@@ -536,7 +536,13 @@ A call the expression consumes as an operand takes the same row when its callee 
 literal or a private local (a slot no user code can rebind, so running the call ahead of the partner's read is
 unobservable): the call, then `op_call_temp` lands the result in a compiler temp, and the binary or the compare reads
 the temp as a slot; inside a block the door's third consumer lands the result in a temp cell. An environment partner
-keeps the stack form, since the callee may write the global the partner reads.
+keeps the stack form, since the callee may write the global the partner reads. A string result lands in the temp cell too:
+the temp's slot takes the value as `op_call_temp` leaves it and the cell borrows the slot's node (a string cell's flush writes
+nothing, since its owner holds the node), so a later miss reads the slot the general form would have written; string + string
+into a temp lands the same way under the general form's memory charge (`out += row(cy) + "\n"` runs as one block). A no-result
+store takes a string result where the store converts nothing: a string local takes the value as it is, a var local takes it under
+the var's stamp. A reference result, a temp or a slot under a declared scalar type, an argument value (a synthetic slot above the
+frame), an environment value and a local of any other declared type take no string, and their landing misses.
 
 A reference alias of a declared typed container (`var& pix = PIX;` with `PIX` an `array<int>`) carries the
 container's type for element reads: the checker keeps it a reference for diagnostics and marks the element

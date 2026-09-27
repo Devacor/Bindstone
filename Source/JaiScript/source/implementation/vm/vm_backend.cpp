@@ -7943,10 +7943,22 @@ op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const c
 	if (cc.consumer == 0) { ++f.ip; return {}; }   // a statement's result was never pushed (land_call_result) or was dropped by the native path
 	const script_value& top = stack_.back().deref();
 	const size_t vi = top.raw_storage_index();
-	if (vi != script_value::TYPEID_INT && vi != script_value::TYPEID_FLOAT && vi != script_value::TYPEID_BOOL) return miss();
+	if (vi != script_value::TYPEID_INT && vi != script_value::TYPEID_FLOAT && vi != script_value::TYPEID_BOOL) {
+		// a string value (never a reference: its referent may change under the borrow) lands where the consumer converts nothing
+		script_value& r = stack_.back();
+		bool landed = false;
+		if (r.raw_storage_index() == script_value::TYPEID_STRING && r.unchecked_string_handle().get()) {
+			if (cc.consumer == 3 && cell_takes_string(f, loop, cc.dst)) { cell_land_string(f, loop, cc.dst, std::move(r)); landed = true; }
+			else if (cc.consumer == 2) { landed = cells_store_string(f, loop, cc.dst, r); }
+		}
+		if (!landed) { JAI_CELLS_COUNT(13); return miss(); }
+		stack_.pop_back();
+		++f.ip;
+		return {};
+	}
 	const uint8_t kind = static_cast<uint8_t>(vi);
 	const int64_t bits = kind == kint ? static_cast<int64_t>(top.unchecked_as_int()) : vi == script_value::TYPEID_FLOAT ? cell_bits_of_float(top.unchecked_as_float()) : (top.unchecked_as_bool() ? 1 : 0);
-	if (!cell_land(f, loop, cc.dst, kind, bits)) return miss();
+	if (!cell_land(f, loop, cc.dst, kind, bits)) { JAI_CELLS_COUNT(13); return miss(); }
 	stack_.pop_back();
 	++f.ip;
 	return {};
@@ -8355,6 +8367,52 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 	cs.payload[dk] = bits; cs.kind[dk] = kind; cs.dirty.set(dk);
 	return true;
 }
+// a string into a compiler temp: the temp's own slot takes the value, as the general form's temp landing leaves it, and the cell borrows
+// the slot's node (a string cell's flush writes nothing: its owner holds the node); a temp under a declared scalar type or an argument
+// value (a synthetic slot above the frame) takes no string
+bool vm_backend::cell_takes_string(const frame& f, const chunk::cell_loop& loop, uint32_t dk) const noexcept {
+	const chunk::cell_loop::cell& cl = loop.cells[dk];
+	return cl.temp && cl.env_operand == k_invalid_u32 && (cl.kind == 0 || cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING)) && cl.slot < f.code->local_count;
+}
+void vm_backend::cell_land_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value&& v) {
+	cell_state& cs = *f.cells;
+	cs.payload[dk] = reinterpret_cast<int64_t>(v.unchecked_string_handle().get()); cs.kind[dk] = static_cast<uint8_t>(script_value::TYPEID_STRING); cs.dirty.set(dk);
+	frame_slot_set(f, loop.cells[dk].slot, std::move(v));
+}
+// a string into a no-result store of a frame slot, as store_popped_value leaves it where it converts nothing: a string slot takes the value
+// as it is, a var slot takes it under the var's stamp; a slot under a scalar contract, an environment value, a reference in the slot or any
+// other declared type (the store's conversion or its text) is the caller's miss
+bool vm_backend::cells_store_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value& v) {
+	const chunk::cell_loop::cell& cl = loop.cells[dk];
+	if (cl.temp || cl.env_operand != k_invalid_u32 || (cl.kind != 0 && cl.kind != static_cast<uint8_t>(script_value::TYPEID_STRING)) || cl.slot >= f.code->local_count) return false;
+	const script_value* s = frame_slot(f, cl.slot);
+	if (!s || s->raw_storage_index() == script_value::TYPEID_REFERENCE || (cl.first_decl && !cl.decl_stamp)) return false;
+	type_info* st = cl.first_decl ? cl.decl_stamp : const_cast<type_info*>(s->type_info_raw());   // the slot's declared type: a body declaration's own, else the stamp the slot carries
+	const type_info* vt = v.type_info_raw();
+	if (st && st->base_type == script_value_type::jai_any_type) {
+		if (!vt || vt->base_type != script_value_type::jai_shared_ptr_type) { v.set_type_info(type_info_ptr{st}); }
+	} else if (st && (st->base_type != script_value_type::jai_string_type || (vt && vt->base_type != script_value_type::jai_any_type && vt->base_type != script_value_type::jai_string_type))) {
+		return false;   // the store would convert: its kernel runs on the general form
+	}
+	cell_land_string(f, loop, dk, std::move(v));
+	return true;
+}
+// string + string with run-time kinds standing for a BINARY_FUSED_TEMP: its fast path's concatenation under its memory charge, landed in
+// its temp as its sink leaves it; any other instruction or operand, a temp that takes no string or a refused charge is the caller's miss
+bool vm_backend::cells_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint32_t left, uint32_t right, uint32_t origin) {
+	const vm_instruction& oi = f.code->code[origin];
+	if (oi.op != opcode::op_binary_fused_temp || oi.b != loop.cells[dk].slot) return false;
+	const cell_state& cs = *f.cells;
+	auto text = [&](uint32_t o) -> const script_string* {
+		if (o & k_typed_const_bit) { const script_value& c = f.code->constants[o & ~k_typed_const_bit]; return c.raw_storage_index() == script_value::TYPEID_STRING ? c.unchecked_string_handle().get() : nullptr; }
+		return cs.kind[o] == static_cast<uint8_t>(script_value::TYPEID_STRING) ? reinterpret_cast<const script_string*>(cs.payload[o]) : nullptr;
+	};
+	const script_string* a = text(left);
+	const script_string* b = a ? text(right) : nullptr;
+	if (!b || !cell_takes_string(f, loop, dk) || !limits_->memory_charge(sizeof(script_value) + a->size() + b->size())) return false;
+	cell_land_string(f, loop, dk, script_value(*a + *b, engine_));
+	return true;
+}
 
 // recv.push(v) inside a block: the receiver's node was resolved at entry (its identity checked against the slot), the value is a
 // cell boxed with its landing's stamp, a constant, or an element of the source container read as a handle; the append is
@@ -8545,7 +8603,10 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith_any(frame& f, size_t& ip, con
 		return true;
 	};
 	uint8_t lk, rk; int64_t lb, rb;
-	if (!read(ins.b, lk, lb) || !read(ins.c, rk, rb)) { cells_miss_ip(f, ip, loop, original_ip(), 1); return {}; }
+	if (!read(ins.b, lk, lb) || !read(ins.c, rk, rb)) {
+		if (op == token_type::plus && cells_concat(f, loop, dk, ins.b, ins.c, original_ip())) { ++ip; return {}; }
+		cells_miss_ip(f, ip, loop, original_ip(), 1); return {};
+	}
 	uint8_t kind; int64_t out; bool ok = true;
 	if (lk == kint && rk == kint) {
 		const script_int a = static_cast<script_int>(lb), b = static_cast<script_int>(rb);
@@ -17318,9 +17379,9 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
 		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (lane removed in row 93) | move assign %llu | move fallback %llu\n",
 			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
-		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu after a call %llu) | calls from a block %llu (landings missed %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
+		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu after a call %llu) | calls from a block %llu (landings missed %llu, by the result's kind %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
-			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[7],
+			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[13], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
 		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
 			(unsigned long long)profile_cells_push_[0], (unsigned long long)profile_cells_push_[1], (unsigned long long)profile_cells_push_[2], (unsigned long long)profile_cells_push_[3]);

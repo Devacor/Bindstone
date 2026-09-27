@@ -214,7 +214,7 @@ namespace jai::vm {
         uint64_t profile_typed_inplace_[4] = {};
         // cell loops: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
         // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
-        uint64_t profile_cells_[13] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site [11] calls made from a block [12] landings after a call that missed
+        uint64_t profile_cells_[14] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site [11] calls made from a block [12] landings after a call that missed [13] of those, missed by the result's kind
         uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: payload plus kind capacity
         uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
         uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
@@ -1800,6 +1800,10 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_math(frame& f, const vm_instruction& ins, const cell_regs& cr);
         JAI_FORCEINLINE op_status exec_c_guard(frame& f, const vm_instruction& ins, const cell_regs& cr);
         bool cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits);
+        bool cell_takes_string(const frame& f, const chunk::cell_loop& loop, uint32_t dk) const noexcept;
+        void cell_land_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value&& v);
+        bool cells_store_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value& v);
+        bool cells_concat(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint32_t left, uint32_t right, uint32_t origin);
         JAI_FORCEINLINE op_status exec_c_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool adopted);
         JAI_FORCEINLINE op_status exec_c_index_store(frame& f, const vm_instruction& ins, const cell_regs& cr);
         JAI_FORCEINLINE op_status exec_c_back(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);

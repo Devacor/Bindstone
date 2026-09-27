@@ -25,6 +25,9 @@
 #include <cstring>
 #include <limits>
 #include <filesystem>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 // One-syscall (mtime, size) stat for the execute_file fast lane.
 #ifdef _WIN32
@@ -1161,20 +1164,57 @@ struct engine::implementation {
     std::unordered_map<std::string, file_cache_node> file_script_cache;
     std::unordered_map<std::string, std::string> canonical_path_cache;   // as-given -> weakly_canonical
 
-    // mtime (100 ns FILETIME on Windows) + size from a single syscall. false = file
-    // unreachable; callers fall back to the legacy read path (today's error text).
-    static bool stat_mtime_size(const std::string& path, uint64_t& mtime, uint64_t& size) {
+    // One stat of a file or folder: on Windows the times are 100 ns FILETIME ticks (the import cache's stamp unit)
+    struct entry_stat {
+        bool is_directory = false;
+        uint64_t size = 0;
+        int64_t modified_ms = 0;   // since the Unix epoch
+        bool has_created = false;
+        int64_t created_ms = 0;
+        uint64_t mtime_ticks = 0;
+    };
+    static bool stat_entry(const std::string& path, entry_stat& out) {
 #ifdef _WIN32
         WIN32_FILE_ATTRIBUTE_DATA fad{};
         std::filesystem::path widePath(path);
         if (!GetFileAttributesExW(widePath.c_str(), GetFileExInfoStandard, &fad)) {
             return false;
         }
-        if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+        const auto ticks = [](const FILETIME& ft) { return (uint64_t(ft.dwHighDateTime) << 32) | ft.dwLowDateTime; };
+        const auto unix_ms = [](uint64_t t) { return (static_cast<int64_t>(t) - 116444736000000000LL) / 10000; };
+        out.is_directory = (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        out.size = out.is_directory ? 0 : (uint64_t(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+        out.mtime_ticks = ticks(fad.ftLastWriteTime);
+        out.modified_ms = unix_ms(out.mtime_ticks);
+        out.has_created = true;
+        out.created_ms = unix_ms(ticks(fad.ftCreationTime));
+        return true;
+#else
+        struct stat st{};
+        if (::stat(path.c_str(), &st) != 0) { return false; }
+        out.is_directory = S_ISDIR(st.st_mode);
+        out.size = out.is_directory ? 0 : static_cast<uint64_t>(st.st_size);
+#ifdef __APPLE__
+        out.modified_ms = static_cast<int64_t>(st.st_mtimespec.tv_sec) * 1000 + st.st_mtimespec.tv_nsec / 1000000;
+        out.has_created = true;
+        out.created_ms = static_cast<int64_t>(st.st_birthtimespec.tv_sec) * 1000 + st.st_birthtimespec.tv_nsec / 1000000;
+#else
+        out.modified_ms = static_cast<int64_t>(st.st_mtim.tv_sec) * 1000 + st.st_mtim.tv_nsec / 1000000;
+#endif
+        return true;
+#endif
+    }
+
+    // mtime (100 ns FILETIME on Windows) + size from a single syscall. false = file
+    // unreachable; callers fall back to the legacy read path (today's error text).
+    static bool stat_mtime_size(const std::string& path, uint64_t& mtime, uint64_t& size) {
+#ifdef _WIN32
+        entry_stat st;
+        if (!stat_entry(path, st) || st.is_directory) {
             return false;
         }
-        mtime = (uint64_t(fad.ftLastWriteTime.dwHighDateTime) << 32) | fad.ftLastWriteTime.dwLowDateTime;
-        size = (uint64_t(fad.nFileSizeHigh) << 32) | fad.nFileSizeLow;
+        mtime = st.mtime_ticks;
+        size = st.size;
         return true;
 #else
         std::error_code timeEc, sizeEc;
@@ -3692,6 +3732,34 @@ void engine::register_location_builtins() {
     add_function("file_name", [](const std::string& path) -> std::string {
         return std::filesystem::path(path).filename().generic_string();
     }, privilege::filesystem);
+    // file_data(path): a file's or folder's metadata, found by the resolve_path ladder; null when nothing is there
+    add_function_with_arity_and_full_types("file_data", guard_function(
+        [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (args.size() != 1) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
+                    "Function expects {0} arguments, got {1}", 1, args.size());
+            }
+            auto name = args[0].checked_as<std::string>();
+            if (!name) { return name.error_value(); }
+            auto resolved = resolve_include_path(name.value(), this);
+            if (!resolved) {
+                if (resolved.error() == make_error_code(runtime_error_code::file_not_found)) { return script_value(std::monostate{}, this); }
+                return resolved.error_value();
+            }
+            implementation::entry_stat st;
+            if (!implementation::stat_entry(resolved.value(), st)) { return script_value(std::monostate{}, this); }
+            const std::filesystem::path p(resolved.value());
+            auto data = script_value::make_map(get_type_info_string(), nullptr, this);
+            auto& m = const_cast<script_map&>(data.as_map());
+            m[script_value(std::string("path"), this)] = script_value(location_spelling(p), this);
+            m[script_value(std::string("filename"), this)] = script_value(p.filename().generic_string(), this);
+            m[script_value(std::string("extension"), this)] = script_value(st.is_directory ? std::string() : p.extension().generic_string(), this);
+            m[script_value(std::string("created"), this)] = st.has_created ? script_value(static_cast<script_int>(st.created_ms), this) : script_value(std::monostate{}, this);
+            m[script_value(std::string("modified"), this)] = script_value(static_cast<script_int>(st.modified_ms), this);
+            m[script_value(std::string("size"), this)] = script_value(static_cast<script_int>(st.size), this);
+            m[script_value(std::string("is_directory"), this)] = script_value(st.is_directory, this);
+            return data;
+        }, privilege::filesystem), 1, {param_type_info(script_value_type::jai_string_type)});
     add_function("app_data_dir", [this](const std::string& app) -> std::string { return app_data_dir(app); }, privilege::filesystem);
     add_function("app_cache_dir", [this](const std::string& app) -> std::string { return app_cache_dir(app); }, privilege::filesystem);
 }

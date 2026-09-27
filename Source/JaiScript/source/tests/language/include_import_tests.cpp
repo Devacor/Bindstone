@@ -944,6 +944,44 @@ public:
             for (const char* f : {"imp_err_c.jai", "imp_err_d.jai", "imp_err_t.jai", "imp_err_u.jai"}) { cleanup_temp_file((jai::foundry::test_temp_directory() / f).string()); }
         });
 
+        test("file_data_answers_a_files_metadata_by_the_one_ladder", [=, this]() {
+            // engine-core: path, filename, extension (with its dot), created/modified (ms since the Unix epoch), size, is_directory;
+            // a relative name resolves like resolve_path; nothing there answers null (a watcher polls it without try/catch)
+            const auto dir = jai::foundry::test_temp_directory() / "file_data_probe";
+            std::filesystem::create_directories(dir);
+            const auto file = dir / "save.dat";
+            for (bool use_vm : {false, true}) {
+                { std::ofstream(file, std::ios::binary | std::ios::trunc) << "12345"; }
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(*eng);
+                eng->add_include_path(dir.string());
+                auto d = eng->execute("var d = file_data(\"save.dat\"); d;");
+                check_true(d.is_map(), "a map of the file's metadata");
+                const std::string path = eng->execute("file_data(\"save.dat\")[\"path\"];").to_string();
+                check_true(path.find("file_data_probe/save.dat") != std::string::npos && path.find('\\') == std::string::npos, path);
+                check_eq(path, eng->execute("resolve_path(\"save.dat\");").to_string(), "the ladder's canonical spelling");
+                check_eq(std::string("save.dat|.dat|5|false"), eng->execute("var d = file_data(\"save.dat\"); d[\"filename\"] + \"|\" + d[\"extension\"] + \"|\" + to_string(d[\"size\"]) + \"|\" + to_string(d[\"is_directory\"]);").to_string());
+                const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                const int64_t modified = eng->execute("file_data(\"save.dat\")[\"modified\"];").as_int();
+                check_true(modified > now_ms - 3600000 && modified <= now_ms + 60000, "modified is ms since the Unix epoch");
+                auto created = eng->execute("file_data(\"save.dat\")[\"created\"];");
+                check_true(created.is_null() || (created.is_int() && created.as_int() <= modified + 1000), "created: ms, or null where unavailable");
+                // a rewrite moves modified (stamped forward so the clock's granularity cannot hide it)
+                { std::ofstream(file, std::ios::binary | std::ios::trunc) << "1234567"; }
+                std::filesystem::last_write_time(file, std::filesystem::last_write_time(file) + std::chrono::seconds(5));
+                check_true(eng->execute("file_data(\"save.dat\")[\"modified\"];").as_int() > modified, "a rewrite moves modified");
+                check_eq(script_int(7), eng->execute("file_data(\"save.dat\")[\"size\"];").as_int());
+                check_true(eng->execute("file_data(\"no_such_file.dat\") == null;").as_bool(), "missing -> null");
+                check_eq(std::string("true|0|"), eng->execute("var f = file_data(\"" + dir.generic_string() + "\"); to_string(f[\"is_directory\"]) + \"|\" + to_string(f[\"size\"]) + \"|\" + f[\"extension\"];").to_string());
+                eng->disable(jai::filesystem);
+                std::string denied;
+                try { denied = eng->execute("var m = \"\"; try { file_data(\"save.dat\"); } catch (e) { m = e; } m;").to_string(); } catch (const std::exception& ex) { denied = ex.what(); }
+                check_eq(std::string("Insufficient privilege: filesystem."), denied);
+            }
+            std::filesystem::remove_all(dir);
+        });
+
         test("an_enum_in_a_file_included_inside_a_function_or_block_is_local_and_warns", [=, this]() {
             // include is textual: the file's enum is declared where the include runs; inside a function or a block that is a
             // local enum, so the program-scope enum keeps its values, and the include's report says so (both backends)

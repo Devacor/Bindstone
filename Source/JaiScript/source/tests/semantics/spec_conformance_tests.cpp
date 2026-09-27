@@ -922,6 +922,18 @@ private:
 				"" + a::b::get() + "|" + hp::w.lock().v + "|" + dyn::x + "|" + G + "|" + cap::x + "," + x + "|" + bump::x + "|" + Cm().m();
 			)", "1|5|s|5|3,100|2|1");
 		});
+		test("a_namespace_variable_may_be_reference_declared", [this]() {
+			// docs/namespaces.md Variables: a namespace variable takes the spellings a program-scope variable takes, a reference
+			// included, and a reference-declared variable stores through to what it refers to
+			expect("ns ref", R"(
+				var G = 1;
+				namespace rf { var& r = G; int& get() { return r; } }
+				rf::r = 5;
+				rf::r += 1;
+				auto& q = rf::get(); q = 9;
+				"" + G + "|" + rf::r;
+			)", "9|9");
+		});
 		test("a_namespace_redeclared_by_another_unit_writes_in_place", [this]() {
 			every_config("ns other unit", "2", [](engine& e) {
 				e.execute("namespace ns { var x = 1; function get() { return x; } }");
@@ -1036,16 +1048,6 @@ private:
 				}
 				run();
 			)", "No exception to re-throw|outer");
-		});
-		test("a_namespace_variable_may_be_reference_declared", [this]() {
-			// docs/namespaces.md Variables: a namespace variable takes the spellings a program-scope variable takes, a reference included
-			expect("ns ref", R"(
-				var G = 1;
-				namespace rf { var& r = G; }
-				rf::r = 5;
-				rf::r += 1;
-				"" + G + "|" + rf::r;
-			)", "6|6");
 		});
 		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
 			// docs/global_shadowing.md: a function called from inside the block still sees the outer binding

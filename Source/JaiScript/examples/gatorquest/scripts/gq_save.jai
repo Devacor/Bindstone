@@ -62,6 +62,7 @@ string seal(string body) { return body + "end " + to_string(text_checksum(body))
 string unseal(string text, string magic) {
 	if (text == "") { SAVE_NOTE = "missing or empty"; return ""; }
 	string t = text;
+	t.replace_all("\r\n", "\n");              // saves are written with \n; a tool that converted them is forgiven
 	while (t.size() > 0 && (t.ends_with("\n") || t.ends_with("\r") || t.ends_with(" "))) { t = t.substr(0, t.size() - 1); }
 	int at = t.rfind("\n");
 	if (at < 0) { SAVE_NOTE = "truncated"; return ""; }
@@ -116,10 +117,9 @@ string load_sealed(string path, string magic) {
 // "key values" lookup over a body; "" when absent
 map<string, string> parse_records(string body) {
 	map<string, string> out;
-	array<string> lines = body.split("\n");
+	array<string> lines = body.lines();
 	for (int i = 1; i < lines.size(); ++i) {
 		string line = lines[i];
-		if (line.ends_with("\r")) { line = line.substr(0, line.size() - 1); }
 		int sp = line.find(" ");
 		if (sp <= 0) { continue; }
 		string key = line.substr(0, sp);
@@ -366,10 +366,9 @@ bool world_from_body(string body, bool keep_players) {
 		if (k < spn.size()) { SP_NEXT[k] = spn[k]; }
 	}
 	// the pools, slot for slot (free slots included: allocation reuses the first free one)
-	array<string> lines = body.split("\n");
+	array<string> lines = body.lines();
 	for (int li = 0; li < lines.size(); ++li) {
 		string line = lines[li];
-		if (line.ends_with("\r")) { line = line.substr(0, line.size() - 1); }
 		if (line.starts_with("m ")) {
 			int m = mob_push();
 			if (line == "m -") { continue; }

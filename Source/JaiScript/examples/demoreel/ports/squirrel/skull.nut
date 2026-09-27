@@ -47,6 +47,8 @@
 ::SK_NBONE <- 5;
 ::SK_CROWN0 <- 0;
 ::SK_CRX <- 0.0; ::SK_CRY <- 0.0; ::SK_CRZ <- 0.0;
+::SK_SKB <- 0.4;
+::SK_CRB <- 0.4;
 ::SK_GMX <- 0.0; ::SK_GMY <- 0.0; ::SK_GMZ <- 0.0;
 ::SK_GAX <- 1.0; ::SK_GAY <- 0.0; ::SK_GAZ <- 0.0;
 ::SK_GBX <- 0.0; ::SK_GBY <- 0.0; ::SK_GBZ <- 1.0;
@@ -141,10 +143,13 @@ function sk_glows(x, y, z) {
 	return best;
 }
 
-function sk_skull(x, y, z) {
+// the skull against best: no nearer than sqrt(0.92) of the distance to its center less SK_SKB (the jaw's reach), so it is
+// skipped when that cannot beat best
+function sk_skull(x, y, z, best) {
 	local hx = x - ::SK_HX;
 	local hy = y - ::SK_HY;
 	local hz = z - ::SK_HZ;
+	if (::sqrt(hx * hx + hy * hy + hz * hz) * 0.959 - ::SK_SKB >= best) { return best; }
 	local cu = hx * ::SK_PUX + hy * ::SK_PUY + hz * ::SK_PUZ;
 	local cf = hx * ::SK_PFX + hy * ::SK_PFY + hz * ::SK_PFZ;
 	local cr = hx * ::SK_PRX + hy * ::SK_PRY + hz * ::SK_PRZ;
@@ -171,7 +176,8 @@ function sk_skull(x, y, z) {
 	}
 	local nx = x - ::SK_NX, ny = y - ::SK_NY, nz = z - ::SK_NZ;
 	local cn = 0.042 - ::sqrt(nx * nx + ny * ny + nz * nz);
-	return d > cn ? d : cn;
+	d = d > cn ? d : cn;
+	return d < best ? d : best;
 }
 
 function sk_body(x, y, z) {
@@ -215,11 +221,14 @@ function sk_spider(x, y, z, groups, cand, nc) {
 	local d = 99.0;
 	if ((groups & 1) != 0) { d = ::sk_body(x, y, z); }
 	if ((groups & 2) != 0) {
-		local ds = ::sk_skull(x, y, z);
-		d = d < ds ? d : ds;
-		local dr = ::sk_ring(x, y, z);
-		d = d < dr ? d : dr;
-		d = ::sk_capsules(x, y, z, ::SK_CROWN0, ::SK_NC, d);
+		d = ::sk_skull(x, y, z, d);
+		// the crown's ring and flames lie within SK_CRB of its center
+		local ox = x - ::SK_CRX, oy = y - ::SK_CRY, oz = z - ::SK_CRZ;
+		if (::sqrt(ox * ox + oy * oy + oz * oz) - ::SK_CRB < d) {
+			local dr = ::sk_ring(x, y, z);
+			d = d < dr ? d : dr;
+			d = ::sk_capsules(x, y, z, ::SK_CROWN0, ::SK_NC, d);
+		}
 		local dg = ::sk_gem(x, y, z);
 		d = d < dg ? d : dg;
 	}
@@ -233,6 +242,11 @@ function sk_spider(x, y, z, groups, cand, nc) {
 			local dg2 = ::sqrt(gx * gx + gy * gy + gz * gz) - ::SK_GR[g];
 			d = d < dg2 ? d : dg2;
 		} else {
+			local mx = x - ::SK_CMX[c];
+			local my = y - ::SK_CMY[c];
+			local mz = z - ::SK_CMZ[c];
+			local reach = d + ::SK_CB[c];
+			if (mx * mx + my * my + mz * mz > reach * reach) { continue; }
 			local pax = x - ::SK_CAX[c];
 			local pay = y - ::SK_CAY[c];
 			local paz = z - ::SK_CAZ[c];
@@ -266,16 +280,20 @@ function sk_ray_near(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
 function sk_material(x, y, z) {
 	local best = ::sk_world(x, y, z);
 	local m = 0;
-	local ds = ::sk_skull(x, y, z);
-	local bone = ::sk_capsules(x, y, z, 0, ::SK_NBONE, ds < best ? ds : best);
+	local bone = ::sk_skull(x, y, z, best);
+	bone = ::sk_capsules(x, y, z, 0, ::SK_NBONE, bone);
 	if (bone < best) { best = bone; m = 1; }
 	local db = ::sk_body(x, y, z);
 	local chit = ::sk_capsules(x, y, z, ::SK_NBONE, ::SK_CROWN0, db < best ? db : best);
 	if (chit < best) { best = chit; m = 2; }
 	local de = ::sk_glows(x, y, z);
-	local dr = ::sk_ring(x, y, z);
-	de = de < dr ? de : dr;
-	de = ::sk_capsules(x, y, z, ::SK_CROWN0, ::SK_NC, de < best ? de : best);
+	de = de < best ? de : best;
+	local ox = x - ::SK_CRX, oy = y - ::SK_CRY, oz = z - ::SK_CRZ;
+	if (::sqrt(ox * ox + oy * oy + oz * oz) - ::SK_CRB < de) {
+		local dr = ::sk_ring(x, y, z);
+		de = de < dr ? de : dr;
+		de = ::sk_capsules(x, y, z, ::SK_CROWN0, ::SK_NC, de);
+	}
 	if (de < best) { best = de; m = 3; }
 	local dgm = ::sk_gem(x, y, z);
 	if (dgm < best) { best = dgm; m = 5; }
@@ -1026,6 +1044,17 @@ class Ossuary extends Scene {
 			local bzk = crz + fz * ca + rz * sa;
 			capsule(::SK_CROWN0 + k, bxk, byk, bzk, bxk + ux * flame + fx * ca * 0.25 + rx * sa * 0.25, byk + uy * flame + fy * ca * 0.25 + ry * sa * 0.25, bzk + uz * flame + fz * ca * 0.25 + rz * sa * 0.25, 0.018);
 		}
+		// the bounding radii the distance skips on: the skull's jaw about its center, the ring and flames about the crown's
+		local jhx = ::SK_JX - ::SK_HX, jhy = ::SK_JY - ::SK_HY, jhz = ::SK_JZ - ::SK_HZ;
+		local jaw_reach = ::sqrt(jhx * jhx + jhy * jhy + jhz * jhz) + 0.085 + 0.09;
+		::SK_SKB = (jaw_reach > ::SK_HR ? jaw_reach : ::SK_HR) + 0.001;
+		local crown_reach = 0.2 + 0.028;
+		for (local k = ::SK_CROWN0; k < ::SK_NC; ++k) {
+			local mx = ::SK_CMX[k] - ::SK_CRX, my = ::SK_CMY[k] - ::SK_CRY, mz = ::SK_CMZ[k] - ::SK_CRZ;
+			local r = ::sqrt(mx * mx + my * my + mz * mz) + ::SK_CB[k];
+			crown_reach = r > crown_reach ? r : crown_reach;
+		}
+		::SK_CRB = crown_reach + 0.001;
 		local spin = tt * 2.2;
 		local gl2 = 0.3 + 0.02 * ::sin(tt * 2.5);
 		::SK_GMX = crx + ux * gl2; ::SK_GMY = cry + uy * gl2; ::SK_GMZ = crz + uz * gl2;

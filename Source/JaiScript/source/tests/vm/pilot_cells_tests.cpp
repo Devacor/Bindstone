@@ -4016,13 +4016,13 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "4", "computed index");
 		});
 		test("a_bail_inside_a_statement_flushes_its_spills_and_graft_values", [this]() {
-			// the first itr grafts behind the spill of m[i], the second stays a call (its left operand has no class to spill) and the statement
-			// bails inside the if after the graft's join; the spill and the graft's result live only in cells, so the bail flushes them
+			// the first itr grafts behind the spill of m[i], the second stays a call (in a ternary's arm) and the statement bails inside the if
+			// after the graft's join; the spill and the graft's result live only in cells, so the bail flushes them
 			const std::string prelude =
 				"function itr(float v) -> int { return math::itrunc(v); }\n"
 				"var q = 4;\n"
 				"function run() -> string { array<int> m = [10, 20, 30, 40]; string out = \"\";\n"
-				"  for (int i = 0; i < 4; ++i) { float d = i * 1.5; if (d > 0.5) { int c = m[i] + itr(d) * q + itr(d); out += to_string(c) + \" \"; } }\n"
+				"  for (int i = 0; i < 4; ++i) { float d = i * 1.5; if (d > 0.5) { int c = m[i] + itr(d) * q + (q > 2 ? itr(d) : 0); out += to_string(c) + \" \"; } }\n"
 				"  return out; }\n";
 			both(prelude + "run();", "25 45 60 ", "a statement bailing after its graft");
 			both(prelude + "run();", "25 45 60 ", "a statement bailing after its graft, proofs off", false);
@@ -5366,6 +5366,39 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// a push of a computed value onto a private array local the checker proved: the value (a leaf's graft, a call, arithmetic, a value
+		// binary ahead of a call) lands in a compiler temp and the fused push takes it, so the loop closes; the push's element conversion is
+		// its own (an int widens into a float array, a float into an int array runs the checked kernel), and a receiver user code can reach
+		// (a global, a local the value names) keeps the general order
+		test("a_push_of_a_computed_value_lands_in_a_temp", [this]() {
+			const std::string src = "[[warn_mode]]\nint K = 7;\narray<int> G = [];\n"
+				"function leafv(int i) -> int { return (i * K + 3) & 1023; }\n"
+				"function heavy(int i) -> int { int s = 0; for (int k = 0; k < 2; ++k) { if (s < 0) { return -1; } s += i + k; } return s; }\n"
+				"function grows(int i) -> int { G.push(-i); return i; }\n"
+				"function half(int i) -> float { return i * 0.5; }\n"
+				"function run(int n) -> string { array<int> a = []; array<int> b = []; array<int> c = []; array<int> d = []; array<float> e = [];\n"
+				"  for (int i = 0; i < n; ++i) { a.push(leafv(i)); b.push(i * 3 + K); c.push(heavy(i)); d.push(K * (i + 1) + heavy(i)); e.push(leafv(i)); }\n"
+				"  return to_json(a) + to_json(b) + to_json(c) + to_json(d) + to_json(e); }\n"
+				"function glob(int n) -> string { G = []; for (int i = 0; i < n; ++i) { G.push(grows(i)); } return to_json(G); }\n"
+				"function self(int n) -> string { array<int> s = [1]; for (int i = 0; i < n; ++i) { s.push(s.size() * 2); } return to_json(s); }\n"
+				"function conv(int n) -> string { try { array<int> t = []; for (int i = 0; i < n; ++i) { t.push(half(i)); } return to_json(t); } catch (e) { return \"E:\" + e; } }\n"
+				"run(6) + \" \" + glob(3) + \" \" + self(3) + \" \" + conv(3);";
+			both(src, "", "computed pushes");
+			both(src, "", "computed pushes, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== run ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("open loop") == std::string::npos && fl.find("PROBE_MEMBER") == std::string::npos, "the loop of computed pushes closes: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }

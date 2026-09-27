@@ -5232,6 +5232,7 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	const bool lsub = (hoists(b->left.get()) && (quiet_partner(b->right.get()) || env_identifier(b->right.get()))) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get(), b->left.get()));
 	const bool rsub = (hoists(b->right.get()) && (quiet_partner(b->left.get()) || env_identifier(b->left.get()))) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));   // an environment name on the left of a hoisted read reads into a temp first
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
+	if (!lsub && call_temp_operand(b->right.get()) && b->left->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(b->left.get()))) return true;   // a value binary ahead of a call lands in a temp first
 	if (binary_shape(b) != binary_shape_none) return true;
 	const int ln = lift_fusible_nodes(b->left.get());
 	const int rn = ln >= 0 ? lift_fusible_nodes(b->right.get()) : -1;
@@ -5326,7 +5327,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
 		const bool lsub = (hoists(expr->left.get()) && (quiet_partner(expr->right.get()) || env_identifier(expr->right.get()))) || (call_temp_operand(expr->left.get()) && call_partner_ok(expr->right.get(), expr->left.get()));
 		const bool rsub = (hoists(expr->right.get()) && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get()))) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get()));
-		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get())))) {
+		// a value binary ahead of a call on its right: the binary into a temp first, as the stack form evaluates it, then the call into a temp
+		const bool lbin = !lsub && call_temp_operand(expr->right.get()) && expr->left->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(expr->left.get()));
+		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get()))) || lbin) {
 			const size_t temp_mark = temp_next_;
 			// the binary's class when the checker proved the pair, else the read's own proven element kind
 			auto expect_of = [&](const expression_ptr& sub) {
@@ -5344,9 +5347,17 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			fused_binary_proto proto;
 			proto.op = static_cast<uint8_t>(expr->op.type);
 			if (lsub) { hoist_into_temp(expr->left, proto.left); }
+			else if (lbin) {
+				compile_expression(expr->left);
+				const uint32_t t0 = static_cast<uint32_t>(temp_next_++);
+				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+				if (chunk_->code.back().op == opcode::op_binary_fused) { chunk_->code.back().op = opcode::op_binary_fused_temp; chunk_->code.back().b = t0; }
+				else { emit(opcode::op_call_temp, t0); }
+				proto.left = fused_operand{}; proto.left.slot = t0; proto.left.symbol = temp_symbol_index(); proto.left.direct = true;
+			}
 			else if (reference_slot_operand(expr->left.get()) || (rsub && expr->left->get_type() == node_type::identifier_expr && (env_identifier(expr->left.get()) || (!private_local(expr->left.get()) && !quiet_read(expr->right.get())) || read_ahead_of(expr->left.get(), expr->right.get())))) { materialize_operand_temp(expr->left, proto.left); }   // its dereference, or its value, precedes the read
 			else { proto.left = make_fused_operand(expr->left); }
-			if (rsub) { hoist_into_temp(expr->right, proto.right); } else { proto.right = make_fused_operand(expr->right); }
+			if (rsub || lbin) { hoist_into_temp(expr->right, proto.right); } else { proto.right = make_fused_operand(expr->right); }
 			stamp_typed_class(proto, expr.get());
 			chunk_->fused_binary_protos.push_back(proto);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
@@ -5790,6 +5801,60 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 	emit(opcode::op_null);
 }
 
+// whether e may reach frame slot `slot`: an identifier naming it anywhere in the tree, or a form the walk does not open
+bool vm_compiler::names_slot(const expression* e, uint32_t slot) {
+	if (!e) return false;
+	switch (e->get_type()) {
+	case node_type::literal_expr: return false;
+	case node_type::identifier_expr: return identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(e))) == slot;
+	case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); return names_slot(b->left.get(), slot) || names_slot(b->right.get(), slot); }
+	case node_type::unary_expr: return names_slot(static_cast<const unary_expr*>(e)->operand.get(), slot);
+	case node_type::ternary_expr: { auto* t = static_cast<const ternary_expr*>(e); return names_slot(t->condition.get(), slot) || names_slot(t->then_expression.get(), slot) || names_slot(t->else_expression.get(), slot); }
+	case node_type::cast_expr: return names_slot(static_cast<const cast_expr*>(e)->operand.get(), slot);
+	case node_type::member_expr: { auto* m = static_cast<const member_expr*>(e); return !m->is_static && names_slot(m->object.get(), slot); }
+	case node_type::assignment_expr: { auto* a = static_cast<const assignment_expr*>(e); return names_slot(a->target.get(), slot) || names_slot(a->value.get(), slot); }
+	case node_type::call_expr: {
+		auto* c = static_cast<const call_expr*>(e);
+		if (names_slot(c->callee.get(), slot)) return true;
+		for (const auto& a : c->arguments) { if (names_slot(a.get(), slot)) return true; }
+		return false;
+	}
+	default: return true;
+	}
+}
+
+// `recv.push(e);` with e computed (a call, arithmetic, a ternary): e lands in a compiler temp first, any leaf in it grafted, and the fused
+// push takes the temp. The receiver is a private local the checker proved an array and e never names it, so nothing e runs can rebind
+// or observe it, and an array always has push: reading it after e is what the general order (receiver, member probe, argument, call)
+// yields. The push's element conversion stays the push's own.
+bool vm_compiler::push_value_temp(const std::shared_ptr<call_expr>& expr, identifier_expr* recv, const expression_ptr& arg, fused_operand& out) {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body || expr->builtin_receiver != 2 || recv->global_qualified) return false;
+	const uint32_t rslot = identifier_slot_operand(recv);
+	if (rslot == k_invalid_u32 || rslot >= k_typed_slot_mask || !private_local(recv) || names_slot(arg.get(), rslot)) return false;
+	bool changed = false;
+	expression_ptr v = hoist_leaf_calls(arg, false, changed);
+	if (!v) v = arg;
+	if (v->get_type() == node_type::identifier_expr && static_cast<identifier_expr*>(v.get())->slot_index != SIZE_MAX && static_cast<identifier_expr*>(v.get())->slot_index >= chunk_->first_temp_slot) {
+		out = make_fused_operand(v);   // a grafted leaf's result temp
+		return true;
+	}
+	if (call_temp_operand(v.get())) { compile_call_into_temp(v, out); return true; }
+	if (ternary_temp_operand(v.get())) { compile_ternary_into_temp(v, out); return true; }
+	if (value_temp_operand(v.get()) && compile_value_into_temp(v, 0xFF, out)) return true;
+	const bool lands = v->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(v.get()));
+	compile_expression(v);
+	const uint32_t t = static_cast<uint32_t>(temp_next_++);
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	vm_instruction& last = chunk_->code.back();
+	if (lands && last.op == opcode::op_binary_fused) { last.op = opcode::op_binary_fused_temp; last.b = t; }
+	else { emit(opcode::op_call_temp, t); }
+	out = fused_operand{};
+	out.slot = t;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
+	return true;
+}
+
 // `recv.push(v);` as a statement (GLOOM profile: 95% of method calls, ~440 cycles as
 // LOAD, LOAD, CALL_METHOD, POP): receiver an identifier, value a slotted identifier or a
 // literal, so no probe is owed (call_args_need_probe's exact admission) and the receiver
@@ -5802,22 +5867,25 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	if (member->object->get_type() != node_type::identifier_expr) return false;
 	const auto& arg = expr->arguments[0];
 	bool value_is_subscript = false;
+	fused_operand landed;
+	bool value_landed = false;
+	// `recv.push(table[i])`: one level, identifier base, ident-or-literal index. Not a transient read (an argument may bind a T&
+	// parameter), so the replay reads it as the lvalue-shaped op_index the general path emits; the builtin lane reads the element by
+	// value, which is what push consumes either way
+	auto simple_subscript = [&]() {
+		if (arg->get_type() != node_type::binary_expr) return false;
+		const auto* sub = static_cast<const binary_expr*>(arg.get());
+		return sub->op.type == token_type::left_bracket && sub->left->get_type() == node_type::identifier_expr &&
+		       !static_cast<const identifier_expr*>(sub->left.get())->global_qualified && fusable_subscript_index(sub->right.get());
+	};
 	if (arg->get_type() == node_type::identifier_expr) {
 		auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 		if (arg_ident->global_qualified || identifier_slot_operand(arg_ident) == k_invalid_u32) return false;
-	} else if (arg->get_type() == node_type::binary_expr) {
-		// `recv.push(table[i])`: one level, identifier base, ident-or-literal index. Not a
-		// transient read (an argument may bind a T& parameter), so the replay reads it as
-		// the lvalue-shaped op_index the general path emits; the builtin lane reads the
-		// element by value, which is what push consumes either way
-		const auto* sub = static_cast<const binary_expr*>(arg.get());
-		if (sub->op.type != token_type::left_bracket) return false;
-		if (sub->left->get_type() != node_type::identifier_expr ||
-		    static_cast<const identifier_expr*>(sub->left.get())->global_qualified) return false;
-		if (!fusable_subscript_index(sub->right.get())) return false;
+	} else if (simple_subscript()) {
 		value_is_subscript = true;
 	} else if (arg->get_type() != node_type::literal_expr) {
-		return false;
+		if (!push_value_temp(expr, static_cast<identifier_expr*>(member->object.get()), arg, landed)) return false;
+		value_landed = true;
 	}
 	call_site site;
 	site.member_node = add_node(member);
@@ -5845,7 +5913,7 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	}
 	push_proto proto;
 	proto.receiver = make_fused_operand(member->object);
-	proto.value = make_fused_operand(arg);
+	proto.value = value_landed ? landed : make_fused_operand(arg);
 	proto.value_is_subscript = value_is_subscript;
 	if (value_is_subscript) {
 		proto.value_index_flags = is_lvalue_shaped(static_cast<const binary_expr*>(arg.get())->left.get()) ? index_flag_lvalue_shape : 0;

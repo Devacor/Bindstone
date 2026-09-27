@@ -37,6 +37,24 @@ ESC             clear target, then the menu (save, load, music, sound, zoom, qui
 In a list: up/down (or W/S) to choose, ENTER to act, ESC to close. In the backpack ENTER uses or equips and
 `D` drops. Shopkeepers offer Buy/Sell, healers heal (and resurrect ghosts for free), the banker keeps a box.
 
+## Multiplayer
+
+Up to 16 gators in one swamp over a LAN (or any network that reaches the host's port, 28777 by default):
+
+```
+play.bat host [port N]                  # play and host: your world, your saves
+play.bat join 192.168.1.20 [port N]     # join a friend (type your name on the title screen)
+jaiscript scripts/gatorquest.jai -- serve [port N] [bots K]     # a dedicated host with no screen
+```
+
+The host runs the world; everyone else sends what they do (moves, attacks, spells, trades) and receives, ten times
+a second, what they can see. Joiners' characters live on the host in `saves/chars/`: leave, come back with the same
+name, and you are where you left off. In game, ENTER opens chat: plain text reaches everyone in your realm, `/p text`
+your party. `/invite name` and `/accept` make a party (kills near your party mates count for their quests too),
+`/leave` leaves it, `/who` lists who is online, and `/pvp` flags you: flagged gators can fight each other, unflagged
+ones cannot be hurt by players (and killing an unflagged gator makes you a murderer the guards will not forget). If the
+host quits, everyone is told and dropped back to the shell; a player who drops is saved and removed.
+
 ## Saves
 
 The game saves by itself every five minutes of play, from the menu (ESC, Save game) and on Save and quit. Starting
@@ -81,6 +99,8 @@ jaiscript scripts/gatorquest.jai -- smoke ticks 3000 bots 2      # autopilot ses
 jaiscript scripts/gatorquest.jai -- savetest                     # save robustness: missing, corrupt, truncated, newer, sparse files
 jaiscript scripts/gatorquest.jai -- hotreload                    # edits five scripts mid-session and checks the carry-over
 jaiscript --backend=interp scripts/gatorquest.jai -- hotreload interp
+jaiscript scripts/gatorquest.jai -- nettest                      # host + 17 client sessions over loopback, one process
+powershell -File nettest2.ps1 [-Backend interp]                  # a dedicated host and two clients as three processes
 jaiscript scripts/gatorquest.jai -- shot ticks 900 every 300     # frame captures (.ans, .txt sketch, .png)
 jaiscript scripts/gatorquest.jai -- demo frames 600              # the real play loop driven by a bot
 jaiscript scripts/gatorquest.jai -- sheet                        # every sprite and tile texture as a PNG

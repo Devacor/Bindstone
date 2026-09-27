@@ -4166,6 +4166,22 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// row 193: a value read into a temp ahead of an environment name on its right (a math call, an element, a member): the name resolves
+		// after it, the source order, so the binary keeps its fused form and the loop around it closes
+		test("temp_reads_ahead_of_an_environment_partner", [this]() {
+			const std::string src = "[[warn_mode]]\nfloat G = 0.25; array<float> A = [1.0, 4.0, 9.0, 16.0];\n"
+				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.5; float da = (sqrt(x * x + 1.0) - G) * 0.74; float db = A[i & 3] - G; t += da + db; } return t; }\n"
+				"function oob() -> string { try { float v = A[9] - nope; return to_string(v); } catch (e) { return \"E:\" + e; } }\n"
+				"function und() -> string { try { float v = A[1] - nope; return to_string(v); } catch (e) { return \"E:\" + e; } }\n"
+				"string out = to_string(run(40)) + \",\" + oob() + \",\" + und(); G = -3.0; out + \",\" + to_string(run(7));";
+			both(src, "", "an environment partner");
+			both(src, "", "an environment partner, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== run ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("open loop") == std::string::npos && fl.find("-- cell loop") != std::string::npos, "the loop closes: " + fl);
+		});
 		test("stdlib_math_alias_under_parallel_transform", [this]() {
 			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
 				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"

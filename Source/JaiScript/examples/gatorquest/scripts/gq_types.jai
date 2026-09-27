@@ -40,6 +40,10 @@ class ClientView {
 	array<int> m_py;
 	array<int> m_mt;
 	array<int> m_md;
+	array<int> m_ppx;          // the move before the current one (drawing others a tick behind needs both)
+	array<int> m_ppy;
+	array<int> m_pmt;
+	array<int> m_pmd;
 	array<int> m_dir;
 	array<int> m_hp;
 	array<int> m_flags;
@@ -96,6 +100,13 @@ class ClientView {
 	array<string> e_text;
 	array<string> log;
 	array<int> log_col;
+	int ack = 0;               // the last predicted step the host processed
+	int auth_x = 0;            // where the host has this player's gator
+	int auth_y = 0;
+	bool slowed = false;
+	bool sliding = false;
+	bool has_auth = false;
+	bool auth_fresh = false;   // a snapshot with a new authoritative position arrived (reconcile)
 	int dlg_ser = -1;
 	int dlg_role = -1;
 	bool dlg_pending = false;

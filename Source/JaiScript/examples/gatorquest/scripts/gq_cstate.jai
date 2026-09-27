@@ -106,4 +106,44 @@ array<int> NCS_SEED;
 array<string> NCS_DROP;
 int NET_SESSION = -1;          // the session the interactive client plays through
 int NET_CLOSE_F = 0;           // frames left before a closed client session quits
+
+// ---- the network simulator (off by default): added round trip, jitter and TCP-style loss
+int NET_SIM_LAG = 0;           // round-trip ms added (half each way)
+int NET_SIM_JITTER = 0;        // +- ms per message
+int NET_SIM_LOSS = 0;          // percent of messages that need a retransmission (+250 ms, order kept)
+int NET_SIM_SEED = 777;
+array<array<int>> NCS_OUT_DUE; // per session: delayed outgoing messages
+array<array<string>> NCS_OUT_MSG;
+array<array<int>> NCS_IN_DUE;  // per session: delayed incoming messages
+array<array<string>> NCS_IN_MSG;
+array<int> NCS_OUT_LAST;       // TCP keeps order: a message never overtakes the one before it
+array<int> NCS_IN_LAST;
+
+// ---- client-side prediction of the local gator
+bool PRED_ON = true;
+int PRED_SEQ = 0;              // the last step sequence number sent
+array<int> PEND_SEQ;           // steps sent but not yet processed by the host
+array<int> PEND_DIR;
+int PRED_W = -1;               // the predicted tile (-1 = not started)
+int PRED_X = 0;
+int PRED_Y = 0;
+int PRED_FX = 0;               // the tile the current step started from
+int PRED_FY = 0;
+int PRED_T0 = 0;               // when the current step started (ms)
+int PRED_DUR = 1;              // how long it takes (ms)
+int PRED_READY = 0;            // when the next step may start (ms)
+int PRED_DIR = 4;              // facing, updated on the key press
+int PRED_LUNGE_T = -1000;      // a bump attack's lunge (ms)
+float CORR_X = 0.0;            // visual correction offset (tiles), decays to zero
+float CORR_Y = 0.0;
+int PRED_CORRECTIONS = 0;      // measured: reconciliations that moved the gator
+int PRED_SNAPS = 0;            // ... of which snapped (too far to glide)
+float PRED_CORR_MAX = 0.0;     // the largest correction (tiles)
+int PRED_STEPS = 0;
+// the smoothed server clock (ticks); others are drawn INTERP_DELAY ticks behind it
+float CLOCK_TICK = 0.0;
+int CLOCK_MS = 0;
+bool CLOCK_SET = false;
+int CLOCK_SEEN = -1;
+float INTERP_DELAY = 1.0;
 int LAST_MOVE_SENT = -2;

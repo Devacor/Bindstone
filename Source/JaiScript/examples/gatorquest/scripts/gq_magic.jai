@@ -225,6 +225,7 @@ void travel(int m, int w, int x, int y) {
 	int slot = MOB_PLAYER[m];
 	if (slot >= 0) {
 		Character& c = CHARS[slot];
+		step_queue_flush(slot);
 		if (from != w) {
 			ev(Ev.warp, w, p[0], p[1], w, from, 0, slot, WORLDS[w].name);
 			say_to(slot, WORLDS[w].name + ": " + WORLDS[w].banner, C_YELLOW);

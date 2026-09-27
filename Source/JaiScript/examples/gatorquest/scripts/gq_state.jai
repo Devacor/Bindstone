@@ -104,6 +104,10 @@ array<Character> CHARS;
 array<int> IN_MOVE;           // held movement direction per slot, -1 = none
 array<array<string>> IN_QUEUE; // discrete actions per slot, consumed by the next tick
 array<string> CHAR_ARCHIVE;   // characters of players who left, as save text (name-keyed on rejoin)
+array<array<int>> IN_STEP_SEQ; // predicted steps from a client: sequence numbers and directions, applied at the player's pace
+array<array<int>> IN_STEP_DIR;
+array<int> IN_ACK;            // the last step sequence each player's host has processed (echoed in snapshots)
+array<int> IN_DROPPED;        // the newest sequence dropped because the queue was full (acknowledged once it drains)
 
 // ---- events produced by the current tick (routed into snapshots, then cleared)
 array<int> EV_KIND;

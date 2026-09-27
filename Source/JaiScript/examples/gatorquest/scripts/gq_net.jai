@@ -4,7 +4,7 @@
 // snapshot of what that player can know (gq_proto.jai), the same text a
 // local player reads. One message per packet, a type then '|' fields:
 //
-//   client -> host   HELLO|proto|name|hue    M|dir    A|action    BYE
+//   client -> host   HELLO|proto|name|hue    M|dir (held)    S|seq|dir (a predicted step)    A|action    BYE
 //   host -> client   WELCOME|proto|slot|seed|tick|motd    REFUSE|why
 //                    SNAP followed by a newline and the snapshot    BYE|why
 //
@@ -129,7 +129,10 @@ void net_host_packet(int cid, string msg) {
 	if (!NET_SLOT_OF.has(cid)) { return; }
 	int slot = NET_SLOT_OF[cid];
 	string rest = bar < 0 ? "" : msg.substr(bar + 1, msg.size() - bar - 1);
-	if (kind == "M") {
+	if (kind == "S") {
+		array<string> sf = rest.split("|");
+		if (sf.size() >= 2) { intent_step(slot, sf[0].to_int(0), sf[1].to_int(-1)); }
+	} else if (kind == "M") {
 		int dir = rest.to_int(-1);
 		intent_move(slot, dir >= 0 && dir < 8 ? dir : -1);
 	} else if (kind == "A") {
@@ -190,12 +193,35 @@ void net_host_stop(string why) {
 	NET_CID_OF = {};
 }
 
+// ------------------------------------------------------------- simulator ---
+// added latency, jitter and TCP-style loss on a client session, for testing prediction.
+// Messages keep their order (a delayed message delays the ones behind it, like TCP).
+bool net_sim_on() { return NET_SIM_LAG > 0 || NET_SIM_JITTER > 0 || NET_SIM_LOSS > 0; }
+
+int net_sim_rand(int n) {
+	NET_SIM_SEED = (NET_SIM_SEED * 1103515245 + 12345) & 2147483647;
+	return n <= 1 ? 0 : (NET_SIM_SEED >> 8) % n;
+}
+
+int net_sim_delay() {
+	int d = NET_SIM_LAG / 2;
+	if (NET_SIM_JITTER > 0) { d = d + net_sim_rand(NET_SIM_JITTER * 2 + 1) - NET_SIM_JITTER; }
+	if (NET_SIM_LOSS > 0 && net_sim_rand(1000) < NET_SIM_LOSS * 10) { d = d + 250; }
+	return imax(0, d);
+}
+
 // ---------------------------------------------------------------- client ---
 int net_client_open(string host, int port) {
 	int s = NCS_CH.size();
 	shared_ptr<NetChannel> ch = new NetChannel();
 	NCS_CH.push(ch);
 	NCS_INBOX.push([]);
+	NCS_OUT_DUE.push([]);
+	NCS_OUT_MSG.push([]);
+	NCS_IN_DUE.push([]);
+	NCS_IN_MSG.push([]);
+	NCS_OUT_LAST.push(0);
+	NCS_IN_LAST.push(0);
 	shared_ptr<ClientView> view = new ClientView();
 	NCS_VIEW.push(view);
 	NCS_STATUS.push("connecting");
@@ -217,13 +243,40 @@ void net_client_hello(int s, string name, int hue) {
 bool net_session_live(int s) { return s >= 0 && s < NCS_CH.size() && !NCS_STATUS[s].starts_with("closed") && !NCS_STATUS[s].starts_with("refused"); }
 
 void net_session_send(int s, string msg) {
-	if (net_session_live(s)) { NCS_CH[s].send(msg); }
+	if (!net_session_live(s)) { return; }
+	if (!net_sim_on()) {
+		NCS_CH[s].send(msg);
+		return;
+	}
+	int due = imax(NCS_OUT_LAST[s], NOW_MS + net_sim_delay());
+	NCS_OUT_LAST[s] = due;
+	NCS_OUT_DUE[s].push(due);
+	NCS_OUT_MSG[s].push(msg);
 }
 
-// pump one session and apply what arrived
+// pump one session and apply what arrived (after the simulator's delay, when it is on)
 void net_session_pump(int s) {
 	if (s < 0 || s >= NCS_CH.size()) { return; }
+	while (NCS_OUT_DUE[s].size() > 0 && NCS_OUT_DUE[s][0] <= NOW_MS) {
+		if (net_session_live(s)) { NCS_CH[s].send(NCS_OUT_MSG[s][0]); }
+		NCS_OUT_DUE[s].remove(0);
+		NCS_OUT_MSG[s].remove(0);
+	}
 	if (net_session_live(s)) { NCS_CH[s].pump(); }
+	if (net_sim_on() && NCS_INBOX[s].size() > 0) {
+		for (int i = 0; i < NCS_INBOX[s].size(); ++i) {
+			int due = imax(NCS_IN_LAST[s], NOW_MS + net_sim_delay());
+			NCS_IN_LAST[s] = due;
+			NCS_IN_DUE[s].push(due);
+			NCS_IN_MSG[s].push(NCS_INBOX[s][i]);
+		}
+		NCS_INBOX[s] = [];
+	}
+	while (NCS_IN_DUE[s].size() > 0 && NCS_IN_DUE[s][0] <= NOW_MS) {
+		NCS_INBOX[s].push(NCS_IN_MSG[s][0]);
+		NCS_IN_DUE[s].remove(0);
+		NCS_IN_MSG[s].remove(0);
+	}
 	int n = NCS_INBOX[s].size();
 	if (n > 0) {
 		array<string> msgs = NCS_INBOX[s];

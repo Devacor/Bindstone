@@ -83,21 +83,27 @@ void light_emit(float ex, float ey, float r, int strength) {
 	}
 }
 
-// interpolated tile position of a mobile in the view (tile units)
-float mob_vx(ClientView& v, int i, float vtick) {
-	float t = (vtick - v.m_mt[i]) / v.m_md[i];
+// interpolated tile position of a mobile at a (fractional) server tick: its current move, or the
+// one before when the tick is earlier (others are drawn a little behind the clock); the local
+// gator is drawn where the prediction has it
+float move_lerp(int from, int to, float vtick, int mt, int md) {
+	if (iabs(to - from) > 2) { return to * 1.0; }
+	float t = (vtick - mt) / md;
 	if (t < 0.0) { t = 0.0; }
 	if (t > 1.0) { t = 1.0; }
-	if (iabs(v.m_x[i] - v.m_px[i]) > 2) { return v.m_x[i] * 1.0; }
-	return v.m_px[i] + (v.m_x[i] - v.m_px[i]) * t;
+	return from + (to - from) * t;
+}
+
+float mob_vx(ClientView& v, int i, float vtick) {
+	if (v.m_ser[i] == v.my_ser && pred_active(v)) { return pred_draw_x(NOW_MS); }
+	if (vtick >= v.m_mt[i] || v.m_ppx.size() <= i) { return move_lerp(v.m_px[i], v.m_x[i], vtick, v.m_mt[i], v.m_md[i]); }
+	return move_lerp(v.m_ppx[i], v.m_px[i], vtick, v.m_pmt[i], v.m_pmd[i]);
 }
 
 float mob_vy(ClientView& v, int i, float vtick) {
-	float t = (vtick - v.m_mt[i]) / v.m_md[i];
-	if (t < 0.0) { t = 0.0; }
-	if (t > 1.0) { t = 1.0; }
-	if (iabs(v.m_y[i] - v.m_py[i]) > 2) { return v.m_y[i] * 1.0; }
-	return v.m_py[i] + (v.m_y[i] - v.m_py[i]) * t;
+	if (v.m_ser[i] == v.my_ser && pred_active(v)) { return pred_draw_y(NOW_MS); }
+	if (vtick >= v.m_mt[i] || v.m_ppy.size() <= i) { return move_lerp(v.m_py[i], v.m_y[i], vtick, v.m_mt[i], v.m_md[i]); }
+	return move_lerp(v.m_ppy[i], v.m_py[i], vtick, v.m_pmt[i], v.m_pmd[i]);
 }
 
 float view_tick(ClientView& v) {
@@ -140,7 +146,7 @@ void draw_tiles(ClientView& v, int camx, int camy, int amb) {
 				}
 			}
 		}
-		float vt = view_tick(v);
+		float vt = render_tick(v);
 		for (int i = 0; i < v.m_ser.size(); ++i) {
 			int kind = v.m_kind[i];
 			int l = MONS[kind].light;
@@ -319,7 +325,7 @@ void draw_sprite2x(int off, int sx, int sy, bool flip, int lev, int mode) {
 
 void draw_mobiles(ClientView& v, int camx, int camy) {
 	int S = TS;
-	float vt = view_tick(v);
+	float vt = render_tick(v);
 	int n = v.m_ser.size();
 	// painter's order: by interpolated y
 	array<int> order;
@@ -350,7 +356,8 @@ void draw_mobiles(ClientView& v, int camx, int camy) {
 		int kind = v.m_kind[i];
 		MonDef md = MONS[kind];
 		int flags = v.m_flags[i];
-		int dir = v.m_dir[i];
+		bool predicted = v.m_ser[i] == v.my_ser && pred_active(v);
+		int dir = predicted ? PRED_DIR : v.m_dir[i];
 		bool flip = dir == 5 || dir == 6 || dir == 7;
 		bool player = v.m_slot[i] >= 0;
 		bool me = v.m_ser[i] == v.my_ser;
@@ -375,8 +382,9 @@ void draw_mobiles(ClientView& v, int camx, int camy) {
 		if ((flags & MF_ELITE) != 0 && FRAME % 30 < 15) { tint = "gold"; }
 		int off = sprite_compiled(spr, tint, armor_c, hat_c, weapon_c);
 		// walking bob and the swim cut
-		bool moving = vt - v.m_mt[i] < v.m_md[i] && (v.m_x[i] != v.m_px[i] || v.m_y[i] != v.m_py[i]);
-		int bob = moving && ((v.m_mt[i] / imax(1, v.m_md[i])) % 2 == 0) ? -1 : 0;
+		bool moving = predicted ? NOW_MS < PRED_T0 + PRED_DUR && (PRED_X != PRED_FX || PRED_Y != PRED_FY) : vt - v.m_mt[i] < v.m_md[i] && (v.m_x[i] != v.m_px[i] || v.m_y[i] != v.m_py[i]);
+		int stride = predicted ? PRED_STEPS : v.m_mt[i] / imax(1, v.m_md[i]);
+		int bob = moving && stride % 2 == 0 ? -1 : 0;
 		int tile_x = math::itrunc(fx + 0.5);
 		int tile_y = math::itrunc(fy + 0.5);
 		int lev = light_at(tile_x, tile_y);
@@ -815,6 +823,8 @@ void process_events(ClientView& v) {
 void step_particles(ClientView& v) {
 	for (int i = 0; i < v.m_ser.size(); ++i) {
 		if (v.m_slot[i] < 0 || (v.m_flags[i] & MF_GHOST) != 0) { continue; }
+		// the predicted gator kicks up its own dust on the key press (gq_predict.jai)
+		if (v.m_ser[i] == v.my_ser && pred_active(v)) { continue; }
 		int ser = v.m_ser[i];
 		float was_x = VIS_X.get(ser, -1.0);
 		float was_y = VIS_Y.get(ser, -1.0);
@@ -843,7 +853,7 @@ void action_juice(ClientView& v, int camx, int camy) {
 	int me = cv_me(v);
 	if (me < 0 || v.action == 0) { return; }
 	int S = TS;
-	float vt = view_tick(v);
+	float vt = render_tick(v);
 	int dir = v.m_dir[me];
 	float tx = mob_vx(v, me, vt) + DX[dir];
 	float ty = mob_vy(v, me, vt) + DY[dir];
@@ -928,7 +938,7 @@ void low_health(ClientView& v) {
 void render_world(ClientView& v) {
 	ensure_shade(v);
 	int me = cv_me(v);
-	float vt = view_tick(v);
+	float vt = render_tick(v);
 	float tx = TITLE_X * 1.0;
 	float ty = TITLE_Y * 1.0;
 	if (me >= 0) {

@@ -309,8 +309,10 @@ void play_loop() {
 			on_key(CV, k);
 			k = read_key();
 		}
-		if (UI_MODE == "play" || UI_MODE == "map") { client_move(held_dir()); }
-		else { client_move(-1); }
+		// movement: predicted on this frame (the host hears about each step), or held-key intents
+		int held = UI_MODE == "play" || UI_MODE == "map" ? held_dir() : -1;
+		if (PRED_ON) { pred_input(CV, held, NOW_MS); }
+		else { client_move(held); }
 		// dev mode: pick up edited scripts about once a second
 		if (DEV_ON && FRAME % 30 == 0) {
 			array<string> msgs = dev_poll();
@@ -333,6 +335,8 @@ void play_loop() {
 			if (net_hosting()) { CV.status = `hosting :${NET_PORT}, ${net_player_count()} joined`; }
 		}
 		STAT_SIM_MS = STAT_SIM_MS + clock_ms() - t_sim;
+		pred_reconcile(CV, NOW_MS);
+		pred_frame(CV, NOW_MS);
 		check_dialog(CV);
 		process_events(CV);
 		particles_update();

@@ -4805,6 +4805,39 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// an element read landed in a compiler temp holds the element's value as read there, never the entry reference: a map entry left
+		// of a hoisted math call whose argument calls a writer of that entry reads ahead of the call (the ordering fuzz band, seed 241)
+		test("an_entry_read_into_a_temp_is_its_value_where_it_is_read", [this]() {
+			const std::string src = "map<string, int> M = {\"a\": 1};\n"
+				"map<string, float> MF = {\"a\": 1.5};\n"
+				"var MV = {\"a\": 1, \"b\": 2.5};\n"
+				"function rec(int n) -> int { if (n <= 0) { return 0; } return rec(n - 1); }\n"
+				"function wm() -> int { rec(0); M[\"a\"] = M[\"a\"] + 100; return 3; }\n"
+				"function wg() -> int { M[\"a\"] = M[\"a\"] + 100; return 4; }\n"
+				"function wf() -> int { rec(0); MF[\"a\"] = MF[\"a\"] + 100.0; return 9; }\n"
+				"function wv() -> int { rec(0); MV[\"b\"] = MV[\"b\"] + 100; return 1; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    M[\"a\"] = 1; int a = M[\"a\"] - math::abs(wm()); out += to_string(a) + \" \";\n"
+				"    M[\"a\"] = 1; float b = M[\"a\"] - sqrt(wg()); out += to_string(b) + \" \";\n"
+				"    MF[\"a\"] = 1.5; float c = MF[\"a\"] + math::floor(wf()); out += to_string(c) + \" \";\n"
+				"    MV[\"b\"] = 2.5; var d = MV[\"b\"] * math::itrunc(wv()); out += to_string(d) + \" \";\n"
+				"    M[\"a\"] = 1; int e = (M[\"a\"] + math::abs(wm())) * 2; out += to_string(e) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"run();";
+			const std::string expected = "-2 -1.0 10.5 2.5 8 | -2 -1.0 10.5 2.5 8 | ";
+			both(src, expected, "an entry read ahead of a hoisted math call");
+			both(src, expected, "an entry read ahead of a hoisted math call, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

@@ -9503,10 +9503,11 @@ op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins)
 		if (sink.landed || is_unwinding_) {
 			return {};   // unwound: parity states stand, the decl never runs
 		}
-		if (p.decl_temp) {   // a compiler temp: the boxed element the sink pushed moves into the temp
+		if (p.decl_temp) {   // a compiler temp: the boxed element the sink pushed moves into the temp, an entry reference's value as it is read here
 			script_value v = std::move(stack_.back());
 			stack_.pop_back();
-			frame_slot_set(f, p.decl_slot, std::move(v));
+			if (v.raw_storage_index() == script_value::TYPEID_REFERENCE) { frame_slot_set(f, p.decl_slot, script_value(v.deref())); }
+			else { frame_slot_set(f, p.decl_slot, std::move(v)); }
 			return {};
 		}
 		const vm_instruction decl_ins{opcode::op_decl_var, ins.c, 1, 1};

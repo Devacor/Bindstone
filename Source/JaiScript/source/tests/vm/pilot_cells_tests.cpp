@@ -5362,6 +5362,49 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// leaves graft through every level the tree's node budget allows (four levels here: a loop over l1 whose body calls l2, which calls l3
+		// twice, which calls l4), each behind its own guard; a callee rebound at any level mid-loop takes that graft's fallback; mutual recursion
+		// stays calls; a tree past the budget keeps the calls that would exceed it, with the same values
+		test("leaves_graft_through_every_level_within_the_node_budget", [this]() {
+			const std::string src = "[[warn_mode]]\nfloat K = 0.5;\n"
+				"function l4(float x) -> float { return x * K + 1.0; }\n"
+				"function l3(float x, float y) -> float { float d = l4(x) - y; return d < 0.0 ? -d : d; }\n"
+				"function l2(float x) -> float { float a = l3(x, 2.0); float b = l3(x * 0.5, 1.0); return a < b ? a : b; }\n"
+				"function l1(float x, int k) -> float { float s = 0.0; for (int j = 0; j < k; ++j) { s += l2(x + j); } return s; }\n"
+				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += l1(i * 0.1, 3); } return t; }\n"
+				"function rb(int i) -> int { if (i == 7) { l4 = function(float v) { return v * 100.0; }; } if (i == 11) { l3 = function(float a, float b) { return a + b; }; } return i; }\n"
+				"function run2(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.25; t += l2(x); float k = rb(i); t += k; } return t; }\n"
+				"function ev(int n) -> int { if (n <= 0) { return 0; } return od(n - 1) + 1; }\n"
+				"function od(int n) -> int { if (n <= 0) { return 1; } return ev(n - 1) + 2; }\n"
+				"function run3(int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s += ev(i & 7); } return s; }\n"
+				"var L40 = l4; var L30 = l3;\n"
+				"string out = to_string(run(20)) + \" \" + to_string(run3(30)) + \" \" + to_string(run2(16));\n"
+				"l4 = L40; l3 = L30; out + \" \" + to_string(run(3));";
+			both(src, "", "four levels");
+			both(src, "", "four levels, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== run ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("-- inlined l1") != std::string::npos && fl.find("-- inlined l4") != std::string::npos && fl.find("open loop") == std::string::npos, "every level grafts and the loops close: " + fl);
+			// a tree past the budget: g's body is large and f calls it many times; the grafts stop where the budget would be exceeded
+			std::string big = "float W = 1.25;\nfunction g(float x) -> float { float a = x * W";
+			for (int i = 0; i < 60; ++i) { big += " + x * " + std::to_string(i + 1) + ".0"; }
+			big += "; return a; }\nfunction f(float x) -> float { float s = g(x);";
+			for (int i = 1; i < 24; ++i) { big += " s += g(x + " + std::to_string(i) + ".0);"; }
+			big += " return s; }\nfunction run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float v = f(i * 0.5); t += v; } return t; }\nto_string(run(10));";
+			both(big, "", "a tree past the budget");
+			const std::string bl = listing_run(big);
+			check_true(bl.find("a graft tree too large") != std::string::npos, "the budget keeps some calls: " + bl.substr(0, 2000));
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		// a leaf whose body evaluates a stdlib alias, as another leaf's argument: the outer leaf's guard stands in its callee's place, so the
 		// inner leaf grafts inside the outer's parameter and the loop closes; the alias rebound by a call in the loop, the outer rebound by
 		// the rebound alias, and a function no graft takes as the enclosing call keep the general form's values

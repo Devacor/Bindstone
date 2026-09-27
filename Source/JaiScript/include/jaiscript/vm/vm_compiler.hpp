@@ -173,6 +173,9 @@ namespace jai::vm {
         const block_stmt* callable_body_ = nullptr;
         std::vector<const block_stmt*> graft_bodies_;   // the grafts being compiled, outermost first: a leaf inside one grafts too (one level), never one of them again
         bool inlining_off_ = false;
+        size_t graft_nesting_ = 0;       // compile_hoist's own nesting: grafts compiled inside a graft (its body, its parameters)
+        size_t graft_tree_nodes_ = 0;    // the nodes cloned for the outermost graft being compiled and every graft inside it
+        std::unordered_map<const call_expr*, bool> nested_land_memo_;   // a call a graft's body makes: whether it grafts as the body's block instructions
         uint64_t inline_symbol_ = 0;
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> alias_pins_;   // a stdlib alias whose callee a guard resolved at its place (call site, mark temp): compile_math_into_temp takes them
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> callee_probes_;   // a call whose callee was probed at its place ahead of a graft (probe ip, unused): compile_call takes the probe

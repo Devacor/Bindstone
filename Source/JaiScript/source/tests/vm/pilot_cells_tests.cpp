@@ -5292,6 +5292,56 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(expected, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a reference parameter bound to an element is an alias of that element in the graft, as the call binds it: stores through it reach the
+		// array (a float array, an int array's element conversion, a row of an array of arrays), in a loop and outside one, reads after the store
+		test("a_reference_parameter_bound_to_an_element_aliases_it", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function setv(var& a) -> void { a = 2.5; }\n"
+				"function bumpv(var& a, float d) -> float { a = a + d; return a * 2.0; }\n"
+				"function run1() -> string { array<float> A = [1.0, 2.0]; setv(A[0]); return to_json(A); }\n"
+				"function run2() -> string { array<int> B = [1, 2]; setv(B[0]); return to_json(B); }\n"
+				"function run3() -> string { var M = [[1, 2], [3, 4]]; for (int i = 0; i < 2; ++i) { setv(M[i]); } return to_json(M); }\n"
+				"function run4(int n) -> string { array<float> A = [0.0, 0.0, 0.0, 0.0]; float t = 0.0; for (int i = 0; i < n; ++i) { t += bumpv(A[i & 3], i * 0.5); } return to_json(A) + \" \" + to_string(t); }\n"
+				"function run5() -> string { var V = [1, \"x\", 2.5]; setv(V[1]); float r = bumpv(V[2], 1.0); return to_json(V) + \" \" + to_string(r); }\n"
+				"run1() + \" \" + run2() + \" \" + run3() + \" \" + run4(10) + \" \" + run5();";
+			const std::string expected = "[2.5,2.0] [2,2] [2.5,2.5] [6.0,7.5,4.0,5.0] 61.0 [1,2.5,3.5] 7.0";
+			both(src, expected, "element references");
+			both(src, expected, "element references, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(expected, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// a reference parameter bound to a name is that variable in the graft only where a store through the reference and a store of the
+		// variable agree: an untyped variable, or one declared the parameter's scalar type with every store proven to land it; a store the
+		// variable's declared type would convert keeps the call (the reference's store does not convert)
+		test("a_reference_parameter_bound_to_a_name_stores_as_the_reference", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function setv(var& a) -> void { a = 2.5; }\n"
+				"function setf(float& a) -> void { a = 7; }\n"
+				"function seti(int& a) -> void { a = 2.75; }\n"
+				"function addi(int& a, float d) -> void { a += d; }\n"
+				"function bumpf(float& a, float d) -> void { a = a + d; }\n"
+				"function incf(float& a) -> void { ++a; }\n"
+				"function run1() -> string { int x = 1; setv(x); return to_string(x) + \":\" + type_of(x); }\n"
+				"function run2() -> string { float y = 1.0; setf(y); return to_string(y) + \":\" + type_of(y); }\n"
+				"function run3() -> string { int z = 1; seti(z); return to_string(z) + \":\" + type_of(z); }\n"
+				"function run4() -> string { int w = 1; addi(w, 0.5); return to_string(w) + \":\" + type_of(w); }\n"
+				"function run5() -> string { var v = 1; setv(v); return to_string(v) + \":\" + type_of(v); }\n"
+				"function run6(int n) -> string { float t = 0.0; for (int i = 0; i < n; ++i) { bumpf(t, i * 0.5); incf(t); } return to_string(t) + \":\" + type_of(t); }\n"
+				"function run7() -> string { int q = 3; bumpf(q, 0.25); return to_string(q) + \":\" + type_of(q); }\n"
+				"run1() + \" \" + run2() + \" \" + run3() + \" \" + run4() + \" \" + run5() + \" \" + run6(10) + \" \" + run7();";
+			const std::string expected = "2.5:float 7:int 2.75:float 1:int 2.5:float 32.5:float 3.25:float";
+			both(src, expected, "name references");
+			both(src, expected, "name references, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== run6 ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("-- inlined bumpf") != std::string::npos && fl.find("-- inlined incf") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "a proven float reference still grafts and the loop closes: " + fl);
+		});
 		// a leaf whose body evaluates a stdlib alias, as another leaf's argument: the outer leaf's guard stands in its callee's place, so the
 		// inner leaf grafts inside the outer's parameter and the loop closes; the alias rebound by a call in the loop, the outer rebound by
 		// the rebound alias, and a function no graft takes as the enclosing call keep the general form's values

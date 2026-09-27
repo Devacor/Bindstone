@@ -11036,7 +11036,7 @@ bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_s
 }
 
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
-	if (debug_hook_) return false;
+	if (debug_hook_ || (site.plain_numeric && has_custom_numeric_ops_)) return false;
 	if (site.method) return inline_method_holds(f, site);
 	if (site.env_reads && f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());

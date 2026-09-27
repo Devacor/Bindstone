@@ -78,6 +78,8 @@ namespace jai::vm {
             // value slots declared int, float or bool: they hold that kind at every point, so a unary or an intrinsic over
             // one runs no user operator or conversion
             std::unordered_set<uint32_t> primitive_slots;
+            // the declared type of each value slot as its declaration compiled (null: untyped): what a store of the variable enforces
+            std::unordered_map<uint32_t, const type_info*> slot_types;
             bool active = false;
         };
 
@@ -174,10 +176,11 @@ namespace jai::vm {
         uint64_t inline_symbol_ = 0;
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> alias_pins_;   // a stdlib alias whose callee a guard resolved at its place (call site, mark temp): compile_math_into_temp takes them
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> callee_probes_;   // a call whose callee was probed at its place ahead of a graft (probe ip, unused): compile_call takes the probe
-        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
+        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
         const char* inline_eligible(const call_expr* call, const function_decl* fn) const;   // nullptr: the graft takes the call; else the rule that keeps it
         bool plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out);
         type_info_ptr inline_type(script_value_type kind);
+        type_info_ptr inline_ref_type();
         type_info_ptr graft_result_type(const function_decl* fn);
         struct land_ctx graft_land_ctx(const function_decl* fn);
         std::shared_ptr<identifier_expr> inline_temp(const source_location& loc);

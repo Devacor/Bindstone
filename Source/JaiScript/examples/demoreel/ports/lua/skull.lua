@@ -29,6 +29,7 @@ local SK_HGX, SK_HGY, SK_HGZ = 0.0, 0.0, 0.0
 local SK_BGX, SK_BGY, SK_BGZ = 0.0, 0.0, 0.0
 local SK_NC, SK_NBONE, SK_CROWN0 = 0, 5, 0
 local SK_CRX, SK_CRY, SK_CRZ = 0.0, 0.0, 0.0
+local SK_SKB, SK_CRB = 0.4, 0.4
 local SK_GMX, SK_GMY, SK_GMZ = 0.0, 0.0, 0.0
 local SK_GAX, SK_GAY, SK_GAZ = 1.0, 0.0, 0.0
 local SK_GBX, SK_GBY, SK_GBZ = 0.0, 0.0, 1.0
@@ -105,10 +106,13 @@ local function sk_glows(x, y, z)
 	return best
 end
 
-local function sk_skull(x, y, z)
+-- the skull against best: no nearer than sqrt(0.92) of the distance to its center less SK_SKB (the jaw's reach),
+-- so it is skipped when that cannot beat best
+local function sk_skull(x, y, z, best)
 	local hx = x - SK_HX
 	local hy = y - SK_HY
 	local hz = z - SK_HZ
+	if sqrt(hx * hx + hy * hy + hz * hz) * 0.959 - SK_SKB >= best then return best end
 	local cu = hx * SK_PUX + hy * SK_PUY + hz * SK_PUZ
 	local cf = hx * SK_PFX + hy * SK_PFY + hz * SK_PFZ
 	local cr = hx * SK_PRX + hy * SK_PRY + hz * SK_PRZ
@@ -133,7 +137,8 @@ local function sk_skull(x, y, z)
 	end
 	local nx = x - SK_NX; local ny = y - SK_NY; local nz = z - SK_NZ
 	local cn = 0.042 - sqrt(nx * nx + ny * ny + nz * nz)
-	return d > cn and d or cn
+	d = d > cn and d or cn
+	return d < best and d or best
 end
 
 local function sk_body(x, y, z)
@@ -179,11 +184,14 @@ local function sk_spider(x, y, z, groups, cand, nc)
 	local d = 99.0
 	if (groups & 1) ~= 0 then d = sk_body(x, y, z) end
 	if (groups & 2) ~= 0 then
-		local ds = sk_skull(x, y, z)
-		d = d < ds and d or ds
-		local dr = sk_ring(x, y, z)
-		d = d < dr and d or dr
-		d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d)
+		d = sk_skull(x, y, z, d)
+		-- the crown's ring and flames lie within SK_CRB of its center
+		local ox = x - SK_CRX; local oy = y - SK_CRY; local oz = z - SK_CRZ
+		if sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < d then
+			local dr = sk_ring(x, y, z)
+			d = d < dr and d or dr
+			d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d)
+		end
 		local dg = sk_gem(x, y, z)
 		d = d < dg and d or dg
 	end
@@ -198,19 +206,25 @@ local function sk_spider(x, y, z, groups, cand, nc)
 			d = d < dg2 and d or dg2
 		else
 			local ci = c + 1
-			local pax = x - SK_CAX[ci]
-			local pay = y - SK_CAY[ci]
-			local paz = z - SK_CAZ[ci]
-			local cdx = SK_CDX[ci]
-			local cdy = SK_CDY[ci]
-			local cdz = SK_CDZ[ci]
-			local hh = (pax * cdx + pay * cdy + paz * cdz) * SK_CID[ci]
-			hh = hh < 0.0 and 0.0 or (hh > 1.0 and 1.0 or hh)
-			local ex = pax - cdx * hh
-			local ey = pay - cdy * hh
-			local ez = paz - cdz * hh
-			local dc = sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[ci]
-			d = d < dc and d or dc
+			local mx = x - SK_CMX[ci]
+			local my = y - SK_CMY[ci]
+			local mz = z - SK_CMZ[ci]
+			local reach = d + SK_CB[ci]
+			if mx * mx + my * my + mz * mz <= reach * reach then
+				local pax = x - SK_CAX[ci]
+				local pay = y - SK_CAY[ci]
+				local paz = z - SK_CAZ[ci]
+				local cdx = SK_CDX[ci]
+				local cdy = SK_CDY[ci]
+				local cdz = SK_CDZ[ci]
+				local hh = (pax * cdx + pay * cdy + paz * cdz) * SK_CID[ci]
+				hh = hh < 0.0 and 0.0 or (hh > 1.0 and 1.0 or hh)
+				local ex = pax - cdx * hh
+				local ey = pay - cdy * hh
+				local ez = paz - cdz * hh
+				local dc = sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[ci]
+				d = d < dc and d or dc
+			end
 		end
 	end
 	return d
@@ -231,16 +245,20 @@ end
 local function sk_material(x, y, z)
 	local best = sk_world(x, y, z)
 	local m = 0
-	local ds = sk_skull(x, y, z)
-	local bone = sk_capsules(x, y, z, 0, SK_NBONE, ds < best and ds or best)
+	local bone = sk_skull(x, y, z, best)
+	bone = sk_capsules(x, y, z, 0, SK_NBONE, bone)
 	if bone < best then best = bone; m = 1 end
 	local db = sk_body(x, y, z)
 	local chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, db < best and db or best)
 	if chit < best then best = chit; m = 2 end
 	local de = sk_glows(x, y, z)
-	local dr = sk_ring(x, y, z)
-	de = de < dr and de or dr
-	de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de < best and de or best)
+	de = de < best and de or best
+	local ox = x - SK_CRX; local oy = y - SK_CRY; local oz = z - SK_CRZ
+	if sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < de then
+		local dr = sk_ring(x, y, z)
+		de = de < dr and de or dr
+		de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de)
+	end
 	if de < best then best = de; m = 3 end
 	local dgm = sk_gem(x, y, z)
 	if dgm < best then best = dgm; m = 5 end
@@ -1017,6 +1035,17 @@ function Ossuary:render(grid)
 		local bzk = SK_CRZ + fz * ca + rz * sa
 		capsule(SK_CROWN0 + k, bxk, byk, bzk, bxk + ux * flame + fx * ca * 0.25 + rx * sa * 0.25, byk + uy * flame + fy * ca * 0.25 + ry * sa * 0.25, bzk + uz * flame + fz * ca * 0.25 + rz * sa * 0.25, 0.018)
 	end
+	-- the bounding radii the distance skips on: the skull's jaw about its center, the ring and flames about the crown's
+	local jhx = SK_JX - SK_HX; local jhy = SK_JY - SK_HY; local jhz = SK_JZ - SK_HZ
+	local jaw_reach = sqrt(jhx * jhx + jhy * jhy + jhz * jhz) + 0.085 + 0.09
+	SK_SKB = (jaw_reach > SK_HR and jaw_reach or SK_HR) + 0.001
+	local crown_reach = 0.2 + 0.028
+	for k = SK_CROWN0 + 1, SK_NC do
+		local mx = SK_CMX[k] - SK_CRX; local my = SK_CMY[k] - SK_CRY; local mz = SK_CMZ[k] - SK_CRZ
+		local r = sqrt(mx * mx + my * my + mz * mz) + SK_CB[k]
+		crown_reach = r > crown_reach and r or crown_reach
+	end
+	SK_CRB = crown_reach + 0.001
 	local spin = tt * 2.2
 	local gl2 = 0.3 + 0.02 * sin(tt * 2.5)
 	SK_GMX = SK_CRX + ux * gl2; SK_GMY = SK_CRY + uy * gl2; SK_GMZ = SK_CRZ + uz * gl2

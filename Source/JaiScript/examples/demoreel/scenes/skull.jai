@@ -57,6 +57,8 @@ int SK_NC = 0;
 int SK_NBONE = 5;
 int SK_CROWN0 = 0;
 float SK_CRX = 0.0; float SK_CRY = 0.0; float SK_CRZ = 0.0;
+float SK_SKB = 0.4;
+float SK_CRB = 0.4;
 float SK_GMX = 0.0; float SK_GMY = 0.0; float SK_GMZ = 0.0;
 float SK_GAX = 1.0; float SK_GAY = 0.0; float SK_GAZ = 0.0;
 float SK_GBX = 0.0; float SK_GBY = 0.0; float SK_GBZ = 1.0;
@@ -148,10 +150,13 @@ function sk_glows(float x, float y, float z) -> float {
 	return best;
 }
 
-function sk_skull(float x, float y, float z) -> float {
+// the skull against best: an ellipsoid (up 1.18, forward sqrt(0.92)) with its jaw, eye sockets and nose cut in. It is no
+// nearer than sqrt(0.92) of the distance to its center less SK_SKB (the jaw's reach), so it is skipped when that cannot beat best
+function sk_skull(float x, float y, float z, float best) -> float {
 	float hx = x - SK_HX;
 	float hy = y - SK_HY;
 	float hz = z - SK_HZ;
+	if (sqrt(hx * hx + hy * hy + hz * hz) * 0.959 - SK_SKB >= best) { return best; }
 	float cu = hx * SK_PUX + hy * SK_PUY + hz * SK_PUZ;
 	float cf = hx * SK_PFX + hy * SK_PFY + hz * SK_PFZ;
 	float cr = hx * SK_PRX + hy * SK_PRY + hz * SK_PRZ;
@@ -176,7 +181,8 @@ function sk_skull(float x, float y, float z) -> float {
 	}
 	float nx = x - SK_NX; float ny = y - SK_NY; float nz = z - SK_NZ;
 	float cn = 0.042 - sqrt(nx * nx + ny * ny + nz * nz);
-	return d > cn ? d : cn;
+	d = d > cn ? d : cn;
+	return d < best ? d : best;
 }
 
 function sk_body(float x, float y, float z) -> float {
@@ -221,11 +227,14 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 	float d = 99.0;
 	if ((groups & 1) != 0) { d = sk_body(x, y, z); }
 	if ((groups & 2) != 0) {
-		float ds = sk_skull(x, y, z);
-		d = d < ds ? d : ds;
-		float dr = sk_ring(x, y, z);
-		d = d < dr ? d : dr;
-		d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d);
+		d = sk_skull(x, y, z, d);
+		// the crown's ring and flames lie within SK_CRB of its center
+		float ox = x - SK_CRX; float oy = y - SK_CRY; float oz = z - SK_CRZ;
+		if (sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < d) {
+			float dr = sk_ring(x, y, z);
+			d = d < dr ? d : dr;
+			d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d);
+		}
 		float dg = sk_gem(x, y, z);
 		d = d < dg ? d : dg;
 	}
@@ -239,6 +248,11 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 			float dg2 = sqrt(gx * gx + gy * gy + gz * gz) - SK_GR[g];
 			d = d < dg2 ? d : dg2;
 		} else {
+			float mx = x - SK_CMX[c];
+			float my = y - SK_CMY[c];
+			float mz = z - SK_CMZ[c];
+			float reach = d + SK_CB[c];
+			if (mx * mx + my * my + mz * mz > reach * reach) { continue; }
 			float pax = x - SK_CAX[c];
 			float pay = y - SK_CAY[c];
 			float paz = z - SK_CAZ[c];
@@ -273,16 +287,20 @@ function sk_material(float x, float y, float z) -> int {
 	float g = sk_field(x, y, z);
 	float best = sk_shell(g);
 	int m = 0;
-	float ds = sk_skull(x, y, z);
-	float bone = sk_capsules(x, y, z, 0, SK_NBONE, ds < best ? ds : best);
+	float bone = sk_skull(x, y, z, best);
+	bone = sk_capsules(x, y, z, 0, SK_NBONE, bone);
 	if (bone < best) { best = bone; m = 1; }
 	float db = sk_body(x, y, z);
 	float chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, db < best ? db : best);
 	if (chit < best) { best = chit; m = 2; }
 	float de = sk_glows(x, y, z);
-	float dr = sk_ring(x, y, z);
-	de = de < dr ? de : dr;
-	de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de < best ? de : best);
+	de = de < best ? de : best;
+	float ox = x - SK_CRX; float oy = y - SK_CRY; float oz = z - SK_CRZ;
+	if (sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < de) {
+		float dr = sk_ring(x, y, z);
+		de = de < dr ? de : dr;
+		de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de);
+	}
 	if (de < best) { best = de; m = 3; }
 	float dgm = sk_gem(x, y, z);
 	if (dgm < best) { best = dgm; m = 5; }
@@ -1021,6 +1039,17 @@ class Ossuary : Scene {
 			float bzk = SK_CRZ + fz * ca + rz * sa;
 			capsule(SK_CROWN0 + k, bxk, byk, bzk, bxk + ux * flame + fx * ca * 0.25 + rx * sa * 0.25, byk + uy * flame + fy * ca * 0.25 + ry * sa * 0.25, bzk + uz * flame + fz * ca * 0.25 + rz * sa * 0.25, 0.018);
 		}
+		// the bounding radii the distance skips on: the skull's jaw about its center, the ring and flames about the crown's
+		float jhx = SK_JX - SK_HX; float jhy = SK_JY - SK_HY; float jhz = SK_JZ - SK_HZ;
+		float jaw_reach = sqrt(jhx * jhx + jhy * jhy + jhz * jhz) + 0.085 + 0.09;
+		SK_SKB = (jaw_reach > SK_HR ? jaw_reach : SK_HR) + 0.001;
+		float crown_reach = 0.2 + 0.028;
+		for (int k = SK_CROWN0; k < SK_NC; ++k) {
+			float mx = SK_CMX[k] - SK_CRX; float my = SK_CMY[k] - SK_CRY; float mz = SK_CMZ[k] - SK_CRZ;
+			float r = sqrt(mx * mx + my * my + mz * mz) + SK_CB[k];
+			crown_reach = r > crown_reach ? r : crown_reach;
+		}
+		SK_CRB = crown_reach + 0.001;
 		float spin = tt * 2.2;
 		float gl2 = 0.3 + 0.02 * sin(tt * 2.5);
 		SK_GMX = SK_CRX + ux * gl2; SK_GMY = SK_CRY + uy * gl2; SK_GMZ = SK_CRZ + uz * gl2;

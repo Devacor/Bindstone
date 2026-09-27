@@ -43,6 +43,14 @@
 >   function (an element load through a property reference), at that function's caller, the throwing frame popped
 >   first, so the function's own `try` does not see it. The VM's `run` converts (`ip_in_call_arg_zone`,
 >   `convert_cpp_exception_in_frame`, `convert_cpp_exception_at_frame`); the interpreter's `visit_call` does.
+> - **An error in an included or imported file is the includer's error, on both backends.** Include is textual, so a
+>   failure of the nested run re-raises at the op that started it exactly as if the file's code ran there: a `throw`
+>   keeps its value and type, a runtime error is caught with its text alone (and carries its category suffix only when
+>   uncaught), and a load failure - the file's parse error, or its static-check listing named by the file's resolved path -
+>   raises that text as a string. The nested run parks its failure and its own frames (`detail::nested_failure`,
+>   `execution_backend::park_nested_failure`) before the engine turns it into a C++ exception; the include/import op
+>   takes it back (`raise_nested_failure`, one per backend) and prepends those frames to its own, so an uncaught error's
+>   trace reads innermost file first, then each include/import site.
 > - `finally` remains unimplemented (still-future, as designed).
 
 ## Overview

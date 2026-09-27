@@ -805,6 +805,7 @@ namespace jai {
         std::optional<error_propagator> run_error_;   // the runtime error that ended this run's top level
         detail::nested_failure nested_failure_;
         void absorb_nested_trace();
+        checked_result<void> raise_nested_failure(const std::exception& e);
 
         // Class parsing context - tracks unresolved identifiers in methods
         struct class_context {

@@ -995,13 +995,13 @@ struct engine::implementation {
     // The tail every checked execute shares: publish last_check_, gate with the root listing
     // followed by each closure unit's own. A unit that failed to parse fails a strict load as
     // the parse error itself (warn runs on, and the import raises it when it executes).
-    void gate_checked(const check_report& root, std::string_view source) {
+    void gate_checked(const check_report& root, std::string_view source, std::string_view name = "script") {
         last_check_ = program_report(root);
         if (static_check_mode_ == check_mode::strict && !program_parse_failures_.empty()) {
             throw parse_error(program_parse_failures_.substr(0, program_parse_failures_.size() - 1));
         }
         if (gates(last_check_)) {
-            throw static_check_error("static check failed:\n" + root.format(source) + program_check_listing_);
+            throw static_check_error("static check failed:\n" + root.format(source, name) + program_check_listing_);
         }
     }
 
@@ -1880,12 +1880,14 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Runs in every mode (the proof pass rides it); diagnostics surface under warn/strict.
         const check_report& rep = impl->checked_report(*this, *cached, impl->static_check_mode_ != check_mode::off);
         if (impl->static_check_mode_ != check_mode::off) {
+            // a unit reached through include or import lists under its resolved path
+            const std::string_view listing_name = textual || impl->importing_.count(sourcePath) ? std::string_view(sourcePath) : std::string_view("script");
             if (instanceVars.empty()) {
-                impl->gate_checked(rep, scriptContent);
+                impl->gate_checked(rep, scriptContent, listing_name);
             } else {
                 // host-supplied instance variables are per-call: check fresh with those
                 // names defined instead of caching a result that depends on them
-                impl->gate_checked(impl->check_with_instance_vars(*this, *cached, instanceVars), scriptContent);
+                impl->gate_checked(impl->check_with_instance_vars(*this, *cached, instanceVars), scriptContent, listing_name);
             }
         }
 

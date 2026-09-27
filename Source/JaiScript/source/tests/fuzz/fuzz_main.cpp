@@ -25,6 +25,11 @@
 //   jaiscript_fuzz --no-passes              run both backends with engine::ir_passes(false)
 //   jaiscript_fuzz --element-band           prepend the element-argument band to every program (default: its own roll, ~30%)
 //   jaiscript_fuzz --no-element-band        never prepend it (the programs of the generator before the band)
+//   jaiscript_fuzz --order-band             ordering programs (writing calls beside reads of what they write), three oracles: the
+//                                           backends agree, the program agrees with its metamorphic variant (operands evaluated into
+//                                           locals left to right), and every run prints what the generator's spec model computes
+//   jaiscript_fuzz --order-args             with --order-band: call arguments read what a sibling argument's call writes too (the
+//                                           model captures each by-value argument where it is evaluated)
 //   jaiscript_fuzz --miss-every N           the vm side misses at every Nth plain cell instruction (a build with
 //                                           JAISCRIPT_MISS_INJECTION defined: the flush and the continuation contract at every position)
 //   jaiscript_fuzz --jaibite-mutate --iterations 10000
@@ -36,6 +41,7 @@
 #include "fuzz_generator.hpp"
 #include "fuzz_harness.hpp"
 #include "fuzz_jaibite.hpp"
+#include "fuzz_order_band.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -73,6 +79,8 @@ namespace {
 		bool passes = true;
 		uint32_t miss_every = 0;
 		band_mode band = band_mode::sometimes;
+		bool order = false;
+		bool order_args = false;
 		bool jaibite_mutate = false;
 		std::string run_file; // triage: compare an on-disk program instead of a generated one
 		std::string exe_path;
@@ -103,6 +111,8 @@ namespace {
 			else if (a == "--no-passes") { opt.passes = false; }
 			else if (a == "--element-band") { opt.band = band_mode::always; }
 			else if (a == "--no-element-band") { opt.band = band_mode::never; }
+			else if (a == "--order-band") { opt.order = true; }
+			else if (a == "--order-args") { opt.order = true; opt.order_args = true; }
 			else if (a == "--miss-every") { const char* v = next("--miss-every"); if (!v) return false; opt.miss_every = static_cast<uint32_t>(std::stoul(v)); }
 			else if (a == "--run") { const char* v = next("--run"); if (!v) return false; opt.run_file = v; }
 			else { std::cerr << "unknown argument: " << a << "\n"; return false; }
@@ -207,6 +217,101 @@ namespace {
 		return supp.empty() ? verdict::diverge_new : verdict::diverge_suppressed;
 	}
 
+	struct order_stats {
+		uint64_t programs = 0, backends = 0, metamorphic = 0, model_checked = 0, model_agree = 0, abstained = 0, args_pending = 0;
+	};
+
+	std::string labeled_difference(const std::string& a, const std::string& b, const std::string& la, const std::string& lb) {
+		size_t i = 0;
+		while (i < a.size() && i < b.size() && a[i] == b[i]) ++i;
+		auto excerpt = [i](const std::string& s) {
+			std::string e = s.substr(i > 40 ? i - 40 : 0, 120);
+			for (auto& c : e) if (c == '\n') c = '|';
+			return e;
+		};
+		return "at byte " + std::to_string(i) + "\n      " + la + ": ..." + excerpt(a) + "\n      " + lb + ": ..." + excerpt(b);
+	}
+
+	std::string order_outcome(const run_outcome& r) {
+		std::string s = r.printed;
+		for (const auto& x : r.segment_results) { s += (x.rfind("ERROR", 0) == 0 ? std::string("ERROR") : x) + "\n"; }
+		return s;
+	}
+
+	void write_order_corpus(const options& opt, uint64_t seed, const order::generated& g, const std::string& report) {
+		if (opt.corpus.empty()) return;
+		namespace fs = std::filesystem;
+		fs::create_directories(opt.corpus);
+		const std::string stem = opt.corpus + "/order_seed" + std::to_string(seed);
+		std::ofstream(stem + ".jai") << g.original.segments[0];
+		std::ofstream(stem + ".variant.jai") << g.variant.segments[0];
+		std::ofstream(stem + ".expected.txt") << (g.model_ok ? g.expected : "model abstained: " + g.abstained + "\n");
+		std::ofstream(stem + ".report.txt") << report;
+	}
+
+	// the ordering band's three oracles over one seed: the backends on the program and on its variant, the program against its
+	// variant on each backend, and every run against the model's output
+	verdict run_order_seed(const options& opt, uint64_t seed, bool verbose, order_stats& st) {
+		const order::generated g = order::generate(seed, opt.order_args);
+		const double budget_seconds = opt.timeout_ms / 1000.0;
+		const compare_result a = compare_program(g.original, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
+		const compare_result b = compare_program(g.variant, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
+		if (a.kind == compare_result::budget_skip || b.kind == compare_result::budget_skip) {
+			if (verbose) std::cout << "[seed " << seed << "] budget-skip\n";
+			return verdict::budget_skip;
+		}
+		++st.programs;
+		std::string report;
+		bool backends_split = false;
+		if (a.kind == compare_result::diverge) { report += "BACKENDS (program):\n" + a.diff; backends_split = true; }
+		if (b.kind == compare_result::diverge) { report += "BACKENDS (metamorphic variant):\n" + b.diff; backends_split = true; }
+		if (!backends_split) ++st.backends;
+		bool semantic_split = false;
+		const std::string oi = order_outcome(a.interp), ov = order_outcome(a.vm), vi = order_outcome(b.interp), vv = order_outcome(b.vm);
+		if (oi == vi && ov == vv) {
+			++st.metamorphic;
+		} else {
+			semantic_split = true;
+			report += "METAMORPHIC (program vs variant):\n";
+			if (oi != vi) report += "  interp " + labeled_difference(oi, vi, "program", "variant") + "\n";
+			if (ov != vv) report += "  vm     " + labeled_difference(ov, vv, "program", "variant") + "\n";
+		}
+		if (g.model_ok) {
+			++st.model_checked;
+			auto run_ok = [&](const run_outcome& r) { return r.printed == g.expected && r.segment_results.size() == 1 && r.segment_results[0].rfind("VALUE string:done", 0) == 0; };
+			const bool ok_oi = run_ok(a.interp), ok_ov = run_ok(a.vm), ok_vi = run_ok(b.interp), ok_vv = run_ok(b.vm);
+			if (ok_oi && ok_ov && ok_vi && ok_vv) {
+				++st.model_agree;
+			} else {
+				semantic_split = true;
+				report += std::string("MODEL (") + (ok_oi ? "" : " interp") + (ok_ov ? "" : " vm") + (ok_vi ? "" : " interp-variant") + (ok_vv ? "" : " vm-variant") +
+					" disagree" + (!ok_oi && !ok_ov && oi == ov ? "; BOTH BACKENDS AGREE WITH EACH OTHER" : "") + "):\n";
+				auto show = [&](const char* who, const run_outcome& r, bool ok) {
+					if (ok) return;
+					report += std::string("  ") + who + " " + labeled_difference(g.expected, r.printed, "model", who) + "\n";
+					if (r.segment_results.empty() || r.segment_results[0].rfind("VALUE string:done", 0) != 0) report += std::string("  ") + who + " result: " + (r.segment_results.empty() ? "" : r.segment_results[0]) + "\n";
+				};
+				show("interp", a.interp, ok_oi); show("vm", a.vm, ok_ov); show("interp-variant", b.interp, ok_vi); show("vm-variant", b.vm, ok_vv);
+			}
+		} else {
+			++st.abstained;
+		}
+		if (report.empty()) {
+			if (verbose) std::cout << "[seed " << seed << "] agree (backends, metamorphic, " << (g.model_ok ? "model" : "model abstained: " + g.abstained) << ")\n";
+			return verdict::agree;
+		}
+		const bool pending = opt.order_args && semantic_split && !backends_split;
+		if (pending) ++st.args_pending;
+		std::cout << "\n=== ORDER DIVERGENCE seed " << seed << (pending ? " [known: call-site capture pending]" : "") << " ===\n" << report;
+		if (verbose) {
+			std::cout << "--- program ---\n" << g.original.segments[0] << "--- variant ---\n" << g.variant.segments[0]
+			          << "--- model ---\n" << (g.model_ok ? g.expected : "abstained: " + g.abstained + "\n");
+		}
+		write_order_corpus(opt, seed, g, report);
+		std::cout.flush();
+		return pending ? verdict::diverge_suppressed : verdict::diverge_new;
+	}
+
 	int run_mutation_seed(const options& opt, uint64_t seed) {
 		try {
 			const auto mutant = make_jaibite_mutant(seed, opt.max_depth, opt.proofs, opt.param_alias);
@@ -251,6 +356,7 @@ namespace {
 		if (!opt.passes) cmd += " --no-passes";
 		if (opt.band == band_mode::always) cmd += " --element-band";
 		if (opt.band == band_mode::never) cmd += " --no-element-band";
+		if (opt.order) cmd += opt.order_args ? " --order-args" : " --order-band";
 		if (opt.miss_every) cmd += " --miss-every " + std::to_string(opt.miss_every);
 		if (opt.jaibite_mutate) cmd += " --jaibite-mutate";
 #ifdef _WIN32
@@ -280,6 +386,13 @@ int main(int argc, char** argv) {
 	if (!parse_args(argc, argv, opt)) return 2;
 	if (opt.miss_every && !jai::engine::miss_injection_available()) { std::cerr << "--miss-every needs a build with JAISCRIPT_MISS_INJECTION defined\n"; return 2; }
 
+	if (opt.dump && opt.order) {
+		const order::generated g = order::generate(opt.seed, opt.order_args);
+		std::cout << g.original.segments[0] << "// --- metamorphic variant ---\n" << g.variant.segments[0] << "// --- model ---\n"
+		          << (g.model_ok ? g.expected : "abstained: " + g.abstained + "\n");
+		return 0;
+	}
+
 	if (opt.dump) {
 		program p = generate_program(opt.seed, opt.max_depth, opt.band);
 		std::cout << p.joined();
@@ -291,6 +404,7 @@ int main(int argc, char** argv) {
 		if (!f) { std::cerr << "cannot open " << opt.run_file << "\n"; return 2; }
 		std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 		program p;
+		p.stdlib_math = opt.order;
 		const std::string marker = "// --- next execute() on same engine ---";
 		size_t pos = 0;
 		while (true) {
@@ -325,7 +439,8 @@ int main(int argc, char** argv) {
 			std::_Exit(23);
 		}).detach();
 		if (opt.jaibite_mutate) return run_mutation_seed(opt, opt.seed);
-		verdict v = run_seed(opt, opt.seed, false);
+		order_stats child_stats;
+		verdict v = opt.order ? run_order_seed(opt, opt.seed, false, child_stats) : run_seed(opt, opt.seed, false);
 		switch (v) {
 			case verdict::agree: return 0;
 			case verdict::budget_skip: return 21;
@@ -373,13 +488,14 @@ int main(int argc, char** argv) {
 	}
 
 	uint64_t agree = 0, new_div = 0, suppressed_div = 0, budget = 0, crashes = 0, hangs = 0, parse_valid = 0;
+	order_stats ost;
 	std::vector<uint64_t> new_div_seeds, crash_seeds, suppressed_seeds, hang_seeds;
 
 	for (uint64_t seed = begin; seed < end; ++seed) {
 		{
 			// Parse-validity metric (jaibite throws on hard parse errors; recoverable
 			// ones synchronize silently, so this is a lower bound on brokenness only).
-			program p = generate_program(seed, opt.max_depth, opt.band);
+			program p = opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band);
 			bool ok = true;
 			try {
 				auto probe = jai::engine::make();
@@ -421,7 +537,7 @@ int main(int argc, char** argv) {
 			// dying seed attributable so a driver can resume at seed+1.
 			std::cout << "[running seed " << seed << "]\r";
 			std::cout.flush();
-			verdict v = run_seed(opt, seed, opt.seed_given);
+			verdict v = opt.order ? run_order_seed(opt, seed, opt.seed_given, ost) : run_seed(opt, seed, opt.seed_given);
 			switch (v) {
 				case verdict::agree: ++agree; break;
 				case verdict::diverge_new: ++new_div; new_div_seeds.push_back(seed); break;
@@ -457,5 +573,11 @@ int main(int argc, char** argv) {
 		for (auto s : hang_seeds) std::cout << " " << s;
 	}
 	std::cout << "\n";
+	if (opt.order && !opt.isolate) {
+		std::cout << "order band:     programs " << ost.programs << " | backends agree " << ost.backends << " | metamorphic agree " << ost.metamorphic
+		          << " | model checked " << ost.model_checked << " (agree " << ost.model_agree << ", abstained " << ost.abstained << ")";
+		if (opt.order_args) std::cout << " | call-site capture pending " << ost.args_pending;
+		std::cout << "\n";
+	}
 	return (new_div > 0 || crashes > 0 || hangs > 0) ? 1 : 0;
 }

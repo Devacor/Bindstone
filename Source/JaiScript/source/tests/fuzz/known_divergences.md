@@ -96,6 +96,24 @@ All three fixed on VM-perf, 2026-07-05 (Dev-ruled semantics). Regression tests:
   `Undefined variable 'to_string'`~~ — RESOLVED 2026-07-05: same root cause as
   FZ-TYPED-FN-NO-RETURN (seed 66 re-run agrees end-to-end with --no-suppressions).
 
+## Ordering band (`--order-band`, `--order-args`)
+
+The band's programs put a call that writes a global, a captured local, an element, a map entry or a field
+beside reads of that storage, and hold three oracles: the backends agree on the program and on its
+metamorphic variant (every operand holding a call or a storage read evaluated into an `auto` local in
+source order), the program agrees with its variant, and every run prints what the generator's model
+computes (`fuzz_order_band.hpp`; the model walks the generator's tree, it never runs the engine).
+
+- The model follows the order both backends implement where the documents are not explicit yet: a compound
+  store reads a member's (a static's, a namespace variable's) value ahead of its right side and evaluates an
+  element's index ahead of it, while a name's and an element's value are read after it (docs/invariants.md 12);
+  `auto x = y` takes the declared type y's value carries (a var's value makes x a var).
+- `--order-args` also puts a writing call beside a read in call arguments. The model captures each by-value
+  argument where it is evaluated (the call-site capture ruling); until that lands, a disagreement where the
+  backends agree with each other is reported as `known: call-site capture pending` and counted apart.
+- The model abstains (the run still holds the first two oracles) on an error, an overflow and on output past
+  the harness's print cap.
+
 ## Maintenance protocol
 
 - New divergence class you are not fixing yet: minimize (`--minimize`), write the corpus

@@ -4764,6 +4764,47 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				}
 			}
 		});
+		// a compound store evaluates its target's location ahead of its value (a member's receiver and value, a static's and a namespace
+		// variable's value, an element's container and index): a graft of the value's call runs where the call ran, never ahead of them
+		// (the ordering fuzz band, seeds 0, 14, 28, 29, 31)
+		test("a_compound_stores_target_is_evaluated_ahead_of_a_grafted_value", [this]() {
+			const std::string src = "class K { int v = 1; static int s = 1; int bump() { v = v + 10; return 1; } int thisv() { this.v += bump(); return v; } }\n"
+				"K O = K();\n"
+				"namespace ns { int x = 1; }\n"
+				"array<int> GA = [1, 2, 3];\n"
+				"function wo() -> int { O.v = O.v + 10; return 1; }\n"
+				"function ws() -> int { K::s = K::s + 10; return 1; }\n"
+				"function wn() -> int { ns::x = ns::x + 10; return 1; }\n"
+				"function wa() -> int { GA[1] = GA[1] + 10; return 1; }\n"
+				"function pure() -> int { return 5; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    O.v = 1; O.v += wo(); out += to_string(O.v) + \" \";\n"
+				"    K::s = 1; K::s += ws(); out += to_string(K::s) + \" \";\n"
+				"    ns::x = 1; ns::x += wn(); out += to_string(ns::x) + \" \";\n"
+				"    K c = K(); var bc = [&]() { c.v = c.v + 10; return 1; }; c.v += bc(); out += to_string(c.v) + \" \";\n"
+				"    K d = K(); out += to_string(d.thisv()) + \" \";\n"
+				"    int j = 0; array<int> la = [0, 0, 0]; var bj = [&]() { j = 2; return 7; }; la[j] += bj(); out += to_json(la) + \" \";\n"
+				"    int i = 1; GA[1] = 2; GA[i] += wa(); out += to_string(GA[1]) + \" \";\n"
+				"    int n = 1; n += wo(); array<int> lb = [1, 2]; lb[i] += pure(); out += to_string(n) + \" \" + to_json(lb) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"run();";
+			const std::string expected = "2 2 2 2 2 [7,0,0] 13 2 [1,7] | 2 2 2 2 2 [7,0,0] 13 2 [1,7] | ";
+			both(src, expected, "a compound store's target ahead of a grafted value");
+			both(src, expected, "a compound store's target ahead of a grafted value, proofs off", false);
+			const std::string l = listing_run(src);
+			check_true(l.find("a compound store whose target is evaluated ahead of its value") != std::string::npos, "the member, static, namespace and element compounds keep their calls: " + l.substr(0, 400));
+			check_true(l.find("-- inlined pure") != std::string::npos && l.find("-- inlined wo") != std::string::npos, "a name's and a private element's compounds still graft: " + l.substr(0, 400));
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

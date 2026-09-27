@@ -5074,8 +5074,8 @@ const script_value* vm_backend::direct_operand(frame& f, const fused_operand& op
 // to the general kernel so the texts stay its own
 template <typename Sink>
 bool vm_backend::typed_binary_head(frame& f, const fused_binary_proto& p, Sink& sink) {
-	const script_value* lp = direct_operand(f, p.left);
-	const script_value* rp = direct_operand(f, p.right);
+	const script_value* lp = p.left.direct || p.left.const_index != k_invalid_u32 ? direct_operand(f, p.left) : fused_cmp_operand(f, p.left, f.ip * 3);   // an environment value: the general kernel's own fast head
+	const script_value* rp = lp ? (p.right.direct || p.right.const_index != k_invalid_u32 ? direct_operand(f, p.right) : fused_cmp_operand(f, p.right, f.ip * 3 + 1)) : nullptr;
 	if (!lp || !rp) return false;
 	const token_type op = static_cast<token_type>(p.op);
 	if (p.typed_class == 1) {
@@ -9004,7 +9004,7 @@ op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) 
 JAI_FORCEINLINE bool vm_backend::typed_arith_fast(frame& f, const vm_instruction& ins) {
 	// a registered global numeric operator turns every numeric row over to the general
 	// path, which consults the operator table (the fused kernels' gate, kept here)
-	const script_value* lp = has_custom_numeric_ops_ ? nullptr : frame_slot(f, ins.b);
+	const script_value* lp = has_custom_numeric_ops_ ? nullptr : typed_left(f, ins.b);
 	const script_value* rp = lp ? typed_right(f, ins.c) : nullptr;
 	if (rp) {
 		if (ins.op <= opcode::op_t_shr_ii) {
@@ -9094,7 +9094,7 @@ op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
 // `T x = y;` as one op: exec_decl_var's fast path over the slot LOAD would have pushed
 op_status vm_backend::exec_typed_decl_mov(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
-	const script_value* src = frame_slot(f, ins.b);
+	const script_value* src = typed_left(f, ins.b);
 	if (src && src->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*src)) { src = nullptr; }
 	if (src) {
 		const script_value* seen = src;
@@ -16464,7 +16464,7 @@ namespace {
 			mark(o.slot, census_use_read, ip);
 			if (o.symbol != k_invalid_u32) { name_slot(o.slot, sym_name(o.symbol)); }
 		};
-		auto typed_slot = [&](uint32_t v, uint32_t ip) { if (!(v & k_typed_const_bit)) { mark(v & k_typed_slot_mask, census_use_typed, ip); } };
+		auto typed_slot = [&](uint32_t v, uint32_t ip) { if (!(v & (k_typed_const_bit | k_typed_env_bit))) { mark(v & k_typed_slot_mask, census_use_typed, ip); } };
 		auto decl_of = [&](uint32_t node) -> uint32_t {
 			if (node >= c.nodes.size() || !c.nodes[node] || c.nodes[node]->get_type() != node_type::variable_decl) { return k_invalid_u32; }
 			const auto* vd = static_cast<const variable_decl*>(c.nodes[node].get());
@@ -16510,7 +16510,7 @@ namespace {
 			}
 			if (op >= opcode::op_t_jlt_ii && op <= opcode::op_t_jne_ff) { typed_slot(ins.a, ip); typed_slot(ins.b, ip); continue; }
 			switch (op) {
-			case opcode::op_t_decl_mov: mark(ins.a, census_use_typed, ip); mark(ins.b, census_use_typed, ip); decl_of(ins.c); break;
+			case opcode::op_t_decl_mov: mark(ins.a, census_use_typed, ip); typed_slot(ins.b, ip); decl_of(ins.c); break;
 			case opcode::op_t_decl_const: mark(ins.a, census_use_typed, ip); decl_of(ins.c); break;
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const: {

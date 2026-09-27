@@ -2053,8 +2053,11 @@ static int index_chain_spine(binary_expr* rb, binary_expr* (&spine)[8]) {
 // node's operand kinds in every mode (cleared when proofs are off); both operands must
 // address directly (frame slot, temp or literal) and the op must be one the heads compute.
 static void stamp_typed_class(fused_binary_proto& p, const binary_expr* node) {
-	auto direct_or_literal = [](const fused_operand& o) { return o.direct || o.const_index != k_invalid_u32; };
-	if (!direct_or_literal(p.left) || !direct_or_literal(p.right)) return;
+	auto typed_operand = [](const fused_operand& o) {
+		return o.direct || o.const_index != k_invalid_u32 ||
+		       (o.slot == k_invalid_u32 && o.symbol != k_invalid_u32 && !o.is_subscript() && o.member_node == k_invalid_u32 && o.load_flags == 0);   // an environment value: the checker proved its declared kind
+	};
+	if (!typed_operand(p.left) || !typed_operand(p.right)) return;
 	switch (static_cast<token_type>(p.op)) {
 		case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent:
 		case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
@@ -2098,6 +2101,21 @@ bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl
 		site.orig2 = vm_instruction{opcode::op_decl_var, add_node(decl), 1, 1};
 		site.stamp = decl->type.get();
 		last = vm_instruction{opcode::op_t_decl_mov, static_cast<uint32_t>(decl->slot_index), orig.a, site.orig2.a};
+		return true;
+	}
+	if (init->get_type() == node_type::identifier_expr && last.op == opcode::op_load && last.a == k_invalid_u32 && last.c == 0 && last.b < chunk_->symbols.size()) {
+		// `T x = G;` from an environment value: the move reads it through the LOAD's own resolution (its cache slot)
+		const vm_instruction orig = last;
+		fused_operand env;
+		env.symbol = orig.b;
+		env.ident_node = ip < chunk_->ident_nodes.size() ? chunk_->ident_nodes[ip] : k_invalid_u32;
+		chunk_->typed_env_operands.push_back(env);
+		const uint32_t operand = k_typed_env_bit | static_cast<uint32_t>(chunk_->typed_env_operands.size() - 1);
+		chunk::typed_site& site = typed_site_at(ip);
+		site.orig = orig;
+		site.orig2 = vm_instruction{opcode::op_decl_var, add_node(decl), 1, 1};
+		site.stamp = decl->type.get();
+		last = vm_instruction{opcode::op_t_decl_mov, static_cast<uint32_t>(decl->slot_index), operand, site.orig2.a};
 		return true;
 	}
 	if (init->get_type() == node_type::literal_expr && last.op == opcode::op_const) {
@@ -2227,12 +2245,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return false;
 		}
 	};
-	// left slot + right (slot or constant of the class); a literal left swaps when the op allows
-	auto operands = [&](const fused_binary_proto& bp, token_type& op, uint32_t& left, uint32_t& right) -> bool {
+	// left slot + right (slot or constant of the class); a literal left swaps when the op allows; an arithmetic row also takes
+	// an environment value on either side, read through the replaced instruction's cache slot for that side
+	auto operands = [&](const fused_binary_proto& bp, token_type& op, uint32_t& left, uint32_t& right, bool env_ok) -> bool {
 		const size_t want = bp.typed_class == 1 ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT;
 		auto direct_slot = [&](const fused_operand& o, uint32_t& out) {
-			if (!o.direct || o.slot == k_invalid_u32 || o.slot >= k_typed_slot_mask || o.const_index != k_invalid_u32) return false;
-			out = o.slot; return true;
+			if (o.direct && o.slot != k_invalid_u32 && o.slot < k_typed_slot_mask && o.const_index == k_invalid_u32) { out = o.slot; return true; }
+			if (!env_ok || o.slot != k_invalid_u32 || o.direct || o.const_index != k_invalid_u32 || o.symbol == k_invalid_u32 || o.is_subscript() || o.member_node != k_invalid_u32 || o.load_flags != 0) return false;
+			c.typed_env_operands.push_back(o);
+			out = k_typed_env_bit | static_cast<uint32_t>(c.typed_env_operands.size() - 1);
+			return true;
 		};
 		auto constant = [&](const fused_operand& o, uint32_t& out) {
 			if (o.const_index == k_invalid_u32 || o.const_index >= k_typed_slot_mask) return false;
@@ -2240,8 +2262,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			out = k_typed_const_bit | o.const_index; return true;
 		};
 		uint32_t l = 0, r = 0;
+		const size_t env_mark = c.typed_env_operands.size();
 		if (direct_slot(bp.left, l) && (direct_slot(bp.right, r) || constant(bp.right, r))) { left = l; right = r; return true; }
-		if (constant(bp.left, r) && direct_slot(bp.right, l) && commutes(op)) { op = mirrored(op); left = l; right = r; return true; }
+		c.typed_env_operands.resize(env_mark);
+		if (constant(bp.left, r) && direct_slot(bp.right, l) && commutes(op)) {
+			if (l & k_typed_env_bit) { c.typed_env_operands.resize(env_mark); return false; }   // the right side's cache slot would move to the left
+			op = mirrored(op); left = l; right = r; return true;
+		}
+		c.typed_env_operands.resize(env_mark);
 		return false;
 	};
 	uint32_t one_const = k_invalid_u32;   // the increment's operand, minted once per chunk
@@ -2253,10 +2281,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			const fused_binary_proto& bp = c.fused_binary_protos[ins.a];
 			if (bp.typed_class == 0 || ins.b >= k_typed_slot_mask) break;
 			token_type op = static_cast<token_type>(bp.op);
+			if (arith_op(op, bp.typed_class) == opcode::op_halt) break;
 			uint32_t left, right;
-			if (!operands(bp, op, left, right)) break;
+			if (!operands(bp, op, left, right, true)) break;
 			const opcode t = arith_op(op, bp.typed_class);
-			if (t == opcode::op_halt) break;
 			chunk_ = &c;
 			typed_site_at(ip).orig = ins;
 			ins = vm_instruction{t, ins.b | (k_typed_dst_temp << k_typed_dst_shift), left, right};
@@ -2268,28 +2296,29 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			const fused_binary_proto& bp = c.fused_binary_protos[dp.binary_proto];
 			if (bp.typed_class == 0) break;
 			token_type op = static_cast<token_type>(bp.op);
+			if (arith_op(op, bp.typed_class) == opcode::op_halt) break;
+			const size_t env_mark = c.typed_env_operands.size();
 			uint32_t left, right;
-			if (!operands(bp, op, left, right)) break;
+			if (!operands(bp, op, left, right, true)) break;
 			const opcode t = arith_op(op, bp.typed_class);
-			if (t == opcode::op_halt) break;
 			uint32_t dst;
 			type_info* stamp = nullptr;
 			if (ins.op == opcode::op_binary_fused_decl) {
 				const auto* decl = static_cast<const variable_decl*>(c.nodes[dp.node_index].get());
 				if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
-				    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) break;
+				    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) { c.typed_env_operands.resize(env_mark); break; }
 				const script_value_type bt = decl->type ? decl->type->base_type : script_value_type::jai_any_type;
 				const bool fits = bt == script_value_type::jai_any_type ||
 				                  (bp.typed_class == 1 && bt == script_value_type::jai_int_type) ||
 				                  (bp.typed_class == 2 && bt == script_value_type::jai_float_type);
-				if (!fits) break;
+				if (!fits) { c.typed_env_operands.resize(env_mark); break; }
 				dst = static_cast<uint32_t>(decl->slot_index) | (k_typed_dst_decl << k_typed_dst_shift);
 				stamp = decl->type.get();
 			} else {
 
 				const uint32_t need = store_flag_no_result | store_flag_same_type | store_flag_type_provable;
-				if ((dp.flags & need) != need || (dp.flags & (store_flag_ref_alias | store_flag_global_only))) break;
-				if (dp.slot == k_invalid_u32 || dp.slot >= k_typed_slot_mask) break;
+				if ((dp.flags & need) != need || (dp.flags & (store_flag_ref_alias | store_flag_global_only)) ||
+				    dp.slot == k_invalid_u32 || dp.slot >= k_typed_slot_mask) { c.typed_env_operands.resize(env_mark); break; }
 				dst = dp.slot | (k_typed_dst_store << k_typed_dst_shift);
 			}
 			chunk_ = &c;
@@ -2417,7 +2446,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (bp.typed_class == 0) break;
 			token_type op = static_cast<token_type>(bp.op);
 			uint32_t left, right;
-			if (!operands(bp, op, left, right)) break;
+			if (!operands(bp, op, left, right, false)) break;
 			const opcode t = cmp_op(op, bp.typed_class);
 			if (t == opcode::op_halt) break;
 			chunk_ = &c;
@@ -2801,9 +2830,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				uint8_t landing = static_cast<uint8_t>(st.a >> k_typed_dst_shift);
 				if (landing == k_typed_dst_decl) { landing = decl_landing(st.a & k_typed_slot_mask); }
 				type_info* stamp = landing == k_typed_dst_decl && ip < c.typed_sites.size() ? c.typed_sites[ip].stamp : nullptr;
-				use_slot(st.b, kind, false, 0, nullptr, ip); use_slot(st.c, kind, false, 0, nullptr, ip);
+				auto row_operand = [&](uint32_t v, uint32_t side) -> uint32_t {
+					if (!(v & k_typed_env_bit)) { use_slot(v, kind, false, 0, nullptr, ip); slot_read(op, v); return v; }
+					return k_ir_env_bit | env_cell(c.typed_env_operands[v & k_typed_slot_mask], kind, static_cast<uint32_t>(ip * 3 + side), ip);
+				};
+				op.b = row_operand(st.b, 0); op.c = row_operand(st.c, 1);
 				use_slot(st.a & k_typed_slot_mask, kind, true, landing, stamp, ip);
-				op.kind = ir::arith; op.fast = st.op; op.a = st.a & k_typed_slot_mask; op.b = st.b; op.c = st.c; op.writes = op.a; slot_read(op, st.b); slot_read(op, st.c);
+				op.kind = ir::arith; op.fast = st.op; op.a = st.a & k_typed_slot_mask; op.writes = op.a;
 			} else if (st.op == opcode::op_binary_fused_decl || st.op == opcode::op_binary_fused_temp || st.op == opcode::op_binary_fused_store) {
 				// arith the typed lowering left general (an environment value or an unclassed operand): kinds at run time, landing in
 				// a stamped scalar decl, a compiler value or a no-result frame-slot store
@@ -2845,6 +2878,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					const size_t ci = st.b < c.constants.size() && st.b < k_typed_slot_mask ? c.constants[st.b].raw_storage_index() : SIZE_MAX;
 					if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_BOOL) { refuse(chunk::cell_refusal_representation, ip); break; }
 					op.b = k_typed_const_bit | st.b;
+				} else if (st.op == opcode::op_t_decl_mov && (st.b & k_typed_env_bit)) {
+					op.b = k_ir_env_bit | env_cell(c.typed_env_operands[st.b & k_typed_slot_mask], 0, static_cast<uint32_t>(ip * 3), ip);
 				} else {
 					if (st.b >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
 					use_slot(st.b, 0, false, 0, nullptr, ip); op.b = st.b; slot_read(op, st.b);

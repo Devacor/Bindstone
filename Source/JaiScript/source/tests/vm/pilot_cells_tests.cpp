@@ -4867,6 +4867,36 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a graft's local or result declared from arithmetic the typed rows left general lands in the block by its declared type: an int
+		// result truncates a float, a float local or result widens an int (the ordering fuzz band's metamorphic variant, seed 266)
+		test("a_grafts_declaration_from_general_arithmetic_lands_by_its_declared_type", [this]() {
+			const std::string src = "int GI = 3;\n"
+				"function w(int p) -> int { float tl = p + 0.25; return tl * 2; }\n"
+				"function w4(int p) -> float { float t = p + 1; return t / 2; }\n"
+				"function w5(float p) -> int { int t = p * 3; return t + 1; }\n"
+				"function w6(int p) -> float { return p + GI; }\n"
+				"function w7(float p) -> int { return p * 1.5; }\n"
+				"function run() -> string { float fs = 0.0; float hs = 0.0;\n"
+				"  for (int i = 0; i < 3; i++) {\n"
+				"    var b = w(i); var c = w4(i); var e = w5(1.5); var f = w6(i); var g = w7(3.0); float h = w4(i) + w(i);\n"
+				"    fs = fs * 10.0 + b + c + e + f + g; hs = hs + h;\n"
+				"  }\n"
+				"  return to_string(fs) + \" \" + to_string(hs); }\n"
+				"run();";
+			const std::string expected = "1429.5 9.0";
+			both(src, expected, "graft declarations by their declared type");
+			both(src, expected, "graft declarations by their declared type, proofs off", false);
+			const std::string l = listing_run(src);
+			check_true(l.find("-- cell loop") != std::string::npos && l.find("-- inlined w4") != std::string::npos, "the loop closes over the grafts: " + l.substr(0, 400));
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

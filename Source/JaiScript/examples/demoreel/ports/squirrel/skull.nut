@@ -59,6 +59,7 @@
 ::SK_GR <- [];
 ::SK_NG <- 0;
 ::SK_NSOCK <- 3;
+::SK_EYE_INSIDE <- false;
 ::SK_W <- 0;
 ::SK_H <- 0;
 ::SK_WORLD <- 0;
@@ -346,7 +347,7 @@ function sk_trace(dx, dy, dz, px, py, cand, row, nrow) {
 		glow = tc < 0.0 ? 9.0 : ::sqrt(perp < 0.0 ? 0.0 : perp) - 0.55;
 	}
 	local hit = false;
-	local inside = ::sk_world(ox, oy, oz) < 0.0;
+	local inside = ::SK_EYE_INSIDE;
 	// the creature's distance is Lipschitz: 1.18 where the skull's long axis is among the ray's parts, else 1
 	local lip = (groups & 2) != 0 ? 1.2 : 1.0;
 	local ds_last = 0.0;
@@ -1085,6 +1086,7 @@ class Ossuary extends Scene {
 		::SK_GAX = rx * ::cos(spin) + fx * ::sin(spin); ::SK_GAY = ry * ::cos(spin) + fy * ::sin(spin); ::SK_GAZ = rz * ::cos(spin) + fz * ::sin(spin);
 		::SK_GBX = fx * ::cos(spin) - rx * ::sin(spin); ::SK_GBY = fy * ::cos(spin) - ry * ::sin(spin); ::SK_GBZ = fz * ::cos(spin) - rz * ::sin(spin);
 		::SK_EX = ex; ::SK_EY = ey; ::SK_EZ = ez;
+		::SK_EYE_INSIDE = ::sk_world(ex, ey, ez) < 0.0;
 		local lx = cx + fx * 0.3 + ux * 0.25 - ex;
 		local ly = cy + fy * 0.3 + uy * 0.25 - ey;
 		local lz = cz + fz * 0.3 + uz * 0.25 - ez;

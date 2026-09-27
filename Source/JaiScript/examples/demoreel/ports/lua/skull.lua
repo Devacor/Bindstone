@@ -36,6 +36,7 @@ local SK_GAX, SK_GAY, SK_GAZ = 1.0, 0.0, 0.0
 local SK_GBX, SK_GBY, SK_GBZ = 0.0, 0.0, 1.0
 local SK_GX, SK_GY, SK_GZ, SK_GR = {}, {}, {}, {}
 local SK_NG, SK_NSOCK = 0, 3
+local SK_EYE_INSIDE = false
 local SK_W, SK_H = 0, 0
 local SK_WORLD, SK_EMBER, SK_BONE, SK_CHIT, SK_EYE, SK_MARK, SK_FOG, SK_SPARK, SK_GEM = 0, 0, 0, 0, 0, 0, 0, 0, 0
 local SK_BAYER = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5}
@@ -312,7 +313,7 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 		glow = tc < 0.0 and 9.0 or sqrt(perp < 0.0 and 0.0 or perp) - 0.55
 	end
 	local hit = false
-	local inside = sk_world(ox, oy, oz) < 0.0
+	local inside = SK_EYE_INSIDE
 	-- the creature's distance is Lipschitz: 1.18 where the skull's long axis is among the ray's parts, else 1
 	local lip = (groups & 2) ~= 0 and 1.2 or 1.0
 	local ds_last = 0.0
@@ -1079,6 +1080,7 @@ function Ossuary:render(grid)
 	SK_GBX = fx * cos(spin) - rx * sin(spin); SK_GBY = fy * cos(spin) - ry * sin(spin); SK_GBZ = fz * cos(spin) - rz * sin(spin)
 	local ex, ey, ez = self.ex, self.ey, self.ez
 	SK_EX = ex; SK_EY = ey; SK_EZ = ez
+	SK_EYE_INSIDE = sk_world(ex, ey, ez) < 0.0
 	local lx = cx + fx * 0.3 + ux * 0.25 - ex
 	local ly = cy + fy * 0.3 + uy * 0.25 - ey
 	local lz = cz + fz * 0.3 + uz * 0.25 - ez

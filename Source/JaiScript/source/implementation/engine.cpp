@@ -1029,9 +1029,10 @@ struct engine::implementation {
             const auto* e = static_cast<const enum_decl*>(d.get());
             const std::string name(e->name);
             if (!self.has_variable(name) && !program_names_.count(name)) { continue; }
-            last_check_.diagnostics.push_back({check_diagnostic::level::warning, 0, 0,
-                path + ":" + std::to_string(e->location.line) + ":" + std::to_string(e->location.column) + ": enum '" + name +
-                "' declared in " + std::string(scope) + " is local to it: the program-scope '" + name + "' keeps its values"});
+            std::string text = path + ":" + std::to_string(e->location.line) + ":" + std::to_string(e->location.column) + ": enum '" + name +
+                "' declared in " + std::string(scope) + " is local to it: the program-scope '" + name + "' keeps its values";
+            self.report_script_warning(text);   // a run-time include has no load listing: the host's warning channel carries it
+            last_check_.diagnostics.push_back({check_diagnostic::level::warning, 0, 0, std::move(text)});
         }
     }
 

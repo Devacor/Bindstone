@@ -1177,7 +1177,10 @@ public:
                 jai::stdlib::register_all(*eng);
                 eng->type_proofs(proofs);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
+                std::vector<std::string> channel;
+                eng->set_script_warning_handler([&channel](const std::string& w) { channel.push_back(w); });
                 check_eq((int64_t)2, eng->execute("enum Color { red, green, blue }\nvoid reload(string p) { include(p); }\nreload(\"enum_inc.jai\");\nColor.blue;").as_int());
+                check_true(channel.size() == 1 && channel[0].find("enum 'Color' declared in function 'reload' is local to it") != std::string::npos, "the host's warning channel carries it");
                 const check_report& r = eng->last_check_diagnostics();
                 bool warned = false;
                 for (const auto& d : r.diagnostics) {

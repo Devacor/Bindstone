@@ -3165,6 +3165,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// the inner counted loop's compare back to its body, in the place of the first generic update instruction
 				const counted_for_proto& p = c.counted_for_protos[inner_cmp_proto];
 				op.kind = ir::cmp; op.tok = p.cmp; op.target = p.body_ip; op.sense = true; op.fast = cmp_op(static_cast<token_type>(p.cmp), 1);
+				// the var is stepped already: a miss here resumes at the generic path's loop back (the counted state pushed), whose compare is this
+				// one, never at the generic update, which would step the var again
+				for (size_t q = p.generic_update_ip; q < p.exit_ip && q < back; ++q) { if (code[q].op == opcode::op_loop_back) { op.origin = static_cast<uint32_t>(q); break; } }
+				if (op.origin == k_invalid_u32) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, p.var, kint, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, p.end, kint, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				inner_cmp_at = k_invalid_u32; inner_skip_until = p.exit_ip;
 				ops.push_back(op); continue;

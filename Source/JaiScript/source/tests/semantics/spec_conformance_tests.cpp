@@ -1326,6 +1326,20 @@ private:
 				"" + a.v + "|" + b.v;
 			)", "13|6");
 		});
+		test("a_default_sort_of_instances_orders_by_the_languages_less_than", [this]() {
+			// CLAUDE.md: ordering stays off containers and instances - an instance sorts by its user operator< (C++ std::sort's
+			// operator<), and an element with no order raises the < operator's rejection instead of sorting by address
+			expect("default sort", R"(
+				class K { int v = 0; K(int x) { v = x; } }
+				class L { int v = 0; L(int x) { v = x; } bool operator<(L o) { return v < o.v; } }
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { array<L> ls = [L(3), L(1), L(2)]; ls.sort(); return "" + ls[0].v + ls[1].v + ls[2].v; }) + "|" +
+				t([]() { var ls = [L(3), L(1), L(2)]; ls.sort(); return "" + ls[0].v + ls[1].v + ls[2].v; }) + "|" +
+				t([]() { array<K> ks = [K(3), K(1)]; ks.sort(); return "sorted"; }) + "|" +
+				t([]() { var a = [[3], [1]]; a.sort(); return "sorted"; }) + "|" +
+				t([]() { var a = [3, "a", 1.5, true]; a.sort(); return to_json(a); });
+			)", "123|123|Invalid operands for < operator|Invalid operands for < operator|[1.5,3,\"a\",true]", check_mode::warn);
+		});
 		test("predicate_and_parallel_body_errors_propagate", [this]() {
 			const char* div = "Division by zero in integer operation";
 			expect_texts({

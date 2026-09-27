@@ -40,7 +40,7 @@ each marked with a `CRAWLER DELTA` comment at the site:
 - `ai.jai` — the boss case mints its coroutine from `G.boss_brain(...)`, a
   **coroutine method** on Game (see language notes below).
 
-New for the crawler: `view.jai` (the raycaster), `ui.jai` (compass panel, minimap,
+New for the crawler: `view.jai` (the raycaster), `ui.jai` (log, character, compass, minimap,
 modals), `game.jai` (facing movement, crawler turn loop, saves, autopilot),
 `main.jai`, and the adapted host `main.cpp`.
 
@@ -56,9 +56,10 @@ cmake --build out/build/x64-Debug --target jai_crawler                  # --dev 
 ```
 
 **Play the Release exe** — the view casts a ray per column and shades every pixel
-of four panes per keypress (at the default size a 64x40-pixel forward view and three
-32x20 ones: about 1.6 ms on the VM, 10 ms on the interpreter in Release; the forward
-view alone is 1 ms and 5.5 ms; Debug is far slower). The exe prefers
+of four panes per keypress and fills six text boxes (at the default size a
+64x40-pixel forward view and three 32x20 ones: about 2 ms on the VM, 13 ms on the
+interpreter in Release; the forward view alone is 1 ms and 5.5 ms; Debug is far
+slower). The exe prefers
 the *source* `scripts/` dir (so `--dev` hot reload edits the files you have open);
 a `crawler_scripts/` copy sits next to the binary for distribution.
 `--time` prints a key-to-frame latency report on exit.
@@ -76,7 +77,7 @@ jai_crawler.exe --god               # tourist mode (visit Vexadrach, stay alive)
 Needs a Windows 10+ console with truecolor VT processing and UTF-8 output (Windows
 Terminal is ideal); the view is drawn with `▀` half blocks and framed with box
 lines. `jai_crawler.exe` keeps a 64x20-cell forward view and opens in the multi-view,
-which wants a console of about 150x42; `v` switches to the forward view alone, which
+which wants a console of about 135x37; `v` switches to the forward view alone, which
 fits 80x28.
 
 ### No build at all: the standalone-runner shim
@@ -101,18 +102,19 @@ jaiscript.exe crawler.jai -- smoke turns 250 seed 99 dump out/s99   # + every fr
 ```
 
 Interactively the shim sizes the view to the console. The multi-view is picked
-whenever it fits with a forward view of at least 20 rows (a console of about 150x42),
-and its forward view grows to fill the console (16:5 cells, up to 48 rows, the panel
-beside it and five log lines under it); a smaller console gets the forward view alone,
-as large as fits. `v` switches layouts and re-fits. Smoke, dump and scripted runs show
-the multi-view around the 64x20 default forward view unless `view N`, `layout single`
-or `screen CxR` (size everything as if the console were C x R) says otherwise.
-`dump PATH` renders the full frame after every smoke turn without touching the game
-(the STATE_HASH is unchanged), writes them all to `PATH.ans`, prints `FRAME_HASH`
-(sha256 of that file) and the frame-build ms/frame, and leaves the last view canvas
-as `PATH.bmp` plus a sketch `PATH.txt` (pane pixels as luminance, frames and labels
-as their text); `shots N` adds `PATH_tT.bmp/.txt` every N turns, and `bench N`
-re-renders the final view N times and prints ms/frame.
+whenever it fits with a forward view of at least 20 rows (a console of about 135x37),
+and its panes grow to fill the console (the forward view 16:5 cells, up to 48 rows);
+a smaller console gets the forward view alone, as large as fits, with the panel
+beside it and five log lines under it. `v` switches layouts and re-fits. Smoke, dump
+and scripted runs show the multi-view around the 64x20 default forward view unless
+`view N`, `layout single` or `screen CxR` (size everything as if the console were
+C x R) says otherwise. `dump PATH` renders the full frame after every smoke turn
+without touching the game (the STATE_HASH is unchanged), writes them all to
+`PATH.ans`, prints `FRAME_HASH` (sha256 of that file) and the frame-build ms/frame,
+and leaves the last view canvas as `PATH.bmp` plus a sketch `PATH.txt` (pane pixels
+as luminance, frames, labels and boxes as their text); `shots N` adds
+`PATH_tT.bmp/.txt` every N turns, and `bench N` re-renders the final view N times and
+prints ms/frame.
 
 Runner-keyboard deltas (its console pump reports lowercase letter edges and no
 punctuation on Windows): uppercase commands = shift+letter, `>` descend = **TAB**,
@@ -157,13 +159,25 @@ in its glow color with the pane and the compass heading it shows (`LEFT · W` wh
 you face north). `v` drops to the forward view alone, which the console sizing also
 picks when the multi-view will not fit.
 
+Every corner around the panes is a text box in the same frames. The LOG fills the
+column above LEFT with as many messages as fit, wrapped, newest at the bottom: what
+happened since your last move keeps its colors, older lines are dimmed. Beside BEHIND,
+the MAP shows the explored map around you (north up) and the COMPASS your heading and
+floor. CHARACTER fills the column above RIGHT: vitals, stats, skill, effects and gear,
+and in a tall box your kin's trait and class skill spelled out. Under LEFT, IN SIGHT
+lists the monsters you can see, nearest first, each with the pane it is in and how
+far (`LEFT 3`); under RIGHT, LOOT does the same for loot (a mimic lists as a chest
+until it bites). The forward view alone keeps the classic panel beside it and the
+last five log lines under it.
+
 JaiDOOM's terminal video method: the caster draws into a palette-indexed pixel canvas
 holding every pane (`VIEW_W x 2*VIEW_H` pixels for the forward view), and each text
 cell is an upper-half block `▀` whose truecolor foreground is the top pixel and
 background the bottom one. A row emits an escape only when its color changes
-(run-length), from `VPAL_FG`/`VPAL_BG` escape tables built once per color; frames,
-labels and the gaps between panes are prebuilt text runs spliced between the pixel
-runs. Wide canvases (160+ columns) build their rows through `parallel_transform`.
+(run-length), from `VPAL_FG`/`VPAL_BG` escape tables built once per color; frames and
+labels are prebuilt text runs and the box rows are written every frame, both spliced
+between the pixel runs. Wide canvases (160+ columns) build their rows through
+`parallel_transform`.
 
 One DDA ray per column across a ~84 degree FOV; perpendicular distance kills the
 fisheye by construction. Every color is a 16-step **ramp** from the floor's fog color
@@ -201,29 +215,30 @@ The Ashen Throat, and — floor 10 — The Hollow Gallery, where the color has b
 swallowed like everything else.
 
 The sketch `dump` writes beside the BMP (one character per cell: pane pixels as
-luminance, two pixels averaged; frames and labels as their text), here the default
-64x20 forward view on floor 2, facing east down a mossy hall with a Snarlbat
-swooping in from the north: it is in the LEFT pane, not yet in the forward view
-(torch hand bottom left of AHEAD):
+luminance, two pixels averaged; frames, labels and boxes as their text), here the
+default 64x20 forward view on floor 2, facing east down a mossy hall with a Snarlbat
+swooping in from the north: it is in the LEFT pane and on the MAP, IN SIGHT reports
+it at `LEFT 1`, and it is not in the forward view yet (torch hand bottom left of
+AHEAD):
 
 ```
-                                                  ┌─ BEHIND · W ───────────────────┐
-                                                  │:::::::::..:::.::.--:..:::::::-:│
-                                                  │....:..:.......::......::.......│
-                                                  │...................-------------│
-                                                  │.... . ..-:. ..  .:*==*=*-*=-*=*│
-                                                  │::::::::----.:.  .:--:==+=-====+│
-                                                  │:::::...:-- ::.  ...::::::.:::::│
-                                                  │.:......----::.....:::--+:::---+│
-                                                  │::::::.::::..::::-..::-:=:----:=│
-                                                  │==-=-=----=-*=-+-*:-==-=:=:=--==│
-                                                  │-=---=---:+=-#-%-#*#*--=-=-=:=-=│
-                                                  └────────────────────────────────┘
-                                  ┌─ AHEAD · E ────────────────────────────────────────────────────┐
-                                  │::.:.:::..--:---::..----:::::..::..:-----:::.:-:-:::::..:::.:.--│
-                                  │::-:-.:.::::.--:---:..::---::.:.::.:---:--.:++++**+++**+**++++++│
-                                  │.:.:::::::..:..:::.::..::.:.:.:.::.::.:.::-=@##@@@@@@@@@@@@@@@@@│
-                                  │.:::.:.:.:.:..::.:.:::..::.::::::..:::::.+++@**@@@@*@@@@@@@@@@@@│
+┌─ LOG ──────────────────────────┐┌─ MAP ────────┐┌─ BEHIND · W ───────────────────┐┌─ COMPASS ────┐┌─ CHARACTER ────────────────────┐
+│ You pocket 1 gold.             ││    .......#  ││:::::::::..:::.::.--:..:::::::-:││              ││ Testpilot                      │
+│ You see a scroll labeled "GNIK ││#   #......##.││....:..:.......::......::.......││      N       ││ Drask-kin Emberwright          │
+│  SISI" at your feet. (g to     ││    #...>...  ││...................-------------││      |       ││ HP 26/26    ################## │
+│  grab)                         ││ #  #......#  ││.... . ..-:. ..  .:*==*=*-*=-*=*││   W -+- E    ││ Fo 20/20    ################## │
+│ You pick up a scroll labeled   ││ ####..b...#  ││::::::::----.:.  .:--:==+=-====+││      |       ││                                │
+│  "GNIK SISI".                  ││.......>......││:::::...:-- ::.  ...::::::.:::::││      S       ││ Lv 1  XP 7/15                  │
+│ Stairs spiral down into the    ││ ##.&....#    ││.:......----::.....:::--+:::---+││              ││ Atk 5  Def 0  Eva 8  Crt 5     │
+│  dark. Press > to descend.     ││ ##......#    ││::::::.::::..::::-..::-:=:----:=││     EAST     ││ Gold 18  Kills 1               │
+│ You descend to floor 2:        ││# #......#    ││==-=-=----=-*=-+-*:-==-=:=:=--==││  floor 2/10  ││ Skill Emberbolt (4 focus, z)   │
+│  Mossrot Warrens.              ││  #......#    ││-=---=---:+=-#-%-#*#*--=-=-=:=-=││              ││                                │
+│ You see Fang Blade at your     │└──────────────┘└────────────────────────────────┘└──────────────┘│ Wpn Fang Blade (+2 atk)        │
+│  feet. (g to grab)             │┌─ AHEAD · E ────────────────────────────────────────────────────┐│ Arm -                          │
+│ You pick up Fang Blade (+2     ││::.:.:::..--:---::..----:::::..::..:-----:::.:-:-:::::..:::.:.--││ Trk -                          │
+│  atk).                         ││::-:-.:.::::.--:---:..::---::.:.::.:---:--.:++++**+++**+**++++++││                                │
+│ You equip Fang Blade (+2 atk). ││.:.:::::::..:..:::.::..::.:.:.:.::.::.:.::-=@##@@@@@@@@@@@@@@@@@││                                │
+└────────────────────────────────┘│.:::.:.:.:.:..::.:.:::..::.::::::..:::::.+++@**@@@@*@@@@@@@@@@@@│└────────────────────────────────┘
 ┌─ LEFT · N ─────────────────────┐│:..::........::....:.... ...:.....::...:==++@**###+***@@@###@@@@│┌─ RIGHT · S ────────────────────┐
 │........:=:.:.: = ..:::.........││::...........:....................... :-==+-@---------#@@---@#@@││...::................:.......:..│
 │..::.:::.===:.=%#%=::==:::.::-:.││   . . ::::::::::::::::::::. . ...  .:--=.+=@####:*#*##@@####:+@││**:.:.:::::::..:::.:::..::::.:::│
@@ -236,16 +251,16 @@ swooping in from the north: it is in the LEFT pane, not yet in the forward view
 │:-:--*+::*:-:-::::-::=:***:--::-││......#@@@#:::.......:::.:.::...::.....::.-+=++=++++**+:=++=%+++││-=+:::::-:---:-:::::---:-:::::--│
 │---=----+-:----=+:--++:--+-=--+-││-::.::.+#+:-.-:-:.:.::-:::::::::-:::::..--:+=====:=*%+++++++%:==││**:--=:--:----:---.---:----:---:│
 └────────────────────────────────┘│:.::--::==:-::::::---::-.-:::-::=:::-:::-:::==-***+*+**%%***%:-=│└────────────────────────────────┘
-                                  │----:-+%==%+-:-:--=---:=-------:.---=--=::::-===%#=****%#+*+%:==│
-                                  │:--=--%%%%%%--:-:::--:-=--=====-.-:--::-=-::==+###-+++++++++%:-=│
-                                  │---=-:+%%%%%---+-=-=:=---=-=-=--.=-----=-=-:###==:------=-------│
-                                  │-----:::::::+======:*+----------:*========+=:::::--------:-+====│
-                                  └────────────────────────────────────────────────────────────────┘
+┌─ IN SIGHT ─────────────────────┐│----:-+%==%+-:-:--=---:=-------:.---=--=::::-===%#=****%#+*+%:==│┌─ LOOT ─────────────────────────┐
+│ b Snarlbat              LEFT 1 ││:--=--%%%%%%--:-:::--:-=--=====-.-:--::-=-::==+###-+++++++++%:-=││ no loot in sight               │
+│                                ││---=-:+%%%%%---+-=-=:=---=-=-=--.=-----=-=-:###==:------=-------││                                │
+│                                ││-----:::::::+======:*+----------:*========+=:::::--------:-+====││                                │
+└────────────────────────────────┘└────────────────────────────────────────────────────────────────┘└────────────────────────────────┘
 ```
 
 The `m` minimap stays text — explored tiles only, facing arrow, loot in sight —
-and takes the panes' place, centered in it (with the forward view alone at 64x20
-it fills the view exactly):
+and takes the forward view's place, centered in it, while the other panes and the
+boxes stay live (with the forward view alone at 64x20 it fills the view exactly):
 
 ```
  GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 0  ~ Mossrot Warrens ~
@@ -309,8 +324,8 @@ scripts/items.jai   loot gen, inventory, potions/scrolls             [copied ver
 scripts/dungeon.jai rooms+corridors gen, FOV, BFS                    [copied, 4-dir BFS delta]
 scripts/combat.jai  attack resolution, XP, class skills              [copied, facing-target delta]
 scripts/ai.jai      monster behaviors                                [copied, boss-handle delta]
-scripts/view.jai    NEW: pixel raycaster, textures, themes, sprite art, panes + frames, half-block blit
-scripts/ui.jai      NEW: frame chrome, compass panel, minimap, modals, console-fit layout
+scripts/view.jai    NEW: pixel raycaster, textures, themes, sprite art, panes + boxes + frames, half-block blit
+scripts/ui.jai      NEW: box contents, panel, minimap, modals, console-fit layout
 scripts/game.jai    NEW: Game class (+boss coroutine method), facing movement, saves, pilot
 scripts/main.jai    NEW: imports + entry + hot reload list
 ```

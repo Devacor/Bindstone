@@ -513,7 +513,9 @@ function apply_decals() -> void {
 
 // --------------------------------------------------------------- layout ----
 // Panes are inner rectangles in cells; pane 0 is always the forward view. A
-// framed pane has a one-cell border with its label in the top edge.
+// framed pane has a one-cell border with its label in the top edge. Boxes are
+// framed text rectangles filling the multi-view's corners; ui.jai writes their
+// rows into BOX_ROWS every frame.
 array<int> PANE_X = [];
 array<int> PANE_Y = [];
 array<int> PANE_W = [];
@@ -521,6 +523,23 @@ array<int> PANE_H = [];
 array<int> PANE_ROT = [];   // quarter turns clockwise from the facing: 0 ahead, 1 right, 2 behind, 3 left
 array<bool> PANE_FRAMED = [];
 array<int> PANE_ROFF = [];  // the pane's first row in ROW_DIST/ROW_LIGHT
+int BOX_LOG = 0;
+int BOX_MAP = 1;
+int BOX_COMPASS = 2;
+int BOX_HERO = 3;
+int BOX_SIGHT = 4;
+int BOX_LOOT = 5;
+var BOX_NAMES = ["LOG", "MAP", "COMPASS", "CHARACTER", "IN SIGHT", "LOOT"];
+array<int> BOX_X = [];
+array<int> BOX_Y = [];
+array<int> BOX_W = [];
+array<int> BOX_H = [];
+array<int> BOX_ID = [];
+array<int> BOX_ROW0 = [];   // the box's first row in BOX_ROWS
+array<string> BOX_ROWS = [];    // every box row, exactly its box's width in cells
+array<int> BOX_ROW_X = [];  // the canvas column each BOX_ROWS entry starts at
+array<string> MAP_ROWS = [];    // the overhead map in the forward pane's place, when MAP_ON
+int MAP_ON = 0;
 int LAYOUT_KEY = -1;
 
 function layout_key() -> int { return (VIEW_LAYOUT * 1000 + VIEW_W) * 1000 + VIEW_H; }
@@ -534,10 +553,20 @@ function add_pane(int x, int y, int w, int h, int rot, bool framed) -> void {
 	PANE_FRAMED.push(framed);
 }
 
+function add_box(int x, int y, int w, int h, int id) -> void {
+	BOX_X.push(x);
+	BOX_Y.push(y);
+	BOX_W.push(w);
+	BOX_H.push(h);
+	BOX_ID.push(id);
+}
+
 // Places the panes around an fw x fh forward view and sizes the canvas. The
 // multi-view is a cockpit: LEFT and RIGHT at half scale beside the forward
 // view on its horizon (the three read as one panorama), BEHIND above it like a
-// rear-view mirror.
+// rear-view mirror, and a text box in every corner: the log and the local map
+// on the left, the compass and the character on the right, the monsters in
+// sight under LEFT and the loot in sight under RIGHT.
 function layout_panes(int mode, int fw, int fh) -> void {
 	PANE_X = [];
 	PANE_Y = [];
@@ -545,6 +574,11 @@ function layout_panes(int mode, int fw, int fh) -> void {
 	PANE_H = [];
 	PANE_ROT = [];
 	PANE_FRAMED = [];
+	BOX_X = [];
+	BOX_Y = [];
+	BOX_W = [];
+	BOX_H = [];
+	BOX_ID = [];
 	if (mode == LAYOUT_SINGLE) {
 		add_pane(0, 0, fw, fh, 0, false);
 		CANVAS_W = fw;
@@ -556,12 +590,20 @@ function layout_panes(int mode, int fw, int fh) -> void {
 	int fx = sw + 3;
 	int fy = sh + 3;
 	int side_y = fy + (fh - sh) / 2;
+	int mid = (fw - sw) / 2;
+	CANVAS_W = 2 * (sw + 2) + fw + 2;
+	CANVAS_H = fh + sh + 4;
 	add_pane(fx, fy, fw, fh, 0, true);
 	add_pane(1, side_y, sw, sh, 3, true);
 	add_pane(fx + fw + 2, side_y, sw, sh, 1, true);
-	add_pane(fx + (fw - sw) / 2, 1, sw, sh, 2, true);
-	CANVAS_W = 2 * (sw + 2) + fw + 2;
-	CANVAS_H = fh + sh + 4;
+	add_pane(fx + mid, 1, sw, sh, 2, true);
+	int low_y = side_y + sh + 2;
+	add_box(1, 1, sw, side_y - 3, BOX_LOG);
+	add_box(sw + 3, 1, mid - 2, sh, BOX_MAP);
+	add_box(fx + mid + sw + 2, 1, fw - sw - mid - 2, sh, BOX_COMPASS);
+	add_box(fx + fw + 2, 1, sw, side_y - 3, BOX_HERO);
+	add_box(1, low_y, sw, CANVAS_H - 1 - low_y, BOX_SIGHT);
+	add_box(fx + fw + 2, low_y, sw, CANVAS_H - 1 - low_y, BOX_LOOT);
 }
 
 function build_layout() -> void {
@@ -589,6 +631,16 @@ function build_layout() -> void {
 			ROW_LIGHT.push(lightf(d) * 15.0);
 		}
 	}
+	BOX_ROW0 = [];
+	BOX_ROWS = [];
+	BOX_ROW_X = [];
+	for (int b = 0; b < BOX_ID.size(); ++b) {
+		BOX_ROW0.push(BOX_ROWS.size());
+		for (int r = 0; r < BOX_H[b]; ++r) {
+			BOX_ROWS.push(" ".repeat(BOX_W[b]));
+			BOX_ROW_X.push(BOX_X[b]);
+		}
+	}
 	BAYER = [];
 	var order = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 	for (int i = 0; i < 16; ++i) { int o = order[i]; BAYER.push((o + 0.5) / 16.0); }
@@ -599,28 +651,31 @@ function build_layout() -> void {
 }
 
 // ---------------------------------------------------------------- chrome ---
-// Everything on the canvas that is not a pane pixel is text: frames, labels,
-// gaps. Per cell: CHROME_KIND -1 pane pixel, 0 gap, 1 frame, 2 label. Each
-// canvas row is a list of segments, a pixel run or a prebuilt text run.
+// Per canvas cell, CHROME_KIND: -1 pane pixel, 0 gap, 1 frame, 2 label, 3 box
+// text (CHROME_REF: the pane, or the BOX_ROWS entry). Each canvas row is a list
+// of segments: a prebuilt text run, a pixel run, or a box row.
 array<int> CHROME_KIND = [];
+array<int> CHROME_REF = [];
 array<string> CHROME_CH = [];
 array<int> SEG_START = [];  // per canvas row, its first segment; one extra entry closes the last row
-array<int> SEG_PIX = [];    // 1 pixel run, 0 text
+array<int> SEG_KIND = [];   // 0 text, 1 pixel run, 2 box row
+array<int> SEG_REF = [];    // pixel run: its pane; box row: its BOX_ROWS entry
 array<int> SEG_X0 = [];
 array<int> SEG_X1 = [];
 array<string> SEG_TEXT = [];
 int CHROME_FLOOR = -1;
-int CHROME_FACING = -1;
+int CHROME_LABELS = -1;
 string FRAME_FG = "";
 string LABEL_FG = "";
-string BOX_H = "";
+string BOX_LINE = "";
 string MIDDOT = "";
 var PANE_NAMES = ["AHEAD", "RIGHT", "BEHIND", "LEFT"];
 
-function chrome_put(int x, int y, string ch, int kind) -> void {
+function chrome_put(int x, int y, string ch, int kind, int ref) -> void {
 	int i = y * CANVAS_W + x;
 	CHROME_CH[i] = ch;
 	CHROME_KIND[i] = kind;
+	CHROME_REF[i] = ref;
 }
 
 function chrome_text(int cy, int x0, int x1) -> string {
@@ -639,57 +694,95 @@ function chrome_text(int cy, int x0, int x1) -> string {
 	return s;
 }
 
-// the top edge reads "- LEFT . W ---": the pane, and the compass heading it shows
-function draw_pane_label(int p) -> void {
-	if (!PANE_FRAMED[p]) { return; }
-	int y = PANE_Y[p] - 1;
-	int x0 = PANE_X[p];
-	int x1 = x0 + PANE_W[p];
-	for (int x = x0; x < x1; ++x) { chrome_put(x, y, BOX_H, 1); }
-	string name = PANE_NAMES[PANE_ROT[p]];
-	array<string> cells = [" "];
-	for (int c = 0; c < name.size(); ++c) { cells.push(name.substr(c, 1)); }
-	cells.push(" ");
-	cells.push(MIDDOT);
-	cells.push(" ");
-	cells.push(FACE_LETTER[(G.facing + PANE_ROT[p]) % 4]);
-	cells.push(" ");
+function frame_rect(int x0, int y0, int x1, int y1) -> void {
+	string box_v = utf8_char(0x2502);
+	for (int x = x0; x < x1; ++x) {
+		chrome_put(x, y0 - 1, BOX_LINE, 1, 0);
+		chrome_put(x, y1, BOX_LINE, 1, 0);
+	}
+	for (int y = y0; y < y1; ++y) {
+		chrome_put(x0 - 1, y, box_v, 1, 0);
+		chrome_put(x1, y, box_v, 1, 0);
+	}
+	chrome_put(x0 - 1, y0 - 1, utf8_char(0x250C), 1, 0);
+	chrome_put(x1, y0 - 1, utf8_char(0x2510), 1, 0);
+	chrome_put(x0 - 1, y1, utf8_char(0x2514), 1, 0);
+	chrome_put(x1, y1, utf8_char(0x2518), 1, 0);
+}
+
+// a label written into a top edge from x0: "- NAME . W ---"
+function put_label(int x0, int x1, int y, array<string> cells) -> void {
+	for (int x = x0; x < x1; ++x) { chrome_put(x, y, BOX_LINE, 1, 0); }
 	for (int c = 0; c < cells.size() && x0 + 1 + c < x1 - 1; ++c) {
-		chrome_put(x0 + 1 + c, y, cells[c], cells[c] == " " ? 1 : 2);
+		chrome_put(x0 + 1 + c, y, cells[c], cells[c] == " " ? 1 : 2, 0);
 	}
 }
 
+function label_cells(string text) -> array<string> {
+	array<string> cells = [" "];
+	for (int c = 0; c < text.size(); ++c) { cells.push(text.substr(c, 1)); }
+	cells.push(" ");
+	return cells;
+}
+
+// a pane names itself and the compass heading it shows; the forward pane
+// holding the overhead map says so
+function draw_pane_label(int p) -> void {
+	if (!PANE_FRAMED[p]) { return; }
+	array<string> cells = [];
+	if (p == 0 && MAP_ON != 0) {
+		cells = label_cells("MAP");
+		cells.push(MIDDOT);
+		for (auto c : label_cells("NORTH UP")) { cells.push(c); }
+	} else {
+		cells = label_cells(PANE_NAMES[PANE_ROT[p]]);
+		cells.push(MIDDOT);
+		for (auto c : label_cells(FACE_LETTER[(G.facing + PANE_ROT[p]) % 4])) { cells.push(c); }
+	}
+	put_label(PANE_X[p], PANE_X[p] + PANE_W[p], PANE_Y[p] - 1, cells);
+}
+
+function seg_kind(int chrome_kind) -> int { return chrome_kind < 0 ? 1 : (chrome_kind == 3 ? 2 : 0); }
+
 function build_chrome_segments() -> void {
 	SEG_START = [];
-	SEG_PIX = [];
+	SEG_KIND = [];
+	SEG_REF = [];
 	SEG_X0 = [];
 	SEG_X1 = [];
 	SEG_TEXT = [];
 	for (int cy = 0; cy < CANVAS_H; ++cy) {
-		SEG_START.push(SEG_PIX.size());
+		SEG_START.push(SEG_KIND.size());
 		int x = 0;
 		while (x < CANVAS_W) {
-			bool pix = CHROME_KIND[cy * CANVAS_W + x] < 0;
+			int i = cy * CANVAS_W + x;
+			int kind = seg_kind(CHROME_KIND[i]);
+			int ref = kind == 0 ? 0 : CHROME_REF[i];
 			int x1 = x + 1;
-			while (x1 < CANVAS_W && (CHROME_KIND[cy * CANVAS_W + x1] < 0) == pix) { x1 = x1 + 1; }
-			SEG_PIX.push(pix ? 1 : 0);
+			while (x1 < CANVAS_W && seg_kind(CHROME_KIND[i + x1 - x]) == kind && (kind == 0 || CHROME_REF[i + x1 - x] == ref)) {
+				x1 = x1 + 1;
+			}
+			SEG_KIND.push(kind);
+			SEG_REF.push(ref);
 			SEG_X0.push(x);
 			SEG_X1.push(x1);
-			SEG_TEXT.push(pix ? "" : chrome_text(cy, x, x1));
+			SEG_TEXT.push(kind == 0 ? chrome_text(cy, x, x1) : "");
 			x = x1;
 		}
 	}
-	SEG_START.push(SEG_PIX.size());
+	SEG_START.push(SEG_KIND.size());
 }
 
+function labels_key() -> int { return G.facing + (MAP_ON != 0 ? 4 : 0); }
+
 function refresh_labels() -> void {
-	CHROME_FACING = G.facing;
+	CHROME_LABELS = labels_key();
 	for (int p = 0; p < PANE_ROT.size(); ++p) {
 		if (!PANE_FRAMED[p]) { continue; }
 		draw_pane_label(p);
 		int cy = PANE_Y[p] - 1;
 		for (int s = SEG_START[cy]; s < SEG_START[cy + 1]; ++s) {
-			if (SEG_PIX[s] == 0) { SEG_TEXT[s] = chrome_text(cy, SEG_X0[s], SEG_X1[s]); }
+			if (SEG_KIND[s] == 0) { SEG_TEXT[s] = chrome_text(cy, SEG_X0[s], SEG_X1[s]); }
 		}
 	}
 }
@@ -705,13 +798,14 @@ function build_chrome() -> void {
 	int gap_pal = pal(12, 12, 12);
 	FRAME_FG = VPAL_FG[frame_pal];
 	LABEL_FG = VPAL_FG[label_pal];
-	BOX_H = utf8_char(0x2500);
+	BOX_LINE = utf8_char(0x2500);
 	MIDDOT = utf8_char(0x00B7);
-	string box_v = utf8_char(0x2502);
 	CHROME_KIND = [];
+	CHROME_REF = [];
 	CHROME_CH = [];
 	for (int i = 0; i < CANVAS_W * CANVAS_H; ++i) {
 		CHROME_KIND.push(0);
+		CHROME_REF.push(0);
 		CHROME_CH.push(" ");
 	}
 	for (int p = 0; p < PANE_X.size(); ++p) {
@@ -720,24 +814,24 @@ function build_chrome() -> void {
 		int x1 = x0 + PANE_W[p];
 		int y1 = y0 + PANE_H[p];
 		for (int y = y0; y < y1; ++y) {
-			for (int x = x0; x < x1; ++x) { chrome_put(x, y, "", -1); }
+			for (int x = x0; x < x1; ++x) { chrome_put(x, y, "", -1, p); }
 		}
 		if (!PANE_FRAMED[p]) { continue; }
-		for (int x = x0; x < x1; ++x) {
-			chrome_put(x, y0 - 1, BOX_H, 1);
-			chrome_put(x, y1, BOX_H, 1);
-		}
-		for (int y = y0; y < y1; ++y) {
-			chrome_put(x0 - 1, y, box_v, 1);
-			chrome_put(x1, y, box_v, 1);
-		}
-		chrome_put(x0 - 1, y0 - 1, utf8_char(0x250C), 1);
-		chrome_put(x1, y0 - 1, utf8_char(0x2510), 1);
-		chrome_put(x0 - 1, y1, utf8_char(0x2514), 1);
-		chrome_put(x1, y1, utf8_char(0x2518), 1);
+		frame_rect(x0, y0, x1, y1);
 		draw_pane_label(p);
 	}
-	CHROME_FACING = G.facing;
+	for (int b = 0; b < BOX_ID.size(); ++b) {
+		int x0 = BOX_X[b];
+		int y0 = BOX_Y[b];
+		int x1 = x0 + BOX_W[b];
+		int y1 = y0 + BOX_H[b];
+		for (int y = y0; y < y1; ++y) {
+			for (int x = x0; x < x1; ++x) { chrome_put(x, y, " ", 3, BOX_ROW0[b] + y - y0); }
+		}
+		frame_rect(x0, y0, x1, y1);
+		put_label(x0, x1, y0 - 1, label_cells(BOX_NAMES[BOX_ID[b]]));
+	}
+	CHROME_LABELS = labels_key();
 	// the canvas under the text, for dumps: frame and label cells in their colors
 	for (int i = 0; i < CANVAS_W * CANVAS_H; ++i) {
 		int k = CHROME_KIND[i];
@@ -1025,16 +1119,16 @@ float CAM_INVDET = 0.0;
 // ------------------------------------------------------------ the caster ---
 // Renders every pane for an arbitrary heading (the turn animation sweeps
 // through non-cardinal headings; gameplay only ever calls it with cardinals),
-// each pane turned its quarter turns from it. Returns CANVAS_H fully-colored
-// row strings.
+// each pane turned its quarter turns from it (with MAP_ON the overhead map
+// takes the forward pane's place). Returns CANVAS_H fully-colored row strings.
 function render_view(float dirx, float diry) -> var {
 	if (LAYOUT_KEY != layout_key()) { build_layout(); }
 	if (VC_FLOOR != G.floor) { build_view_cache(); }
 	if (CHROME_FLOOR != G.floor) { build_chrome(); }
-	if (CHROME_FACING != G.facing) { refresh_labels(); }
+	if (CHROME_LABELS != labels_key()) { refresh_labels(); }
 	for (int p = 0; p < PANE_ROT.size(); ++p) {
 		int rot = PANE_ROT[p];
-		if (rot == 0) { render_pane(p, dirx, diry); }
+		if (rot == 0) { if (MAP_ON == 0) { render_pane(p, dirx, diry); } }
 		else if (rot == 1) { render_pane(p, 0.0 - diry, dirx); }
 		else if (rot == 2) { render_pane(p, 0.0 - dirx, 0.0 - diry); }
 		else { render_pane(p, diry, 0.0 - dirx); }
@@ -1179,8 +1273,8 @@ function render_pane(int p, float dirx, float diry) -> void {
 }
 
 // One canvas row: pixel runs as half blocks (fg = top pixel, bg = bottom
-// pixel, escapes only on change) between the chrome's text runs. Also the
-// parallel_transform body, so it reads the globals directly.
+// pixel, escapes only on change) between the chrome's text runs and the box
+// rows. Also the parallel_transform body, so it reads the globals directly.
 function view_row_half(int cy) -> string {
 	string row = "";
 	int stride = STRIDE;
@@ -1188,8 +1282,17 @@ function view_row_half(int cy) -> string {
 	int bi = ti + stride;
 	int s1 = SEG_START[cy + 1];
 	for (int s = SEG_START[cy]; s < s1; ++s) {
-		if (SEG_PIX[s] == 0) {
+		int kind = SEG_KIND[s];
+		if (kind == 0) {
 			row += SEG_TEXT[s];
+			continue;
+		}
+		if (kind == 2) {
+			row += BOX_ROWS[SEG_REF[s]];
+			continue;
+		}
+		if (MAP_ON != 0 && SEG_REF[s] == 0) {
+			row += MAP_ROWS[cy - PANE_Y[0]];
 			continue;
 		}
 		int fg = -1;

@@ -254,7 +254,7 @@ function shim_le(int v, int bytes) -> string {
 }
 
 // the last rendered canvas as ground truth: a 24-bit BMP and a sketch (pane
-// pixels as luminance, frames and labels as their text)
+// pixels as luminance, frames, labels and boxes as their text)
 function shim_dump_view(string base) -> void {
 	int cw = STRIDE;
 	int ch = CANVAS_H * 2;
@@ -272,11 +272,19 @@ function shim_dump_view(string base) -> void {
 		}
 		bmp += shim_le(0, pad);
 	}
+	array<string> box_plain = [];
+	for (int r = 0; r < BOX_ROWS.size(); ++r) { box_plain.push(plain_text(BOX_ROWS[r])); }
 	for (int y = 0; y < ch; y += 2) {
 		string row = "";
 		for (int x = 0; x < cw; ++x) {
 			int cell = (y / 2) * cw + x;
-			if (CHROME_KIND[cell] >= 0) {
+			int kind = CHROME_KIND[cell];
+			if (kind == 3) {
+				int ref = CHROME_REF[cell];
+				row += box_plain[ref].substr(x - BOX_ROW_X[ref], 1);
+				continue;
+			}
+			if (kind >= 0) {
 				row += CHROME_CH[cell];
 				continue;
 			}

@@ -358,7 +358,7 @@ public:
             // the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)21, (int)bytes[4], "jaibite format version");   // 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
+            check_eq((int)22, (int)bytes[4], "jaibite format version");   // 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
             // a loaded bite carries the attributes: a warn region's errors stay warnings on the
             // loading engine's own check, and the runtime raises
             for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",

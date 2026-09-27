@@ -2336,10 +2336,6 @@ checked_result<declaration_ptr> parser::declaration_body() {
         return result;
     }
     if (match(token_type::import_keyword)) {
-        if (nesting_depth_ > 0) {   // an import runs once and takes no scope: a top-level declaration only (Dev, 2026-09-14)
-            report_error("import is allowed only at the top level of a file, not inside a function, a block, a class or a namespace", previous());
-            return make_error_code(parse_error_code::unexpected_token);
-        }
         JAISCRIPT_TRY_ASSIGN(auto result, import_declaration());
         match(token_type::semicolon);  // Consume optional trailing semicolon
         return result;
@@ -2887,6 +2883,12 @@ checked_result<statement_ptr> parser::statement_body() {
     if (match(token_type::continue_keyword)) return continue_statement();
     if (match(token_type::try_keyword)) return try_statement();
     if (match(token_type::switch_keyword)) return switch_statement();
+    if (match(token_type::import_keyword)) {   // `if (changed) import "m.jai";`: the declaration as a one-statement block
+        const source_location at = previous().location;
+        JAISCRIPT_TRY_ASSIGN(declaration_ptr imported, import_declaration());
+        match(token_type::semicolon);
+        return statement_ptr(std::make_shared<block_stmt>(at, std::vector<declaration_ptr>{std::move(imported)}));
+    }
 
     // Check for fallthrough keyword
     if (match(token_type::fallthrough_keyword)) {
@@ -3332,8 +3334,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     nesting_guard nesting(nesting_depth_);
 
     while (!check(token_type::right_brace) && !is_at_end()) {
-        if (check(token_type::import_keyword)) {   // an import is a top-level declaration only (Dev, 2026-09-14)
-            report_error("import is allowed only at the top level of a file, not inside a function, a block, a class or a namespace", peek());
+        if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member (Dev, 2026-09-27)
+            report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
             return make_error_code(parse_error_code::unexpected_token);
         }
         // Error-recovery `continue`s below can leave in_coroutine_ armed; every member
@@ -3940,8 +3942,8 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
     // Parse namespace members (functions, classes, variables)
     nesting_guard nesting(nesting_depth_);
     while (!check(token_type::right_brace) && !is_at_end()) {
-        if (check(token_type::import_keyword)) {   // an import is a top-level declaration only (Dev, 2026-09-14)
-            report_error("import is allowed only at the top level of a file, not inside a function, a block, a class or a namespace", peek());
+        if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member (Dev, 2026-09-27)
+            report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
             return make_error_code(parse_error_code::unexpected_token);
         }
         // Parse any declaration (class, function, variable)
@@ -4456,7 +4458,9 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     } else if (check(token_type::left_brace)) {
         // Auto type with brace initializer - parse as expression
         JAISCRIPT_TRY_ASSIGN(initializer, expression());
-    } else if (!is_reference) {
+    }
+    const bool default_initialized = !initializer && !is_reference;
+    if (default_initialized) {
         initializer = default_initializer(type, name.location);   // T x;: the type's default (a class default-constructs)
     }
 
@@ -4464,6 +4468,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
 
     auto decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
     decl->function_spelling = function_spelling;
+    decl->default_initialized = default_initialized;
 
     // If we're inside a function, assign a slot for this local variable
     if (in_function_scope() && decl->name_id != UINT64_MAX) {

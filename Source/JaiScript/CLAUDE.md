@@ -430,9 +430,17 @@ engine stays usable", not by `check_throws`.
   functions/classes always replace in place (hot reload). Inside a unit, `{}` blocks scope as in C++ (a block
   declaration shadows for the block and vanishes after; a callee sees the outer binding). An include is TEXTUAL:
   the file runs at the include site, in the current scope and under the including unit (a later `var x` in the
-  includer writes the included x in place; `{ include ... }` scopes it); an import is its own unit and a top-level
-  declaration only (inside a function, a block, a class or a namespace it is a parse error: an import runs once and takes
-  no scope; Dev ruling 2026-09-14). The host reads and
+  includer writes the included x in place; `{ include ... }` scopes it); an import is its own unit keyed by its
+  canonical path, a statement allowed wherever a statement is (a function, a block, a loop, a conditional, a coroutine,
+  a lambda) whose effect is always program scope - it takes no scope (Dev ruling 2026-09-27); directly in a class or a
+  namespace body it is a parse error. It runs when first reached and, reached again, re-runs only when the file's
+  (mtime, size) stamp moved (functions and classes replace in place, instances migrate); the re-run parses and
+  strict-checks the module and the modules it imports before any of it runs, so a check failure is a catchable error
+  that leaves the program unchanged, and a run-time error in it is catchable too. A same-unit re-run (a module re-run,
+  the host's `execute_file` of the same file, a re-executed string, a top-level include run again) keeps a program-scope
+  variable declared WITHOUT an initializer (`int kills;`, `var loose;`) unless its declared type changed (then the new
+  type's default, like a class field on hot reload); a declaration that assigns re-runs its initializer (Dev ruling
+  2026-09-27; `detail/redeclaration.hpp`, vm `op_decl_keep`, `.jaibite` version 22). The host reads and
   assigns the newest cell. Zero cost
   on the VM's armed lookup paths (`string_symbolizer::shadow_count`, `environment::define_variable`), and zero
   per-call cost until the first shadow: the running unit is derived from the executing frame and the ambient
@@ -445,7 +453,9 @@ engine stays usable", not by `check_throws`.
 - **Files and locations** (guide ch. 10 "Where files are"): ONE resolution ladder for `import`, `include`,
   the checker's closure gather and the `resolve_path(name)` builtin: absolute as given; relative against the
   ASKING file's folder, then the include paths in order, then the working directory (canonical spelling is
-  the cache key). Engine-core location builtins on every engine: `current_script_dir/path` (the executing
+  the cache key). The engine remembers each answer per asking folder and revalidates it with one attribute query per
+  rung up to the answer (a file appearing earlier on the ladder, or the answer vanishing, is seen at once); an import
+  reached again whose module answered from the asking folder costs one stat (`engine::import_is_idle`). Engine-core location builtins on every engine: `current_script_dir/path` (the executing
   file, a function because imports change it), `root_script_dir/path` (the outermost `execute_file`),
   `executable_dir` (alias `bin_dir`), `app_data_dir/app_cache_dir(name)` (platform defaults,
   `engine::app_directory_resolvers` for hosts), `working_dir`, `parent_dir`, `file_name`, and `file_data(path)`

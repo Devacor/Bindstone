@@ -7,6 +7,7 @@
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
+#include <jaiscript/detail/redeclaration.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
@@ -2188,16 +2189,30 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
     };
     std::string out;
     fs::path p(path);
+    std::string key;
+    if (engine_ptr) {
+        key = engine::resolution_key(path, from_file);
+        if (const std::string* remembered = engine_ptr->remembered_resolution(key)) { return *remembered; }
+    }
+    std::vector<std::string> misses;
+    auto rung = [&](const fs::path& candidate) {
+        if (found(candidate, out)) {
+            if (engine_ptr) { engine_ptr->remember_resolution(key, std::move(misses), candidate.string(), out); }
+            return true;
+        }
+        misses.push_back(candidate.string());
+        return false;
+    };
     if (p.is_absolute()) {
-        if (found(p, out)) return out;
+        if (rung(p)) return out;
     } else {
-        if (!from_file.empty() && from_file != "<script>" && found(fs::path(from_file).parent_path() / p, out)) return out;
+        if (!from_file.empty() && from_file != "<script>" && rung(fs::path(from_file).parent_path() / p)) return out;
         if (engine_ptr) {
             for (const auto& include_path : engine_ptr->get_include_paths()) {
-                if (found(fs::path(include_path) / p, out)) return out;
+                if (rung(fs::path(include_path) / p)) return out;
             }
         }
-        if (found(p, out)) return out;
+        if (rung(p)) return out;
     }
     return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found), "Could not find include/import file");
 }
@@ -6372,6 +6387,10 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
 
 template<bool Replaying>
 checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
+    // a same-unit re-run of a program-scope declaration written without an initializer keeps the variable (the vm's op_decl_keep)
+    if (decl->default_initialized && decl->slot_index == SIZE_MAX && !environment_->get_parent()) [[unlikely]] {
+        if (const script_value* cell = environment_->same_unit_cell(decl->name_id); cell && detail::redeclaration_keeps_value(*decl, *cell)) { return {}; }
+    }
     // Helper to store value in slot (local) or environment (global)
     auto define_variable = [&](script_value value) {
         // Escape-marked declarations box into a cell (reference_holder cell mode):
@@ -12692,6 +12711,10 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     } else {
         // Use the literal path
         path = decl->path;
+    }
+    if (engine_ptr->import_is_idle(path)) {   // the stamp check alone (KEEP BYTE-PARALLEL with vm_backend::exec_import)
+        push_value(make_value());
+        return {};
     }
 
     // Resolve the file path

@@ -272,8 +272,9 @@ produces one diagnostic, not a cascade; (line, col, message) dedupe on top. Cap 
 
 ## Programs
 
-A unit whose top-level `import`/`include` declarations carry literal paths is the root of a
-**program**. Before anything runs, the engine gathers the program's **closure**: every unit
+A unit whose top-level `import`/`include` declarations carry literal paths, or which holds a
+literal-path `import` anywhere (an import takes no scope: in a function, a block or a lambda it still
+declares at program scope, `docs/global_shadowing.md`), is the root of a **program**. Before anything runs, the engine gathers the program's **closure**: every unit
 those paths reach, resolved exactly as the runtime resolves them (the importing file's folder, then the include paths, then the working directory),
 recursively, each file once (cycles are fine), parsed into the same cache entries the unit's
 later `import` executes through. The union of every unit's top-level names — functions,
@@ -328,8 +329,8 @@ runs; under warn - and in `engine->check()` - the report holds the parse error a
 error diagnostic with the text as its message, and the import raises it when it executes. A
 fix to the file is seen on the next run. A unit the closure cannot resolve or read contributes
 no names and is skipped; the runtime reports it exactly as before, when the unit executes. A **dynamic-path**
-`import(expr)`/`include(expr)`, or an import below the top level, can define anything: that
-unit keeps warning severity for undeclared identifiers. Names the program never declares —
+`import(expr)`/`include(expr)`, or an include below the top level (a literal include in a function
+body is spliced into it instead), can define anything: that unit keeps warning severity for undeclared identifiers. Names the program never declares —
 a host global bound after load, a value injected at run time — are outside the closure by
 definition; `extern` (below) is the spelling that declares such a name to the checker without
 defining it.
@@ -426,8 +427,7 @@ to runtime; the declarations around them still receive their applicable checks:
   conversions, callables held in variables, host functions beyond arity and primitive
   certainties, binder (C++) methods reached through a script chain (no static signature:
   wrong arity or a wrong argument type raises at the call), binder properties (untyped).
-- Dynamic-path `import(expr)`/`include(expr)` units and below-top-level imports (undeclared
-  identifiers drop to warnings), `extern` names (untyped: `var`; typed: checked), a parent found
+- Dynamic-path `import(expr)`/`include(expr)` units (undeclared identifiers drop to warnings), `extern` names (untyped: `var`; typed: checked), a parent found
   nowhere (its subclass's bare names type as unknown), namespace-qualified lookups
   at every depth (declarations inside a namespace are still checked).
 - Accessor-bearing members whose declaration is ambiguous ("Members": two getter/setter

@@ -93,6 +93,8 @@ namespace jai {
         // unit, a child environment, a function or a class definition write in place (define)
         void define_variable(uint64_t id, const script_value& value);
         void define_variable(uint64_t id, script_value&& value);
+        // The program-scope cell the running unit already declared for `id` (a re-run of the same unit), else null
+        script_value* same_unit_cell(uint64_t id);
         // An extern's shared global: defined only when the name is absent, owned by no unit; the first unit that
         // declares the name adopts the cell in place, so every unit keeps sharing it
         void define_shared(uint64_t id, script_value&& value);

@@ -1097,6 +1097,16 @@ namespace jai {
         void add_include_path(const std::string& path);
         void clear_include_paths();
         std::vector<std::string> get_include_paths() const;
+
+        // The resolution ladder's memo (resolve_include_path): a name asked from a folder answers its earlier canonical result
+        // while every rung before it still holds no file and the hit still exists (one attribute query each, instead of the
+        // canonicalizing walk); an include-path change forgets every answer
+        const std::string* remembered_resolution(const std::string& key);
+        void remember_resolution(const std::string& key, std::vector<std::string> misses, std::string candidate, std::string resolved);
+        static std::string resolution_key(const std::string& path, const std::string& from_file);
+        // An import statement reached again with nothing to do: the name answered from the asking file's own folder (or an
+        // absolute name) last time, the module ran, and one stat shows its stamp unchanged. false = take the full path
+        bool import_is_idle(const std::string& path);
         
         // Import behavior configuration
         enum class import_behavior {

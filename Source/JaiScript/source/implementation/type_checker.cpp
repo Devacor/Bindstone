@@ -3362,9 +3362,12 @@ void static_checker::collect_names(const statement* node) {
             break;
         }
         case node_type::include_decl:
+            has_includes_ = true;
+            has_dynamic_includes_ = true;   // nested: a runtime include, beyond the closure
+            break;
         case node_type::import_decl:
             has_includes_ = true;
-            has_dynamic_includes_ = true;   // nested: beyond the closure's top-level walk
+            if (static_cast<const import_decl*>(node)->path_expr) { has_dynamic_includes_ = true; }   // a literal one is a closure unit (collect_unit_imports)
             break;
         case node_type::expression_stmt:
             collect_names_expr(static_cast<const expression_stmt*>(node)->expression.get());
@@ -3519,6 +3522,105 @@ void static_checker::collect_names_expr(const expression* e) {
 }
 
 } // namespace
+
+// Every literal import below the top level: an import runs at program scope wherever it is written, so its module is a unit
+// of the program like a top-level one (lambda bodies included: they are statements too)
+namespace {
+struct import_path_walker {
+    std::vector<std::string>& out;
+    void stmt(const statement* node) {
+        if (!node) { return; }
+        switch (node->get_type()) {
+            case node_type::import_decl: {
+                auto* imp = static_cast<const import_decl*>(node);
+                if (!imp->path_expr) { out.push_back(imp->path); }
+                break;
+            }
+            case node_type::variable_decl: expr(static_cast<const variable_decl*>(node)->initializer.get()); break;
+            case node_type::function_decl: stmt(static_cast<const function_decl*>(node)->body.get()); break;
+            case node_type::class_decl:
+                for (const auto& m : static_cast<const class_decl*>(node)->members) { stmt(m.declaration.get()); }
+                break;
+            case node_type::namespace_decl:
+                for (const auto& d : static_cast<const namespace_decl*>(node)->declarations) { stmt(d.get()); }
+                break;
+            case node_type::destructuring_decl: expr(static_cast<const destructuring_decl*>(node)->initializer.get()); break;
+            case node_type::expression_stmt: expr(static_cast<const expression_stmt*>(node)->expression.get()); break;
+            case node_type::expression_decl: expr(static_cast<const expression_decl*>(node)->expression.get()); break;
+            case node_type::statement_decl: stmt(static_cast<const statement_decl*>(node)->statement.get()); break;
+            case node_type::block_stmt:
+                for (const auto& d : static_cast<const block_stmt*>(node)->declarations) { stmt(d.get()); }
+                break;
+            case node_type::if_stmt: {
+                auto* i = static_cast<const if_stmt*>(node);
+                expr(i->condition.get());
+                stmt(i->then_statement.get());
+                stmt(i->else_statement.get());
+                break;
+            }
+            case node_type::while_stmt: expr(static_cast<const while_stmt*>(node)->condition.get()); stmt(static_cast<const while_stmt*>(node)->body.get()); break;
+            case node_type::for_stmt: {
+                auto* f = static_cast<const for_stmt*>(node);
+                stmt(f->initializer.get());
+                expr(f->condition.get());
+                expr(f->update.get());
+                stmt(f->body.get());
+                break;
+            }
+            case node_type::range_for_stmt: expr(static_cast<const range_for_stmt*>(node)->container.get()); stmt(static_cast<const range_for_stmt*>(node)->body.get()); break;
+            case node_type::parallel_for_stmt: stmt(static_cast<const parallel_for_stmt*>(node)->body.get()); break;
+            case node_type::try_stmt: stmt(static_cast<const try_stmt*>(node)->try_block.get()); stmt(static_cast<const try_stmt*>(node)->catch_block.get()); break;
+            case node_type::switch_stmt: {
+                auto* sw = static_cast<const switch_stmt*>(node);
+                for (const auto& cs : sw->cases) { for (const auto& st : cs->body) { stmt(st.get()); } }
+                if (sw->default_case) { for (const auto& st : sw->default_case->body) { stmt(st.get()); } }
+                break;
+            }
+            case node_type::return_stmt: expr(static_cast<const return_stmt*>(node)->value.get()); break;
+            default: break;
+        }
+    }
+    void expr(const expression* e) {
+        if (!e) { return; }
+        switch (e->get_type()) {
+            case node_type::lambda_expr: stmt(static_cast<const lambda_expr*>(e)->body.get()); break;
+            case node_type::binary_expr: expr(static_cast<const binary_expr*>(e)->left.get()); expr(static_cast<const binary_expr*>(e)->right.get()); break;
+            case node_type::unary_expr: expr(static_cast<const unary_expr*>(e)->operand.get()); break;
+            case node_type::assignment_expr: expr(static_cast<const assignment_expr*>(e)->target.get()); expr(static_cast<const assignment_expr*>(e)->value.get()); break;
+            case node_type::call_expr: {
+                auto* c = static_cast<const call_expr*>(e);
+                expr(c->callee.get());
+                for (const auto& a : c->arguments) { expr(a.get()); }
+                break;
+            }
+            case node_type::member_expr: expr(static_cast<const member_expr*>(e)->object.get()); break;
+            case node_type::new_expr: for (const auto& a : static_cast<const new_expr*>(e)->arguments) { expr(a.get()); } break;
+            case node_type::ternary_expr: {
+                auto* t = static_cast<const ternary_expr*>(e);
+                expr(t->condition.get());
+                expr(t->then_expression.get());
+                expr(t->else_expression.get());
+                break;
+            }
+            case node_type::array_literal_expr: for (const auto& el : static_cast<const array_literal_expr*>(e)->elements) { expr(el.get()); } break;
+            case node_type::map_literal_expr:
+                for (const auto& [k, v] : static_cast<const map_literal_expr*>(e)->entries) { expr(k.get()); expr(v.get()); }
+                break;
+            case node_type::throw_expr: expr(static_cast<const throw_expr*>(e)->value.get()); break;
+            case node_type::cast_expr: expr(static_cast<const cast_expr*>(e)->operand.get()); break;
+            case node_type::yield_expr: expr(static_cast<const yield_expr*>(e)->value.get()); break;
+            default: break;
+        }
+    }
+};
+} // namespace
+
+void collect_unit_imports(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out) {
+    import_path_walker w{out};
+    for (const auto& d : decls) {
+        if (d && d->get_type() != node_type::import_decl) { w.stmt(d.get()); }
+    }
+}
 
 check_report run_static_check(engine& eng, const std::vector<declaration_ptr>& decls,
                               const std::vector<std::string>* extra_globals, check_options opts) {

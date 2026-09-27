@@ -664,6 +664,12 @@ struct engine::implementation {
         uint64_t size = 0;
     };
     std::unordered_map<std::string, import_record> import_cache;
+    struct resolution_entry {
+        std::vector<std::string> misses;   // the earlier rungs' candidates, which held no file
+        std::string candidate;             // the rung that answered
+        std::string resolved;              // its canonical spelling
+    };
+    std::unordered_map<std::string, resolution_entry> resolution_memo_;
     std::unordered_set<std::string> importing_;   // resolved paths mid-execution: a cyclic import's back edge is a no-op
 
     // Source-string execution cache: re-executing identical source skips lex/parse
@@ -773,6 +779,7 @@ struct engine::implementation {
                 if (!inc->path_expr) { out.push_back(inc->path); }
             }
         }
+        detail::collect_unit_imports(decls, out);
     }
 
     // The parse-cache entry for (sourcePath, content): a hit, a fresh jaibite sibling, or a
@@ -3829,14 +3836,52 @@ conversions::conversion_manager engine::get_conversion_manager() {
 // Include/Import path management
 void engine::include_paths(const std::vector<std::string>& paths) {
     impl->include_paths = paths;
+    impl->resolution_memo_.clear();
 }
 
 void engine::add_include_path(const std::string& path) {
     impl->include_paths.push_back(path);
+    impl->resolution_memo_.clear();
 }
 
 void engine::clear_include_paths() {
     impl->include_paths.clear();
+    impl->resolution_memo_.clear();
+}
+
+const std::string* engine::remembered_resolution(const std::string& key) {
+    if (parallel_region_active()) { return nullptr; }
+    auto it = impl->resolution_memo_.find(key);
+    if (it == impl->resolution_memo_.end()) { return nullptr; }
+    implementation::entry_stat st;
+    bool valid = implementation::stat_entry(it->second.candidate, st);
+    for (size_t i = 0; valid && i < it->second.misses.size(); ++i) { valid = !implementation::stat_entry(it->second.misses[i], st); }
+    if (!valid) { impl->resolution_memo_.erase(it); return nullptr; }
+    return &it->second.resolved;
+}
+
+std::string engine::resolution_key(const std::string& path, const std::string& from_file) {
+    std::error_code ec;
+    const std::filesystem::path p(path);
+    return path + '\n' + (p.is_absolute() || from_file == "<script>" ? std::string() : std::filesystem::path(from_file).parent_path().string()) +
+           '\n' + std::filesystem::current_path(ec).string();
+}
+
+bool engine::import_is_idle(const std::string& path) {
+    if (impl->import_behavior == import_behavior::always || !is_enabled(privilege::filesystem) || parallel_region_active()) { return false; }
+    auto memo = impl->resolution_memo_.find(resolution_key(path, current_source_file()));
+    if (memo == impl->resolution_memo_.end() || !memo->second.misses.empty()) { return false; }
+    auto record = impl->import_cache.find(memo->second.resolved);
+    if (record == impl->import_cache.end()) { return false; }
+    uint64_t mtime = 0, size = 0;
+    if (!implementation::stat_mtime_size(memo->second.resolved, mtime, size)) { return false; }
+    return impl->import_behavior == import_behavior::once || (mtime == record->second.mtime && size == record->second.size);
+}
+
+void engine::remember_resolution(const std::string& key, std::vector<std::string> misses, std::string candidate, std::string resolved) {
+    if (parallel_region_active()) { return; }
+    if (impl->resolution_memo_.size() >= 1024) { impl->resolution_memo_.clear(); }
+    impl->resolution_memo_[key] = implementation::resolution_entry{std::move(misses), std::move(candidate), std::move(resolved)};
 }
 
 std::vector<std::string> engine::get_include_paths() const {

@@ -5920,7 +5920,20 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	emit(opcode::op_closure, static_cast<uint32_t>(chunk_->closure_protos.size() - 1));
 }
 
+// A program-scope declaration written without an initializer: a same-unit re-run keeps the variable, so the default is not
+// evaluated at all (the interpreter asks the same question before its evaluation)
 void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& decl) {
+	if (decl->default_initialized && decl->slot_index == SIZE_MAX) {
+		emit(opcode::op_decl_keep, add_node(decl));
+		const size_t skip = emit(opcode::op_jump_if_true, k_invalid_u32, 1);
+		compile_variable_decl_value(decl);
+		patch_jump(skip, chunk_->code.size());
+		return;
+	}
+	compile_variable_decl_value(decl);
+}
+
+void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_decl>& decl) {
 	const bool is_reference = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
 	if (decl->ref_escaping && decl->slot_index != SIZE_MAX) { callable_.escaping.insert(static_cast<uint32_t>(decl->slot_index)); }   // a reference or a capture reaches it
 	if (!is_reference && decl->slot_index != SIZE_MAX && primitive_declared_type(decl->type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(decl->slot_index)); }   // a typed scalar slot holds that kind at every point

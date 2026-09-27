@@ -4862,10 +4862,135 @@ public:
     }
 };
 
+// A by-value argument takes its value when the argument expression is evaluated (left to right, after the callee), so a
+// later argument, or a conversion the binding runs, that writes what it read does not change what the callee receives; a
+// reference parameter binds the lvalue and sees the write. Every row runs on both backends with proofs on and off.
+class call_argument_capture_tests : public suite {
+public:
+    call_argument_capture_tests() : suite("Call Argument Capture") {}
+
+    void forge_tests() override {
+        auto run = [](const std::string& src, bool use_vm, bool proofs) {
+            auto e = jai::engine::make();
+            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            e->type_proofs(proofs);
+            e->execution_budget(0);
+            jai::stdlib::register_all(e);
+            jai::engine* raw = e.get();
+            e->add_variadic_function("host_seen", [raw](const std::vector<script_value>& args) -> checked_result<script_value> {
+                std::string s;
+                for (const auto& a : args) { if (!s.empty()) { s += ","; } s += a.deref().to_string(); }
+                return script_value(s, raw);
+            });
+            e->add_function("host_fill", [](bound_array<int64_t>& a, int64_t v) -> int64_t { a[0] = v; return static_cast<int64_t>(a.size()); });
+            try { return e->execute(src).to_string(); }
+            catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+        };
+        auto expect = [this, run](const std::string& src, const std::string& expected, const char* what) {
+            for (bool proofs : {true, false}) {
+                for (bool use_vm : {false, true}) {
+                    check_eq(expected, run(src, use_vm, proofs), std::string(what) + (use_vm ? " (vm" : " (interpreter") + (proofs ? ")" : ", proofs off)"));
+                }
+            }
+        };
+        const std::string add2 = "function add2(a, b) { return a + b; } function sz(a, b) { return a.size() + b; } ";
+
+        test("an_element_read_takes_its_value_before_a_later_argument_runs", [expect, add2]() {
+            const std::string ga = add2 + "var GA = [1, 2, 3]; function f() { GA[1] = 100; return 1; } ";
+            expect(ga + "to_string(add2(GA[1], f()))", "3", "a plain call");
+            expect(ga + "to_string(add2(GA[1], add2(0, f())))", "3", "a nested call as the later argument");
+            expect(ga + "to_string(add2(GA[1], GA[1] = 7))", "9", "an assignment as the later argument");
+            expect(ga + "to_string(add2(true ? GA[1] : GA[2], f()))", "3", "a ternary over elements");
+            expect(ga + "class Q { function addn(a, b) { return a + b; } } var q = Q(); to_string(q.addn(GA[1], f()))", "3", "a method call");
+            expect(ga + "class C2 { var s = 0; C2(a, b) { s = a + b; } } to_string(C2(GA[1], f()).s)", "3", "a constructor call");
+            expect(ga + "class C3 { var s = 0; C3(a, b) { s = a + b; } } var p = new C3(GA[1], f()); to_string(p.s)", "3", "new");
+            expect(ga + "var lam = [](a, b) { return a + b; }; to_string(lam(GA[1], f()))", "3", "a lambda");
+            expect(ga + "function dflt(a, b = f()) { return a + b; } to_string(dflt(GA[1]))", "3", "a default argument");
+            expect(ga + "to_string(GA[1]) + \" \" + to_string(GA[1] + f())", "2 3", "a binary operand (unchanged)");
+            expect(add2 + "var GS = [\"abc\", \"d\"]; function f() { GS[0] = \"abcdefg\"; return 0; } to_string(sz(GS[0], f()))", "3", "a string element");
+            expect(add2 + "var GR = [1, 2, 3]; int& pick() { return GR[1]; } function f() { GR[1] = 100; return 1; } to_string(add2(pick(), f()))", "3", "a reference-returning call");
+        });
+
+        test("a_heavy_argument_binds_the_value_it_had_when_evaluated", [expect, add2]() {
+            expect(add2 + "var arr = [1, 2, 3]; function grow() { arr.push(4); return 0; } to_string(sz(arr, grow()))", "3", "a global array");
+            expect(add2 + "var mp = {\"a\": 1}; function grow() { mp[\"b\"] = 2; return 0; } to_string(sz(mp, grow()))", "1", "a global map");
+            expect(add2 + "var GH = [[1, 2], [3, 4]]; function grow() { GH[0].push(9); return 0; } to_string(sz(GH[0], grow()))", "2", "an element array");
+            expect(add2 + "class P { var list = [1, 2]; } var obj = P(); function grow() { obj.list.push(9); return 0; } to_string(sz(obj.list, grow()))", "2", "a member array");
+            expect(add2 + "class R { var x = 5; } var r = R(); function heavy(o, b) { return o.x + b; } function poke() { r.x = 55; return 0; } to_string(heavy(r, poke()))", "5", "a class instance");
+            expect(add2 + "var arr = [1, 2, 3]; function reset() { arr = [9, 9, 9, 9]; return 0; } to_string(sz(arr, reset()))", "3", "a variable rebound by the later argument");
+            expect(add2 + "function outer() { var la = [1, 2, 3]; var push = [&]() { la.push(4); return 0; }; return sz(la, push()); } to_string(outer())", "3", "a local captured by reference");
+            expect(add2 + "var target = [1, 2, 3]; function grow() { target.push(4); return 0; } function via() { var& r = target; return sz(r, grow()); } to_string(via())", "3", "through a reference");
+            expect("array<int> arr = [1, 2, 3]; function grow() -> int { arr.push(4); return 0; } function rd(array<int> a, int n) -> int { return a.size() + n; } to_string(rd(arr, grow()))", "3", "a read-only parameter");
+            expect("class Box { var n = 1; function bump() { n = 10; return 0; } function show(b, k) { return b.n + k; } function go() { return show(this, bump()); } } var bx = Box(); to_string(bx.go())", "1", "this by value");
+        });
+
+        test("scalar_reads_already_taken_at_evaluation_stay_so", [expect, add2]() {
+            expect(add2 + "class P { var x = 5; } var obj = P(); function g() { obj.x = 50; return 1; } to_string(add2(obj.x, g()))", "6", "a member");
+            expect(add2 + "var gx = 7; function h() { gx = 70; return 1; } to_string(add2(gx, h()))", "8", "a global");
+            expect(add2 + "function outer() { var lx = 3; var bump = [&]() { lx = 30; return 1; }; return add2(lx, bump()); } to_string(outer())", "4", "a captured local");
+            expect(add2 + "var target = [1, 2, 3]; function via() { var& r = target[0]; var k = [&]() { target[0] = 11; return 1; }; return add2(r, k()); } to_string(via())", "2", "a reference alias");
+        });
+
+        test("host_callees_receive_the_value_at_evaluation", [expect]() {
+            const std::string ga = "var GA = [1, 2, 3]; function f() { GA[1] = 100; return 1; } ";
+            expect(ga + "host_seen(GA[1], f())", "2,1", "a variadic host function");
+            expect(ga + "to_string(max(GA[1], f()))", "2.0", "a typed host function");
+            expect(ga + "to_string(math::max(GA[1], f()))", "2", "a math intrinsic");
+            expect("var s = \"abcdef\"; var GI = [1, 2]; function f() { GI[0] = 3; return 2; } s.substr(GI[0], f())", "bc", "a string builtin");
+        });
+
+        test("math_intrinsic_operands_survive_a_later_call", [expect]() {
+            // a later operand's call runs statements (an expression statement, a block) that must not disturb the operands
+            // already evaluated
+            expect("var GA = [1, 2, 3]; function f() { GA[1] = 100; return 1; } to_string(math::max(5, f()))", "5", "an expression statement in the callee");
+            expect("function k() { if (true) { var t = 1; t = 2; } return 1; } to_string(math::max(5, k()))", "5", "a block in the callee");
+            expect("function j() { var s = 3; s = 4; return 1; } to_string(math::clamp(7, j(), 9))", "7", "three operands");
+        });
+
+        test("reference_parameters_still_alias_the_lvalue", [expect]() {
+            const std::string gf = "var GF = [1, 2, 3]; function ff() { GF[1] = 600; return 1; } function refp(int& a, b) { return a + b; } ";
+            expect(gf + "to_string(refp(GF[1], ff()))", "601", "an element lvalue");
+            expect(gf + "var k = 0; to_string(refp(GF[k + 1], ff()))", "601", "a computed element lvalue");
+            expect("var arr = [1, 2, 3]; function grow() { arr.push(4); return 0; } function refarr(var& a, n) { return a.size() + n; } to_string(refarr(arr, grow()))", "4", "a var& parameter over a heavy value");
+            expect("array<int> ha = [1, 2]; function grow() -> int { ha.push(3); return 7; } to_string(host_fill(ha, grow())) + \" \" + to_string(ha[0])", "3 7", "a host bound_array& parameter");
+        });
+
+        test("a_constructor_takes_its_arguments_before_its_construction_runs", [expect]() {
+            const std::string ga = "var GA = [1, 2, 3]; function f() { GA[1] = 100; return 1; } ";
+            expect(ga + "class Base { var s = 0; Base(a, b) { s = a + b; } } class Kid : Base { Kid() : super(GA[1], f()) {} } to_string(Kid().s)", "3", "a super initializer");
+            expect(ga + "class Two { var s = 0; Two(a, b) { s = a + b; } Two() : this(GA[1], f()) {} } to_string(Two().s)", "3", "a this initializer");
+            expect("var arr = [1, 2, 3]; function grow() { arr.push(4); return 0; } class Sz { var n = 0; Sz(a, b) { n = a.size() + b; } Sz(int k) : this(arr, grow()) {} } to_string(Sz(0).n)", "3", "a heavy this initializer");
+            expect(ga + "class W { var t = f(); var v = 0; W(a) { v = a; } } to_string(W(GA[1]).v)", "2", "a field initializer that writes the argument");
+            expect(ga + "class A { var v = 0; A(a) { v = a; } } class B : A { var t = f(); B() : super(GA[1]) {} } to_string(B().v)", "2", "a super argument ahead of a field initializer");
+            expect(ga + "class N { var t = f(); var v = 0; N(a) { v = a; } } var n = new N(GA[1]); to_string(n.v)", "2", "new");
+        });
+
+        test("a_coroutine_takes_its_arguments_at_the_call", [expect]() {
+            const std::string ga = "var GA = [1, 2, 3]; ";
+            expect(ga + "coroutine function co(a) { yield a; } var h = co(GA[1]); GA[1] = 100; to_string(h.resume())", "2", "an element");
+            expect("var arr = [1, 2, 3]; coroutine function co(a) { yield a.size(); } var h = co(arr); arr.push(4); to_string(h.resume())", "3", "a heavy value");
+            expect(ga + "class K { coroutine function gen(a) { yield a; } } var k = K(); var h = k.gen(GA[1]); GA[1] = 100; to_string(h.resume())", "2", "a method coroutine");
+            expect(ga + "coroutine function cr(int& a) { yield a; } var h = cr(GA[1]); GA[1] = 100; to_string(h.resume())", "100", "a reference parameter still aliases");
+        });
+
+        test("a_binding_conversion_runs_after_every_argument_is_taken", [expect]() {
+            expect("var GK = [1, 2, 3]; class Conv { var v = 0; Conv(int x) { v = x; GK[1] = 900; } } function takes(Conv c, b) { return c.v + b; } to_string(takes(5, GK[1]))", "7", "a converting constructor");
+        });
+
+        test("errors_keep_their_order_and_text", [expect]() {
+            expect("nocopy class Ledger { int total = 1; } auto ledger = Ledger(); var ran = 0; function side() { ran = 1; return 0; } function take(Ledger l, n) { return n; }"
+                   " var msg = \"\"; try { take(ledger, side()); } catch (e) { msg = e; } to_string(ran) + (msg.contains(\"nocopy class 'Ledger'\") ? \" nocopy\" : \" \" + msg)", "1 nocopy", "a nocopy argument");
+            expect("var GA = [1, 2, 3]; function f() { GA[1] = 100; return 1; } var notfn = 5; var msg = \"\"; try { notfn(GA[1], f()); } catch (e) { msg = \"caught\"; } msg + \" \" + to_string(GA[1])", "caught 2", "a callee that is not callable");
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
 using constructor_semantics_tests = jai::foundry::tests::constructor_semantics_tests;
 FOUNDRY_REGISTER(constructor_semantics_tests)
+using call_argument_capture_tests = jai::foundry::tests::call_argument_capture_tests;
+FOUNDRY_REGISTER(call_argument_capture_tests)
 using char_promotion_tests = jai::foundry::tests::char_promotion_tests;
 FOUNDRY_REGISTER(char_promotion_tests)
 using review_regression_tests = jai::foundry::tests::review_regression_tests;

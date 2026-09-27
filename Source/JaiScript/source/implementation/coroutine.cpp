@@ -1,6 +1,7 @@
 #include "../../include/jaiscript/core/coroutine.hpp"
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/core/execution_backend.hpp"
+#include "../../include/jaiscript/detail/arg_capture.hpp"
 
 namespace jai {
 
@@ -23,6 +24,12 @@ void coroutine_handle::set_function(std::shared_ptr<function_decl> func,
     function_ = std::move(func);
     initial_args_ = std::move(args);
     closure_env_ = std::move(closure_env);
+    // the call's arguments take their values at the call; the body binds them at the first resume
+    for (size_t i = 0; i < initial_args_.size(); ++i) {
+        if (!detail::capture_candidate(initial_args_[i], detail::transient_read_marker::arg_capture_full)) continue;
+        detail::capture_argument(initial_args_[i], detail::transient_read_marker::arg_capture_full,
+                                 function_ ? detail::parameters_binding(function_->parameters, i) : detail::arg_binding::opaque);
+    }
 }
 
 void coroutine_handle::do_yield(script_value value) {

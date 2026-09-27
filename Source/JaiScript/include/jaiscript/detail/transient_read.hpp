@@ -4,6 +4,7 @@
 #define __JAISCRIPT_DETAIL_TRANSIENT_READ_HPP__
 
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/math_intrinsics.hpp>
 
 namespace jai::detail {
 
@@ -78,6 +79,8 @@ namespace jai::detail {
 
         // No user code can run while evaluating this subtree (builtin subscripts included:
         // an object "[]" override flips the engine's runtime gate, closing that hole).
+        // intrinsics: a math:: intrinsic call counts too (both backends run it as the kernel).
+        template<bool intrinsics = false>
         static bool callout_free(const expression* e) noexcept {
             if (!e) {
                 return true;
@@ -92,7 +95,7 @@ namespace jai::detail {
                     auto* b = static_cast<const binary_expr*>(e);
                     if (b->op.type == token_type::left_bracket || is_value_binary_op(b->op.type) ||
                         b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) {
-                        return callout_free(b->left.get()) && callout_free(b->right.get());
+                        return callout_free<intrinsics>(b->left.get()) && callout_free<intrinsics>(b->right.get());
                     }
                     return false;
                 }
@@ -100,17 +103,67 @@ namespace jai::detail {
                     auto* u = static_cast<const unary_expr*>(e);
                     if (u->op.type == token_type::bang || u->op.type == token_type::minus ||
                         u->op.type == token_type::plus || u->op.type == token_type::tilde) {
-                        return callout_free(u->operand.get());
+                        return callout_free<intrinsics>(u->operand.get());
                     }
                     return false;   // ++/-- mutate; anything else is unknown
                 }
                 case node_type::ternary_expr: {
                     auto* t = static_cast<const ternary_expr*>(e);
-                    return callout_free(t->condition.get()) && callout_free(t->then_expression.get()) &&
-                           callout_free(t->else_expression.get());
+                    return callout_free<intrinsics>(t->condition.get()) && callout_free<intrinsics>(t->then_expression.get()) &&
+                           callout_free<intrinsics>(t->else_expression.get());
+                }
+                case node_type::call_expr: {
+                    if constexpr (intrinsics) {
+                        auto* c = static_cast<const call_expr*>(e);
+                        if (!c->callee || c->callee->get_type() != node_type::member_expr || c->arguments.size() > 8 ||
+                            math_intrinsic_for_call(static_cast<const member_expr*>(c->callee.get())) == math_fn::none) {
+                            return false;
+                        }
+                        for (const auto& a : c->arguments) {
+                            if (!callout_free<intrinsics>(a.get())) return false;
+                        }
+                        return true;
+                    }
+                    return false;
                 }
                 default:
                     return false;   // member (getters), call, assignment, new, lambda, literals, ...
+            }
+        }
+
+        // A call argument's value is taken when it is evaluated: a read of storage (a reference, a heavy handle, a host-bound
+        // value) that a later argument may write is captured before that argument runs. ref: only a reference result needs it
+        // (a by-value call or operator result is fresh); full: any read of storage.
+        static constexpr uint8_t arg_capture_ref = 1;
+        static constexpr uint8_t arg_capture_full = 2;
+
+        static uint8_t arg_capture_kind(const expression* e) noexcept {
+            switch (e->get_type()) {
+                case node_type::literal_expr:
+                case node_type::lambda_expr:
+                case node_type::new_expr:
+                    return 0;
+                case node_type::call_expr:
+                case node_type::unary_expr:
+                    return arg_capture_ref;
+                case node_type::binary_expr:
+                    return static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket ? arg_capture_full : arg_capture_ref;
+                default:
+                    return arg_capture_full;
+            }
+        }
+
+        // every argument ahead of the last one that may run user code; empty when none needs a capture
+        static void stamp_arg_captures(const std::vector<expression_ptr>& args, std::vector<uint8_t>& out) {
+            out.clear();
+            size_t last = args.size();
+            while (last > 0 && callout_free<true>(args[last - 1].get())) { --last; }
+            bool any = false;
+            for (size_t i = 0; i + 1 < last; ++i) {
+                const uint8_t kind = arg_capture_kind(args[i].get());
+                if (kind == 0) { continue; }
+                if (!any) { out.assign(last - 1, 0); any = true; }
+                out[i] = kind;
             }
         }
 
@@ -162,6 +215,7 @@ namespace jai::detail {
                     for (const auto& arg : c->arguments) {
                         walk_expr(arg.get(), false);       // ref-params: always mint
                     }
+                    stamp_arg_captures(c->arguments, c->arg_captures);
                     return;
                 }
                 case node_type::member_expr:
@@ -175,11 +229,14 @@ namespace jai::detail {
                     walk_stmt(l->body.get());
                     return;
                 }
-                case node_type::new_expr:
-                    for (const auto& arg : static_cast<new_expr*>(e)->arguments) {
+                case node_type::new_expr: {
+                    auto* n = static_cast<new_expr*>(e);
+                    for (const auto& arg : n->arguments) {
                         walk_expr(arg.get(), false);
                     }
+                    stamp_arg_captures(n->arguments, n->arg_captures);
                     return;
+                }
                 case node_type::include_expr:
                     walk_expr(static_cast<include_expr*>(e)->path_expr.get(), false);
                     return;
@@ -319,10 +376,11 @@ namespace jai::detail {
                     for (auto& p : fd->parameters) {
                         walk_expr(p.default_value.get(), false);
                     }
-                    for (const auto& ci : fd->initializers) {
+                    for (auto& ci : fd->initializers) {
                         for (const auto& arg : ci.arguments) {
                             walk_expr(arg.get(), false);
                         }
+                        stamp_arg_captures(ci.arguments, ci.arg_captures);
                     }
                     walk_stmt(fd->body.get());
                     return;

@@ -4671,7 +4671,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"  }\n"
 				"  return out; }\n"
 				"run();";
-			const std::string expected = "3 2 2 true 101 3 [2,1] 2 3 | 3 2 2 true 101 3 [2,1] 2 3 | ";
+			const std::string expected = "3 2 2 true 3 3 [2,1] 2 3 | 3 2 2 true 3 3 [2,1] 2 3 | ";
 			both(src, expected, "an element read ahead of a writing call");
 			both(src, expected, "an element read ahead of a writing call, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }

@@ -34,6 +34,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (interp parity)
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (interp parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (interp parity)
+#include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (interp parity)
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
 
@@ -10674,6 +10675,43 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 	return {};
 }
 
+// the argument on top takes its value now, as the callee resolved ahead of the arguments binds it (KEEP BYTE-PARALLEL with the
+// interpreter's capture_call_argument sites)
+void vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
+	const size_t k = ins.b;
+	const size_t below = stack_.size() >= k + 2 ? stack_.size() - k - 2 : SIZE_MAX;
+	detail::arg_binding b = detail::arg_binding::opaque;
+	switch (ins.c >> 2) {
+		case capture_form_probe:
+			if (!pending_callees_.empty()) {
+				const pending_callee& pc = pending_callees_.back();
+				b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k) : detail::callee_binding(pc.value, k);
+			}
+			break;
+		case capture_form_stack:
+			if (below != SIZE_MAX) { b = detail::callee_binding(stack_[below], k); }
+			break;
+		case capture_form_method: {
+			const auto* member = static_cast<const member_expr*>(f.code->nodes[f.code->call_sites[ins.a].member_node].get());
+			if (below != SIZE_MAX) {
+				b = detail::member_call_binding(stack_[below], member->member_id, member->object && member->object->get_type() == node_type::super_expr, k);
+			}
+			break;
+		}
+		case capture_form_new: {
+			const auto* expr = static_cast<const new_expr*>(f.code->nodes[ins.a].get());
+			const type_info* t = !expr->type ? nullptr : expr->type->base_type == script_value_type::jai_shared_ptr_type ? expr->type->element_type().get() : expr->type.get();
+			if (t) {
+				auto ctor = environment_->get(t->type_name);
+				if (ctor) { b = detail::callee_binding(ctor.value(), k); }
+			}
+			break;
+		}
+		default: break;
+	}
+	detail::capture_argument(stack_.back(), static_cast<uint8_t>(ins.c & 3), b);
+}
+
 // Callee-first probe for member callees (the op_probe_callee ruling extended to
 // `recv.m(args)`): the lookup errors exec_call_method's ladder raises post-args fire
 // here, at the pre-args observation point; every other outcome leaves the stack
@@ -15169,7 +15207,8 @@ void vm_backend::apply_field_initializers(const std::shared_ptr<class_instance>&
 checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
                                                             const std::shared_ptr<environment>& definition_env,
                                                             const std::vector<script_value>& args,
-                                                            std::shared_ptr<function_decl>& matching_ctor_out) {
+                                                            std::shared_ptr<function_decl>& matching_ctor_out,
+                                                            std::vector<script_value>& captured_out) {
 	// This native phase owns the constructor depth only until a body takes over.
 	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
 		return detail::raise_call_depth();
@@ -15278,10 +15317,20 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 		init_env->define(symbolizer_->get_this_id(), this_value);
 		init_env->set_access_context(class_def.get());   // field initializers are class-body code
 	}
-	for (size_t i = 0; i < matching_ctor->parameters.size() && i < args.size(); ++i) {
+	// the construction runs code ahead of the body: the call's arguments are taken first, as the body's parameters (KEEP
+	// BYTE-PARALLEL with interpreter::construct_instance)
+	const std::vector<script_value>* argv = &args;
+	if (init_env && detail::later_capture_candidate(0, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) {
+		captured_out = args;
+		for (size_t j = 0; j < captured_out.size(); ++j) {
+			detail::capture_argument(captured_out[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(matching_ctor->parameters, j));
+		}
+		argv = &captured_out;
+	}
+	for (size_t i = 0; i < matching_ctor->parameters.size() && i < argv->size(); ++i) {
 		const auto& param = matching_ctor->parameters[i];
 		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
-		if (init_env) { init_env->define(param.symbol_id, args[i]); }
+		if (init_env) { init_env->define(param.symbol_id, (*argv)[i]); }
 	}
 
 	bool handled_parent_init = false;
@@ -15308,6 +15357,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 							"Failed to evaluate constructor initializer argument");
 					}
 					init_args.push_back(std::move(result.value()));
+					detail::capture_initializer_argument(initializer, init_args.size() - 1, !class_def->chain_initializers_all_literal(), init_args.back(),
+					                                     [&] { return detail::constructor_binding(class_def->get_parent().get(), init_args.size() - 1); });
 				}
 
 				auto parent_class = class_def->get_parent();
@@ -15362,6 +15413,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 														"Failed to evaluate super() argument");
 												}
 												ancestor_args.push_back(std::move(r.value()));
+												detail::capture_initializer_argument(init, ancestor_args.size() - 1, !class_def->chain_initializers_all_literal(), ancestor_args.back(),
+												                                     [&] { return detail::constructor_binding(ancestor.get(), ancestor_args.size() - 1); });
 											}
 
 											auto ancestor_script = std::dynamic_pointer_cast<script_class_definition>(ancestor);
@@ -15497,6 +15550,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 						"Failed to evaluate constructor initializer argument");
 				}
 				init_args.push_back(std::move(result.value()));
+				detail::capture_initializer_argument(initializer, init_args.size() - 1, !class_def->chain_initializers_all_literal(), init_args.back(),
+				                                     [&] { return detail::constructor_binding(class_def.get(), init_args.size() - 1); });
 			}
 
 			// fewest defaults used wins
@@ -15563,7 +15618,8 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
                                                             std::shared_ptr<environment> definition_env,
                                                             const std::vector<script_value>& args) {
 	std::shared_ptr<function_decl> matching_ctor;
-	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor);
+	std::vector<script_value> captured;
+	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor, captured);
 	if (!pre) {
 		return pre;
 	}
@@ -15575,7 +15631,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	method_env->set_access_context(class_def.get());
 	method_env->define(symbolizer_->get_this_id(), this_value);
 
-	auto result = execute_method_ast(matching_ctor, method_env, args);
+	auto result = execute_method_ast(matching_ctor, method_env, captured.empty() ? args : captured);
 
 #ifdef JAISCRIPT_VM_PROFILE
 	profile_ctor_cyc_[4] += __rdtsc() - prof_c4;
@@ -15593,10 +15649,12 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 op_status vm_backend::enter_constructor_in_loop(frame& f,
                                                 const std::shared_ptr<script_class_definition>& class_def,
                                                 const std::shared_ptr<environment>& definition_env,
-                                                const std::vector<script_value>& args,
+                                                const std::vector<script_value>& call_args,
                                                 type_info* result_stamp) {
 	std::shared_ptr<function_decl> matching_ctor;
-	auto pre = construct_instance_pre_body(class_def, definition_env, args, matching_ctor);
+	std::vector<script_value> captured;
+	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured);
+	const std::vector<script_value>& args = captured.empty() ? call_args : captured;
 	if (!pre) {
 		return raise_from(pre);
 	}
@@ -16497,6 +16555,9 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
 		case opcode::op_index_fused_decl: return exec_index_fused_decl(f, ins);
 		case opcode::op_cast: return exec_cast(f, ins);
+		case opcode::op_capture_arg:
+			if (detail::capture_candidate(stack_.back(), static_cast<uint8_t>(ins.c & 3))) { capture_arg(f, ins); }
+			return {};
 		default: return {};
 	}
 }
@@ -17828,6 +17889,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_parallel_for:
 			case opcode::op_cast:
 			case opcode::op_return_convert:
+			case opcode::op_capture_arg:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or
@@ -19348,7 +19410,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  const call_site* site, frame* caller_frame,
                                                  chunk* caller_code, const uint8_t* arg_proofs,
                                                  const script_defined_function* alias_fn,
-                                                 unit_stamp caller_unit) {
+                                                 unit_stamp caller_unit,
+                                                 size_t first_param, bool later_taken) {
 	// Stage-2 in-place binding: for zero-copy callers the args slice IS the window
 	// (window_base == args_base and param i sits in slot i), so a matching-type
 	// primitive argument is ALREADY its own slot - the bind copy is elided outright
@@ -19358,7 +19421,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 	// converted/cloned/boxed value INTO the slot, replacing the raw argument.
 	const bool in_place = callee.window_backed && args_are_stack(args) &&
 	                      callee.window_base == args_base;
-	for (size_t i = 0; i < parameters.size(); ++i) {
+	for (size_t i = first_param; i < parameters.size(); ++i) {
 		const auto& param = parameters[i];
 
 		if (i >= argc) {
@@ -19652,6 +19715,24 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				converted_arg = (!untyped && param.type->base_type == script_value_type::jai_object_type)
 				                ? script_value(arg_shield.deref()) : script_value(arg_shield);
 			} else {
+				if (!later_taken && i + 1 < argc && detail::binding_may_run_code(arg_shield, param.type.get()) &&
+				    detail::later_capture_candidate(i + 1, argc, [&](size_t j) -> const script_value& { return args[args_base + j]; })) [[unlikely]] {
+					// the arguments after this conversion were taken before the binding began: captured ahead of it, in place on the
+					// stack; a vector source resumes this parameter's bind over a captured copy
+					later_taken = true;
+					if (!args_are_stack(args)) {
+						std::vector<script_value> held;
+						held.reserve(argc);
+						for (size_t j = 0; j < argc; ++j) { held.push_back(args[args_base + j]); }
+						for (size_t j = i + 1; j < argc; ++j) {
+							detail::capture_argument(held[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
+						}
+						return bind_parameters(parameters, held, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, true);
+					}
+					for (size_t j = i + 1; j < argc; ++j) {
+						detail::capture_argument(stack_[args_base + j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
+					}
+				}
 				auto converted_result = try_convert_for_parameter(arg_shield, param.type,
 					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name});
 				if (!converted_result) {

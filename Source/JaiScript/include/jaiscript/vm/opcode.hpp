@@ -277,8 +277,15 @@ namespace jai::vm {
         op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
         op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code
+        op_capture_arg,     // a = call site (form new: the new_expr node), b = argument index, c = capture kind | form << 2: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
         op_halt,
     };
+    // op_capture_arg forms: where the callee stands while its arguments evaluate
+    inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
+    inline constexpr uint32_t capture_form_stack = 1;    // the callee value below the arguments (op_call)
+    inline constexpr uint32_t capture_form_method = 2;   // the receiver below the arguments, the member from the call site
+    inline constexpr uint32_t capture_form_new = 3;      // the class's constructor, looked up by name (op_new)
+    inline constexpr uint32_t capture_form_opaque = 4;   // a builtin or intrinsic: the value is dereferenced
     inline constexpr uint32_t k_cell_op_shift = 24;
     inline constexpr uint32_t k_cell_index_mask = (1u << k_cell_op_shift) - 1;
     inline constexpr uint32_t k_cell_math_float_arg = 0x40;   // op_c_math's math_fn bit: a stdlib alias, whose int argument converts to float first
@@ -539,6 +546,7 @@ namespace jai::vm {
             case opcode::op_call_builtin: return "CALL_BUILTIN";
             case opcode::op_concat_append: return "CONCAT_APPEND";
             case opcode::op_deref_top: return "DEREF_TOP";
+            case opcode::op_capture_arg: return "CAPTURE_ARG";
             case opcode::op_size_temp: return "SIZE_TEMP";
             case opcode::op_c_size: return "C_SIZE";
             case opcode::op_halt: return "HALT";

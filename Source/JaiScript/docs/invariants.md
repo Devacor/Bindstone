@@ -277,3 +277,30 @@ the saved reference then names the slot's reference wrapper; re-resolve the bind
 point the language's order puts the read (the interpreter's identifier compound path does this after the right
 side; the VM's compound store reads the slot after the right side by construction). Suite `Compound Assignment
 Order` pins it.
+
+## 13. A call argument takes its value when it is evaluated (2026-09-27)
+
+Arguments evaluate left to right after the callee, and a by-value argument's value is fixed at that point: a later
+argument (or a conversion the binding runs) that writes the variable, element or object it read does not change what
+the callee receives; a reference parameter binds the lvalue and sees the write. An evaluated argument can still share
+storage (an element read is a reference, a heavy value is a handle to a shared node, a host global is a cpp-bound
+box), so the value is taken explicitly, and only where a later argument may run user code:
+
+- The parse-time stamp `call_expr::arg_captures` / `new_expr::arg_captures` (`transient_read_marker::stamp_arg_captures`,
+  recomputed by the VM compiler for cloned nodes) marks every argument ahead of the last one that is not
+  `callout_free<true>` (a `math::` intrinsic over callout-free operands counts as free). Kind `ref` (a call or operator
+  result) acts only on a reference; kind `full` (a read of storage) also on a heavy value or a cpp-bound box.
+- Right after evaluating a marked argument, each backend captures it through the ONE kernel `detail/arg_capture.hpp`,
+  classified by how the callee resolved ahead of the arguments binds that position: a copy parameter dereferences,
+  copies a heavy payload and decodes a bound primitive; a `shared_ptr`/`weak_ptr` parameter and an opaque host callable
+  only dereference (a host `T&` or `bound_array<T>&` keeps working on the object); a reference parameter is untouched
+  (Tier 1 re-resolves from the expression, Tier 2 shares the evaluated reference). Interpreter: `capture_call_argument`
+  in every call path (math intrinsic, string builtin, direct method, generic) and both `new` loops; VM: `op_capture_arg`
+  with the callee's form (pending register, stack callee, method receiver, `new` class, builtin).
+- A binding conversion that may run user code (`binding_may_run_code`) captures the later arguments first, in both
+  binders; a coroutine captures its arguments in `coroutine_handle::set_function`, since it binds them at the first
+  resume.
+
+A new call form must stamp its arguments and capture on both backends; an operand held across a later operand's
+evaluation must leave the interpreter's value stack (statements clear it at their boundaries). Suite `Call Argument
+Capture` pins it.

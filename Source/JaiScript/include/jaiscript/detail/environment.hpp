@@ -320,6 +320,13 @@ namespace jai {
     // Create a bound method - binds 'this' as the first argument
     script_value make_bound_method(const script_value& this_obj, const script_value& method);
 
+    // make_bound_method's callable, named so a call site can see the method it forwards to
+    struct bound_method_fn {
+        script_value this_obj;
+        script_value method;
+        checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+    };
+
     // The ONE implicit-copy kernel for assignment-shaped store boundaries (decl from
     // lvalue, identifier/field/element assign, range-for bindings, destructuring,
     // by-value parameter binding), shared by both backends: plain values deep-copy

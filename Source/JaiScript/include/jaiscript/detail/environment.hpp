@@ -528,6 +528,7 @@ namespace jai {
         // from return_type on first call; mutable like backend_body_cache (workers hold
         // private function copies, so lazy fills never cross threads).
         mutable uint8_t backend_return_conv = 0;
+        mutable uint8_t backend_lean_bind = 0;   // 1: every parameter a by-value primitive slot in order (a matching argument is its own slot), 2: not
 
         // Precomputed so ref-free call sites can skip the per-call arg-metadata build
         bool has_reference_parameters = false;

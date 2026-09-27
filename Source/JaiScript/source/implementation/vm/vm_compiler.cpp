@@ -189,6 +189,7 @@ namespace {
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
+			case opcode::op_call_typed:
 			case opcode::op_probe_member:
 			case opcode::op_return:
 			case opcode::op_return_ident:
@@ -371,6 +372,7 @@ namespace {
 			case opcode::op_call:
 			case opcode::op_probe_callee:
 			case opcode::op_call_from_scratch:
+			case opcode::op_call_typed:
 			case opcode::op_probe_member:
 			case opcode::op_return:
 			case opcode::op_return_ident:
@@ -3254,7 +3256,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// sites re-resolved after it, so nothing the callee can reach is stale in the block.
 				size_t call_ip = ip + 1;
 				for (const auto& z : c.call_arg_zones) { if (z.first == ip + 1) { call_ip = z.second; break; } }
-				if (call_ip + 1 >= back || code[call_ip].op != opcode::op_call_from_scratch || code[call_ip].b != st.a || code[call_ip].c != 0) { refuse(chunk::cell_refusal_effect, ip); break; }
+				if (call_ip + 1 >= back || (code[call_ip].op != opcode::op_call_from_scratch && code[call_ip].op != opcode::op_call_typed) || code[call_ip].b != st.a || code[call_ip].c != 0) { refuse(chunk::cell_refusal_effect, ip); break; }
 				const size_t consumer_ip = call_ip + 1;
 				chunk::cell_loop::cell_call cc; cc.probe_ip = static_cast<uint32_t>(ip); cc.call_ip = static_cast<uint32_t>(call_ip); cc.consumer_ip = static_cast<uint32_t>(consumer_ip);
 				std::vector<ir_op> seq;   // one operation per instruction from the probe to the call
@@ -4382,6 +4384,10 @@ void vm_compiler::compile_call_into_temp(const expression_ptr& e, fused_operand&
 	const uint32_t t = static_cast<uint32_t>(temp_next_);
 	++temp_next_;
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	if (typed_lowering_ && t < k_typed_slot_mask && !chunk_->code.empty() && chunk_->code.back().op == opcode::op_call_from_scratch && chunk_->code.back().c == 0) {
+		typed_site_at(chunk_->code.size() - 1).operands[0] = t | (k_typed_dst_temp << k_typed_dst_shift);
+		chunk_->code.back().op = opcode::op_call_typed;
+	}
 	emit(opcode::op_call_temp, t);
 	out = fused_operand{};
 	out.slot = t;
@@ -5706,6 +5712,16 @@ void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl,
 		return;
 	}
 	if (init->get_type() == node_type::member_expr) { member_tail_into_temp(init.get()); }
+	if (typed_lowering_ && init->get_type() == node_type::call_expr && !code.empty() && code.back().op == opcode::op_call_from_scratch && code.back().c == 0 &&
+	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
+	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask && decl->type &&
+	    (decl->type->base_type == script_value_type::jai_int_type || decl->type->base_type == script_value_type::jai_float_type)) {
+		// `int x = f(...);` / `float x = f(...);`: a result of the declared kind lands in the slot at the return, the declaration skipped
+		chunk::typed_site& site = typed_site_at(code.size() - 1);
+		site.operands[0] = static_cast<uint32_t>(decl->slot_index) | (k_typed_dst_decl << k_typed_dst_shift);
+		site.stamp = decl->type.get();
+		code.back().op = opcode::op_call_typed;
+	}
 	emit(opcode::op_decl_var, add_node(decl), 1, lvalue_init);
 }
 

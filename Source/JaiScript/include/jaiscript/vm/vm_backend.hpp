@@ -637,6 +637,7 @@ namespace jai::vm {
             return next != opcode::op_pop && next != opcode::op_implicit_return;
         }
         void land_call_result(frame& caller, script_value&& v) {
+            if (caller.code->code[caller.ip].op == opcode::op_call_typed && call_typed_land(caller, v)) { caller.ip += 2; return; }
             if (next_op_discards_result(caller)) { caller.ip += 2; return; }
             if (block_landing_discards_result(caller)) { ++caller.ip; return; }   // a statement call inside a block: the landing has nothing to consume
             stack_.push_back(std::move(v));
@@ -1730,6 +1731,7 @@ namespace jai::vm {
 #endif
         bool inline_site_holds(frame& f, const chunk::inline_site& site);
         bool math_alias_holds(frame& f, const chunk::cell_loop::math_alias_site& site);
+        bool call_typed_land(frame& caller, const script_value& v);   // op_call_typed's landing (the caller's ip on the call)
         bool inline_method_holds(frame& f, const chunk::inline_site& site);   // the identity, read without running a getter
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell

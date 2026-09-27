@@ -448,10 +448,14 @@ engine stays usable", not by `check_throws`.
   the cache key). Engine-core location builtins on every engine: `current_script_dir/path` (the executing
   file, a function because imports change it), `root_script_dir/path` (the outermost `execute_file`),
   `executable_dir` (alias `bin_dir`), `app_data_dir/app_cache_dir(name)` (platform defaults,
-  `engine::app_directory_resolvers` for hosts), `working_dir`, `parent_dir`, `file_name`. `parent_dir`
+  `engine::app_directory_resolvers` for hosts), `working_dir`, `parent_dir`, `file_name`, and `file_data(path)`
+  (a `map<string, var>` for the file or folder the ladder finds: `path` canonical absolute, `filename`,
+  `extension` with its dot, `created`/`modified` int ms since the Unix epoch - `created` null where the platform
+  does not report it - `size` int bytes, `is_directory`; nothing there = null, so a watcher polls it without a try;
+  one stat, the import cache's). `parent_dir`
   weakly canonicalizes its result (not purely lexical); `file_name` is lexical. Core source loading,
   location queries and disk caches do touch the filesystem. General `read_file`/`write_file`/`list_dir`/
-  `writable_dir` are host functions (the runner has them). `.jaibite` siblings mark their own file (v14)
+  `writable_dir`/`move_file` are host functions (the runner has them). `.jaibite` siblings mark their own file (v14)
   so a moved folder keeps its names.
 - **Filesystem privilege**: enabled by default. C++ `eng->disable(jai::filesystem)`, `enable(...)`,
   `is_enabled(...)`; `jai::filesystem` aliases scoped `jai::privilege::filesystem`, the only built-in

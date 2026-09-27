@@ -119,7 +119,8 @@ zip_extract(zip, entry, dest) -> bool                             (CRC-32 verifi
 `move_file("save.tmp", "save.txt")`. On one volume the destination is replaced in a single
 operation (`MoveFileEx` on Windows, `rename(2)` elsewhere), so a crash leaves the old file or
 the new one, never half of either; across volumes it copies, then removes the source. Every
-function above requires the engine's `filesystem` privilege.
+function above requires the engine's `filesystem` privilege. A file's metadata (size, created and
+modified times) is the engine-core `file_data(path)` builtin, on every engine.
 
 Where things are is not the host's to invent: every engine carries the location builtins
 (`resolve_path`, `current_script_dir`, `root_script_dir`, `executable_dir` with alias

@@ -89,7 +89,7 @@ public:
                 "root_script_path()", "root_script_dir()", "current_script_path()", "current_script_dir()",
                 "resolve_path(\"missing.jai\")", "executable_path()", "executable_dir()", "bin_dir()",
                 "working_dir()", "parent_dir(\"a/b.jai\")", "file_name(\"a/b.jai\")",
-                "app_data_dir(\"JaiTest\")", "app_cache_dir(\"JaiTest\")"
+                "app_data_dir(\"JaiTest\")", "app_cache_dir(\"JaiTest\")", "file_data(\"missing.jai\")"
             };
             auto eng = make_engine();
             filesystem_enabled(*eng, false);

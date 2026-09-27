@@ -17515,6 +17515,7 @@ vm_backend::profile_chunk_stats& vm_backend::profile_stats_for(const chunk& code
 		st.name = code.function_name;
 		st.census = census_chunk(code, symbolizer_);
 		st.refusals = code.cell_refusals;
+		st.inline_refusals = code.inline_refusals;
 		st.closed_loops = code.cell_loops.size();
 		st.lines.assign(code.code.size(), 0);
 		for (size_t ip = 0; ip < code.code.size(); ++ip) {
@@ -18161,7 +18162,7 @@ void vm_backend::dump_opcode_profile() const {
 	{
 		// the calls the inliner kept, by callee and rule (sites, over the chunks that ran)
 		std::map<std::string, std::map<std::string, uint32_t>> kept;
-		for (const auto& [code, st] : profile_chunks_) { if (!code) continue; for (const auto& r : code->inline_refusals) { ++kept[r.callee][r.reason ? r.reason : "?"]; } }
+		for (const auto& [code, st] : profile_chunks_) { for (const auto& r : st.inline_refusals) { ++kept[r.callee][r.reason ? r.reason : "?"]; } }
 		if (!kept.empty()) {
 			fprintf(stderr, "\n[vm-profile] calls the inliner kept (callee: rule x sites):\n");
 			for (const auto& [callee, rules] : kept) { for (const auto& [rule, n] : rules) { fprintf(stderr, "  %-28s %s x %u\n", callee.c_str(), rule.c_str(), n); } }

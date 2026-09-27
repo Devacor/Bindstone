@@ -766,6 +766,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		callable_.declared.insert(id);
 		if (p.slot_index != SIZE_MAX && (p.is_reference || p.ref_escaping)) { callable_.escaping.insert(static_cast<uint32_t>(p.slot_index)); }
 		if (p.slot_index != SIZE_MAX && !p.is_reference && primitive_declared_type(p.type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(p.slot_index)); }
+		if (p.slot_index != SIZE_MAX && !p.is_reference) { callable_.slot_types[static_cast<uint32_t>(p.slot_index)] = p.type.get(); }
 #ifdef JAISCRIPT_VM_PROFILE
 		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
 #endif
@@ -6271,6 +6272,7 @@ void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_dec
 	const bool is_reference = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
 	if (decl->ref_escaping && decl->slot_index != SIZE_MAX) { callable_.escaping.insert(static_cast<uint32_t>(decl->slot_index)); }   // a reference or a capture reaches it
 	if (!is_reference && decl->slot_index != SIZE_MAX && primitive_declared_type(decl->type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(decl->slot_index)); }   // a typed scalar slot holds that kind at every point
+	if (!is_reference && decl->slot_index != SIZE_MAX) { callable_.slot_types[static_cast<uint32_t>(decl->slot_index)] = decl->type.get(); }
 	if (!is_reference && try_inline_variable_decl(decl)) return;
 
 	// Locals declared through env fallback in lambda contexts keep working because the

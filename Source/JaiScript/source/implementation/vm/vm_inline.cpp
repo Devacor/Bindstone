@@ -41,6 +41,9 @@ struct inline_context {
 	bool writes_global = false;
 	bool writes_member = false;
 	bool writes_ref = false;                                       // a store or an increment through a reference parameter: the caller's variable or element
+	std::vector<const type_info*> slot_types;                      // per callee slot: its declared type (parameters and the body's declarations)
+	std::vector<uint8_t> ref_stored;                               // per callee slot: a reference parameter stored as a whole
+	std::vector<uint8_t> ref_store_unproven;                       // per callee slot: such a store the checker did not prove lands the parameter's type
 	bool reads_env = false;                                        // the body names an environment value (a global, a stdlib alias)
 	struct land_ctx lc;                                            // the stdlib aliases and the nested leaves a body may call
 	std::vector<std::shared_ptr<ast_node>> pins;
@@ -170,13 +173,65 @@ std::shared_ptr<identifier_expr> clone_identifier(const identifier_expr* id, inl
 	return n;
 }
 
+// the kind plain arithmetic yields (no numeric operator registered); jai_null_type: not known
+script_value_type arith_kind(token_type op, script_value_type l, script_value_type r) {
+	using K = script_value_type;
+	const bool li = l == K::jai_int_type, lf = l == K::jai_float_type, ri = r == K::jai_int_type, rf = r == K::jai_float_type;
+	switch (op) {
+	case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash:
+		if (li && ri) return K::jai_int_type;
+		return (li || lf) && (ri || rf) ? K::jai_float_type : K::jai_null_type;
+	case token_type::percent: case token_type::ampersand: case token_type::pipe: case token_type::caret: case token_type::left_shift: case token_type::right_shift:
+		return li && ri ? K::jai_int_type : K::jai_null_type;
+	case token_type::less: case token_type::greater: case token_type::less_equal: case token_type::greater_equal: case token_type::equal_equal: case token_type::bang_equal:
+		return (li || lf) && (ri || rf) ? K::jai_bool_type : K::jai_null_type;
+	default: return K::jai_null_type;
+	}
+}
+// the kind a value of the callee's body has at run time, from its own declarations: a literal, a name declared a scalar (a reference
+// parameter's declared type, which the rename requires of the caller's variable), plain arithmetic, a comparison, a negation, a cast to
+// a scalar, a ternary whose arms agree; jai_null_type otherwise
+script_value_type value_kind(const expression* e, const inline_context& c) {
+	using K = script_value_type;
+	if (!e) return K::jai_null_type;
+	switch (e->get_type()) {
+	case node_type::literal_expr: {
+		const script_value& v = static_cast<const literal_expr*>(e)->value;
+		return v.is_int() ? K::jai_int_type : v.is_float() ? K::jai_float_type : v.is_bool() ? K::jai_bool_type : K::jai_null_type;
+	}
+	case node_type::identifier_expr: {
+		auto* id = static_cast<const identifier_expr*>(e);
+		if (id->slot_index == SIZE_MAX || id->slot_index >= c.slot_types.size() || !scalar_type(c.slot_types[id->slot_index])) return K::jai_null_type;
+		return c.slot_types[id->slot_index]->base_type;
+	}
+	case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); return arith_kind(b->op.type, value_kind(b->left.get(), c), value_kind(b->right.get(), c)); }
+	case node_type::unary_expr: {
+		auto* u = static_cast<const unary_expr*>(e);
+		const K k = value_kind(u->operand.get(), c);
+		if (u->op.type == token_type::minus) return k == K::jai_int_type || k == K::jai_float_type ? k : K::jai_null_type;
+		if (u->op.type == token_type::tilde) return k == K::jai_int_type ? k : K::jai_null_type;
+		return K::jai_null_type;
+	}
+	case node_type::ternary_expr: {
+		auto* t = static_cast<const ternary_expr*>(e);
+		const K a = value_kind(t->then_expression.get(), c);
+		return a == value_kind(t->else_expression.get(), c) ? a : K::jai_null_type;
+	}
+	case node_type::cast_expr: { auto* k = static_cast<const cast_expr*>(e); return !k->by_reference && scalar_type(k->target.get()) ? k->target->base_type : K::jai_null_type; }
+	default: return K::jai_null_type;
+	}
+}
+
 // a store's target: a global, the caller's variable through a reference parameter (renamed or aliased), a field or an element
-void note_store(const expression* target, inline_context& c) {
+void note_store(const expression* target, inline_context& c, bool proven) {
 	if (target->get_type() == node_type::identifier_expr) {
 		auto* t = static_cast<const identifier_expr*>(target);
 		const bool renamed = t->slot_index != SIZE_MAX && t->slot_index < c.renames.size() && c.renames[t->slot_index];
 		if (t->slot_index == SIZE_MAX || renamed) { c.writes_global = true; }
-		if (t->slot_index != SIZE_MAX && t->slot_index < c.ref_slots.size() && c.ref_slots[t->slot_index]) { c.writes_ref = true; }
+		if (t->slot_index != SIZE_MAX && t->slot_index < c.ref_slots.size() && c.ref_slots[t->slot_index]) {
+			c.writes_ref = true;
+			if (t->slot_index < c.ref_stored.size()) { c.ref_stored[t->slot_index] = 1; if (!proven) { c.ref_store_unproven[t->slot_index] = 1; } }
+		}
 		return;
 	}
 	c.writes_member = true;
@@ -218,7 +273,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	}
 	case node_type::unary_expr: {
 		auto* u = static_cast<const unary_expr*>(e.get());
-		if (incdec_op(u->op.type) && u->operand) { note_store(u->operand.get(), c); }   // an identifier's increment (any other target desugars to a compound store)
+		if (incdec_op(u->op.type) && u->operand) { note_store(u->operand.get(), c, true); }   // an identifier's increment keeps its kind (any other target desugars to a compound store)
 		auto o = clone_expr(u->operand, c);
 		if (!c.ok) return nullptr;
 		return c.make<unary_expr>(u->location, u->op, o, u->is_postfix);
@@ -227,7 +282,23 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto* a = static_cast<const assignment_expr*>(e.get());
 		const node_type tk = a->target->get_type();
 		if (tk != node_type::identifier_expr && tk != node_type::member_expr && tk != node_type::binary_expr) { c.fail("a store target the graft does not take"); return nullptr; }
-		note_store(a->target.get(), c);
+		bool lands = false;   // a store through a reference parameter lands the parameter's declared kind
+		if (a->target->get_type() == node_type::identifier_expr) {
+			auto* t = static_cast<const identifier_expr*>(a->target.get());
+			if (t->slot_index != SIZE_MAX && t->slot_index < c.slot_types.size() && scalar_type(c.slot_types[t->slot_index])) {
+				const script_value_type want = c.slot_types[t->slot_index]->base_type;
+				token_type base = token_type::plus;
+				switch (a->op.type) {
+				case token_type::minus_equal: base = token_type::minus; break;
+				case token_type::star_equal: base = token_type::star; break;
+				case token_type::slash_equal: base = token_type::slash; break;
+				case token_type::percent_equal: base = token_type::percent; break;
+				default: break;
+				}
+				lands = a->op.type == token_type::equal ? value_kind(a->value.get(), c) == want : arith_kind(base, want, value_kind(a->value.get(), c)) == want;
+			}
+		}
+		note_store(a->target.get(), c, lands);
 		auto t = clone_expr(a->target, c); auto v = clone_expr(a->value, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<assignment_expr>(a->location, t, a->op, v);
@@ -412,6 +483,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 			if (c.in_loop && v->initializer && !landable(v->initializer.get(), &c.lc)) { c.fail("a declaration the block cannot land"); return out; }   // a declaration the block cannot land: the call stays
 			expression_ptr init = v->initializer ? clone_expr(v->initializer, c) : nullptr;
 			if (!c.ok) return out;
+			if (v->slot_index < c.slot_types.size()) { c.slot_types[v->slot_index] = v->type.get(); }
 			auto n = c.make<variable_decl>(v->location, v->type, v->name, v->name_id, init);
 			n->slot_index = v->slot_index + c.slot_offset;
 			n->static_init_proof = v->static_init_proof;
@@ -582,6 +654,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	std::shared_ptr<call_expr> call = events.front();
 	out.call = call;   // the call the plan is about, named with the rule that keeps it when the plan fails
 	if (unsupported) { out.why = "a statement the graft does not take"; return false; }
+	out.plain_numeric = false;
 	std::vector<const call_expr*> alias_pins, probe_pins;
 	bool args_call = false;   // the grafted call's arguments hold calls: they run inside its parameters, after its guard
 	{
@@ -629,11 +702,34 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	inline_context probe; probe.lc = graft_land_ctx(fn.get()); probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
 	probe.returns_proven = fn->graft_return_kind != 0;
 	probe.receiver = out.receiver;
-	probe.ref_slots.assign(fn->local_count, 0);
-	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { probe.ref_slots[p.slot_index] = 1; } }
+	probe.ref_slots.assign(fn->local_count, 0); probe.ref_stored.assign(fn->local_count, 0); probe.ref_store_unproven.assign(fn->local_count, 0); probe.slot_types.assign(fn->local_count, nullptr);
+	for (size_t i = 0; i < fn->parameters.size(); ++i) {
+		const parameter& p = fn->parameters[i];
+		if (p.slot_index >= fn->local_count) continue;
+		probe.slot_types[p.slot_index] = p.type.get();
+		if (!p.is_reference) continue;
+		probe.ref_slots[p.slot_index] = 1;
+		if (call->arguments[i]->get_type() != node_type::identifier_expr) continue;
+		// a reference parameter's declared type binds nothing: the variable it names is what it holds
+		auto* id = static_cast<const identifier_expr*>(call->arguments[i].get());
+		const auto declared = id->names_value_decl ? callable_.slot_types.find(static_cast<uint32_t>(id->slot_index)) : callable_.slot_types.end();
+		probe.slot_types[p.slot_index] = declared == callable_.slot_types.end() ? nullptr : declared->second;
+	}
 	if (!void_type(fn->return_type.get())) { auto r = std::make_shared<identifier_expr>(fn->body->location, std::string_view("\x01inl"), uint64_t(1)); probe.result = r; probe.pins.push_back(r); }
 	(void)clone_body(fn->body->declarations, probe, true);
 	if (!probe.ok) { out.why = probe.why ? probe.why : "a body the graft does not take"; return false; }
+	// a reference parameter renamed to the caller's variable turns a store through it into a store of the variable, which enforces the
+	// variable's declared type where the reference's store does not: equal when the variable is a reference or untyped, or declared a
+	// scalar type with every store proven to land that type
+	for (size_t i = 0; i < fn->parameters.size(); ++i) {
+		const parameter& p = fn->parameters[i];
+		if (!p.is_reference || call->arguments[i]->get_type() != node_type::identifier_expr || p.slot_index >= probe.ref_stored.size() || !probe.ref_stored[p.slot_index]) continue;
+		if (!static_cast<const identifier_expr*>(call->arguments[i].get())->names_value_decl) continue;
+		const type_info* vt = probe.slot_types[p.slot_index];
+		if (vt && vt->base_type == script_value_type::jai_any_type) continue;
+		if (scalar_type(vt) && !probe.ref_store_unproven[p.slot_index]) { out.plain_numeric = true; continue; }
+		out.why = "a reference parameter whose store the caller's variable would convert"; return false;
+	}
 	// the operands before the call: the left siblings along the path from the root
 	std::vector<expression_ptr> path;
 	if (!find_path(root, call.get(), path)) { out.why = "a position the graft does not take"; return false; }
@@ -750,6 +846,19 @@ type_info_ptr vm_compiler::graft_result_type(const function_decl* fn) {
 	return inline_type(fn->graft_return_kind == 1 ? script_value_type::jai_int_type : fn->graft_return_kind == 2 ? script_value_type::jai_float_type : script_value_type::jai_bool_type);
 }
 
+// `var&`: a reference parameter's alias declaration binds as the call binds the parameter (no check at the bind; a store through it
+// follows the referent)
+type_info_ptr vm_compiler::inline_ref_type() {
+	for (auto& t : chunk_->owned_types) { if (t->base_type == script_value_type::jai_reference_type) return type_info_ptr(t.get()); }
+	chunk_->owned_types.push_back(std::make_unique<type_info>(script_value_type::jai_any_type, std::string_view("var")));
+	const type_info_ptr any(chunk_->owned_types.back().get());
+	auto ref = std::make_unique<type_info>(script_value_type::jai_reference_type, std::string_view("var&"));
+	ref->type_params.push_back(any);
+	ref->id = symbolizer_->intern(ref->canonical_name());
+	chunk_->owned_types.push_back(std::move(ref));
+	return type_info_ptr(chunk_->owned_types.back().get());
+}
+
 type_info_ptr vm_compiler::inline_type(script_value_type kind) {
 	for (auto& t : chunk_->owned_types) { if (t->base_type == kind) return type_info_ptr(t.get()); }
 	const char* name = kind == script_value_type::jai_int_type ? "int" : kind == script_value_type::jai_float_type ? "float" : kind == script_value_type::jai_bool_type ? "bool" : "string";
@@ -833,6 +942,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	}
 	site.body = fn->body.get();
 	site.decl = plan.fn;
+	site.plain_numeric = plan.plain_numeric;
 	site.call_stmt = current_stmt_;
 	site.result_slot = result ? static_cast<uint32_t>(result->slot_index) : k_invalid_u32;
 	const uint32_t site_index = static_cast<uint32_t>(chunk_->inline_sites.size());
@@ -865,7 +975,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			ctx.renames[p.slot_index] = copy_identifier(id, id->location, ctx);
 			continue;
 		}
-		auto d = std::make_shared<variable_decl>(call->location, p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), a);
+		auto d = std::make_shared<variable_decl>(call->location, p.is_reference ? inline_ref_type() : p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), a);   // an element: its alias, as the call binds it
 		d->slot_index = base + p.slot_index;
 		ctx.pins.push_back(d);
 		params.push_back(d);

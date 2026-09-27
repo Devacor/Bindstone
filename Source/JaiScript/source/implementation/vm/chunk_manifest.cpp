@@ -192,7 +192,7 @@ namespace {
 			out << pre << "inline_sites " << ch.inline_sites.size() << "\n";
 			for (size_t i = 0; i < ch.inline_sites.size(); ++i) {
 				const chunk::inline_site& s = ch.inline_sites[i];
-				out << pre << " " << i << " guard=" << s.guard_ip << " begin=" << s.begin_ip << " fallback=" << s.fallback_ip << " join=" << s.join_ip << " name=" << u(s.name_symbol) << "\n";
+				out << pre << " " << i << " guard=" << s.guard_ip << " begin=" << s.begin_ip << " fallback=" << s.fallback_ip << " join=" << s.join_ip << " name=" << u(s.name_symbol) << " env=" << b(s.env_reads) << "\n";
 			}
 			out << pre << "cell_loops " << ch.cell_loops.size() << "\n";
 			for (size_t i = 0; i < ch.cell_loops.size(); ++i) {

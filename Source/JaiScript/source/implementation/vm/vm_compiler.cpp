@@ -5348,6 +5348,15 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		}
 	}
 
+	if (expr->callee->get_type() == node_type::identifier_expr && math_temp_operand(expr.get()) != detail::math_fn::none) {
+		// a stdlib alias whose value the stack takes (a return, an argument, a compound's right side): its temp, then a load of it
+		const size_t mark = temp_next_;
+		fused_operand o;
+		compile_math_into_temp(expr, o);
+		emit(opcode::op_load, o.slot, o.symbol, 0);
+		temp_next_ = mark;
+		return;
+	}
 	// Callee-first probe (Dev ruling 2026-07-08): identifier callees resolve via
 	// op_probe_callee at the pre-args observation point into the pending register -
 	// no value-stack materialization, byte-identical semantics. Other callee shapes

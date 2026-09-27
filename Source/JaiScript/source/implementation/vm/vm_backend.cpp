@@ -10379,6 +10379,10 @@ bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_s
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_) return false;
 	if (site.method) return inline_method_holds(f, site);
+	if (site.env_reads && f.locals && !f.top_level) {
+		ensure_frame_member_scope(f, environment_.get());
+		if (frame_scope_active(f)) return false;
+	}
 	const script_value* v = fused_cmp_operand(f, site.callee, static_cast<size_t>(site.guard_ip) * 3);
 	if (!v) return false;
 	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }

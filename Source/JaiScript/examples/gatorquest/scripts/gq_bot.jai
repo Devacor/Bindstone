@@ -35,11 +35,13 @@ bool bot_walkable(int w, int x, int y, int tx, int ty) {
 	if (k == 0 || k == 3 || k == 5) { return x == tx && y == ty && k != 0; }
 	int st = TILES_DEF[t].station;
 	if ((st == 7 || st == 8) && (x != tx || y != ty)) { return false; }
-	// shopkeepers never step aside: route around them
+	// shopkeepers never step aside: route around them (and around everyone once stuck)
 	int o = OCC[W_OFF[w] + y * W_W[w] + x] - 1;
-	if (o >= 0 && MOB_ROLE[o] >= 0 && (x != tx || y != ty)) { return false; }
+	if (o >= 0 && (MOB_ROLE[o] >= 0 || BFS_AVOID_MOBS) && (x != tx || y != ty)) { return false; }
 	return true;
 }
+
+bool BFS_AVOID_MOBS = false;
 
 // a route from the mobile toward (tx, ty) as a list of directions; `near` = stop when adjacent.
 // empty = already there; [-1] = no route
@@ -128,13 +130,21 @@ bool bot_go(Bot& b, int m, int x, int y, bool near) {
 	bool replan = b.path_w != MOB_WORLD[m] || b.path_tx != x || b.path_ty != y || b.path_i >= b.path.size();
 	if (!replan && (MOB_X[m] != b.last_x || MOB_Y[m] != b.last_y)) { replan = true; }
 	if (!replan && b.stuck > 3) { replan = true; }
+	if (b.stuck > 8) {
+		// still stuck after routing around everyone: shuffle sideways and try again
+		intent_move(b.slot, bot_roll(b, 8));
+		b.stuck = 0;
+		b.path = [];
+		return false;
+	}
 	if (replan) {
+		BFS_AVOID_MOBS = b.stuck > 3;
 		b.path = bfs_path(m, x, y, near, 6000);
+		BFS_AVOID_MOBS = false;
 		b.path_i = 0;
 		b.path_w = MOB_WORLD[m];
 		b.path_tx = x;
 		b.path_ty = y;
-		b.stuck = 0;
 		if (b.path.size() == 0) { intent_move(b.slot, -1); return true; }
 		if (b.path[0] < 0) {
 			intent_move(b.slot, bot_roll(b, 8));
@@ -152,6 +162,7 @@ bool bot_go(Bot& b, int m, int x, int y, bool near) {
 		b.last_x = nx;
 		b.last_y = ny;
 		b.path_i = b.path_i + 1;
+		b.stuck = 0;
 	} else {
 		b.last_x = MOB_X[m];
 		b.last_y = MOB_Y[m];

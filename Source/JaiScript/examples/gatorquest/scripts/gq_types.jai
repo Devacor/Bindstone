@@ -54,6 +54,90 @@ class Item {
 	bool empty() { return base < 0 || qty <= 0; }
 }
 
+// what one player's client knows: filled only from snapshots, read by the renderer and HUD
+class ClientView {
+	int slot = -1;
+	int my_ser = -1;
+	int tick = 0;
+	int world = 0;
+	int weather = 0;
+	int tod = 0;
+	int day = 1;
+	int rx_ms = 0;
+	int snaps = 0;
+	array<int> m_ser;
+	array<int> m_kind;
+	array<int> m_x;
+	array<int> m_y;
+	array<int> m_px;
+	array<int> m_py;
+	array<int> m_mt;
+	array<int> m_md;
+	array<int> m_dir;
+	array<int> m_hp;
+	array<int> m_flags;
+	array<int> m_role;
+	array<int> m_slot;
+	array<int> m_hue;
+	array<string> m_name;
+	array<int> i_ser;
+	array<int> i_base;
+	array<int> i_rar;
+	array<int> i_x;
+	array<int> i_y;
+	array<int> i_qty;
+	map<int, int> tover;
+	int hp = 0;
+	int hpmax = 1;
+	int mp = 0;
+	int mpmax = 1;
+	int target_ser = -1;
+	int action = 0;
+	int action_left = 0;
+	int gold = 0;
+	int bank_gold = 0;
+	int fame = 0;
+	int karma = 0;
+	int str = 0;
+	int dex = 0;
+	int intel = 0;
+	int armor = 0;
+	int luck = 0;
+	int ghost = 0;
+	string name = "";
+	string title = "";
+	int hue = 0;
+	bool pvp = false;
+	int party = -1;
+	array<int> skills;
+	array<Item> pack;
+	array<Item> worn;
+	array<Item> bank;
+	array<int> spells;
+	array<string> journal;
+	int buff_night = 0;
+	int buff_fire = 0;
+	int buff_regen = 0;
+	int sheet_version = -1;
+	array<int> e_kind;
+	array<int> e_w;
+	array<int> e_x;
+	array<int> e_y;
+	array<int> e_a;
+	array<int> e_b;
+	array<int> e_c;
+	array<string> e_text;
+	array<string> log;
+	array<int> log_col;
+	int dlg_ser = -1;
+	int dlg_role = -1;
+	bool dlg_pending = false;
+	array<string> party_names;
+	array<int> party_hp;
+	array<string> who;
+	string status = "";
+}
+
 // an autopilot driving one player slot (smoke tests, net tests, idle demo)
 class Bot {
 	int slot = -1;

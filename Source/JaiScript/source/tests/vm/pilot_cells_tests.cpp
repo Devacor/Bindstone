@@ -5342,6 +5342,36 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
 			check_true(fl.find("-- inlined bumpf") != std::string::npos && fl.find("-- inlined incf") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "a proven float reference still grafts and the loop closes: " + fl);
 		});
+		// a bare stdlib alias call is float wherever its name binds the builtin: the arithmetic around it takes the typed rows (the proof the
+		// rows guard), so the block runs its pinned forms; a rebinding to a function returning an int or a string keeps the general values
+		// and texts
+		test("a_stdlib_alias_operand_is_a_float_operand", [this]() {
+			const std::string src = "[[warn_mode]]\nvar SIN0 = sin;\nfloat W = 0.5; float T = 0.25;\n"
+				"function f(float q) -> float { float wx = q + W * sin(q * 1.3 + T * 0.7); return wx; }\n"
+				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; float wx = q + W * sin(q * 1.3 + T * 0.7); s += wx + f(q); } return s; }\n"
+				"function rb(int i) -> int { if (i == 5) { sin = function(float v) { return 3; }; } return i; }\n"
+				"function run2(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; s += q + W * sin(q); int k = rb(i); s += k; } return s; }\n"
+				"string out = to_string(run(40)) + \" \" + to_string(run2(10));\n"
+				"sin = function(float v) { return \"x\"; };\n"
+				"function bad() -> string { try { float q = 1.0; float r = q + W * sin(q); return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"function bad2() -> string { try { float z = sin(1.0); return to_string(z); } catch (e) { return \"E:\" + e; } }\n"
+				"function bad3() -> string { try { int k = sin(1.0); return to_string(k); } catch (e) { return \"E:\" + e; } }\n"
+				"out += \" \" + bad() + \" \" + bad2() + \" \" + bad3(); sin = SIN0; out + \" \" + to_string(run(3));";
+			both(src, "", "alias operands");
+			both(src, "", "alias operands, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== f ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("BINARY_FUSED") == std::string::npos && fl.find("T_MUL_FF") != std::string::npos, "the arithmetic around the alias takes typed rows: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		// a miss inside a block's inner loop resumes with what the general form reads next: an inner counted loop's compare back to its body
 		// resumes at the generic path's loop back (the var already stepped, never stepped twice), and a compiler value live where the inner
 		// loop's body begins (a graft's parameter over the graft's own loop) is flushed anywhere in that loop, since its back edge reads it again

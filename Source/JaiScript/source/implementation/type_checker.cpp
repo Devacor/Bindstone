@@ -2768,6 +2768,8 @@ private:
 			if (eng_.has_function(name)) {
 				note_global_use(id->name);
 				check_host_call(name, args, c->location);
+				// a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
+				if (args.size() == 1 && eng_.math_alias_fn(id->symbol_id) < engine::k_math_alias_rows) { return ctype::make(ctype::float_k); }
 				return host_result_type(name);
 			}
 			if (eng_.has_variable(name)) { note_global_use(id->name); return {}; }

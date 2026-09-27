@@ -108,11 +108,18 @@ everything.) On top, the host binds file IO so scripts can actually save things:
 ```
 read_file(path) -> string      write_file(path, text) -> bool   (creates missing folders)
 file_exists(path) -> bool      delete_file(path) -> bool
+move_file(from, to) -> bool    (replaces `to`; false when `from` is not a file)
 dir_exists(path) -> bool       make_dirs(path) -> bool           list_dir(path) -> array<string>
 writable_dir(path) -> bool     (creates the folder if missing, writes and removes a probe)
 sha256_file(path) -> string    zip_entries(zip) -> array<string>
 zip_extract(zip, entry, dest) -> bool                             (CRC-32 verified)
 ```
+
+`move_file` is the last step of a safe save: write `save.tmp`, check it, then
+`move_file("save.tmp", "save.txt")`. On one volume the destination is replaced in a single
+operation (`MoveFileEx` on Windows, `rename(2)` elsewhere), so a crash leaves the old file or
+the new one, never half of either; across volumes it copies, then removes the source. Every
+function above requires the engine's `filesystem` privilege.
 
 Where things are is not the host's to invent: every engine carries the location builtins
 (`resolve_path`, `current_script_dir`, `root_script_dir`, `executable_dir` with alias

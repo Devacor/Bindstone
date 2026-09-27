@@ -91,9 +91,7 @@ public:
 		shifts_and_budget();
 		debugger_armed_mid_run();
 		parallel_bodies_with_leaves();
-#ifdef JAISCRIPT_SPEC_KNOWN_BUGS
-		known_bugs();
-#endif
+		removed_element_aliases();
 	}
 
 private:
@@ -469,7 +467,7 @@ private:
 		});
 	}
 
-	void known_bugs() {
+	void removed_element_aliases() {
 		test("an_element_alias_whose_element_a_callee_removed_raises_the_removed_element_text", [this]() {
 			// docs/reference_model.md ELEMENT: a shrink under the reference raises "Reference to a removed array element"; the guide
 			// (ch. 3) makes it stop the script; docs/diagnostics.md: one text on both backends

@@ -269,6 +269,10 @@ namespace jai {
         // address each time and bounds-check it (see reference_holder::container).
         static script_value make_element_reference(const strong_ptr<script_array>& container, size_t index,
                                                    engine* eng, type_info_ptr element_type);
+        // The element reference a binding made while the element existed, after the array shrank past it: every touch raises
+        // "Reference to a removed array element", as the reference minted in range would (the VM's cell flush of an alias)
+        static script_value make_removed_element_reference(const strong_ptr<script_array>& container, size_t index,
+                                                           engine* eng, type_info_ptr element_type);
         // Instance-pinned reference to a class field: deref/assign-through re-resolve the
         // field node by id (never a cached address), so hot reload cannot dangle it.
         static script_value make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,

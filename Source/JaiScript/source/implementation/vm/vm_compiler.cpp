@@ -4693,7 +4693,11 @@ void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand&
 	const expression_ptr& arg = call->arguments[0];
 	uint32_t alias_site = k_invalid_u32, alias_temp = k_invalid_u32;
 	uint32_t args_begin = 0;
-	if (math_alias_call(e.get())) {
+	if (auto pin = alias_pins_.find(call); pin != alias_pins_.end()) {   // a guard above a graft resolved the callee in its place
+		alias_site = pin->second.first; alias_temp = pin->second.second;
+		alias_pins_.erase(pin);
+		args_begin = static_cast<uint32_t>(chunk_->code.size());
+	} else if (math_alias_call(e.get())) {
 		// the real call's site, as compile_call builds it; an argument evaluated ahead of the op that could raise or run user
 		// code needs the callee resolved first, at the guard
 		call_site site;
@@ -5852,6 +5856,12 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	// Consumed HERE so nested arg calls never inherit the return-position hint
 	const bool tail_site = pending_tail_call_;
 	pending_tail_call_ = false;
+	if (alias_pins_.count(expr.get())) {   // a stdlib alias whose guard resolved the callee ahead of a graft: the math row, its value pushed
+		fused_operand t;
+		compile_math_into_temp(expr, t);
+		emit(opcode::op_load, t.slot, t.symbol, 0);
+		return;
+	}
 	if (expr->callee->get_type() == node_type::identifier_expr) {
 		auto* ident = static_cast<identifier_expr*>(expr->callee.get());
 		if (ident->name == "weak_from_this" || ident->name == "shared_from_this") {
@@ -6026,7 +6036,10 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	// keep the verbatim load+op_call pair.
 	const bool probe_callee = expr->callee->get_type() == node_type::identifier_expr;
 	size_t probe_ip = SIZE_MAX;
-	if (probe_callee) {
+	if (auto pinned = callee_probes_.find(expr.get()); probe_callee && pinned != callee_probes_.end()) {   // probed at its place, ahead of a graft in its arguments
+		probe_ip = pinned->second.first;
+		callee_probes_.erase(pinned);
+	} else if (probe_callee) {
 		probe_ip = emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(expr->arguments.size()));
 	} else {
 		compile_expression(expr->callee);

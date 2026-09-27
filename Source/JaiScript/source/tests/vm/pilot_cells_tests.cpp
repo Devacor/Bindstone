@@ -5245,6 +5245,83 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// an enclosing call's callee is resolved before its arguments run: a leaf grafted inside the arguments whose callee was rebound
+		// to code that rebinds the enclosing name leaves the enclosing call on the function it named first (a leaf, a stdlib alias, a
+		// function no graft takes, three levels, in loops)
+		test("an_enclosing_callee_resolves_before_its_arguments", [this]() {
+			const std::string src = "[[warn_mode]]\nvar SQRT0 = sqrt;\n"
+				"function inner(float x) -> float { return x + 1.0; }\n"
+				"function outer(float x) -> float { return x * 2.0; }\n"
+				"function mid(float x) -> float { return x - 3.0; }\n"
+				"function big(float x) -> float { for (int i = 0; i < 3; ++i) { if (i == 2) { return x * 5.0; } } return 0.0; }\n"
+				"function evil(float x) -> float { outer = function(float v) { return v * 100.0; }; mid = function(float v) { return v * 1000.0; }; big = function(float v) { return v * 7.0; }; sqrt = function(float v) { return v * 10000.0; }; hypot = function(float a, float b) { return a * 3.0; }; return x + 1.0; }\n"
+				"function leafs(float x) -> float { return sqrt(x) + 1.0; }\n"
+				"var OUTER0 = outer; var MID0 = mid; var BIG0 = big; var INNER0 = inner; var HYPOT0 = hypot;\n"
+				"function reset() -> void { outer = OUTER0; mid = MID0; big = BIG0; sqrt = SQRT0; hypot = HYPOT0; }\n"
+				"function r1(float x) -> float { return outer(inner(x)); }\n"
+				"function r2(float x) -> float { float r = outer(inner(x)) + 0.5; return r; }\n"
+				"function r3(float x) -> float { float t = 0.0; for (int i = 0; i < 3; ++i) { t += outer(inner(x)); } return t; }\n"
+				"function r4(float x) -> float { float r = sqrt(inner(x)) + 0.0; return r; }\n"
+				"function r5(float x) -> float { float r = big(inner(x)) + 0.0; return r; }\n"
+				"function r6(float x) -> float { return outer(mid(inner(x))); }\n"
+				"function r7(float x) -> float { float r = 1.0 + outer(leafs(x)); return r; }\n"
+				"function r8(float x) -> float { float t = 0.0; for (int i = 0; i < 3; ++i) { float r = sqrt(inner(x)) + 0.0; t += r; } return t; }\n"
+				"function r9(float x) -> float { float r = hypot(inner(x), 0.0) + 0.0; return r; }\n"
+				"function all() -> string { string s = \"\";\n"
+				"  reset(); s += to_string(r1(1.0)) + \" \"; s += to_string(r1(1.0)) + \" \";\n"
+				"  reset(); s += to_string(r2(1.0)) + \" \"; s += to_string(r2(1.0)) + \" \";\n"
+				"  reset(); s += to_string(r3(1.0)) + \" \";\n"
+				"  reset(); s += to_string(r4(3.0)) + \" \"; s += to_string(r4(3.0)) + \" \";\n"
+				"  reset(); s += to_string(r5(1.0)) + \" \"; s += to_string(r5(1.0)) + \" \";\n"
+				"  reset(); s += to_string(r6(1.0)) + \" \"; s += to_string(r6(1.0)) + \" \";\n"
+				"  reset(); s += to_string(r8(3.0)) + \" \";\n"
+				"  reset(); s += to_string(r9(1.0)) + \" \"; s += to_string(r9(1.0)) + \" \";\n"
+				"  return s; }\n"
+				"string out = all(); inner = evil; out += \"| \" + all(); inner = INNER0; reset();\n"
+				"out += \"| \" + to_string(r7(4.0));\n"
+				"sqrt = function(float v) { outer = function(float w) { return w * 100.0; }; return v; };\n"
+				"out += \" \" + to_string(r7(4.0)) + \" \" + to_string(r7(4.0)); out;";
+			const std::string expected = "4.0 4.0 4.5 4.5 12.0 2.0 2.0 10.0 10.0 -2.0 -2.0 6.0 2.0 2.0 | 4.0 200.0 4.5 200.5 404.0 2.0 40000.0 10.0 14.0 -2.0 2e+05 80002.0 2.0 6.0 | 7.0 11.0 501.0";
+			both(src, expected, "enclosing callees");
+			both(src, expected, "enclosing callees, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(expected, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// a leaf whose body evaluates a stdlib alias, as another leaf's argument: the outer leaf's guard stands in its callee's place, so the
+		// inner leaf grafts inside the outer's parameter and the loop closes; the alias rebound by a call in the loop, the outer rebound by
+		// the rebound alias, and a function no graft takes as the enclosing call keep the general form's values
+		test("a_leaf_with_an_alias_grafts_as_another_leafs_argument", [this]() {
+			const std::string src = "[[warn_mode]]\nvar SQRT0 = sqrt; float K = 0.5;\n"
+				"function len2(float x, float y) -> float { return sqrt(x * x + y * y); }\n"
+				"function shade(float d) -> float { return d * K + 1.0; }\n"
+				"function rb(int i) -> int { if (i == 5) { sqrt = function(float v) { shade = function(float w) { return w * 100.0; }; return -v; }; } return i; }\n"
+				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.25; t += shade(len2(x, 1.0)); } return t; }\n"
+				"function run2(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.25; t += shade(len2(x, 1.0)); int k = rb(i); t += k; } return t; }\n"
+				"var SHADE0 = shade;\n"
+				"string out = to_string(run(40)) + \",\" + to_string(run2(12)) + \",\" + to_string(run2(12));\n"
+				"sqrt = SQRT0; shade = SHADE0; out + \",\" + to_string(run(3));";
+			both(src, "", "a leaf with an alias as an argument");
+			both(src, "", "a leaf with an alias as an argument, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			const std::string l = listing_run(src);
+			const size_t fbeg = l.find("== run ");
+			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
+			check_true(fl.find("-- inlined shade") != std::string::npos && fl.find("-- inlined len2") != std::string::npos && fl.find("-- cell loop") != std::string::npos && fl.find("open loop") == std::string::npos,
+				"both leaves graft and the loop closes: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

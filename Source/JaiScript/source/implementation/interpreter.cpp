@@ -607,7 +607,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         auto& node = *self.unchecked_get_array_storage();
-        if (node.is_typed() && args.empty()) {
+        if (node.is_typed() && args.empty() && node.kind() != script_array::kind_t::obj) {
             // raw buffer sort: no comparator, so no user script can mutate mid-sort
             switch (node.kind()) {
                 case script_array::kind_t::i64: std::sort(node.ints().begin(), node.ints().end()); break;
@@ -621,12 +621,6 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 case script_array::kind_t::str:
                     std::sort(node.strs().begin(), node.strs().end(),
                               [](const strong_ptr<script_string>& a, const strong_ptr<script_string>& b) { return *a < *b; });
-                    break;
-                case script_array::kind_t::obj:
-                    // objects order by held-object identity, exactly like the boxed compare
-                    std::sort(node.objs().begin(), node.objs().end(), [](const obj_slot& a, const obj_slot& b) {
-                        return std::less<const void*>()(a.handle.get(), b.handle.get());
-                    });
                     break;
                 default: std::sort(node.bytes().begin(), node.bytes().end()); break;   // b8: false < true
             }
@@ -642,10 +636,24 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             ? node.materialize_values(ctx.get_engine()) : node.values();
 
         if (args.empty()) {
-            // Default order: a strict weak ordering for ALL element types. Numerics
-            // compare by value (int/float mixed too); everything else falls back to
-            // script_value's total <=> order.
-            std::sort(tmp.begin(), tmp.end(), [](const script_value& a, const script_value& b) {
+            // Default order: numerics by value (int/float mixed too), other primitives by script_value's total <=> order.
+            // An instance, a container or a callable has no built-in order (CLAUDE.md: ordering stays off containers and
+            // instances): it sorts by the language's `<` - a user operator< on the left element's class - and without one
+            // raises the < operator's own rejection; never by storage address, which differs between runs and backends.
+            engine* eng = ctx.get_engine();
+            auto* backend = eng->get_execution_backend();
+            const uint64_t less_id = ctx.get_string_symbolizer()->intern("<");
+            std::optional<error_propagator> order_error;
+            bool order_threw = false;
+            auto unordered = [](const script_value& v) {
+                const size_t k = v.raw_storage_index();
+                return k == script_value::TYPEID_OBJECT || k == script_value::TYPEID_SHARED_PTR || k == script_value::TYPEID_ARRAY ||
+                       k == script_value::TYPEID_MAP || k == script_value::TYPEID_FUNCTION || k == script_value::TYPEID_WEAK_PTR;
+            };
+            std::sort(tmp.begin(), tmp.end(), [&](const script_value& a_in, const script_value& b_in) {
+                if (order_error || order_threw) return false;   // the first failure ends the calls; the array stays as it was
+                const script_value& a = a_in.is_reference() ? a_in.deref() : a_in;
+                const script_value& b = b_in.is_reference() ? b_in.deref() : b_in;
                 const bool an = a.is_int() || a.is_float();
                 const bool bn = b.is_int() || b.is_float();
                 if (an && bn) {
@@ -653,8 +661,34 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     double bv = b.is_int() ? static_cast<double>(b.unchecked_as_int()) : b.unchecked_as_float();
                     return av < bv;
                 }
-                return a < b;  // total order via operator<=> (numerics have lowest type ids)
+                if (!unordered(a) && !unordered(b)) {
+                    return a < b;  // total order via operator<=> (numerics have lowest type ids)
+                }
+                auto view = detail::resolve_slot_class(a, eng);
+                script_value method(std::monostate{}, eng);
+                if (view.def) { method = view.def->get_method(less_id, false); }
+                if (!method.is_invalid() && method.is_function()) {
+                    script_value bound = make_bound_method(a, method);
+                    auto result = bound.as_function()({b});
+                    if (!result) {
+                        order_error = result.error_value();
+                        return false;
+                    }
+                    if (backend && backend->is_unwinding()) {
+                        order_threw = true;
+                        return false;
+                    }
+                    if (result.value().is_bool()) return result.value().unchecked_as_bool();
+                }
+                order_error = error_propagator{make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator"};
+                return false;
             });
+            if (order_error) {
+                return *order_error;
+            }
+            if (order_threw) {
+                return ctx.make_value();
+            }
         } else {
             // Custom comparator
             if (!args[0].is_function()) {

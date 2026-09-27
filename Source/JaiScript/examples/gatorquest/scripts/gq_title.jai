@@ -117,7 +117,7 @@ bool title_screen(bool has_save, int auto_frames) {
 		int ly = VH / 6;
 		draw_text_px(logo, (VW - lw) / 2 + 1, ly + 1, rgb(20, 40, 10), -1, scale);
 		draw_text_px(logo, (VW - lw) / 2, ly, FRAME % 40 < 20 ? rgb(130, 220, 80) : rgb(160, 240, 100), COL_BLACK, scale);
-		string sub = "A SWAMP IN NEED OF A HERO";
+		string sub = TITLE_NOTE != "" ? TITLE_NOTE : "A SWAMP IN NEED OF A HERO";
 		draw_text_px(sub, (VW - text_px_width(sub, 1)) / 2, ly + 6 * scale + 3, rgb(250, 220, 120), COL_BLACK, 1);
 		int off = sprite_compiled(sprite_of("gator"), "hue" + to_string(hue), crgb("leather"), crgb("straw"), crgb("steel"));
 		int gx = VW / 2 - TS;

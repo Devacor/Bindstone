@@ -20,6 +20,7 @@ int VIEW_TY0 = 0;
 int TITLE_X = 0;
 int TITLE_Y = 0;
 string TITLE_LAST = "";        // the last gator played (the title's default name)
+string TITLE_NOTE = "";        // "HOSTING ON PORT n" / "JOINING host:n" under the logo
 
 // ---- particles (tile-unit positions)
 array<float> P_X;
@@ -77,4 +78,26 @@ int SCREEN_ROWS = 34;
 bool MUSIC_ON = true;
 bool SFX_ON = true;
 int MUSIC_CUR = -99;           // the theme playing (-1 title, -2 death, else a world), -99 none
+
+// ---- networking: the host side (one NetServer, clients by id)
+shared_ptr<NetServer> NET_SRV = null;
+int NET_PORT = 28777;
+map<int, int> NET_SLOT_OF;     // client id -> player slot (after HELLO)
+map<int, int> NET_CID_OF;      // player slot -> client id
+array<int> NH_KIND;            // host inbox: 0 connect, 1 packet, 2 disconnect
+array<int> NH_ID;
+array<string> NH_TXT;
+int NET_BYTES_OUT = 0;
+int NET_SNAPS_OUT = 0;
+
+// ---- networking: client sessions (the game uses one; the net test drives several)
+array<shared_ptr<NetChannel>> NCS_CH;
+array<array<string>> NCS_INBOX;
+array<shared_ptr<ClientView>> NCS_VIEW;
+array<string> NCS_STATUS;      // connecting, hello, joined, refused: why, closed: why
+array<int> NCS_SLOT;
+array<int> NCS_SEED;
+array<string> NCS_DROP;
+int NET_SESSION = -1;          // the session the interactive client plays through
+int NET_CLOSE_F = 0;           // frames left before a closed client session quits
 int LAST_MOVE_SENT = -2;

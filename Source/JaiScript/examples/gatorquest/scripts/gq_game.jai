@@ -268,13 +268,18 @@ string game_load_request() {
 
 // ------------------------------------------------------------ the loop ---
 // one step of the local host: tick the sim and hand our own view its snapshot
+// the host's network is drained after the tick and before the snapshots go out, so what
+// joins, leaves and chats between ticks lands in this tick's events (sim_tick clears them)
 void local_host_tick() {
 	bots_tick();
 	sim_tick();
-	host_after_tick();
+	net_host_pump();
 	autosave_tick();
-	CV.rx_ms = NOW_MS;
-	cv_apply(CV, snapshot_for(LOCAL_SLOT));
+	host_after_tick();
+	if (LOCAL_SLOT >= 0 && LOCAL_SLOT < CHARS.size() && CHARS[LOCAL_SLOT].active) {
+		CV.rx_ms = NOW_MS;
+		cv_apply(CV, snapshot_for(LOCAL_SLOT));
+	}
 }
 
 int MAX_FRAMES;             // demo/test: stop after this many frames (0 = play until quit)
@@ -316,13 +321,16 @@ void play_loop() {
 		}
 		// the world
 		int t_sim = clock_ms();
-		if (NET_CLIENT) { net_client_pump(); }
+		if (NET_CLIENT) {
+			net_client_pump();
+			CV.status = NET_CLOSE_F > 0 ? "disconnected" : "online";
+		}
 		else {
 			while (acc >= TICK_MS) {
 				local_host_tick();
 				acc = acc - TICK_MS;
 			}
-			net_host_pump();
+			if (net_hosting()) { CV.status = `hosting :${NET_PORT}, ${net_player_count()} joined`; }
 		}
 		STAT_SIM_MS = STAT_SIM_MS + clock_ms() - t_sim;
 		check_dialog(CV);
@@ -353,6 +361,8 @@ void play_loop() {
 		if (spent < 33) { sleep_ms(33 - spent); }
 	}
 	music_stop_all();
+	if (NET_CLIENT) { net_session_bye(NET_SESSION); }
+	if (net_hosting()) { net_host_stop("the host has left the swamp"); }
 	print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
 	print("Thanks for playing Gator Quest! Your swamp awaits.");
 }

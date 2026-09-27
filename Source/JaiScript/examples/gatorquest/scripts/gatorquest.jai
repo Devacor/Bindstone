@@ -39,6 +39,7 @@ import "gq_title.jai";
 import "gq_png.jai";
 import "gq_dev.jai";
 import "gq_tests.jai";
+import "gq_serve.jai";
 
 string arg_value(string key, string def) {
 	for (int i = 0; i + 1 < ARGS.size(); ++i) {
@@ -129,8 +130,11 @@ int run_play() {
 		FORCE_ROWS = wh.size() > 1 ? wh[1].to_int(0) : 0;
 	}
 	bool demo = arg_flag("demo");
-	// demos and timed runs never touch the player's saves
-	SAVES_ON = !demo && arg_value("frames", "0") == "0";
+	string join_host = arg_value("join", "");
+	bool hosting = arg_flag("host");
+	int port = arg_value("port", "28777").to_int(28777);
+	// demos, timed runs and joiners never touch this machine's saves (a joiner's character lives on the host)
+	SAVES_ON = !demo && arg_value("frames", "0") == "0" && join_host == "";
 	string last = SAVES_ON ? last_player_name() : "";
 	bool resumed = SAVES_ON && load_world_for_session();
 	if (!resumed) { sim_init(seed); }
@@ -138,25 +142,45 @@ int run_play() {
 	layout(screen_cols(), screen_rows());
 	MAX_FRAMES = arg_value("frames", "0").to_int(0);
 	AUDIO_ON = !arg_flag("mute") && audio_prepare(data_root() + "/cache");
-	TITLE_LAST = last;
+	TITLE_LAST = last != "" ? last : arg_value("name", "");
+	TITLE_NOTE = join_host != "" ? `JOINING ${string::to_upper(join_host)}:${port}` : (hosting ? `HOSTING ON PORT ${port}` : "");
 	if (!title_screen(resumed, demo ? 45 : 0)) {
 		print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
 		return 0;
 	}
 	CAMERA_W = -1;
-	string welcome = join_character(LOCAL_SLOT, CHOSEN_NAME, CHOSEN_HUE);
-	CV = new ClientView();
-	CV.slot = LOCAL_SLOT;
 	BOTS = [];
-	if (demo) { bot_add(LOCAL_SLOT); }
+	string welcome = "";
+	if (join_host != "") {
+		string err = net_join(join_host, port, CHOSEN_NAME, CHOSEN_HUE, true);
+		if (err != "") {
+			print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
+			print(`Could not join ${join_host}:${port}: ${err}`);
+			return 1;
+		}
+		cv_log(CV, `Connected to ${join_host}:${port}. The host keeps your gator; type /who to see who is here.`, 5);
+	} else {
+		welcome = join_character(LOCAL_SLOT, CHOSEN_NAME, CHOSEN_HUE);
+		CV = new ClientView();
+		CV.slot = LOCAL_SLOT;
+		if (demo) { bot_add(LOCAL_SLOT); }
+		if (hosting) {
+			welcome = welcome + (net_host_start(port) ? ` Hosting on port ${port}: friends join with play.bat join <your address>.` : ` Could not open port ${port} for hosting.`);
+		}
+	}
 	if (arg_flag("dev")) {
 		dev_watch_dir(current_script_dir());
 		DEV_ON = true;
 		welcome = welcome + ` Dev mode: watching ${DEV_FILES.size()} scripts for changes.`;
 	}
-	say_to(LOCAL_SLOT, welcome, C_YELLOW);
-	music_play(MOB_WORLD[CHARS[LOCAL_SLOT].mob]);
+	if (!NET_CLIENT) {
+		say_to(LOCAL_SLOT, welcome, C_YELLOW);
+		music_play(MOB_WORLD[CHARS[LOCAL_SLOT].mob]);
+	} else {
+		music_play(0);
+	}
 	play_loop();
+	if (arg_value("png", "") != "") { png_write_canvas(arg_value("png", ""), 3); }
 	if (MAX_FRAMES > 0) {
 		int n = imax(1, STAT_FRAMES);
 		print(`frames ${STAT_FRAMES}: sim ${STAT_SIM_MS * 1000 / n} us, render ${STAT_RENDER_MS * 1000 / n} us, compose ${STAT_COMPOSE_MS * 1000 / n} us per frame; tick ${TICK}; STATE_HASH ${state_hash()}`);
@@ -215,8 +239,13 @@ int main() {
 	if (arg_flag("sheet")) { return run_sheet(); }
 	if (arg_flag("smoke")) { return run_smoke(); }
 	if (arg_flag("shot")) { return run_shots(); }
-	if (arg_flag("savetest")) { return run_savetest(data_root() + "/saves"); }
-	if (arg_flag("hotreload")) { return run_hotreload(data_root() + "/saves", !arg_flag("interp")); }
+	// "tag X" gives a test run its own folders, so runs in parallel never share files
+	string tests = data_root() + "/saves" + (arg_value("tag", "") == "" ? "" : "/" + arg_value("tag", ""));
+	if (arg_flag("savetest")) { return run_savetest(tests); }
+	if (arg_flag("hotreload")) { return run_hotreload(tests, !arg_flag("interp")); }
+	if (arg_flag("nettest")) { return run_nettest(tests, arg_value("port", "28911").to_int(28911)); }
+	if (arg_flag("serve")) { return run_serve(); }
+	if (arg_flag("client")) { return run_client(); }
 	return run_play();
 }
 main();

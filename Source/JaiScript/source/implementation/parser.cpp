@@ -4025,7 +4025,9 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 synchronize();
                 continue;
             }
-            type_info_ptr type = std::move(type_result.value());
+            // `var& r = G;` / `Box& get()`: a reference variable or a reference-returning function, as at program scope
+            type_info_ptr type = wrap_reference_return_type(std::move(type_result.value()));
+            const bool reference_member = type && type->base_type == script_value_type::jai_reference_type;
 
             if (!check(token_type::identifier)) {
                 report_error("Expected member name in namespace", peek());
@@ -4123,7 +4125,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                     continue;
                 }
 
-                if (!init) { init = default_initializer(type, member_name.location); }
+                if (!init && !reference_member) { init = default_initializer(type, member_name.location); }
                 auto var_decl = std::make_shared<variable_decl>(member_name.location, type, member_name.lexeme, get_symbol_id(member_name), init);
                 var_decl->function_spelling = function_spelling;
                 member_decl = var_decl;

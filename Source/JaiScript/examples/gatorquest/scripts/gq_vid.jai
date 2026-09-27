@@ -18,7 +18,7 @@ array<string> PAL_BG;
 array<int> PAL_R;
 array<int> PAL_G;
 array<int> PAL_B;
-int NBASE = 0;
+int NBASE;
 
 int rgb(int r, int g, int b) {
 	r = iclamp(r, 0, 255);
@@ -48,10 +48,10 @@ void pal_reset() {
 
 // ---- the canvas
 array<int> PIX;
-int VW = 0;
-int VH = 0;
-int COL_BLACK = 0;
-int COL_WHITE = 0;
+int VW;
+int VH;
+int COL_BLACK;
+int COL_WHITE;
 
 void canvas_init(int w, int h) {
 	VW = w;
@@ -74,9 +74,9 @@ void fill_px(int x0, int y0, int w, int h, int c) {
 int NLEV = 16;
 array<int> SHADE;
 array<int> GRAYSHADE;        // ghost vision: desaturated, cold
-int SHADE_TINT_R = 18;
-int SHADE_TINT_G = 22;
-int SHADE_TINT_B = 48;
+int SHADE_TINT_R;
+int SHADE_TINT_G;
+int SHADE_TINT_B;
 
 void shade_build(int tr, int tg, int tb, bool ghost) {
 	SHADE_TINT_R = tr;
@@ -194,9 +194,9 @@ string canvas_row(int cy) {
 }
 
 // ---- text panes: a row builder that tracks visible width
-string PANE_ROW = "";
-int PANE_W = 0;
-int PANE_MAX = 0;
+string PANE_ROW;
+int PANE_W;
+int PANE_MAX;
 
 void pane_begin(int width) {
 	PANE_ROW = "";

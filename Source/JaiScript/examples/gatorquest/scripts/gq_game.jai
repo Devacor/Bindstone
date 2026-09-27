@@ -4,10 +4,10 @@
 
 import "gq_hud.jai";
 
-int LOCAL_SLOT = 0;
-bool NET_CLIENT = false;       // true when the sim runs on a remote host
-int VIEW_ROWS = 30;
-bool QUIT = false;
+int LOCAL_SLOT;
+bool NET_CLIENT;       // true when the sim runs on a remote host
+int VIEW_ROWS;
+bool QUIT;
 
 // ------------------------------------------------------------- intents ---
 void client_act(string a) {
@@ -28,8 +28,8 @@ void toast(string s) {
 }
 
 // ---------------------------------------------------------------- layout ---
-int FORCE_COLS = 0;            // "screen WxH" on the command line pins the layout (tests, captures)
-int FORCE_ROWS = 0;
+int FORCE_COLS;            // "screen WxH" on the command line pins the layout (tests, captures)
+int FORCE_ROWS;
 
 int screen_cols() { return FORCE_COLS > 0 ? FORCE_COLS : term_cols(); }
 int screen_rows() { return FORCE_ROWS > 0 ? FORCE_ROWS : term_rows(); }
@@ -272,15 +272,16 @@ void local_host_tick() {
 	bots_tick();
 	sim_tick();
 	host_after_tick();
+	autosave_tick();
 	CV.rx_ms = NOW_MS;
 	cv_apply(CV, snapshot_for(LOCAL_SLOT));
 }
 
-int MAX_FRAMES = 0;             // demo/test: stop after this many frames (0 = play until quit)
-int STAT_FRAMES = 0;
-int STAT_RENDER_MS = 0;
-int STAT_COMPOSE_MS = 0;
-int STAT_SIM_MS = 0;
+int MAX_FRAMES;             // demo/test: stop after this many frames (0 = play until quit)
+int STAT_FRAMES;
+int STAT_RENDER_MS;
+int STAT_COMPOSE_MS;
+int STAT_SIM_MS;
 
 void play_loop() {
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);
@@ -305,6 +306,14 @@ void play_loop() {
 		}
 		if (UI_MODE == "play" || UI_MODE == "map") { client_move(held_dir()); }
 		else { client_move(-1); }
+		// dev mode: pick up edited scripts about once a second
+		if (DEV_ON && FRAME % 30 == 0) {
+			array<string> msgs = dev_poll();
+			for (int i = 0; i < msgs.size(); ++i) {
+				toast(msgs[i]);
+				cv_log(CV, msgs[i], msgs[i].contains("FAILED") ? 2 : 5);
+			}
+		}
 		// the world
 		int t_sim = clock_ms();
 		if (NET_CLIENT) { net_client_pump(); }

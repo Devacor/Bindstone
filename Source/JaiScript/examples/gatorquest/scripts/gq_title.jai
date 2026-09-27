@@ -3,8 +3,8 @@
 
 import "gq_save.jai";
 
-string CHOSEN_NAME = "";
-int CHOSEN_HUE = 0;
+string CHOSEN_NAME;
+int CHOSEN_HUE;
 
 array<string> HUE_NAMES = ["Swamp Green", "Teal", "Olive", "Mud Brown", "Blue Steel", "Brick Red", "Royal Purple", "Mint",
 	"Tan", "Charcoal", "Albino", "Emerald", "Crimson", "Moss", "Gold", "Ocean"];
@@ -28,7 +28,26 @@ array<string> title_pane(int w, int rows) {
 	out.push(rule("CONTROLS", w));
 	array<string> keys = ["arrows/WASD move, bump to fight", "SPACE use  F target  G grab", "1-9 cast  I pack  ? help"];
 	for (int i = 0; i < keys.size(); ++i) { out.push(pane_line(SGR_DIM, " " + keys[i], w)); }
+	array<string> saved = saved_gators();
+	if (saved.size() > 0 && out.size() + 2 < rows) {
+		out.push(rule("SAVED GATORS", w));
+		for (int i = 0; i < saved.size() && out.size() < rows; ++i) { out.push(pane_line(SGR_GOLD, " " + saved[i], w)); }
+	}
 	while (out.size() < rows) { out.push(pane_line(SGR_DIM, "", w)); }
+	return out;
+}
+
+// the names of the character files in the save folder (as typed: underscores read as spaces)
+array<string> saved_gators() {
+	array<string> out;
+	if (!SAVES_ON || !dir_exists(save_dir() + "/chars")) { return out; }
+	array<string> files = list_dir(save_dir() + "/chars");
+	for (int i = 0; i < files.size(); ++i) {
+		if (!files[i].ends_with(".gqc")) { continue; }
+		string n = files[i].substr(0, files[i].size() - 4);
+		n.replace_all("_", " ");
+		out.push(n);
+	}
 	return out;
 }
 
@@ -59,7 +78,7 @@ bool title_screen(bool has_save, int auto_frames) {
 		string k = read_key();
 		while (k != "") {
 			if (k == "enter") {
-				CHOSEN_NAME = name == "" ? "Chomps" : name;
+				CHOSEN_NAME = name == "" ? (TITLE_LAST != "" ? TITLE_LAST : "Chomps") : name;
 				CHOSEN_HUE = hue;
 				return true;
 			}
@@ -109,11 +128,12 @@ bool title_screen(bool has_save, int auto_frames) {
 				if (c >= 0) { pset(gx + px, gy + py - (FRAME / 8) % 2, c); }
 			}
 		}
-		string prompt = "NAME: " + (name == "" ? "CHOMPS" : string::to_upper(name)) + (FRAME % 20 < 10 ? "~" : " ");
+		string shown = name == "" ? (TITLE_LAST != "" ? TITLE_LAST : "Chomps") : name;
+		string prompt = "NAME: " + string::to_upper(shown) + (FRAME % 20 < 10 ? "~" : " ");
 		draw_text_px(prompt, (VW - text_px_width(prompt, 1)) / 2, gy + TS * 2 + 4, rgb(255, 255, 255), COL_BLACK, 1);
 		string huel = "< " + string::to_upper(HUE_NAMES[hue]) + " >";
 		draw_text_px(huel, (VW - text_px_width(huel, 1)) / 2, gy + TS * 2 + 11, rgb(200, 230, 180), COL_BLACK, 1);
-		string go = has_save ? "ENTER CONTINUES YOUR SAVED GAME" : "TYPE A NAME, ENTER TO BEGIN";
+		string go = has_save ? "SAVED WORLD LOADED - ENTER TO PLAY" : "TYPE A NAME, ENTER TO BEGIN";
 		draw_text_px(go, (VW - text_px_width(go, 1)) / 2, VH - 8, FRAME % 30 < 20 ? rgb(255, 230, 120) : rgb(200, 170, 80), COL_BLACK, 1);
 		array<string> pane = title_pane(PANE_WIDTH, VIEW_ROWS);
 		string out = "";

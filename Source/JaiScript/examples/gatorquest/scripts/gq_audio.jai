@@ -5,12 +5,12 @@
 
 import "gq_render.jai";
 
-bool AUDIO_ON = false;
-string AUDIO_DIR = "";
+bool AUDIO_ON;
+string AUDIO_DIR;
 map<string, string> SFX_PATH;
 map<string, int> SFX_LAST;
-int MUSIC_CUR = -99;
-int MUSIC_POLL = 0;
+
+int MUSIC_POLL;
 int SFX_RATE = 11025;
 
 string le16(int v) { return "" + to_char(v & 255) + to_char((v >> 8) & 255); }

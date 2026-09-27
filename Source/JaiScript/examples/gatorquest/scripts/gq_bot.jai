@@ -25,8 +25,8 @@ array<int> BOT_PLAN = [0, 1, 2, 3, 4, 5, 6, 11, 7, 10, 8, 10, 2, 9, 3, 10, 2];
 array<int> BFS_SEEN;
 array<int> BFS_FIRST;
 array<int> BFS_Q;
-int BFS_STAMP = 0;
-int BFS_LAST_LEN = 0;
+int BFS_STAMP;
+int BFS_LAST_LEN;
 
 bool bot_walkable(int w, int x, int y, int tx, int ty) {
 	if (!in_world(w, x, y)) { return false; }
@@ -41,7 +41,7 @@ bool bot_walkable(int w, int x, int y, int tx, int ty) {
 	return true;
 }
 
-bool BFS_AVOID_MOBS = false;
+bool BFS_AVOID_MOBS;
 
 // a route from the mobile toward (tx, ty) as a list of directions; `near` = stop when adjacent.
 // empty = already there; [-1] = no route

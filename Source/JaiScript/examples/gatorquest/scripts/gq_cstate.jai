@@ -19,6 +19,7 @@ int VIEW_TX0 = 0;
 int VIEW_TY0 = 0;
 int TITLE_X = 0;
 int TITLE_Y = 0;
+string TITLE_LAST = "";        // the last gator played (the title's default name)
 
 // ---- particles (tile-unit positions)
 array<float> P_X;
@@ -75,4 +76,5 @@ int SCREEN_COLS = 120;
 int SCREEN_ROWS = 34;
 bool MUSIC_ON = true;
 bool SFX_ON = true;
+int MUSIC_CUR = -99;           // the theme playing (-1 title, -2 death, else a world), -99 none
 int LAST_MOVE_SENT = -2;

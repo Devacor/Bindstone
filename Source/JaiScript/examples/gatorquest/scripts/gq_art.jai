@@ -46,7 +46,7 @@ int clight(string name, int pct) {
 }
 
 // ------------------------------------------------------------ textures ---
-int TS = 8;                    // tile size in pixels (4, 6 or 8)
+int TS;                        // tile size in pixels (4, 6 or 8); 0 until art_init
 array<int> TEX;                // every tile texture, TS*TS each
 array<int> TEX_OFF;            // (tile * 4 + variant) * 4 + frame -> offset into TEX
 array<int> TILE_ANIM;          // 1 if the tile animates

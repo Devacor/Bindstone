@@ -610,6 +610,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	if (!find_path(root, call.get(), path)) { out.why = "a position the graft does not take"; return false; }
 	std::vector<expression_ptr> pre;
 	std::vector<const expression*> callee_names;   // an outer call's callee name resolves where it stands
+	std::vector<const expression*> copied_args;    // an outer call's argument its parameter does not take as a proven scalar
 	for (size_t k = 0; k + 1 < path.size(); ++k) {
 		const expression_ptr& a = path[k]; const expression* x = path[k + 1].get();
 		switch (a->get_type()) {
@@ -627,7 +628,12 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 			if (ce->callee->get_type() == node_type::member_expr) { if (!math_call(ce)) { out.why = "a method call's argument"; return false; } }   // a method's receiver and lookup stand before its arguments
 			else if (ce->callee->get_type() == node_type::identifier_expr) { pre.push_back(ce->callee); callee_names.push_back(ce->callee.get()); }
 			else { out.why = "an argument of a computed callee"; return false; }
-			for (const auto& arg : ce->arguments) { if (arg.get() == x) break; pre.push_back(arg); }
+			const auto outer = math_call(ce) ? std::shared_ptr<const function_decl>() : ce->proven_callee_decl.lock();
+			for (size_t ai = 0; ai < ce->arguments.size() && ce->arguments[ai].get() != x; ++ai) {
+				pre.push_back(ce->arguments[ai]);
+				const bool scalar_param = outer && ai < outer->parameters.size() && !outer->parameters[ai].is_reference && scalar_type(outer->parameters[ai].type.get());
+				if (!math_call(ce) && !scalar_param) { copied_args.push_back(ce->arguments[ai].get()); }
+			}
 			break;
 		}
 		case node_type::unary_expr: case node_type::cast_expr: case node_type::member_expr: break;
@@ -644,7 +650,9 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 			const bool global = static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX;
 			if ((global || !private_local(p.get())) && std::find(callee_names.begin(), callee_names.end(), p.get()) == callee_names.end()) {
 				// a global, a closure's by-reference capture or a reference: the call (the graft, or the fallback's callee, whatever the name binds
-				// by then) may write it, so its value is taken ahead of the call, as the real call's operand order has it
+				// by then) may write it, so its value is taken ahead of the call, as the real call's operand order has it. A temp holds its value
+				// only as a scalar: an outer call that binds it by reference or copies it (an array, a map, an instance) binds the name itself
+				if (std::find(copied_args.begin(), copied_args.end(), p.get()) != copied_args.end()) { out.why = "a name an outer call binds by reference or copies, ahead of the call"; return false; }
 				out.spills.emplace_back(p, script_value_type::jai_any_type);
 				break;
 			}

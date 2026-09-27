@@ -119,6 +119,7 @@ public:
 		closures();
 		diagnostic_texts();
 		callback_errors();
+		user_assignment_operator();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1277,6 +1278,13 @@ private:
 				{"object + string", Q, "string s = ts + \"x\";", div, check_mode::strict},
 			});
 		});
+		test("a_user_operator_assign_error_propagates_with_its_own_text", [this]() {
+			const char* A2 = "class A2 { int v = 1; function operator=(int x) -> A2 { int z = 0; v = x / z; return this; } } A2 g = A2();";
+			expect_texts({
+				{"operator= on a global", A2, "g = 5;", "Division by zero in integer operation", check_mode::strict},
+				{"operator= on a local", A2, "function f() { A2 a = A2(); a = 5; } f();", "Division by zero in integer operation", check_mode::strict},
+			});
+		});
 		test("archive_hooks_the_script_declares_propagate_their_errors", [this]() {
 			const char* H = R"(
 				class P { int v = 1; int _get_v() { int z = 0; return v / z; } }
@@ -1308,6 +1316,58 @@ private:
 				{"map filter", "var m = {\"a\": 1};", "var r = m.filter([](var k, var v) { int z = 0; return v / z > 0; });", div, check_mode::warn},
 				{"map remove_if", "var m = {\"a\": 1};", "m.remove_if([](var k, var v) { int z = 0; return v / z > 0; });", div, check_mode::warn},
 				{"parallel_for body", "array<int> xs = [1, 2, 3, 4];", "parallel_for (auto& x : xs) { int z = 0; x = x / z; }", div, check_mode::strict},
+			});
+		});
+	}
+
+	// docs/static_checking.md rule table: on plain assignment an object slot takes a source through a user operator= of its
+	// class (C++ assignment: the operator runs on the held instance, exact match ahead of a converting constructor); the
+	// expression's value is the destination's (CLAUDE.md assignment-expression values); container elements need the exact
+	// type (CLAUDE.md element conversions), so an element store never dispatches it
+	void user_assignment_operator() {
+		const char* OK = R"(
+			class OK2 { int v = 1; function operator=(int x) -> OK2 { v = x * 10; return this; } }
+			class H { OK2 m = OK2(); static OK2 s = OK2(); void set_bare() { m = 7; } void set_this() { this.m = 8; } }
+			namespace ns { OK2 n = OK2(); }
+			OK2 g = OK2();
+		)";
+		test("operator_assign_runs_at_every_plain_store", [this, OK]() {
+			expect("destinations", std::string(OK) + R"(
+				function local() -> int { OK2 a = OK2(); a = 5; return a.v; }
+				function auto_local() -> int { auto a = OK2(); a = 4; return a.v; }
+				function field() -> int { H h = H(); h.m = 5; return h.m.v; }
+				function bare() -> int { H h = H(); h.set_bare(); return h.m.v; }
+				function this_field() -> int { H h = H(); h.set_this(); return h.m.v; }
+				g = 3;
+				H::s = 2;
+				ns::n = 6;
+				"" + local() + "|" + auto_local() + "|" + field() + "|" + bare() + "|" + this_field() + "|" + g.v + "|" + H::s.v + "|" + ns::n.v;
+			)", "50|40|50|70|80|30|20|60");
+		});
+		test("operator_assign_value_is_the_destination_and_a_copy", [this, OK]() {
+			expect("expression value", std::string(OK) + R"(
+				function local() -> string { OK2 a = OK2(); var r = (a = 6); r.v = 1; return type_of(r) + ":" + a.v; }
+				function global() -> string { var r = (g = 9); r.v = 2; return type_of(r) + ":" + g.v; }
+				local() + "|" + global();
+			)", "OK2:60|OK2:90");
+		});
+		test("same_class_and_subclass_sources_copy_and_exact_operator_beats_the_converting_constructor", [this]() {
+			expect("copy and precedence", R"(
+				class B2 { int v = 1; B2() {} B2(int x) { v = x; } function operator=(int x) -> B2 { v = x * 100; return this; } }
+				class D2 : B2 { D2() { v = 42; } }
+				function run() -> string {
+					B2 a = B2(); B2 b = B2(); b.v = 7; a = b;
+					B2 c = B2(); c = D2();
+					B2 d = B2(); d = 3;
+					B2 e = 4;
+					return "" + a.v + "|" + c.v + "|" + d.v + "|" + e.v;
+				}
+				run();
+			)", "7|42|300|4");
+		});
+		test("an_element_store_needs_the_exact_type", [this, OK]() {
+			expect_texts({
+				{"array element", OK, "array<OK2> xs = [OK2()]; xs[0] = 5;", "Cannot assign 'int' to element of type 'OK2'", check_mode::warn},
 			});
 		});
 	}

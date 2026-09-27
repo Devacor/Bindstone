@@ -3443,6 +3443,14 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			// V-S1: a same_type proof whose payload guard holds makes enforcement the identity
 			const bool proven_identity = (ins.c & store_flag_same_type) && slot_type &&
 			                             detail::same_type_payload(value, slot_type.get());
+			// A user operator= writes the held instance (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr)
+			if (!proven_identity && slot_type && slot_type->base_type == script_value_type::jai_object_type) {
+				if (auto assigned = detail::user_assign_operator(*storage, value, engine_)) {
+					if (!*assigned) { return raise_from(*assigned); }
+					stack_.push_back(clone_for_assignment(*storage));   // the expression's value is the destination's
+					return {};
+				}
+			}
 			if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
 			                  slot_type->base_type == script_value_type::jai_object_type ||
 			                  slot_type->base_type == script_value_type::jai_array_type ||
@@ -3781,35 +3789,12 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 #endif
 		type_info_ptr target_type = currentVal ? currentVal->get_type_info() : nullptr;
 
-		if (target_type && target_type->base_type == script_value_type::jai_object_type) {
-			auto source_type_info = value.get_type_info();
-			std::string source_type_name = source_type_info ? source_type_info->type_name : "unknown";
-			if (source_type_name != target_type->type_name && currentVal) {
-				auto instance_result = currentVal->checked_as<std::shared_ptr<class_instance>>();
-				if (instance_result) {
-					auto instance = instance_result.value();
-					// Safe-mode workers: verdict instead of a racing operator= (increment B)
-					if (parallel_worker_ &&
-					    instance->get_class_definition() &&
-					    instance->get_class_definition()->defines_method(assign_operator_id_)) [[unlikely]] {
-						return raise_(make_error_code(runtime_error_code::unsupported_operation),
-							"custom operator dispatch on class instances is not admitted in a parallel body");
-					}
-					script_value method = instance->get_method(assign_operator_id_, false);
-					if (method.is_function()) {
-						const script_function& func = method.as_function();
-						std::vector<script_value> args;
-						script_value result_copy = value;
-						args.push_back(*currentVal);
-						args.push_back(std::move(value));
-						auto call_result = func(args);
-						if (call_result) {
-							stack_.push_back(std::move(result_copy));
-							return {};
-						}
-						return raise_(call_result.error(), "operator= failed");
-					}
-				}
+		// A user operator= writes the held instance (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr)
+		if (target_type && target_type->base_type == script_value_type::jai_object_type && currentVal) {
+			if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_)) {
+				if (!*assigned) { return raise_from(*assigned); }
+				stack_.push_back(clone_for_assignment(*currentVal));   // the expression's value is the destination's
+				return {};
 			}
 		}
 
@@ -13085,6 +13070,13 @@ op_status vm_backend::store_namespace_cell(const detail::namespace_store_target&
 		}
 	}
 	type_info_ptr slot_type = storage->get_type_info();
+	if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {
+		if (auto assigned = detail::user_assign_operator(*storage, incoming, engine_)) {
+			if (!*assigned) { return raise_from(*assigned); }
+			if (stored_out) { *stored_out = clone_for_assignment(*storage); }   // the operator wrote the held instance
+			return {};
+		}
+	}
 	if (slot_type && (slot_type->base_type != incoming.type() ||
 	                  slot_type->base_type == script_value_type::jai_object_type ||
 	                  slot_type->base_type == script_value_type::jai_array_type ||

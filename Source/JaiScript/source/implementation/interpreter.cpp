@@ -5574,6 +5574,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         type_info_ptr slot_type = storage->get_type_info();
                         const bool proven_identity = expr->static_store_proof == proof_same_type && slot_type &&
                                                      detail::same_type_payload(value, slot_type.get());
+                        // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
+                        if (!proven_identity && slot_type && slot_type->base_type == script_value_type::jai_object_type) {
+                            if (auto assigned = detail::user_assign_operator(*storage, value, engine_)) {
+                                if (!*assigned) { return assigned->error_value(); }
+                                push_value(clone_for_assignment(*storage));   // the expression's value is the destination's
+                                return {};
+                            }
+                        }
                         if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
                                           slot_type->base_type == script_value_type::jai_object_type ||
                                           slot_type->base_type == script_value_type::jai_array_type ||
@@ -5882,36 +5890,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     // Regular variable assignment with STRONG TYPES enforcement
                     type_info_ptr target_type = currentVal->get_type_info();
 
-                    // Try assignment operator lookup for class types before type enforcement
+                    // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
                     if (target_type && target_type->base_type == script_value_type::jai_object_type) {
-                        // Check if currentVal has an operator= method for the source type
-                        auto source_type_info = value.get_type_info();
-                        std::string source_type_name = source_type_info ? source_type_info->type_name : "unknown";
-
-                        // Only try operator= if types are different (same type just uses regular assignment)
-                        if (source_type_name != target_type->type_name) {
-                            auto instance_result = currentVal->checked_as<std::shared_ptr<class_instance>>();
-                            if (instance_result) {
-                                auto instance = instance_result.value();
-                                // Look for operator= method using cached symbol ID
-                                script_value method = instance->get_method(assign_operator_id_, false);
-                                if (method.is_function()) {
-                                    // Found operator= method - call it with the source value
-                                    // Script methods expect 'this' as the first argument
-                                    const script_function& func = method.as_function();
-                                    std::vector<script_value> args;
-                                    args.push_back(*currentVal);  // 'this' - the instance being assigned to
-                                    args.push_back(std::move(value));  // the value being assigned
-                                    auto result = func(args);
-                                    if (result) {
-                                        // Operator= succeeded - return without replacing the variable
-                                        // The operator= method should have modified the instance in place
-                                        return checked_result<void>();
-                                    }
-                                    // FIX #10: Propagate operator= errors instead of silent fallthrough
-                                    return checked_result<void>(result.error(), "operator= failed");
-                                }
-                            }
+                        if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_)) {
+                            if (!*assigned) { return assigned->error_value(); }
+                            push_value(clone_for_assignment(*currentVal));   // the expression's value is the destination's
+                            return {};
                         }
                     }
 
@@ -6927,6 +6911,12 @@ checked_result<script_value> interpreter::store_namespace_cell(const detail::nam
         }
     }
     type_info_ptr slot_type = storage->get_type_info();
+    if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {
+        if (auto assigned = detail::user_assign_operator(*storage, incoming, engine_)) {
+            if (!*assigned) { return assigned->error_value(); }
+            return clone_for_assignment(*storage);   // the operator wrote the held instance
+        }
+    }
     if (slot_type && (slot_type->base_type != incoming.type() ||
                       slot_type->base_type == script_value_type::jai_object_type ||
                       slot_type->base_type == script_value_type::jai_array_type ||

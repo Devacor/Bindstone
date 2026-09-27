@@ -259,6 +259,8 @@ void ensure_slot(int slot) {
 bool player_restore(int slot, string body) {
 	ensure_slot(slot);
 	Character c = char_from_body(body);
+	c.party = -1;              // parties and invitations belong to the session that made them
+	c.invite = -1;
 	CHARS[slot] = c;
 	quest_ensure(slot);
 	map<string, string> r = parse_records(body);
@@ -268,7 +270,7 @@ bool player_restore(int slot, string body) {
 	int x = cc.home_x;
 	int y = cc.home_y;
 	if (pos.size() >= 3 && pos[0] >= 0 && pos[0] < WORLD_COUNT && in_world(pos[0], pos[1], pos[2])) { w = pos[0]; x = pos[1]; y = pos[2]; }
-	array<int> p = find_spot(w, x, y, 8, LAND_MASK + 4);
+	array<int> p = find_free_spot(w, x, y, 8, LAND_MASK + 4);
 	int m = mob_spawn(M_GATOR_NPC, w, p[0], p[1]);
 	MOB_PLAYER[m] = slot;
 	MOB_FLAGS[m] = cc.pvp ? MF_PVP : 0;

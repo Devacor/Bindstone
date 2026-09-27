@@ -265,7 +265,7 @@ void ai_summon(int m) {
 	if (t >= 0) { chase_and_swing(m, t); return; }
 	if (cheb(MOB_X[m], MOB_Y[m], MOB_X[owner], MOB_Y[owner]) > 2) {
 		if (MOB_WORLD[m] != MOB_WORLD[owner] || cheb(MOB_X[m], MOB_Y[m], MOB_X[owner], MOB_Y[owner]) > 14) {
-			array<int> p = find_spot(MOB_WORLD[owner], MOB_X[owner], MOB_Y[owner] + 1, 3, LAND_MASK + 4);
+			array<int> p = find_free_spot(MOB_WORLD[owner], MOB_X[owner], MOB_Y[owner] + 1, 3, LAND_MASK + 4);
 			mob_place(m, MOB_WORLD[owner], p[0], p[1]);
 			return;
 		}

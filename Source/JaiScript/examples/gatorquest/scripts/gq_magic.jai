@@ -218,7 +218,7 @@ void mob_cast(int m, int spell, int t) {
 void travel(int m, int w, int x, int y) {
 	int from = MOB_WORLD[m];
 	fx_at(from, MOB_X[m], MOB_Y[m], Fx.warp, 12);
-	array<int> p = find_spot(w, x, y, 6, LAND_MASK + (MOB_PLAYER[m] >= 0 ? 4 : 0));
+	array<int> p = find_free_spot(w, x, y, 6, LAND_MASK + (MOB_PLAYER[m] >= 0 ? 4 : 0));
 	mob_place(m, w, p[0], p[1]);
 	fx_at(w, p[0], p[1], Fx.warp, 16);
 	sound_at(w, p[0], p[1], "warp");
@@ -239,7 +239,7 @@ void travel(int m, int w, int x, int y) {
 		// summons follow their caster through gates
 		for (int i = 0; i < MOB_KIND.size(); ++i) {
 			if (MOB_KIND[i] >= 0 && MOB_OWNER[i] == m && (MOB_FLAGS[i] & MF_SUMMON) != 0) {
-				array<int> q = find_spot(w, p[0] + 1, p[1], 3, LAND_MASK + 4);
+				array<int> q = find_free_spot(w, p[0] + 1, p[1], 3, LAND_MASK + 4);
 				mob_place(i, w, q[0], q[1]);
 			}
 		}

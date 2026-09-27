@@ -4113,6 +4113,40 @@ bool vm_compiler::private_local(const expression* e) {
 	return slot != k_invalid_u32 && callable_.escaping.count(slot) == 0;
 }
 
+// the one route by which user code reaches a private local: a call that takes it as a direct argument (a reference parameter binds the
+// slot) or as a method's receiver (an in-place mutator); a math intrinsic takes its arguments by value
+bool vm_compiler::slot_argument_in(const expression* e, uint32_t slot) {
+	if (!e || slot == k_invalid_u32) return false;
+	auto names = [&](const expression* a) {
+		return a && a->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(a))) == slot;
+	};
+	switch (e->get_type()) {
+	case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); return slot_argument_in(b->left.get(), slot) || slot_argument_in(b->right.get(), slot); }
+	case node_type::unary_expr: return slot_argument_in(static_cast<const unary_expr*>(e)->operand.get(), slot);
+	case node_type::cast_expr: return slot_argument_in(static_cast<const cast_expr*>(e)->operand.get(), slot);
+	case node_type::member_expr: return slot_argument_in(static_cast<const member_expr*>(e)->object.get(), slot);
+	case node_type::ternary_expr: {
+		auto* t = static_cast<const ternary_expr*>(e);
+		return slot_argument_in(t->condition.get(), slot) || slot_argument_in(t->then_expression.get(), slot) || slot_argument_in(t->else_expression.get(), slot);
+	}
+	case node_type::call_expr: {
+		auto* c = static_cast<const call_expr*>(e);
+		const bool method = c->callee && c->callee->get_type() == node_type::member_expr;
+		const bool intrinsic = method && detail::math_intrinsic_for_call(static_cast<const member_expr*>(c->callee.get())) != detail::math_fn::none;
+		if (method && !intrinsic && names(static_cast<const member_expr*>(c->callee.get())->object.get())) return true;
+		for (const auto& a : c->arguments) { if ((!intrinsic && names(a.get())) || slot_argument_in(a.get(), slot)) return true; }
+		return slot_argument_in(c->callee.get(), slot);
+	}
+	default: return false;
+	}
+}
+
+// an identifier resolved inside its operation after `later` computes into temps: taken first when `later` may reach it
+bool vm_compiler::read_ahead_of(const expression* operand, const expression* later) {
+	if (!operand || operand->get_type() != node_type::identifier_expr) return false;
+	return slot_argument_in(later, identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(operand))));
+}
+
 bool vm_compiler::primitive_local(const expression* e) {
 	if (!private_local(e)) return false;
 	return callable_.primitive_slots.count(identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(e)))) != 0;
@@ -4618,15 +4652,9 @@ bool vm_compiler::call_partner_ok(const expression* e, const expression* call) {
 	if (!e) return false;
 	if (e->get_type() == node_type::literal_expr) return true;
 	if (e->get_type() != node_type::identifier_expr || !private_local(e)) return false;
-	// a partner the call names as a direct argument can be bound by reference and written before the binary reads it (`x + mutate(x)`,
-	// mutate(int& v)): the plain binary's reads are left to right, so such a call keeps the stack form
-	if (call && call->get_type() == node_type::call_expr) {
-		const uint32_t partner_slot = identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(e)));
-		for (const auto& arg : static_cast<const call_expr*>(call)->arguments) {
-			if (arg && arg->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(arg.get())) == partner_slot) return false;
-		}
-	}
-	return true;
+	// a partner the call (or a call among its arguments) takes as an argument can be bound by reference and written before the binary reads
+	// it (`x + mutate(x)`, `x + f(mutate(x))`, mutate(int& v)): the plain binary's reads are left to right, so such a call keeps the stack form
+	return !read_ahead_of(e, call);
 }
 void vm_compiler::compile_call_into_temp(const expression_ptr& e, fused_operand& out) {
 	compile_call(std::static_pointer_cast<call_expr>(e));
@@ -4987,7 +5015,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			fused_binary_proto proto;
 			proto.op = static_cast<uint8_t>(expr->op.type);
 			if (lsub) { hoist_into_temp(expr->left, proto.left); }
-			else if (reference_slot_operand(expr->left.get()) || (rsub && expr->left->get_type() == node_type::identifier_expr && (env_identifier(expr->left.get()) || (!private_local(expr->left.get()) && !quiet_read(expr->right.get()))))) { materialize_operand_temp(expr->left, proto.left); }   // its dereference, or its value, precedes the read
+			else if (reference_slot_operand(expr->left.get()) || (rsub && expr->left->get_type() == node_type::identifier_expr && (env_identifier(expr->left.get()) || (!private_local(expr->left.get()) && !quiet_read(expr->right.get())) || read_ahead_of(expr->left.get(), expr->right.get())))) { materialize_operand_temp(expr->left, proto.left); }   // its dereference, or its value, precedes the read
 			else { proto.left = make_fused_operand(expr->left); }
 			if (rsub) { hoist_into_temp(expr->right, proto.right); } else { proto.right = make_fused_operand(expr->right); }
 			stamp_typed_class(proto, expr.get());
@@ -5048,7 +5076,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			// before the sink writes).
 			auto sequence_left = [&](fused_operand& lo, const expression* l, const expression* r) {
 				const bool ref_left = reference_slot_operand(l) && (temp_only(r) || !operand_shape(r));
-				const bool snap_left = l->get_type() == node_type::identifier_expr && ((!private_local(l) && observing_hoist_in(r)) || (env_identifier(l) && hoist_in(r)));   // its value precedes a read in the right subtree that may run user code; an environment name that may be a property reference reads ahead of any hoisted read
+				const bool snap_left = l->get_type() == node_type::identifier_expr && ((!private_local(l) && observing_hoist_in(r)) || (env_identifier(l) && hoist_in(r)) || read_ahead_of(l, r));   // its value precedes a read in the right subtree that may run user code; an environment name that may be a property reference reads ahead of any hoisted read; a call to its right may take it by reference
 				if (!ref_left && !snap_left && (!lo.is_subscript() || operand_shape(r))) { return; }
 				fused_binary_proto p;
 				p.left = std::move(lo);

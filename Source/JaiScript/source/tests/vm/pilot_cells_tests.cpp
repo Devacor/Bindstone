@@ -4838,6 +4838,35 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a private local is private to everything but a call that takes it as an argument: read in its operation after a hoisted ternary,
+		// math call or call temp whose call binds it by reference, it is taken first (the ordering fuzz band, seed 249)
+		test("a_local_a_later_call_takes_by_reference_is_read_first", [this]() {
+			const std::string src = "function mutate(int& r) -> bool { r = r + 100; return true; }\n"
+				"function bump(int& r) -> int { r = r + 100; return 1; }\n"
+				"function wrap(int v) -> int { return v; }\n"
+				"function run() -> string { string out = \"\";\n"
+				"  for (int k = 0; k < 2; ++k) {\n"
+				"    int x = 1; int a = x + (mutate(x) ? 1 : 2); out += to_string(a) + \" \";\n"
+				"    int y = 1; int b = y + ((y * 2) - (mutate(y) ? 2 : 1)); out += to_string(b) + \" \";\n"
+				"    int z = 1; int c = z + wrap(bump(z)); out += to_string(c) + \" \";\n"
+				"    int w = 1; float d = w + math::abs(bump(w)); out += to_string(d) + \" \";\n"
+				"    int u = 1; float e = u + sqrt(bump(u)); out += to_string(e) + \" \";\n"
+				"    int v = 1; int f = (v * 3) + (v + (mutate(v) ? 1 : 2)); out += to_string(f) + \" | \";\n"
+				"  }\n"
+				"  return out; }\n"
+				"run();";
+			const std::string expected = "2 1 2 2.0 2.0 5 | 2 1 2 2.0 2.0 5 | ";
+			both(src, expected, "a local read ahead of a call that takes it by reference");
+			both(src, expected, "a local read ahead of a call that takes it by reference, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string oracle = run_on(false, src);
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 	}
 };
 

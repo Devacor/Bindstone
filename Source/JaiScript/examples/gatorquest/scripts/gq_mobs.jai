@@ -349,7 +349,10 @@ int nearest_player(int w, int x, int y, int r) {
 	return best;
 }
 
-bool player_near(int w, int x, int y, int r) { return nearest_player(w, x, y, r) >= 0; }
+bool player_near(int w, int x, int y, int r) {
+	if (CAMERA_W == w && cheb(x, y, CAMERA_X, CAMERA_Y) <= r) { return true; }
+	return nearest_player(w, x, y, r) >= 0;
+}
 
 // ------------------------------------------------------------- spawners ---
 void spawners_tick() {

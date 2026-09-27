@@ -3,9 +3,12 @@
 //   jaiscript gatorquest.jai                         play (single player)
 //   jaiscript gatorquest.jai -- smoke [ticks N] [seed S] [bots K]
 //                                                    headless autopilot session, prints STATE_HASH
+//   jaiscript gatorquest.jai -- shot [ticks N] [every N] [screen 150x44] [out DIR] [keys "i down enter"]
+//                                                    headless frame captures (.ans + .txt sketch)
 
 import "gq_types.jai";
 import "gq_state.jai";
+import "gq_cstate.jai";
 import "gq_util.jai";
 import "gq_defs.jai";
 import "gq_data.jai";
@@ -19,6 +22,17 @@ import "gq_quests.jai";
 import "gq_actions.jai";
 import "gq_sim.jai";
 import "gq_bot.jai";
+import "gq_proto.jai";
+import "gq_vid.jai";
+import "gq_art.jai";
+import "gq_render.jai";
+import "gq_audio.jai";
+import "gq_hud.jai";
+import "gq_game.jai";
+import "gq_net.jai";
+import "gq_save.jai";
+import "gq_title.jai";
+import "gq_png.jai";
 
 string arg_value(string key, string def) {
 	for (int i = 0; i + 1 < ARGS.size(); ++i) {
@@ -92,9 +106,91 @@ int run_smoke() {
 	return 0;
 }
 
-int main() {
-	if (arg_flag("smoke")) { return run_smoke(); }
-	print("Gator Quest: interactive play is not wired yet. Try -- smoke");
+int run_play() {
+	int seed = arg_value("seed", "1").to_int(1);
+	string screen = arg_value("screen", "");
+	if (screen != "") {
+		array<string> wh = screen.split("x");
+		FORCE_COLS = wh[0].to_int(0);
+		FORCE_ROWS = wh.size() > 1 ? wh[1].to_int(0) : 0;
+	}
+	sim_init(seed);
+	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);
+	layout(screen_cols(), screen_rows());
+	bool demo = arg_flag("demo");
+	MAX_FRAMES = arg_value("frames", "0").to_int(0);
+	AUDIO_ON = !arg_flag("mute") && audio_prepare(data_root() + "/cache");
+	if (!title_screen(false, demo ? 45 : 0)) {
+		print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
+		return 0;
+	}
+	CAMERA_W = -1;
+	player_create(LOCAL_SLOT, CHOSEN_NAME, CHOSEN_HUE);
+	CV = new ClientView();
+	CV.slot = LOCAL_SLOT;
+	BOTS = [];
+	if (demo) { bot_add(LOCAL_SLOT); }
+	say_to(LOCAL_SLOT, `Welcome to Swampton, ${CHOSEN_NAME}! Talk to the townsfolk (bump them) for work. Press ? for help.`, C_YELLOW);
+	music_play(0);
+	play_loop();
+	if (MAX_FRAMES > 0) {
+		int n = imax(1, STAT_FRAMES);
+		print(`frames ${STAT_FRAMES}: sim ${STAT_SIM_MS * 1000 / n} us, render ${STAT_RENDER_MS * 1000 / n} us, compose ${STAT_COMPOSE_MS * 1000 / n} us per frame; tick ${TICK}; STATE_HASH ${state_hash()}`);
+	}
 	return 0;
+}
+
+// dev: every sprite at 4x with its tint, and every tile texture, into one PNG
+int run_sheet() {
+	sim_init(1);
+	art_init(8);
+	shade_build(18, 22, 48, false);
+	int cols = 12;
+	int cell = 40;
+	int nspr = SPRITE_SRC.size();
+	int rows = (nspr + cols - 1) / cols;
+	int trows = (TILES_DEF.size() + 23) / 24;
+	canvas_init(cols * cell, rows * cell + trows * 20 + 8);
+	fill_px(0, 0, VW, VH, rgb(40, 44, 52));
+	for (int i = 0; i < nspr; ++i) {
+		string name = SPRITE_SRC[i].split("|")[0];
+		string tint = "green";
+		for (int k = 0; k < MONS.size(); ++k) {
+			if (MONS[k].spr == name) { tint = MONS[k].col; break; }
+		}
+		if (name == "gator") { tint = "hue0"; }
+		int off = sprite_compiled(i, tint, crgb("leather"), crgb("straw"), crgb("steel"));
+		int ox = (i % cols) * cell + 4;
+		int oy = (i / cols) * cell + 2;
+		for (int py = 0; py < 32; ++py) {
+			for (int px = 0; px < 32; ++px) {
+				int c = SPRPIX[off + (py / 4) * TS + px / 4];
+				if (c >= 0) { pset(ox + px, oy + py, c); }
+			}
+		}
+		draw_text_px(name.substr(0, 9), ox - 2, oy + 33, rgb(220, 220, 220), -1, 1);
+	}
+	int ty0 = rows * cell + 4;
+	for (int t = 0; t < TILES_DEF.size(); ++t) {
+		int ox = (t % 24) * 20 + 2;
+		int oy = ty0 + (t / 24) * 20;
+		for (int vr = 0; vr < 2; ++vr) {
+			int src = TEX_OFF[(t * 4 + vr) * 4];
+			for (int py = 0; py < 8; ++py) {
+				for (int px = 0; px < 8; ++px) { pset(ox + vr * 8 + px, oy + py, TEX[src + py * 8 + px]); }
+			}
+		}
+	}
+	string out = arg_value("out", data_root() + "/shots/sheet.png");
+	png_write_canvas(out, 2);
+	print("wrote " + out);
+	return 0;
+}
+
+int main() {
+	if (arg_flag("sheet")) { return run_sheet(); }
+	if (arg_flag("smoke")) { return run_smoke(); }
+	if (arg_flag("shot")) { return run_shots(); }
+	return run_play();
 }
 main();

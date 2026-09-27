@@ -116,8 +116,17 @@ array<int> EV_C;
 array<int> EV_TO;             // player slot, -1 = everyone near (EV_W, EV_X, EV_Y)
 array<string> EV_TEXT;
 
+// ---- a spectator camera keeps its surroundings awake (title screen); -1 = none
+int CAMERA_W = -1;
+int CAMERA_X = 0;
+int CAMERA_Y = 0;
+
 // ---- autopilots
 array<Bot> BOTS;
+
+// ---- snapshots and the client side
+array<int> NET_SHEET_SENT;     // host: sheet version last sent to each slot
+shared_ptr<ClientView> CV = null;   // the view the renderer draws
 
 // ---- dev/stat counters (not hashed)
 int STAT_KILLS = 0;

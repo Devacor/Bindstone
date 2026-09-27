@@ -10,6 +10,7 @@
 #include <jaiscript/detail/type_proofs.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/core/class_registry.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 #include "fuzz/fuzz_generator.hpp"
 #include "fuzz/fuzz_harness.hpp"
@@ -236,7 +237,8 @@ public:
             check_eq((size_t)0, error_count(e->check("int x = 1; x += 2.5;")));
             check_eq((size_t)0, error_count(e->check("int x = 4; x /= 2;")));
             check_eq((size_t)0, error_count(e->check("float f = 1.0; f *= 2;")));
-            check_eq((size_t)0, error_count(e->check("string s = \"a\"; s += 5;")));
+            check_eq((size_t)1, error_count(e->check("string s = \"a\"; s += 5;")));   // the runtime raises: a string target appends text only
+            check_eq((size_t)0, error_count(e->check("string s = \"a\"; s += 'b'; s += \"c\";")));
             check_eq((size_t)1, error_count(e->check("int x = 1; x += \"s\";")));
         });
 
@@ -1631,6 +1633,85 @@ public:
             w->execute("import \"leaf_err.jai\";\n1");
             check_true(w->has_function("f"));
             std::filesystem::remove_all(dir);
+        });
+
+        test("global_qualified_store_checks_the_program_scope_declaration", [this]() {
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                auto r = e->check("int PACK_MAX = 5;\n::PACK_MAX = \"lots\";");
+                check_eq((size_t)1, error_count(r));
+                check_true(has_diag(r, dlevel::error, "cannot assign 'string' to 'PACK_MAX' declared 'int'"));
+                // ::name skips the locals and fields that shadow it, both ways
+                check_eq((size_t)1, error_count(e->check("int PACK_MAX = 5;\nvoid f() { string PACK_MAX = \"a\"; ::PACK_MAX = \"lots\"; }")));
+                check_eq((size_t)0, error_count(e->check("string G2 = \"\";\nvoid f() { int G2 = 0; ::G2 = \"x\"; G2 = 3; }")));
+                check_eq((size_t)0, error_count(e->check("string G3 = \"\";\nclass K { int G3 = 0; void m() { ::G3 = \"x\"; G3 = 4; } }")));
+                // a global another unit declared, typed off its engine cell (the reload-stub shape: a file included later)
+                auto run = make_engine();
+                run->type_proofs(proofs);
+                run->execute("int LIMIT = 5;");
+                check_eq((size_t)1, error_count(run->check("void reload() { ::LIMIT = \"lots\"; }")));
+                check_eq((size_t)0, error_count(run->check("void reload() { ::LIMIT = 7; LIMIT = 8; }")));
+            }
+            // across the units of one program, before anything runs: the declaring unit's spelled type
+            auto dir = closure_dir("gq_store");
+            write_unit(dir, "gq_data.jai", "int PACK_MAX = 5;\n");
+            write_unit(dir, "gq_logic.jai", "void bump() { ::PACK_MAX = \"lots\"; }\n");
+            auto p = program_engine(dir);
+            std::string what;
+            try { p->execute("import \"gq_data.jai\";\nimport \"gq_logic.jai\";\n1"); } catch (const static_check_error& ex) { what = ex.what(); }
+            check_true(what.find("gq_logic.jai:1:") != std::string::npos && what.find("cannot assign 'string' to 'PACK_MAX' declared 'int'") != std::string::npos, what);
+            write_unit(dir, "gq_logic.jai", "void bump() { ::PACK_MAX = 9; }\n");
+            check_eq((int64_t)1, p->execute("import \"gq_data.jai\";\nimport \"gq_logic.jai\";\n1").as_int());
+            std::filesystem::remove_all(dir);
+        });
+
+        test("checker_sees_promoted_char_arithmetic_host_results_and_string_namespace_arguments", [this]() {
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                jai::stdlib::register_all(*e);
+                e->type_proofs(proofs);
+                auto r = e->check("string z = \"\";\nint a = 1;\nz += to_char(a) + to_char(a);");
+                check_eq((size_t)1, error_count(r));
+                check_true(has_diag(r, dlevel::error, "cannot apply '+=' to 'string' and 'int'"), r.format());
+                r = e->check("array<string> msg;\nint a = 1;\nmsg.push(to_char(a) + to_char(a) + to_char(a));");
+                check_eq((size_t)1, error_count(r));
+                check_true(has_diag(r, dlevel::error, "cannot push into 'array<string>'"), r.format());
+                r = e->check("int a = 65;\nvar t = string::repeat(to_char(a), 3);");
+                check_eq((size_t)1, error_count(r));
+                check_true(has_diag(r, dlevel::error, "string::repeat"), r.format());
+                check_true(has_diag(r, dlevel::error, "'char'"), r.format());
+                check_eq((size_t)1, error_count(e->check("class C { string s = \"\"; }\nC c = C();\nc.s += 5;")));
+                check_true(has_diag(e->check("class C { string s = \"\"; }\nC c = C();\nc.s++;"), dlevel::error, "cannot apply '++' to 'string'"));
+                check_eq((size_t)1, error_count(e->check("string s = \"\";\ns += 2.5;")));
+                // the spellings that work stay clean
+                check_eq((size_t)0, error_count(e->check("string z = \"\";\nint a = 1;\nz += to_char(a);\nz += \"\" + to_char(a) + to_char(a);\nz += \"x\";\nvar q = to_char(a) + 1;\nint n = to_char(a) + to_char(a);")));
+                check_eq((size_t)0, error_count(e->check("var t = string::repeat(\"ab\", 2) + string::pad_left(\"7\", 3, '0') + string::pad_right(\"x\", 2, \"-\");\nutf8_string u = \"a\";\nvar w = string::repeat(u, 2);\narray<string> v;\nint a = 1;\nv.push(\"\" + to_char(a));\narray<string> elems = [\"x\"];\nelems[0] += 5;")));
+                check_eq((size_t)0, error_count(e->check("var s = \"\";\ns += 5;")), "a var target stays dynamic");
+            }
+        });
+
+        test("a_literal_passed_to_a_reference_parameter_is_reported_at_check_time", [this]() {
+            const std::string decl = "int index_of_name(array<string>& names, string n, int def) { return def; }\n";
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                auto r = e->check(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);");
+                check_eq((size_t)1, error_count(r));
+                check_true(has_diag(r, dlevel::error, "cannot pass a literal to reference parameter 'names' of 'index_of_name'"), r.format());
+                check_eq((size_t)1, error_count(e->check("void inc(int& x) { x = x + 1; }\ninc(5);")));
+                check_eq((size_t)1, error_count(e->check("class K { void put(string& s) { s = \"\"; } }\nK k = K();\nk.put(\"lit\");")));
+                check_eq((size_t)0, error_count(e->check(decl + "array<string> names = [\"a\"];\nindex_of_name(names, \"a\", 0);")));
+                check_eq((size_t)0, error_count(e->check("void inc(int& x) { x = x + 1; }\nvoid inc(int x, int y) { }\nint v = 1;\ninc(v);")));
+                check_eq((size_t)0, error_count(e->check("coroutine int gen(int& x) { yield x + 1; }\nauto g = gen(6);")), "a coroutine binds a copy of the argument");
+                // the runtime keeps its verdict: warn mode reports the diagnostic and the call still raises
+                auto w = make_engine();
+                w->type_proofs(proofs);
+                w->static_checking(check_mode::warn);
+                check_eq(std::string("Cannot pass non-lvalue to reference parameter"),
+                         w->execute(decl + "var m = \"\";\ntry { index_of_name([\"a\"], \"a\", 0); } catch (e) { m = e; }\nm;").to_string());
+                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "cannot pass a literal to reference parameter 'names'"));
+            }
         });
 
         test("an_enum_declared_in_a_function_is_local_and_warns_when_it_hides_a_program_enum", [this]() {

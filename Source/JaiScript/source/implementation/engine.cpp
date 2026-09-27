@@ -755,6 +755,9 @@ struct engine::implementation {
     std::string program_check_listing_;
     std::vector<check_diagnostic> program_check_diags_;
     std::string program_parse_failures_;
+    // Host functions' declared scalar results (engine::host_function_result): jai_null_type = unknown or disagreeing
+    std::unordered_map<std::string, script_value_type> host_results_;
+    script_value_type staged_host_result_ = script_value_type::jai_null_type;
 
     static void literal_unit_paths(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out) {
         for (const auto& d : decls) {
@@ -2364,9 +2367,23 @@ void engine::add_variadic_function(const std::string& name, script_function func
 // createSetOnFirst is the only policy difference between entry points: the add_overloaded_* family
 // always builds a set (even for a lone untyped overload); the add_function* family defers (a single
 // untyped function stays a plain global until a second one of the same name arrives).
+void engine::stage_host_result(script_value_type kind) {
+    impl->staged_host_result_ = kind;
+}
+
+bool engine::host_function_result(const std::string& name, script_value_type& out) const {
+    auto it = impl->host_results_.find(name);
+    if (it == impl->host_results_.end() || it->second == script_value_type::jai_null_type) { return false; }
+    out = it->second;
+    return true;
+}
+
 void engine::register_overload_impl(const std::string& name, size_t arity, script_function func,
                                     const std::vector<param_type_info>& paramTypes, bool createSetOnFirst) {
     ++impl->check_surface_epoch_;   // the static checker can see registered functions
+    const script_value_type result = impl->staged_host_result_;
+    impl->staged_host_result_ = script_value_type::jai_null_type;
+    if (auto [it, fresh] = impl->host_results_.try_emplace(name, result); !fresh && it->second != result) { it->second = script_value_type::jai_null_type; }
     auto existing_result = impl->global_environment_->get(name);
     bool hasExisting = existing_result && existing_result.value().is_function();
     bool setExists = impl->overloadedFunctions.find(name) != impl->overloadedFunctions.end();

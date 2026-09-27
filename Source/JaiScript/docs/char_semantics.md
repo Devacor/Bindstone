@@ -49,7 +49,11 @@ Both directions of the char↔int door are open:
 - **`to_char(n)`** (stdlib) — explicit int → char, range-checked 0..255, throws outside.
   `out += to_char(b)` appends the byte to a string: the binary-writer shape.
 - `string += char` appends as text (chars are text units). `string += int` still raises
-  by pinned Strong Types design — stringify explicitly if you mean it.
+  by pinned Strong Types design — stringify explicitly if you mean it. The promotion makes
+  `to_char(a) + to_char(b)` an int, so `out += to_char(a) + to_char(b)` and
+  `parts.push(to_char(a) + to_char(b))` into an `array<string>` are that same mistake; the
+  static checker sees the promoted type and reports both at load (`"" + to_char(a) + to_char(b)`
+  builds the text).
 
 There is still **no implicit int→char**: `type_of('a' + 1) == "int"`.
 

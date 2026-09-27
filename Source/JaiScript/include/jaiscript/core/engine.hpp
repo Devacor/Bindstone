@@ -320,6 +320,9 @@ namespace jai {
             std::vector<param_type_info> param_types;
         };
         bool host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const;
+        // The scalar result every registration of `name` declares by its C++ return type (int, float, bool, char,
+        // string); false when a registration returns anything else or registrations disagree
+        bool host_function_result(const std::string& name, script_value_type& out) const;
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
@@ -614,6 +617,7 @@ namespace jai {
             
             auto binder = make_functionBinder(std::forward<Func>(func), this);
             script_function boundFunc = binder.bind();
+            stage_host_result(host_result_kind<return_type>());
             
             // Wrap the function to handle type conversion for return values
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
@@ -665,6 +669,19 @@ namespace jai {
         }
         
         void setHasCustomNumericOps(bool value);
+
+        template <typename R>
+        static constexpr script_value_type host_result_kind() {
+            using D = std::decay_t<R>;
+            if constexpr (std::is_same_v<D, int> || std::is_same_v<D, int64_t> || std::is_same_v<D, script_int>) { return script_value_type::jai_int_type; }
+            else if constexpr (std::is_same_v<D, float> || std::is_same_v<D, double>) { return script_value_type::jai_float_type; }
+            else if constexpr (std::is_same_v<D, bool>) { return script_value_type::jai_bool_type; }
+            else if constexpr (std::is_same_v<D, char> || std::is_same_v<D, script_char>) { return script_value_type::jai_char_type; }
+            else if constexpr (std::is_same_v<D, std::string>) { return script_value_type::jai_string_type; }
+            else { return script_value_type::jai_null_type; }
+        }
+        // the result kind of the registration about to be made (register_overload_impl consumes it; unstaged = unknown)
+        void stage_host_result(script_value_type kind);
 
         // The single overloaded-function registration algorithm shared by every public entry point
         // (add_function*, add_overloaded_function*, add_variadic_function). createSetOnFirst is the

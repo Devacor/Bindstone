@@ -15,6 +15,7 @@ import "gq_game.jai";
 
 int NET_PROTO = 1;
 int NET_MAX_PLAYERS = 16;
+string NET_CLOSE_WHY;       // why the interactive client's session ended (the title shows it)
 
 // ------------------------------------------------------------------ host ---
 bool net_host_start(int port) {
@@ -328,7 +329,11 @@ void net_client_pump() {
 	}
 	if (NET_CLOSE_F > 0) {
 		NET_CLOSE_F = NET_CLOSE_F - 1;
-		if (NET_CLOSE_F == 0) { QUIT = true; }
+		if (NET_CLOSE_F == 0) {
+			NET_CLOSE_WHY = st.substr(8, st.size() - 8);
+			PLAY_EXIT = "title";
+			QUIT = true;
+		}
 	}
 }
 
@@ -352,6 +357,13 @@ string net_join(string host, int port, string name, int hue, bool prepare_world)
 		waited = waited + 1;
 	}
 	if (NCS_STATUS[s] != "joined") { return "no answer from " + host; }
+	net_join_finish(s, prepare_world);
+	return "";
+}
+
+// a welcomed session becomes the interactive client: the host's world (terrain from its seed), our slot, its view
+void net_join_finish(int s, bool prepare_world) {
+	NET_SESSION = s;
 	if (prepare_world) {
 		sim_reset();
 		world_generate(NCS_SEED[s]);
@@ -360,5 +372,4 @@ string net_join(string host, int port, string name, int hue, bool prepare_world)
 	NET_CLIENT = true;
 	LOCAL_SLOT = NCS_SLOT[s];
 	CV = NCS_VIEW[s];
-	return "";
 }

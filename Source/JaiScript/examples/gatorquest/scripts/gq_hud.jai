@@ -240,13 +240,18 @@ void build_menu(ClientView& v) {
 		for (int i = 0; i < v.bank.size(); ++i) { menu_add(item_label(v.bank[i]), rarity_sgr(v.bank[i].rarity), i); }
 	} else if (mode == "menu") {
 		menu_add("Resume", SGR_TEXT, 0);
-		menu_add("Save game", SGR_TEXT, 1);
-		menu_add("Load game", SGR_TEXT, 2);
+		if (!NET_CLIENT) {
+			menu_add("Save game", SGR_TEXT, 1);
+			menu_add("Load game", SGR_TEXT, 2);
+		}
 		menu_add(MUSIC_ON ? "Music: on" : "Music: off", SGR_TEXT, 3);
 		menu_add(SFX_ON ? "Sound: on" : "Sound: off", SGR_TEXT, 4);
 		menu_add(`Zoom: ${TILE_ZOOM == 0 ? "auto" : to_string(TILE_ZOOM) + "px"}`, SGR_TEXT, 5);
 		menu_add("Help", SGR_TEXT, 6);
-		menu_add("Save and quit", SGR_TEXT, 7);
+		if (net_hosting()) { menu_add(`Stop hosting (${net_player_count()} joined)`, SGR_TEXT, 9); }
+		else if (!NET_CLIENT) { menu_add(`Host this game (port ${TM_PORT})`, SGR_TEXT, 8); }
+		menu_add(NET_CLIENT ? "Leave to title" : "Save and leave to title", SGR_TEXT, 10);
+		menu_add(NET_CLIENT ? "Leave and quit" : "Save and quit", SGR_TEXT, 7);
 	} else if (mode == "help") {
 		array<string> help = [
 			"arrows/WASD  move (bump to attack/talk)", "space or E   use: talk, fish, mine, chop", "F or tab     next target", "G  pick up    H  bandage    Q  potion",

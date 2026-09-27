@@ -1,6 +1,8 @@
 // Gator Quest entry point.
 //
-//   jaiscript gatorquest.jai                         play (single player)
+//   jaiscript gatorquest.jai                         play: the title offers single player, host and join
+//   jaiscript gatorquest.jai -- host [port N]        ... opening on the host page
+//   jaiscript gatorquest.jai -- join HOST [port N]   ... opening on the join page (lag/jitter/loss N simulate a link)
 //   jaiscript gatorquest.jai -- smoke [ticks N] [seed S] [bots K]
 //                                                    headless autopilot session, prints STATE_HASH
 //   jaiscript gatorquest.jai -- shot [ticks N] [every N] [screen 150x44] [out DIR] [keys "i down enter"]
@@ -8,6 +10,7 @@
 //   jaiscript gatorquest.jai -- savetest             save robustness suite
 //   jaiscript gatorquest.jai -- hotreload [interp]   hot-reload test (pass interp on --backend=interp)
 //   jaiscript gatorquest.jai -- dev                  play with live script reload
+//   jaiscript gatorquest.jai -- predtest | menutest | nettest | endgame | tour | serve | client   see README.md
 
 import "gq_enums.jai";
 import "gq_types.jai";
@@ -43,6 +46,7 @@ import "gq_tests.jai";
 import "gq_serve.jai";
 import "gq_endgame.jai";
 import "gq_predtest.jai";
+import "gq_menutest.jai";
 
 string arg_value(string key, string def) {
 	for (int i = 0; i + 1 < ARGS.size(); ++i) {
@@ -124,6 +128,7 @@ int run_smoke() {
 	return fails;
 }
 
+// the interactive game: title (single player, host, join) -> session -> back to the title or quit
 int run_play() {
 	int seed = arg_value("seed", "1").to_int(1);
 	string screen = arg_value("screen", "");
@@ -133,59 +138,42 @@ int run_play() {
 		FORCE_ROWS = wh.size() > 1 ? wh[1].to_int(0) : 0;
 	}
 	bool demo = arg_flag("demo");
-	string join_host = arg_value("join", "");
-	bool hosting = arg_flag("host");
 	int port = arg_value("port", "28777").to_int(28777);
-	// demos, timed runs and joiners never touch this machine's saves (a joiner's character lives on the host)
-	SAVES_ON = !demo && arg_value("frames", "0") == "0" && join_host == "";
-	string last = SAVES_ON ? last_player_name() : "";
-	bool resumed = SAVES_ON && load_world_for_session();
-	if (!resumed) { sim_init(seed); }
+	MAX_FRAMES = arg_value("frames", "0").to_int(0);
+	// demos and timed runs never touch this machine's saves (a joined game's gators live on its host)
+	SAVES_ON = !demo && MAX_FRAMES == 0;
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);
 	layout(screen_cols(), screen_rows());
-	MAX_FRAMES = arg_value("frames", "0").to_int(0);
 	AUDIO_ON = !arg_flag("mute") && audio_prepare(data_root() + "/cache");
-	TITLE_LAST = last != "" ? last : arg_value("name", "");
-	TITLE_NOTE = join_host != "" ? `JOINING ${string::to_upper(join_host)}:${port}` : (hosting ? `HOSTING ON PORT ${port}` : "");
-	if (!title_screen(resumed, demo ? 45 : 0)) {
-		print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
-		return 0;
-	}
-	CAMERA_W = -1;
-	pred_reset();
-	if (demo) { PRED_ON = false; }
-	BOTS = [];
-	string welcome = "";
-	if (join_host != "") {
-		string err = net_join(join_host, port, CHOSEN_NAME, CHOSEN_HUE, true);
-		if (err != "") {
-			print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
-			print(`Could not join ${join_host}:${port}: ${err}`);
-			return 1;
-		}
-		cv_log(CV, `Connected to ${join_host}:${port}. The host keeps your gator; type /who to see who is here.`, 5);
-	} else {
-		welcome = join_character(LOCAL_SLOT, CHOSEN_NAME, CHOSEN_HUE);
-		CV = new ClientView();
-		CV.slot = LOCAL_SLOT;
-		if (demo) { bot_add(LOCAL_SLOT); }
-		if (hosting) {
-			welcome = welcome + (net_host_start(port) ? ` Hosting on port ${port}: friends join with play.bat join <your address>.` : ` Could not open port ${port} for hosting.`);
-		}
-	}
-	if (arg_flag("dev")) {
+	title_setup(arg_value("join", ""), arg_flag("host"), port);
+	if (arg_flag("join") && TM_PAGE == "main") { tm_open("join"); }
+	bool dev = arg_flag("dev");
+	if (dev) {
 		dev_watch_dir(current_script_dir());
 		DEV_ON = true;
-		welcome = welcome + ` Dev mode: watching ${DEV_FILES.size()} scripts for changes.`;
 	}
-	if (!NET_CLIENT) {
-		say_to(LOCAL_SLOT, welcome, C_YELLOW);
-		music_play(MOB_WORLD[CHARS[LOCAL_SLOT].mob]);
-	} else {
-		music_play(0);
+	while (true) {
+		string last = SAVES_ON ? last_player_name() : "";
+		TITLE_LAST = last != "" ? last : arg_value("name", "");
+		bool resumed = SAVES_ON && load_world_for_session();
+		if (!resumed) { sim_init(seed); }
+		string choice = title_screen(resumed, demo ? 45 : 0);
+		if (choice == "quit") { break; }
+		string welcome = session_start(choice, demo);
+		if (dev) { welcome = welcome + ` Dev mode: watching ${DEV_FILES.size()} scripts for changes.`; }
+		if (!NET_CLIENT) {
+			say_to(LOCAL_SLOT, welcome, C_YELLOW);
+			music_play(MOB_WORLD[CHARS[LOCAL_SLOT].mob]);
+		} else {
+			music_play(0);
+		}
+		play_loop();
+		if (arg_value("png", "") != "") { png_write_canvas(arg_value("png", ""), 3); }
+		session_end();
+		if (PLAY_EXIT != "title" || MAX_FRAMES > 0) { break; }
 	}
-	play_loop();
-	if (arg_value("png", "") != "") { png_write_canvas(arg_value("png", ""), 3); }
+	print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
+	print("Thanks for playing Gator Quest! Your swamp awaits.");
 	if (MAX_FRAMES > 0) {
 		int n = imax(1, STAT_FRAMES);
 		print(`frames ${STAT_FRAMES}: sim ${STAT_SIM_MS * 1000 / n} us, render ${STAT_RENDER_MS * 1000 / n} us, compose ${STAT_COMPOSE_MS * 1000 / n} us per frame; tick ${TICK}; STATE_HASH ${state_hash()}`);
@@ -267,7 +255,7 @@ int main() {
 	NET_SIM_LOSS = arg_value("loss", "0").to_int(0);
 	if (arg_flag("sheet")) { return run_sheet(); }
 	if (arg_flag("smoke")) { return run_smoke(); }
-	if (arg_flag("shot")) { return run_shots(); }
+	if (arg_flag("shot")) { return arg_flag("title") ? run_title_shots() : run_shots(); }
 	// "tag X" gives a test run its own folders, so runs in parallel never share files
 	string tests = data_root() + "/saves" + (arg_value("tag", "") == "" ? "" : "/" + arg_value("tag", ""));
 	if (arg_flag("savetest")) { return run_savetest(tests); }
@@ -277,6 +265,7 @@ int main() {
 	if (arg_flag("endgame")) { return run_endgame(); }
 	if (arg_flag("tour")) { return run_tour(); }
 	if (arg_flag("predtest")) { return run_predtest(); }
+	if (arg_flag("menutest")) { return run_menutest(tests, arg_value("port", "28960").to_int(28960)); }
 	if (arg_flag("serve")) { return run_serve(); }
 	if (arg_flag("client")) { return run_client(); }
 	return run_play();

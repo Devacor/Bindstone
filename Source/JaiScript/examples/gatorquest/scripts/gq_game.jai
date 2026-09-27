@@ -239,7 +239,22 @@ void on_menu_key(ClientView& v, string k) {
 			layout(SCREEN_COLS, SCREEN_ROWS);
 		}
 		else if (arg == 6) { open_mode("help"); }
-		else if (arg == 7) { game_save_request(); QUIT = true; }
+		else if (arg == 7) { PLAY_EXIT = "quit"; QUIT = true; }
+		else if (arg == 8) {
+			int port = TM_PORT.to_int(28777);
+			if (net_host_start(port)) {
+				string msg = host_welcome();
+				cv_log(CV, msg, 5);
+				toast(`Hosting on port ${port}.`);
+			} else { toast(`Could not open port ${port} for hosting.`); }
+			UI_MODE = "play";
+		}
+		else if (arg == 9) {
+			net_host_stop("the host stopped hosting");
+			toast("Stopped hosting; the swamp is yours alone again.");
+			UI_MODE = "play";
+		}
+		else if (arg == 10) { PLAY_EXIT = "title"; QUIT = true; }
 		return;
 	}
 	if (mode == "help" || mode == "skills" || mode == "journal") {
@@ -287,9 +302,96 @@ int STAT_FRAMES;
 int STAT_RENDER_MS;
 int STAT_COMPOSE_MS;
 int STAT_SIM_MS;
+string PLAY_EXIT;           // how the last session ended: "title" or "quit"
+
+// ------------------------------------------------------------ sessions ---
+// what a host tells its players to type
+string host_welcome() {
+	array<string> addrs = net_local_addresses();
+	string where = addrs.size() > 0 ? addrs.join(" or ") : "this machine's address";
+	return `Hosting on port ${NET_PORT}: friends choose Join a game and type ${where}.`;
+}
+
+void presentation_reset() {
+	P_X = [];
+	P_Y = [];
+	P_VX = [];
+	P_VY = [];
+	P_LIFE = [];
+	P_MAX = [];
+	P_COL = [];
+	P_FLAGS = [];
+	FT_X = [];
+	FT_Y = [];
+	FT_S = [];
+	FT_COL = [];
+	FT_T = [];
+	FT_SCALE = [];
+	PR_X0 = [];
+	PR_Y0 = [];
+	PR_X1 = [];
+	PR_Y1 = [];
+	PR_T = [];
+	PR_DUR = [];
+	PR_KIND = [];
+	FLASH = {};
+	VIS_X = {};
+	VIS_Y = {};
+	BANNER_F = 0;
+	UI_TOAST_F = 0;
+	SHAKE_F = 0;
+	UI_MODE = "play";
+	CHAT_BUF = "";
+}
+
+// the title's choice becomes a session: the local gator joins this world (alone or hosting),
+// or the welcomed join builds the host's world; returns the welcome line for a local gator
+string session_start(string choice, bool demo) {
+	presentation_reset();
+	CAMERA_W = -1;
+	pred_reset();
+	if (demo) { PRED_ON = false; }
+	BOTS = [];
+	NET_CLOSE_F = 0;
+	NET_CLOSE_WHY = "";
+	LAST_MOVE_SENT = -2;
+	PLAY_EXIT = "quit";
+	if (choice == "join") {
+		net_join_finish(TM_SESSION, true);
+		cv_log(CV, `Connected to ${TM_JOIN_ADDR}:${TM_JOIN_PORT}. The host keeps your gator; type /who to see who is here.`, 5);
+		return "";
+	}
+	LOCAL_SLOT = 0;
+	string welcome = join_character(LOCAL_SLOT, CHOSEN_NAME, CHOSEN_HUE);
+	CV = new ClientView();
+	CV.slot = LOCAL_SLOT;
+	if (demo) { bot_add(LOCAL_SLOT); }
+	if (choice == "host") { welcome = welcome + " " + host_welcome(); }
+	return welcome;
+}
+
+// the session ends: a joined player says goodbye; a host sends everyone home with their
+// gators written; the local world and gator are saved (the title reloads the world from disk)
+void session_end() {
+	music_stop_all();
+	if (NET_CLIENT) {
+		net_session_bye(NET_SESSION);
+		NET_CLIENT = false;
+		NET_SESSION = -1;
+	} else {
+		if (net_hosting()) { net_host_stop("the host has left the swamp"); }
+		if (SAVES_ON) { save_world_and_chars(); }
+	}
+	LOCAL_SLOT = 0;
+	BOTS = [];
+	pred_reset();
+	presentation_reset();
+	if (NET_CLOSE_WHY != "") { tm_fail("DISCONNECTED", "The connection to the host ended: " + NET_CLOSE_WHY + "."); }
+	else { tm_open("main"); }
+}
 
 void play_loop() {
-	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);
+	print(ESC + "[2J", skip_newline);
 	layout(screen_cols(), screen_rows());
 	int last = clock_ms();
 	int acc = 0;
@@ -364,11 +466,6 @@ void play_loop() {
 		int spent = clock_ms() - NOW_MS;
 		if (spent < 33) { sleep_ms(33 - spent); }
 	}
-	music_stop_all();
-	if (NET_CLIENT) { net_session_bye(NET_SESSION); }
-	if (net_hosting()) { net_host_stop("the host has left the swamp"); }
-	print(ESC + "[0m" + ESC + "[?25h" + ESC + "[?1049l", skip_newline);
-	print("Thanks for playing Gator Quest! Your swamp awaits.");
 }
 
 void music_stop_all() {

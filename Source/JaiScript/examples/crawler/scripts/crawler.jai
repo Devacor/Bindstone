@@ -22,8 +22,7 @@
 //     shows the character sheet; scripted/--input '?' works)
 
 // ---- capture the runner's host functions BEFORE this file shadows the names ----
-var HOST_READ_KEY_RAW = read_key;   // non-blocking edge poll: "" when no key is waiting
-var HOST_SLEEP_MS = sleep_ms;       // real sleep (the shim's sleep_ms no-ops when headless)
+import "host_capture.jai";
 
 // ---- flags as globals (main.cpp's host_options, parsed from the runner's ARGS) ----
 var HOST_SEED = 1337;

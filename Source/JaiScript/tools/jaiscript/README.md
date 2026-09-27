@@ -133,6 +133,9 @@ while (!d.pump()) { ... }   // d.received(), d.total() (-1 until known), d.fract
 d.success()  d.error()  d.cancel()
 ```
 
+For hosting, `net_host_name()` returns this machine's name and `net_local_addresses()` its IPv4
+addresses (loopback left out), which is what a player hosting a game tells the others to type.
+
 The transport is the platform's own: WinHTTP on Windows, libcurl on Linux and macOS when
 the build found it, otherwise the `curl` executable at run time. A failed transfer leaves no
 partial file. JaiDOOM's first run uses this to fetch and verify its own game data.

@@ -7789,7 +7789,7 @@ op_status vm_backend::cells_run(frame& f, const chunk::cell_loop& loop) {
 		case opcode::op_c_jump:
 			// c = 1: an inner loop's back edge inside the block, the budget's poll (a miss on exhaustion: the general form raises on the
 			// original back edge with materialized slots)
-			if (ci.c == 1 && execution_limit_exhausted()) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 0); break; }
+			if (ci.c == 1 && (execution_limit_exhausted() || debug_hook_)) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 0); break; }
 			ip = ci.a;
 			break;
 		case opcode::op_c_guard: f.ip = ip; st = exec_c_guard(f, ci, regs); ip = f.ip; break;
@@ -8038,6 +8038,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cfor_back(frame& f, size_t& ip, con
 		f.ip = ip;
 		return raise_from(execution_limit_failure());
 	}
+	if (debug_hook_) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.back, 0); return {}; }   // a session armed mid-block: the general form's statements
 	const counted_for_proto& p = f.code->counted_for_protos[loop.counted];
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
 	auto read = [&](uint32_t o, script_int& v) -> bool {
@@ -8076,6 +8077,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_back(frame& f, size_t& ip, const vm
 		f.ip = ip;
 		return raise_from(execution_limit_failure());
 	}
+	if (debug_hook_) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.back, 0); return {}; }   // a session armed mid-block: the general form's statements
 	JAI_CELLS_COUNT(2);
 	ip = loop.copy_head;
 	return {};
@@ -8133,7 +8135,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith_jump(frame& f, size_t& ip, co
 	const op_status st = exec_c_arith(f, ip, ins, cr, false);
 	if (st != op_status::ok || ip != next) return st;
 	const vm_instruction& j = cr.code[next];   // the block's jump (not a plain position: the lever never counts it): an inner back edge polls the budget
-	if (j.c == 1 && execution_limit_exhausted()) [[unlikely]] { const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop]; cells_miss_ip(f, ip, loop, loop.origin[next - loop.copy_head], 0); return {}; }
+	if (j.c == 1 && (execution_limit_exhausted() || debug_hook_)) [[unlikely]] { const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop]; cells_miss_ip(f, ip, loop, loop.origin[next - loop.copy_head], 0); return {}; }
 	ip = j.a;
 	return {};
 }

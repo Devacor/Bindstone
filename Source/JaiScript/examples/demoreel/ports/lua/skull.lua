@@ -242,16 +242,47 @@ local function sk_ray_near(ox, oy, oz, dx, dy, dz, cx, cy, cz, r)
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r
 end
 
--- 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby at a point the wall is dw from: the nearest wins, ties to
--- the earlier. Each capsule run starts from the best so far, so a capsule that cannot win costs only its bounding test
-local function sk_material(x, y, z, dw)
+-- the ray's candidate capsules cand[first, last) (counted from 0) against best
+local function sk_candidates(x, y, z, cand, first, last, d)
+	for k = first + 1, last do
+		local ci = cand[k] + 1
+		local mx = x - SK_CMX[ci]
+		local my = y - SK_CMY[ci]
+		local mz = z - SK_CMZ[ci]
+		local reach = d + SK_CB[ci]
+		if mx * mx + my * my + mz * mz <= reach * reach then
+			local pax = x - SK_CAX[ci]
+			local pay = y - SK_CAY[ci]
+			local paz = z - SK_CAZ[ci]
+			local cdx = SK_CDX[ci]
+			local cdy = SK_CDY[ci]
+			local cdz = SK_CDZ[ci]
+			local hh = (pax * cdx + pay * cdy + paz * cdz) * SK_CID[ci]
+			hh = hh < 0.0 and 0.0 or (hh > 1.0 and 1.0 or hh)
+			local ex = pax - cdx * hh
+			local ey = pay - cdy * hh
+			local ez = paz - cdz * hh
+			local dc = sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[ci]
+			d = d < dc and d or dc
+		end
+	end
+	return d
+end
+
+-- 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby at a point on the ray the wall is dw from: the nearest wins, ties
+-- to the earlier. Each capsule run starts from the best so far, so a capsule that cannot win costs only its bounding
+-- test; and a capsule the ray passed no nearer than 0.01 to (not among its candidates: cand[0, nbone) bone, then chitin
+-- up to ncap) is that far from every point on it, so where the wall is nearer only the candidates can win
+local function sk_material(x, y, z, dw, cand, nbone, ncap)
 	local best = dw
 	local m = 0
+	local candidates_only = dw < 0.009
 	local bone = sk_skull(x, y, z, best)
-	bone = sk_capsules(x, y, z, 0, SK_NBONE, bone)
+	if candidates_only then bone = sk_candidates(x, y, z, cand, 0, nbone, bone) else bone = sk_capsules(x, y, z, 0, SK_NBONE, bone) end
 	if bone < best then best = bone; m = 1 end
 	local db = sk_body(x, y, z)
-	local chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, db < best and db or best)
+	local chit = db < best and db or best
+	if candidates_only then chit = sk_candidates(x, y, z, cand, nbone, ncap, chit) else chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, chit) end
 	if chit < best then best = chit; m = 2 end
 	local de = sk_glows(x, y, z)
 	de = de < best and de or best
@@ -283,6 +314,8 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 	local oz = SK_EZ
 	local groups = 0
 	local nc = 0
+	local nbone = 0
+	local ncap = 0
 	if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_BGX, SK_BGY, SK_BGZ, 0.62) then groups = 1 end
 	if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_HGX, SK_HGY, SK_HGZ, 0.74) then groups = groups + 2 end
 	for k = 1, nrow do
@@ -292,6 +325,8 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 			if sk_ray_near(ox, oy, oz, dx, dy, dz, SK_CMX[ci], SK_CMY[ci], SK_CMZ[ci], SK_CB[ci] + 0.01) then
 				nc = nc + 1
 				cand[nc] = c
+				ncap = nc
+				if c < SK_NBONE then nbone = nc end
 			end
 		else
 			local g = c - 99
@@ -372,7 +407,7 @@ local function sk_trace(dx, dy, dz, px, py, cand, row, nrow)
 	local x = ox + dx * t
 	local y = oy + dy * t
 	local z = oz + dz * t
-	local m = sk_material(x, y, z, wall)
+	local m = sk_material(x, y, z, wall, cand, nbone, ncap)
 	local fog = 1.0 - t / 14.0
 	fog = fog < 0.0 and 0.0 or fog
 	local lx = SK_LX - x

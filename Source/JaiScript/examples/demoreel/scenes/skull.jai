@@ -240,9 +240,9 @@ function sk_groups(float x, float y, float z, int groups) -> float {
 	return d;
 }
 
-// the ray's candidate parts against best: capsule indices, glows as 100 + index
-function sk_candidates(float x, float y, float z, array<int>& cand, int nc, float d) -> float {
-	for (int k = 0; k < nc; ++k) {
+// the ray's candidate parts cand[first, last) against best: capsule indices in ascending order, then glows as 100 + index
+function sk_candidates(float x, float y, float z, array<int>& cand, int first, int last, float d) -> float {
+	for (int k = first; k < last; ++k) {
 		int c = cand[k];
 		if (c >= 100) {
 			int g = c - 100;
@@ -277,7 +277,7 @@ function sk_candidates(float x, float y, float z, array<int>& cand, int nc, floa
 
 function sk_spider(float x, float y, float z, int groups, array<int>& cand, int nc) -> float {
 	float d = sk_groups(x, y, z, groups);
-	return sk_candidates(x, y, z, cand, nc, d);
+	return sk_candidates(x, y, z, cand, 0, nc, d);
 }
 
 // does the ray (origin o, unit direction d) pass within r of c ahead of the origin
@@ -290,16 +290,20 @@ function sk_ray_near(float ox, float oy, float oz, float dx, float dy, float dz,
 	return vx * vx + vy * vy + vz * vz - tc * tc < r * r;
 }
 
-// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby at a point the wall is dw from: the nearest wins, ties to the earlier.
-// Each capsule run starts from the best so far, so a capsule that cannot win costs only its bounding test
-function sk_material(float x, float y, float z, float dw) -> int {
+// 0 world, 1 bone, 2 chitin, 3 glow, 4 marking, 5 ruby at a point on the ray the wall is dw from: the nearest wins, ties to the
+// earlier. Each capsule run starts from the best so far, so a capsule that cannot win costs only its bounding test; and a capsule
+// the ray passed no nearer than 0.01 to (not among its candidates: cand[0, nbone) bone, then chitin up to ncap) is that far from
+// every point on it, so where the wall is nearer only the candidates can win
+function sk_material(float x, float y, float z, float dw, array<int>& cand, int nbone, int ncap) -> int {
 	float best = dw;
 	int m = 0;
+	bool candidates_only = dw < 0.009;
 	float bone = sk_skull(x, y, z, best);
-	bone = sk_capsules(x, y, z, 0, SK_NBONE, bone);
+	if (candidates_only) { bone = sk_candidates(x, y, z, cand, 0, nbone, bone); } else { bone = sk_capsules(x, y, z, 0, SK_NBONE, bone); }
 	if (bone < best) { best = bone; m = 1; }
 	float db = sk_body(x, y, z);
-	float chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, db < best ? db : best);
+	float chit = db < best ? db : best;
+	if (candidates_only) { chit = sk_candidates(x, y, z, cand, nbone, ncap, chit); } else { chit = sk_capsules(x, y, z, SK_NBONE, SK_CROWN0, chit); }
 	if (chit < best) { best = chit; m = 2; }
 	float de = sk_glows(x, y, z);
 	de = de < best ? de : best;
@@ -331,6 +335,8 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	float oz = SK_EZ;
 	int groups = 0;
 	int nc = 0;
+	int nbone = 0;
+	int ncap = 0;
 	if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_BGX, SK_BGY, SK_BGZ, 0.62)) { groups = 1; }
 	if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_HGX, SK_HGY, SK_HGZ, 0.74)) { groups = groups + 2; }
 	for (int k = 0; k < nrow; ++k) {
@@ -339,6 +345,8 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 			if (sk_ray_near(ox, oy, oz, dx, dy, dz, SK_CMX[c], SK_CMY[c], SK_CMZ[c], SK_CB[c] + 0.01)) {
 				cand[nc] = c;
 				nc = nc + 1;
+				ncap = nc;
+				if (c < SK_NBONE) { nbone = nc; }
 			}
 		} else {
 			int g = c - 100;
@@ -389,7 +397,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 			float bound = ds_last - (t - t_last) * lip - 0.001;
 			if (bound < dw || (bound < glow && bound < 0.5)) {
 				float ds = sk_groups(x, y, z, groups);
-				ds = sk_candidates(x, y, z, cand, nc, ds);
+				ds = sk_candidates(x, y, z, cand, 0, nc, ds);
 				glow = ds < glow ? ds : glow;
 				d = dw < ds ? dw : ds;
 				ds_last = ds;
@@ -417,7 +425,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	float x = ox + dx * t;
 	float y = oy + dy * t;
 	float z = oz + dz * t;
-	int m = sk_material(x, y, z, wall);
+	int m = sk_material(x, y, z, wall, cand, nbone, ncap);
 	float fog = 1.0 - t / 14.0;
 	fog = fog < 0.0 ? 0.0 : fog;
 	float lx = SK_LX - x;

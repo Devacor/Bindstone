@@ -92,9 +92,74 @@ public:
 		debugger_armed_mid_run();
 		parallel_bodies_with_leaves();
 		removed_element_aliases();
+		census_paths();
 	}
 
 private:
+	// VM lowerings no other registered test executed (Clang source coverage of the whole suite, docs/spec_conformance.md
+	// "Execution census"): each runs its general form's semantics
+	void census_paths() {
+		test("a_ternary_store_with_binary_arms_lands_through_the_fused_store", [this]() {
+			expect("ternary store arms", R"(
+				function run() -> string {
+					int a = 3; int b = 4; int x = 0; string s = "";
+					for (int i = 0; i < 4; i++) { x = i % 2 == 0 ? a + b * i : a - i; s += "" + x + ","; }
+					float f = 0.0; float h = 1.5;
+					for (int k = 0; k < 2; k++) { f = k == 0 ? h * 2.0 : h - 1.0; s += "" + f + ","; }
+					return s;
+				}
+				function ovf() -> string { int big = 9223372036854775807; int x = 0; string r = "no"; try { x = big > 0 ? big + 1 : 0; } catch (e) { r = e; } return r + "|" + x; }
+				run() + ovf();
+			)", "3,2,11,0,3.0,0.5,Integer overflow in '+'|0");
+		});
+		test("a_unary_over_a_binary_lands_in_a_temp_in_every_operand_position", [this]() {
+			expect("unary temps", R"(
+				function neg(int v) -> int { return v; }
+				function run() -> string {
+					int a = 3; int b = 4; string s = "";
+					for (int i = 0; i < 2; i++) {
+						int y = -(a + b) * 2 + i; s += "" + y + ",";
+						s += "" + neg(-(a * b)) + ",";
+						int z = i == 0 ? -(a - b) : -(b * i); s += "" + z + ",";
+					}
+					return s;
+				}
+				run();
+			)", "-14,-12,1,-13,-12,-4,");
+		});
+		test("an_index_chain_whose_step_runs_a_user_operator_takes_the_boxed_tail", [this]() {
+			expect("boxed index tail", R"(
+				class N { int v = 0; N(int x) { v = x; } function operator+(int k) -> int { return v + k; } }
+				function run() -> string {
+					array<int> a = [10, 20, 30, 40]; array<array<int>> g = [[1, 2], [3, 4]]; N n = N(1); string s = "";
+					for (int i = 0; i < 2; i++) { s += "" + a[n + i] + "," + g[i][n + 0] + ","; }
+					return s;
+				}
+				run();
+			)", "20,2,30,4,", check_mode::warn);
+		});
+		test("loop_bodies_without_braces", [this]() {
+			expect("braceless bodies", R"(
+				function run() -> string { string s = ""; for (int i = 0; i < 3; i++) s += "" + i; int k = 0; while (k < 3) k++; for (auto v : [7, 8]) s += "" + v; return s + "|" + k; }
+				run();
+			)", "01278|3");
+		});
+		test("from_this_with_arguments_raises_its_arity_text", [this]() {
+			// docs/diagnostics.md: weak_from_this() takes no arguments
+			expect("from_this arity", R"(
+				class C { function f() { var w = weak_from_this(1); return 1; } }
+				string r = ""; try { C().f(); } catch (e) { r = e; } r;
+			)", "weak_from_this() takes no arguments", check_mode::warn);
+		});
+		test("destructured_names_shared_with_a_closure_live_in_the_environment", [this]() {
+			expect("destructure", R"(
+				function run() -> string { auto [x, y] = [10, 20]; auto f = [&]() { x += 1; }; f(); return "" + x + "," + y; }
+				auto [p, q] = [1, 2];
+				run() + "|" + (p + q);
+			)", "11,20|3", check_mode::warn);
+		});
+	}
+
 	// docs/typed_regions_design.md "The contract": a raise inside a block leaves the general form's post-state
 	void exceptions_inside_fast_paths() {
 		test("a_raise_inside_a_closed_typed_loop_is_caught_in_the_same_function", [this]() {

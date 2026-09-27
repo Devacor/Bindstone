@@ -256,3 +256,29 @@ through `var&`, which is the documented escape hatch and felt right. Rating: goo
 redefining its functions and re-evaluating its initialized globals in place, would replace my stub generator, remove
 the line-based fragility, and could be made transactional (check first, apply on success). The class half of hot
 reload is already there; this is the function-and-constant half.
+
+### 2026-09-27: CRLF (milestone b follow-up)
+
+On master's Windows checkout the scripts have `\r\n` line endings, and the hot-reload test failed: its edits searched
+for `"class Character {\n"`. The stub generator itself survived (it already stripped a trailing `\r` by hand), and so
+did the save reader (same hand-stripping), but only because I had written those strips.
+
+**Good: the string library already had the right tool, `lines()`.** It splits on `\n` and `\r\n`, keeps interior
+blank lines (which the stub generator needs so its line numbers match the source) and drops the empty last element.
+I had used `split("\n")` plus a hand-written `\r` strip in four places instead; switching to `lines()` deleted code.
+`trim()` also strips `\r`, and `to_int()` tolerates a trailing `\r` (`"1\r".to_int(-7)` is 1). What I missed was
+discoverability, not capability: in the guide `lines()` is one clause in a paragraph of helpers. Suggestion: show
+`lines()` in the containers chapter's first string example, and consider a checker hint for `split("\n")` on text read
+from a file. Rating: good (library), okay (docs).
+
+**What I changed:** `lines()` for the stub generator, the save reader and the snapshot parser; the save checksum is
+verified over the text with `\r\n` normalized to `\n` (the game writes `\n`, so a file an editor or git converted
+still loads; a new savetest check pins it); the hot-reload test's edits follow each file's own line endings, and the
+test now writes two of its five copies with `\r\n` and three with `\n` whatever the checkout did, so both paths run on
+every machine. Verified from a `git archive` export converted to CRLF, on both backends (hot reload 23/23 VM, 20/20
+interpreter; savetest 16/16).
+
+**A scare that was mine, not the engine's:** while verifying, an interpreter run failed exactly the edits whose search
+text had no newline. It turned out a background batch of mine (with a PowerShell splatting mistake) was running a
+second copy of the test at the same time, and both processes edited the same copies folder. The test folders now take
+a `tag` suffix so parallel runs cannot collide.

@@ -218,7 +218,7 @@ namespace {
 	}
 
 	struct order_stats {
-		uint64_t programs = 0, backends = 0, metamorphic = 0, model_checked = 0, model_agree = 0, abstained = 0, args_pending = 0;
+		uint64_t programs = 0, backends = 0, metamorphic = 0, model_checked = 0, model_agree = 0, abstained = 0;
 	};
 
 	std::string labeled_difference(const std::string& a, const std::string& b, const std::string& la, const std::string& lb) {
@@ -266,12 +266,10 @@ namespace {
 		if (a.kind == compare_result::diverge) { report += "BACKENDS (program):\n" + a.diff; backends_split = true; }
 		if (b.kind == compare_result::diverge) { report += "BACKENDS (metamorphic variant):\n" + b.diff; backends_split = true; }
 		if (!backends_split) ++st.backends;
-		bool semantic_split = false;
 		const std::string oi = order_outcome(a.interp), ov = order_outcome(a.vm), vi = order_outcome(b.interp), vv = order_outcome(b.vm);
 		if (oi == vi && ov == vv) {
 			++st.metamorphic;
 		} else {
-			semantic_split = true;
 			report += "METAMORPHIC (program vs variant):\n";
 			if (oi != vi) report += "  interp " + labeled_difference(oi, vi, "program", "variant") + "\n";
 			if (ov != vv) report += "  vm     " + labeled_difference(ov, vv, "program", "variant") + "\n";
@@ -283,7 +281,6 @@ namespace {
 			if (ok_oi && ok_ov && ok_vi && ok_vv) {
 				++st.model_agree;
 			} else {
-				semantic_split = true;
 				report += std::string("MODEL (") + (ok_oi ? "" : " interp") + (ok_ov ? "" : " vm") + (ok_vi ? "" : " interp-variant") + (ok_vv ? "" : " vm-variant") +
 					" disagree" + (!ok_oi && !ok_ov && oi == ov ? "; BOTH BACKENDS AGREE WITH EACH OTHER" : "") + "):\n";
 				auto show = [&](const char* who, const run_outcome& r, bool ok) {
@@ -300,16 +297,14 @@ namespace {
 			if (verbose) std::cout << "[seed " << seed << "] agree (backends, metamorphic, " << (g.model_ok ? "model" : "model abstained: " + g.abstained) << ")\n";
 			return verdict::agree;
 		}
-		const bool pending = opt.order_args && semantic_split && !backends_split;
-		if (pending) ++st.args_pending;
-		std::cout << "\n=== ORDER DIVERGENCE seed " << seed << (pending ? " [known: call-site capture pending]" : "") << " ===\n" << report;
+		std::cout << "\n=== ORDER DIVERGENCE seed " << seed << " ===\n" << report;
 		if (verbose) {
 			std::cout << "--- program ---\n" << g.original.segments[0] << "--- variant ---\n" << g.variant.segments[0]
 			          << "--- model ---\n" << (g.model_ok ? g.expected : "abstained: " + g.abstained + "\n");
 		}
 		write_order_corpus(opt, seed, g, report);
 		std::cout.flush();
-		return pending ? verdict::diverge_suppressed : verdict::diverge_new;
+		return verdict::diverge_new;
 	}
 
 	int run_mutation_seed(const options& opt, uint64_t seed) {
@@ -575,9 +570,7 @@ int main(int argc, char** argv) {
 	std::cout << "\n";
 	if (opt.order && !opt.isolate) {
 		std::cout << "order band:     programs " << ost.programs << " | backends agree " << ost.backends << " | metamorphic agree " << ost.metamorphic
-		          << " | model checked " << ost.model_checked << " (agree " << ost.model_agree << ", abstained " << ost.abstained << ")";
-		if (opt.order_args) std::cout << " | call-site capture pending " << ost.args_pending;
-		std::cout << "\n";
+		          << " | model checked " << ost.model_checked << " (agree " << ost.model_agree << ", abstained " << ost.abstained << ")\n";
 	}
 	return (new_div > 0 || crashes > 0 || hangs > 0) ? 1 : 0;
 }

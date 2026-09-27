@@ -34,9 +34,8 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <article class="chapter"><h1 id="tour">The Ten-Minute Tour<a class="hlink" href="#tour" aria-label="link">&#8203;</a></h1>
 <p class="lead">One small game, built a piece at a time. Every block of code on this page was run through two independent engines, a tree-walking interpreter and a bytecode VM, and the output under it is what both of them printed.</p>
 <h2 id="reads-like-cpp">It reads like the C++ you already write<a class="hlink" href="#reads-like-cpp" aria-label="link">&#8203;</a></h2>
-<p>Classes with access labels, typed fields, constructors, methods, operator overloading. Strings that splice values in and format them on the way. If you have written a game in C++, you can read this without a manual.</p>
+<p>Classes with typed fields, constructors, methods, operator overloading. Strings that splice values in and format them on the way. If you have written a game in C++, you can read this without a manual.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 {
-public:
     float x = 0.0; float y = 0.0;
     Vec2(float px, float py) { x = px; y = py; }
     Vec2 operator+(Vec2 o) { return Vec2(x + o.x, y + o.y); }
@@ -49,7 +48,7 @@ auto ship = Vec2(3.0, 4.0);
 auto next = ship + Vec2(1.0, -1.0);
 print(`ship is ${ship.length():.1f} from home, heading for (${next.x}, ${next.y})`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ship is 5.0 from home, heading for (4.0, 3.0)</code></pre></div>
-<p>No semicolon rituals you did not already have, no <code>self.</code> on every field, no metatables. <code>x</code> inside a method is the field. <code>`${expr:.1f}`</code> formats like you think it should. And one thing simpler than C++: visibility starts public, so there is no class-versus-struct default to remember; <code>private:</code> members belong to the class and the classes derived from it.</p>
+<p><code>x</code> inside a method is the field, and <code>`${expr:.1f}`</code> formats like you think it should. JaiScript has no <code>struct</code> keyword, just classes, and since it is meant to be a simple scripting language, members are public by default; <code>private:</code> marks what only the class and its subclasses can touch.</p>
 <h2 id="a-copy-is-a-copy">A copy is a copy<a class="hlink" href="#a-copy-is-a-copy" aria-label="link">&#8203;</a></h2>
 <p>This is the one idea that makes JaiScript feel different from Lua, Python or JavaScript: <strong>objects are values</strong>, exactly as in C++. Assigning a ship gives you a second ship. When you want two names for one ship, you ask for a reference.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 { float x = 0.0; float y = 0.0; }

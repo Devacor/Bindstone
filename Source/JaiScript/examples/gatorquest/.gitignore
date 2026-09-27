@@ -1,0 +1,7 @@
+dist/
+harness/
+saves/
+cache/
+shots/
+*.jaibite
+scripts/.gq_reload*.jai

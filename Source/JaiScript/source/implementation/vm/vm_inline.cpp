@@ -53,6 +53,8 @@ struct inline_context {
 	bool returns_proven = false;                                   // an untyped lambda whose returns the checker proved one scalar kind
 	const class_definition* field_class = nullptr;
 	std::vector<uint64_t> field_ids;
+	std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>>* alias_pins = nullptr;   // the statement's clone: a pinned alias call keeps its guard
+	std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>>* callee_probes = nullptr;   // and a probed call its probe
 	template <class T, class... A> std::shared_ptr<T> make(A&&... a) {
 		auto n = std::make_shared<T>(std::forward<A>(a)...);
 		pins.push_back(n);
@@ -269,6 +271,10 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (!c.ok) return nullptr;
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
 		n->static_arg_proofs = ce->static_arg_proofs; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
+		for (auto* pins : { c.alias_pins, c.callee_probes }) {
+			if (!pins) continue;
+			if (auto pin = pins->find(ce); pin != pins->end()) { const auto v = pin->second; pins->erase(pin); (*pins)[n.get()] = v; }
+		}
 		// a replaced argument is the hoisted leaf's result temp, a slot of its return type: the outer call's proof for it is the types' agreement
 		if (auto callee_decl = c.replace && c.result && c.result_type ? ce->proven_callee_decl.lock() : nullptr) {
 			for (size_t i = 0; i < ce->arguments.size() && i < callee_decl->parameters.size(); ++i) {
@@ -565,14 +571,36 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 // the first call the statement runs is a leaf the graft takes, in an unconditional position, with every operand evaluated before
 // it a literal, a private local the body leaves alone, a name any write may reach taken into a temp, or a stamped subtree that
 // spills into a typed temp. Any other first call ends the statement's hoisting: a call after it would run behind an effect.
+// A callee named by a call whose arguments hold the first call resolves before that call runs (the callee before the arguments):
+// the outermost such leaf grafts instead, its guard in the callee's place and the first call inside its parameters; a stdlib alias
+// above it is resolved in its place by the alias's guard; a callee no guard pins keeps the call.
 bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out) {
 	land_ctx plain; plain.eng = engine_;
 	std::vector<std::shared_ptr<call_expr>> events; bool unsupported = false;
 	call_events(root, events, unsupported);
 	if (events.empty()) return false;
-	const std::shared_ptr<call_expr>& call = events.front();
+	std::shared_ptr<call_expr> call = events.front();
 	out.call = call;   // the call the plan is about, named with the rule that keeps it when the plan fails
 	if (unsupported) { out.why = "a statement the graft does not take"; return false; }
+	std::vector<const call_expr*> alias_pins, probe_pins;
+	bool args_call = false;   // the grafted call's arguments hold calls: they run inside its parameters, after its guard
+	{
+		std::vector<expression_ptr> cpath;
+		if (!find_path(root, call.get(), cpath)) { out.why = "a position the graft does not take"; return false; }
+		for (size_t k = 0; k + 1 < cpath.size(); ++k) {
+			if (cpath[k]->get_type() != node_type::call_expr) continue;
+			auto ce = std::static_pointer_cast<call_expr>(cpath[k]);
+			if (!ce->callee || cpath[k + 1].get() == ce->callee.get() || ce->callee->get_type() != node_type::identifier_expr) continue;   // a method or a computed callee: the position rules below
+			if (private_local(ce->callee.get()) || alias_pins_.count(ce.get()) || callee_probes_.count(ce.get())) continue;   // no user code rebinds it, or an earlier round resolved it
+			if (alias_call(ce.get(), engine_) && math_temp_operand(ce.get()) != detail::math_fn::none) { alias_pins.push_back(ce.get()); continue; }
+			std::shared_ptr<const function_decl> efn = ever_stamped(ce->proven_callee_decl) ? ce->proven_callee_decl.lock() : nullptr;
+			if (efn && inline_eligible(ce.get(), efn.get()) == nullptr) { call = ce; out.call = call; args_call = true; break; }
+			const std::string_view nm = static_cast<const identifier_expr*>(ce->callee.get())->name;
+			if (nm == "weak_from_this" || nm == "shared_from_this" || nm == "__jai_parallel_advance" || nm == "__jai_parallel_element") { out.why = "a call in the arguments of a call no probe pins"; return false; }
+			probe_pins.push_back(ce.get());   // any other callee: its probe runs in its place and the call takes the parked callee
+		}
+	}
+	if (callee_probes_.count(call.get())) { out.why = "a call whose callee an earlier round probed"; return false; }
 	std::shared_ptr<const function_decl> fn;
 	out.receiver = nullptr;
 	if (call->callee && call->callee->get_type() == node_type::member_expr && ever_stamped(call->proven_method_decl)) {
@@ -595,7 +623,8 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	bool in_loop = false;
 	for (const loop_context& lc : loops_) { if (lc.kind == region_kind::loop || lc.kind == region_kind::range_for) { in_loop = true; break; } }
 	if (in_loop) {   // inside a loop every parameter's argument lands by a block instruction, or the call stays (its landing converts what a declaration cannot)
-		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get(), &plain)) { out.why = "an argument the block cannot land"; return false; } }
+		const land_ctx args = args_call ? graft_land_ctx(fn.get()) : plain;   // a leaf in an argument grafts inside the parameter's declaration
+		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get(), &args)) { out.why = "an argument the block cannot land"; return false; } }
 	}
 	inline_context probe; probe.lc = graft_land_ctx(fn.get()); probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
 	probe.returns_proven = fn->graft_return_kind != 0;
@@ -609,9 +638,8 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	std::vector<expression_ptr> path;
 	if (!find_path(root, call.get(), path)) { out.why = "a position the graft does not take"; return false; }
 	std::vector<expression_ptr> pre;
-	std::vector<const expression*> callee_names;   // an outer call's callee name resolves where it stands
 	std::vector<const expression*> copied_args;    // an outer call's argument its parameter does not take as a proven scalar
-	bool free_identifier = false, in_place = false, free_global = false;
+	bool free_identifier = false, in_place = false;
 	for (size_t k = 0; k + 1 < path.size(); ++k) {
 		const expression_ptr& a = path[k]; const expression* x = path[k + 1].get();
 		switch (a->get_type()) {
@@ -631,7 +659,10 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 			if (x == ce->callee.get()) break;
 			if (!ce->callee) { out.why = "a callee that is not a name"; return false; }
 			if (ce->callee->get_type() == node_type::member_expr) { if (!math_call(ce)) { out.why = "a method call's argument"; return false; } }   // a method's receiver and lookup stand before its arguments
-			else if (ce->callee->get_type() == node_type::identifier_expr) { pre.push_back(ce->callee); callee_names.push_back(ce->callee.get()); }
+			else if (ce->callee->get_type() == node_type::identifier_expr) {   // an alias's guard or a probe resolves its callee here; any other name is a private local
+				if (std::find(alias_pins.begin(), alias_pins.end(), ce) != alias_pins.end() || std::find(probe_pins.begin(), probe_pins.end(), ce) != probe_pins.end()) { pre.push_back(a); }
+				else if (!alias_pins_.count(ce) && !callee_probes_.count(ce)) { pre.push_back(ce->callee); }
+			}
 			else { out.why = "an argument of a computed callee"; return false; }
 			const auto outer = math_call(ce) ? std::shared_ptr<const function_decl>() : ce->proven_callee_decl.lock();
 			for (size_t ai = 0; ai < ce->arguments.size() && ce->arguments[ai].get() != x; ++ai) {
@@ -649,19 +680,24 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	for (const expression_ptr& p : pre) {
 		switch (p->get_type()) {
 		case node_type::literal_expr: break;
+		case node_type::call_expr: {   // an alias's guard, or a callee's probe
+			const bool alias = std::find(alias_pins.begin(), alias_pins.end(), static_cast<const call_expr*>(p.get())) != alias_pins.end();
+			out.spills.emplace_back(p, alias ? script_value_type::jai_function_type : script_value_type::jai_object_type);
+			break;
+		}
 		case node_type::identifier_expr: {
 			free_identifier = true;
 			const bool global = static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX;
-			if ((global || !private_local(p.get())) && std::find(callee_names.begin(), callee_names.end(), p.get()) == callee_names.end()) {
+			if (global || !private_local(p.get()) || args_call) {
 				// a global, a closure's by-reference capture or a reference: the call (the graft, or the fallback's callee, whatever the name binds
-				// by then) may write it, so its value is taken ahead of the call, as the real call's operand order has it. A temp holds its value
-				// only as a scalar: an outer call that binds it by reference or copies it (an array, a map, an instance) binds the name itself
+				// by then) may write it, so its value is taken ahead of the call, as the real call's operand order has it; with calls in the
+				// arguments, a private local too (a leaf there may bind it by reference). A temp holds its value only as a scalar: an outer call
+				// that binds it by reference or copies it (an array, a map, an instance) binds the name itself
 				if (std::find(copied_args.begin(), copied_args.end(), p.get()) != copied_args.end()) { out.why = "a name an outer call binds by reference or copies, ahead of the call"; return false; }
 				out.spills.emplace_back(p, script_value_type::jai_any_type);
 				break;
 			}
 			in_place = true;
-			if (global) { free_global = true; }
 			break;
 		}
 		default: {
@@ -673,7 +709,6 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		}
 	}
 	if (in_place && probe.writes_ref) { out.why = "a name before the call the body may write through its reference"; return false; }   // an identifier before the call may be the referent
-	if (free_global && (probe.writes_global || probe.writes_member)) { out.why = "a global before the call the body writes"; return false; }
 	if (out.receiver && free_identifier && probe.writes_member) { out.why = "a name before the call a method may write"; return false; }   // an identifier before the call may alias the receiver's instance
 	out.fn = fn; out.in_loop = in_loop; out.why = nullptr;
 	return true;
@@ -739,7 +774,34 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	inlining_off_ = true;   // the spills, the graft's statements and the fallback compile plainly
 	inline_context sc;      // the statement's clone: the spilled operands and the call become temps
 	sc.budget = SIZE_MAX;
+	sc.alias_pins = &alias_pins_;
+	sc.callee_probes = &callee_probes_;
+	std::vector<const call_expr*> pinned;
 	for (const auto& [sub, kind] : plan.spills) {
+		if (kind == script_value_type::jai_function_type) {
+			// a stdlib alias above the graft: its guard resolves the callee here, before the call runs, and the alias's op reads the guard's mark
+			auto* ac = static_cast<const call_expr*>(sub.get());
+			call_site site;
+			site.call_node = add_node(sub);
+			site.callee = make_fused_operand(ac->callee);
+			site.arg_symbols.push_back(UINT64_MAX);
+			site.arg_slots.push_back(k_invalid_u32);
+			chunk_->call_sites.push_back(std::move(site));
+			const uint32_t s = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
+			const uint32_t mark = static_cast<uint32_t>(temp_next_++);
+			if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+			emit(opcode::op_math_guard, s, mark, static_cast<uint32_t>(math_temp_operand(ac)));
+			alias_pins_[ac] = { s, mark };
+			pinned.push_back(ac);
+			continue;
+		}
+		if (kind == script_value_type::jai_object_type) {
+			// a callee no graft takes, above the graft: its probe parks it here and the call compiled later takes the parked callee
+			auto* pc = static_cast<const call_expr*>(sub.get());
+			callee_probes_[pc] = { static_cast<uint32_t>(emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(pc->arguments.size()))), 0u };
+			pinned.push_back(pc);
+			continue;
+		}
 		auto tid = inline_temp(sub->location);
 		if (kind == script_value_type::jai_any_type) {   // a name's value as it stands
 			fused_binary_proto p;
@@ -821,7 +883,10 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	loops_.push_back({});
 	loops_.back().kind = region_kind::graft;
 	loops_.back().scope_depth = scope_depth_;
+	inlining_off_ = was_off;   // a leaf in an argument grafts inside its parameter's declaration, after this guard (the callee before the arguments)
 	for (const auto& d : params) { compile_variable_decl(d); }
+	current_stmt_ = site.call_stmt;
+	chunk_->inline_sites[site_index].begin_ip = static_cast<uint32_t>(chunk_->code.size());   // the arguments are the caller's (a raise there names no callee)
 	graft_bodies_.push_back(fn->body.get());
 	inlining_off_ = graft_bodies_.size() > 1;   // a leaf the body calls grafts here, one level down
 	for (const auto& d : body) { compile_declaration(d, false); }
@@ -855,6 +920,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	inlining_off_ = was_off;
 	sc.replace = call.get(); sc.result = result; sc.result_type = graft_result_type(fn);   // a replaced argument's proof reads the type
 	expression_ptr replaced = clone_expr(root, sc);
+	for (const call_expr* p : pinned) { alias_pins_.erase(p); callee_probes_.erase(p); }   // moved to the clone's node when the clone holds it
 	for (auto& n : sc.pins) { chunk_->nodes.push_back(n); }
 	return sc.ok ? replaced : nullptr;
 }

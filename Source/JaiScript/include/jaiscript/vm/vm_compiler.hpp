@@ -7,6 +7,7 @@
 #include <functional>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -171,6 +172,8 @@ namespace jai::vm {
         std::vector<const block_stmt*> graft_bodies_;   // the grafts being compiled, outermost first: a leaf inside one grafts too (one level), never one of them again
         bool inlining_off_ = false;
         uint64_t inline_symbol_ = 0;
+        std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> alias_pins_;   // a stdlib alias whose callee a guard resolved at its place (call site, mark temp): compile_math_into_temp takes them
+        std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> callee_probes_;   // a call whose callee was probed at its place ahead of a graft (probe ip, unused): compile_call takes the probe
         struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
         const char* inline_eligible(const call_expr* call, const function_decl* fn) const;   // nullptr: the graft takes the call; else the rule that keeps it
         bool plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out);

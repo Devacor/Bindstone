@@ -2986,24 +2986,19 @@ inline std::optional<script_value> field_store_convert_no_script(const script_va
 // Script-surface member access enforcement kernel — the ONE check both backends call
 // verbatim at every member get/set/compound/call site (parity by construction).
 // ctx = the class whose method body is currently executing (nullptr at top level /
-// free functions). Rules: private = declaring class only; protected = declaring class
-// and its subclasses. Host C++ APIs (get_field/set_field/get_fields, serialization)
-// never call this — the host side stays unrestricted by design.
+// free functions). Two levels (Dev ruling 2026-09-27): public = everyone; private = the
+// declaring class and every class derived from it, through any receiver of the family;
+// protected is a synonym of private. Host C++ APIs (get_field/set_field/get_fields,
+// serialization) never call this — the host side stays unrestricted by design.
 inline checked_result<void> enforce_member_access(const class_definition* cls, uint64_t member_id,
                                                   const class_definition* ctx) {
     access_level level = access_level::public_access;
     const class_definition* declarer = cls->find_nonpublic_declarer(member_id, level);
-    if (!declarer || declarer == ctx) {
-        return {};
-    }
-    if (level == access_level::protected_access && ctx && ctx->derives_from(declarer)) {
+    if (!declarer || declarer == ctx || (ctx && ctx->derives_from(declarer))) {
         return {};
     }
     return checked_result<void>(make_error_code(runtime_error_code::access_violation),
-        level == access_level::private_access
-            ? "Cannot access private member '{0}' of class '{1}'"
-            : "Cannot access protected member '{0}' of class '{1}'",
-        member_id, declarer->get_type_id());
+        "Cannot access private member '{0}' of class '{1}'", member_id, declarer->get_type_id());
 }
 
 // operator= on a plain store (docs/static_checking.md rule table; C++ assignment): a destination holding a class

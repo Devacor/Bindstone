@@ -300,6 +300,7 @@ private:
         std::unordered_map<std::string_view, std::vector<const function_decl*>> methods;
         std::unordered_map<std::string_view, std::vector<const function_decl*>> static_methods;
         std::vector<const function_decl*> ctors;
+        std::unordered_map<std::string_view, uint8_t> nonpublic;   // private: / protected: members (member_hit::access)
         // Declared by another closure unit (program table): its locations belong to that unit's
         // source, and its member types seed proofs only once the engine has registered it.
         bool foreign = false;
@@ -500,11 +501,14 @@ private:
         c.decl = cd;
         for (const auto& m : cd->members) {
             if (!m.declaration) { continue; }
+            const uint8_t access = m.visibility == class_decl::Private ? 1 : m.visibility == class_decl::Protected ? 2 : 0;
             if (m.declaration->get_type() == node_type::variable_decl) {
                 auto* f = static_cast<const variable_decl*>(m.declaration.get());
                 (f->is_static ? c.static_fields : c.fields).emplace(f->name, f);
+                if (access) { c.nonpublic[f->name] = access; }
             } else if (m.declaration->get_type() == node_type::function_decl) {
                 auto* fn = static_cast<const function_decl*>(m.declaration.get());
+                if (access && fn->name != cd->name) { c.nonpublic[fn->name] = access; }
                 if (fn->name == cd->name) {
                     c.ctors.push_back(fn);
                 } else if (fn->is_static) {
@@ -868,7 +872,45 @@ private:
         bool provable = true;      // the declaring class is this unit's or registered: its types may seed proofs
         bool unresolved = false;
         bool read_only = false;    // a getter-only binder property on a closed class: every store is the runtime raise
+        uint8_t access = 0;              // 0 public, 1 private, 2 protected
+        std::string_view declarer;       // the class that declares a non-public member
     };
+
+    // A registered class's non-public member: its declarer and level (class_definition::find_nonpublic_declarer)
+    static void engine_member_access(const class_definition& def, uint64_t id, member_hit& h) {
+        access_level level = access_level::public_access;
+        if (const class_definition* declarer = def.find_nonpublic_declarer(id, level)) {
+            h.access = level == access_level::private_access ? 1 : 2;
+            h.declarer = declarer->get_name();
+        }
+    }
+
+    // cls is base or derives from it, through the modeled chain and registered ancestors
+    bool class_is_or_derives(std::string_view cls, std::string_view base, int depth = 0) {
+        if (cls == base) { return true; }
+        if (depth > 32) { return false; }
+        if (const sclass* c = find_sclass(cls)) {
+            for (auto b : c->decl->base_classes) {
+                if (class_is_or_derives(b, base, depth + 1)) { return true; }
+            }
+            return false;
+        }
+        auto def = engine_class(cls);
+        auto base_def = engine_class(base);
+        return def && base_def && def->derives_from(base_def.get());
+    }
+
+    // Access control as the runtime applies it (detail::enforce_member_access, Dev ruling 2026-09-27): a private
+    // (or protected, its synonym) member is reachable inside its declaring class and every class derived from it; the
+    // same text as the raise
+    bool access_denied(const member_hit& hit, std::string_view member, const source_location& loc) {
+        if (!hit.found || hit.access == 0) { return false; }
+        const std::string_view ctx = class_ctx_ ? class_ctx_name_ : std::string_view{};
+        if (!ctx.empty() && class_is_or_derives(ctx, hit.declarer)) { return false; }
+        diag(diag_level::error, loc,
+             "Cannot access private member '" + std::string(member) + "' of class '" + std::string(hit.declarer) + "'");
+        return true;
+    }
 
     member_hit lookup_member(std::string_view cls, std::string_view member, bool want_static, int depth = 0) {
         member_hit miss;
@@ -878,6 +920,10 @@ private:
                 member_hit h{true, true, f, m};
                 h.foreign = c->foreign;
                 h.provable = c->provable;
+                if (auto a = c->nonpublic.find(member); a != c->nonpublic.end()) {
+                    h.access = a->second;
+                    h.declarer = c->decl->name;
+                }
                 return h;
             };
             if (want_static) {
@@ -915,7 +961,9 @@ private:
         bool closed = def->is_cpp_class() && !def->extended_ever();
         if (want_static) {
             if (def->has_static_method(id) || def->is_static_field(id) || def->has_static_field(id)) {
-                return member_hit{true, true, nullptr, nullptr};
+                member_hit h{true, true, nullptr, nullptr};
+                engine_member_access(*def, id, h);
+                return h;
             }
         } else {
             uint64_t getter_id = eng_.symbolize("_get_" + std::string(member));
@@ -924,6 +972,7 @@ private:
                 if (closed && def->is_read_only_property(id)) {
                     h.read_only = !derived_opens_property(*def, id, eng_.symbolize("_set_" + std::string(member)));
                 }
+                engine_member_access(*def, id, h);
                 return h;
             }
             // A binder surface is a lower bound on the C++ declaration: a virtual bound only
@@ -1137,6 +1186,7 @@ private:
         auto* id = static_cast<identifier_expr*>(u->operand.get());
         if (find_local(id->name)) { return; }
         member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
+        if (hit.found && !global_tier_name(id->name) && access_denied(hit, id->name, id->location)) { return; }
         if (hit.found && hit.read_only && !global_tier_name(id->name)) { read_only_store(u->location, id->name); }
     }
 
@@ -2219,6 +2269,7 @@ private:
 				// both is flow-order-ambiguous to a static walk (a global declared later
 				// in the source steals the read at call time) - stay unknown.
 				if (global_tier_name(id->name)) { return {}; }
+				if (access_denied(hit, id->name, id->location)) { return {}; }
 				if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
 				if (hit.methods) { return ctype::make(ctype::function_k); }
 				if (hit.field && !hit.field->is_static && !hit.methods && bare_field_context() && !chain_has_user_accessor(class_ctx_name_, id->name)) { bare_this_field_ = true; }
@@ -2282,6 +2333,7 @@ private:
 		bool want_static = (recv.kind == ctype::class_ref_k);
 		std::string_view cls = recv.cls;
 		member_hit hit = lookup_member(cls, m->member, want_static);
+		if (access_denied(hit, m->member, m->location)) { return {}; }
 		if (hit_out) { *hit_out = hit; }
 		if (!want_static && chain_has_user_accessor(cls, m->member)) { return accessor_read_type(cls, m->member); }   // a user _get_/_set_ answers: known member, typed only by a single declared getter, never a proof
 		if (hit.found) {
@@ -2424,6 +2476,7 @@ private:
 					// Bare calls prefer the GLOBAL function when one exists (audited
 					// resolution order); flow order decides which one runs - lenient.
 					if (global_tier_name(id->name)) { return {}; }
+					if (access_denied(hit, id->name, id->location)) { return {}; }
 					if (hit.methods) {
 						if (hit.provable) { ov = hit.methods; }
 						ctype r = check_script_overloads(id->name, *hit.methods, args, c->location, hit.foreign).result;
@@ -2570,6 +2623,7 @@ private:
 					// Writes resolve through the global tier before fields too (audited
 					// order) - a name that is both is flow-order-ambiguous: stay lenient.
 					if (global_tier_name(id->name)) { return done(rhs); }
+					if (access_denied(hit, id->name, id->location)) { return done({}); }
 					if (hit.read_only) { read_only_store(a->location, id->name); return done({}); }
 					if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
 					if (hit.field && !hit.field->is_static && !hit.methods && bare_field_context() && !chain_has_user_accessor(class_ctx_name_, id->name)) { this_field = true; }

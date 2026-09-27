@@ -17,10 +17,11 @@
 namespace jai::detail {
 
 struct capture_source {
-    enum class kind : uint8_t { miss, slot, own_scope, member, cpp_property, shadow, chain };
+    enum class kind : uint8_t { miss, slot, own_scope, member, cpp_property, shadow, chain, denied };
     kind what = kind::miss;
     script_value* cell = nullptr;   // slot / own_scope / member / chain: stable storage
     member_probe_hit property;      // cpp_property: the probe (instance, _get_ accessor, getter id)
+    std::optional<error_propagator> access_error;   // denied: a member out of reach (bare_member_access)
 
     // Default captures take every cell; explicit captures take variables only
     bool is_variable() const {
@@ -45,6 +46,13 @@ inline capture_source resolve_capture_source(script_value* frame_slot_cell,
             return src;
         }
         auto hit = probe_member_scope(scope.state, scope.this_storage, scope.statics, sym, /*want_methods*/ true);
+        if (hit) {
+            if (auto access = bare_member_access(hit, sym, current ? current->find_access_context() : nullptr); !access) [[unlikely]] {
+                src.what = capture_source::kind::denied;   // capturing reads the member: the closure's creation raises
+                src.access_error = access.error_value();
+                return src;
+            }
+        }
         switch (hit.what) {
         case member_probe_hit::kind::field:
         case member_probe_hit::kind::static_field:

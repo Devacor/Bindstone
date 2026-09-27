@@ -907,9 +907,9 @@ public:
         });
 
         // === Member access enforcement (private:/protected:/public: labels) ===
-        // RULED (2026-07): private = declaring class's methods only; protected = declaring
-        // class + subclasses; lambdas defined in a method inherit its class's access; free
-        // functions/top level are public-only. Host C++ APIs stay unrestricted.
+        // RULED (2026-09-27, two levels): private = the declaring class and every class derived
+        // from it; protected is its synonym; lambdas defined in a method inherit its class's
+        // access; free functions/top level are public-only. Host C++ APIs stay unrestricted.
         test("member_access_enforcement_matrix", [this]() {
             const char* src = R"(
                 class C {
@@ -943,12 +943,12 @@ public:
             const std::string expected =
                 "29|9|7|9"
                 "|Cannot access private member 'secret' of class 'C'"
-                "|Cannot access protected member 'prot' of class 'C'"
+                "|Cannot access private member 'prot' of class 'C'"
                 "|Cannot access private member 'hidden_helper' of class 'C'"
                 "|free:Cannot access private member 'secret' of class 'C'"
                 "|other:Cannot access private member 'secret' of class 'C'"
                 "|w:Cannot access private member 'secret' of class 'C'"
-                "|cw:Cannot access protected member 'prot' of class 'C'";
+                "|cw:Cannot access private member 'prot' of class 'C'";
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
@@ -960,9 +960,9 @@ public:
             check_eq(outputs[0], outputs[1], "access matrix parity (byte-identical incl. error text)");
         });
 
-        test("member_access_private_in_base_vs_derived", [this]() {
-            // Derived methods cannot touch Base-private (C++ rule); protected passes.
-            // super:: private method errors, super:: protected/public passes.
+        test("member_access_private_reaches_derived_classes", [this]() {
+            // Derived methods reach Base-private and Base-protected alike, bare, through this.
+            // and through super:: (two levels, Dev ruling 2026-09-27)
             const char* src = R"(
                 class Base {
                 private:
@@ -979,14 +979,11 @@ public:
                 }
                 var d = Derived();
                 var out = "" + d.okProt();
-                try { var a = d.badPriv(); out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
-                try { var b = d.badPrivM(); out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
+                try { var a = d.badPriv(); out = out + "|" + a; } catch (e) { out = out + "|" + e; }
+                try { var b = d.badPrivM(); out = out + "|" + b; } catch (e) { out = out + "|" + e; }
                 out;
             )";
-            const std::string expected =
-                "24"
-                "|Cannot access private member 'core' of class 'Base'"
-                "|Cannot access private member 'corem' of class 'Base'";
+            const std::string expected = "24|1|11";
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
@@ -1023,6 +1020,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
                 if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->static_checking(check_mode::warn);   // the runtime raise (strict rejects S::counter at load)
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
             check_eq(expected, outputs[0], "interp statics/ref access");

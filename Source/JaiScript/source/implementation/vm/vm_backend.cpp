@@ -3264,6 +3264,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
 			if (member) {
+				VM_TRY(detail::bare_member_access(member, sym, frame_access_context(f)));
 				if (member.what == detail::member_probe_hit::kind::method) {
 					if (member.instance && f.locals->scope_this) {
 						stack_.push_back(make_bound_method_thunk(*f.locals->scope_this, std::move(member.method_value)));
@@ -3546,9 +3547,12 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 					}
 				}
 			}
-			member_wins = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
-			                                         f.locals->scope_static, sym,
-			                                         /*want_methods*/ false).what != detail::member_probe_hit::kind::miss ||
+			const auto store_member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
+			                                                     f.locals->scope_static, sym, /*want_methods*/ false);
+			if (store_member) {
+				VM_TRY(detail::bare_member_access(store_member, sym, frame_access_context(f)));
+			}
+			member_wins = store_member.what != detail::member_probe_hit::kind::miss ||
 			              detail::member_scope_has_method(frame_scope_state(f), f.locals->scope_this,
 			                                              f.locals->scope_static, sym);
 		}
@@ -4293,6 +4297,9 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Undefined variable '{0}' (not a field of 'this')", sym);
 	}
+	if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
+		VM_TRY(detail::enforce_member_access(field_class, sym, frame_access_context(f)));
+	}
 
 	// A hybrid's C++ property reads through its getter and stores through its setter
 	// (KEEP BYTE-PARALLEL with the interpreter implicit-this compound tail)
@@ -4519,6 +4526,9 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		script_value this_val = *frame_this;
 		std::shared_ptr<class_instance> instance = this_val.get_class_instance();
 		if (instance && instance->has_field(sym)) {
+			if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
+				VM_TRY(detail::enforce_member_access(field_class, sym, frame_access_context(f)));
+			}
 			// A hybrid's C++ property reads through its getter and stores through its setter
 			// (KEEP BYTE-PARALLEL with the interpreter ++/-- this-tail)
 			const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), sym);
@@ -4719,6 +4729,10 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                         f.locals->scope_static, sym, /*want_methods*/ true);
 			if (member) {
+				if (auto access = detail::bare_member_access(member, sym, frame_access_context(f)); !access) {
+					raise_from(access);
+					return nullptr;
+				}
 				if (member.what == detail::member_probe_hit::kind::method) {
 					if (member.instance && f.locals->scope_this) {
 						scratch.emplace(make_bound_method_thunk(*f.locals->scope_this, std::move(member.method_value)));
@@ -10493,6 +10507,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			}
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(minted->value()));
 		}
+		VM_TRY(frame_bare_member_access(f, target_sym));
 		return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
 	}
 
@@ -11827,6 +11842,9 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					scope = detail::frame_member_scope(*f.locals);
 				}
 				auto src = detail::resolve_capture_source(slot_val, environment_.get(), scope, var_id);
+				if (src.what == detail::capture_source::kind::denied) [[unlikely]] {
+					return raise_from(*src.access_error);
+				}
 				if (src.cell) {
 					if (capture_by_ref_default) {
 						captureEnv->define(var_id, share_env_ref(*src.cell));
@@ -16497,6 +16515,7 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 		if (auto done = mint()) { return *done; }
 	}
 	if (!storage) {
+		VM_TRY(frame_bare_member_access(f, symbol_id));
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			"Cannot take reference of undefined variable", symbol_id);
 	}
@@ -16546,6 +16565,7 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 				std::optional<checked_result<script_value>> minted;
 				if (!global_only) { auto b = bind_bare_cpp_property_ref(f, target_sym); if (b) { minted.emplace(std::move(*b)); } }
 				if (!minted) {
+					VM_TRY(frame_bare_member_access(f, target_sym));
 					return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
 				}
 				if (!*minted) {
@@ -19696,6 +19716,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 								                                         caller_frame->locals->scope_this,
 								                                         caller_frame->locals->scope_static,
 								                                         symbol_id, /*want_methods*/ false);
+								if (member) {
+									VM_TRY(detail::bare_member_access(member, symbol_id, frame_access_context(*caller_frame)));
+								}
 								argPtr = member.value_ptr;
 								// A C++ property binds the member itself / its accessors (reference_model.md)
 								if (member.what == detail::member_probe_hit::kind::cpp_property) {

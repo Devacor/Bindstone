@@ -1034,6 +1034,14 @@ namespace jai {
             return environment_->get_value_ptr(symbol_id);
         }
 
+        // A reference to a bare member out of reach names the access text, never the undefined one
+        checked_result<void> bare_reference_access(uint64_t symbol_id) {
+            if (!member_scope_.active()) { return {}; }
+            auto hit = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
+                                                  member_scope_.statics, symbol_id, /*want_methods*/ false);
+            return hit ? detail::bare_member_access(hit, symbol_id, environment_->find_access_context()) : checked_result<void>{};
+        }
+
         // The non-slot rungs of the member-scope ladder (member_scope_.active() only).
         script_value* scoped_env_lookup(uint64_t symbol_id) noexcept {
             if (script_value* own = detail::own_scope_lookup(environment_.get(), member_scope_.floor, symbol_id)) {
@@ -1042,6 +1050,10 @@ namespace jai {
             auto hit = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                   member_scope_.statics, symbol_id, /*want_methods*/ false);
             if (hit) {
+                if (hit.class_def && hit.class_def->chain_has_nonpublic() &&
+                    !detail::bare_member_access(hit, symbol_id, environment_->find_access_context())) [[unlikely]] {
+                    return nullptr;   // out of reach: the value site raises the access text
+                }
                 return hit.value_ptr;   // a C++ property answers nullptr: a shadow, minted by value sites
             }
             if (detail::member_scope_has_method(member_scope_.state, member_scope_.this_storage,

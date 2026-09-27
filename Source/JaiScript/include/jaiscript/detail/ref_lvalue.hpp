@@ -260,6 +260,7 @@ namespace jai::detail {
 			return i < 8 ? inline_steps[i] : heap_steps[i - 8];
 		};
 
+		std::optional<checked_result<void>> base_access_error;   // a bare base out of reach (bare_member_access)
 		auto resolve_identifier_ptr = [&](const identifier_expr* ident) -> const script_value* {
 			if (ident->slot_index != SIZE_MAX) {
 				if (const script_value* slot_ptr = caller.slot(ident->slot_index)) {
@@ -290,6 +291,12 @@ namespace jai::detail {
 				auto member = probe_member_scope(scope_state, caller.metadata->scope_this,
 				                                 caller.metadata->scope_static, symbol_id,
 				                                 /*want_methods*/ false);
+				if (member) {
+					if (auto access = bare_member_access(member, symbol_id, caller_env ? caller_env->find_access_context() : nullptr); !access) {
+						base_access_error = std::move(access);
+						return nullptr;
+					}
+				}
 				if (member.value_ptr) { return member.value_ptr; }
 				if (member_scope_has_method(scope_state, caller.metadata->scope_this,
 				                            caller.metadata->scope_static, symbol_id)) {
@@ -345,6 +352,7 @@ namespace jai::detail {
 		if (base->get_type() == node_type::identifier_expr) {
 			const auto* ident = static_cast<const identifier_expr*>(base);
 			const script_value* base_ptr = resolve_identifier_ptr(ident);
+			if (base_access_error) { return base_access_error->error_value(); }
 			if (!base_ptr) {
 				auto read = bare_property_base(ident);
 				if (!read) { return read; }

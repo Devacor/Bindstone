@@ -55,6 +55,10 @@ void sim_reset() {
 	CHARS = [];
 	IN_MOVE = [];
 	IN_QUEUE = [];
+	IN_STEP_SEQ = [];
+	IN_STEP_DIR = [];
+	IN_ACK = [];
+	IN_DROPPED = [];
 	CHAR_ARCHIVE = [];
 	events_clear();
 }
@@ -157,6 +161,36 @@ void intent_move(int slot, int dir) {
 
 void intent_act(int slot, string a) {
 	if (slot < IN_QUEUE.size()) { IN_QUEUE[slot].push(a); }
+}
+
+void step_queue_ensure(int slot) {
+	while (IN_STEP_SEQ.size() <= slot) {
+		IN_STEP_SEQ.push([]);
+		IN_STEP_DIR.push([]);
+		IN_ACK.push(0);
+		IN_DROPPED.push(0);
+	}
+}
+
+// a step a predicting client already took on its side; the host applies it when the player may move
+void intent_step(int slot, int seq, int dir) {
+	step_queue_ensure(slot);
+	if (dir < 0 || dir > 7 || seq <= IN_ACK[slot]) { return; }
+	if (IN_STEP_SEQ[slot].size() >= 12) {
+		IN_DROPPED[slot] = imax(IN_DROPPED[slot], seq);
+		return;
+	}
+	IN_STEP_SEQ[slot].push(seq);
+	IN_STEP_DIR[slot].push(dir);
+}
+
+// steps queued for another place are void after a teleport; they count as processed
+void step_queue_flush(int slot) {
+	step_queue_ensure(slot);
+	for (int i = 0; i < IN_STEP_SEQ[slot].size(); ++i) { IN_ACK[slot] = imax(IN_ACK[slot], IN_STEP_SEQ[slot][i]); }
+	IN_ACK[slot] = imax(IN_ACK[slot], IN_DROPPED[slot]);
+	IN_STEP_SEQ[slot] = [];
+	IN_STEP_DIR[slot] = [];
 }
 
 void sim_tick() {

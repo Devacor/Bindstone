@@ -158,7 +158,10 @@ string snapshot_view(int slot, int w, int x, int y) {
 		int target = MOB_TARGET[me];
 		int tser = mob_live(target) ? MOB_SER[target] : -1;
 		int left = c.action != 0 ? imax(0, c.action_t - TICK) : 0;
-		out += `Y|${MOB_HP[me]}|${MOB_HPMAX[me]}|${MOB_MP[me]}|${MOB_MPMAX[me]}|${tser}|${c.action}|${left}|${mob_ghost(me) ? 1 : 0}\n`;
+		step_queue_ensure(slot);
+		// the last predicted step this host processed, and where that left the gator (the client replays the rest)
+		out += `Y|${MOB_HP[me]}|${MOB_HPMAX[me]}|${MOB_MP[me]}|${MOB_MPMAX[me]}|${tser}|${c.action}|${left}|${mob_ghost(me) ? 1 : 0}`;
+		out += `|${IN_ACK[slot]}|${MOB_X[me]}|${MOB_Y[me]}|${MOB_SLOW[me] > 0 ? 1 : 0}|${MOB_AUX[me]}\n`;
 	}
 	int ww = W_W[w];
 	int wh = W_H[w];
@@ -288,6 +291,10 @@ void cv_apply(ClientView& v, string snap) {
 			v.m_py = [];
 			v.m_mt = [];
 			v.m_md = [];
+			v.m_ppx = [];
+			v.m_ppy = [];
+			v.m_pmt = [];
+			v.m_pmd = [];
 			v.m_dir = [];
 			v.m_hp = [];
 			v.m_flags = [];
@@ -311,10 +318,20 @@ void cv_apply(ClientView& v, string snap) {
 			v.action = f[6].to_int(0);
 			v.action_left = f[7].to_int(0);
 			v.ghost = f[8].to_int(0);
+			if (f.size() >= 14) {
+				v.ack = f[9].to_int(0);
+				v.auth_x = f[10].to_int(0);
+				v.auth_y = f[11].to_int(0);
+				v.slowed = f[12] == "1";
+				v.sliding = f[13].to_int(0) != 0;
+				v.has_auth = true;
+				v.auth_fresh = true;
+			}
 		} else if (k == "M" && f.size() >= 16) {
 			int ser = f[1].to_int(0);
 			int i = cv_find(v, ser);
-			if (i < 0) {
+			bool fresh_mob = i < 0;
+			if (fresh_mob) {
 				i = v.m_ser.size();
 				v.m_ser.push(ser);
 				v.m_kind.push(0);
@@ -324,6 +341,10 @@ void cv_apply(ClientView& v, string snap) {
 				v.m_py.push(0);
 				v.m_mt.push(0);
 				v.m_md.push(1);
+				v.m_ppx.push(0);
+				v.m_ppy.push(0);
+				v.m_pmt.push(0);
+				v.m_pmd.push(1);
 				v.m_dir.push(4);
 				v.m_hp.push(100);
 				v.m_flags.push(0);
@@ -332,13 +353,22 @@ void cv_apply(ClientView& v, string snap) {
 				v.m_hue.push(0);
 				v.m_name.push("");
 			}
+			int mt = f[7].to_int(0);
+			int md = imax(1, f[8].to_int(1));
+			if (fresh_mob || mt != v.m_mt[i]) {
+				// a new move: the current one becomes the previous (a mobile seen for the first time has none)
+				v.m_ppx[i] = fresh_mob ? f[5].to_int(0) : v.m_px[i];
+				v.m_ppy[i] = fresh_mob ? f[6].to_int(0) : v.m_py[i];
+				v.m_pmt[i] = fresh_mob ? mt - md : v.m_mt[i];
+				v.m_pmd[i] = fresh_mob ? md : v.m_md[i];
+			}
 			v.m_kind[i] = iclamp(f[2].to_int(0), 0, MONS.size() - 1);
 			v.m_x[i] = f[3].to_int(0);
 			v.m_y[i] = f[4].to_int(0);
 			v.m_px[i] = f[5].to_int(0);
 			v.m_py[i] = f[6].to_int(0);
-			v.m_mt[i] = f[7].to_int(0);
-			v.m_md[i] = imax(1, f[8].to_int(1));
+			v.m_mt[i] = mt;
+			v.m_md[i] = md;
 			v.m_dir[i] = f[9].to_int(4);
 			v.m_hp[i] = f[10].to_int(100);
 			v.m_flags[i] = f[11].to_int(0);
@@ -462,6 +492,10 @@ void cv_remove_mob(ClientView& v, int i) {
 	v.m_py.remove(i);
 	v.m_mt.remove(i);
 	v.m_md.remove(i);
+	v.m_ppx.remove(i);
+	v.m_ppy.remove(i);
+	v.m_pmt.remove(i);
+	v.m_pmd.remove(i);
 	v.m_dir.remove(i);
 	v.m_hp.remove(i);
 	v.m_flags.remove(i);

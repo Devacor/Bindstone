@@ -31,6 +31,7 @@ import "gq_vid.jai";
 import "gq_art.jai";
 import "gq_render.jai";
 import "gq_audio.jai";
+import "gq_predict.jai";
 import "gq_hud.jai";
 import "gq_game.jai";
 import "gq_net.jai";
@@ -41,6 +42,7 @@ import "gq_dev.jai";
 import "gq_tests.jai";
 import "gq_serve.jai";
 import "gq_endgame.jai";
+import "gq_predtest.jai";
 
 string arg_value(string key, string def) {
 	for (int i = 0; i + 1 < ARGS.size(); ++i) {
@@ -150,6 +152,8 @@ int run_play() {
 		return 0;
 	}
 	CAMERA_W = -1;
+	pred_reset();
+	if (demo) { PRED_ON = false; }
 	BOTS = [];
 	string welcome = "";
 	if (join_host != "") {
@@ -256,6 +260,11 @@ int run_prepare() {
 
 int main() {
 	if (arg_flag("nodelta")) { SNAP_DELTAS = false; }
+	if (arg_flag("noprediction")) { PRED_ON = false; }
+	// the network simulator: lag N (round trip ms), jitter N (ms), loss N (percent)
+	NET_SIM_LAG = arg_value("lag", "0").to_int(0);
+	NET_SIM_JITTER = arg_value("jitter", "0").to_int(0);
+	NET_SIM_LOSS = arg_value("loss", "0").to_int(0);
 	if (arg_flag("sheet")) { return run_sheet(); }
 	if (arg_flag("smoke")) { return run_smoke(); }
 	if (arg_flag("shot")) { return run_shots(); }
@@ -267,6 +276,7 @@ int main() {
 	if (arg_flag("prepare")) { return run_prepare(); }
 	if (arg_flag("endgame")) { return run_endgame(); }
 	if (arg_flag("tour")) { return run_tour(); }
+	if (arg_flag("predtest")) { return run_predtest(); }
 	if (arg_flag("serve")) { return run_serve(); }
 	if (arg_flag("client")) { return run_client(); }
 	return run_play();

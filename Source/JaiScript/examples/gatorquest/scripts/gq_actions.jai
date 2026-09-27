@@ -1055,8 +1055,21 @@ void players_tick() {
 			else { on_enter(m); }
 			continue;
 		}
-		int dir = IN_MOVE[slot];
-		if (dir >= 0 && TICK >= MOB_NEXT[m]) { player_move(slot, dir); }
+		// a predicting client's steps, one per step time, in the order it took them
+		if (slot < IN_STEP_SEQ.size() && IN_STEP_SEQ[slot].size() > 0) {
+			if (TICK >= MOB_NEXT[m]) {
+				int seq = IN_STEP_SEQ[slot][0];
+				int sdir = IN_STEP_DIR[slot][0];
+				IN_STEP_SEQ[slot].remove(0);
+				IN_STEP_DIR[slot].remove(0);
+				player_move(slot, sdir);
+				IN_ACK[slot] = seq;
+				if (IN_STEP_SEQ[slot].size() == 0 && IN_DROPPED[slot] > IN_ACK[slot]) { IN_ACK[slot] = IN_DROPPED[slot]; }
+			}
+		} else {
+			int dir = IN_MOVE[slot];
+			if (dir >= 0 && TICK >= MOB_NEXT[m]) { player_move(slot, dir); }
+		}
 		// war mode: swing at the target whenever it is in reach
 		int t = MOB_TARGET[m];
 		if (t >= 0 && !mob_ghost(m)) {

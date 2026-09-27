@@ -209,6 +209,10 @@ namespace {
 					out << " (" << c.slot << " k" << static_cast<int>(c.kind) << " l" << static_cast<int>(c.landing) << " in" << b(c.live_in) << " def" << b(c.defined) << " " << tn(c.stamp)
 					    << " env" << u(c.env_operand) << " t" << b(c.temp) << " fd" << b(c.first_decl) << " " << tn(c.decl_stamp) << " sb" << b(c.string_borrow) << " it" << b(c.iter_index) << ")";
 				}
+				out << "\n" << pre << "  entry_cells";
+				for (uint32_t c : l.entry_cells) { out << " " << c; }
+				out << "\n" << pre << "  site_env_cache";
+				for (uint32_t c : l.site_env_cache) { out << " " << u(c); }
 				out << "\n" << pre << "  slot_to_cell";
 				for (uint32_t c : l.slot_to_cell) { out << " " << u(c); }
 				out << "\n" << pre << "  origin";

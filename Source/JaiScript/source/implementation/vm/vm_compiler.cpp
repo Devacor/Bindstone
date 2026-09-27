@@ -3744,6 +3744,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 			}
 		}
+		loop.site_env_cache.assign(loop.sites.size(), k_invalid_u32);
+		for (uint32_t k = 0; k < loop.sites.size(); ++k) {
+			const uint32_t cip = loop.sites[k];
+			const opcode o = code[cip].op;
+			if ((o != opcode::op_c_load && o != opcode::op_c_load_any) || (k < loop.site_alias.size() && loop.site_alias[k]) || cip >= c.typed_sites.size()) continue;
+			const chunk::typed_site& s = c.typed_sites[cip];
+			if (s.cont_slot != k_invalid_u32) continue;
+			const uint32_t pi = s.index_proto != k_invalid_u32 ? s.index_proto : s.orig.a;
+			if (pi >= c.fused_index_protos.size()) continue;
+			const fused_operand& co = c.fused_index_protos[pi].container;
+			if (co.member_node != k_invalid_u32 || co.const_index != k_invalid_u32 || co.is_subscript() || co.load_flags != 0 || co.slot != k_invalid_u32 || co.symbol == k_invalid_u32) continue;
+			loop.site_env_cache[k] = s.fold_count ? code[cip].c * 3 + 2 : code[cip].c * 3;
+		}
 		std::vector<std::pair<uint32_t, uint32_t>> exits;   // (general target, its exit's copy ip): a compare's edge out of the loop
 		auto exit_at = [&](uint32_t target) -> uint32_t {
 			for (const auto& x : exits) { if (x.first == target) return x.second; }
@@ -3797,6 +3810,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		for (uint32_t k = 0; k < loop.cells.size(); ++k) {   // the landing's lists (row 156.2): the environment cells, and the slot cells a string may sit in
 			const chunk::cell_loop::cell& cl = loop.cells[k];
+			if (cl.env_operand != k_invalid_u32 || cl.iter_index || !(cl.temp || cl.first_decl)) { loop.entry_cells.push_back(k); }
 			if (cl.env_operand != k_invalid_u32) { loop.env_cells.push_back(k); continue; }
 			if (!cl.temp && (cl.kind == 0 || cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING))) { loop.string_candidates.push_back(k); }
 		}

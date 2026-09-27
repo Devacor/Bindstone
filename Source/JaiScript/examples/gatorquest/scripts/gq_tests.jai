@@ -119,6 +119,196 @@ int run_savetest(string base_dir) {
 	return TEST_FAILS;
 }
 
+// ------------------------------------------------------------ netplay ---
+// the real host session and real client sessions over loopback sockets in one engine
+// (p9_netplay style); the clients share the host's terrain instead of regenerating it
+
+array<int> NT_SESS;            // test session indices, by role
+
+void nt_round() {
+	NOW_MS = NOW_MS + TICK_MS;
+	for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
+	sim_tick();
+	net_host_pump();
+	host_after_tick();
+	sleep_ms(2);
+	for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
+}
+
+void nt_rounds(int n) {
+	for (int i = 0; i < n; ++i) { nt_round(); }
+}
+
+bool log_has(int s, string needle) {
+	array<string>& log = NCS_VIEW[s].log;
+	for (int i = 0; i < log.size(); ++i) {
+		if (log[i].contains(needle)) { return true; }
+	}
+	return false;
+}
+
+bool view_sees_slot(int s, int slot) {
+	array<int>& slots = NCS_VIEW[s].m_slot;
+	for (int i = 0; i < slots.size(); ++i) {
+		if (slots[i] == slot) { return true; }
+	}
+	return false;
+}
+
+bool saw_damage_on_me(int s) {
+	ClientView& v = NCS_VIEW[s];
+	for (int i = 0; i < v.e_kind.size(); ++i) {
+		if (v.e_kind[i] == Ev.dmg && v.e_a[i] == v.my_ser) { return true; }
+	}
+	return false;
+}
+
+// open a session and join; waits (bounded) for the answer
+int nt_join(string name, int hue, int port) {
+	int s = net_client_open("127.0.0.1", port);
+	for (int i = 0; i < 300 && !NCS_CH[s].connected() && net_session_live(s); ++i) { nt_round(); }
+	net_client_hello(s, name, hue);
+	for (int i = 0; i < 300 && NCS_STATUS[s] == "hello"; ++i) { nt_round(); }
+	return s;
+}
+
+int nt_mob(int s) { return CHARS[NCS_SLOT[s]].mob; }
+
+int run_nettest(string base_dir, int port) {
+	SAVE_DIR = base_dir + "/nettest";
+	make_dirs(SAVE_DIR + "/chars");
+	array<string> old = list_dir(SAVE_DIR + "/chars");
+	for (int i = 0; i < old.size(); ++i) { delete_file(SAVE_DIR + "/chars/" + old[i]); }
+	print("netplay:");
+	sim_init(11);
+	BOTS = [];
+	NOW_MS = 0;
+	check(net_host_start(port), `host listens on port ${port}`);
+	// ---- three gators join
+	int a = nt_join("alpha", 1, port);
+	int b = nt_join("bravo", 2, port);
+	int c = nt_join("chuck", 3, port);
+	check(NCS_STATUS[a] == "joined" && NCS_STATUS[b] == "joined" && NCS_STATUS[c] == "joined", `three clients joined (${NCS_STATUS[a]}, ${NCS_STATUS[b]}, ${NCS_STATUS[c]})`);
+	check(NCS_SLOT[a] == 0 && NCS_SLOT[b] == 1 && NCS_SLOT[c] == 2, `slots 0, 1, 2 in join order`);
+	check(NCS_SEED[a] == SEED && NCS_SEED[c] == SEED, "WELCOME carries the world seed");
+	nt_rounds(3);
+	check(NCS_VIEW[a].my_ser == MOB_SER[nt_mob(a)] && NCS_VIEW[c].snaps > 0, "each client's snapshots name its own gator");
+	if (!(view_sees_slot(a, 1) && view_sees_slot(a, 2) && view_sees_slot(c, 0))) {
+		print(`  debug a sees ${NCS_VIEW[a].m_ser.size()} mobiles, slots ${to_json(NCS_VIEW[a].m_slot)}; host mobs a ${MOB_X[nt_mob(a)]},${MOB_Y[nt_mob(a)]} b ${MOB_X[nt_mob(b)]},${MOB_Y[nt_mob(b)]} c ${MOB_X[nt_mob(c)]},${MOB_Y[nt_mob(c)]}`);
+	}
+	check(view_sees_slot(a, 1) && view_sees_slot(a, 2) && view_sees_slot(c, 0), "the clients see each other in their snapshots");
+	check(log_has(a, "bravo has joined the swamp.") && log_has(a, "chuck has joined the swamp.") && !log_has(c, "chuck has joined"), "join announcements reach the others, not the joiner");
+	check(NCS_VIEW[b].name == "bravo" && NCS_VIEW[b].skills.size() == Sk.count && NCS_VIEW[b].pack.size() > 0, "each client received its character sheet");
+	// ---- movement: intents up, positions down
+	int ma = nt_mob(a);
+	int x0 = MOB_X[ma];
+	net_session_send(a, "M|2");
+	nt_rounds(12);
+	net_session_send(a, "M|-1");
+	nt_rounds(3);
+	int moved = MOB_X[ma] - x0;
+	int ia = cv_find(NCS_VIEW[b], MOB_SER[ma]);
+	check(moved >= 3, `alpha walked east on the host (${moved} tiles)`);
+	check(ia >= 0 && NCS_VIEW[b].m_x[ia] == MOB_X[ma], "bravo's view shows alpha where the host has it");
+	// ---- chat
+	net_session_send(a, "A|:hello swamp");
+	nt_rounds(3);
+	check(log_has(b, "alpha: hello swamp") && log_has(c, "alpha: hello swamp") && log_has(a, "alpha: hello swamp"), "open chat reaches everyone in the realm");
+	// ---- parties
+	net_session_send(a, "A|:/invite bravo");
+	nt_rounds(3);
+	check(log_has(b, "alpha invites you to a party"), "bravo got the party invitation");
+	net_session_send(b, "A|:/accept");
+	nt_rounds(3);
+	int pa = CHARS[NCS_SLOT[a]].party;
+	check(pa >= 0 && pa == CHARS[NCS_SLOT[b]].party && CHARS[NCS_SLOT[c]].party < 0, "alpha and bravo share a party on the host");
+	check(NCS_VIEW[b].party_names.contains("alpha"), "bravo's sheet lists alpha in the party");
+	net_session_send(a, "A|:/p meet at the bayou");
+	nt_rounds(3);
+	check(log_has(b, "alpha (party): meet at the bayou") && !log_has(c, "meet at the bayou"), "party chat reaches the party only");
+	// ---- pvp: nobody can hurt an unflagged gator; flagged gators can fight
+	int mc = nt_mob(c);
+	mob_place(mc, MOB_WORLD[ma], MOB_X[ma] + 1, MOB_Y[ma]);
+	int hp_a = MOB_HP[ma];
+	net_session_send(c, "A|A" + to_string(MOB_SER[ma]));
+	nt_rounds(12);
+	check(MOB_HP[ma] == hp_a && MOB_TARGET[mc] != ma, "chuck cannot target unflagged alpha");
+	net_session_send(a, "A|:/pvp");
+	net_session_send(c, "A|:/pvp");
+	nt_rounds(2);
+	check(CHARS[NCS_SLOT[a]].pvp && CHARS[NCS_SLOT[c]].pvp && log_has(a, "PvP ON"), "both flag for PvP over the wire");
+	net_session_send(c, "A|A" + to_string(MOB_SER[ma]));
+	for (int i = 0; i < 60 && MOB_HP[ma] == hp_a; ++i) { nt_round(); }
+	check(MOB_HP[ma] < hp_a, `flagged chuck hurts flagged alpha (${hp_a} -> ${MOB_HP[ma]})`);
+	check(saw_damage_on_me(a), "alpha's snapshots carried the damage events on alpha");
+	net_session_send(c, "A|!");
+	net_session_send(a, "A|:/pvp");
+	net_session_send(c, "A|:/pvp");
+	nt_rounds(2);
+	// ---- a graceful leave writes the character on the host; rejoining restores it
+	CHARS[NCS_SLOT[c]].gold = 4321;
+	net_session_bye(c);
+	nt_rounds(4);
+	check(!CHARS[2].active && log_has(a, "chuck has left the swamp (logged out)"), "chuck logged out and the others were told");
+	string cfile = read_file(char_path("chuck"));
+	check(cfile.contains("gold 4321"), "the host wrote chuck's character file on logout");
+	int c2 = nt_join("chuck", 3, port);
+	nt_rounds(2);
+	check(NCS_STATUS[c2] == "joined" && CHARS[NCS_SLOT[c2]].gold == 4321 && log_has(c2, "Welcome back, chuck"), "chuck rejoined as himself (4321 gold)");
+	// ---- an abrupt drop is handled like a leave
+	NCS_CH[b].close();
+	NCS_STATUS[b] = "closed: test drop";
+	nt_rounds(6);
+	check(!CHARS[1].active && log_has(a, "bravo has left the swamp (connection closed)") && file_exists(char_path("bravo")), "bravo's dropped connection freed the slot and saved the character");
+	check(CHARS[NCS_SLOT[a]].party < 0, "alpha's party dissolved with bravo gone");
+	// ---- refusals
+	int dup = nt_join("Alpha", 5, port);
+	check(NCS_STATUS[dup].starts_with("refused") && NCS_STATUS[dup].contains("already here"), `a second 'alpha' is refused (${NCS_STATUS[dup]})`);
+	int old_proto = net_client_open("127.0.0.1", port);
+	for (int i = 0; i < 100 && !NCS_CH[old_proto].connected(); ++i) { nt_round(); }
+	net_session_send(old_proto, "HELLO|99|zed|0");
+	for (int i = 0; i < 100 && net_session_live(old_proto); ++i) { nt_round(); }
+	check(NCS_STATUS[old_proto].starts_with("refused") && NCS_STATUS[old_proto].contains("protocol"), `a client speaking another protocol is refused (${NCS_STATUS[old_proto]})`);
+	// ---- sixteen gators, and a seventeenth
+	array<int> crowd;
+	for (int k = 0; k < 14; ++k) { crowd.push(nt_join("gator" + to_string(k), k % 16, port)); }
+	int joined = 0;
+	for (int k = 0; k < crowd.size(); ++k) {
+		if (NCS_STATUS[crowd[k]] == "joined") { joined = joined + 1; }
+	}
+	check(joined == 14 && net_player_count() == 16, `sixteen gators online (${net_player_count()})`);
+	int t0 = clock_ms();
+	int bytes0 = NET_BYTES_OUT;
+	nt_rounds(20);
+	int per_tick_us = (clock_ms() - t0) * 1000 / 20;
+	int per_tick_bytes = (NET_BYTES_OUT - bytes0) / 20;
+	int t1 = clock_ms();
+	for (int i = 0; i < 20; ++i) { host_after_tick(); }
+	int snap_us = (clock_ms() - t1) * 1000 / 20;
+	for (int i = 0; i < 20; ++i) {
+		for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
+	}
+	print(`  info  16 players: ${per_tick_us} us per round (sim + 16 snapshots + 17 client pumps); the host's 16 snapshots alone ${snap_us} us; ${per_tick_bytes} bytes of snapshots per tick`);
+	check(log_has(crowd[13], "Welcome to Swampton, gator13") && view_sees_slot(crowd[13], NCS_SLOT[a]), "the sixteenth gator plays in the same world");
+	int extra = nt_join("latecomer", 0, port);
+	check(NCS_STATUS[extra].starts_with("refused") && NCS_STATUS[extra].contains("full"), `a seventeenth is refused (${NCS_STATUS[extra]})`);
+	// ---- the host leaves: everyone is told, characters are saved
+	net_host_stop("test over");
+	for (int i = 0; i < 20; ++i) {
+		NOW_MS = NOW_MS + TICK_MS;
+		for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
+		sleep_ms(2);
+	}
+	int told = 0;
+	for (int k = 0; k < crowd.size(); ++k) {
+		if (NCS_STATUS[crowd[k]] == "closed: test over") { told = told + 1; }
+	}
+	check(told == 14 && NCS_STATUS[a] == "closed: test over", `the host's goodbye reached every client (${told + (NCS_STATUS[a] == "closed: test over" ? 1 : 0)} of 15)`);
+	check(file_exists(char_path("gator7")) && file_exists(char_path("alpha")), "the host saved every character on the way out");
+	print(`netplay: ${TEST_PASSES} passed, ${TEST_FAILS} failed`);
+	return TEST_FAILS;
+}
+
 // ------------------------------------------------------------ hot reload ---
 // an edit in the file's own line endings (a Windows checkout has \r\n)
 string replace_once(string text, string from, string to) {

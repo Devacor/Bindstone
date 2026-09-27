@@ -40,6 +40,7 @@
 #else
 #include <cerrno>
 #include <fcntl.h>
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -237,7 +238,8 @@ void print_usage() {
 		"  signals on_packet(bytes)/on_connect()/on_disconnect(reason) fire during pump();\n"
 		"  4-byte big-endian length framing, MV-compatible) and NetServer (N clients on one\n"
 		"  port: listen/send(id,bytes)/broadcast/pump/kick/client_count; per-client signals\n"
-		"  on_client_connect(id)/on_client_packet(id,bytes)/on_client_disconnect(id,reason)).\n"
+		"  on_client_connect(id)/on_client_packet(id,bytes)/on_client_disconnect(id,reason)),\n"
+		"  net_host_name() and net_local_addresses() (this machine's IPv4 addresses).\n"
 		"  Args after `--` are the global ARGS (array of strings). include/import resolve\n"
 		"  relative to the script's folder.\n"
 		"\n"
@@ -1040,6 +1042,34 @@ void register_net_channel(jai::engine& eng) {
 		.method("status", &net_channel::status)
 		.auto_bind()   // JAI_SIGNAL_PROPERTYs expose the generic Signal view
 		.build();
+	// what a host shows its players so they know what to type: the machine's name and its IPv4 addresses
+	eng.add_function("net_host_name", []() -> std::string {
+		if (!net_ready()) { return ""; }
+		char name[256] = {0};
+		if (::gethostname(name, sizeof(name) - 1) != 0) { return ""; }
+		return name;
+	});
+	eng.add_function("net_local_addresses", []() -> std::vector<std::string> {
+		std::vector<std::string> out;
+		if (!net_ready()) { return out; }
+		char name[256] = {0};
+		if (::gethostname(name, sizeof(name) - 1) != 0) { return out; }
+		addrinfo hints{};
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
+		addrinfo* found = nullptr;
+		if (::getaddrinfo(name, nullptr, &hints, &found) != 0) { return out; }
+		for (addrinfo* a = found; a != nullptr; a = a->ai_next) {
+			char text[INET_ADDRSTRLEN] = {0};
+			const auto* in4 = reinterpret_cast<const sockaddr_in*>(a->ai_addr);
+			if (::inet_ntop(AF_INET, &in4->sin_addr, text, sizeof(text)) == nullptr) { continue; }
+			std::string address = text;
+			if (address.rfind("127.", 0) == 0) { continue; }
+			if (std::find(out.begin(), out.end(), address) == out.end()) { out.push_back(address); }
+		}
+		::freeaddrinfo(found);
+		return out;
+	});
 }
 
 // ----------------------------------------------------------------- engine ---

@@ -16307,20 +16307,9 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	try {
 		script_value result = engine_->execute_include_source(resolved_path, content);
 		stack_.push_back(std::move(result));
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		absorb_nested_trace();
 	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		absorb_nested_trace();
+		return raise_nested_failure(e);
 	}
-	nested_failure_.parked = false;
 	return {};
 }
 
@@ -16351,20 +16340,28 @@ op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 	try {
 		script_value result = engine_->execute_import(resolved_path);
 		stack_.push_back(std::move(result));
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		absorb_nested_trace();
 	} catch (const std::exception& e) {
+		return raise_nested_failure(e);
+	}
+	return {};
+}
+
+// KEEP BYTE-PARALLEL with interpreter::raise_nested_failure
+op_status vm_backend::raise_nested_failure(const std::exception& e) {
+	if (!nested_failure_.parked) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = script_exception(e.what());
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
-		absorb_nested_trace();
+		return {};
 	}
+	absorb_nested_trace();
 	nested_failure_.parked = false;
+	if (nested_failure_.error) { return raise_from(*nested_failure_.error); }
+	active_exception_value_ = nested_failure_.value ? std::move(nested_failure_.value) : std::optional<script_value>(make_null());
+	current_exception_ = nested_failure_.exception ? std::move(nested_failure_.exception) : std::optional<script_exception>(script_exception(e.what()));
+	is_unwinding_ = true;
+	stack_.push_back(make_null());
 	return {};
 }
 

@@ -12614,11 +12614,30 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     nested_failure_.parked = false;
     try {
         push_value(engine_ptr->execute_include_source(resolved_path, content));
-    } catch (...) {
-        absorb_nested_trace();
-        nested_failure_.parked = false;
-        throw;
+    } catch (const std::exception& e) {
+        return raise_nested_failure(e);
     }
+    return {};
+}
+
+// A failure of a nested run (include/import) re-raised in this run as if the nested code ran here: its runtime error
+// itself (caught with its text alone), or its thrown value; a load failure (parse, static check, missing file) raises its
+// text. KEEP BYTE-PARALLEL with vm_backend::raise_nested_failure.
+checked_result<void> interpreter::raise_nested_failure(const std::exception& e) {
+    if (!nested_failure_.parked) {
+        active_exception_value_ = make_value(std::string(e.what()));
+        current_exception_ = script_exception(e.what());
+        is_unwinding_ = true;
+        push_value(make_value());
+        return {};
+    }
+    absorb_nested_trace();
+    nested_failure_.parked = false;
+    if (nested_failure_.error) { return *nested_failure_.error; }
+    active_exception_value_ = nested_failure_.value ? std::move(nested_failure_.value) : std::optional<script_value>(make_value());
+    current_exception_ = nested_failure_.exception ? std::move(nested_failure_.exception) : std::optional<script_exception>(script_exception(e.what()));
+    is_unwinding_ = true;
+    push_value(make_value());
     return {};
 }
 
@@ -12666,10 +12685,8 @@ checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     nested_failure_.parked = false;
     try {
         push_value(engine_ptr->execute_import(resolved_path));
-    } catch (...) {
-        absorb_nested_trace();
-        nested_failure_.parked = false;
-        throw;
+    } catch (const std::exception& e) {
+        return raise_nested_failure(e);
     }
     return {};
 }

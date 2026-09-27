@@ -943,6 +943,47 @@ public:
                      trace_files(eng->format_stack_trace()));
             for (const char* f : {"imp_err_c.jai", "imp_err_d.jai", "imp_err_t.jai", "imp_err_u.jai"}) { cleanup_temp_file((jai::foundry::test_temp_directory() / f).string()); }
         });
+
+        test("an_error_in_an_included_file_is_caught_like_inline_code", [=, this]() {
+            // include is textual: a throw keeps its value and type, a runtime error is caught with its text alone, a load failure
+            // (static check, parse) is caught with its listing, which names the included file; both backends, proofs on and off
+            const std::string dir = jai::foundry::test_temp_directory().string();
+            const std::string path = (jai::foundry::test_temp_directory() / "inc_err.jai").string();
+            auto run = [&](jai::engine& e, const std::string& body) {
+                create_temp_file("inc_err.jai", body);
+                return e.execute("var r = null;\ntry { include(\"inc_err.jai\"); r = \"no error\"; } catch (e) { r = e; }\nr;");
+            };
+            for (bool proofs : {true, false}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->type_proofs(proofs);
+                eng->add_include_path(dir);
+                check_eq(std::string("boom"), run(*eng, "throw \"boom\";\n").to_string());
+                auto typed = run(*eng, "throw 42;\n");
+                check_true(typed.is_int(), "a thrown int stays an int across the include");
+                check_eq((int64_t)42, typed.as_int());
+                check_eq(std::string("Cannot initialize 'x' (declared int) with string"), run(*eng, "var s = \"s\";\nint x = s;\n").to_string());
+                check_eq(std::string("Array index 5 out of bounds for array of size 1"), run(*eng, "int boom() { array<int> a = [1]; return a[5]; }\nboom();\n").to_string());
+                const std::string checked = run(*eng, "int x = \"s\";\n").to_string();
+                check_true(checked.rfind("static check failed:\n", 0) == 0, checked);
+                check_true(checked.find("inc_err.jai:1:5: error: cannot initialize 'x' declared 'int' with 'string'\n    int x = \"s\";\n        ^\n") != std::string::npos, checked);
+                check_true(checked.find("script:1:5") == std::string::npos, checked);
+                const std::string parsed = run(*eng, "void f(int var) {}\n").to_string();
+                check_true(parsed.rfind("Parse error: ", 0) == 0 && parsed.find("inc_err.jai:1:12:") != std::string::npos, parsed);
+                // from a function body, a computed path; the program goes on after every catch
+                create_temp_file("inc_err.jai", "throw \"deep\";\n");
+                check_eq(std::string("deep after"), eng->execute("string go(string p) { try { include(p); } catch (e) { return e + \" after\"; } return \"none\"; }\ngo(\"inc_err.jai\");").to_string());
+                // a nested include: the inner failure crosses both boundaries
+                create_temp_file("inc_err_outer.jai", "include(\"inc_err.jai\");\n");
+                check_eq(std::string("deep"), eng->execute("var q = null;\ntry { include(\"inc_err_outer.jai\"); } catch (e) { q = e; }\nq;").to_string());
+                // after a failed include the includer's own location queries name the includer again
+                const std::string root = (jai::foundry::test_temp_directory() / "inc_err_root.jai").string();
+                const std::string here = eng->execute_file_source(root, "var p = \"\";\ntry { include(\"inc_err.jai\"); } catch (e) { }\np = current_script_path();\np;").to_string();
+                check_true(here.size() >= 16 && here.substr(here.size() - 16) == "inc_err_root.jai", here);
+            }
+            cleanup_temp_file(path);
+            cleanup_temp_file((jai::foundry::test_temp_directory() / "inc_err_outer.jai").string());
+        });
     }
 };
 

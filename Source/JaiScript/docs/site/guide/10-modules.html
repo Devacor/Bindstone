@@ -53,6 +53,7 @@ MOD_PI = 3.141590
 include runs EVERY time: load_count = 3</code></pre></div>
 <p>Includes nest (an included file can include another), and the <code>#</code> prefix is accepted and ignored for C++ muscle memory: <code>#include &quot;x.jai&quot;;</code>.</p>
 <p><strong>include in expression position returns the file&#x27;s value</strong>: <code>var cfg = include &quot;config.jai&quot;;</code> evaluates to the included file&#x27;s result (its last top-level expression), which makes data-file configs a one-liner. Statement-position include still discards the value.</p>
+<p><strong>An error in an included or imported file is an error at the line that reached it.</strong> A <code>throw</code> arrives with its value and type, a run-time error with its own text, and a file that does not parse or check raises its listing, named by the file&#x27;s path. A <code>try</code> around an <code>include</code> catches every one of them, and the program goes on. Uncaught, the stack trace lists the file&#x27;s own frames first, then the frame of each <code>include</code> or <code>import</code> that reached it.</p>
 <h2 id="dynamic-paths">Dynamic paths<a class="hlink" href="#dynamic-paths" aria-label="link">&#8203;</a></h2>
 <p>An <code>import</code> is a top-level declaration: inside a function, a block, a class or a namespace it is a parse error, since an import runs once and takes no scope. An <code>include</code> may appear wherever a statement may.</p>
 <p>The call form takes any string expression, both for include and import:</p>

@@ -220,9 +220,9 @@ function sk_gem(float x, float y, float z) -> float {
 	return (a + b * 0.62 + c - 0.075) * 0.54;
 }
 
-// the creature along one ray is only the parts the ray passes near: its groups (1 body, 2 head), then its candidate parts (see
-// sk_candidates). A part the ray never enters changes the step lengths, never a hit.
-function sk_groups(float x, float y, float z, int groups) -> float {
+// the creature along one ray: only the parts the ray passes near (groups: 1 body, 2 head; cand: capsule indices, glows as 100 + index).
+// A part the ray never enters changes the step lengths, never a hit.
+function sk_spider(float x, float y, float z, int groups, array<int>& cand, int nc) -> float {
 	float d = 99.0;
 	if ((groups & 1) != 0) { d = sk_body(x, y, z); }
 	if ((groups & 2) != 0) {
@@ -236,6 +236,36 @@ function sk_groups(float x, float y, float z, int groups) -> float {
 		}
 		float dg = sk_gem(x, y, z);
 		d = d < dg ? d : dg;
+	}
+	for (int k = 0; k < nc; ++k) {
+		int c = cand[k];
+		if (c >= 100) {
+			int g = c - 100;
+			float gx = x - SK_GX[g];
+			float gy = y - SK_GY[g];
+			float gz = z - SK_GZ[g];
+			float dg2 = sqrt(gx * gx + gy * gy + gz * gz) - SK_GR[g];
+			d = d < dg2 ? d : dg2;
+		} else {
+			float mx = x - SK_CMX[c];
+			float my = y - SK_CMY[c];
+			float mz = z - SK_CMZ[c];
+			float reach = d + SK_CB[c];
+			if (mx * mx + my * my + mz * mz > reach * reach) { continue; }
+			float pax = x - SK_CAX[c];
+			float pay = y - SK_CAY[c];
+			float paz = z - SK_CAZ[c];
+			float cdx = SK_CDX[c];
+			float cdy = SK_CDY[c];
+			float cdz = SK_CDZ[c];
+			float hh = (pax * cdx + pay * cdy + paz * cdz) * SK_CID[c];
+			hh = hh < 0.0 ? 0.0 : (hh > 1.0 ? 1.0 : hh);
+			float ex = pax - cdx * hh;
+			float ey = pay - cdy * hh;
+			float ez = paz - cdz * hh;
+			float dc = sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[c];
+			d = d < dc ? d : dc;
+		}
 	}
 	return d;
 }
@@ -273,11 +303,6 @@ function sk_candidates(float x, float y, float z, array<int>& cand, int first, i
 		}
 	}
 	return d;
-}
-
-function sk_spider(float x, float y, float z, int groups, array<int>& cand, int nc) -> float {
-	float d = sk_groups(x, y, z, groups);
-	return sk_candidates(x, y, z, cand, 0, nc, d);
 }
 
 // does the ray (origin o, unit direction d) pass within r of c ahead of the origin
@@ -396,8 +421,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 			// above the glow so far or the aura's reach (0.5), it can change neither the step nor the aura
 			float bound = ds_last - (t - t_last) * lip - 0.001;
 			if (bound < dw || (bound < glow && bound < 0.5)) {
-				float ds = sk_groups(x, y, z, groups);
-				ds = sk_candidates(x, y, z, cand, 0, nc, ds);
+				float ds = sk_spider(x, y, z, groups, cand, nc);
 				glow = ds < glow ? ds : glow;
 				d = dw < ds ? dw : ds;
 				ds_last = ds;

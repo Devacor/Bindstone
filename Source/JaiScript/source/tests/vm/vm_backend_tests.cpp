@@ -1870,6 +1870,7 @@ public:
 				for (const char* c : cases) {
 					auto e = jai::engine::make();
 					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					e->static_checking(jai::check_mode::warn);   // the checker reports f(5) at load; the RUNTIME text is under test
 					auto msg = e->execute(std::string(setup) + c).as<std::string>();
 					check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
 						std::string("non-lvalue arg keeps the exact error: ") + c + " got: " + msg);

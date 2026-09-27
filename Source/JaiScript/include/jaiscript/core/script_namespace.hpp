@@ -14,6 +14,17 @@ class function_decl;
 class class_definition;
 class environment;
 
+// A host entry's static signature for the checker (docs/static_checking.md "Language namespaces"): the arity range and
+// the kind each argument must have (jai_string_type = text, a string or a utf8_string; jai_null_type = anything); the
+// entry still checks its arguments at run time. result_follows_first: the result is text of the first argument's kind.
+struct host_entry_signature {
+    uint8_t min_args = 0;
+    uint8_t max_args = 0;
+    std::vector<script_value_type> params;
+    script_value_type result = script_value_type::jai_null_type;
+    bool result_follows_first = false;
+};
+
 // Flat script namespace registry entry ("a::b::c" is one namespace name, no nesting).
 // Engine-owned (see engine::script_namespaces()) so namespaces survive across backends.
 struct script_namespace_data {
@@ -21,6 +32,7 @@ struct script_namespace_data {
     std::unordered_map<uint64_t, script_value> variables;                                 // variable_name_id -> value
     std::unordered_map<uint64_t, std::shared_ptr<class_definition>> classes;              // class_name_id -> definition
     std::shared_ptr<environment> scope;   // the cells of the script-declared variables, parented on the global environment (detail/namespace_scope.hpp)
+    std::unordered_map<uint64_t, host_entry_signature> signatures;   // variable_name_id -> a host entry's signature
 };
 
 // Engine-owned namespaces: reflect:: answers and jai:: capabilities cannot be

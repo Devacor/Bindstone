@@ -15,6 +15,7 @@
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/script_class.hpp>
+#include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
@@ -252,6 +253,7 @@ public:
         if (extra_globals) {
             for (const auto& n : *extra_globals) {
                 extra_globals_.insert(n);
+                instance_names_.insert(n);
             }
         }
         if (opts.program_names) {
@@ -364,6 +366,7 @@ private:
     // AND the engine surface — typos, not ordering.
     std::unordered_set<std::string_view> all_names_;
     std::unordered_set<std::string> extra_globals_;
+    std::unordered_set<std::string> instance_names_;   // the host's per-call instance variables (a subset of extra_globals_)
     // Top-level (and namespace-flattened) variable names. Runtime resolution reads the
     // scope chain THROUGH the globals before falling back to this-fields, so a name that
     // is both a global and a field is flow-order-ambiguous to a static walk: member hits
@@ -549,6 +552,29 @@ private:
         const variable_decl* g = it->second.begin()->second.front().get();
         if (!g || !g->type || g->type->is_reference() || g->function_spelling || g->is_static) { return nullptr; }
         return g;
+    }
+    // The declared type a store to a program-scope name must respect when this unit does not declare it: the engine's cell
+    // once a unit has run (typed off its tag), else the one spelled declaration another unit of the program makes
+    ctype program_scope_store_type(const std::string& name) {
+        if (instance_names_.count(name)) { return {}; }
+        if (eng_.has_variable(name)) { return engine_global_type(name); }
+        if (!program_globals_) { return {}; }
+        auto it = program_globals_->find(name);
+        if (it == program_globals_->end() || it->second.size() != 1 || it->second.begin()->second.size() != 1) { return {}; }
+        const variable_decl* g = it->second.begin()->second.front().get();
+        if (!g || !g->type || g->type->is_reference() || g->function_spelling || g->is_static) { return {}; }
+        ctype t = ctype_from_type_info(g->type.get());
+        if (t.kind == ctype::object_k && !find_sclass(t.cls) && !engine_class(t.cls)) { return {}; }
+        t.tentative = true;
+        return t;
+    }
+    // ::name reaches the unit's program scope only: locals and fields never shadow it
+    var_entry* find_named(const identifier_expr* id, size_t* scope_index = nullptr) {
+        if (!id->global_qualified) { return find_local(id->name, scope_index); }
+        if (scope_index) { *scope_index = 0; }
+        if (scopes_.empty()) { return nullptr; }
+        auto found = scopes_[0].find(id->name);
+        return found != scopes_[0].end() ? &found->second : nullptr;
     }
     ctype program_global_type(const variable_decl* g) {
         ctype t = ctype_from_type_info(g->type.get());
@@ -1662,6 +1688,73 @@ private:
         return false;
     }
 
+    // A host namespace entry with a declared signature (script_namespace_data::signatures): arity and argument kinds are
+    // certainties the entry's own run-time check would raise; a unit that declares the namespace, or a script function of
+    // the name, keeps the call lenient
+    ctype check_namespace_entry(const member_expr* m, const std::vector<ctype>& args, const source_location& loc) {
+        std::vector<std::string_view> segments;
+        const expression* e = m->object.get();
+        while (e && e->get_type() == node_type::member_expr) {
+            segments.push_back(static_cast<const member_expr*>(e)->member);
+            e = static_cast<const member_expr*>(e)->object.get();
+        }
+        if (!e || e->get_type() != node_type::identifier_expr) { return {}; }
+        std::string path(static_cast<const identifier_expr*>(e)->name);
+        for (size_t i = segments.size(); i-- > 0;) { path += "::"; path += segments[i]; }
+        if (namespaces_.count(std::string_view(path))) { return {}; }
+        auto& all = eng_.script_namespaces();
+        auto nit = all.find(eng_.symbolize(path));
+        if (nit == all.end() || !nit->second) { return {}; }
+        const uint64_t member_id = eng_.symbolize(m->member);
+        if (nit->second->functions.count(member_id)) { return {}; }
+        auto sit = nit->second->signatures.find(member_id);
+        if (sit == nit->second->signatures.end()) { return {}; }
+        const host_entry_signature& sig = sit->second;
+        const std::string qualified = path + "::" + std::string(m->member);
+        if (args.size() < sig.min_args || args.size() > sig.max_args) {
+            const std::string expected = sig.min_args == sig.max_args ? std::to_string(sig.min_args)
+                : std::to_string(sig.min_args) + " to " + std::to_string(sig.max_args);
+            diag(diag_level::error, loc, "'" + qualified + "' expects " + expected + " argument(s), got " + std::to_string(args.size()));
+            return {};
+        }
+        for (size_t i = 0; i < args.size() && i < sig.params.size(); ++i) {
+            if (!namespace_arg_accepts(args[i], sig.params[i])) {
+                diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" + qualified + "': cannot pass '" +
+                     ctype_name(args[i]) + "' where " + namespace_param_spelling(sig.params[i]) + " is expected");
+                return {};
+            }
+        }
+        ctype t;
+        if (sig.result_follows_first && !args.empty() && (args[0].kind == ctype::string_k || args[0].kind == ctype::utf8_k)) { t = ctype::make(args[0].kind); }
+        else if (sig.result == script_value_type::jai_string_type) { t = ctype::make(ctype::string_k); }
+        else if (sig.result == script_value_type::jai_bool_type) { t = ctype::make(ctype::bool_k); }
+        else if (sig.result == script_value_type::jai_int_type) { t = ctype::make(ctype::int_k); }
+        else { return {}; }
+        t.tentative = true;
+        return t;
+    }
+    static bool namespace_arg_accepts(const ctype& arg, script_value_type p) {
+        if (arg.is_unknown() || arg.kind == ctype::null_k || p == script_value_type::jai_null_type) { return true; }
+        switch (p) {
+            case script_value_type::jai_string_type: return arg.kind == ctype::string_k || arg.kind == ctype::utf8_k;
+            case script_value_type::jai_int_type: return arg.kind == ctype::int_k;
+            case script_value_type::jai_bool_type: return arg.kind == ctype::bool_k;
+            case script_value_type::jai_array_type: return arg.kind == ctype::array_k;
+            case script_value_type::jai_map_type: return arg.kind == ctype::map_k;
+            default: return true;
+        }
+    }
+    static std::string namespace_param_spelling(script_value_type p) {
+        switch (p) {
+            case script_value_type::jai_string_type: return "a string";
+            case script_value_type::jai_int_type: return "an int";
+            case script_value_type::jai_bool_type: return "a bool";
+            case script_value_type::jai_array_type: return "an array";
+            case script_value_type::jai_map_type: return "a map";
+            default: return "a value";
+        }
+    }
+
     bool namespace_known(const std::string& path) {
         return namespaces_.count(std::string_view(path)) != 0 ||
                eng_.script_namespaces().count(eng_.symbolize(path)) != 0;
@@ -1795,6 +1888,23 @@ private:
             }
         }
         return true;
+    }
+
+    // A host function's declared scalar result (every registration agrees): tentative, a diagnostics fact only
+    ctype host_result_type(const std::string& name) {
+        script_value_type k;
+        if (!eng_.host_function_result(name, k)) { return {}; }
+        ctype t;
+        switch (k) {
+            case script_value_type::jai_int_type: t = ctype::make(ctype::int_k); break;
+            case script_value_type::jai_float_type: t = ctype::make(ctype::float_k); break;
+            case script_value_type::jai_bool_type: t = ctype::make(ctype::bool_k); break;
+            case script_value_type::jai_char_type: t = ctype::make(ctype::char_k); break;
+            case script_value_type::jai_string_type: t = ctype::make(ctype::string_k); break;
+            default: return {};
+        }
+        t.tentative = true;
+        return t;
     }
 
     static bool host_param_accepts(const ctype& arg, const param_type_info& p) {
@@ -2028,7 +2138,7 @@ private:
 
 	ctype infer_identifier_impl(identifier_expr* id, std::optional<field_proof>& fp) {
 		size_t scope_index = 0;
-		if (var_entry* local = find_local(id->name, &scope_index)) {
+		if (var_entry* local = find_named(id, &scope_index)) {
 			if (scope_index == 0) { note_global_use(id->name); }   // top-level var read
 			if (!capture_stack_.empty()) {
 				auto& cap = capture_stack_.back();
@@ -2042,7 +2152,7 @@ private:
 			}
 			return local->dynamic ? (local->alias.kind != ctype::unknown ? local->alias : ctype{}) : local->type;
 		}
-		if (class_ctx_) {
+		if (class_ctx_ && !id->global_qualified) {
 			member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
 			if (hit.found) {
 				// Runtime resolution reaches GLOBALS before this-fields; a name that is
@@ -2216,6 +2326,24 @@ private:
                 }
                 if (viable && aliasing) { map_key_alias(c->arguments[i]->location, c->arguments[i].get()); }
             }
+            // a literal where every viable overload binds the parameter by reference: the runtime refuses the call
+            // (Cannot pass non-lvalue to reference parameter), so the load reports it, naming the parameter
+            for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
+                const node_type k = c->arguments[i]->get_type();
+                if (k != node_type::literal_expr && k != node_type::array_literal_expr && k != node_type::map_literal_expr) { continue; }
+                const function_decl* by_ref = nullptr;
+                bool all_ref = false;
+                for (const auto* fn : *ov) {
+                    if (!script_fn_viable(fn, args)) { continue; }
+                    all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference;   // a coroutine binds a copy
+                    if (!all_ref) { break; }
+                    by_ref = fn;
+                }
+                if (all_ref && by_ref) {
+                    diag(diag_level::error, c->arguments[i]->location, "cannot pass a literal to reference parameter '" +
+                         by_ref->parameters[i].name + "' of '" + std::string(by_ref->name) + "' (a reference parameter binds a variable)");
+                }
+            }
         }
         return t;
     }
@@ -2265,7 +2393,7 @@ private:
 			if (eng_.has_function(name)) {
 				note_global_use(id->name);
 				check_host_call(name, args, c->location);
-				return {};
+				return host_result_type(name);
 			}
 			if (eng_.has_variable(name)) { note_global_use(id->name); return {}; }
 			if (engine_knows_name(name)) { return {}; }
@@ -2280,7 +2408,7 @@ private:
 				// math:: intrinsics take the kernel lane (same shape gate as both backends)
 				const math_fn fn = math_intrinsic_for_call(m);
 				if (fn != math_fn::none && args.size() <= 8) { return math_intrinsic_result(fn, args); }
-				if (namespace_path_receiver(m)) { return {}; }
+				if (namespace_path_receiver(m)) { return check_namespace_entry(m, args, c->location); }
 			}
 			ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
 			if (recv.kind == ctype::array_k && recv.ti && m->member == "push" && args.size() == 1) {
@@ -2353,6 +2481,8 @@ private:
 
 	ctype infer_assignment_impl(assignment_expr* a, uint8_t& store_proof) {
 		ctype rhs = infer(a->value.get());
+		struct incdec_scope { const char*& slot; const char* prev; ~incdec_scope() { slot = prev; } } incdec_guard{incdec_op_, incdec_op_};
+		incdec_op_ = !a->incdec_desugar ? nullptr : a->op.type == token_type::plus_equal ? "++" : "--";
 		bool compound = (a->op.type != token_type::equal);
 		token_type base_op = compound_base_op(a->op.type);
 
@@ -2363,7 +2493,7 @@ private:
 			bool this_field = false;
 			auto done = [&](ctype t) { stamp_field(id, fp); stamp(id->this_field, this_field, false); return t; };
 			size_t scope_index = 0;
-			if (var_entry* local = find_local(id->name, &scope_index)) {
+			if (var_entry* local = find_named(id, &scope_index)) {
 				if (scope_index == 0) { note_global_use(id->name); }   // top-level var write
 				if (rhs.const_key && local->is_handle && !compound) { map_key_alias(a->location, a->value.get()); return done(rhs); }
 				if (local->dynamic) { return done(rhs); }
@@ -2373,7 +2503,7 @@ private:
 				if (compound) { stamp(a->static_operand_class, operand_class_of(local->type, rhs), operand_class_unknown); }   // the fused compound's typed row
 				return done(local->type);
 			}
-			if (class_ctx_) {
+			if (class_ctx_ && !id->global_qualified) {
 				member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
 				if (hit.found) {
 					// Writes resolve through the global tier before fields too (audited
@@ -2397,7 +2527,13 @@ private:
 				if (hit.unresolved) { return done(rhs); }
 			}
 			std::string name(id->name);
-			if (extra_globals_.count(name)) { note_global_use(id->name); return done(rhs); }
+			if (extra_globals_.count(name)) {
+				note_global_use(id->name);
+				ctype gt = program_scope_store_type(name);
+				if (gt.is_unknown()) { return done(rhs); }
+				check_store(rhs, compound, base_op, gt, ctype_name(gt), "'" + name + "'", a->location, 0, 0);
+				return done(gt);
+			}
 			if (functions_.count(id->name) || find_sclass(id->name) || enums_.count(id->name) ||
 				namespaces_.count(id->name)) {
 				return done(rhs);
@@ -2473,10 +2609,21 @@ private:
     // Dev ruling 2026-07: compound assign on a typed target behaves like C++ —
     // `x op= rhs` is `x = T(x op rhs)` — so it checks exactly like plain assignment
     // of the operation's result. var targets keep the old dynamic behavior (unchecked).
+	const char* incdec_op_ = nullptr;   // the ++/-- spelling while checking its += 1 / -= 1 desugar
 	void check_store(const ctype& rhs, bool compound, token_type base_op, const ctype& target,
 					 const std::string& target_display, const std::string& what,
 					 const source_location& loc, size_t decl_line, size_t decl_col) {
 		if (target.is_unknown()) { return; }
+		if (compound && incdec_op_ && target.kind == ctype::string_k) {
+			diag(diag_level::error, loc, std::string("cannot apply '") + incdec_op_ + "' to 'string'", decl_line, decl_col);
+			return;
+		}
+		if (compound && base_op == token_type::plus && target.kind == ctype::string_k && !rhs.is_unknown() &&
+			rhs.kind != ctype::string_k && rhs.kind != ctype::char_k && rhs.kind != ctype::utf8_k && !eng_.has_function("+")) {
+			// a string target appends text only (a char is text; string += int raises, unlike binary +)
+			diag(diag_level::error, loc, "cannot apply '+=' to 'string' and '" + ctype_name(rhs) + "'", decl_line, decl_col);
+			return;
+		}
 		ctype stored = compound ? binary_result(target, base_op, rhs) : rhs;
 		if (assignable(stored, target)) { return; }
 		if (!compound && target.kind == ctype::object_k && assign_operator_accepts(target.cls, stored)) { return; }

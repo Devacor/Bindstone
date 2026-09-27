@@ -22,6 +22,20 @@ namespace stdlib {
         auto& ns = eng_ref.script_namespaces()[eng_ref.symbolize("string")];
         if (!ns) { ns = std::make_shared<script_namespace_data>(); }
         engine* eng = &eng_ref;
+        constexpr auto text = script_value_type::jai_string_type;
+        constexpr auto integer = script_value_type::jai_int_type;
+        constexpr auto any = script_value_type::jai_null_type;
+        auto sign = [&](const char* name, host_entry_signature sig) { ns->signatures[eng_ref.symbolize(name)] = std::move(sig); };
+        sign("to_lower", {1, 1, {text}, any, true});
+        sign("to_upper", {1, 1, {text}, any, true});
+        sign("from_code", {1, 1, {integer}, text, false});
+        sign("is_valid_utf8", {1, 1, {text}, script_value_type::jai_bool_type, false});
+        sign("join", {1, 2, {script_value_type::jai_array_type, text}, any, false});
+        sign("trim", {1, 1, {text}, any, true});
+        sign("replace_all", {3, 3, {text, text, text}, any, true});
+        sign("repeat", {2, 2, {text, integer}, any, true});
+        sign("pad_left", {2, 3, {text, integer, any}, any, true});
+        sign("pad_right", {2, 3, {text, integer, any}, any, true});
 
         ns->variables[eng_ref.symbolize("to_lower")] = script_value::make_function(
             [eng](const std::vector<script_value>& args) -> checked_result<script_value> {

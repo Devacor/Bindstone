@@ -1979,7 +1979,7 @@ public:
                 string caught = "none";
                 try { gs().s++; } catch (e) { caught = "raised"; }
                 log + "|" + caught + ":" + so.s;
-            )").c_str(), "S|raised:a", "++ gate on a string member: the receiver still runs once (the vm used to run it twice)", check_mode::strict);
+            )").c_str(), "S|raised:a", "++ gate on a string member: the receiver still runs once (the vm used to run it twice)", check_mode::off);   // the checker rejects ++ on a string at load; the RUNTIME order is under test
             expect_order((std::string(recv_prelude) + R"(
                 string caught = "none";
                 try { pk().v += "s"; } catch (e) { caught = e; }

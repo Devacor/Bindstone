@@ -100,8 +100,14 @@ error surfaces in the caller.
 
 **Compound assign** (Dev ruling 2026-07, settled): typed targets follow C++ rules —
 `x op= rhs` is `x = T(x op rhs)`, so `int x; x += 2.5` is fine (truncates) and
-`x += "s"` is an error (string result into int). `var` targets keep dynamic behavior,
-unchecked.
+`x += "s"` is an error (string result into int). A `string` variable or field appends text
+only, as the runtime does: `s += 'c'` and `s += "t"` append, `s += n` with a known non-text
+operand (an int, a float, a bool, null, a container, an object) is `cannot apply '+=' to
+'string' and 'int'` - the promoted type counts, so `s += to_char(a) + to_char(b)` is `string +=
+int` (`docs/char_semantics.md`; `"" + to_char(a) + to_char(b)` is the text spelling). An
+element target (`names[i] += 5`) concatenates at run time and stays lenient; a registered
+global `+` operator makes the rule lenient. `++`/`--` on a string member (the `+= 1` desugar) is
+`cannot apply '++' to 'string'`. `var` targets keep dynamic behavior, unchecked.
 
 **Typed fields** (Dev ruling 2026-07, settled): declared field types are real and enforce
 like locals — field initializers, member stores (`obj.field = v`, bare `field = v` inside
@@ -110,12 +116,21 @@ methods, inherited fields) all check against the declared type.
 **Calls** — checked only when the callee resolves statically:
 - same-script functions/ctors/methods: arity (with defaults) + per-arg assignability
   (same conversion table, element boundary included — note a `string` parameter accepts anything). Overloads: error
-  only if NO overload matches. Reference params are lenient.
+  only if NO overload matches. A reference parameter takes any argument type, but a literal
+  (a number, string, char, bool or null literal, an array or map literal) where every viable
+  overload binds the parameter by reference is `cannot pass a literal to reference parameter
+  'names' of 'index_of_name' (a reference parameter binds a variable)` - the runtime refuses
+  the call (`Cannot pass non-lvalue to reference parameter`), which stays as it is. A coroutine
+  binds a copy of its arguments, so a literal is fine there.
 - host (C++) functions via `engine::host_function_signatures`: arity across overloads
   (variadic = anything), and per-arg only certainties (a known primitive with no builtin
   conversion to a primitive param — e.g. `square("s")`; numeric↔numeric is fine; objects
   and `script_value` wildcard params accept anything). Note the C++ boundary has NO
-  numeric→string conversion, unlike script `string` slots.
+  numeric→string conversion, unlike script `string` slots. The call's result is typed by the
+  C++ return type when every registration of the name declares the same scalar (`int`,
+  `float`, `bool`, `char`, `string` - `to_char(n)` is a `char`, `engine::host_function_result`);
+  anything else (a `script_value`, an object, registrations that disagree) is unknown. The
+  type is a diagnostics fact, never a proof source.
 - callables in variables (lambdas, cross-execute function values): unchecked.
 
 **Returns** — must be assignable to the declared return type. A value from a `void` fn is
@@ -133,6 +148,12 @@ hides a name), `extern` declarations (Escape hatches below — a name defined ou
 program, typed or not), and the engine's full registration surface (globals, functions,
 classes, template types, namespaces — visible because checking happens at execute/jaibite
 time).
+`::name` reaches the program scope only (the unit's top level, then the program and the engine),
+never a local or a field of the same name, for reads and stores alike. A store to a
+program-scope name the unit does not declare checks against that name's declaration: the
+engine's cell once a unit has run (typed off its tag, like any engine global), else the one
+declaration with a spelled type that exactly one unit of the program makes - so a reload stub's
+`::PACK_MAX = "lots";` is the same load error as `int PACK_MAX = "lots";` in the declaring file.
 Only a unit with a dynamic-path `import(expr)`/`include(expr)` drops undeclared-identifier
 to warning severity (that file can define anything). Lambda capture-list entries are not
 identifier uses (`[this]` inside a method reaches the class); `weak_from_this()` /
@@ -143,8 +164,15 @@ math_intrinsics.hpp`, the same shape gate both backends use): typed by the kerne
 (`int` for `itrunc`/`ifloor`/`wrap_*`, `float` for the transcendental and interpolation
 families, operand-typed for `abs`/`min`/`max`/`clamp`/`random` — uniform int → `int`,
 uniform float → `float`, mixed or unknown → unknown; `random_seed` unknown). Arity is the
-kernel's runtime error, not a static one. A user namespace path `a::b::c` (a flat name;
-declared here or registered with the engine) is lenient at every depth.
+kernel's runtime error, not a static one. A host namespace entry that carries a signature
+(`script_namespace_data::signatures`: the arity range, each argument's kind, the result) is
+checked against it - the `string::` library declares one per function, so
+`string::repeat(to_char(a), 3)` is `argument 1 of 'string::repeat': cannot pass 'char' where a
+string is expected`, a wrong count is `'string::pad_left' expects 2 to 3 argument(s), got 1`, and
+the result is typed (text of the first argument's kind, `bool` for `is_valid_utf8`). A unit that
+declares the namespace itself, or a script function of the entry's name, stays lenient. Any
+other user namespace path `a::b::c` (a flat name; declared here or registered with the engine)
+is lenient at every depth.
 
 **Members** — on a receiver whose class is fully known (in-script hierarchy resolvable, or
 engine-registered `class_definition` incl. `_get_`/`_set_` properties and statics),
@@ -497,7 +525,7 @@ Diagnostics keep reading such a receiver as tentative.
 
 **Program globals** — a top-level variable exactly one unit of the program declares, once, with a spelled non-reference
 type (`array<int> ND_X`, `shared_ptr<Game> G`) is typed by that declaration in every other unit's proof pass, the way a class
-from the program table is; the diagnostics never read the table (a diagnostics walk leaves the name dynamic, and the proofs
+from the program table is; the diagnostics read the table for stores only (Identifiers above; a read in a diagnostics walk leaves the name dynamic, and the proofs
 come from a proof-only walk after it), so no load-time text changes. A class-typed global is typed once its class is defined,
 and a unit whose proofs waited for a class re-stamps after each import completes (`proof_stats::deferred`); a body compiled
 before that (a lambda compiles with its unit's top level; a named function compiles at its first call) keeps the proofs it had.

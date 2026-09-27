@@ -31,7 +31,7 @@ H               apply a bandage                        X  hide (stealth)
 I P K J B C     backpack, paperdoll, skills, journal, spellbook, crafting
 M               world map                              ?  help
 ENTER           chat (/pvp /who /invite name /accept /leave /p msg /home)
-ESC             clear target, then the menu (save, load, music, sound, zoom, quit)
+ESC             clear target, then the menu (save, load, music, sound, zoom, host, leave to title, quit)
 ```
 
 In a list: up/down (or W/S) to choose, ENTER to act, ESC to close. In the backpack ENTER uses or equips and
@@ -60,11 +60,23 @@ gear of the right tier finishes it with a handful of deaths in total.
 
 ## Multiplayer
 
-Up to 16 gators in one swamp over a LAN (or any network that reaches the host's port, 28777 by default):
+Up to 16 gators in one swamp over a LAN (or any network that reaches the host's port, 28777 by default). The title
+screen has it all: type your name, pick a color, then choose Single player, Host a game or Join a game.
+
+- **Host a game** takes a port (28777 unless you change it) and lists this machine's addresses, which is what friends
+  type. In single player, ESC also offers Host this game, and a host can Stop hosting.
+- **Join a game** takes the host's address and port (`192.168.1.20:30000` works too) and remembers every server you
+  joined with the name you used there (`saves/servers.txt`; pick one and press ENTER, or backspace to forget it).
+  Connecting shows what it is waiting for; a failed join says why: NAME TAKEN, SERVER FULL, VERSION MISMATCH, or
+  UNREACHABLE (with the address, and whether nothing listened there or the name did not resolve).
+- **Leave to title** (ESC) ends the session: a host sends everyone home with their gators saved and saves the world; a
+  joined player just leaves. When a host goes away, its players land back on the title with the reason.
+
+The command line opens the same pages filled in, and the dedicated host has no screen at all:
 
 ```
-play.bat host [port N]                  # play and host: your world, your saves
-play.bat join 192.168.1.20 [port N]     # join a friend (type your name on the title screen)
+play.bat host [port N]                  # the host page (ENTER starts hosting)
+play.bat join 192.168.1.20 [port N]     # the join page with the address in (ENTER connects)
 jaiscript scripts/gatorquest.jai -- serve [port N] [bots K]     # a dedicated host with no screen
 ```
 
@@ -73,12 +85,50 @@ a second, what they can see. Joiners' characters live on the host in `saves/char
 name, and you are where you left off. In game, ENTER opens chat: plain text reaches everyone in your realm, `/p text`
 your party. `/invite name` and `/accept` make a party (kills near your party mates count for their quests too),
 `/leave` leaves it, `/who` lists who is online, and `/pvp` flags you: flagged gators can fight each other, unflagged
-ones cannot be hurt by players (and killing an unflagged gator makes you a murderer the guards will not forget). If the
-host quits, everyone is told and dropped back to the shell; a player who drops is saved and removed.
+ones cannot be hurt by players (and killing an unflagged gator makes you a murderer the guards will not forget). A
+player who drops is saved and removed.
+
+### Movement prediction
+
+Your own gator moves on the frame you press the key, whatever the latency. Each step goes to the host tagged with a
+sequence number (`S|seq|dir`); the host runs the steps in order at the gator's own pace (water, slows and ghosts
+included), and every snapshot says which step it processed last and where that left the gator. The client drops the
+acknowledged steps, replays the ones still in flight from the host's position, and when the result differs it glides
+the drawn gator to the corrected tile (more than three tiles snaps). Facing, footsteps, the swing and the lunge of a
+bump attack happen locally; damage, loot and everything else stay with the host. Other gators and the monsters are
+drawn about 100 ms behind a smoothed copy of the host's clock, interpolating between the moves the snapshots
+describe, so they glide instead of stepping when snapshots arrive unevenly. `noprediction` turns prediction off.
+
+The network simulator adds latency, jitter and loss to a client's link (off by default; loss is TCP-style: a lost
+message arrives 250 ms late and holds up the ones behind it):
+
+```
+play.bat join 192.168.1.20 lag 120 jitter 20 loss 2      # 120 ms round trip, +-20 ms, 2% of messages late
+jaiscript scripts/gatorquest.jai -- predtest              # the prediction test at 0, 60, 150 and 300 ms round trips
+```
+
+`predtest` runs the real host and a real client over loopback on a virtual clock (a minute of walking in well
+under a minute), through the same input path as the keyboard. It checks that every free step is taken on the frame the key
+is held, that the prediction agrees with the host at every stop, that corrections on a clean link are rare and at
+most one tile, that nothing snaps, and that a step into a monster the host saw first corrects once, by one tile,
+without the drawn gator jumping. A typical run (64 seconds of walking at each round trip):
+
+```
+  rtt  jitter loss | steps | corrections /min  max  snaps | same-frame misses | stops converged
+     0      0   0% |   268 |           0   0.0    0      0 |     0 of   268    | 12 of 12
+    60     10   0% |   275 |           0   0.0    0      0 |     0 of   275    | 12 of 12
+   150     25   1% |   210 |           1   0.9    1      0 |     0 of   210    | 12 of 12
+   300     50   1% |   255 |           3   2.8    2      0 |     0 of   255    | 12 of 12
+```
+
+The counts move by one or two between runs: the sockets are real, so which frame a message lands in depends on the
+machine. The corrections at 150 and 300 ms are monsters stepping into the gator's path before the client heard
+they had moved.
 
 ## Saves
 
-The game saves by itself every five minutes of play, from the menu (ESC, Save game) and on Save and quit. Starting
+The game saves by itself every five minutes of play, from the menu (ESC, Save game), and when you leave to the
+title or quit. Starting
 again loads the saved world, and typing the name of a saved gator (the title lists them; ENTER alone picks the last
 one played) brings it back where it stood, with its gear, skills, quests and bank box. A new name starts a new gator
 in the same world.
@@ -122,9 +172,12 @@ jaiscript scripts/gatorquest.jai -- hotreload                    # edits five sc
 jaiscript --backend=interp scripts/gatorquest.jai -- hotreload interp
 jaiscript scripts/gatorquest.jai -- nettest                      # host + 17 client sessions over loopback, one process
 powershell -File nettest2.ps1 [-Backend interp]                  # a dedicated host and two clients as three processes
+jaiscript scripts/gatorquest.jai -- predtest [lag N jitter N loss N]   # movement prediction under a simulated link
+jaiscript scripts/gatorquest.jai -- menutest                     # the title's host and join pages, every refusal, leaving
 jaiscript scripts/gatorquest.jai -- endgame                      # the six tyrants and the Six Scales, start to crown
 jaiscript scripts/gatorquest.jai -- tour [screen 200x56]         # captures of every realm, night, a boss fight, fishing
 jaiscript scripts/gatorquest.jai -- shot ticks 900 every 300     # frame captures (.ans, .txt sketch, .png)
+jaiscript scripts/gatorquest.jai -- shot title                   # every title page as a capture
 jaiscript scripts/gatorquest.jai -- demo frames 600              # the real play loop driven by a bot
 jaiscript scripts/gatorquest.jai -- sheet                        # every sprite and tile texture as a PNG
 ```

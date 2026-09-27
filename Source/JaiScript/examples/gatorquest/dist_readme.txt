@@ -8,9 +8,10 @@ the Glacier Queen (Frostfang Caverns), Emberjaw the Wyrm (Mt. Scorchmaw) and the
 Gator Avatar. Fight, fish, mine, chop, smith, cook and brew along the way. Raccoons will steal your gold.
 
 START
-  play.bat              single player (your world is saved in the saves folder)
-  host.bat              play and let friends join (port 28777; host.bat port 30000 for another)
-  join.bat <address>    join a friend's game (their LAN address, e.g. join.bat 192.168.1.20)
+  play.bat              the title screen: type a name, pick a color, then Single player, Host a game
+                        or Join a game (up/down and ENTER). Your world is saved in the saves folder.
+  host.bat              straight to the host page (port 28777; host.bat port 30000 for another)
+  join.bat [address]    straight to the join page (join.bat 192.168.1.20 fills in the address)
   serve.bat             a dedicated host with no screen, for a group's persistent swamp
 
 Use Windows Terminal (or any terminal with 24-bit color) and make the window big: at least 100x30
@@ -29,7 +30,18 @@ CONTROLS
   K  J  B  C         skills, journal (quests), spellbook, crafting (stand near a forge, anvil or fire)
   M                  world map                              ?  help
   ENTER              chat. Commands: /pvp /who /invite name /accept /leave /p party-message /home
-  ESC                clear the target, then the menu: save, load, music, sound, zoom, quit
+  ESC                clear the target, then the menu: save, load, music, sound, zoom, host this game,
+                     leave to title, quit
+
+MULTIPLAYER
+  Host a game shows this machine's addresses: friends choose Join a game and type one of them (and the
+  port, if you changed it). Over the internet, forward TCP port 28777 on your router to the host.
+  Join a game remembers the servers you joined and the name you used on each. When a join fails the
+  title says why: the name is taken, the server is full, the host runs another version, or nothing
+  answered at that address.
+  Your gator moves the moment you press a key; the host checks every step, and the rare disagreement
+  (a monster stepped into your path before you saw it) is corrected with a short glide.
+  Testing a slow link: add lag 150 jitter 25 loss 1 to the command line (round trip ms, +- ms, percent).
 
 TIPS
   Shopkeepers offer Buy and Sell. The healer and the Oracle resurrect ghosts for free.
@@ -41,7 +53,7 @@ TIPS
   Moongates around Swampton lead to the six realms; the grate in the plaza leads to the sewers.
 
 SAVES
-  The game saves every five minutes, from the menu and when you quit. Files are plain text in the
+  The game saves every five minutes, from the menu, and when you leave to the title or quit. Files are plain text in the
   saves folder (or %LOCALAPPDATA%\GatorQuest\saves if this folder is read-only): world.gqw and one
   file per gator in saves\chars. A .bak copy of the previous save is kept; a damaged save loads from it.
 

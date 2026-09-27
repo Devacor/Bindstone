@@ -1042,6 +1042,19 @@ private:
 				r;
 			)", "outer");
 		});
+		test("a_throw_expression_composes_inside_a_ternary", [this]() {
+			// docs/grammar.md throwExpression: throw is an expression, so it composes (x > 0 ? x : throw "neg")
+			expect("throw in ternary", R"(
+				function g(int x) { return x > 0 ? x : throw "neg"; }
+				function k(int x) -> int { int y = x > 0 ? x : throw "neg3"; return y; }
+				string r = "";
+				try { g(-1); } catch (e) { r += e; }
+				try { k(-1); } catch (e) { r += "|" + e; }
+				try { var q = true ? throw "neg4" : 1; } catch (e) { r += "|" + e; }
+				try { int s = 1 + (false ? 1 : throw "neg5"); } catch (e) { r += "|" + e; }
+				r + "|" + g(2);
+			)", "neg|neg3|neg4|neg5|2", check_mode::warn);
+		});
 		test("a_native_exception_in_a_call_argument_converts_in_the_calling_frame", [this]() {
 			every_config("native arg", "own:n", [](engine& e) {
 				e.add_function("bad", []() -> script_int { throw std::runtime_error("n"); });

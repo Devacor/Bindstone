@@ -9824,6 +9824,8 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
     }
 
     is_unwinding_ = true;
+    // throw is an expression (docs/grammar.md): it yields the unwinding placeholder every operand consumer pops
+    push_value(make_value());
     return {};
 }
 

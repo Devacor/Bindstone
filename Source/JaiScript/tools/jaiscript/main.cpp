@@ -1139,6 +1139,23 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 		std::error_code ec;
 		return fs::remove(path, ec);
 	}, jai::filesystem);
+	// the safe-save step: the destination is replaced in one operation on the same volume (MoveFileEx / rename(2)), a
+	// reader sees the old file or the new one; across volumes the move copies, then removes the source
+	eng->add_function("move_file", [](const std::string& from, const std::string& to) -> bool {
+		std::error_code ec;
+		if (!fs::is_regular_file(from, ec)) { return false; }
+#ifdef _WIN32
+		return MoveFileExW(fs::path(from).c_str(), fs::path(to).c_str(),
+			MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH | MOVEFILE_COPY_ALLOWED) != 0;
+#else
+		fs::rename(from, to, ec);
+		if (!ec) { return true; }
+		if (ec != std::errc::cross_device_link) { return false; }
+		ec.clear();
+		fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
+		return !ec && fs::remove(from, ec);
+#endif
+	}, jai::filesystem);
 	eng->add_function("dir_exists", [](const std::string& path) -> bool {
 		std::error_code ec;
 		return fs::is_directory(path, ec);
@@ -1841,6 +1858,7 @@ int run_selftest(const console_state& con) {
 				{"write_file(fixture + \"/content.txt\", \"changed\")", "write_file"},
 				{"file_exists(fixture + \"/content.txt\")", "file_exists"},
 				{"delete_file(fixture + \"/removable.txt\")", "delete_file"},
+				{"move_file(fixture + \"/removable.txt\", fixture + \"/moved.txt\")", "move_file"},
 				{"dir_exists(fixture)", "dir_exists"},
 				{"make_dirs(fixture + \"/created\")", "make_dirs"},
 				{"writable_dir(fixture + \"/probe-created\")", "writable_dir"},
@@ -1893,6 +1911,10 @@ int run_selftest(const console_state& con) {
 				"file_exists(fixture + \"/reenabled.txt\");").as_bool()
 				&& slurp_file((fixture / "reenabled.txt").string()) == "enabled",
 				"reenabled file operations retain normal behavior");
+			expect_privilege(eng->execute("write_file(fixture + \"/save.tmp\", \"new\") && write_file(fixture + \"/save.txt\", \"old\") && "
+				"move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\") && !file_exists(fixture + \"/save.tmp\") && "
+				"read_file(fixture + \"/save.txt\") == \"new\" && !move_file(fixture + \"/save.tmp\", fixture + \"/save.txt\");").as_bool(),
+				"move_file replaces the destination and answers false for a missing source");
 			expect_privilege(!eng->execute("saved_start(\"jaiscript-selftest://never-network\", "
 				"fixture + \"/reenabled-download.bin\");").as_bool()
 				&& eng->execute("pending.error();").as_string() == "download: only http and https URLs are supported",

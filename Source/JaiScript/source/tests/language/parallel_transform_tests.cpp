@@ -1276,6 +1276,7 @@ public:
 			// own fresh strings (the buffer copy shared them across threads: GLOOM's palettes
 			// rendered short rows under workers once they were declared array<string>)
 			auto e = make_engine();
+			e->execution_budget(0);
 			e->parallel_thread_count(4);
 			script_value table = e->execute(R"(
 				array<string> PAL = [];
@@ -1492,6 +1493,7 @@ public:
 		// map. Fully deterministic (constants derive from the seed, no wall clock).
 		test("fuzz_pure_fns_1_vs_N", [this]() {
 			auto e = make_engine();
+			e->execution_budget(0);
 			jai::stdlib::register_all(*e);
 			auto mix = [](uint64_t z) {
 				z ^= z >> 33; z *= 0xFF51AFD7ED558CCDULL;

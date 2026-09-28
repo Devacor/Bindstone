@@ -388,6 +388,16 @@ namespace MV {
 		return (dist1 <= dist2)?dist1:dist2;
 	}
 
+	template <class Type>
+	Type wrappingMix(Type lowerBound, Type upperBound, Type a_start, Type a_end, Type a_percent) {
+		bool wrapped = false;
+		Type distance = wrappingDistance(lowerBound, upperBound, a_start, a_end, &wrapped);
+		a_start = wrap(lowerBound, upperBound, a_start);
+		a_end = wrap(lowerBound, upperBound, a_end);
+		Type towardEnd = (wrapped == (a_start > a_end)) ? distance : -distance;
+		return wrap(lowerBound, upperBound, a_start + towardEnd * a_percent);
+	}
+
 	//expects the same type for both parameters.
 	template<typename Type>
 	bool floatingPointRangeCompareCheck(Type value, Type delta){

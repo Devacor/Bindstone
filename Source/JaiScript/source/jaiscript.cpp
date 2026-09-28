@@ -1,4 +1,6 @@
-// Single compilation unit for JaiScript
+// Single compilation unit for JaiScript: every file source/CMakeLists.txt builds, for hosts that add one file.
+// connector.cpp stays first: it includes winsock2 before anything can drag in windows.h.
+#include "implementation/debug/connector.cpp"
 
 #include "../include/jaiscript/jaiscript.hpp"
 
@@ -16,6 +18,7 @@
 #include "implementation/parse_errors.cpp"
 #include "implementation/interpreter_dispatch.cpp"
 #include "implementation/type_checker.cpp"
+#include "implementation/schema_binding.cpp"
 #include "implementation/vm/vm_compiler.cpp"
 #include "implementation/vm/vm_inline.cpp"
 #include "implementation/vm/vm_backend.cpp"
@@ -23,3 +26,5 @@
 #include "implementation/vm/region_ir.cpp"
 #include "implementation/vm/chunk_manifest.cpp"
 #include "implementation/coroutine.cpp"
+#include "implementation/parallel_transform.cpp"
+#include "implementation/debug/controller.cpp"

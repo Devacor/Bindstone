@@ -29,6 +29,23 @@ set(JAISCRIPT_SOURCES
     implementation/vm/region_ir.cpp
 )
 
+# MutedVision compiles every implementation/**/*.cpp (MutedVision_Common.vcxitems) and embedders compile
+# jaiscript.cpp; configure fails when either disagrees with this list.
+file(GLOB_RECURSE jaiscript_on_disk RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS implementation/*.cpp)
+set(jaiscript_unity ${CMAKE_CURRENT_SOURCE_DIR}/jaiscript.cpp)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${jaiscript_unity})
+file(STRINGS ${jaiscript_unity} jaiscript_in_unity REGEX "^#include \"implementation/.+\\.cpp\"")
+list(TRANSFORM jaiscript_in_unity REPLACE "^#include \"(implementation/.+\\.cpp)\".*" "\\1")
+foreach(jaiscript_list jaiscript_on_disk jaiscript_in_unity)
+    set(jaiscript_extra ${${jaiscript_list}})
+    set(jaiscript_missing ${JAISCRIPT_SOURCES})
+    list(REMOVE_ITEM jaiscript_extra ${JAISCRIPT_SOURCES})
+    list(REMOVE_ITEM jaiscript_missing ${${jaiscript_list}})
+    if(jaiscript_extra OR jaiscript_missing)
+        message(FATAL_ERROR "JAISCRIPT_SOURCES disagrees with ${jaiscript_list} (implementation/ on disk, jaiscript.cpp includes). Not in JAISCRIPT_SOURCES: ${jaiscript_extra}. Missing: ${jaiscript_missing}.")
+    endif()
+endforeach()
+
 # Create the library
 add_library(jaiscript STATIC ${JAISCRIPT_SOURCES})
 

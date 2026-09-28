@@ -147,11 +147,11 @@
   "range": {
    "end": {
     "character": 10,
-    "line": 27
+    "line": 28
    },
    "start": {
     "character": 5,
-    "line": 27
+    "line": 28
    }
   },
   "uri": "program/lib.jai"
@@ -347,6 +347,22 @@
    }
   }
  },
+ "hover.doc_comment": {
+  "contents": {
+   "kind": "markdown",
+   "value": "```jaiscript\nint util::twice(int v)\n```\n\nfunction in namespace `util` - declared in `lib.jai:29`\n\nDoubles a value."
+  },
+  "range": {
+   "end": {
+    "character": 26,
+    "line": 17
+   },
+   "start": {
+    "character": 21,
+    "line": 17
+   }
+  }
+ },
  "hover.enum_value": {
   "contents": {
    "kind": "markdown",
@@ -516,11 +532,11 @@
    "range": {
     "end": {
      "character": 10,
-     "line": 30
+     "line": 31
     },
     "start": {
      "character": 6,
-     "line": 30
+     "line": 31
     }
    },
    "uri": "program/lib.jai"
@@ -529,11 +545,11 @@
    "range": {
     "end": {
      "character": 11,
-     "line": 31
+     "line": 32
     },
     "start": {
      "character": 7,
-     "line": 31
+     "line": 32
     }
    },
    "uri": "program/lib.jai"
@@ -542,11 +558,11 @@
    "range": {
     "end": {
      "character": 14,
-     "line": 32
+     "line": 33
     },
     "start": {
      "character": 10,
-     "line": 32
+     "line": 33
     }
    },
    "uri": "program/lib.jai"
@@ -1446,21 +1462,21 @@
      "range": {
       "end": {
        "character": 35,
-       "line": 27
+       "line": 28
       },
       "start": {
        "character": 5,
-       "line": 27
+       "line": 28
       }
      },
      "selectionRange": {
       "end": {
        "character": 10,
-       "line": 27
+       "line": 28
       },
       "start": {
        "character": 5,
-       "line": 27
+       "line": 28
       }
      }
     }
@@ -1471,7 +1487,7 @@
    "range": {
     "end": {
      "character": 1,
-     "line": 28
+     "line": 29
     },
     "start": {
      "character": 10,
@@ -1496,21 +1512,21 @@
    "range": {
     "end": {
      "character": 1,
-     "line": 34
+     "line": 35
     },
     "start": {
      "character": 12,
-     "line": 30
+     "line": 31
     }
    },
    "selectionRange": {
     "end": {
      "character": 22,
-     "line": 30
+     "line": 31
     },
     "start": {
      "character": 12,
-     "line": 30
+     "line": 31
     }
    }
   }

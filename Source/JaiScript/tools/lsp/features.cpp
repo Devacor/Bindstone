@@ -71,6 +71,31 @@ bool matches_prefix(std::string_view name, std::string_view prefix) {
 	return j == prefix.size() && std::tolower(static_cast<unsigned char>(name[0])) == std::tolower(static_cast<unsigned char>(prefix[0]));
 }
 
+// The // comment block right above a declaration, or the one trailing it on its line
+std::string doc_comment(const unit& owner, text_span span) {
+	auto trim = [](std::string_view s) {
+		while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) { s.remove_prefix(1); }
+		while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) { s.remove_suffix(1); }
+		return s;
+	};
+	std::vector<std::string> above;
+	for (uint32_t line = span.start.line; line-- > 0 && above.size() < 12;) {
+		std::string_view text = trim(owner.lines.line_text(owner.text, line));
+		if (text.rfind("//", 0) != 0) { break; }
+		text.remove_prefix(2);
+		above.emplace_back(trim(text));
+	}
+	std::string out;
+	for (auto it = above.rbegin(); it != above.rend(); ++it) { out += (out.empty() ? "" : "\n") + *it; }
+	if (!out.empty()) { return out; }
+	std::string_view line = owner.lines.line_text(owner.text, span.start.line);
+	size_t pos = line.find("//", span.end.col);
+	if (pos != std::string_view::npos && line.substr(span.end.col, pos - span.end.col).find('"') == std::string_view::npos) {
+		return std::string(trim(line.substr(pos + 2)));
+	}
+	return {};
+}
+
 std::string file_name(const std::string& path) {
 	size_t pos = path.find_last_of("/\\");
 	return pos == std::string::npos ? path : path.substr(pos + 1);
@@ -387,6 +412,13 @@ std::optional<std::string> workspace::hover(unit& u, text_pos pos, text_span& ra
 		about += " - declared in `" + file_name(s->path) + ":" + std::to_string(s->span.start.line + 1) + "`";
 	}
 	md += "\n\n" + about;
+	if (!s->path.empty() && s->kind != symbol_kind::local && s->kind != symbol_kind::parameter) {
+		const std::string path = s->path;
+		const text_span span = s->span;
+		if (unit* owner = path == u.path ? &u : get(path)) {
+			if (std::string doc = doc_comment(*owner, span); !doc.empty()) { md += "\n\n" + doc; }
+		}
+	}
 	return md;
 }
 

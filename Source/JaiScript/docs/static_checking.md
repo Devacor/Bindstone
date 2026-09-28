@@ -40,6 +40,14 @@ related_line/column, strict_region}`); mode only decides whether errors gate exe
 (strict: every error; warn: only errors a `[[strict_mode]]` region raised - "Escape hatches").
 Warning severity never gates.
 
+Tools drive the walk directly: `detail::run_static_check(eng, decls, extra, options)` with the
+program tables of their choosing (`program_names`, `program_classes`), and
+`check_options::observer` (a `check_observer`) receives every expression's inferred type in the
+checker's own lattice (`check_expression_type`: kind, class, declared `type_info`, spelling). The
+language server (`tools/lsp`) is built on exactly this; the observer changes nothing the walk
+reports. `parser::recovered_declarations()` hands a tool the top-level declarations a failed parse
+read around its errors.
+
 ## Rule table (known source and destination types)
 
 | target | accepts | notes |

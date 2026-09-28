@@ -209,7 +209,11 @@ fields / a hybrid's C++ property; a method name shadows and is not a cell), then
 environment chain from the creating env. A same-named global never wins over a slot or a
 member. The capture KIND is applied by the caller afterwards ([&]/[&x] cell-share the
 source, [=]/[x]/bare [] snapshot it); an explicit [x]/[&x] takes variables only, so a
-member keeps the `Cannot capture undefined variable` text with or without a global. The
+member keeps the `Cannot capture undefined variable` text with or without a global. A
+program-scope source (the ladder's `global` flag) is never captured by a default ([=], bare
+[], [&]) and `[&g]` leaves it unlisted, so the call reads the global live; only `[g]` and an
+init-capture `[x = e]` copy at creation (the init expression is evaluated by the creating
+code and handed to the closure op, never resolved through the ladder). The
 capture env parents the GLOBAL env, so "already captured" tests must read its OWN storage
 (`get_own_value_ptr`), never `contains` - a `contains` walk reaches the global and the slot
 is silently skipped (the bug class that let `[&]` box a global instead of the local).
@@ -270,6 +274,12 @@ gate. Rules:
 
 `x op= e` evaluates `e`, then reads `x`, then stores, on both backends (the right operand before the left, as
 C++17 sequences every assignment operator); `x = x op e` and the plain binary keep their left-to-right reads.
+Every target follows the same order (2026-09-27): `obj.f op= e`, `this.f op= e`, `C::s op= e`, `ns::x op= e`,
+`a[j] op= e` and `a[j] = e` evaluate `e` first, then the receiver, container and index, then the read (a user
+getter included), the arithmetic and the store, so an error in `e` comes before any error the target raises.
+The VM emits the value first and the executor rotates the operands into its own order
+(`compound_flag_value_first`); a right side that cannot observe or change anything (a literal, a slot local's
+value) keeps the target-first emission.
 So with `mutate(int& v) { v = 20; return 2; }`, `x + mutate(x)` and `x = x + mutate(x)` are 5 and `x += mutate(x)`
 is 22. The rule for an implementation: never carry a C++ reference to a slot's current representation across an
 evaluation that can run user code, because a by-reference argument boxes the variable into a cell in place and

@@ -400,31 +400,55 @@ def run_gatorquest(exe, checks):
         client.close()
 
 
+def edit_latency(client, uri, rounds=30):
+    lines = client.texts[uri].split("\n")
+    line = next(i for i, l in enumerate(lines) if l.startswith("\t") and l.strip().endswith(";") and "return" not in l)
+    samples = []
+    for i in range(rounds):
+        pos = {"line": line, "character": 1}
+        probe = "int lsp_probe_%d = %d;\n\t" % (i, i)
+        t0 = time.perf_counter()
+        version = client.change(uri, pos, pos, probe)
+        client.wait_diagnostics(uri, version)
+        samples.append((time.perf_counter() - t0) * 1000)
+        version = client.change(uri, pos, {"line": line + 1, "character": 1}, "")
+        client.wait_diagnostics(uri, version)
+    samples.sort()
+    return statistics.median(samples), samples[int(len(samples) * 0.95) - 1], samples[-1], line
+
+
 def run_latency(exe, checks):
     print("latency")
     client = Client(exe, GATORQUEST.parent)
     try:
         client.open(GATORQUEST / "gatorquest.jai")
         combat_uri = client.open(GATORQUEST / "gq_combat.jai")
-        client.wait_diagnostics(combat_uri)
+        actions_uri = client.open(GATORQUEST / "gq_actions.jai")
+        client.wait_diagnostics(actions_uri)
         client.settle()
-        text = client.texts[combat_uri]
-        lines = text.split("\n")
-        line = next(i for i, l in enumerate(lines) if l.startswith("\t") and l.strip().endswith(";") and "return" not in l)
-        samples = []
-        for i in range(30):
-            pos = {"line": line, "character": 1}
-            probe = "int lsp_probe_%d = %d;\n\t" % (i, i)
-            t0 = time.perf_counter()
-            version = client.change(combat_uri, pos, pos, probe)
-            client.wait_diagnostics(combat_uri, version)
-            samples.append((time.perf_counter() - t0) * 1000)
-            version = client.change(combat_uri, pos, {"line": line + 1, "character": 1}, "")
-            client.wait_diagnostics(combat_uri, version)
-        samples.sort()
-        median = statistics.median(samples)
-        p95 = samples[int(len(samples) * 0.95) - 1]
-        print("  edit -> diagnostics on gq_combat.jai: median %.1f ms, p95 %.1f ms, max %.1f ms" % (median, p95, samples[-1]))
+        median, p95, worst, line = edit_latency(client, actions_uri)
+        print("  edit -> diagnostics on gq_actions.jai (1085 lines): median %.1f ms, p95 %.1f ms, max %.1f ms" % (median, p95, worst))
+        median, p95, worst, line = edit_latency(client, combat_uri)
+        print("  edit -> diagnostics on gq_combat.jai: median %.1f ms, p95 %.1f ms, max %.1f ms" % (median, p95, worst))
+        root_uri = uri_of(GATORQUEST / "gatorquest.jai")
+        root_text = client.texts[root_uri]
+        t0 = time.perf_counter()
+        client.request("textDocument/references", {"textDocument": {"uri": root_uri}, "position": position_of(root_text, "mob_live(m)"), "context": {"includeDeclaration": True}})
+        first_refs = (time.perf_counter() - t0) * 1000
+        t0 = time.perf_counter()
+        client.request("textDocument/references", {"textDocument": {"uri": root_uri}, "position": position_of(root_text, "CHARS[slot]"), "context": {"includeDeclaration": True}})
+        warm_refs = (time.perf_counter() - t0) * 1000
+        print("  references across the program: %.0f ms cold (every unit's model built), %.1f ms warm" % (first_refs, warm_refs))
+        combat_text = client.texts[combat_uri]
+        t0 = time.perf_counter()
+        client.request("textDocument/hover", {"textDocument": {"uri": combat_uri}, "position": position_of(combat_text, "mob_live(", 1, 0)})
+        print("  hover: %.1f ms" % ((time.perf_counter() - t0) * 1000))
+        pos = {"line": line, "character": 1}
+        version = client.change(combat_uri, pos, pos, "CHARS[0].\n\t")
+        t0 = time.perf_counter()
+        items = client.request("textDocument/completion", {"textDocument": {"uri": combat_uri}, "position": {"line": line, "character": 10}})
+        print("  completion after CHARS[0].: %.1f ms (%d items)" % ((time.perf_counter() - t0) * 1000, len(items["items"])))
+        client.change(combat_uri, pos, {"line": line + 1, "character": 1}, "")
         t0 = time.perf_counter()
         pos = {"line": line, "character": 1}
         version = client.change(combat_uri, pos, pos, "int typo_probe = \"text\";\n\t")

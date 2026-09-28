@@ -85,6 +85,8 @@ EMBEDDING = [
      "Breakpoints, stepping, and live variable reads and writes on both backends, plus a VS Code attach that costs nothing until it is used."),
     ("13-script-extensible.html", "Script-Extensible Objects: extend",
      "A script class can derive a bound C++ class, and the script decides which object becomes which class."),
+    ("14-language-server.html", "Editor Support: the Language Server",
+     "jaiscript_lsp answers the editor from the engine's own parser and strict checker: diagnostics as you type across a whole program, definitions, references, hover, completion, rename."),
 ]
 
 SECTION_INDEX_DESC = {
@@ -93,7 +95,7 @@ SECTION_INDEX_DESC = {
     "guide/index.html":
         "Thirteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
     "embedding/index.html":
-        "Thirteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, and shipping.",
+        "Fourteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, and editor support.",
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel - and what each one proves.",
     "reference/index.html":
@@ -321,7 +323,7 @@ def main():
     if args.check:
         print("\n".join(drifted) if drifted else "chrome up to date")
         return 1 if drifted else 0
-    print("chrome applied: %d of 31 pages rewritten" % len(drifted))
+    print("chrome applied: %d of 32 pages rewritten" % len(drifted))
     return 0
 
 

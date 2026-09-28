@@ -23,7 +23,8 @@ and no test pins a reading of it.
   containers, increments, parallel locals, grammar and operators, chars, scopes and units,
   references, exceptions, closures, diagnostic texts, script the runtime calls, user `operator=`,
   error texts, checker verdicts, instance-variable overlays, file locations, privilege order,
-  guide examples, parallel contracts, native exceptions, access control).
+  guide examples, parallel contracts, native exceptions, access control, and the rulings on
+  lambda captures of globals, the order of a compound or subscript store, and `auto`'s static type).
 - `source/tests/vm/spec_attack_tests.cpp`, suite "Spec Attacks": the VM's fast paths under
   pressure (raises inside cell blocks and grafts, coroutines over fast paths, host callbacks
   re-entering mid-loop, redefinition and hot reload mid-loop and mid-recursion, callees that
@@ -57,12 +58,13 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 |---|---|---|---|---|---|---|---|---|---|
 | 1. CLAUDE.md language rules, integer_semantics.md, char_semantics.md (C-) | 362 | 321 | 24 | 16 | 1 | 345 | 13 | 2 | 2 |
 | 2. diagnostics.md, static_checking.md, type_proofs_design.md (D-, S-, P-) | 530 | 375 | 49 | 101 | 5 | 423 | 38 | 64 | 5 |
-| 3. reference_model, namespaces, global_shadowing, EXCEPTION_DESIGN, closures, LOCAL_VARIABLES, script_extensible (R, N, G, E, L, V, X) | 315 | 246 | 20 | 47 | 2 | 288 | 10 | 15 | 2 |
+| 3. reference_model, namespaces, global_shadowing, EXCEPTION_DESIGN, closures, LOCAL_VARIABLES, script_extensible (R, N, G, E, L, V, X) | 315 | 246 | 20 | 47 | 2 | 289 | 10 | 15 | 1 |
 | 4. parallel_design, parallel_prove_or_serial, invariants, typed_regions_design, typed_array_design (PD-, PS-, I-, TR-, TA-) | 177 | 134 | 28 | 10 | 5 | 139 | 23 | 10 | 5 |
 | 5. User guide chapters 1-13, reference page, grammar.md (Gnn-, RF-, GR-) | 1114 | 871 | 153 | 74 | 16 | 911 | 134 | 53 | 16 |
 | 6. Script the runtime calls, user operator=, error texts, throw expressions, sort, range-for (CB-) | 38 | 2 | 6 | 30 | 0 | 32 | 5 | 1 | 0 |
 | 7. Access control (AC-) | 14 | 3 | 2 | 7 | 2 | 13 | 1 | 0 | 0 |
-| **Total** | **2550** | **1952** | **282** | **285** | **31** | **2151** | **224** | **145** | **30** |
+| 8. Captures of globals, assignment order, `auto`'s static type (RL-) | 16 | 3 | 1 | 9 | 3 | 16 | 0 | 0 | 0 |
+| **Total** | **2566** | **1955** | **283** | **294** | **34** | **2168** | **224** | **145** | **29** |
 
 ## Script the runtime calls
 
@@ -289,8 +291,31 @@ function set(int& a) { a = 3.7; } float u = 1.5; set(u); u;
 ```
 Today: 3.7 (reference parameters take any lvalue and store without the declared element type).
 
+**Q19. An `auto` field.** The static-type rule for `auto` names declarations; a class field spelled `auto` is not
+typed by the checker.
+```
+var src = [1];
+class A { auto f = src[0]; }
+A a = A(); a.f = "s";
+```
+Today: raises `Cannot assign string to field 'f' of A (declared int)` (the field locks to the value's kind), where a
+local `auto f = src[0]` is a `var`.
+
+**Q20. An `auto` from a mixed int/float ternary.** C++ gives `c ? 1 : 2.5` the type `double`; the checker gives it
+no single static type.
+```
+bool c = true; auto m = c ? 1 : 2.5; m = "s";
+```
+Today: accepted (`m` is a `var`, with a warning that says so).
+
+**Q21. A range-for `auto` over a `var` container.** The rule names `auto x = e`; a loop variable takes each element.
+```
+var a = [1, 2]; for (auto x : a) { x = "s"; }
+```
+Today: each `x` locks to the element's kind (`Cannot assign string to 'x' (declared int)`).
+
 **Rows marked contradicted in the ledger.** Registered tests pin the other reading of these claims; each row
-names the tests: C-044, C-326, D-164, D-221, S-207, S-218, S-283, R33, L16, PD-2, PD-26, PD-40, PD-49, PD-50,
+names the tests: C-044, C-326, D-164, D-221, S-207, S-218, S-283, R33, PD-2, PD-26, PD-40, PD-49, PD-50,
 G02-035, G02-038, G03-013b, G03-024a, G03-028, G06-024, G09-178, G09-189, G10-063, G12-002, G13-111, RF-022,
 RF-043, GR-087, GR-089, GR-090.
 
@@ -1442,7 +1467,7 @@ The ID prefix names the document; the Source column names its section. R = `docs
 | L13 | By-value capture deep-copies arrays and script objects | clone_for_capture | semantics/spec_conformance_tests.cpp:value_captures_copy_objects_and_share_handles_and_loop_variables_snapshot (script-object form only; arrays unpinned) | no | thin |
 | L14 | By-value capture shares `shared_ptr` values and C++-bound objects | clone_for_capture | semantics/spec_conformance_tests.cpp:value_captures_copy_objects_and_share_handles_and_loop_variables_snapshot; serialization/polymorphic_serialization_tests.cpp:hybrid_copy_semantics_follow_the_cpp_base; integration/reentrant_callback_tests.cpp:captured_cpp_bound_object_survives_into_converted_callback | no | pinned |
 | L15 | A global read by a bare `[]` closure is live at call time | Tier 2 | language/test_lambda_captures.cpp:global_still_reached_when_nothing_shadows; properties/container_property_tests.cpp:global_reference_resolves_at_call_time | yes | pinned |
-| L16 | Globals are never captured, so `[=]` also reads a global live | Tier 2 | language/test_lambda_captures.cpp:global_still_reached_when_nothing_shadows; language/test_lambda_captures.cpp:capture_all_by_value; language/review_regression_tests.cpp:closure_capture_local_snapshot (all pin a `[=]` snapshot of the global) | partial | contradicted |
+| L16 | Globals are never captured, so `[=]` also reads a global live | Tier 2 | semantics/spec_conformance_tests.cpp:a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it; semantics/spec_conformance_tests.cpp:a_top_level_lambda_reads_a_global_when_it_runs; language/test_lambda_captures.cpp:global_still_reached_when_nothing_shadows; language/review_regression_tests.cpp:closure_capture_local_snapshot | partial | pinned |
 | L17 | `add_global` rebinding is visible to earlier closures | Tier 2 | properties/container_property_tests.cpp:global_reference_resolves_at_call_time | no | pinned |
 | L18 | A module-scope `var` is a global that persists across executes | Tier 2 | properties/container_property_tests.cpp:module_scope_var_is_shared_across_executes_of_the_same_unit; semantics/test_global_persistence.cpp:top_level_variable_persistence | yes | pinned |
 | L19 | The same file or literal redeclaring updates in place; closures see it | Tier 2 | properties/container_property_tests.cpp:module_scope_var_is_shared_across_executes_of_the_same_unit | no | pinned |
@@ -2082,7 +2107,7 @@ IDs Gnn- belong to guide chapter nn (the Source column gives the chapter number 
 | G06-054 | Bare [] over a function local snapshots: `g() = 5` | 06 "Lambdas and captures" | language/test_lambda_captures.cpp:bare_capture_local_over_same_named_global; language/review_regression_tests.cpp:closure_capture_local_auto_no_capture; language/function_tests.cpp:anonymous_function_capture_matches_empty_lambda | partial | pinned |
 | G06-055 | [&]/[&name] share storage, writes both ways | 06 "Lambdas and captures" | language/review_regression_tests.cpp:default_by_ref_capture_writes_through; language/review_regression_tests.cpp:ref_capture_reads_live_value; language/review_regression_tests.cpp:two_closures_share_one_ref_capture | yes | pinned |
 | G06-056 | [&] storage outlives the frame | 06 "Lambdas and captures" | language/review_regression_tests.cpp:escaping_ref_capture_outlives_frame | partial | pinned |
-| G06-057 | A global is never captured; [n] snapshots a global | 06 "Lambdas and captures" | language/test_lambda_captures.cpp:global_still_reached_when_nothing_shadows (also pins a `[=]` snapshot of a global) | partial | pinned |
+| G06-057 | A global is never captured; [n] snapshots a global | 06 "Lambdas and captures" | semantics/spec_conformance_tests.cpp:a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it; language/test_lambda_captures.cpp:global_still_reached_when_nothing_shadows | partial | pinned |
 | G06-058 | Bare [] implicitly capturing a local warns; explicit lists silent | 06 "Lambdas and captures" | semantics/static_check_tests.cpp:warn_implicit_capture_in_bare_lambda | no | pinned |
 | G06-059 | Full warning text `bare [] implicitly captured local 'm' by value — be explicit with [=] (snapshot) or [&] (share updates)` | 06 "Lambdas and captures" | semantics/static_check_tests.cpp:warn_implicit_capture_in_bare_lambda (prefix only) | no | thin |
 | G06-060 | Nested lambdas: `plus() = 15` | 06 "Lambdas and captures" | language/test_lambda_captures.cpp:default_capture_chains_through_two_lambda_levels; language/release_review_regression_tests.cpp:lambda_captures_colliding_outer_param_escaping | no | pinned |
@@ -2944,3 +2969,31 @@ control", gr = `docs/grammar.md` note 12, sc = `docs/static_checking.md` "Access
 | AC-12 | A `var` receiver is checked when the access runs | 07; sc Access | spec:outside_the_family_every_spelling_raises_the_one_private_text | no | pinned |
 | AC-13 | Constructors are exempt from the labels; the host C++ API (`get_field`/`set_field`, serialization, reflection reads) is unrestricted | gr | stdlib/reflection_tests.cpp:get_set_invoke_read_write_like_direct_syntax (reads; constructor exemption not asserted) | no | thin |
 | AC-14 | A lambda defined inside a method has its class's access | gr | language/script_class_tests.cpp:member_access_enforcement_matrix | no | pinned |
+
+## 8. Captures of globals, assignment order, `auto`'s static type
+
+Source codes: ruling = Dev's rulings 2026-09-27, cc = `docs/closures_and_captures.md`, gr = `docs/grammar.md`,
+diag = `docs/diagnostics.md` "Order of errors in an assignment", inv = `docs/invariants.md` (sections 10, 12, 14),
+sc = `docs/static_checking.md` (rule table), 02/04/06 = guide chapters. Pins are relative to
+`Source/JaiScript/source/tests`; `spec:` is `semantics/spec_conformance_tests.cpp`. BEFORE is the verdict the
+ledger gave the claim's old reading: the three contradicted rows had registered tests pinning the opposite, which
+now pin the ruling.
+
+| ID | Claim | Source | Pinned by | Fuzzer | Verdict |
+|---|---|---|---|---|---|
+| RL-01 | `[=]` and bare `[]` never capture a global: the call reads it live, and a write goes to the global | ruling; cc; inv 10 | spec:a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it; spec:a_top_level_lambda_reads_a_global_when_it_runs; language/test_lambda_captures.cpp:global_still_reached_when_nothing_shadows | partial | pinned |
+| RL-02 | An explicit `[g]` copies the global at creation | ruling; cc | spec:a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it; spec:a_top_level_lambda_reads_a_global_when_it_runs; language/test_lambda_captures.cpp:explicit_captures | no | pinned |
+| RL-03 | `[&g]` on a global is the same as leaving it unlisted | ruling; cc | spec:a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it; language/test_lambda_captures.cpp:global_still_reached_when_nothing_shadows (`[&]` on a global) | no | pinned |
+| RL-04 | An init-capture `[x = e]` evaluates `e` at creation and copies it into a lambda-local `x` (beside `[=, w = 5]` and `[z = e, &y]`; a container copies) | ruling; cc; gr; 06 | spec:an_init_capture_copies_its_expression_at_creation; spec:a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it | no | pinned |
+| RL-05 | A reference capture takes no initializer: `[&r = x]` is a parse error `A reference capture takes no initializer` | ruling; gr | spec:a_reference_capture_takes_no_initializer | no | pinned |
+| RL-06 | Locals and parameters keep their contract: `[=]` copies at creation, `[&]` shares | ruling; cc | spec:a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it; language/test_lambda_captures.cpp:capture_all_by_value | yes | pinned |
+| RL-07 | `obj.f op= e` evaluates `e`, then the receiver, the read (a user getter included), the arithmetic and the store | ruling; diag; inv 12; 04 | spec:a_member_compound_evaluates_its_right_side_before_the_target; language/review_regression_tests.cpp:member_compound_order_pinned; language/coroutine_tests.cpp:yield_in_store_targets_runs_once | partial | pinned |
+| RL-08 | `this.f op= e`, `C::s op= e` and `ns::x op= e` evaluate `e` first; a right side that writes the target's field is overwritten by the store | ruling; diag; inv 12 | spec:a_member_compound_evaluates_its_right_side_before_the_target | no | pinned |
+| RL-09 | An error in the right side comes before the target's errors (a null receiver, a missing namespace member) | ruling; diag | spec:a_right_side_error_comes_before_the_targets; language/review_regression_tests.cpp:member_compound_order_pinned | no | pinned |
+| RL-10 | `a[j] op= e` and `a[j] = e` evaluate `e` before `a` and `j` (arrays and maps; a right side that writes the element or the index variable) | ruling; diag; inv 12 | spec:a_subscript_compound_evaluates_its_right_side_before_the_container_and_index | partial | pinned |
+| RL-11 | An error in the right side comes before the subscript's errors (a null container, an index out of bounds) | ruling; diag | spec:a_right_side_error_comes_before_the_subscripts | no | pinned |
+| RL-12 | `auto x = e` whose static type is `var` or unknown makes `x` a `var`: an `array<var>` element, a `var` local, a `var`-returning call, a mixed-branch ternary, in every check mode | ruling; sc; inv 14; 02 | spec:an_auto_from_a_var_or_unknown_static_type_is_a_var | no | pinned |
+| RL-13 | `auto x = e` whose static type is known locks to it (`auto n = 5; n = 1.5` is 1; a typed element; a class) | ruling; sc; 02 | spec:an_auto_from_a_known_static_type_keeps_that_type; semantics/strong_types_tests.cpp:auto_int_truncates_float | no | pinned |
+| RL-14 | The same holds inside counted loops on every lane (a typed element keeps the lock, a `var` element does not) | ruling; inv 14 | spec:an_auto_in_a_counted_loop_follows_the_static_type_on_every_lane | no | pinned |
+| RL-15 | A `.jaibite` keeps the `auto` spelling and the loaded unit decides again, with the same result | inv 14 | spec:a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load | no | pinned |
+| RL-16 | An `auto` from a mixed-branch ternary warns that it is a `var`, naming both branch types | sc Precision | semantics/static_check_tests.cpp:warn_auto_from_mixed_branch_ternary | no | pinned |

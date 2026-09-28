@@ -341,18 +341,9 @@ namespace jai::fuzz::order {
 				out += tabs(depth) + t + " = " + v + ";\n";
 				return;
 			}
-			case sk::compound: {
-				if (h && s->target.kind == pk::field) {
-					const std::string current = temp();
-					out += tabs(depth) + "auto " + current + " = " + place_text(s->target) + ";\n";
-					const std::string v = value(s->e);
-					out += tabs(depth) + place_text(s->target) + " = (" + current + " " + s->op + " " + v + ");\n";
-					return;
-				}
-				std::string t;
-				if (h && s->target.kind == pk::elem) { t = target_text(s->target, depth, out); }
+			case sk::compound: {   // the right side first, then every part of the target (docs/invariants.md 12)
 				const std::string v = value(s->e);
-				if (t.empty()) { t = place_text(s->target); }
+				const std::string t = h ? target_text(s->target, depth, out) : place_text(s->target);
 				out += tabs(depth) + t + " " + s->op + "= " + v + ";\n";
 				return;
 			}
@@ -721,25 +712,10 @@ namespace jai::fuzz::order {
 				store(sl, v, s->target.kind == pk::elem || s->target.kind == pk::map);
 				return;
 			}
-			case sk::compound: {
-				// the right side first, then the target's read (docs/invariants.md 12); as both backends implement it, an element's index is
-				// evaluated ahead of the right side and a member's value is read ahead of it (open questions in the band's report)
-				if (s->target.kind == pk::field) {
-					const slot sl = resolve(s->target, f);
-					const mval current = *sl.v;
-					const mval v = eval(s->e, f);
-					store(sl, arith(s->op, current, v), false);
-					return;
-				}
-				if (s->target.kind == pk::elem) {
-					const slot sl = resolve(s->target, f);
-					const mval v = eval(s->e, f);
-					store(sl, arith(s->op, *sl.v, v), true);
-					return;
-				}
+			case sk::compound: {   // the right side first, then every part of the target and its read (docs/invariants.md 12)
 				const mval v = eval(s->e, f);
 				const slot sl = resolve(s->target, f);
-				store(sl, arith(s->op, *sl.v, v), s->target.kind == pk::map);
+				store(sl, arith(s->op, *sl.v, v), s->target.kind == pk::elem || s->target.kind == pk::map);
 				return;
 			}
 			case sk::eval: (void)eval(s->e, f); return;

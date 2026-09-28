@@ -612,20 +612,6 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	std::vector<const expression*> callee_names;   // an outer call's callee name resolves where it stands
 	std::vector<const expression*> copied_args;    // an outer call's argument its parameter does not take as a proven scalar
 	bool free_identifier = false, in_place = false, free_global = false;
-	// a compound store evaluates its target's location ahead of its value (an element's container and index; a member's receiver and
-	// its value, as a static's and a namespace variable's): only a name, read after the value, or an element over parts no call can
-	// change keeps the order when the value's call runs first
-	auto quiet_compound_target = [&](const expression* t) {
-		if (t->get_type() == node_type::identifier_expr) return true;
-		if (t->get_type() != node_type::binary_expr || static_cast<const binary_expr*>(t)->op.type != token_type::left_bracket) return false;
-		auto* b = static_cast<const binary_expr*>(t);
-		for (const expression* part : { b->left.get(), b->right.get() }) {
-			if (part->get_type() == node_type::literal_expr) continue;
-			if (!private_local(part)) return false;
-			in_place = true;
-		}
-		return true;
-	};
 	for (size_t k = 0; k + 1 < path.size(); ++k) {
 		const expression_ptr& a = path[k]; const expression* x = path[k + 1].get();
 		switch (a->get_type()) {
@@ -638,8 +624,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		case node_type::assignment_expr: {
 			auto* s = static_cast<const assignment_expr*>(a.get());
 			if (x != s->value.get()) { out.why = "a call in a store's target"; return false; }
-			if (s->op.type != token_type::equal && !quiet_compound_target(s->target.get())) { out.why = "a compound store whose target is evaluated ahead of its value"; return false; }
-			break;
+			break;   // a store runs its value ahead of every part of its target, compound or plain (docs/invariants.md 12)
 		}
 		case node_type::call_expr: {
 			auto* ce = static_cast<const call_expr*>(a.get());

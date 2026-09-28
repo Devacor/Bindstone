@@ -56,6 +56,24 @@ include runs EVERY time: load_count = 3</code></pre></div>
 <p><strong>An error in an included or imported file is an error at the line that reached it.</strong> A <code>throw</code> arrives with its value and type, a run-time error with its own text, and a file that does not parse or check raises its listing, named by the file&#x27;s path. A <code>try</code> around an <code>include</code> catches every one of them, and the program goes on. Uncaught, the stack trace lists the file&#x27;s own frames first, then the frame of each <code>include</code> or <code>import</code> that reached it.</p>
 <h2 id="dynamic-paths">Dynamic paths<a class="hlink" href="#dynamic-paths" aria-label="link">&#8203;</a></h2>
 <p>Both may appear wherever a statement may: in a function or lambda body, a block, a loop, a conditional, a coroutine. An <code>include</code> runs where it is written (its declarations are that scope&#x27;s). An <code>import</code> takes no scope: wherever it stands, the module&#x27;s declarations are program-scope declarations. Directly in a class or a namespace body an import is a parse error, since there it would read as scoped.</p>
+<p>The two differ in where the declarations land. An include is text pasted where it stands, so it runs in the current scope under the current file: inside a function its names are that function&#x27;s and end with it. An import is a file of its own, one unit however many places import it, so its names are the program&#x27;s wherever the statement stands:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void load_rules() {
+    include &quot;tuning.jai&quot;;     // textual: SPEED is a local of load_rules
+    print(&quot;inside load_rules: SPEED = {}&quot;, SPEED);
+}
+load_rules();
+
+void load_physics() {
+    import &quot;physics.jai&quot;;     // its own unit: gravity() is declared at program scope
+}
+load_physics();
+print(&quot;after load_physics: gravity() = {}&quot;, gravity());</code></pre></div>
+<p>with <code>tuning.jai</code>:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int SPEED = 3;</code></pre></div>
+<p>and <code>physics.jai</code>:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float gravity() { return 9.81; }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">inside load_rules: SPEED = 3
+after load_physics: gravity() = 9.81</code></pre></div>
 <p>The call form takes any string expression, both for include and import:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto libname = &quot;mod_&quot; + &quot;math&quot; + &quot;.jai&quot;;
 include(libname);

@@ -456,8 +456,30 @@ public:
         test("split_into_chars", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"abc\"; var arr = s.split(); arr.length();");
+            auto result = engine->execute("var s = \"abc\"; var arr = s.split(\"\"); arr.length();");
             check_eq(result.as<script_int>(), 3);
+        });
+
+        test("split_without_a_separator_splits_on_whitespace_and_skips_empties", [this]() {
+            // Python/Ruby/Go/JS/Java's no-separator split: runs of the string library's whitespace separate pieces, no piece is
+            // empty; string::whitespace spells the same; an exact separator keeps empties; "" splits into characters; explode is
+            // every form's synonym; a utf8_string keeps its kind and "" splits it into characters
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto js = [&](const std::string& expr) { return engine->execute("to_json(" + expr + ");").as<std::string>(); };
+            check_eq(std::string("[\"stats\",\"35\",\"25\",\"25\"]"), js("\"  stats 35\\t25\\n\\r25  \".split()"));
+            check_eq(std::string("[]"), js("\" \\t\\n \".split()"));
+            check_eq(std::string("[]"), js("\"\".split()"));
+            check_eq(std::string("[\"a\",\"b\",\"c\"]"), js("\"a\\x0Bb\\x0Cc\".split(string::whitespace)"));
+            check_eq(std::string("[\"a\",\"b  c \"]"), js("\"  a b  c \".split(string::whitespace, 1)"));
+            check_eq(std::string("[\"a\",\"\",\"b\",\"\"]"), js("\"a,,b,\".split(\",\")"));
+            check_eq(std::string("[\"a\",\" \",\"b\"]"), js("\"a b\".split(\"\")"));
+            check_eq(std::string("[\"x\",\"y\"]"), js("\" x  y \".explode()"));
+            check_eq(std::string("[\"a\",\"b\"]"), js("\"a|b\".explode(\"|\")"));
+            check_eq(std::string("[\"a\",\"b\"]"), js("\"ab\".explode(\"\")"));
+            check_eq(std::string(" \t\n\v\f\r"), engine->execute("string::whitespace;").as<std::string>());
+            check_eq(std::string("utf8_string|2|\xC3\xA9t\xC3\xA9"), engine->execute("var p = utf8_string(\"  \xC3\xA9t\xC3\xA9 \\n l\xC3\xA0 \").split(); type_of(p[0]) + \"|\" + to_string(p.size()) + \"|\" + p[0];").as<std::string>());
+            check_eq(std::string("3|\xC3\xA9"), engine->execute("var c = utf8_string(\"\xC3\xA9t\xC3\xA9\").explode(\"\"); to_string(c.size()) + \"|\" + c[0];").as<std::string>());
         });
 
         test("split_first_element", [this]() {

@@ -228,7 +228,7 @@ namespace jai::detail {
         const builtin_method string_chars = get("utf8_chars");
         m[sym->intern("split")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             const std::string* sep = args.empty() ? nullptr : args[0].text_bytes();
-            if (args.empty() || (args.size() == 1 && sep && sep->empty())) {   // no separator: the characters
+            if (args.size() == 1 && sep && sep->empty()) {   // the empty separator: the characters
                 R r = string_chars(ctx, self, std::vector<script_value>{});
                 if (!r) return r;
                 return utf8_result(ctx, std::move(r.value()));
@@ -237,6 +237,7 @@ namespace jai::detail {
             if (!r) return r;
             return utf8_result(ctx, std::move(r.value()));
         };
+        m[sym->intern("explode")] = m[sym->intern("split")];
         return m;
     }
 

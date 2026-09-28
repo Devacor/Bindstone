@@ -574,6 +574,12 @@ engine stays usable", not by `check_throws`.
   vm's `class_definition::native_method` lanes (declining shapes fall to the bound method); the strict checker knows the
   types, signatures (`dynamic_binder::strict_signatures`), pairings and statically visible `read(Class, layout)` matches.
   `binary::Name` class types parse as qualified type names (`binary::writer w;`, `-> binary::reader`).
+- **`split`** (Dev ruling 2026-09-27, guide ch. 9): `s.split()` splits on whitespace (the string library's class: space, tab,
+  newline, CR, vertical tab, form feed - `detail::is_string_whitespace`) and skips empty pieces, as Python/Ruby/Go/JS/Java do;
+  `s.split(string::whitespace)` is the same spelled out (the constant's exact text is read as the mode,
+  `detail::k_whitespace_text`); `s.split(sep)` cuts at the exact separator and keeps empties; `s.split("")` splits into
+  characters (bytes for string, characters for utf8_string); an optional max-splits argument leaves the rest in the last
+  piece; `explode` is a synonym for every form.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

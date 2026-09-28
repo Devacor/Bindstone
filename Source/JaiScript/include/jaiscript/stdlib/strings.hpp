@@ -6,6 +6,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/utf8.hpp>
+#include <jaiscript/detail/builtin_methods.hpp>
 
 #include <cctype>
 #include <string>
@@ -26,6 +27,7 @@ namespace stdlib {
         constexpr auto integer = script_value_type::jai_int_type;
         constexpr auto any = script_value_type::jai_null_type;
         auto sign = [&](const char* name, host_entry_signature sig) { ns->signatures[eng_ref.symbolize(name)] = std::move(sig); };
+        ns->variables[eng_ref.symbolize("whitespace")] = script_value(std::string(k_whitespace_text), eng);
         sign("to_lower", {1, 1, {text}, any, true});
         sign("to_upper", {1, 1, {text}, any, true});
         sign("from_code", {1, 1, {integer}, text, false});

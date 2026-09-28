@@ -276,6 +276,8 @@ def run_fixtures(exe, update, checks):
         ask("rename.field", "textDocument/rename", main_uri, main_text, "h.hp", 1, 2, {"newName": "health"})
         ask("rename.method_hierarchy", "textDocument/rename", lib_uri, lib_text, "void heal", 1, 5, {"newName": "mend"})
         ask("rename.refuse_host", "textDocument/rename", main_uri, main_text, "print", 1, 0, {"newName": "say"})
+        ask("rename.refuse_dynamic_receiver", "textDocument/rename", lib_uri, lib_text, "int level", 1, 4, {"newName": "rank"})
+        ask("rename.refuse_bad_name", "textDocument/rename", main_uri, main_text, "sum = 0", 1, 0, {"newName": "while"})
         ask("rename.refuse_collision", "textDocument/rename", main_uri, main_text, "total(", 1, 0, {"newName": "run"})
         results["symbols.document.lib"] = client.request("textDocument/documentSymbol", {"textDocument": {"uri": lib_uri}})
         results["symbols.workspace.her"] = sorted(
@@ -388,6 +390,17 @@ def run_gatorquest(exe, checks):
         client.change(root_uri, pos, {"line": pos["line"] + 1, "character": 1}, "")
         labels = {item["label"] for item in result["items"]}
         checks.check({"pack", "gold", "skill", "name", "fame"} <= labels, "completion c. lists Character fields", str(sorted(labels))[:300])
+
+        # mid-edit: an unclosed call and a half-typed name, the way the text looks while typing
+        version = client.change(root_uri, pos, pos, "mob_live(\n\t")
+        sig = client.request("textDocument/signatureHelp", {"textDocument": {"uri": root_uri}, "position": {"line": pos["line"], "character": pos["character"] + 9}})
+        checks.check(sig and sig["signatures"] and sig["signatures"][0]["label"] == "bool mob_live(int m)", "signature help inside an unclosed call", str(sig)[:300])
+        client.change(root_uri, pos, {"line": pos["line"] + 1, "character": 1}, "")
+        version = client.change(root_uri, pos, pos, "mob_al\n\t")
+        result = client.request("textDocument/completion", {"textDocument": {"uri": root_uri}, "position": {"line": pos["line"], "character": pos["character"] + 6}})
+        client.change(root_uri, pos, {"line": pos["line"] + 1, "character": 1}, "")
+        labels = {item["label"] for item in result["items"]}
+        checks.check("mob_alive" in labels and "mob_live" not in labels, "completion of a half-typed name offers the program's functions", str(sorted(labels))[:300])
 
         combat = GATORQUEST / "gq_combat.jai"
         combat_uri = client.open(combat)

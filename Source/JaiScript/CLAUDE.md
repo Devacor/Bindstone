@@ -474,7 +474,10 @@ engine stays usable", not by `check_throws`.
   one stat, the import cache's). `parent_dir`
   weakly canonicalizes its result (not purely lexical); `file_name` is lexical. Core source loading,
   location queries and disk caches do touch the filesystem. General `read_file`/`write_file`/`list_dir`/
-  `writable_dir`/`move_file` are host functions (the runner has them). `.jaibite` siblings mark their own file (v14)
+  `writable_dir`/`move_file` are host functions (the runner has them; its `read_file` returns the bytes exactly, `""` for an
+  empty file, and raises the catchable `Cannot read file '<path>': not found` / `not a file` / `permission denied` for one
+  it cannot hand back, so absence is asked with `file_data(path) != null` or `file_exists` first). `.jaibite` siblings mark
+  their own file (v14)
   so a moved folder keeps its names.
 - **Filesystem privilege**: enabled by default. C++ `eng->disable(jai::filesystem)`, `enable(...)`,
   `is_enabled(...)`; `jai::filesystem` aliases scoped `jai::privilege::filesystem`, the only built-in
@@ -528,6 +531,19 @@ engine stays usable", not by `check_throws`.
   monotonic clock only at a host entry, and only after a loaded program names `time::execute_elapsed` (the parse-tail
   marking pass flags it). time:: calls are a parallel-body wall (all modes); the checker types them through
   `script_namespace_data::signatures`.
+- **Binary data** (Dev rulings 2026-09-27, guide ch. 9 "Binary data", `detail/binary_data.hpp`): `string` is binary-safe
+  bytes, `utf8_string` is text. `s.to_bytes([offset], [count])` -> `array<int>` (range-checked, one native copy),
+  `string::from_bytes(array<int> | array<char>)` (0..255 or a catchable error naming element and value). The engine-core
+  `binary::` library: `s.reader()` / `binary::reader(s)` (cursor over a copy-on-write snapshot, little-endian until
+  `big_endian()`; `int8..int64`, `uint8..uint32` (no uint64: ints are int64), `float32` widens, `float64`, `text(n)`,
+  `text_z(n)` (C `char[n]`: bytes before the first NUL), `bytes(n)`, `seek/skip/pos/size/remaining/at_end`),
+  `binary::writer w;` (the mirror writers, `text(s, n)` NUL-pads/truncates, `bytes`, `seek` to patch, `to_string()`); width
+  tokens `binary::int8 ... binary::float64`, `binary::text(n)`; `binary::layout(name, width, ...)`, `r.unpack(layout | pairs)`
+  -> `map<string, var>`, `w.pack(layout, map)`, `r.read(Class, layout)` (fields in declaration order, bases first). A read
+  past the end / a value that does not fit / a bad layout is catchable and moves nothing. Hot reader/writer members take the
+  vm's `class_definition::native_method` lanes (declining shapes fall to the bound method); the strict checker knows the
+  types, signatures (`dynamic_binder::strict_signatures`), pairings and statically visible `read(Class, layout)` matches.
+  `binary::Name` class types parse as qualified type names (`binary::writer w;`, `-> binary::reader`).
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

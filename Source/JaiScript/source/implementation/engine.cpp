@@ -12,6 +12,7 @@
 #include <jaiscript/detail/ast_serializer.hpp>   // jaibite save/load
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/format_spec.hpp>       // format_value builtin (template-string specs)
+#include <jaiscript/detail/binary_data.hpp>
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <charconv>
@@ -1877,6 +1878,10 @@ void engine::initialize_engine_reference() {
     add_variadic_function("parallel_transform", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
         return detail::run_parallel_transform(*this, args);
     });
+
+    // binary::reader / writer / layout and the width tokens (detail/binary_data.hpp): string's reader() builtin
+    // returns a binary::reader, so the library exists on every engine
+    binary::register_library(*this);
 
     // Note: weak_ptr and shared_ptr are now handled as type constructors in the interpreter
     // They are keywords and follow C++ semantics:

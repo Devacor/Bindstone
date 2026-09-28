@@ -203,7 +203,7 @@ padded: 007
 <p><strong>The non-mutating twins live in <code>string::</code>.</strong> <code>string::trim(s)</code>, <code>string::replace_all(s, from, to)</code>, <code>string::repeat(s, n)</code>, <code>string::pad_left(s, n, [fill])</code>, <code>string::pad_right(s, n, [fill])</code>, <code>string::to_lower(s)</code> and <code>string::to_upper(s)</code> return a new string and leave the argument alone, the spelling for expressions: <code>print(string::trim(line))</code>. <code>string::join(parts, [sep])</code> joins an array of strings. The namespace is yours to extend: <code>namespace string { function shout(string s) -&gt; string { return string::to_upper(s) + "!"; } }</code> adds <code>string::shout</code> beside the built-in entries.</p>
 <p>The everyday helpers: <code>s.split(sep, max)</code> stops after <code>max</code> splits (the last element keeps the rest); <code>s.lines()</code> splits on <code>\n</code> and <code>\r\n</code> with no empty last element; <code>s.partition(sep)</code> is <code>[head, sep, tail]</code> (<code>[s, "", ""]</code> when <code>sep</code> is absent); <code>a.compare(b)</code> is <code>-1</code>, <code>0</code> or <code>1</code>; <code>is_digit</code>, <code>is_alpha</code>, <code>is_alnum</code>, <code>is_space</code>, <code>is_upper</code> and <code>is_lower</code> are true when the string is non-empty and every byte is in the ASCII class.</p>
 <h2 id="bytes-and-chars">Bytes and chars: <code>s[i]</code>, <code>\xNN</code>, <code>cast&lt;char&gt;</code><a class="hlink" href="#bytes-and-chars" aria-label="link">&#8203;</a></h2>
-<p><code>s[i]</code> reads a <code>char</code>, and chars promote to integers (<strong>0–255, always unsigned</strong>) in arithmetic, bitwise, and comparison contexts, so parsing a binary format is plain arithmetic, no decoder API required. <code>s.at(i)</code> is the alternative when you want a one-character <em>string</em> instead of a char. Range-<code>for</code> walks a string the same way: <code>for (auto c : s)</code> binds each char by value, in order (<code>auto&amp;</code> raises, since a char is a read, not a cell). Going the other way: <code>\xNN</code> escapes (exactly two hex digits) put literal bytes in source, and <code>cast&lt;char&gt;(n)</code> mints a char from an int, range-checked to 0–255:</p>
+<p><code>s[i]</code> reads a <code>char</code>, and chars promote to integers (<strong>0–255, always unsigned</strong>) in arithmetic, bitwise, and comparison contexts, so a single byte is plain arithmetic (whole records read through <a href="#binary-data">binary data</a>). <code>s.at(i)</code> is the alternative when you want a one-character <em>string</em> instead of a char. Range-<code>for</code> walks a string the same way: <code>for (auto c : s)</code> binds each char by value, in order (<code>auto&amp;</code> raises, since a char is a read, not a cell). Going the other way: <code>\xNN</code> escapes (exactly two hex digits) put literal bytes in source, and <code>cast&lt;char&gt;(n)</code> mints a char from an int, range-checked to 0–255:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var s = &quot;Jai\x21&quot;;                 // \xNN: exactly two hex digits
 print(&quot;s = {}&quot;, s);
 print(&quot;s[0] = {} ({})&quot;, s[0], type_of(s[0]));
@@ -230,9 +230,63 @@ le u16: 24906
 built: J!!
 caught: Cannot cast &#x27;int&#x27; to &#x27;char&#x27;
 caught: Strings are read-only through subscript: use substr()/+ to build a new string</code></pre></div>
-<p>Note the last line: subscript is <strong>read-only</strong>: strings mutate through their methods or get rebuilt with <code>+</code>/<code>+=</code>. And the promotion never crosses into the string domain: <code>&#x27;a&#x27; == &quot;a&quot;</code> is false, <code>char + string</code> concatenates, and <code>string += int</code> is an error (stringify explicitly if you mean it). High bytes stay unsigned: <code>&quot;\xC3&quot;[0] + 0</code> is <code>195</code>, never <code>-61</code>. This entire model is enough to read real binary file formats in pure script.</p>
+<p>Note the last line: subscript is <strong>read-only</strong>: strings mutate through their methods or get rebuilt with <code>+</code>/<code>+=</code>. And the promotion never crosses into the string domain: <code>&#x27;a&#x27; == &quot;a&quot;</code> is false, <code>char + string</code> concatenates, and <code>string += int</code> is an error (stringify explicitly if you mean it). High bytes stay unsigned: <code>&quot;\xC3&quot;[0] + 0</code> is <code>195</code>, never <code>-61</code>.</p>
 <p><strong>The char door is <code>cast&lt;T&gt;</code>, and only <code>cast&lt;T&gt;</code>.</strong> The assignment table has no char row: <code>char c = 65</code> and <code>int n = &#x27;A&#x27;</code> are both load errors under the default strict checking (see <a href="13-strict-checking.html">Types That Fail Early</a>). To cross deliberately, spell it: <code>cast&lt;int&gt;(c)</code> and <code>cast&lt;float&gt;(c)</code> give the code point, <code>cast&lt;string&gt;(c)</code> the one-character string, <code>cast&lt;char&gt;(n)</code> or <code>cast&lt;char&gt;(&quot;a&quot;)</code> mint one. Out of range raises the catchable <code>Cannot cast &#x27;int&#x27; to &#x27;char&#x27;</code> (a longer string, <code>Cannot cast &#x27;string&#x27; to &#x27;char&#x27;</code>). <code>to_char(n)</code> is the stdlib function form of the same range-checked rule. Chapter 4 covers <a href="04-operators.html">promotion</a> in full.</p>
-<p><strong>What this doesn&#x27;t do (and what to use instead):</strong> no unary <code>-c</code>/<code>~c</code> on chars (write <code>0 - c</code> / <code>c ^ 0xFF</code>), and no packed byte-buffer type. Big binary payloads live in ordinary strings or int arrays.</p>
+<p><strong>What this doesn&#x27;t do (and what to use instead):</strong> no unary <code>-c</code>/<code>~c</code> on chars (write <code>0 - c</code> / <code>c ^ 0xFF</code>). Binary payloads live in ordinary strings, read and built by the binary library below.</p>
+<h2 id="binary-data">Binary data<a class="hlink" href="#binary-data" aria-label="link">&#8203;</a></h2>
+<p>A <code>string</code> is binary-safe: it holds any byte 0–255, NULs included, and <code>read_file</code> / <code>write_file</code> move bytes unchanged, so a file's bytes are a string and a string's bytes are a file. <code>utf8_string</code> is for text. Whole-buffer conversions are one native call each:</p>
+<ul>
+<li><code>s.to_bytes()</code>, <code>s.to_bytes(offset)</code>, <code>s.to_bytes(offset, count)</code> → an <code>array&lt;int&gt;</code> of 0–255 values (a typed int buffer, the fast lane for hot loops). The range is checked: <code>to_bytes(1, 3) out of bounds for string of size 3</code>. On a <code>utf8_string</code> it gives the UTF-8 bytes.</li>
+<li><code>string::from_bytes(bytes)</code> builds a string from an <code>array&lt;int&gt;</code> (every value 0–255, else <code>string::from_bytes expects bytes (0 to 255): element 3 is 256</code>) or an <code>array&lt;char&gt;</code>.</li>
+</ul>
+<p><strong>Reading: <code>binary::reader</code>.</strong> <code>s.reader()</code> (or <code>binary::reader(s)</code>) walks the string with a cursor from 0, little-endian until <code>big_endian()</code>; <code>little_endian()</code> switches back, and both return the reader so <code>auto r = s.reader().big_endian();</code> reads naturally. Every read advances the cursor and names its width:</p>
+<ul>
+<li><code>int8()</code> <code>int16()</code> <code>int32()</code> <code>int64()</code> sign-extend; <code>uint8()</code> <code>uint16()</code> <code>uint32()</code> are 0 to 4294967295. There is no <code>uint64()</code>: a script int is an int64, so a value past 2<sup>63</sup> has no int to land in; <code>int64()</code> reads the same eight bytes as a signed value.</li>
+<li><code>float32()</code> widens to the script float, <code>float64()</code> keeps every bit (a NaN's payload, <code>-0.0</code>).</li>
+<li><code>text(n)</code> is <code>n</code> raw bytes as a string; <code>text_z(n)</code> reads an <code>n</code>-byte fixed-length field and keeps the bytes before the first NUL, the C <code>char[n]</code> convention (a lump name <code>"E1M1\0\0\0\0"</code> is <code>"E1M1"</code>; bytes after the terminator are not part of the name, even when a tool left something there, which trimming trailing NULs would keep); <code>bytes(n)</code> is an <code>array&lt;int&gt;</code>.</li>
+<li><code>seek(pos)</code> and <code>skip(n)</code> move the cursor and return the reader; <code>pos()</code>, <code>size()</code>, <code>remaining()</code> and <code>at_end()</code> ask.</li>
+</ul>
+<p>Reading past the end raises the catchable <code>Cannot read int32 at position 10: 4 bytes wanted, 2 remain</code> and leaves the cursor where it was. A reader is a value: <code>auto r2 = r;</code> copies the cursor, a by-value parameter gets its own copy, a <code>binary::reader&amp;</code> parameter shares it. It reads a snapshot of the string: strings are shared copy-on-write, so making a reader copies nothing, and a later change to the string leaves the reader's bytes as they were.</p>
+<p><strong>Writing: <code>binary::writer</code>.</strong> <code>binary::writer w;</code> mirrors the reader: <code>w.int8(v)</code> through <code>w.int64(v)</code>, <code>w.uint8(v)</code> through <code>w.uint32(v)</code>, <code>w.float32(v)</code>, <code>w.float64(v)</code>, <code>w.text(s)</code> (raw bytes), <code>w.text(s, n)</code> (exactly <code>n</code> bytes, NUL-padded or truncated), <code>w.bytes(array&lt;int&gt;)</code>, <code>big_endian()</code> / <code>little_endian()</code>. Each returns the writer for chaining. A value that does not fit its width raises and writes nothing: <code>Cannot write 256 as uint8 (0 to 255)</code>. <code>w.pos()</code> and <code>w.seek(pos)</code> go back to patch an earlier field in place (a length or an offset known only at the end); <code>w.size()</code> is the byte count and <code>w.to_string()</code> the bytes, ready for <code>write_file(path, w.to_string())</code>.</p>
+<p><strong>Layouts.</strong> <code>binary::int8</code>, <code>binary::int16</code>, <code>binary::int32</code>, <code>binary::int64</code>, <code>binary::uint8</code>, <code>binary::uint16</code>, <code>binary::uint32</code>, <code>binary::float32</code>, <code>binary::float64</code> and <code>binary::text(n)</code> are width tokens: values that describe an encoding, not language types (a script int is always an int64). <code>binary::text(n)</code> is the fixed-length text field of <code>text_z(n)</code> and <code>w.text(s, n)</code>. A layout names them in order:</p>
+<ul>
+<li><code>binary::layout(name, width, ...)</code> builds a reusable layout, validated once; <code>r.unpack(layout)</code> reads its fields in order into a <code>map&lt;string, var&gt;</code>, and <code>r.unpack(name, width, ...)</code> reads an inline one.</li>
+<li><code>w.pack(layout, map)</code> writes the map's values in the layout's order; a missing name or a value that does not fit raises before anything is written.</li>
+<li><code>r.read(Class, layout)</code> makes a default-constructed instance and fills its fields in declaration order, base class fields first; the field count and each field's kind (int, float, text) must match the widths.</li>
+</ul>
+<p>The order always comes from the arguments, never from a map: maps iterate in key order. The strict checker knows the library: the types, every method's signature and result, an odd name/width pairing or a non-width where a width belongs, and a <code>read(Class, layout)</code> whose class and layout it can see, all reported at load.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var ENTRY = binary::layout(&quot;pos&quot;, binary::int32, &quot;size&quot;, binary::int32, &quot;name&quot;, binary::text(8));
+
+binary::writer w;                            // a tiny WAD: header, one lump, a directory
+w.text(&quot;PWAD&quot;).int32(1).int32(0);            // id, lump count, directory offset (patched below)
+int lump = w.pos();
+w.text(&quot;hello&quot;);
+int dir = w.pos();
+w.pack(ENTRY, {&quot;pos&quot;: lump, &quot;size&quot;: 5, &quot;name&quot;: &quot;GREET&quot;});
+w.seek(8).int32(dir);                        // back to the header to patch the offset
+string wad = w.to_string();
+
+var r = wad.reader();
+print(&quot;{}, lump count {}&quot;, r.text(4), r.int32());
+r.seek(r.int32());                           // the directory
+var e = r.unpack(ENTRY);                     // map&lt;string, var&gt;: name -&gt; value
+print(&quot;{} at {}: {}&quot;, e[&quot;name&quot;], e[&quot;pos&quot;], wad.substr(e[&quot;pos&quot;], e[&quot;size&quot;]));
+
+class Entry { int pos; int size; string name; }
+Entry first = wad.reader().seek(dir).read(Entry, ENTRY);
+print(&quot;{} {} {}&quot;, first.name, first.pos, first.size);
+print(to_json(wad.to_bytes(0, 4)));
+print(string::from_bytes([80, 87, 65, 68]));
+try { r.int32(); } catch (err) { print(&quot;caught: {}&quot;, err); }
+try { w.uint8(256); } catch (err) { print(&quot;caught: {}&quot;, err); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">PWAD, lump count 1
+GREET at 12: hello
+GREET 12 5
+[80,87,65,68]
+PWAD
+caught: Cannot read int32 at position 33: 4 bytes wanted, 0 remain
+caught: Cannot write 256 as uint8 (0 to 255)</code></pre></div>
+<p><strong>Files.</strong> <code>write_file(path, string::from_bytes(b))</code> and <code>read_file(path).to_bytes()</code> round-trip any bytes exactly: every value 0–255, embedded NULs, <code>\r\n</code> untouched. <code>read_file</code> raises a catchable error for a file that is missing or cannot be read (<code>Cannot read file 'saves/world.dat': not found</code>, <code>...: not a file</code>, <code>...: permission denied</code>); an existing empty file reads as <code>""</code>. Ask first when absence is expected: <code>file_exists(path) ? read_file(path) : ""</code> (<a href="10-modules.html#where-files-are">Where files are</a>).</p>
 <h2 id="utf-8-text">UTF-8 text<a class="hlink" href="#utf-8-text" aria-label="link">&#8203;</a></h2>
 <p>A string is bytes, as in C++: <code>size()</code>, <code>s[i]</code> and <code>substr</code> count bytes, which is O(1) and what binary formats and renderers want. Text in UTF-8 has its own methods, named so they never blur with <code>char</code> (a byte):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = &quot;héllo 🙂&quot;;

@@ -485,6 +485,23 @@ public:
     static std::vector<param_type_info> param_sig_from_tuple() {
         return param_sig_from_tuple_impl<Tuple, Offset>(std::make_index_sequence<Count>{});
     }
+    // A bound method's result kind for the checker (class_definition::strict_signatures): a chaining T& is the class
+    template<typename R>
+    static param_type_info result_info() {
+        if constexpr (std::is_void_v<R>) {
+            return param_type_info();
+        } else if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_cvref_t<R>, T>) {
+            return param_type_info(script_value_type::jai_object_type, std::type_index(typeid(T)));
+        } else {
+            return engine::map_cpp_type_to_param_info<std::remove_cvref_t<R>>();
+        }
+    }
+
+    // Hold every bound method of this class to its C++ signature in the strict checker
+    dynamic_binder& strict_signatures() {
+        class_def_->set_strict_signatures(true);
+        return *this;
+    }
 
     // Add method binding - member function pointer version
     template<typename R, typename... Args, typename Requirements = privilege>
@@ -513,7 +530,7 @@ public:
         // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
         // by argument type instead of the last registration silently winning.
         class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
-            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
+            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
 
         return *this;
     }
@@ -544,7 +561,7 @@ public:
         // Add method to the class definition with its C++ parameter signature (see non-const
         // overload) so same-arity const overloads resolve by argument type.
         class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
-            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
+            std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
 
         return *this;
     }
@@ -611,7 +628,7 @@ public:
         constexpr size_t script_arity = has_self_param ? traits::arity - 1 : traits::arity;
         constexpr size_t self_offset = has_self_param ? 1 : 0;
         class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), script_arity,
-            param_sig_from_tuple<args_tuple, self_offset, script_arity>());
+            param_sig_from_tuple<args_tuple, self_offset, script_arity>(), result_info<typename traits::return_type>());
 
         return *this;
     }

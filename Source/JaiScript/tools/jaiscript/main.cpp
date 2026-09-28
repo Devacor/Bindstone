@@ -1831,13 +1831,15 @@ int run_selftest(const console_state& con) {
 		expect(text.find("jai> ") != std::string::npos, "repl: prompt prints when interactive");
 	}
 
-	for (const char* backend : {"interp", "vm"}) {   // read_file's contract through the real file functions
+	for (const char* backend : {"interp", "vm"}) {   // read_file's contract and binary data through the real file functions
 		options file_opt = opt;
 		file_opt.backend = backend;
 		auto eng = make_runner_engine(file_opt, nullptr);
+		const fs::path bin = dir / (std::string("binary ") + backend + ".bin");
 		const fs::path empty = dir / (std::string("empty ") + backend + ".txt");
 		const fs::path missing = dir / "no such file.txt";
 		spill_file(empty.string(), "");
+		eng->add_global("bin_path", jai::script_value(bin.generic_string(), eng.get()));
 		eng->add_global("empty_path", jai::script_value(empty.generic_string(), eng.get()));
 		eng->add_global("missing_path", jai::script_value(missing.generic_string(), eng.get()));
 		eng->add_global("dir_path", jai::script_value(dir.generic_string(), eng.get()));
@@ -1845,6 +1847,16 @@ int run_selftest(const console_state& con) {
 			try { return eng->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
 		};
 		auto name = [&](const char* what) { return std::string("files [") + backend + "]: " + what; };
+		const std::string bytes = "array<int> b = []; for (int i = 0; i < 256; ++i) { b.push(i); } b.push(13); b.push(10); b.push(0); b.push(10); ";
+		expect(run(bytes + "write_file(bin_path, string::from_bytes(b)) && read_file(bin_path).to_bytes() == b;") == "true",
+			name("every byte value, NUL and \\r\\n round trip").c_str());
+		std::string disk = slurp_file(bin.string());
+		bool exact = disk.size() == 260 && disk[13] == '\x0D' && disk[256] == '\x0D' && disk[257] == '\x0A' && disk[258] == '\0';
+		for (int i = 0; i < 256 && exact; ++i) { exact = static_cast<unsigned char>(disk[i]) == i; }
+		expect(exact, name("the file on disk holds exactly those bytes").c_str());
+		expect(run("binary::writer w; w.uint32(0xCAFEBABE).text(\"hdr\", 8).float64(-0.5); write_file(bin_path, w.to_string()); "
+			"var r = read_file(bin_path).reader(); to_string(r.uint32()) + \" \" + r.text_z(8) + \" \" + to_string(r.float64()) + \" \" + to_string(r.at_end());") ==
+			"3405691582 hdr -0.5 true", name("a binary::writer file reads back through binary::reader").c_str());
 		expect(run("read_file(empty_path).size();") == "0", name("an empty file reads as \"\"").c_str());
 		expect(run("var m = \"\"; try { read_file(missing_path); } catch (e) { m = e; } m;") == "Cannot read file '" + missing.generic_string() + "': not found",
 			name("a missing file raises").c_str());

@@ -14136,6 +14136,31 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #endif
 					auto* inst = static_cast<class_instance*>(holder->data.get());
 					class_definition* cd = inst->get_class_definition();
+					// A host class's direct lane (class_definition::native_method): the bound method's body on the
+					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
+					if (!parallel_worker_ && cd && cd->has_native_methods() && !cd->extended_ever()) {
+						if (const class_definition::native_method native = cd->find_native_method(member->member_id)) {
+							if (void* self = inst->cpp_object_pointer()) {
+								script_value out = make_null();
+								bool taken = false;
+								try {
+									taken = native(self, objd, stack_.data() + args_base, argc, out);
+								} catch (const std::exception& e) {
+									stack_.truncate(args_base - 1);
+									active_exception_value_ = script_value(std::string(e.what()), engine_);
+									current_exception_ = script_exception(e.what());
+									is_unwinding_ = true;
+									stack_.push_back(make_null());
+									return {};
+								}
+								if (taken) {
+									stack_.truncate(args_base - 1);
+									stack_.push_back(std::move(out));
+									return {};
+								}
+							}
+						}
+					}
 					// Worker pin (pre-resolved at the barrier): slice-enter directly
 					if (parallel_worker_ && cd) [[unlikely]] {
 						const detail::parallel_method_pin* pin = parallel_method_pins_

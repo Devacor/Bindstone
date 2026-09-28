@@ -36,6 +36,7 @@
 #include <filesystem>
 #include <jaiscript/detail/string_methods_more.hpp>
 #include <jaiscript/detail/utf8_methods.hpp>
+#include <jaiscript/detail/binary_data.hpp>
 #include <fstream>
 
 namespace jai {
@@ -2161,6 +2162,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
     };
     detail::add_more_string_methods(out.string_methods, symbolizer);
+    detail::add_binary_string_methods(out.string_methods, symbolizer);
     out.string_methods[symbolizer->intern("to_utf8")] = [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_utf8() takes no arguments");
         return script_value::make_utf8(self.unchecked_text(), ctx.get_engine());

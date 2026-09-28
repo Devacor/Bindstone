@@ -117,6 +117,10 @@ namespace jai {
             : std::system_error(make_error_code(ec), context) {}
     };
 
+    namespace detail {
+        inline constexpr const char* bare_throw_text = "Bare throw with no active exception thrown.";
+    }
+
 } // namespace jai
 
 // Register for implicit conversion to error_code

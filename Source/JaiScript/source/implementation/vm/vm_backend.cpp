@@ -16451,10 +16451,9 @@ op_status vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
 		current_exception_ = script_exception(message, node ? node->location : source_location{});
 		current_exception_->thrown = true;
 	} else {
-		// Re-throw protocol parity: a bare rethrow with no active exception is a real
-		// C++ throw (caught at the nearest call boundary, exactly like the interpreter)
+		// a bare rethrow with no active exception is a catchable runtime error (KEEP BYTE-PARALLEL with the interpreter)
 		if (!current_exception_) {
-			throw script_exception("No exception to re-throw", node ? node->location : source_location{});
+			return raise_(make_error_code(runtime_error_code::invalid_operation), detail::bare_throw_text);
 		}
 	}
 	is_unwinding_ = true;
@@ -17346,23 +17345,13 @@ checked_result<void> vm_backend::run(frame& entry) {
 			return {};
 		} catch (const script_exception& e) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }   // a block run that ended in another frame (a raw call's callee) threw there
-			if (ip_in_call_arg_zone(*fp)) {
-				convert_cpp_exception_in_frame(e);
-			} else if (call_records_top_ == records_base) {
-				throw;
-			} else {
-				convert_cpp_exception_at_frame(fp, e);
-			}
+			// a native exception an instruction raises is the running frame's exception: its own try sees it (C++,
+			// docs/EXCEPTION_DESIGN.md), else the unwind carries it to the callers like a script throw
+			convert_cpp_exception_in_frame(e);
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (const std::exception& e) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }
-			if (ip_in_call_arg_zone(*fp)) {
-				convert_cpp_exception_in_frame(script_exception(e.what()));
-			} else if (call_records_top_ == records_base) {
-				throw;
-			} else {
-				convert_cpp_exception_at_frame(fp, script_exception(e.what()));
-			}
+			convert_cpp_exception_in_frame(script_exception(e.what()));
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (...) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }
@@ -19941,35 +19930,11 @@ op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	return {};
 }
 
-bool vm_backend::ip_in_call_arg_zone(const frame& f) const {
-	for (const auto& zone : f.code->call_arg_zones) {
-		if (f.ip >= zone.first && f.ip < zone.second) {
-			return true;
-		}
-	}
-	return false;
-}
-
-// Interpreter parity: visit_call converts C++ throws during argument evaluation in the
-// frame making the call (no pop, no result push - the call never happened), so the same
-// frame's try/catch can fire; handle_throw_unwind takes it from here.
+// The running frame takes a native exception as its own script exception; handle_throw_unwind takes it from here.
 void vm_backend::convert_cpp_exception_in_frame(const script_exception& e) {
 	active_exception_value_ = script_value(std::string(e.what()), engine_);
 	current_exception_ = e;
 	is_unwinding_ = true;
-}
-
-void vm_backend::convert_cpp_exception_at_frame(frame*& fp, const script_exception& e) {
-	call_record& rec = *call_records_[call_records_top_ - 1];
-	assert(fp == &rec.f);
-	// The throwing frame's cleanup runs while is_unwinding_ is still false (no trace),
-	// like the native catch(...) path; conversion then happens at the caller
-	pop_script_frame_core(rec);
-	fp = rec.caller;
-	active_exception_value_ = script_value(std::string(e.what()), engine_);
-	current_exception_ = e;
-	is_unwinding_ = true;
-	stack_.push_back(make_null());
 }
 
 void vm_backend::pop_records_to(size_t records_base, frame*& fp) {

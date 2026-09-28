@@ -114,11 +114,17 @@ eng-&gt;max_call_depth(jai::backend_type::vm, 10000);
 auto vmLimit = eng-&gt;max_call_depth(jai::backend_type::vm);</code></pre></div>
 <p>The setter accepts values from 1 through <code>INT_MAX</code> and refuses changes during execution or an active parallel region. Both overloads require a built-in backend type. An ordinary uncaught recursion error adds the category suffix <code>: Maximum environment recursion depth exceeded</code>; a native callback wrapper may additionally append <code>: C++ exception</code>.</p>
 <p>On the VM, a bare self tail call (<code>return f(args)</code> outside any <code>try</code>) reuses its frame and runs in constant space without accumulating call depth. A runaway tail loop is stopped by the <strong>execution budget</strong>, just like <code>while (true)</code>. The interpreter does not perform this tail-call optimization. Ordinary VM script-to-script calls use in-loop frames, but constructors and C++ callbacks can still recurse natively.</p>
+<h2 id="5-binary-scan-limit">5. Binary scan limit<a class="hlink" href="#5-binary-scan-limit" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;binary_scan_limit(64 * 1024);   // the longest NUL scan one binary::reader read may run
+                                      // DEFAULT: 1 MiB (1048576); there is no unlimited setting
+auto limit = eng-&gt;binary_scan_limit();</code></pre></div>
+<p>A <code>binary::reader</code>'s <code>text_null_terminated()</code> reads a C string, so it scans for a NUL. The scan covers at most the remaining bytes and this limit; scripts cannot change it. A scan that reaches the limit without a NUL raises the catchable <code>Cannot read null-terminated text at position 0: no NUL terminator within 65536 bytes (the engine's binary scan limit; raise it from C++ with engine-&gt;binary_scan_limit)</code> and leaves the cursor where it was. The default is far above any string field a real format holds, and a full miss is one <code>memchr</code> over 1 MiB, well under a millisecond. The fixed-field form <code>text_null_terminated(n)</code> reads exactly <code>n</code> bytes, a width the data format sets, and needs no scan bound.</p>
 <h2 id="putting-it-together-running-untrusted-script">Putting it together: running untrusted script<a class="hlink" href="#putting-it-together-running-untrusted-script" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
 eng-&gt;disable(jai::filesystem);          // execute source supplied in memory
 eng-&gt;execution_budget(0.005);            // 5 ms per execute
 eng-&gt;memory_cap(16 * 1024 * 1024);       // 16 MB high-water
+eng-&gt;binary_scan_limit(4096);            // C-string reads of binary data stop after 4 KB
 eng-&gt;set_output_stream(myLogStream);     // print speaks only into this stream
 // static checking is already strict — nothing to turn on
 // register ONLY the API surface the script should have

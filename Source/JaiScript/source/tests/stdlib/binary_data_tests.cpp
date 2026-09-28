@@ -108,14 +108,75 @@ public:
         });
 
         test("reader_text_bytes_and_cursor", [expect]() {
-            expect("var r = \"AB\\x00CDEF\".reader(); var t = r.text(3); to_string(t.size()) + \" \" + r.text_z(4)", "3 CDEF", "text keeps NULs, text_z stops at one");
-            expect("var r = \"E1M1\\x00\\x00\\x00\\x00x\".reader(); r.text_z(8) + \" \" + to_string(r.pos())", "E1M1 8", "text_z consumes the whole field");
-            expect("var r = \"AB\\x00ZZZZZ\".reader(); r.text_z(8)", "AB", "bytes after the NUL are not the name");
+            expect("var r = \"AB\\x00CDEF\".reader(); var t = r.text(3); to_string(t.size()) + \" \" + r.text_null_terminated(4)", "3 CDEF", "text keeps NULs, text_null_terminated stops at one");
             expect("var r = \"\\x05\\x06\\x07\".reader(); var b = r.bytes(2); to_json(b) + \" \" + to_string(r.at_end())", "[5,6] false", "bytes");
             expect("var r = \"abcd\".reader(); r.seek(3); to_string(r.pos()) + \" \" + to_string(r.remaining()) + \" \" + r.text(1) + \" \" + to_string(r.at_end())", "3 1 d true", "seek, remaining, at_end");
             expect("var r = \"abcd\".reader(); r.seek(4); to_string(r.at_end()) + \" \" + to_string(r.bytes(0).size()) + \" \" + r.text(0)", "true 0 ", "reads of nothing at the end");
             expect("\"\\x01\\x02\\x03\".reader().seek(1).skip(1).uint8()", "3", "seek and skip chain");
             expect("var r = \"abc\".reader(); to_string(r.size()) + \" \" + to_string(\"\".reader().size())", "3 0", "size");
+        });
+
+        test("null_terminated_text_is_bounded", [expect, caught]() {
+            // the fixed field: exactly n bytes, the text before the first NUL (all n without one)
+            expect("var r = \"E1M1\\x00\\x00\\x00\\x00x\".reader(); r.text_null_terminated(8) + \" \" + to_string(r.pos())", "E1M1 8", "exactly n bytes");
+            expect("var r = \"AB\\x00ZZZZZ\".reader(); r.text_null_terminated(8)", "AB", "bytes after the NUL are not the text");
+            expect("\"TEXTURE1\".reader().text_null_terminated(8)", "TEXTURE1", "a full field with no NUL is all n bytes");
+            expect(caught("var r = \"abc\".reader(); r.text_null_terminated(5)"), "Cannot read text_null_terminated(5) at position 0: 5 bytes wanted, 3 remain", "short data");
+            expect("var r = \"abc\".reader(); try { r.text_null_terminated(5); } catch (e) {} to_string(r.pos())", "0", "short data leaves the cursor");
+            expect(caught("\"abc\".reader().text_null_terminated(-1)"), "Cannot read text_null_terminated(-1): a count cannot be negative", "a negative field length");
+            // the C string: up to the next NUL, the cursor past it, bounded by the end of the data
+            expect("var r = \"ab\\x00cd\\x00\".reader(); r.text_null_terminated() + \"|\" + r.text_null_terminated() + \" \" + to_string(r.at_end())", "ab|cd true", "two C strings");
+            expect("var r = \"abc\\x00\".reader(); var t = r.text_null_terminated(); t + \" \" + to_string(r.at_end())", "abc true", "the terminator at the last byte");
+            expect("var r = \"\\x00z\".reader(); var t = r.text_null_terminated(); to_string(t.size()) + \" \" + to_string(r.pos())", "0 1", "an empty string");
+            expect(caught("var r = \"xyz\".reader(); r.skip(1); r.text_null_terminated()"), "Cannot read null-terminated text at position 1: no NUL terminator in the remaining 2 bytes", "no terminator");
+            expect(caught("\"\".reader().text_null_terminated()"), "Cannot read null-terminated text at position 0: no NUL terminator in the remaining 0 bytes", "no data");
+            expect("var r = \"xyz\".reader(); try { r.text_null_terminated(); } catch (e) {} to_string(r.pos())", "0", "no terminator leaves the cursor");
+            // the writer: a terminator always follows, and text holding a NUL is refused
+            expect("binary::writer w; w.text_null_terminated(\"hi\").text_null_terminated(\"\"); to_json(w.to_string().to_bytes())", "[104,105,0,0]", "text then a NUL");
+            expect("binary::writer w; w.text_null_terminated(\"abcdef\", 4).text_null_terminated(\"ab\", 4); to_json(w.to_string().to_bytes())", "[97,98,99,0,97,98,0,0]", "a field keeps n - 1 bytes and a NUL");
+            expect("binary::writer w; w.text_null_terminated(\"one\").text_null_terminated(\"two\", 6); var r = w.to_string().reader(); r.text_null_terminated() + \" \" + r.text_null_terminated(6)", "one two", "the writer's forms read back");
+            expect(caught("binary::writer w; w.text_null_terminated(string::from_bytes([97, 0, 98]))"), "Cannot write text_null_terminated: the text holds a NUL at byte 1", "a NUL in the text");
+            expect(caught("binary::writer w; w.text_null_terminated(string::from_bytes([0]), 4)"), "Cannot write text_null_terminated: the text holds a NUL at byte 0", "a NUL in a field's text");
+            expect(caught("binary::writer w; w.text_null_terminated(\"a\", 0)"), "Cannot write text_null_terminated(s, 0): the field needs 1 byte for its NUL", "a field with no room for its NUL");
+            expect(caught("binary::writer w; w.text_null_terminated(\"a\", -1)"), "Cannot write text_null_terminated(s, -1): a count cannot be negative", "a negative field length");
+            expect("binary::writer w; try { w.text_null_terminated(string::from_bytes([97, 0])); } catch (e) {} to_string(w.size())", "0", "a refused write writes nothing");
+            // the layout token
+            expect("var t = binary::text_null_terminated(4); t.name() + \" \" + to_string(t.size())", "text_null_terminated(4) 4", "the token");
+            expect("var L = binary::layout(\"n\", binary::text_null_terminated(4), \"v\", binary::uint8); binary::writer w; w.pack(L, {\"n\": \"abcdef\", \"v\": 7}); "
+                   "to_json(w.to_string().to_bytes()) + \" \" + to_json(w.to_string().reader().unpack(L))", "[97,98,99,0,7] {\"n\":\"abc\",\"v\":7}", "pack keeps n - 1 bytes and a NUL, unpack stops at it");
+            expect("class N { string n; } var L = binary::layout(\"n\", binary::text_null_terminated(6)); var o = \"hey\\x00\\x00\\x00\".reader().read(N, L); o.n", "hey", "read fills a string field");
+            expect(caught("var L = binary::layout(\"n\", binary::text_null_terminated(4)); binary::writer w; w.pack(L, {\"n\": string::from_bytes([120, 0])})"), "Cannot pack field 'n': the text holds a NUL at byte 1", "pack refuses a NUL");
+            expect(caught("var k = 0; binary::text_null_terminated(k)"), "binary::text_null_terminated expects a length of 1 or more (room for the NUL), got 0", "a token with no room for its NUL");
+        });
+
+        test("the_engine_bounds_every_null_terminated_scan", [this, caught]() {
+            check_eq((size_t)1048576, jai::engine::make()->binary_scan_limit(), "the default limit is 1 MiB");
+            auto run_limited = [](const std::string& src, bool use_vm, bool proofs, size_t limit) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->type_proofs(proofs);
+                e->binary_scan_limit(limit);
+                jai::stdlib::register_all(e);
+                try { return e->execute(src).to_string(); }
+                catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+            };
+            const std::pair<std::string, std::string> rows[] = {
+                {caught("\"abcdef\\x00\".reader().text_null_terminated()"), "Cannot read null-terminated text at position 0: no NUL terminator within 4 bytes (the engine's binary scan limit; raise it from C++ with engine->binary_scan_limit)"},
+                {"\"abc\\x00\".reader().text_null_terminated()", "abc"},
+                {caught("\"abcd\\x00\".reader().text_null_terminated()"), "Cannot read null-terminated text at position 0: no NUL terminator within 4 bytes (the engine's binary scan limit; raise it from C++ with engine->binary_scan_limit)"},
+                {caught("\"abc\".reader().text_null_terminated()"), "Cannot read null-terminated text at position 0: no NUL terminator in the remaining 3 bytes"},
+                {caught("\"abcd\".reader().text_null_terminated()"), "Cannot read null-terminated text at position 0: no NUL terminator in the remaining 4 bytes"},
+                {"\"abcdefgh\\x00\".reader().text_null_terminated(9)", "abcdefgh"},
+                {"var r = \"abcdefgh\\x00\".reader(); r.skip(1); try { r.text_null_terminated(); } catch (e) {} to_string(r.pos())", "1"},
+                {"var r = \"abcdefgh\\x00\".reader(); r.skip(5); r.text_null_terminated()", "fgh"},
+            };
+            for (const auto& [src, want] : rows) {
+                for (bool proofs : {true, false}) {
+                    for (bool use_vm : {false, true}) {
+                        check_eq(want, run_limited(src, use_vm, proofs, 4), std::string("scan limit 4: ") + src + (use_vm ? " (vm" : " (interpreter") + (proofs ? ")" : ", proofs off)"));
+                    }
+                }
+            }
         });
 
         test("reading_past_the_end_names_the_position_and_width", [expect, caught]() {
@@ -217,6 +278,8 @@ public:
                 "var w = binary::writer(); utf8_string u = \"\\xC3\\xA9\"; w.text(u).uint8(1); to_json(w.to_string().to_bytes())",
                 "var w = binary::writer(); var t = \"\"; try { w.uint16(70000); } catch (e) { t = e; } t + \" \" + to_string(w.size())",
                 "var r = \"\\x05\".reader(); var same = r.skip(0); same.uint8(); to_string(r.pos()) + \" \" + to_string(same.pos())",
+                "var r = \"ab\\x00cd\".reader(); var t = r.text_null_terminated(); var u = \"\"; try { u = r.text_null_terminated(); } catch (e) { u = e; } t + \"|\" + u + \"|\" + to_string(r.pos())",
+                "var r = \"abcdef\\x00x\".reader(); var t = r.text_null_terminated(); t + \" \" + r.text_null_terminated(1.0)",
             };
             for (const char* src : shapes) {
                 for (bool proofs : {true, false}) {
@@ -245,6 +308,8 @@ public:
             check_eq((size_t)0, errors("binary::writer w; binary::reader r = w.to_string().reader(); int v = r.uint16(); string t = r.text(2); array<int> b = r.bytes(2);"), "a clean program");
             check_true(says("var L = binary::layout(\"a\", binary::int8, \"b\");", "binary::layout expects name, width pairs, got 3 arguments"), "an odd pairing");
             check_true(says("var L = binary::layout(\"a\", 3);", "binary::layout argument 2 must be a binary width"), "a non-width");
+            check_eq((size_t)0, errors("class C { string n; } var c = \"\".reader().read(C, binary::layout(\"n\", binary::text_null_terminated(8)));"), "a null-terminated text token is a text width");
+            check_true(says("binary::reader r = \"\".reader(); r.text_null_terminated(1, 2);", "'binary::reader.text_null_terminated' expects 0 or 1 argument(s), got 2"), "both reader forms are known");
             check_true(says("var L = binary::layout(5, binary::int8);", "binary::layout argument 1 must be a field name string, got int"), "a non-string name");
             check_true(says("binary::reader r = \"\".reader(); var m = r.unpack(\"a\", binary::int8, \"b\", \"x\");", "unpack argument 4 must be a binary width"), "unpack pairs");
             check_true(says("class Bad { string name; float pos; } binary::layout L = binary::layout(\"name\", binary::text(8), \"pos\", binary::int32); var b = \"\".reader().read(Bad, L);",

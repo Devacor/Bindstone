@@ -27,7 +27,7 @@ freely distributable, md5-verified) and Freedoom 0.13 (BSD) — both gitignored.
 The WAD is one string. Structured reads go through `binary::reader` (`lump_reader(idx)` puts one
 at a lump's first byte; little-endian, the format's order): map lumps read record by record, the
 16-byte directory entry is the `binary::layout` `LUMP_ENTRY`, PNAMES/TEXTURE1 and patch headers
-read with `int16`/`uint32`/`text_z(8)`. Bulk bytes (COLORMAP, PLAYPAL banks, flats, sound samples)
+read with `int16`/`uint32`/`text_null_terminated(8)`. Bulk bytes (COLORMAP, PLAYPAL banks, flats, sound samples)
 come out as `array<int>` through `to_bytes`. The files the game writes (WAV, MIDI, BMP) are built
 with `binary::writer`. Post data inside patch columns is still walked byte by byte (`WAD[post] + 0`
 reads the unsigned byte). Texture compositing is a `parallel_transform` body, which admits no host

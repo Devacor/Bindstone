@@ -29,15 +29,15 @@ function snd_wav_bytes(string name) -> string {
 	if (count > LUMP_SIZE[lu] - ofs) { count = LUMP_SIZE[lu] - ofs; }
 	if (count <= 0) { return ""; }
 	binary::writer wav = wav_header(1, rate, count);
-	wav.text(WAD.substr(pos + ofs, count));
+	wav.bytes(WAD.substr(pos + ofs, count));
 	return wav.to_string();
 }
 
 // a RIFF/WAVE header for 8-bit PCM: channels, sample rate, then count data bytes to follow
 function wav_header(int channels, int rate, int count) -> binary::writer {
 	binary::writer w;
-	w.text("RIFF").uint32(36 + count).text("WAVEfmt ").uint32(16).uint16(1).uint16(channels);
-	w.uint32(rate).uint32(rate * channels).uint16(channels).uint16(8).text("data").uint32(count);
+	w.bytes("RIFF").uint32(36 + count).bytes("WAVEfmt ").uint32(16).uint16(1).uint16(channels);
+	w.uint32(rate).uint32(rate * channels).uint16(channels).uint16(8).bytes("data").uint32(count);
 	return w;
 }
 

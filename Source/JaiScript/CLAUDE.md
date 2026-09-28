@@ -535,14 +535,13 @@ engine stays usable", not by `check_throws`.
   bytes, `utf8_string` is text. `s.to_bytes([offset], [count])` -> `array<int>` (range-checked, one native copy),
   `string::from_bytes(array<int> | array<char>)` (0..255 or a catchable error naming element and value). The engine-core
   `binary::` library: `s.reader()` / `binary::reader(s)` (cursor over a copy-on-write snapshot, little-endian until
-  `big_endian()`; `int8..int64`, `uint8..uint32` (no uint64: ints are int64), `float32` widens, `float64`, `text(n)`,
-  `text_null_terminated(n)` (a C `char[n]` field: n bytes, the text before the first NUL), `text_null_terminated()` (a C
-  string; the scan stops at the data end and the host-only `engine::binary_scan_limit`, default 1 MiB, kept in
-  `execution_limits`), `bytes(n)`, `seek/skip/pos/size/remaining/at_end`), `binary::writer w;` (the mirror writers,
-  `text(s, n)` NUL-pads/truncates, `text_null_terminated(s)` / `(s, n)` always end in a NUL and refuse a NUL inside, `bytes`,
-  `seek` to patch, `to_string()`); width tokens `binary::int8 ... binary::float64`, `binary::text(n)` (n raw bytes, NULs kept,
-  = `r.text(n)` / `w.text(s, n)`), `binary::text_null_terminated(n)` (= `r.text_null_terminated(n)` / `w.text_null_terminated(s, n)`;
-  Dev ruling 2026-09-28); `binary::layout(name, width, ...)`, `r.unpack(layout | pairs)`
+  `big_endian()`; `int8..int64`, `uint8..uint32` (no uint64: ints are int64), `float32` widens, `float64`, `text(n)` (an n-byte
+  text field: n bytes, the text before the first NUL), `text()` (a C string; the scan stops at the data end and the host-only
+  `engine::binary_scan_limit`, default 1 MiB, kept in `execution_limits`), `bytes(n)` (exactly n raw bytes), `seek/skip/pos/size/
+  remaining/at_end`), `binary::writer w;` (the mirror writers; `text(s)` ends in a NUL, `text(s, n)` NUL-pads to n, a text of
+  exactly n fills it, a longer text or a NUL inside raises; `bytes(b)` writes a string's or a byte array's bytes as they are;
+  `seek` to patch, `to_string()`); width tokens `binary::int8 ... binary::float64`, `binary::text(n)` (= `r.text(n)` /
+  `w.text(s, n)`), `binary::bytes(n)` (= `r.bytes(n)` / `w.bytes(b)`, exactly n; Dev rulings 2026-09-28); `binary::layout(name, width, ...)`, `r.unpack(layout | pairs)`
   -> `map<string, var>`, `w.pack(layout, map)`, `r.read(Class, layout)` (fields in declaration order, bases first). A read
   past the end / a value that does not fit / a bad layout is catchable and moves nothing. Hot reader/writer members take the
   vm's `class_definition::native_method` lanes (declining shapes fall to the bound method); the strict checker knows the

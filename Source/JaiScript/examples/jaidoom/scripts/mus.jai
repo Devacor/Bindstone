@@ -99,7 +99,7 @@ function mus_midi_bytes(string name) -> string {
 	}
 	trk += midi_varlen(delay) + to_char(0xFF) + to_char(0x2F) + to_char(0);
 	binary::writer mid;
-	mid.big_endian().text("MThd").uint32(6).uint16(0).uint16(1).uint16(70).text("MTrk").uint32(trk.size()).text(trk);
+	mid.big_endian().bytes("MThd").uint32(6).uint16(0).uint16(1).uint16(70).bytes("MTrk").uint32(trk.size()).bytes(trk);
 	return mid.to_string();
 }
 

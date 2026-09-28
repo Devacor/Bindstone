@@ -401,7 +401,7 @@ namespace jai {
         void memory_cap(size_t bytes);
         size_t memory_cap() const;
 
-        // The most bytes a binary::reader's text_null_terminated() scans for its NUL; a scan that reaches the limit raises a
+        // The most bytes a binary::reader's text() (a C string) scans for its NUL; a scan that reaches the limit raises a
         // catchable error naming it and moves nothing, so a script can never run an unbounded scan (scripts cannot change
         // it). Default 1 MiB (1048576): far above any string field real formats hold, and a full miss costs a memchr over
         // 1 MiB, well under a millisecond. There is no unlimited setting; a larger value is the host's choice.

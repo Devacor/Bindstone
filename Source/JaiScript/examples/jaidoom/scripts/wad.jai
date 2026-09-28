@@ -13,7 +13,7 @@ array<string> LUMP_NAME = [];
 map<string, int> LUMP_INDEX = {}; // name -> index, later lumps win (W_GetNumForName scans backward)
 
 // a directory entry: the lump's offset and size, its name NUL-padded to 8 bytes (all 8 when the name fills them)
-binary::layout LUMP_ENTRY = binary::layout("pos", binary::int32, "size", binary::int32, "name", binary::text_null_terminated(8));
+binary::layout LUMP_ENTRY = binary::layout("pos", binary::int32, "size", binary::int32, "name", binary::text(8));
 
 // a reader over the WAD at a lump's first byte
 function lump_reader(int idx) -> binary::reader { return WAD.reader().seek(LUMP_POS[idx]); }

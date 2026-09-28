@@ -85,7 +85,7 @@ function bmp_write(string path) -> void {
 	int pad = (4 - (VW * 3) % 4) % 4;
 	int stride = VW * 3 + pad;
 	binary::writer out;
-	out.text("BM").uint32(54 + stride * VH).uint32(0).uint32(54);
+	out.bytes("BM").uint32(54 + stride * VH).uint32(0).uint32(54);
 	out.uint32(40).int32(VW).int32(VH).uint16(1).uint16(24).uint32(0).uint32(stride * VH);
 	out.int32(2835).int32(2835).uint32(0).uint32(0);
 	var& pix = PIX;
@@ -94,7 +94,8 @@ function bmp_write(string path) -> void {
 		int base = y * VW;
 		string row = "";
 		for (int x = 0; x < VW; ++x) { row += bgr[pix[base + x]]; }
-		out.text(row, VW * 3 + pad);
+		out.bytes(row);
+		for (int p = 0; p < pad; ++p) { out.uint8(0); }
 	}
 	write_file(path, out.to_string());
 }

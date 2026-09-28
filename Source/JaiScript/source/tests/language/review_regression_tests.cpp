@@ -1995,7 +1995,7 @@ public:
                 string caught = "";
                 try { pk().v += boom(); } catch (e) { caught = e; }
                 log + "|" + caught + ":" + ("" + shared.v);
-            )").c_str(), "AR|boom:10", "receiver before the rhs; an rhs raise leaves the field alone", check_mode::strict);
+            )").c_str(), "R|boom:10", "C++17 (Dev ruling 2026-09-27): the rhs before the receiver; an rhs raise evaluates no target", check_mode::strict);
             expect_order((std::string(recv_prelude) + R"(
                 var n = null;
                 var& gn() { log += "N"; return n; }

@@ -338,6 +338,7 @@ namespace jai::vm {
     inline constexpr uint32_t compound_flag_global_only = 0x20; // ::name target (global env only)
     inline constexpr uint32_t compound_flag_old_result = 0x40;  // postfix x++ on an element/member target: push the OLD value
     inline constexpr uint32_t compound_flag_incdec = 0x80;      // ++/-- desugar: the target must be numeric (identifier-path gate)
+    inline constexpr uint32_t compound_flag_value_first = 0x100; // C++17 order: the right-hand side was evaluated before the target (it sits under the target's operands)
 
     // op_incdec c flags
     inline constexpr uint32_t incdec_flag_postfix = 1;

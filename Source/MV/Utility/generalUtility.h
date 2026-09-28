@@ -316,19 +316,19 @@ namespace MV {
 	std::vector<std::string> fileLines(const std::string& a_path);
 
 	inline float angle2D(int x1, int y1, int x2, int y2) {
-		return wrap(toDegrees(atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - y2))), 0.0f, 360.0f);
+		return wrap(0.0f, 360.0f, toDegrees(atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - x1))));
 	}
 
 	inline float angle2D(float x1, float y1, float x2, float y2){
-		return wrap(toDegrees(atan2(y2 -y1, x2 - x1)), 0.0f, 360.0f);
+		return wrap(0.0f, 360.0f, toDegrees(atan2(y2 - y1, x2 - x1)));
 	}
 
 	inline double angle2D(double x1, double y1, double x2, double y2) {
-		return wrap(toDegrees(atan2(y2 - y1, x2 - x1)), 0.0, 360.0);
+		return wrap(0.0, 360.0, toDegrees(atan2(y2 - y1, x2 - x1)));
 	}
 
 	inline float angle2DRad(int x1, int y1, int x2, int y2) {
-		return atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - y2));
+		return atan2(static_cast<float>(y2 - y1), static_cast<float>(x2 - x1));
 	}
 
 	inline float angle2DRad(float x1, float y1, float x2, float y2) {

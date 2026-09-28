@@ -16,7 +16,7 @@ cl /nologo /O2 /std:c++20 /EHsc /MD /DNDEBUG ^
   /I"%ROOT%\External\openssl\openssl-1.1.0c\include" /I"%ROOT%\Source\JaiScript\include" ^
   /I"%ROOT%\VSProjects\SDL2\include" /I"%ROOT%\VSProjects\SDL2_ttf\include" ^
   matrix_tests.cpp scene_tests.cpp atlas_tests.cpp rhi_tests.cpp scriptdebug_tests.cpp ^
-  scene_serialization_tests.cpp texture_handle_tests.cpp pathfinding_tests.cpp ^
+  scene_serialization_tests.cpp texture_handle_tests.cpp pathfinding_tests.cpp utility_tests.cpp ^
   "%ROOT%\Source\Game\Script\script.cpp" ^
   "%ROOT%\Source\JaiScript\source\tests\main_test_runner.cpp" ^
   "%ROOT%\External\gl3w\src\gl3w.c" /Fe:mv_tests.exe ^

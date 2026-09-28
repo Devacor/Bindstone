@@ -53,19 +53,20 @@ function sprites_init() -> void {
 function sprite_prepare(int lump) -> void {
 	if (SPR_PIX.has(lump)) { return; }
 	int pofs = LUMP_POS[lump];
-	int w = i16(pofs);
-	int h = i16(pofs + 2);
+	binary::reader r = lump_reader(lump);
+	int w = r.int16();
+	int h = r.int16();
 	SPR_W[lump] = w;
 	SPR_H[lump] = h;
-	SPR_LO[lump] = i16(pofs + 4);
-	SPR_TO[lump] = i16(pofs + 6);
+	SPR_LO[lump] = r.int16();
+	SPR_TO[lump] = r.int16();
 	array<int> pix = [];
 	int n = w * h;
 	for (int i = 0; i < n; ++i) { pix.push(-1); }
 	var& wd = WAD;
 	for (int col = 0; col < w; ++col) {
 		int colbase = col * h;
-		int post = pofs + u32(pofs + 8 + col * 4);
+		int post = pofs + r.uint32();
 		while (wd[post] != 255) {
 			int top = wd[post] + 0;
 			int len = wd[post + 1] + 0;

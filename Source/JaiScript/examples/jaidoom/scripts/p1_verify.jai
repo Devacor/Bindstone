@@ -40,7 +40,7 @@ function main() -> int {
 	check(cm >= 0 && LUMP_SIZE[cm] == 8704, "COLORMAP is 34 maps x 256 bytes");
 
 	// palette 0, color 0 should be near-black; color 4 is the doom white-ish
-	var pal = lump_bytes(pp);
+	array<int> pal = lump_bytes(pp);
 	print(`  pal[0] rgb = ${pal[0]},${pal[1]},${pal[2]}   pal[4] rgb = ${pal[12]},${pal[13]},${pal[14]}`);
 	check(pal.size() == 10752, "PLAYPAL fully decoded");
 
@@ -74,27 +74,28 @@ function main() -> int {
 	check(LUMP_SIZE[sects] % 26 == 0, `SECTORS % 26 (${LUMP_SIZE[sects] / 26} sectors)`);
 
 	// first THINGS record: x,y are signed i16 map coords; type of thing 1 = player 1 start
-	int tp = LUMP_POS[things];
-	print(`  first thing: x=${i16(tp)} y=${i16(tp + 2)} angle=${i16(tp + 4)} type=${i16(tp + 6)} flags=${i16(tp + 8)}`);
+	var th = lump_reader(things).unpack("x", binary::int16, "y", binary::int16, "angle", binary::int16, "type", binary::int16, "flags", binary::int16);
+	print(`  first thing: x=${th["x"]} y=${th["y"]} angle=${th["angle"]} type=${th["type"]} flags=${th["flags"]}`);
 
 	// DS* sound lumps decode to valid WAVs in pure script (playback is host-side)
 	var wav = snd_wav_bytes("DSPISTOL");
 	check(wav.size() > 44 && wav.substr(0, 4) == "RIFF" && wav.substr(8, 8) == "WAVEfmt ", "DSPISTOL decodes to RIFF/WAVE");
-	int wrate = (wav[24] + 0) | (wav[25] << 8) | (wav[26] << 16) | (wav[27] << 24);
+	int wrate = wav.reader().seek(24).uint32();
 	check(wrate == 11025 || wrate == 22050, `sample rate sane (${wrate})`);
-	int dlen = (wav[40] + 0) | (wav[41] << 8) | (wav[42] << 16) | (wav[43] << 24);
+	int dlen = wav.reader().seek(40).uint32();
 	check(wav.size() == 44 + dlen, "data chunk length matches file size");
 	check(snd_wav_bytes("DSNOSUCH") == "", "missing sound lump decodes to nothing");
 
 	// positional-audio variants: stereo header shape, interleave, attenuation, pan
 	var st0 = snd_wav_stereo("DSPISTOL", 16, 16, 16);
 	check(st0.substr(0, 4) == "RIFF" && st0.substr(8, 8) == "WAVEfmt ", "stereo variant is RIFF/WAVE");
-	check(((st0[22] + 0) | (st0[23] << 8)) == 2, "stereo: nchannels == 2");
-	check(((st0[32] + 0) | (st0[33] << 8)) == 2, "stereo: blockalign == 2");
-	int srate = (st0[24] + 0) | (st0[25] << 8) | (st0[26] << 16) | (st0[27] << 24);
-	int sbyte = (st0[28] + 0) | (st0[29] << 8) | (st0[30] << 16) | (st0[31] << 24);
+	var fmt = st0.reader().seek(22).unpack("channels", binary::uint16, "rate", binary::uint32, "byterate", binary::uint32, "align", binary::uint16);
+	check(fmt["channels"] == 2, "stereo: nchannels == 2");
+	check(fmt["align"] == 2, "stereo: blockalign == 2");
+	int srate = fmt["rate"];
+	int sbyte = fmt["byterate"];
 	check(srate == wrate && sbyte == srate * 2, "stereo: byterate is rate x 2");
-	int sdl = (st0[40] + 0) | (st0[41] << 8) | (st0[42] << 16) | (st0[43] << 24);
+	int sdl = st0.reader().seek(40).uint32();
 	check(sdl == dlen * 2 && st0.size() == 44 + sdl, `stereo data is 2x the mono samples (${sdl})`);
 	var st1 = snd_wav_stereo("DSPISTOL", 8, 8, 16);
 	int amp0 = 0;
@@ -132,7 +133,7 @@ function main() -> int {
 	// D_* music lumps transcode to structurally valid MIDI in pure script
 	var mid = mus_midi_bytes("D_E1M1");
 	check(mid.size() > 200 && mid.substr(0, 4) == "MThd" && mid.substr(14, 4) == "MTrk", "D_E1M1 transcodes to MIDI");
-	int tlen = ((mid[18] + 0) << 24) | ((mid[19] + 0) << 16) | ((mid[20] + 0) << 8) | (mid[21] + 0);
+	int tlen = mid.reader().big_endian().seek(18).uint32();
 	check(mid.size() == 22 + tlen, `MIDI track length consistent (${tlen} bytes)`);
 	check(mid[mid.size() - 3] == 255 && mid[mid.size() - 2] == 47 && mid[mid.size() - 1] == 0, "end-of-track marker present");
 	check(mus_midi_bytes("D_NOSUCH") == "", "missing music lump transcodes to nothing");
@@ -142,9 +143,9 @@ function main() -> int {
 	check(lump_num("PNAMES") >= 0, "PNAMES exists");
 	check(lump_num("TITLEPIC") >= 0, "TITLEPIC exists");
 	int pn = lump_num("PNAMES");
-	print(`  PNAMES count = ${i32(LUMP_POS[pn])}`);
+	print(`  PNAMES count = ${lump_reader(pn).int32()}`);
 	int t1 = lump_num("TEXTURE1");
-	print(`  TEXTURE1 count = ${i32(LUMP_POS[t1])}`);
+	print(`  TEXTURE1 count = ${lump_reader(t1).int32()}`);
 
 	print("");
 	if (FAILS == 0) { print("P1 GATE: ALL GREEN"); }

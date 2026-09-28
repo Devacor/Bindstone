@@ -80,29 +80,23 @@ function rgb_idx(int r, int g, int b) -> int {
 	return idx;
 }
 
-function le16(int v) -> string { return "" + to_char(v & 255) + to_char((v >> 8) & 255); }
-function le32(int v) -> string {
-	return "" + to_char(v & 255) + to_char((v >> 8) & 255) + to_char((v >> 16) & 255) + to_char((v >> 24) & 255);
-}
-
 // ground-truth artifact: the palette-index grid as a 24-bit BMP
 function bmp_write(string path) -> void {
 	int pad = (4 - (VW * 3) % 4) % 4;
 	int stride = VW * 3 + pad;
-	string out = "BM" + le32(54 + stride * VH) + le32(0) + le32(54);
-	out += le32(40) + le32(VW) + le32(VH) + le16(1) + le16(24) + le32(0) + le32(stride * VH);
-	out += le32(2835) + le32(2835) + le32(0) + le32(0);
-	string padding = "";
-	for (int p = 0; p < pad; ++p) { padding += to_char(0); }
+	binary::writer out;
+	out.text("BM").uint32(54 + stride * VH).uint32(0).uint32(54);
+	out.uint32(40).int32(VW).int32(VH).uint16(1).uint16(24).uint32(0).uint32(stride * VH);
+	out.int32(2835).int32(2835).uint32(0).uint32(0);
 	var& pix = PIX;
 	var& bgr = PAL_BGR3;
 	for (int y = VH - 1; y >= 0; --y) {
 		int base = y * VW;
 		string row = "";
 		for (int x = 0; x < VW; ++x) { row += bgr[pix[base + x]]; }
-		out += row + padding;
+		out.text(row, VW * 3 + pad);
 	}
-	write_file(path, out);
+	write_file(path, out.to_string());
 }
 
 function pix_clear(int color) -> void {

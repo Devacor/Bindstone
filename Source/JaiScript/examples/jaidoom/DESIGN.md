@@ -22,12 +22,17 @@ freely distributable, md5-verified) and Freedoom 0.13 (BSD) — both gitignored.
   `math::` (low-bit deviation from id's tables — visually identical; demo-lump sync would need
   exact tables + rndtable and is a P7 option, not a P0 constraint).
 
-## Byte access (SUPERSEDED — see Source/JaiScript/docs/char_semantics.md)
+## Byte access (see Source/JaiScript/docs/char_semantics.md and guide ch. 9, "Binary data")
 
-Bytes are language-native now: `s[i] + 0` reads the unsigned byte, comparisons promote the
-same way, and `to_char(n)` / `\xNN` literals mint bytes. Both language rounds were landed by
-Dev off this project's feedback — the WAD parser was the forcing function. Decode stays lazy
-per-lump into cached typed arrays; never eager whole-WAD.
+The WAD is one string. Structured reads go through `binary::reader` (`lump_reader(idx)` puts one
+at a lump's first byte; little-endian, the format's order): map lumps read record by record, the
+16-byte directory entry is the `binary::layout` `LUMP_ENTRY`, PNAMES/TEXTURE1 and patch headers
+read with `int16`/`uint32`/`text_z(8)`. Bulk bytes (COLORMAP, PLAYPAL banks, flats, sound samples)
+come out as `array<int>` through `to_bytes`. The files the game writes (WAV, MIDI, BMP) are built
+with `binary::writer`. Post data inside patch columns is still walked byte by byte (`WAD[post] + 0`
+reads the unsigned byte). Texture compositing is a `parallel_transform` body, which admits no host
+method calls, so each patch's column table is decoded ahead of it (`tex_patches_prepare`) into
+typed arrays. Decode stays lazy per-lump into cached typed arrays; never eager whole-WAD.
 
 History, for the war story: before promotion existed, `wad.jai` self-bootstrapped a decoder by
 collecting all 256 distinct chars from the WAD itself, insertion-sorting them by comparison

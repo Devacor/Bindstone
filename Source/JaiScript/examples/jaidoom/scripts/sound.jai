@@ -20,16 +20,25 @@ function snd_wav_bytes(string name) -> string {
 	int lu = lump_num(name);
 	if (lu < 0) { return ""; }
 	int pos = LUMP_POS[lu];
-	if (LUMP_SIZE[lu] < 10 || u16(pos) != 3) { return ""; }
-	int rate = u16(pos + 2);
-	int count = i32(pos + 4);
+	binary::reader r = lump_reader(lu);
+	if (LUMP_SIZE[lu] < 10 || r.uint16() != 3) { return ""; }
+	int rate = r.uint16();
+	int count = r.int32();
 	int ofs = 8;
 	if (count > 32) { ofs = 24; count = count - 32; }   // strip the DMX lead/tail pads
 	if (count > LUMP_SIZE[lu] - ofs) { count = LUMP_SIZE[lu] - ofs; }
 	if (count <= 0) { return ""; }
-	return "RIFF" + le32(36 + count) + "WAVEfmt " + le32(16) + le16(1) + le16(1)
-		+ le32(rate) + le32(rate) + le16(1) + le16(8) + "data" + le32(count)
-		+ WAD.substr(pos + ofs, count);
+	binary::writer wav = wav_header(1, rate, count);
+	wav.text(WAD.substr(pos + ofs, count));
+	return wav.to_string();
+}
+
+// a RIFF/WAVE header for 8-bit PCM: channels, sample rate, then count data bytes to follow
+function wav_header(int channels, int rate, int count) -> binary::writer {
+	binary::writer w;
+	w.text("RIFF").uint32(36 + count).text("WAVEfmt ").uint32(16).uint16(1).uint16(channels);
+	w.uint32(rate).uint32(rate * channels).uint16(channels).uint16(8).text("data").uint32(count);
+	return w;
 }
 
 function snd_play(string name) -> void {
@@ -70,23 +79,21 @@ function snd_wav_stereo(string name, int lnum, int rnum, int den) -> string {
 	int lu = lump_num(name);
 	if (lu < 0) { return ""; }
 	int pos = LUMP_POS[lu];
-	if (LUMP_SIZE[lu] < 10 || u16(pos) != 3) { return ""; }
-	int rate = u16(pos + 2);
-	int count = i32(pos + 4);
+	binary::reader r = lump_reader(lu);
+	if (LUMP_SIZE[lu] < 10 || r.uint16() != 3) { return ""; }
+	int rate = r.uint16();
+	int count = r.int32();
 	int ofs = 8;
 	if (count > 32) { ofs = 24; count = count - 32; }   // strip the DMX lead/tail pads
 	if (count > LUMP_SIZE[lu] - ofs) { count = LUMP_SIZE[lu] - ofs; }
 	if (count <= 0) { return ""; }
-	var data = "";
-	var& w = WAD;
-	int stop = pos + ofs + count;
-	for (int i = pos + ofs; i < stop; ++i) {
-		int s = (w[i] + 0) - 128;
-		data += to_char(128 + s * lnum / den);
-		data += to_char(128 + s * rnum / den);
+	binary::writer wav = wav_header(2, rate, count * 2);
+	array<int> samples = WAD.to_bytes(pos + ofs, count);
+	for (int i = 0; i < count; ++i) {
+		int s = samples[i] - 128;
+		wav.uint8(128 + s * lnum / den).uint8(128 + s * rnum / den);
 	}
-	return "RIFF" + le32(36 + count * 2) + "WAVEfmt " + le32(16) + le16(1) + le16(2)
-		+ le32(rate) + le32(rate * 2) + le16(2) + le16(8) + "data" + le32(count * 2) + data;
+	return wav.to_string();
 }
 
 function snd_play_at(string name, float x, float y) -> void {

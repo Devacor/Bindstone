@@ -42,6 +42,9 @@ Prereq: a Release engine lib at `Builds\Windows\x64\Release\mutedvision.lib` (bu
   size, not content size.
 - **Pathfinding** — `Map` budget, `NavigationAgent` paths/signals, footprint block counts
   across moves, clones and off-map placement.
+- **MV Utility** — `angle2D`/`angle2DRad` overloads, `wrappingDistance` and `wrappingMix` (the
+  short-way angle interpolation `Collider::interpolateDrawAngle` draws with), `startsWith`,
+  `BoxAABB::centerPoint` and `BoxAABB::collides` with and without depth.
 
 ## Benchmarks (measurement, not assertions)
 

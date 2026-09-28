@@ -24,7 +24,8 @@ and no test pins a reading of it.
   references, exceptions, closures, diagnostic texts, script the runtime calls, user `operator=`,
   error texts, checker verdicts, instance-variable overlays, file locations, privilege order,
   guide examples, parallel contracts, native exceptions, access control, and the rulings on
-  lambda captures of globals, the order of a compound or subscript store, and `auto`'s static type).
+  lambda captures of globals, the order of a compound or subscript store, `auto`'s static type and
+  call arguments).
 - `source/tests/vm/spec_attack_tests.cpp`, suite "Spec Attacks": the VM's fast paths under
   pressure (raises inside cell blocks and grafts, coroutines over fast paths, host callbacks
   re-entering mid-loop, redefinition and hot reload mid-loop and mid-recursion, callees that
@@ -34,10 +35,9 @@ and no test pins a reading of it.
 
 Every row runs against one expected string on the interpreter and the VM, with type proofs on
 and off, with the VM's IR passes off, and, in a build that carries the miss-injection lever
-(`x64-Release MISS`), with injected cell misses every one and every three blocks. Two groups are
-compiled out and never cited as pins: `known_bugs` (`JAISCRIPT_SPEC_KNOWN_BUGS`, a derived
-expectation the runtime does not meet) and `pending_call_argument_capture`
-(`JAISCRIPT_SPEC_PENDING_CALL_ARGS`, a ruled behavior the runtime does not implement).
+(`x64-Release MISS`), with injected cell misses every one and every three blocks. One group is
+compiled out and never cited as a pin: `known_bugs` (`JAISCRIPT_SPEC_KNOWN_BUGS`, a derived
+expectation the runtime does not meet).
 
 ## Verdicts
 
@@ -63,8 +63,8 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 | 5. User guide chapters 1-13, reference page, grammar.md (Gnn-, RF-, GR-) | 1114 | 871 | 153 | 74 | 16 | 911 | 134 | 53 | 16 |
 | 6. Script the runtime calls, user operator=, error texts, throw expressions, sort, range-for (CB-) | 38 | 2 | 6 | 30 | 0 | 32 | 5 | 1 | 0 |
 | 7. Access control (AC-) | 14 | 3 | 2 | 7 | 2 | 13 | 1 | 0 | 0 |
-| 8. Captures of globals, assignment order, `auto`'s static type (RL-) | 16 | 3 | 1 | 9 | 3 | 16 | 0 | 0 | 0 |
-| **Total** | **2566** | **1955** | **283** | **294** | **34** | **2168** | **224** | **145** | **29** |
+| 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments (RL-) | 17 | 3 | 1 | 10 | 3 | 17 | 0 | 0 | 0 |
+| **Total** | **2567** | **1955** | **283** | **295** | **34** | **2169** | **224** | **145** | **29** |
 
 ## Script the runtime calls
 
@@ -2970,10 +2970,10 @@ control", gr = `docs/grammar.md` note 12, sc = `docs/static_checking.md` "Access
 | AC-13 | Constructors are exempt from the labels; the host C++ API (`get_field`/`set_field`, serialization, reflection reads) is unrestricted | gr | stdlib/reflection_tests.cpp:get_set_invoke_read_write_like_direct_syntax (reads; constructor exemption not asserted) | no | thin |
 | AC-14 | A lambda defined inside a method has its class's access | gr | language/script_class_tests.cpp:member_access_enforcement_matrix | no | pinned |
 
-## 8. Captures of globals, assignment order, `auto`'s static type
+## 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments
 
 Source codes: ruling = Dev's rulings 2026-09-27, cc = `docs/closures_and_captures.md`, gr = `docs/grammar.md`,
-diag = `docs/diagnostics.md` "Order of errors in an assignment", inv = `docs/invariants.md` (sections 10, 12, 14),
+diag = `docs/diagnostics.md` "Order of errors in an assignment", inv = `docs/invariants.md` (sections 10, 12, 13, 14),
 sc = `docs/static_checking.md` (rule table), 02/04/06 = guide chapters. Pins are relative to
 `Source/JaiScript/source/tests`; `spec:` is `semantics/spec_conformance_tests.cpp`. BEFORE is the verdict the
 ledger gave the claim's old reading: the three contradicted rows had registered tests pinning the opposite, which
@@ -2997,3 +2997,4 @@ now pin the ruling.
 | RL-14 | The same holds inside counted loops on every lane (a typed element keeps the lock, a `var` element does not) | ruling; inv 14 | spec:an_auto_in_a_counted_loop_follows_the_static_type_on_every_lane | no | pinned |
 | RL-15 | A `.jaibite` keeps the `auto` spelling and the loaded unit decides again, with the same result | inv 14 | spec:a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load | no | pinned |
 | RL-16 | An `auto` from a mixed-branch ternary warns that it is a `var`, naming both branch types | sc Precision | semantics/static_check_tests.cpp:warn_auto_from_mixed_branch_ternary | no | pinned |
+| RL-17 | A by-value argument takes its value when it is evaluated: a later argument that writes the element, map entry or nested element it read does not change what the callee receives (untyped and typed parameters, a method, a constructor, inside a counted loop) | ruling; inv 13; 04 | spec:by_value_arguments_capture_their_values_left_to_right; the suite `Call Argument Capture` | partial | pinned |

@@ -5405,6 +5405,33 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a graft's clone judges a nested leaf in the frame its arguments are read in (the callee's declared slots, whichever clone reads the
+		// call), and a graft never compiles a body its own clone refused: the plan's probe read the caller's slot at the callee's slot number,
+		// the compile's clone read slots not yet declared, and the graft emitted a truncated body whose result kept a stale value
+		test("a_nested_leaf_is_judged_in_the_frame_its_arguments_are_read_in", [this]() {
+			const std::string src = "function inner(var y) -> int { return y * 3 + 1; }\n"
+				"function outer(int x) -> int { return inner(x) + 1; }\n"
+				"function outer2(int x) -> int { int t = x * 2; return inner(t) + inner(x); }\n"
+				"function sq(int a) -> int { return a * a; }\n"
+				"function run(int n) -> int { int o = 0; int s = 0; for (int i = 1; i <= n; ++i) { s += sq(i); o += outer(i); } return o * 1000 + s; }\n"
+				"function run2(string tag, int n) -> int { int o = 0; for (int i = 1; i <= n; ++i) { o += outer(i) + outer2(i); } return o; }\n"
+				"function run3(int n) -> int { var v = \"s\"; int o = 0; for (int i = 1; i <= n; ++i) { o += outer2(i); } return o; }\n"
+				"to_string(run(6)) + \" \" + to_string(run2(\"x\", 6)) + \" \" + to_string(run3(4));";
+			both(src, "75091 276 98", "nested leaves");
+			both(src, "75091 276 98", "nested leaves, proofs off", false);
+			const std::string l = listing_run(src);
+			auto chunk = [&l](const char* name) { const size_t b = l.find(std::string("== ") + name + " "); return b == std::string::npos ? l : l.substr(b, l.find("\n== ", b + 1) - b); };
+			const std::string r2 = chunk("run2"), r3 = chunk("run3");
+			check_true(r2.find("-- inlined outer") != std::string::npos && r2.find("-- inlined inner") != std::string::npos && r2.find("-- cell loop") != std::string::npos, "the nested leaf grafts under a caller whose slot 0 is no scalar: " + r2);
+			check_true(r3.find("-- inlined outer2") != std::string::npos && r3.find("-- inlined inner") != std::string::npos && r3.find("-- cell loop") != std::string::npos, "the nested leaves over the callee's own local graft: " + r3);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("75091 276 98"), got, "a miss at every " + std::to_string(every));
+			}
+		});
 		// a miss inside a block's inner loop resumes with what the general form reads next: an inner counted loop's compare back to its body
 		// resumes at the generic path's loop back (the var already stepped, never stepped twice), and a compiler value live where the inner
 		// loop's body begins (a graft's parameter over the graft's own loop) is flushed anywhere in that loop, since its back edge reads it again

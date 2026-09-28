@@ -19,7 +19,9 @@ namespace jai::vm {
 // what a body may call besides math:: intrinsics: the registered stdlib aliases, and (one level down) a leaf that grafts itself
 struct land_ctx {
 	const engine* eng = nullptr;
-	std::function<bool(const call_expr*)> nested;
+	std::function<bool(const call_expr*, const std::vector<const type_info*>*)> nested;
+	const std::vector<const type_info*>* frame = nullptr;   // the declared types of the slots a body's call reads its arguments from (null: the caller's frame)
+	const std::unordered_map<const expression*, const call_expr*>* origins = nullptr;   // a clone's call: the body's call it copies, whose arguments the verdict reads
 };
 
 namespace {
@@ -55,6 +57,7 @@ struct inline_context {
 	std::vector<std::pair<const expression*, std::shared_ptr<identifier_expr>>> spills;   // the statement's clone: a spilled operand becomes its temp
 	std::shared_ptr<identifier_expr> receiver;                     // a method graft: `this` and the bare fields read through the caller's receiver
 	bool returns_proven = false;                                   // an untyped lambda whose returns the checker proved one scalar kind
+	std::unordered_map<const expression*, const call_expr*> origins;   // per cloned call: the call it copies
 	const class_definition* field_class = nullptr;
 	std::vector<uint64_t> field_ids;
 	std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>>* alias_pins = nullptr;   // the statement's clone: a pinned alias call keeps its guard
@@ -82,7 +85,11 @@ bool math_call(const call_expr* ce) {
 	return ce->callee && ce->callee->get_type() == node_type::member_expr && detail::math_intrinsic_for_call(static_cast<const member_expr*>(ce->callee.get())) != detail::math_fn::none;
 }
 // `sqrt(x)` naming a registered stdlib math alias from outside the frame: the math temp's guarded form (the real call on a miss)
-bool nested_call(const call_expr* ce, const land_ctx* lc) { return lc && lc->nested && lc->nested(ce); }
+bool nested_call(const call_expr* ce, const land_ctx* lc) {
+	if (!lc || !lc->nested) return false;
+	if (lc->origins) { if (const auto it = lc->origins->find(ce); it != lc->origins->end()) { ce = it->second; } }
+	return lc->nested(ce, lc->frame);
+}
 bool alias_call(const call_expr* ce, const engine* eng) {
 	if (!eng || !ce->callee || ce->callee->get_type() != node_type::identifier_expr || ce->arguments.size() != 1) return false;
 	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
@@ -343,6 +350,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (!c.ok) return nullptr;
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
 		n->static_arg_proofs = ce->static_arg_proofs; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
+		c.origins[n.get()] = ce;
 		for (auto* pins : { c.alias_pins, c.callee_probes }) {
 			if (!pins) continue;
 			if (auto pin = pins->find(ce); pin != pins->end()) { const auto v = pin->second; pins->erase(pin); (*pins)[n.get()] = v; }
@@ -600,8 +608,9 @@ script_value_type spill_kind(const expression* e) {
 
 // the callee's shape and the site's arguments (the statement's position is the caller's business): one small body of the forms the
 // clone takes, every by-value parameter a scalar the checker proved or a `var` taking a scalar local or a literal, every reference
-// parameter a `var&` bound to a plain identifier or an element lvalue
-const char* vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn) const {
+// parameter a `var&` bound to a plain identifier or an element lvalue. frame: the declared types of the slots the arguments are read
+// from, when the call is a body's (null: the caller's frame)
+const char* vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame) const {
 	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
 	if (!fn || !fn->body) return "a callee without a body";
 	if (fn->is_coroutine || fn->is_static) return "a coroutine or a static callee";
@@ -630,10 +639,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 		if (scalar_type(p.type.get())) { if (!proven) return "an unproven argument"; continue; }   // an unproven argument would bind out of the call's order (every argument before the first binding)
 		if (any_type(p.type.get())) {
 			if (a->get_type() == node_type::literal_expr) continue;
-			if (a->get_type() == node_type::identifier_expr) {
-				auto* id = static_cast<const identifier_expr*>(a);
-				if (id->slot_index != SIZE_MAX && callable_.primitive_slots.count(static_cast<uint32_t>(id->slot_index))) continue;
-			}
+			if (a->get_type() == node_type::identifier_expr && arg_kind(a, frame) != script_value_type::jai_null_type) continue;
 			return "a var parameter bound to more than a scalar local or a literal";
 		}
 		return "a parameter type the graft does not take";
@@ -700,22 +706,12 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		const land_ctx args = args_call ? graft_land_ctx(fn.get()) : plain;   // a leaf in an argument grafts inside the parameter's declaration
 		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get(), &args)) { out.why = "an argument the block cannot land"; return false; } }
 	}
-	inline_context probe; probe.lc = graft_land_ctx(fn.get()); probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
+	inline_context probe; probe.lc = graft_land_ctx(fn.get()); probe.lc.frame = &probe.slot_types; probe.lc.origins = &probe.origins; probe.renames.assign(fn->local_count, nullptr); probe.result_type = graft_result_type(fn.get()); probe.callee_name = fn->name; probe.in_loop = in_loop;
 	probe.returns_proven = fn->graft_return_kind != 0;
 	probe.receiver = out.receiver;
-	probe.ref_slots.assign(fn->local_count, 0); probe.ref_stored.assign(fn->local_count, 0); probe.ref_store_unproven.assign(fn->local_count, 0); probe.slot_types.assign(fn->local_count, nullptr);
-	for (size_t i = 0; i < fn->parameters.size(); ++i) {
-		const parameter& p = fn->parameters[i];
-		if (p.slot_index >= fn->local_count) continue;
-		probe.slot_types[p.slot_index] = p.type.get();
-		if (!p.is_reference) continue;
-		probe.ref_slots[p.slot_index] = 1;
-		if (call->arguments[i]->get_type() != node_type::identifier_expr) continue;
-		// a reference parameter's declared type binds nothing: the variable it names is what it holds
-		auto* id = static_cast<const identifier_expr*>(call->arguments[i].get());
-		const auto declared = id->names_value_decl ? callable_.slot_types.find(static_cast<uint32_t>(id->slot_index)) : callable_.slot_types.end();
-		probe.slot_types[p.slot_index] = declared == callable_.slot_types.end() ? nullptr : declared->second;
-	}
+	probe.ref_slots.assign(fn->local_count, 0); probe.ref_stored.assign(fn->local_count, 0); probe.ref_store_unproven.assign(fn->local_count, 0);
+	graft_param_types(call.get(), fn.get(), nullptr, probe.slot_types);   // a reference parameter's declared type binds nothing: the variable it names is what it holds
+	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { probe.ref_slots[p.slot_index] = 1; } }
 	if (!void_type(fn->return_type.get())) { auto r = std::make_shared<identifier_expr>(fn->body->location, std::string_view("\x01inl"), uint64_t(1)); probe.result = r; probe.pins.push_back(r); }
 	(void)clone_body(fn->body->declarations, probe, true);
 	if (!probe.ok) { out.why = probe.why ? probe.why : "a body the graft does not take"; return false; }
@@ -819,30 +815,82 @@ land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
 	land_ctx lc;
 	lc.eng = engine_;
 	{
-		lc.nested = [this, fn](const call_expr* ce) {
+		lc.nested = [this, fn](const call_expr* ce, const std::vector<const type_info*>* frame) {
 			if (!ce->callee || ce->callee->get_type() != node_type::identifier_expr || !ever_stamped(ce->proven_callee_decl)) return false;
 			const std::shared_ptr<const function_decl> inner = ce->proven_callee_decl.lock();
 			if (!inner || !inner->body || inner->body.get() == fn->body.get()) return false;
-			if (auto memo = nested_land_memo_.find(ce); memo != nested_land_memo_.end()) return memo->second;
+			// the verdict's inputs, never a clone's address: the callee, the grafts around it, and each argument's shape, proof and kind
+			std::string key;
+			auto put = [&key](uint64_t v) { key.append(reinterpret_cast<const char*>(&v), sizeof v); };
+			put(reinterpret_cast<uintptr_t>(fn)); put(reinterpret_cast<uintptr_t>(inner.get()));
+			for (const block_stmt* b : graft_bodies_) { put(reinterpret_cast<uintptr_t>(b)); }
+			put(UINT64_MAX);
+			for (size_t i = 0; i < ce->arguments.size(); ++i) {
+				const expression* a = ce->arguments[i].get();
+				uint64_t code = static_cast<uint64_t>(a->get_type());
+				if (a->get_type() == node_type::identifier_expr) {
+					auto* id = static_cast<const identifier_expr*>(a);
+					code |= (id->slot_index == SIZE_MAX ? 1u : 0u) << 8 | (id->global_qualified ? 1u : 0u) << 9 | (id->names_value_decl ? 1u : 0u) << 10;
+				} else if (a->get_type() == node_type::binary_expr) {
+					code |= static_cast<uint64_t>(static_cast<const binary_expr*>(a)->op.type) << 16;
+				}
+				code |= static_cast<uint64_t>(arg_kind(a, frame)) << 32;
+				code |= static_cast<uint64_t>(i < ce->static_arg_proofs.size() ? ce->static_arg_proofs[i] : 0) << 48;
+				put(code);
+			}
+			if (const auto memo = nested_land_memo_.find(key); memo != nested_land_memo_.end()) return memo->second;
 			graft_bodies_.push_back(fn->body.get());
-			bool ok = inline_eligible(ce, inner.get()) == nullptr;
+			bool ok = inline_eligible(ce, inner.get(), frame) == nullptr;
 			if (ok) {
 				// the body the inner graft will clone, held to the block's landing rules: a leaf that stays a call inside the graft would only
 				// widen the caller's frame
-				inline_context probe; probe.lc = graft_land_ctx(inner.get()); probe.renames.assign(inner->local_count, nullptr); probe.result_type = graft_result_type(inner.get());
+				inline_context probe; probe.lc = graft_land_ctx(inner.get()); probe.lc.frame = &probe.slot_types; probe.lc.origins = &probe.origins; probe.renames.assign(inner->local_count, nullptr); probe.result_type = graft_result_type(inner.get());
 				probe.callee_name = inner->name; probe.in_loop = true; probe.returns_proven = inner->graft_return_kind != 0;
 				probe.ref_slots.assign(inner->local_count, 0);
+				graft_param_types(ce, inner.get(), frame, probe.slot_types);
 				for (const parameter& p : inner->parameters) { if (p.is_reference && p.slot_index < inner->local_count) { probe.ref_slots[p.slot_index] = 1; } }
 				if (!void_type(inner->return_type.get())) { auto r = std::make_shared<identifier_expr>(inner->body->location, std::string_view("\x01inl"), uint64_t(1)); probe.result = r; probe.pins.push_back(r); }
 				(void)clone_body(inner->body->declarations, probe, true);
 				ok = probe.ok;
 			}
 			graft_bodies_.pop_back();
-			nested_land_memo_[ce] = ok;
+			nested_land_memo_[key] = ok;
 			return ok;
 		};
 	}
 	return lc;
+}
+
+// an argument's kind where the call reads it: a literal's, or a local's declared scalar type in the frame (null: the caller's)
+script_value_type vm_compiler::arg_kind(const expression* a, const std::vector<const type_info*>* frame) const {
+	using K = script_value_type;
+	if (a->get_type() == node_type::literal_expr) {
+		const script_value& v = static_cast<const literal_expr*>(a)->value;
+		return v.is_int() ? K::jai_int_type : v.is_float() ? K::jai_float_type : v.is_bool() ? K::jai_bool_type : K::jai_null_type;
+	}
+	if (a->get_type() != node_type::identifier_expr) return K::jai_null_type;
+	auto* id = static_cast<const identifier_expr*>(a);
+	if (id->slot_index == SIZE_MAX || id->global_qualified) return K::jai_null_type;
+	const type_info* t = nullptr;
+	if (frame) { t = id->slot_index < frame->size() ? (*frame)[id->slot_index] : nullptr; }
+	else if (const auto it = callable_.slot_types.find(static_cast<uint32_t>(id->slot_index)); it != callable_.slot_types.end()) { t = it->second; }
+	return scalar_type(t) ? t->base_type : K::jai_null_type;
+}
+
+// the declared types of a graft's parameter slots as its clone reads them: a by-value parameter's own, a reference parameter bound to a
+// variable that variable's (the rename makes it the variable), from the frame the arguments are read in (null: the caller's)
+void vm_compiler::graft_param_types(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, std::vector<const type_info*>& out) const {
+	out.assign(fn->local_count, nullptr);
+	for (size_t i = 0; i < fn->parameters.size() && i < call->arguments.size(); ++i) {
+		const parameter& p = fn->parameters[i];
+		if (p.slot_index >= fn->local_count) continue;
+		if (!p.is_reference) { out[p.slot_index] = p.type.get(); continue; }
+		if (call->arguments[i]->get_type() != node_type::identifier_expr) continue;
+		auto* id = static_cast<const identifier_expr*>(call->arguments[i].get());
+		if (!id->names_value_decl || id->slot_index == SIZE_MAX) continue;
+		if (frame) { if (id->slot_index < frame->size()) { out[p.slot_index] = (*frame)[id->slot_index]; } }
+		else if (const auto it = callable_.slot_types.find(static_cast<uint32_t>(id->slot_index)); it != callable_.slot_types.end()) { out[p.slot_index] = it->second; }
+	}
 }
 
 // the graft's result type: the declared one, or for an untyped lambda the kind the checker proved its returns yield
@@ -876,14 +924,48 @@ std::shared_ptr<identifier_expr> vm_compiler::inline_temp(const source_location&
 	callable_.declared.insert(inline_symbol_);   // a private name no source spells: declared for the callable once
 	auto t = std::make_shared<identifier_expr>(loc, std::string_view("\x01inl"), inline_symbol_);
 	t->slot_index = temp_next_++; t->names_value_decl = true;
+	callable_.slot_types.erase(static_cast<uint32_t>(t->slot_index));   // a slot an earlier graft declared: the temp holds anything
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 	chunk_->nodes.push_back(t);
 	return t;
 }
 
 // the spills, the graft into the result temp, the statement rewritten over the temps
-expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expression_ptr& root) {
+expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expression_ptr& root, const char*& refused) {
 	const function_decl* fn = plan.fn.get(); const std::shared_ptr<call_expr>& call = plan.call;
+	// the body's clone as the graft compiles it: the callee's slots above the frame, a reference parameter bound to a variable renamed to it
+	auto setup = [&](inline_context& c, size_t base, const std::shared_ptr<identifier_expr>& result) {
+		c.lc = graft_land_ctx(fn);
+		c.lc.frame = &c.slot_types;
+		c.lc.origins = &c.origins;
+		c.slot_offset = base;
+		c.renames.assign(fn->local_count, nullptr);
+		c.ref_slots.assign(fn->local_count, 0);
+		for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { c.ref_slots[p.slot_index] = 1; } }
+		c.result = result; c.result_type = graft_result_type(fn); c.callee_name = fn->name; c.in_loop = plan.in_loop;
+		c.returns_proven = fn->graft_return_kind != 0;
+		c.receiver = plan.receiver;
+		graft_param_types(call.get(), fn, nullptr, c.slot_types);
+	};
+	auto rename = [&](inline_context& c, size_t i) {   // a reference parameter bound to a variable is renamed to it
+		auto* id = static_cast<const identifier_expr*>(call->arguments[i].get());
+		c.renames[fn->parameters[i].slot_index] = copy_identifier(id, id->location, c);
+	};
+	// the clone's verdict before anything is emitted, with the slots it will have: a body the plan's probe took and this clone does not keeps the
+	// call (the graft never compiles a body its clone refused)
+	refused = nullptr;
+	{
+		size_t temps = 0;
+		for (const auto& sp : plan.spills) { if (sp.second != script_value_type::jai_object_type) { ++temps; } }
+		std::shared_ptr<identifier_expr> r;
+		if (!void_type(fn->return_type.get())) { r = std::make_shared<identifier_expr>(call->location, std::string_view("\x01inl"), uint64_t(1)); r->slot_index = temp_next_ + temps; r->names_value_decl = true; }
+		inline_context dry;
+		setup(dry, temp_next_ + temps + (r ? 1 : 0), r);
+		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (fn->parameters[i].is_reference && call->arguments[i]->get_type() == node_type::identifier_expr) { rename(dry, i); } }
+		if (r) { dry.pins.push_back(r); }
+		(void)clone_body(fn->body->declarations, dry, true);
+		if (!dry.ok) { refused = dry.why ? dry.why : "a body the graft does not take"; return root; }
+	}
 	if (graft_nesting_++ == 0) { graft_tree_nodes_ = 0; }
 	const bool was_off = inlining_off_;
 	inlining_off_ = true;   // the spills, the graft's statements and the fallback compile plainly
@@ -961,14 +1043,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	temp_next_ += fn->local_count;   // the callee's slots
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 	inline_context ctx;
-	ctx.lc = graft_land_ctx(fn);
-	ctx.slot_offset = base;
-	ctx.renames.assign(fn->local_count, nullptr);
-	ctx.ref_slots.assign(fn->local_count, 0);
-	for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { ctx.ref_slots[p.slot_index] = 1; } }
-	ctx.result = result; ctx.result_type = graft_result_type(fn); ctx.callee_name = fn->name; ctx.in_loop = plan.in_loop;
-	ctx.returns_proven = fn->graft_return_kind != 0;
-	ctx.receiver = plan.receiver;
+	setup(ctx, base, result);
 	// the parameters: a by-value parameter is a declaration of the callee's type from the argument (the assignment table
 	// bind_parameters runs; the checker proved the type, so nothing converts); a reference parameter bound to an identifier is a
 	// renaming, bound to an element lvalue an alias declaration (a rebind)
@@ -976,11 +1051,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
 		const expression_ptr& a = call->arguments[i];
-		if (p.is_reference && a->get_type() == node_type::identifier_expr) {
-			auto* id = static_cast<const identifier_expr*>(a.get());
-			ctx.renames[p.slot_index] = copy_identifier(id, id->location, ctx);
-			continue;
-		}
+		if (p.is_reference && a->get_type() == node_type::identifier_expr) { rename(ctx, i); continue; }
 		auto d = std::make_shared<variable_decl>(call->location, p.is_reference ? inline_ref_type() : p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), a);   // an element: its alias, as the call binds it
 		d->slot_index = base + p.slot_index;
 		ctx.pins.push_back(d);
@@ -1032,7 +1103,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	patch_jump(jump_ip, join);
 	for (size_t at : exits) { patch_jump(at, join); }
 	temp_next_ = base;   // the callee's slots go; the temps stay for the statement
-	for (size_t s = base; s < base + fn->local_count; ++s) { callable_.primitive_slots.erase(static_cast<uint32_t>(s)); }   // another graft may put anything in these slots
+	for (size_t s = base; s < base + fn->local_count; ++s) { callable_.primitive_slots.erase(static_cast<uint32_t>(s)); callable_.slot_types.erase(static_cast<uint32_t>(s)); }   // another graft may put anything in these slots
 	if (result) { callable_.primitive_slots.erase(static_cast<uint32_t>(result->slot_index)); }   // the fallback declares it as anything
 	inlining_off_ = was_off;
 	sc.replace = call.get(); sc.result = result; sc.result_type = graft_result_type(fn);   // a replaced argument's proof reads the type
@@ -1051,16 +1122,18 @@ expression_ptr vm_compiler::hoist_leaf_calls(const expression_ptr& e, bool state
 	expression_ptr cur = e;
 	for (size_t round = 0; round < k_inline_max_hoists && cur; ++round) {
 		hoist_plan plan;
-		if (!plan_hoist(cur, statement_position && round == 0, plan)) {
-			if (plan.why && plan.call && plan.call->callee && plan.call->callee->get_type() == node_type::identifier_expr) {   // the kept call, named for the listing and the profile
-				chunk_->inline_refusals.push_back({std::string(static_cast<const identifier_expr*>(plan.call->callee.get())->name), plan.why, static_cast<uint32_t>(plan.call->location.line)});
-			} else if (plan.why && plan.call && ever_stamped(plan.call->proven_method_decl) && plan.call->callee->get_type() == node_type::member_expr) {
-				chunk_->inline_refusals.push_back({"." + std::string(static_cast<const member_expr*>(plan.call->callee.get())->member), plan.why, static_cast<uint32_t>(plan.call->location.line)});
-			}
-			break;
+		if (plan_hoist(cur, statement_position && round == 0, plan)) {
+			const char* refused = nullptr;
+			expression_ptr next = compile_hoist(plan, cur, refused);
+			if (!refused) { cur = next; changed = true; continue; }
+			plan.why = refused;
 		}
-		cur = compile_hoist(plan, cur);
-		changed = true;
+		if (plan.why && plan.call && plan.call->callee && plan.call->callee->get_type() == node_type::identifier_expr) {   // the kept call, named for the listing and the profile
+			chunk_->inline_refusals.push_back({std::string(static_cast<const identifier_expr*>(plan.call->callee.get())->name), plan.why, static_cast<uint32_t>(plan.call->location.line)});
+		} else if (plan.why && plan.call && ever_stamped(plan.call->proven_method_decl) && plan.call->callee->get_type() == node_type::member_expr) {
+			chunk_->inline_refusals.push_back({"." + std::string(static_cast<const member_expr*>(plan.call->callee.get())->member), plan.why, static_cast<uint32_t>(plan.call->location.line)});
+		}
+		break;
 	}
 	return cur;
 }

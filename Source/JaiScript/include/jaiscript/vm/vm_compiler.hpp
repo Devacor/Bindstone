@@ -175,12 +175,14 @@ namespace jai::vm {
         bool inlining_off_ = false;
         size_t graft_nesting_ = 0;       // compile_hoist's own nesting: grafts compiled inside a graft (its body, its parameters)
         size_t graft_tree_nodes_ = 0;    // the nodes cloned for the outermost graft being compiled and every graft inside it
-        std::unordered_map<const call_expr*, bool> nested_land_memo_;   // a call a graft's body makes: whether it grafts as the body's block instructions
+        std::unordered_map<std::string, bool> nested_land_memo_;   // a call a graft's body makes, by what decides it (the callee, the grafts around it, its arguments' shapes and kinds): whether it grafts as the body's block instructions
         uint64_t inline_symbol_ = 0;
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> alias_pins_;   // a stdlib alias whose callee a guard resolved at its place (call site, mark temp): compile_math_into_temp takes them
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> callee_probes_;   // a call whose callee was probed at its place ahead of a graft (probe ip, unused): compile_call takes the probe
         struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
-        const char* inline_eligible(const call_expr* call, const function_decl* fn) const;   // nullptr: the graft takes the call; else the rule that keeps it
+        const char* inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame = nullptr) const;   // nullptr: the graft takes the call; else the rule that keeps it
+        script_value_type arg_kind(const expression* a, const std::vector<const type_info*>* frame) const;
+        void graft_param_types(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, std::vector<const type_info*>& out) const;
         bool names_slot(const expression* e, uint32_t slot);
         bool push_value_temp(const std::shared_ptr<call_expr>& expr, identifier_expr* recv, const expression_ptr& arg, fused_operand& out);
         bool plan_hoist(const expression_ptr& root, bool statement_position, hoist_plan& out);
@@ -189,7 +191,7 @@ namespace jai::vm {
         type_info_ptr graft_result_type(const function_decl* fn);
         struct land_ctx graft_land_ctx(const function_decl* fn);
         std::shared_ptr<identifier_expr> inline_temp(const source_location& loc);
-        expression_ptr compile_hoist(const hoist_plan& plan, const expression_ptr& root);
+        expression_ptr compile_hoist(const hoist_plan& plan, const expression_ptr& root, const char*& refused);
         expression_ptr hoist_leaf_calls(const expression_ptr& e, bool statement_position, bool& changed);
         void compile_graft_exit();
         bool try_inline_expression(const expression_ptr& e);

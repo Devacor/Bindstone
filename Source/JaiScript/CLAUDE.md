@@ -540,8 +540,9 @@ engine stays usable", not by `check_throws`.
   string; the scan stops at the data end and the host-only `engine::binary_scan_limit`, default 1 MiB, kept in
   `execution_limits`), `bytes(n)`, `seek/skip/pos/size/remaining/at_end`), `binary::writer w;` (the mirror writers,
   `text(s, n)` NUL-pads/truncates, `text_null_terminated(s)` / `(s, n)` always end in a NUL and refuse a NUL inside, `bytes`,
-  `seek` to patch, `to_string()`); width tokens `binary::int8 ... binary::float64`, `binary::text(n)`,
-  `binary::text_null_terminated(n)`; `binary::layout(name, width, ...)`, `r.unpack(layout | pairs)`
+  `seek` to patch, `to_string()`); width tokens `binary::int8 ... binary::float64`, `binary::text(n)` (n raw bytes, NULs kept,
+  = `r.text(n)` / `w.text(s, n)`), `binary::text_null_terminated(n)` (= `r.text_null_terminated(n)` / `w.text_null_terminated(s, n)`;
+  Dev ruling 2026-09-28); `binary::layout(name, width, ...)`, `r.unpack(layout | pairs)`
   -> `map<string, var>`, `w.pack(layout, map)`, `r.read(Class, layout)` (fields in declaration order, bases first). A read
   past the end / a value that does not fit / a bad layout is catchable and moves nothing. Hot reader/writer members take the
   vm's `class_definition::native_method` lanes (declining shapes fall to the bound method); the strict checker knows the

@@ -230,7 +230,7 @@ public:
         });
 
         test("layouts_unpack_pack_and_read", [expect, caught]() {
-            const std::string layout = "var L = binary::layout(\"name\", binary::text(8), \"pos\", binary::int32, \"size\", binary::uint16); ";
+            const std::string layout = "var L = binary::layout(\"name\", binary::text_null_terminated(8), \"pos\", binary::int32, \"size\", binary::uint16); ";
             expect(layout + "to_string(L.size()) + \" \" + to_string(L.count())", "14 3", "size and count");
             expect(layout + "binary::writer w; w.pack(L, {\"name\": \"E1M1\", \"pos\": -5, \"size\": 7}); to_string(w.size()) + \" \" + to_json(w.to_string().reader().unpack(L))",
                    "14 {\"name\":\"E1M1\",\"pos\":-5,\"size\":7}", "pack then unpack");
@@ -245,6 +245,20 @@ public:
                    "var e = w.to_string().reader().read(Entry, L); e.name + \" \" + to_string(e.pos) + \" \" + to_string(e.size)", "PLAYPAL 12 99", "read fills a class in field order");
             expect("class Base { int a; } class Derived : Base { var b; } var d = \"\\x01\\x02\".reader().read(Derived, binary::layout(\"x\", binary::uint8, \"y\", binary::uint8)); to_string(d.a) + \" \" + to_string(d.b)", "1 2", "read fills base fields first");
             expect("class T { utf8_string n; } var t = \"ab\".reader().read(T, binary::layout(\"n\", binary::text(2))); type_of(t.n)", "utf8_string", "a utf8_string field takes text");
+        });
+
+        test("layout_text_is_raw_like_the_reader_and_writer", [expect]() {
+            // binary::text(n) in a layout is n raw bytes, NULs kept, exactly r.text(n) and w.text(s, n)
+            const std::string raw = "var L = binary::layout(\"t\", binary::text(5)); ";
+            expect(raw + "var m = string::from_bytes([97, 0, 98, 0, 0]).reader().unpack(L); to_json(m[\"t\"].to_bytes())", "[97,0,98,0,0]", "unpack keeps embedded and trailing NULs");
+            expect(raw + "class C { string t; } var c = string::from_bytes([0, 1, 0, 2, 0]).reader().read(C, L); to_json(c.t.to_bytes())", "[0,1,0,2,0]", "read keeps them too");
+            for (const char* value : {"string::from_bytes([97, 0, 98])", "\"abcdefgh\"", "\"\"", "string::from_bytes([0, 0, 0, 0, 0, 0])"}) {
+                expect(raw + "var v = " + value + "; binary::writer a; a.pack(L, {\"t\": v}); binary::writer b; b.text(v, 5); "
+                       "to_string(a.to_string() == b.to_string()) + \" \" + to_string(a.to_string().reader().unpack(L)[\"t\"] == b.to_string().reader().text(5)) + \" \" + to_json(a.to_string().to_bytes())",
+                       std::string("true true ") + (std::string(value) == "\"abcdefgh\"" ? "[97,98,99,100,101]" : std::string(value) == "\"\"" ? "[0,0,0,0,0]" : std::string(value).find("[97") != std::string::npos ? "[97,0,98,0,0]" : "[0,0,0,0,0]"),
+                       (std::string("pack and w.text(s, n) agree byte for byte: ") + value).c_str());
+            }
+            expect("var L = binary::layout(\"t\", binary::text_null_terminated(5)); to_json(string::from_bytes([97, 0, 98, 0, 0]).reader().unpack(L))", "{\"t\":\"a\"}", "text_null_terminated(n) still ends at the first NUL");
         });
 
         test("layout_errors_are_catchable", [expect, caught]() {

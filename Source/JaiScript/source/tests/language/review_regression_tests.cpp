@@ -2076,18 +2076,18 @@ public:
                 "an rvalue subscript base runs once and raises the vm's text", check_mode::strict);
         });
         test("subscript_compound_string_base_text", [this, expect_order]() {
-            // Pinned alignment (interpreter -> vm): the interpreter used to re-dispatch a
-            // synthetic `=` (index twice, the read-only-string text)
+            // Pinned alignment (interpreter -> vm): the index runs once per compound store; a non-text
+            // result raises after the arithmetic and leaves the string alone, a text result replaces the char
             expect_order(R"(
                 var log = "";
-                string s = "abc";
+                var s = "abc";
                 int idx() { log += "I"; return 0; }
                 string c1 = ""; string c2 = "";
                 try { s[idx()] += 1; } catch (e) { c1 = e; }
                 try { s[idx()] += "x"; } catch (e) { c2 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + s;
-            )", "II|Cannot assign to rvalue expression|Cannot assign to rvalue expression|abc",
-                "a string subscript compound runs the index once and leaves the string alone", check_mode::strict);
+            )", "II|Cannot assign int to a string character (it takes a char or a string)||axbc",
+                "a string subscript compound runs the index once", check_mode::strict);
         });
         test("map_compound_missing_key_concat_raises", [this, expect_order]() {
             // Pinned alignment (interpreter -> vm): the interpreter's fallback silently

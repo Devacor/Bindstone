@@ -2975,6 +2975,16 @@ private:
 				const ctype recv = declared_container_receiver(subscript->left.get(), infer(subscript->left.get()));
 				infer(subscript->right.get());
 				stamp(subscript->static_operand_class, operand_class_unknown, operand_class_unknown);
+				if (recv.kind == ctype::string_k || recv.kind == ctype::utf8_k) {
+					// a string character takes a char or a string (its text replaces the character)
+					const ctype character = ctype::make(recv.kind == ctype::string_k ? ctype::char_k : ctype::utf8_k);
+					const ctype stored = compound ? binary_result(character, base_op, rhs) : rhs;
+					if (!stored.is_unknown() && stored.kind != ctype::char_k && stored.kind != ctype::string_k && stored.kind != ctype::utf8_k) {
+						diag(diag_level::error, a->location, "cannot store into '" + ctype_name(recv) +
+							 "': a string character takes a char or a string, got '" + ctype_name(stored) + "'");
+					}
+					return stored;
+				}
 				const ctype element = container_value_type(recv);
 				const ctype stored = compound ? binary_result(element, base_op, rhs) : rhs;
 				const auto issue = container_element_issue(stored, element.ti);

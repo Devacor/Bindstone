@@ -57,6 +57,7 @@ read around its errors.
 | `bool` | anything | truthy conversion |
 | `string` | anything | to_string conversion; objects use their `to_string()` when defined |
 | `char` | char, object with `to_char()` | `char c = 65` is a runtime error too (`cast<char>` is the spelling) |
+| `s[i]` of a declared `string` / `utf8_string` (store target) | char, string, utf8_string (the text replaces the character) | anything else is `cannot store into 'string': a string character takes a char or a string, got 'int'`; a compound store checks the operator's result on the character (`s[i] += 1` is int, rejected; `s[i] += "x"` is text) |
 | `array<T>` / `map<K,V>` | compatible container elements and keys | known literal elements, nested literals and declared container types are checked; typed subscript reads carry T/V, and typed push arguments and subscript stores are checked; var-sourced values stay lenient |
 | object `C` | null (a typed null); same class; derived→base; a `shared_ptr<C or derived>` handle; ctor conversion `C(src)` through exactly ONE true 1-param ctor whose parameter takes `src` directly (no chaining, no `to_X()` on the way in); on plain assignment, a user `operator=` overload of `C` (or an in-script base) that accepts `src` | unrelated classes with no viable 1-arg ctor or `operator=` = error; array/map/function into object = error; a registered ancestor's `operator=` is lenient |
 | `shared_ptr<T>` | null or compatible object/handle sources | existing shared-handle declaration rules |
@@ -116,7 +117,7 @@ methods, inherited fields) all check against the declared type.
 **Calls** — checked only when the callee resolves statically:
 - same-script functions/ctors/methods: arity (with defaults) + per-arg assignability
   (same conversion table, element boundary included — note a `string` parameter accepts anything). Overloads: error
-  only if NO overload matches. A reference parameter takes any argument type, but a literal
+  only if NO overload matches. A reference parameter takes any argument type. A literal
   (a number, string, char, bool or null literal, an array or map literal) where every viable
   overload binds the parameter by reference is `cannot pass a literal to reference parameter
   'names' of 'index_of_name' (a reference parameter binds a variable)` - the runtime refuses

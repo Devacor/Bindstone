@@ -464,6 +464,7 @@ namespace jai {
         checked_result<void> dispatch_decl_resuming(declaration* decl);
         checked_result<void> run_case_body(ast_node* self, const std::vector<statement_ptr>& body);
         checked_result<void> store_through_subscript_reference(script_value& target_ref, script_value value);
+        script_value string_element_pin(script_value& base_raw, const expression* base_expr);
         // Unwind side (cold): park a node's produced operands / mark a statement's root
         void park_operands(ast_node* node, uint32_t phase, size_t index, std::vector<script_value> partial);
         void note_statement_yield(ast_node* stmt, expression* root);
@@ -840,6 +841,9 @@ namespace jai {
         // grow the map. visit_binary captures and clears this immediately so
         // nested subscripts are treated as reads.
         bool lvalue_target_context_ = false;
+        // The compound-store target read (s[i] op= v): a string base mints a STRING-ELEMENT
+        // reference like the `=` target does; captured and cleared with the flag above
+        bool string_target_context_ = false;
 
         // Call depth tracking for recursion limit
         int current_call_depth_ = 0;

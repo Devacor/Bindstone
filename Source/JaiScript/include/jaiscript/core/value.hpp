@@ -303,6 +303,10 @@ namespace detail { struct argument_capture_storage; }
         // on every touch, assign-through writes through the setter (a setter-less property
         // stays the silent no-op `receiver.name = v` is today).
         static script_value make_property_reference(const script_value& receiver, uint64_t field_id, engine* eng);
+        // STRING-ELEMENT reference (a string subscript as a store target): `pin` is a reference
+        // to the string's storage, `index` a byte of a string or a character of a utf8_string;
+        // deref reads that character, stores replace it (detail/string_element.hpp)
+        static script_value make_string_element_reference(const script_value& pin, size_t index, engine* eng);
         static script_value make_function(const script_function& func, engine* eng);
         // Rvalue mint: moves the std::function into its strong_ptr box (every backend
         // mint passes a temporary - the copy was pure churn)
@@ -1997,10 +2001,16 @@ namespace detail { struct argument_capture_storage; }
             const script_value& materialize_property(engine* eng);                       // throws on a failed getter
             checked_result<script_value> read_property(engine* eng, bool bind_point) const;   // checked twin
             void store_property(const script_value& value, engine* eng);                // setter; no setter = no-op
-            // Scratch-backed modes (typed element, PROPERTY): deref() hands back the
-            // holder's inline scratch, so in-place mutators (++/--) must commit_scratch()
-            // after writing - the buffer store / the setter call.
-            bool scratch_backed() const noexcept { return typed_element() || property_ref(); }
+            // STRING-ELEMENT mode: string_base pins the string's storage (another holder),
+            // container_index names the byte / utf8 character; deref() materializes it
+            // into the inline scratch, stores replace it through detail/string_element.hpp.
+            strong_ptr<reference_holder> string_base;
+            bool string_element() const noexcept { return static_cast<bool>(string_base); }
+            const script_value& materialize_string_element(engine* eng);   // value.cpp; throws when the character is gone
+            // Scratch-backed modes (typed element, PROPERTY, STRING-ELEMENT): deref() hands
+            // back the holder's inline scratch, so in-place mutators (++/--) must
+            // commit_scratch() after writing - the buffer store / the setter call.
+            bool scratch_backed() const noexcept { return typed_element() || property_ref() || string_element(); }
             void commit_scratch();
 
             // Mode-based write-target resolution for the immediate-use assignment
@@ -2429,9 +2439,12 @@ namespace detail { struct argument_capture_storage; }
             return nullptr;
         }
 
+        // A STRING-ELEMENT holder's pin as a reference value (value.cpp)
+        static script_value make_string_element_pin(const reference_holder& holder, engine* eng);
+
         // Non-null iff *this is a reference whose deref() hands back the holder's inline
-        // scratch (a TYPED array element or a C++ PROPERTY): in-place mutators must
-        // commit_scratch() after writing (typed_array_design.md, reference_model.md).
+        // scratch (a TYPED array element, a C++ PROPERTY or a STRING-ELEMENT): in-place
+        // mutators must commit_scratch() after writing (typed_array_design.md, reference_model.md).
         reference_holder* scratch_ref_holder() noexcept {
             if (raw_storage_index() != TYPEID_REFERENCE) { return nullptr; }
             auto& holder = *storage_.get_if<TYPEID_REFERENCE>();

@@ -25,6 +25,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
+#include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/capture_ladder.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
@@ -1679,6 +1680,30 @@ script_value* vm_backend::string_receiver_cell(frame& f, const call_site& site, 
 		return engine_->get_global_environment()->get_value_ptr(site.receiver_symbol);
 	}
 	return resolve_local_or_env(f, site.receiver_slot, site.receiver_symbol);
+}
+
+script_value vm_backend::string_element_pin(frame& f, script_value& base_raw, uint32_t site_index) {
+	if (base_raw.is_reference()) {
+		return base_raw;
+	}
+	if (site_index == k_invalid_u32 || site_index >= f.code->string_target_sites.size()) {
+		return make_null();
+	}
+	const string_target_site& site = f.code->string_target_sites[site_index];
+	const auto* sub = static_cast<const binary_expr*>(f.code->nodes[site.node].get());
+	if (sub->left->get_type() == node_type::identifier_expr) {
+		const auto* ident = static_cast<const identifier_expr*>(sub->left.get());
+		const uint64_t symbol_id = f.code->symbols[site.base_symbol];
+		script_value* cell = ident->global_qualified ? engine_->get_global_environment()->get_value_ptr(symbol_id)
+		                                             : resolve_local_or_env(f, site.base_slot, symbol_id);
+		return cell ? share_env_ref(*cell) : make_null();
+	}
+	ensure_frame_member_scope(f, environment_.get());   // the kernel reads the frame's member scope
+	auto resolved = detail::resolve_ref_lvalue(sub->left.get(), caller_view(&f), environment_.get(), engine_, symbolizer_);
+	if (resolved && resolved.value().is_reference()) {
+		return std::move(resolved.value());
+	}
+	return make_null();
 }
 
 // resolve_local_or_env with the env path memoized per instruction (slot 2*ip); the
@@ -6090,17 +6115,12 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
+	const bool string_target = lvalue_write || (ins.a & index_flag_string_target) != 0;
 	if (left.is_string()) {
-		// Read-only char subscript (C++-familiar s[i]). Writes stay an error:
-		// strings share storage under copy, so subscript writes would need
-		// copy-on-write - future work, a clear error instead of a silent trap.
-		// (KEEP BYTE-PARALLEL with the interpreter subscript path)
+		// s[i]: byte i as a char; a store target mints a STRING-ELEMENT reference
+		// (detail/string_element.hpp; KEEP BYTE-PARALLEL with the interpreter subscript path)
 		if (!right.is_int()) {
 			return raise_(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
-		}
-		if (lvalue_shape && lvalue_write) {
-			return raise_(make_error_code(runtime_error_code::unsupported_operation),
-				"Strings are read-only through subscript: use substr()/+ to build a new string");
 		}
 		const auto& str = left.unchecked_as_string();
 		script_int index = right.unchecked_as_int();
@@ -6110,18 +6130,22 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				symbolizer_->intern(std::to_string(index)),
 				symbolizer_->intern(std::to_string(str.size())));
 		}
-		stack_.push_back(script_value(static_cast<script_char>(str[static_cast<size_t>(index)]), engine_));
+		const script_char byte = static_cast<script_char>(str[static_cast<size_t>(index)]);
+		if (string_target) {
+			script_value pin = string_element_pin(f, left_raw, (ins.a & index_flag_string_target) != 0 ? ins.c : k_invalid_u32);
+			if (pin.is_reference()) {
+				stack_.push_back(script_value::make_string_element_reference(pin, static_cast<size_t>(index), engine_));
+				return {};
+			}
+		}
+		stack_.push_back(script_value(byte, engine_));
 		return {};
 	}
 
 	if (left.is_utf8_string()) {
-		// u[i]: character i as a utf8_string, read-only like s[i] (KEEP BYTE-PARALLEL with the interpreter subscript path)
+		// u[i]: character i as a utf8_string, a store target like s[i] (KEEP BYTE-PARALLEL with the interpreter subscript path)
 		if (!right.is_int()) {
 			return raise_(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
-		}
-		if (lvalue_shape && lvalue_write) {
-			return raise_(make_error_code(runtime_error_code::unsupported_operation),
-				"Strings are read-only through subscript: use substr()/+ to build a new string");
 		}
 		const script_utf8& text = left.unchecked_as_utf8();
 		const bool cache = !engine_->parallel_region_active();
@@ -6132,6 +6156,13 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				"String index {0} out of bounds for string of size {1}",
 				symbolizer_->intern(std::to_string(index)),
 				symbolizer_->intern(std::to_string(len)));
+		}
+		if (string_target) {
+			script_value pin = string_element_pin(f, left_raw, (ins.a & index_flag_string_target) != 0 ? ins.c : k_invalid_u32);
+			if (pin.is_reference()) {
+				stack_.push_back(script_value::make_string_element_reference(pin, static_cast<size_t>(index), engine_));
+				return {};
+			}
 		}
 		stack_.push_back(detail::utf8::char_value(text, static_cast<size_t>(index), engine_, cache));
 		return {};
@@ -6192,6 +6223,12 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	// at: target_ptr aims at the holder scratch so the enforcement flow below stays
 	// byte-identical, and the result commits into the raw buffer at the end.
 	auto refHolder = target_ref.get_reference_holder();
+	if (refHolder && refHolder->string_element()) {
+		auto stored = detail::store_string_element(*refHolder, value, engine_);
+		if (!stored) { return raise_from(stored); }
+		stack_.push_back(assignment_result_used(f) ? clone_for_assignment(value.deref()) : std::move(value));
+		return {};
+	}
 	const bool typed_element = refHolder && refHolder->typed_element();
 	script_value* target_ptr;
 	if (typed_element) {
@@ -6321,6 +6358,12 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	// and write can't corrupt the heap. TYPED elements: scratch target + buffer commit
 	// (see exec_index_assign).
 	auto refHolder = currentValue.get_reference_holder();
+	if (refHolder && refHolder->string_element()) {
+		auto stored = detail::store_string_element(*refHolder, resultValue, engine_);
+		if (!stored) { return raise_from(stored); }
+		stack_.push_back(old_result ? std::move(postfix_old) : assignment_result_used(f) ? clone_for_assignment(resultValue) : std::move(resultValue));
+		return {};
+	}
 	const bool typed_element = refHolder && refHolder->typed_element();
 	script_value* target_ptr;
 	if (typed_element) {
@@ -6460,7 +6503,8 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 		}
 	}
 	// Slow replay: identical to the old two-op sequence
-	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_write | (ins.a & index_flag_lvalue_shape), 0, 0};
+	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_write | (ins.a & index_flag_lvalue_shape) |
+	                                           (ins.c != k_invalid_u32 ? index_flag_string_target : 0u), 0, ins.c};
 	auto indexed = exec_index(f, index_ins);
 	if (indexed == op_status::failed) {
 		return indexed;
@@ -10225,7 +10269,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 					return {};
 				}
 			}
-			const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
+			const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, p.string_target};
 			const op_status st = exec_index_store(f, store_ins);
 			if (st == op_status::failed) { return st; }
 			if (no_result && !is_unwinding_) { stack_.pop_back(); }
@@ -10379,7 +10423,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.index.const_index)); }
 	else { stack_.push_back(*index_ptr); }
-	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, 0};
+	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, p.string_target};
 	const op_status st = exec_index_store(f, store_ins);
 	if (st == op_status::failed) { return st; }
 	if (no_result && !is_unwinding_) { stack_.pop_back(); }
@@ -10500,7 +10544,8 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 	// Slow replay: identical to the old two-op sequence
 	script_value rhs = std::move(stack_.back());
 	stack_.pop_back();
-	vm_instruction index_ins{opcode::op_index, (ins.b & index_flag_lvalue_shape), 0, 0};
+	vm_instruction index_ins{opcode::op_index, (ins.b & index_flag_lvalue_shape) |
+	                                           (ins.c != k_invalid_u32 ? index_flag_string_target : 0u), 0, ins.c};
 	auto indexed = exec_index(f, index_ins);
 	if (indexed == op_status::failed) {
 		return indexed;

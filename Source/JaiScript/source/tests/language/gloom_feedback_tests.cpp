@@ -326,7 +326,7 @@ public:
 				{ R"(var s = "hello"; s[99];)", "String index 99 out of bounds for string of size 5" },
 				{ R"(var s = "hello"; s[-1];)", "String index -1 out of bounds for string of size 5" },
 				{ R"(var s = "hello"; s["k"];)", "String index must be an integer" },
-				{ R"(var s = "hello"; s[0] = 'x';)", "Strings are read-only through subscript: use substr()/+ to build a new string" },
+				{ R"(var s = "hello"; s[0] = 5;)", "Cannot assign int to a string character (it takes a char or a string)" },
 				{ R"(var a = [1]; a[5];)", "Array index 5 out of bounds for array of size 1" },
 			};
 			for (const auto& [src, core] : cases) {

@@ -322,7 +322,8 @@ namespace jai::binary {
 		script_value read_field(const field& f) {
 			const unsigned char* p = take_field(f);
 			engine* eng = get_engine();
-			if (f.w.is_text()) { return script_value(load_text(p, f.w.length), eng); }
+			if (f.w.k == kind::text) { return script_value(std::string(reinterpret_cast<const char*>(p), f.w.length), eng); }
+			if (f.w.k == kind::text_null_terminated) { return script_value(load_text(p, f.w.length), eng); }
 			if (f.w.is_float()) { return script_value(load_float(f.w.k, p, big_), eng); }
 			return script_value(load_integer(f.w.k, p, big_), eng);
 		}

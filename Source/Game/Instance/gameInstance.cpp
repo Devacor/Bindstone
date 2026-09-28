@@ -76,11 +76,12 @@ float GameInstance::scaleToFit(const MV::BoxAABB<>& a_bounds) {
 
 MV::Point<> GameInstance::viewCorrection(const MV::BoxAABB<>& a_bounds) {
 	auto visible = visibleMapBounds();
+	auto centering = a_bounds.centerPoint() - visible.centerPoint();
 	MV::Point<> correction;
-	if (visible.width() >= a_bounds.width()) { correction.x = ((a_bounds.minPoint.x + a_bounds.maxPoint.x) - (visible.minPoint.x + visible.maxPoint.x)) / 2.0f; }
+	if (visible.width() >= a_bounds.width()) { correction.x = centering.x; }
 	else if (visible.minPoint.x < a_bounds.minPoint.x) { correction.x = a_bounds.minPoint.x - visible.minPoint.x; }
 	else if (visible.maxPoint.x > a_bounds.maxPoint.x) { correction.x = a_bounds.maxPoint.x - visible.maxPoint.x; }
-	if (visible.height() >= a_bounds.height()) { correction.y = ((a_bounds.minPoint.y + a_bounds.maxPoint.y) - (visible.minPoint.y + visible.maxPoint.y)) / 2.0f; }
+	if (visible.height() >= a_bounds.height()) { correction.y = centering.y; }
 	else if (visible.minPoint.y < a_bounds.minPoint.y) { correction.y = a_bounds.minPoint.y - visible.minPoint.y; }
 	else if (visible.maxPoint.y > a_bounds.maxPoint.y) { correction.y = a_bounds.maxPoint.y - visible.maxPoint.y; }
 	return correction;

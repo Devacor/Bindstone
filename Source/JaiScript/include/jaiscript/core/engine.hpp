@@ -494,6 +494,23 @@ namespace jai {
         // The running executable, generic (forward-slash) spelling; empty when the platform cannot say
         static std::string executable_path();
 
+        // The clock every time:: call reads: monotonic is a steady reading, wall the time since the Unix epoch
+        // (UTC), sleep blocks the script thread. An empty provider selects the system one (steady_clock,
+        // system_clock, this_thread::sleep_for). A time:: call reads its provider once; otherwise the engine
+        // reads monotonic only at a host entry, and only after a loaded program names time::execute_elapsed.
+        // engine_elapsed() counts from the system clock's reading at construction, or from zero on a host
+        // monotonic provider.
+        using clock_reading = std::function<std::chrono::nanoseconds()>;
+        using clock_sleep = std::function<void(std::chrono::nanoseconds)>;
+        void time_source(clock_reading monotonic, clock_reading wall, clock_sleep sleep = {});
+        std::chrono::nanoseconds monotonic_now();
+        std::chrono::nanoseconds wall_now();
+        void sleep_for(std::chrono::nanoseconds duration);
+        double engine_elapsed();
+        double execute_elapsed();
+        void note_host_entry();
+        void note_execute_elapsed_use();
+
         // Object creation through registered class system
         template<typename T, typename... Args>
         script_value make_object(Args&&... args) {

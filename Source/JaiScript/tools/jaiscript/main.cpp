@@ -505,12 +505,11 @@ void posix_pump_input() {
 #endif
 
 void register_console_game_io(jai::engine& eng) {
-	eng.add_function("clock_ms", []() -> jai::script_int {
-		return std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count();
+	eng.add_function("clock_ms", [&eng]() -> jai::script_int {
+		return std::chrono::duration_cast<std::chrono::milliseconds>(eng.monotonic_now()).count();
 	});
-	eng.add_function("sleep_ms", [](jai::script_int ms) {
-		if (ms > 0) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+	eng.add_function("sleep_ms", [&eng](jai::script_int ms) {
+		if (ms > 0) { eng.sleep_for(std::chrono::milliseconds(ms)); }
 	});
 	// held-key state from console events, cross-checked against the physical
 	// key so a release delivered to another window (alt-tab mid-press) unsticks

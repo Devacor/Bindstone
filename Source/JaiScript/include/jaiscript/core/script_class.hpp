@@ -256,6 +256,7 @@ inline checked_result<script_value> script_method_dispatch::operator()(const std
     payload.cls = cls;
     payload.definition_env = definition_env;
     payload.this_obj = args[0];
+    if (!backend->is_executing()) { eng->note_host_entry(); }
     return backend->execute_callable(payload, method_args);
 }
 

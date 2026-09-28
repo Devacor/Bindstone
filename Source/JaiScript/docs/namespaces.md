@@ -67,6 +67,13 @@ registers `string::to_lower`, `jai::filesystem` and `reflect::is_enabled`. Such 
 and it is read-only from script: a store raises `Cannot assign to 'name': it is read-only`. A script
 declaration and a host entry never share a name.
 
+A host function entry may declare its signature in `script_namespace_data::signatures` (`host_entry_signature`: arity range, argument
+kinds, the result and an object result's class): the strict checker then checks `ns::f(...)` calls against it and types the result, the way
+the stdlib's `string::` and `time::` entries are checked. A host class registered under a qualified name (`dynamic_binder<T>(eng,
+"time::date")`) is a type by that name: `time::date d;`, a `time::date` parameter or field, `array<time::date>`
+and `cast<time::date>(x)` all spell it, and the namespace entry of the same bare name (`time::date()`) holds its
+constructor.
+
 ## Reserved names
 
 `reflect` and `jai` (and every `reflect::...` / `jai::...`) are the engine's: a script cannot declare or

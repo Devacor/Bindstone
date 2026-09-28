@@ -56,6 +56,7 @@ namespace {
         // read from any function (a store-enforced invariant; every consumer guards at runtime)
         std::unordered_map<uint64_t, uint8_t> global_elem_cls;
         string_symbolizer* symbolizer = nullptr;
+        bool names_execute_elapsed = false;   // the engine stamps host entries once a loaded program can read them
 
         void escape(uint64_t symbol) {
             if (symbol == UINT64_MAX) {
@@ -484,9 +485,15 @@ namespace {
                     walk_args(c->arguments);
                     break;
                 }
-                case node_type::member_expr:
-                    walk_expr(static_cast<member_expr*>(e)->object.get());
+                case node_type::member_expr: {
+                    auto* m = static_cast<member_expr*>(e);
+                    if (m->is_static && m->member == "execute_elapsed" && m->object && m->object->get_type() == node_type::identifier_expr &&
+                        static_cast<identifier_expr*>(m->object.get())->name == "time") {
+                        names_execute_elapsed = true;
+                    }
+                    walk_expr(m->object.get());
                     break;
+                }
                 case node_type::lambda_expr: {
                     auto* l = static_cast<lambda_expr*>(e);
                     // Explicit by-ref captures escape the captured variable
@@ -768,14 +775,17 @@ namespace {
 
 } // namespace
 
-void detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarations,
+bool detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarations,
                                     string_symbolizer* symbolizer) {
+	bool names_execute_elapsed = false;
 	{
 		ref_escape_marker marker;
 		marker.symbolizer = symbolizer;
 		marker.run(declarations);
+		names_execute_elapsed = marker.names_execute_elapsed;
 	}
 	detail::mark_transient_reads(declarations);
+	return names_execute_elapsed;
 }
 
 // One true constructor with dependency injection
@@ -834,7 +844,7 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
 
     // Escape-mark + transient-read passes (shared with jaibite loads, which must
     // re-derive the parser-pass flags the serializer does not carry)
-    detail::run_ast_marking_passes(declarations, symbolizer_);
+    if (detail::run_ast_marking_passes(declarations, symbolizer_)) { engine_->note_execute_elapsed_use(); }
 
     // Mark the last expression declaration as an implicit return
     if (!declarations.empty()) {
@@ -1668,6 +1678,13 @@ checked_result<type_info_ptr> parser::parse_type() {
     if (match({token_type::identifier, token_type::user_template_type})) {
         std::string type_name(previous().lexeme);
         token_type typeToken = previous().type;
+        // ns::Type names a class registered under its qualified name (time::date)
+        while (typeToken == token_type::identifier && check(token_type::colon_colon) &&
+               current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
+            advance();
+            type_name += "::";
+            type_name += advance().lexeme;
+        }
 
         // If it's a user_template_type token, we know it's safe to parse template syntax
         if (typeToken == token_type::user_template_type && match(token_type::less)) {
@@ -2491,6 +2508,28 @@ checked_result<declaration_ptr> parser::declaration_body() {
         // Look ahead to see if this is "identifier identifier" pattern
         advance(); // consume first identifier
 
+        // ns::Type name ... / ns::Type& name ...: a declaration with a qualified class type, by the same rules as below
+        size_t after = current_;
+        while (after + 1 < stream_->size() && (*stream_)[after].type == token_type::colon_colon &&
+               (*stream_)[after + 1].type == token_type::identifier) {
+            after += 2;
+        }
+        if (after != current_ && after + 1 < stream_->size()) {
+            const token_type next = (*stream_)[after].type;
+            if (next == token_type::identifier) {
+                const bool is_function = (*stream_)[after + 1].type == token_type::left_paren && !paren_group_ends_statement(after + 1);
+                current_ = savedPos;
+                return is_function ? function_declaration() : variable_declaration();
+            }
+            if (next == token_type::ampersand && after + 2 < stream_->size() && (*stream_)[after + 1].type == token_type::identifier) {
+                const token_type then = (*stream_)[after + 2].type;
+                if (then == token_type::left_paren || then == token_type::equal || then == token_type::semicolon) {
+                    current_ = savedPos;
+                    return then == token_type::left_paren ? function_declaration() : variable_declaration();
+                }
+            }
+        }
+
         // Check for template syntax after the identifier
         if (check(token_type::less)) {
             // Might be a templated type like Point<int>
@@ -2655,7 +2694,8 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
                     // This handles shorthand like: void foo(x) where x is untyped, including
                     // untyped defaults foo(x = 3) (the '=' is consumed by the shared default
                     // parse below)
-                    if (type && type->base_type == script_value_type::jai_object_type && !type->type_name.empty()) {
+                    if (type && type->base_type == script_value_type::jai_object_type && !type->type_name.empty() &&
+                        type->type_name.find("::") == std::string::npos) {
                         name = type->type_name;
                         type = nullptr; // Auto type
                     } else {

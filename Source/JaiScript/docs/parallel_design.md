@@ -150,7 +150,8 @@ before dispatch). A miss on the frozen interner is Debug's assert, the tripwire.
 pinning every element method it can; only its script-semantic verdicts (captured-state writes,
 aliasing, mutating methods on captured state, member stores, lambdas, `new`) go lenient. The
 engine-seam rules stay walls in every mode: bare sibling-method calls, call targets the walk
-cannot resolve, `yield`, includes and declarations inside a body, `math::random`. The element
+cannot resolve, `yield`, includes and declarations inside a body, `math::random`, every `time::`
+call (the engine-owned clock: a read would make the result differ from the serial run). The element
 proof still collects the element classes and detaches shared strings; its verdict goes lenient.
 The worker walls apply in every mode: an unpinned method call, operator dispatch on instances,
 bound-method and constructor thunks, accessor reads and stores all raise their verdict in a

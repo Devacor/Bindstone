@@ -17,12 +17,14 @@ class environment;
 // A host entry's static signature for the checker (docs/static_checking.md "Language namespaces"): the arity range and
 // the kind each argument must have (jai_string_type = text, a string or a utf8_string; jai_null_type = anything); the
 // entry still checks its arguments at run time. result_follows_first: the result is text of the first argument's kind.
+// jai_float_type is a number (an int or a float); a jai_object_type result names its class in result_class.
 struct host_entry_signature {
     uint8_t min_args = 0;
     uint8_t max_args = 0;
     std::vector<script_value_type> params;
     script_value_type result = script_value_type::jai_null_type;
     bool result_follows_first = false;
+    std::string result_class;
 };
 
 // Flat script namespace registry entry ("a::b::c" is one namespace name, no nesting).

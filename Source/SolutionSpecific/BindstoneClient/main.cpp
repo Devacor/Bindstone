@@ -508,8 +508,8 @@ static int RunWorkbench(bool a_smoke, const std::string& a_screenshotPath = "", 
 	if (a_selectForGizmo && app.scene()) {
 		// The sim auto-frame centers the map, so the node nearest the map center is the
 		// one guaranteed on-screen for the gizmo to render against.
-		auto mapBounds = app.scene()->bounds();
-		auto center = MV::point(mapBounds.minPoint.x + mapBounds.size().width * 0.5f, mapBounds.minPoint.y + mapBounds.size().height * 0.5f);
+		auto mapCenter = app.scene()->bounds().centerPoint();
+		auto center = MV::point(mapCenter.x, mapCenter.y);
 		std::shared_ptr<MV::Scene::Node> best;
 		float bestDistance = 0.0f;
 		std::function<void(const std::shared_ptr<MV::Scene::Node>&)> visit = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {

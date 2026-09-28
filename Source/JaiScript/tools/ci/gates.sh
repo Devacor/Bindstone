@@ -2,7 +2,7 @@
 # The CI gates, one per argument, so the workflow can give each its own step and a
 # local run can reproduce any of them:
 #
-#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm fuzz gloom demoreel crawler gatorquest
+#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm fuzz gloom demoreel crawler gatorquest lsp lsp-latency
 #   tools/ci/gates.sh all
 #
 # BIN is the directory holding the built executables (default: build/bin under the
@@ -72,6 +72,32 @@ gate_crawler() {
 	done
 }
 
+python_cmd() {
+	local candidate
+	for candidate in python3 python; do
+		if "$candidate" -c "import sys; sys.exit(sys.version_info < (3, 8))" >/dev/null 2>&1; then
+			echo "$candidate"
+			return
+		fi
+	done
+	echo "::error::the lsp gate needs Python 3.8 or later" >&2
+	return 1
+}
+
+lsp_test() {
+	local exe="$BIN/jaiscript_lsp" py
+	[ -f "$exe.exe" ] && exe="$exe.exe"
+	py="$(python_cmd)"
+	run "$py" "$ROOT/tools/lsp/tests/lsp_test.py" --exe "$exe" "$@"
+}
+
+gate_lsp() {
+	lsp_test --only fixtures
+	lsp_test --only gatorquest
+}
+
+gate_lsp_latency() { lsp_test --only latency; }
+
 gate_gatorquest() {
 	cd "$ROOT/examples/gatorquest"
 	for backend in vm interp; do
@@ -80,14 +106,14 @@ gate_gatorquest() {
 	done
 }
 
-ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest)
+ALL=(tests-interp tests-vm fuzz gloom demoreel crawler gatorquest lsp lsp-latency)
 
 [ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all)" >&2; exit 2; }
 [ "$1" = all ] && set -- "${ALL[@]}"
 
 for gate in "$@"; do
 	case "$gate" in
-		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest) ;;
+		tests-interp | tests-vm | fuzz | gloom | demoreel | crawler | gatorquest | lsp | lsp-latency) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all)" >&2; exit 2 ;;
 	esac
 	echo "== gate: $gate"

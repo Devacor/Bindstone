@@ -443,18 +443,29 @@ namespace jai::vm {
             // raw: the checker resolved the callee to a free script function with scalar by-value parameters and a scalar result, and every
             // argument is a cell or a constant; at run time the arguments instruction enters the callee's frame program raw when the parked
             // callee has one whose parameter kinds are the arguments' kinds (docs/typed_regions_design.md "Raw typed frames")
-            struct cell_call { uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; uint8_t raw = 0; };
+            // raw: the arguments instruction may enter the callee's frame program raw; raw_kinds: the callee's parameter kinds as the checked
+            // declaration names them (four bits per parameter, parameter i at bits 4i); raw_proven: every argument is a pinned cell or a constant
+            // of exactly that kind, so a raw entry checks no argument
+            struct cell_call {
+                uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; uint8_t raw = 0;
+                uint8_t raw_proven = 0; uint32_t raw_kinds = 0;
+            };
             std::vector<cell_call> calls;
             // a frame program: the region covers the whole function body from its first instruction to its final HALT, its returns are ret
             // operations (C_RET), and raw_enterable says a raw call may enter it at copy_head with the parameters written into param_cells
             // (one per parameter, by slot): its entry reads nothing but the parameters (no environment value, no site, no guard of a graft)
             bool frame_program = false;
             bool raw_enterable = false;
+            bool raw_sites = false;   // a call of the block may be raw (plans is sized): only such a block advances the raw epoch at its entry and its doors
             std::vector<uint32_t> param_cells;
             std::string ir_text;   // the region's canonical operations (index:kind, ->target, w slot, r slots), filled only when the compiler lists the IR
+            uint32_t param_kinds = 0;   // the parameter cells' kinds, four bits per parameter (the call site's raw_kinds form)
+            // a raw site's plan, the run time's (one per call when any call is raw): the epoch in which the probe last validated the callee
+            // (vm_backend::raw_epoch_) and its body's chunk
+            struct call_plan { uint64_t epoch = 0; chunk* body = nullptr; };
+            mutable std::vector<call_plan> plans;
         };
         std::vector<cell_loop> cell_loops;
-        uint32_t frame_program = k_invalid_u32;   // the cell_loops index of the body's frame program (k_invalid_u32: none)
         // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's
         // open-loop table and the disassembly); a `translation` refusal is a supported core operation in an encoding the
         // translation does not normalize yet, a coverage gap rather than a limit of the model
@@ -593,6 +604,8 @@ namespace jai::vm {
 
         // Pins the whole program tree for top-level chunks
         std::vector<declaration_ptr> pinned_decls;
+
+        uint32_t frame_program = k_invalid_u32;   // the cell_loops index of the body's frame program (k_invalid_u32: none)
     };
 
 } // namespace jai::vm

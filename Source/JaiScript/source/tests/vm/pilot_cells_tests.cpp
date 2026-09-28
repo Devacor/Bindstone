@@ -5156,6 +5156,35 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(oracle, session(true), "a rebound callee and a converting argument, both backends");
 			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
 		});
+		test("raw_frames_replan_after_general_code_inside_the_chain", [this]() {
+			// a call site's plan holds only until general code runs: a host function called from a raw frame redefines the raw callee mid-chain
+			// (the next raw probe resolves the new body), and a callee redefined with another parameter kind takes the door from a site whose
+			// arguments were proven against the old kind
+			auto session = [](bool vm) {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				engine* raw = e.get();
+				int flips = 0;
+				e->add_function("redefine", [raw, &flips](script_int n) -> script_int {
+					if (n == 4 && flips == 0) { ++flips; raw->execute("int step(int n) { if (n < 1) { return 100; } return redefine(n) + step(n - 1) + 2; }"); }
+					return 0;
+				});
+				std::string out;
+				try {
+					e->execute("int step(int n) { if (n < 1) { return 0; } return redefine(n) + step(n - 1) + 1; }\n"
+					           "int drive(int n) { if (n < 1) { return 0; } return walk(n) + drive(n - 1); }\n"
+					           "int walk(int n) { if (n < 1) { return 1; } return walk(n - 1) + n; }");
+					out += e->execute("to_string(step(8)) + \" \" + to_string(step(3)) + \" \" + to_string(drive(6));").as_string();
+					e->execute("int walk(float x) { if (x < 1.0) { return 7; } return walk(x - 1.5) + 1; }");
+					out += " " + e->execute("to_string(drive(6));").as_string();
+				} catch (const std::exception& ex) { out += std::string(" throw:") + ex.what(); }
+				return out;
+			};
+			const std::string oracle = session(false);
+			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
+			check_eq(oracle, session(true), "a callee redefined inside a raw chain and one redefined with another parameter kind");
+		});
 		test("raw_frames_inside_coroutines_and_around_yields", [this]() {
 			// a coroutine's body runs on its fiber frame (never a frame program); the raw chains it starts end before its yields
 			const std::string src =

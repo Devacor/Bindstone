@@ -33,6 +33,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1">
 <h1>Embedding &amp; Engine Guide</h1>
 <p>How to put JaiScript inside a C++ engine: the two-line quickstart, binding classes, choosing a backend, precompiled <code>.jaibite</code> bites, safety rails for untrusted script, static checking, hot reload, serialization, coroutine hosting, signals, and the honest performance numbers. All host snippets were compiled and run against the real library.</p>
+<p>The embedding model is settled for 1.0; the exact C++ signatures may still change in a 0.x release. <a href="../stability.html">Stability</a> has both lists.</p>
 <ol class="toc">
 <li><a href="01-embedding-quickstart.html">Embedding Quickstart</a><p class="toc-desc">Make an engine, run a string, read the result, register a function, bind a live C++ variable, and the three ways a script can fail.</p></li>
 <li><a href="02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a><p class="toc-desc">Declare a field once and it is reflected, script-visible and serialized; then the fluent binder chain underneath, verb by verb.</p></li>

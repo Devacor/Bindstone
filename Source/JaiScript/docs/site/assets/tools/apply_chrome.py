@@ -102,6 +102,8 @@ SECTION_INDEX_DESC = {
         "Quick-lookup tables distilled from the guide and embedding chapters: operators, types, conversions, the host API, and rules of thumb.",
     "index.html":
         "An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.",
+    "stability.html":
+        "What is settled in the language and the embedding API, and what a 0.x release may still change before 1.0.",
 }
 
 SECTION_TITLE = {"tour": "The Ten-Minute Tour", "guide": "The Language Guide", "embedding": "Embedding &amp; Engine Guide",
@@ -220,6 +222,7 @@ def build_pages():
     pages = []
 
     pages.append(("index.html", None, "", SECTION_INDEX_DESC["index.html"], "", ""))
+    pages.append(("stability.html", None, "", SECTION_INDEX_DESC["stability.html"], page_sidebar(True), ""))
 
     pages.append(("tour/index.html", "tour", "../", SECTION_INDEX_DESC["tour/index.html"], page_sidebar(True),
                   prevnext(None, ("../guide/01-hello.html", "next &middot; the guide", GUIDE[0][1]))))
@@ -323,7 +326,7 @@ def main():
     if args.check:
         print("\n".join(drifted) if drifted else "chrome up to date")
         return 1 if drifted else 0
-    print("chrome applied: %d of 32 pages rewritten" % len(drifted))
+    print("chrome applied: %d of %d pages rewritten" % (len(drifted), len(build_pages())))
     return 0
 
 

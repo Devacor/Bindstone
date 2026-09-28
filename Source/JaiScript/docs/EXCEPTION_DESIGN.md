@@ -36,6 +36,13 @@
 >   throw, whose exception pair stays live for the resumer's handler. So a resumer's own
 >   `try/catch` between resumes never touches the fiber's `e`, and a resumer's `catch (e)`
 >   driving a coroutine from a range-for keeps reading its own exception throughout.
+> - **A host callable's exception is the runtime error of the site that called it.** A method, operator,
+>   property getter or setter, or static the binder registered (`class_definition::add_method`,
+>   `add_static_method`) returns its C++ exception as the catchable runtime error `cpp_exception` with the
+>   exception's text, so a store `obj.v = x`, a read `obj.v`, an operator `a * b` and a compound `obj.v += x` raise it
+>   where they stand, at top level or in a function, like a bound free function (`FunctionBinder`). An archive skips a
+>   host property that refuses a read or a store, and passes a host exception on (`to_json`, `from_json`, the
+>   binary archive).
 > - **A native exception converts at a call boundary, on both backends.** A C++ exception a bound function,
 >   getter or setter raises becomes the script's exception where the call it belongs to stands: during a call's
 >   argument evaluation, in the calling frame (the unfused call's argument zone; the fused push's own instruction,

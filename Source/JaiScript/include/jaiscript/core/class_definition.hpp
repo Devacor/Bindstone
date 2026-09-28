@@ -468,6 +468,12 @@ public:
         add_method(name, std::move(func), arity, {});
     }
 
+    // A host callable's C++ exception is the script's catchable runtime error with its text, wherever the runtime
+    // calls it (a method, an operator, a property getter or setter, a static; docs/EXCEPTION_DESIGN.md)
+    static checked_result<script_value> host_exception_result(engine* eng, const std::exception& e) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::cpp_exception), "{0}", symbolize_text(eng, e.what()));
+    }
+
     // Typed overload: param_types is the C++ parameter signature (one entry per script argument,
     // excluding 'this'). Same-arity overloads with DISTINCT signatures coexist and are resolved by
     // argument type at call time; an identical signature re-binds. Empty param_types is a legacy
@@ -506,6 +512,7 @@ public:
                         return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
                                                             "Class definition no longer exists");
                     }
+                    try {
                     // C++ boundary: escape-boxed locals arrive as CELL references (script
                     // parameter binding derefs them; the bound-method mint path does not) —
                     // normalize so overload scoring and converters see hoisted-temp values.
@@ -537,14 +544,21 @@ public:
                                                      name_id, args.data() + 1, script_arg_count, args[0].get_engine());
                     }
                     return entries[static_cast<size_t>(best)].func(args);
+                    } catch (const std::exception& e) {
+                        return host_exception_result(raw_args[0].get_engine(), e);
+                    }
                 },
                 engine_
             ));
         } else {
             methods_.insert_or_assign(name_id, script_value::make_function(
-                [func](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+                [func, eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
                     std::vector<script_value> scratch;
-                    return func(detail::deref_builtin_args(raw_args, scratch));
+                    try {
+                        return func(detail::deref_builtin_args(raw_args, scratch));
+                    } catch (const std::exception& e) {
+                        return host_exception_result(eng, e);
+                    }
                 },
                 engine_
             ));
@@ -570,9 +584,13 @@ public:
     // add_static_script_method) — args normalize like add_method's.
     void add_static_method(uint64_t name_id, script_function func, size_t arity = SIZE_MAX) {
         static_methods_.insert_or_assign(name_id, script_value::make_function(
-            [func](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+            [func, eng = engine_](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
                 std::vector<script_value> scratch;
-                return func(detail::deref_builtin_args(raw_args, scratch));
+                try {
+                    return func(detail::deref_builtin_args(raw_args, scratch));
+                } catch (const std::exception& e) {
+                    return host_exception_result(eng, e);
+                }
             },
             engine_
         ));

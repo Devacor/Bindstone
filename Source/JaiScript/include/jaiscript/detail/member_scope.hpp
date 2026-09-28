@@ -125,8 +125,9 @@ inline checked_result<script_value> read_cpp_property(const script_value& receiv
 
 // The bare-name read (kernel rung cpp_property, non-scope this-tails, [=] captures):
 // read_cpp_property through the chain's getter (the probe's method_value, or
-// instance->get_method(getter_id, false)), degrading on a C++ throw to the placeholder
-// cell exactly as the this.name ladder does.
+// instance->get_method(getter_id, false)), degrading on a throw to the placeholder cell
+// exactly as the this.name ladder does; a host getter's own exception arrives as its
+// runtime error and raises.
 inline checked_result<script_value> read_bare_cpp_property(const script_value& receiver,
                                                            class_instance* instance,
                                                            const script_value& getter,
@@ -222,7 +223,12 @@ inline checked_result<script_value> read_cpp_property_site(const script_value& r
             "Cannot pass non-lvalue to reference parameter");
     }
     try {
-        return read_cpp_property(receiver, site.view.def, site.view.instance.get(), getter, site.getter_id);
+        auto read = read_cpp_property(receiver, site.view.def, site.view.instance.get(), getter, site.getter_id);
+        if (!read && bind_point && read.error() == make_error_code(runtime_error_code::cpp_exception)) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
+                "Cannot pass non-lvalue to reference parameter");   // a getter that cannot read at a bind point is a non-lvalue
+        }
+        return read;
     } catch (const std::exception&) {
         if (!bind_point) throw;
         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),

@@ -1977,10 +1977,10 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			struct stepper { bool armed = false; };
 			const char* defs = R"JAI(
 var G = 10;
+function target(int a) -> int { return a; }
 var box = Stepper();
 var& V = box.number;
 var& F = box.callable;
-function target(int a) -> int { return a; }
 function take_b(int a, int b) -> int { return b; }
 function take_ab(int a, int b) -> int { return a * 100 + b; }
 function after(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_b(V, G + 1); acc = acc + z; } return to_string(acc); }
@@ -1991,10 +1991,10 @@ function via_callee(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i)
 			// the listing compiles the same four loops as lambdas held in vars: a named function body compiles on its first call
 			const char* listing_defs = R"JAI(
 var G = 10;
+function target(int a) -> int { return a; }
 var box = Stepper();
 var& V = box.number;
 var& F = box.callable;
-function target(int a) -> int { return a; }
 function take_b(int a, int b) -> int { return b; }
 function take_ab(int a, int b) -> int { return a * 100 + b; }
 var after = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = take_b(V, G + 1); acc = acc + z; } return to_string(acc); };
@@ -2285,8 +2285,8 @@ var MIXED = [3, 1, 4, 1, 5, "s", 2, 6];
 			struct stepper { bool armed = false; };
 			const char* defs = R"JAI(
 var TEXT = "a";
-var& F = box.callable;
 function target(int a) -> int { return a; }
+var& F = box.callable;
 function flip(int i) -> void { if (i == 2) { TEXT = "b"; } }
 function by_call() { var s = ""; int i = 0; while (i < 5) { flip(i); s += TEXT; i = i + 1; } return s + "|" + TEXT; }
 function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(); } int z = F(i); s += TEXT; i = i + 1; } return s + "|" + TEXT; }

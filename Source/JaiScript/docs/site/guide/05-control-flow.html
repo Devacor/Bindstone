@@ -122,7 +122,7 @@ rethrowing inner
 outer caught: inner
 catch without a variable
 == result: done</code></pre></div>
-<p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions: a bound host function that throws surfaces as a catchable script error, and an uncaught script throw reaches the host with its script stack trace attached. Inside a <code>catch</code>, <code>e</code> is the error text alone; when the same error escapes to the host, its <code>what()</code> appends the error's category (<code>&lt;text&gt;: &lt;category&gt;</code>).</p>
+<p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions: a bound host function, method, operator or property accessor that throws surfaces as a catchable script error with the exception&#x27;s text where it was called, and an uncaught script throw reaches the host with its script stack trace attached. Inside a <code>catch</code>, <code>e</code> is the error text alone; when the same error escapes to the host, its <code>what()</code> appends the error's category (<code>&lt;text&gt;: &lt;category&gt;</code>).</p>
 <h2 id="what-a-catch-can-see">What a catch can see, and what never reaches one<a class="hlink" href="#what-a-catch-can-see" aria-label="link">&#8203;</a></h2>
 <p>The runtime's own errors are ordinary catchable values: a bad index, a division by zero, a failed <code>cast</code>, and a type mismatch the checker could not see coming because the value came out of a <code>var</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto xs = [1, 2, 3];

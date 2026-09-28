@@ -63,8 +63,8 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 | 5. User guide chapters 1-13, reference page, grammar.md (Gnn-, RF-, GR-) | 1114 | 871 | 153 | 74 | 16 | 911 | 134 | 53 | 16 |
 | 6. Script the runtime calls, user operator=, error texts, throw expressions, sort, range-for (CB-) | 38 | 2 | 6 | 30 | 0 | 32 | 5 | 1 | 0 |
 | 7. Access control (AC-) | 14 | 3 | 2 | 7 | 2 | 13 | 1 | 0 | 0 |
-| 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments (RL-) | 17 | 3 | 1 | 10 | 3 | 17 | 0 | 0 | 0 |
-| **Total** | **2567** | **1955** | **283** | **295** | **34** | **2169** | **224** | **145** | **29** |
+| 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions (RL-) | 18 | 3 | 1 | 11 | 3 | 18 | 0 | 0 | 0 |
+| **Total** | **2568** | **1955** | **283** | **296** | **34** | **2170** | **224** | **145** | **29** |
 
 ## Script the runtime calls
 
@@ -2970,11 +2970,11 @@ control", gr = `docs/grammar.md` note 12, sc = `docs/static_checking.md` "Access
 | AC-13 | Constructors are exempt from the labels; the host C++ API (`get_field`/`set_field`, serialization, reflection reads) is unrestricted | gr | stdlib/reflection_tests.cpp:get_set_invoke_read_write_like_direct_syntax (reads; constructor exemption not asserted) | no | thin |
 | AC-14 | A lambda defined inside a method has its class's access | gr | language/script_class_tests.cpp:member_access_enforcement_matrix | no | pinned |
 
-## 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments
+## 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions
 
 Source codes: ruling = Dev's rulings 2026-09-27, cc = `docs/closures_and_captures.md`, gr = `docs/grammar.md`,
 diag = `docs/diagnostics.md` "Order of errors in an assignment", inv = `docs/invariants.md` (sections 10, 12, 13, 14),
-sc = `docs/static_checking.md` (rule table), 02/04/06 = guide chapters. Pins are relative to
+sc = `docs/static_checking.md` (rule table), exc = `docs/EXCEPTION_DESIGN.md`, 02/04/05/06 = guide chapters. Pins are relative to
 `Source/JaiScript/source/tests`; `spec:` is `semantics/spec_conformance_tests.cpp`. BEFORE is the verdict the
 ledger gave the claim's old reading: the three contradicted rows had registered tests pinning the opposite, which
 now pin the ruling.
@@ -2998,3 +2998,4 @@ now pin the ruling.
 | RL-15 | A `.jaibite` keeps the `auto` spelling and the loaded unit decides again, with the same result | inv 14 | spec:a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load | no | pinned |
 | RL-16 | An `auto` from a mixed-branch ternary warns that it is a `var`, naming both branch types | sc Precision | semantics/static_check_tests.cpp:warn_auto_from_mixed_branch_ternary | no | pinned |
 | RL-17 | A by-value argument takes its value when it is evaluated: a later argument that writes the element, map entry or nested element it read does not change what the callee receives (untyped and typed parameters, a method, a constructor, inside a counted loop) | ruling; inv 13; 04 | spec:by_value_arguments_capture_their_values_left_to_right; the suite `Call Argument Capture` | partial | pinned |
+| RL-18 | A bound host setter, getter, method or operator that throws raises the catchable runtime error with its text where it is called (top-level `try`, a function's own `try`, a compound store, an operand the operator cannot take), and the store leaves the member unchanged | exc addendum; 05 | spec:a_bound_accessor_method_or_operator_that_throws_is_catchable_where_it_is_called | no | pinned |

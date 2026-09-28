@@ -6,6 +6,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <cstdint>
@@ -24,6 +25,30 @@ using namespace jai::foundry;
 namespace jai::foundry::tests {
 
 namespace spec {
+
+// A host class whose accessors, methods and operators throw (docs/EXCEPTION_DESIGN.md: a C++ exception a bound
+// function, getter or setter raises becomes the script's exception)
+struct boundary_probe {
+	int v = 1;
+	int get_v() const { return v; }
+	void set_v(int x) { if (x < 0) { throw std::invalid_argument("negative v"); } v = x; }
+	int get_bad() const { throw std::runtime_error("getter failed"); }
+	int poke(int x) { if (x == 0) { throw std::invalid_argument("poke zero"); } return x; }
+	boundary_probe operator+(const boundary_probe& o) const { boundary_probe r; r.v = v + o.v; return r; }
+	boundary_probe operator*(int k) const { if (k < 0) { throw std::domain_error("negative scale"); } boundary_probe r; r.v = v * k; return r; }
+};
+
+inline void bind_boundary_probe(engine& e) {
+	dynamic_binder<boundary_probe>(e, "Probe")
+		.constructor<>()
+		.property("v", &boundary_probe::get_v, &boundary_probe::set_v)
+		.property("bad", &boundary_probe::get_bad, nullptr)
+		.property("lv", [](boundary_probe& p) { return p.v; }, [](boundary_probe& p, int x) { if (x > 100) { throw std::out_of_range("lv too big"); } p.v = x; })
+		.method("poke", &boundary_probe::poke)
+		.method("+", &boundary_probe::operator+)
+		.method("*", &boundary_probe::operator*)
+		.build();
+}
 
 struct run_config {
 	bool vm = false;
@@ -1646,6 +1671,27 @@ private:
 	}
 
 	void native_exceptions() {
+		test("a_bound_accessor_method_or_operator_that_throws_is_catchable_where_it_is_called", [this]() {
+			// every host exception at the boundary is the catchable runtime error with its text, at top level and inside a
+			// function, and an operand the operator cannot take raises the overload text instead of escaping
+			const std::string src = R"(
+				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+				string top = "none";
+				try { Probe q = Probe(); q.v = -1; } catch (e) { top = e; }
+				string in_fn() { Probe p = Probe(); string r = "none"; try { p.v = -2; } catch (e) { r = e; } return r + ":" + p.v; }
+				Probe p = Probe();
+				top + "|" + in_fn() + "|" +
+				t([]() { Probe a = Probe(); a.v = -3; }) + "|" +
+				t([]() { Probe a = Probe(); a.lv = 500; }) + "|" +
+				t([]() { Probe a = Probe(); var x = a.bad; }) + "|" +
+				t([]() { Probe a = Probe(); a.poke(0); }) + "|" +
+				t([]() { Probe a = Probe(); a.v += -9; }) + "|" +
+				t([]() { Probe a = Probe(); var b = a * -1; }) + "|" +
+				(t([]() { Probe a = Probe(); var b = a + 5; }) != "none" ? "operand raised" : "operand accepted") + "|" + p.v;
+			)";
+			every_config("native boundary", "negative v|negative v:1|negative v|lv too big|getter failed|poke zero|negative v|negative scale|operand raised|1",
+				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::off);
+		});
 		test("a_host_script_exception_is_catchable_with_its_message", [this]() {
 			every_config("host script_exception", "Random failure!", [](engine& e) {
 				e.add_function("raise_it", []() -> script_int { throw jai::script_exception("Random failure!"); });

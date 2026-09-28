@@ -5,6 +5,7 @@
 #include "MV/Utility/generalUtility.h"
 #include "MV/Utility/stringUtility.h"
 #include "MV/Render/points.h"
+#include "MV/Render/boxaabb.h"
 
 using namespace jai::foundry;
 using namespace MV;
@@ -65,6 +66,17 @@ public:
             check_false(startsWith("abc", "abd"));
             check_false(startsWith("ab", "abc"));
             check_false(startsWith("xabc", "abc"));
+        });
+        test("BoxAABB centerPoint is the midpoint of its corners", [this]() {
+            BoxAABB<> box(Point<>(10.0f, 20.0f, 0.0f), Point<>(30.0f, 60.0f, 4.0f));
+            Point<> c = box.centerPoint();
+            check_near(20.0f, c.x, 1e-6f);
+            check_near(40.0f, c.y, 1e-6f);
+            check_near(2.0f, c.z, 1e-6f);
+            BoxAABB<int> ibox(Point<int>(-4, 2), Point<int>(6, 12));
+            Point<int> ic = ibox.centerPoint();
+            check_eq(1, ic.x);
+            check_eq(7, ic.y);
         });
     }
 };

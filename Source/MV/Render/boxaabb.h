@@ -60,7 +60,7 @@ namespace MV {
 
 		void sanitize();
 
-		Point<T> centerPoint() const { return minPoint + ((minPoint + maxPoint) / static_cast<T>(2)); }
+		Point<T> centerPoint() const { return (minPoint + maxPoint) / static_cast<T>(2); }
 
 		Point<T> topLeftPoint() const { return minPoint; }
 		Point<T> bottomLeftPoint() const { return point(minPoint.x, maxPoint.y); }

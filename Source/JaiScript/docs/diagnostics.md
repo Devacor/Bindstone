@@ -296,6 +296,29 @@ parser's weighted recursion limit of 250, which is not an AST-depth limit or a
 complete native-stack guarantee; recursive assignment and type parsing are not
 covered by that parser counter.
 
+## Binary data
+
+One catalog for `to_bytes`, `string::from_bytes` and the `binary::` library (`detail/binary_data.hpp`), byte-identical
+on both backends and catchable. A read or write that raises moves nothing: the reader's cursor stays, the writer's
+bytes stay.
+
+| site | texts |
+|---|---|
+| `s.to_bytes(offset, count)` | `to_bytes(4) out of bounds for string of size 3`, `to_bytes(1, 3) out of bounds for string of size 3` (a negative offset or count too; a parallel worker, whose symbolizer is frozen, gets `to_bytes() range out of bounds`), `to_bytes() arguments must be integers`, `to_bytes() takes 0 to 2 arguments ([offset], [count])` |
+| `string::from_bytes(bytes)` | `string::from_bytes expects bytes (0 to 255): element 3 is 256` (the element's value, or its kind: `... element 1 is string`), `string::from_bytes expects an array of bytes, got int`, `string::from_bytes expects exactly 1 argument` |
+| reader reads | `Cannot read int32 at position 10: 4 bytes wanted, 2 remain` (`1 remains` for one), `Cannot read text(5) at position 0: 5 bytes wanted, 3 remain`, `Cannot read bytes(-1): a count cannot be negative`; a layout field names itself: `Cannot read field 'pos' (int32) at position 4: 4 bytes wanted, 2 remain` |
+| cursor | `Cannot seek to position 4: the data is 3 bytes`, `Cannot skip 2 bytes at position 2: the data is 3 bytes`; the writer: `Cannot seek to position 2: 1 byte written` |
+| writer writes | `Cannot write 256 as uint8 (0 to 255)`, `Cannot write 1e+300 as float32 (-3.4028234663852886e+38 to 3.4028234663852886e+38)`, `Cannot write bytes: element 1 is 300, not 0 to 255`, `Cannot write text(s, -1): a count cannot be negative` |
+| layouts | `binary::layout expects name, width pairs, got 3 arguments`, `binary::layout argument 1 must be a field name string, got int`, `binary::layout argument 2 must be a binary width (binary::int32, binary::text(8), ...), got int`, `binary::layout repeats the field name 'a'`, `binary::text expects a length of 0 or more, got -1`; the inline form spells `unpack` in place of `binary::layout` |
+| `w.pack(layout, map)` | `Cannot pack field 'pos': the map has no 'pos'`, `Cannot pack field 'pos': cannot write 4294967296 as int32 (-2147483648 to 2147483647)`, `Cannot pack field 'name': int does not fit text(4)`, `pack expects a binary::layout, got int`, `pack expects a map of field values, got int` |
+| `r.read(Class, layout)` | `Cannot read One from a layout of 2 fields: One has 1 field`, `Cannot read field 'name' (text(4)) into Two.name (declared int)`, `read expects a class, got int`, `read expects a script class, got binary::writer`, `read expects a binary::layout, got int` |
+| `binary::reader(x)` | `binary::reader expects a string, got int` |
+
+The strict checker reports the same facts at load where it can see them (an odd pairing, a non-width, a `read` whose
+class and layout are both known, a strict signature's arity and argument kinds): `binary::layout argument 2 must be a
+binary width ...`, `Cannot read layout field 2 into Bad.pos (declared float)`, `'binary::reader.int8' expects 0
+argument(s), got 1`, `no overload of 'binary::reader.seek' accepts these argument types`.
+
 ## Host file reads
 
 The runner's `read_file(path)` (and the crawler host's) raises one shape for a file it cannot hand back,

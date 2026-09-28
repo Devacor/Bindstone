@@ -479,7 +479,7 @@ public:
     // argument type at call time; an identical signature re-binds. Empty param_types is a legacy
     // untyped binding (single overload per arity, as before).
     void add_method(const std::string& name, script_function func, size_t arity,
-                    std::vector<param_type_info> param_types) {
+                    std::vector<param_type_info> param_types, param_type_info result = {}) {
         auto eng = engine_;
         if (!eng) return;
 
@@ -499,8 +499,9 @@ public:
                 [&](const cpp_overload_entry& e) { return e.param_types == param_types; });
             if (existing != bucket.end()) {
                 existing->func = func;  // re-bind same signature
+                existing->result = result;
             } else {
-                bucket.push_back(cpp_overload_entry{ std::move(param_types), func });
+                bucket.push_back(cpp_overload_entry{ std::move(param_types), func, result });
             }
             method_arities_[name_id].push_back(arity);
 
@@ -1531,6 +1532,20 @@ public:
     // re-query only when it moved (the live-query/recapture model).
     bool cpp_backed() const { return cpp_backed_; }
     void set_cpp_backed(bool v) { cpp_backed_ = v; }
+    // A host class whose bound methods the strict checker holds to their C++ signatures: arity, argument kinds and
+    // the declared result (dynamic_binder::strict_signatures)
+    bool strict_signatures() const { return strict_signatures_; }
+    void set_strict_signatures(bool v) { strict_signatures_ = v; }
+    // A host class's direct call lane for a bound method (the vm's exec_call_method): the same body on the receiver's
+    // C++ object, reached without minting a bound method. It declines (false) any argument shape it does not take,
+    // and the ordinary call runs instead; what it throws raises as the ordinary call's would.
+    using native_method = bool (*)(void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out);
+    void add_native_method(uint64_t id, native_method fn) { native_methods_[id] = fn; }
+    bool has_native_methods() const noexcept { return !native_methods_.empty(); }
+    native_method find_native_method(uint64_t id) const {
+        auto it = native_methods_.find(id);
+        return it == native_methods_.end() ? nullptr : it->second;
+    }
     uint64_t reflection_generation() const { return reflection_generation_; }
     // The C++ identity behind a host-backed class (nullptr for script classes) — lets
     // reflection reach the type_registry schema (property kinds: field/observable/signal)
@@ -2091,6 +2106,8 @@ private:
     uint64_t type_id_;
     bool auto_registered_ = false;
     bool cpp_backed_ = false;
+    bool strict_signatures_ = false;
+    std::unordered_map<uint64_t, native_method> native_methods_;
     uint64_t reflection_generation_ = 0;
     std::vector<uint64_t> field_order_;
     const std::type_info* cpp_type_ = nullptr;
@@ -2108,6 +2125,7 @@ private:
     struct cpp_overload_entry {
         std::vector<param_type_info> param_types;
         script_function func;
+        param_type_info result;   // the C++ result kind (jai_null_type: void, script_value or unrecorded)
     };
     std::unordered_map<uint64_t, std::unordered_map<size_t, std::vector<cpp_overload_entry>>> cpp_method_overloads_;
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> method_overloads_;

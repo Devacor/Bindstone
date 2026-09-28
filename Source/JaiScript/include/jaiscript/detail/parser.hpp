@@ -57,6 +57,9 @@ namespace jai {
 
         // Current namespace context for nested namespace declarations
         std::vector<std::string> current_namespace_path_;
+        // ns::Class for every class this unit declared inside a namespace: that qualified type spelling names the class's
+        // own (bare) name; any other qualified type names a class registered under the qualified name (binary::writer)
+        std::unordered_set<std::string> namespace_class_names_;
         
         // Error handling
         void report_error(const std::string& message, const token& token);  // Logs error to errors_ vector

@@ -366,6 +366,10 @@ private:
     // conditional paths), so "undeclared" only fires for names absent from this set
     // AND the engine surface — typos, not ordering.
     std::unordered_set<std::string_view> all_names_;
+    // names an assignment expression or a reference declaration targets, and each variable declaration's binary::layout(...)
+    // initializer (null for any other initializer): a layout variable declared once and never assigned is statically known
+    std::unordered_set<std::string_view> assigned_names_;
+    std::unordered_map<std::string_view, std::vector<const expression*>> layout_inits_;
     std::unordered_set<std::string> extra_globals_;
     std::unordered_set<std::string> instance_names_;   // the host's per-call instance variables (a subset of extra_globals_)
     // Top-level (and namespace-flattened) variable names. Runtime resolution reads the
@@ -1880,6 +1884,241 @@ private:
         return false;
     }
 
+    // -------------------------------------------------------------- binary data
+
+    // The engine's binary:: library (detail/binary_data.hpp) and string::from_bytes, unless the program declares its own
+    bool library_namespace(std::string_view ns) const { return namespaces_.count(ns) == 0; }
+    static bool static_path(const member_expr* m, std::string_view ns) {
+        return m && m->is_static && m->object && m->object->get_type() == node_type::identifier_expr &&
+               static_cast<const identifier_expr*>(m->object.get())->name == ns;
+    }
+    static bool binary_width_name(std::string_view n) {
+        return n == "int8" || n == "int16" || n == "int32" || n == "int64" || n == "uint8" || n == "uint16" || n == "uint32" ||
+               n == "float32" || n == "float64";
+    }
+    bool binary_width_token(const member_expr* m) const {
+        return static_path(m, "binary") && library_namespace("binary") && binary_width_name(m->member);
+    }
+    bool binary_call(const expression* e, std::string_view member) const {
+        if (!e || e->get_type() != node_type::call_expr) { return false; }
+        auto* c = static_cast<const call_expr*>(e);
+        return c->callee && c->callee->get_type() == node_type::member_expr &&
+               static_path(static_cast<const member_expr*>(c->callee.get()), "binary") &&
+               static_cast<const member_expr*>(c->callee.get())->member == member && library_namespace("binary");
+    }
+    static bool is_class_kind(const ctype& t, std::string_view cls) { return t.kind == ctype::object_k && t.cls == cls; }
+
+    // name, width pairs (binary::layout, reader.unpack): an odd count, a name that is not a string or a width that is not a
+    // binary width token is certain at load; unknown kinds stay lenient
+    void check_binary_pairs(const call_expr* c, const std::vector<ctype>& args, const char* who) {
+        const size_t n = args.size();
+        if (n == 0 || n % 2 != 0) {
+            diag(diag_level::error, c->location, std::string(who) + " expects name, width pairs, got " + std::to_string(n) +
+                 (n == 1 ? " argument" : " arguments"));
+            return;
+        }
+        for (size_t i = 0; i < n; i += 2) {
+            const ctype& name = args[i];
+            if (!name.is_unknown() && name.kind != ctype::string_k && name.kind != ctype::utf8_k) {
+                diag(diag_level::error, c->arguments[i]->location, std::string(who) + " argument " + std::to_string(i + 1) +
+                     " must be a field name string, got " + ctype_name(name));
+            }
+            const ctype& w = args[i + 1];
+            if (!w.is_unknown() && !is_class_kind(w, "binary::width")) {
+                diag(diag_level::error, c->arguments[i + 1]->location, std::string(who) + " argument " + std::to_string(i + 2) +
+                     " must be a binary width (binary::int32, binary::text(8), ...), got " + ctype_name(w));
+            }
+        }
+    }
+
+    // binary::layout(...), binary::text(n), binary::reader(...), binary::writer(), string::from_bytes(...)
+    bool library_namespace_call(const call_expr* c, const member_expr* m, const std::vector<ctype>& args, ctype& out) {
+        if (static_path(m, "binary") && library_namespace("binary")) {
+            if (m->member == "layout") { check_binary_pairs(c, args, "binary::layout"); out = object_of("binary::layout"); return true; }
+            if (m->member == "text") { out = object_of("binary::width"); return true; }
+            if (m->member == "reader") { out = object_of("binary::reader"); return true; }
+            if (m->member == "writer") { out = object_of("binary::writer"); return true; }
+            return false;
+        }
+        if (static_path(m, "string") && library_namespace("string") && m->member == "from_bytes") {
+            out = ctype::make(ctype::string_k);
+            return true;
+        }
+        return false;
+    }
+
+    // the layout a call argument statically is: an inline binary::layout(...) call, or a variable declared once with one and
+    // never assigned again
+    const call_expr* static_layout(const expression* e, int depth = 0) {
+        if (!e || depth > 8) { return nullptr; }
+        if (binary_call(e, "layout")) { return static_cast<const call_expr*>(e); }
+        if (e->get_type() != node_type::identifier_expr) { return nullptr; }
+        auto* id = static_cast<const identifier_expr*>(e);
+        auto it = layout_inits_.find(id->name);
+        if (it == layout_inits_.end() || it->second.size() != 1 || !it->second[0] || assigned_names_.count(id->name)) { return nullptr; }
+        return static_layout(it->second[0], depth + 1);
+    }
+
+    // a statically known layout's field kinds: 1 integer, 2 float, 3 text; empty when any width is not a token
+    std::vector<uint8_t> layout_kinds(const call_expr* l) {
+        std::vector<uint8_t> kinds;
+        if (l->arguments.size() % 2 != 0) { return {}; }
+        for (size_t i = 1; i < l->arguments.size(); i += 2) {
+            const expression* w = l->arguments[i].get();
+            if (w->get_type() == node_type::member_expr && binary_width_token(static_cast<const member_expr*>(w))) {
+                const std::string_view n = static_cast<const member_expr*>(w)->member;
+                kinds.push_back(n == "float32" || n == "float64" ? 2 : 1);
+            } else if (binary_call(w, "text")) {
+                kinds.push_back(3);
+            } else {
+                return {};
+            }
+        }
+        return kinds;
+    }
+
+    // r.read(Class, layout) with a class this program declares and a statically known layout: the field counts and each
+    // field's declared kind against its width (the runtime's check, at load)
+    void check_binary_read(const call_expr* c) {
+        if (c->arguments.size() != 2 || c->arguments[0]->get_type() != node_type::identifier_expr) { return; }
+        const call_expr* l = static_layout(c->arguments[1].get());
+        if (!l) { return; }
+        const std::vector<uint8_t> kinds = layout_kinds(l);
+        if (kinds.empty()) { return; }
+        const std::string_view cname = static_cast<const identifier_expr*>(c->arguments[0].get())->name;
+        std::vector<std::string_view> chain;
+        for (std::string_view at = cname; !at.empty();) {
+            const sclass* sc = find_sclass(at);
+            if (!sc || chain.size() > 32 || sc->decl->base_classes.size() > 1) { return; }
+            chain.push_back(at);
+            at = sc->decl->base_classes.empty() ? std::string_view() : sc->decl->base_classes[0];
+        }
+        std::vector<const variable_decl*> fields;
+        for (size_t i = chain.size(); i-- > 0;) {
+            const sclass* sc = find_sclass(chain[i]);
+            for (const auto& mem : sc->decl->members) {
+                if (!mem.declaration || mem.declaration->get_type() != node_type::variable_decl) { continue; }
+                auto* v = static_cast<const variable_decl*>(mem.declaration.get());
+                if (sc->static_fields.count(v->name)) { continue; }
+                fields.push_back(v);
+            }
+        }
+        if (fields.size() != kinds.size()) {
+            diag(diag_level::error, c->location, "Cannot read " + std::string(cname) + " from a layout of " + std::to_string(kinds.size()) +
+                 (kinds.size() == 1 ? " field: " : " fields: ") + std::string(cname) + " has " + std::to_string(fields.size()) +
+                 (fields.size() == 1 ? " field" : " fields"));
+            return;
+        }
+        for (size_t i = 0; i < fields.size(); ++i) {
+            const type_info* t = fields[i]->type.get();
+            if (!t || t->base_type == script_value_type::jai_any_type || fields[i]->function_spelling) { continue; }
+            const bool ok = (kinds[i] == 1 && t->base_type == script_value_type::jai_int_type) ||
+                            (kinds[i] == 2 && t->base_type == script_value_type::jai_float_type) ||
+                            (kinds[i] == 3 && (t->base_type == script_value_type::jai_string_type || t->base_type == script_value_type::jai_utf8_string_type));
+            if (!ok) {
+                diag(diag_level::error, c->location, "Cannot read layout field " + std::to_string(i + 1) + " into " + std::string(cname) +
+                     "." + std::string(fields[i]->name) + " (declared " + t->canonical_name() + ")");
+            }
+        }
+    }
+
+    // s.to_bytes() / s.reader() on a proven string, and the binary::reader / binary::writer members whose arguments the
+    // bound signatures cannot describe (unpack's pairs, read's class and layout, pack's layout)
+    bool binary_member_call(const call_expr* c, const member_expr* m, const ctype& recv, const std::vector<ctype>& args, ctype& out) {
+        if (m->is_static) { return false; }
+        if ((recv.kind == ctype::string_k || recv.kind == ctype::utf8_k) && (!recv.tentative || recv.element_proof)) {
+            if (m->member == "to_bytes") { out = ctype_from_type_info(eng_.get_type_info_array(eng_.get_type_info_int())); return true; }
+            if (m->member == "reader" && args.empty()) { out = object_of("binary::reader"); return true; }
+            return false;
+        }
+        if (is_class_kind(recv, "binary::reader")) {
+            if (m->member == "unpack") {
+                if (!(args.size() == 1 && (args[0].is_unknown() || is_class_kind(args[0], "binary::layout")))) { check_binary_pairs(c, args, "unpack"); }
+                out = ctype::make(ctype::map_k);
+                return true;
+            }
+            if (m->member == "read" && args.size() == 2) {
+                if (!args[1].is_unknown() && !is_class_kind(args[1], "binary::layout")) {
+                    diag(diag_level::error, c->arguments[1]->location, "read expects a binary::layout, got " + ctype_name(args[1]));
+                }
+                check_binary_read(c);
+                const expression* cls = c->arguments[0].get();
+                out = cls->get_type() == node_type::identifier_expr && find_sclass(static_cast<const identifier_expr*>(cls)->name)
+                    ? object_of(static_cast<const identifier_expr*>(cls)->name) : ctype{};
+                return true;
+            }
+            return false;
+        }
+        if (is_class_kind(recv, "binary::writer") && m->member == "pack" && args.size() == 2) {
+            if (!args[0].is_unknown() && !is_class_kind(args[0], "binary::layout")) {
+                diag(diag_level::error, c->arguments[0]->location, "pack expects a binary::layout, got " + ctype_name(args[0]));
+            }
+            if (!args[1].is_unknown() && args[1].kind != ctype::map_k) {
+                diag(diag_level::error, c->arguments[1]->location, "pack expects a map of field values, got " + ctype_name(args[1]));
+            }
+            out = object_of("binary::writer");
+            return true;
+        }
+        return false;
+    }
+
+    // the result kind a strict host class's bound method declares (class_definition::strict_signatures)
+    ctype host_result(const param_type_info& r) {
+        switch (r.base_type) {
+            case script_value_type::jai_int_type: return ctype::make(ctype::int_k);
+            case script_value_type::jai_float_type: return ctype::make(ctype::float_k);
+            case script_value_type::jai_bool_type: return ctype::make(ctype::bool_k);
+            case script_value_type::jai_char_type: return ctype::make(ctype::char_k);
+            case script_value_type::jai_string_type: return ctype::make(ctype::string_k);
+            case script_value_type::jai_array_type: return ctype::make(ctype::array_k);
+            case script_value_type::jai_map_type: return ctype::make(ctype::map_k);
+            case script_value_type::jai_object_type:
+                if (auto def = eng_.get_class_definition_by_type(r.cpp_type)) { return object_of(def->get_name()); }
+                return {};
+            default: return {};
+        }
+    }
+
+    // a method call on a host class that opted into strict signatures: the arity and argument kinds its overloads accept, and
+    // the result they agree on; other host classes stay lenient
+    ctype check_strict_host_method(std::string_view cls, std::string_view member, const std::vector<ctype>& args, const source_location& loc) {
+        auto def = engine_class(cls);
+        if (!def || !def->is_cpp_class() || !def->strict_signatures() || def->extended_ever()) { return {}; }
+        const auto& table = def->cpp_method_overload_table();
+        auto it = table.find(eng_.symbolize(member));
+        if (it == table.end()) { return {}; }
+        const std::string fname = std::string(cls) + "." + std::string(member);
+        auto bucket = it->second.find(args.size());
+        if (bucket == it->second.end() || bucket->second.empty()) {
+            std::vector<size_t> arities;
+            for (const auto& [n, entries] : it->second) { if (!entries.empty()) { arities.push_back(n); } }
+            std::sort(arities.begin(), arities.end());
+            std::string text;
+            for (size_t n : arities) { text += (text.empty() ? "" : " or ") + std::to_string(n); }
+            diag(diag_level::error, loc, "'" + fname + "' expects " + text + " argument(s), got " + std::to_string(args.size()));
+            return {};
+        }
+        std::optional<ctype> result;
+        bool agree = true;
+        bool viable = false;
+        for (const auto& entry : bucket->second) {
+            bool ok = true;
+            for (size_t i = 0; i < args.size() && i < entry.param_types.size(); ++i) {
+                if (!host_param_accepts(args[i], entry.param_types[i])) { ok = false; break; }
+            }
+            if (!ok) { continue; }
+            viable = true;
+            ctype r = host_result(entry.result);
+            if (!result) { result = r; }
+            else if (result->kind != r.kind || result->cls != r.cls) { agree = false; }
+        }
+        if (!viable) {
+            diag(diag_level::error, loc, "no overload of '" + fname + "' accepts these argument types");
+            return {};
+        }
+        return agree && result ? *result : ctype{};
+    }
+
     // -------------------------------------------------------------- calls
 
     struct call_check {
@@ -2310,6 +2549,7 @@ private:
 
 	ctype infer_member_impl(member_expr* m, bool writing, const variable_decl** typed_field_out,
 							ctype* recv_out, member_hit* hit_out, std::optional<field_proof>& fp) {
+		if (m->is_static && binary_width_token(m)) { return object_of("binary::width"); }
 		if (m->is_static && namespace_path_receiver(m)) { return {}; }
 		ctype recv = infer(m->object.get());
 		if (recv_out) { *recv_out = recv; }
@@ -2522,9 +2762,11 @@ private:
 				// math:: intrinsics take the kernel lane (same shape gate as both backends)
 				const math_fn fn = math_intrinsic_for_call(m);
 				if (fn != math_fn::none && args.size() <= 8) { return math_intrinsic_result(fn, args); }
+				if (ctype t; library_namespace_call(c, m, args, t)) { return t; }
 				if (namespace_path_receiver(m)) { return check_namespace_entry(m, args, c->location); }
 			}
 			ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
+			if (ctype t; binary_member_call(c, m, recv, args, t)) { return t; }
 			if (recv.kind == ctype::array_k && recv.ti && m->member == "push" && args.size() == 1) {
 				const auto issue = container_element_issue(args[0], recv.ti->element_type().get());
 				if (!issue.empty()) {
@@ -2543,6 +2785,7 @@ private:
 						if (!hit.provable) { r.tentative = true; }
 						return r;
 					}
+					if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location); }
 					return {};
 				}
 				if (!want_static) {
@@ -3470,6 +3713,11 @@ void static_checker::collect_names(const statement* node) {
         case node_type::variable_decl: {
             auto* v = static_cast<const variable_decl*>(node);
             all_names_.insert(v->name);
+            layout_inits_[v->name].push_back(binary_call(v->initializer.get(), "layout") ? v->initializer.get() : nullptr);
+            if (v->type && v->type->base_type == script_value_type::jai_reference_type && v->initializer &&
+                v->initializer->get_type() == node_type::identifier_expr) {
+                assigned_names_.insert(static_cast<const identifier_expr*>(v->initializer.get())->name);
+            }
             if (v->initializer) { collect_names_expr(v->initializer.get()); }
             break;
         }
@@ -3609,6 +3857,9 @@ void static_checker::collect_names_expr(const expression* e) {
             break;
         case node_type::assignment_expr: {
             auto* a = static_cast<const assignment_expr*>(e);
+            if (a->target && a->target->get_type() == node_type::identifier_expr) {
+                assigned_names_.insert(static_cast<const identifier_expr*>(a->target.get())->name);
+            }
             collect_names_expr(a->target.get());
             collect_names_expr(a->value.get());
             break;

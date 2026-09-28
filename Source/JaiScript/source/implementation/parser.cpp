@@ -1679,13 +1679,17 @@ checked_result<type_info_ptr> parser::parse_type() {
     if (match({token_type::identifier, token_type::user_template_type})) {
         std::string type_name(previous().lexeme);
         token_type typeToken = previous().type;
-        // ns::Type names a class registered under its qualified name (time::date)
+        // ns::Type names a class registered under its qualified name (time::date); a class this unit declared inside a
+        // namespace is defined under its bare name
+        std::string last_name(previous().lexeme);
         while (typeToken == token_type::identifier && check(token_type::colon_colon) &&
                current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
             advance();
             type_name += "::";
-            type_name += advance().lexeme;
+            last_name = std::string(advance().lexeme);
+            type_name += last_name;
         }
+        if (namespace_class_names_.count(type_name)) { type_name = last_name; }
 
         // If it's a user_template_type token, we know it's safe to parse template syntax
         if (typeToken == token_type::user_template_type && match(token_type::less)) {
@@ -4025,6 +4029,9 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 continue;
             }
             member_decl = std::move(class_result.value());
+            if (auto* cls = dynamic_cast<class_decl*>(member_decl.get())) {
+                namespace_class_names_.insert(full_namespace_name + "::" + std::string(cls->name));
+            }
             match(token_type::semicolon);  // Consume optional semicolon after class
         } else if (match(token_type::namespace_keyword)) {
             // Nested namespaces

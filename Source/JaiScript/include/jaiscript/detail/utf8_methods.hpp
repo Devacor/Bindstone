@@ -26,7 +26,7 @@ namespace jai::detail {
         if (k == script_value::TYPEID_STRING) return script_value::make_utf8(std::move(r.unchecked_as_string_ref()), ctx.get_engine());
         if (k == script_value::TYPEID_ARRAY) {
             const script_array* node = r.unchecked_array_node();
-            bool strings = node && node->size() > 0;
+            bool strings = node && node->size() > 0 && (node->kind() == script_array::kind_t::hetero || node->kind() == script_array::kind_t::str);
             if (strings) node->for_each(ctx.get_engine(), [&](const script_value& e) { if (!e.is_string()) strings = false; });
             if (!strings) return r;
             script_value out = script_value::make_array(nullptr, ctx.get_engine());

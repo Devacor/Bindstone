@@ -1162,6 +1162,16 @@ namespace jai {
         checked_result<bool> import_modules(import_site& site, const std::vector<std::string>& paths, bool force);
         // Filesystem queries the import step has made (resolution, stamps): the counter the throttle's tests read
         uint64_t import_stat_count() const noexcept;
+
+        // The catch variable's value, both backends at the catch: the error's message as a string (every string operation
+        // reads it unchanged) that also answers e.message, e.file, e.line, e.column, e.stack (file:line per frame,
+        // innermost first) and e.value (a throw's value; null for a run-time error). The place is the throw's, else the
+        // innermost frame's statement.
+        script_value make_caught_error(const script_value& thrown, bool by_throw, const source_location* throw_site,
+                                       const std::vector<stack_frame>& trace);
+        // A member read on a string receiver that is a caught error (nullopt: not one, or not an error member; a thrown
+        // object or map answers its own fields)
+        std::optional<script_value> caught_error_member(const script_value& receiver, uint64_t member_id);
         
         // Import management
         void reset_imports();

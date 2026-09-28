@@ -39,8 +39,8 @@ array<string> dev_poll() {
 	} catch (e) {
 		string text = to_string(e);
 		string module = "?";
-		for (int i = 0; i < DEV_MODULES.size(); ++i) {
-			if (text.contains(DEV_MODULES[i])) { module = DEV_MODULES[i]; break; }
+		for (int i = 0; i < DEV_MODULES.size(); ++i) {   // a run-time error names its file, a rejected load its listing
+			if (e.file.contains(DEV_MODULES[i]) || text.contains(DEV_MODULES[i])) { module = DEV_MODULES[i]; break; }
 		}
 		array<string> el = text.lines();
 		msgs.push(`Reload FAILED (${module}): ` + (el.size() > 0 ? el[0] + (el.size() > 1 ? " " + string::trim(el[1]) : "") : "?"));

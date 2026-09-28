@@ -1181,7 +1181,7 @@ void vm_backend::capture_stack_trace() {
 		}
 		for (const chunk::inline_site& s : fr->code->inline_sites) {   // an inlined leaf: the callee's frame as the interpreter has it, the caller's line the call's
 			if (fr->ip >= s.begin_ip && fr->ip < s.fallback_ip && s.decl) {
-				captured_trace_.push_back({ std::string(s.decl->name), node ? node->location.filename : std::string(), node ? node->location.line : 0 });
+				captured_trace_.push_back({ std::string(s.decl->name), node ? node->location.filename : std::string(), node ? node->location.line : 0, node ? node->location.column : 0 });
 				node = s.call_stmt;
 				break;
 			}
@@ -1189,13 +1189,15 @@ void vm_backend::capture_stack_trace() {
 		captured_trace_.push_back({
 			fr->code->function_name.empty() ? std::string("<anonymous>") : fr->code->function_name,
 			node ? node->location.filename : std::string(),
-			node ? node->location.line : 0
+			node ? node->location.line : 0,
+			node ? node->location.column : 0
 		});
 	}
 	captured_trace_.push_back({
 		"<script>",
 		top_node ? top_node->location.filename : std::string(),
-		top_node ? top_node->location.line : 0
+		top_node ? top_node->location.line : 0,
+		top_node ? top_node->location.column : 0
 	});
 	trace_captured_ = true;
 }
@@ -12687,6 +12689,12 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	}
 
 	if (objectValue.is_string() || objectValue.is_utf8_string()) {
+		if (!as_callee) {   // a caught error's own members and a thrown object's fields before the string methods (KEEP BYTE-PARALLEL with interpreter::member_read_on)
+			if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {
+				out = std::move(*error_member);
+				return {};
+			}
+		}
 		const auto& table = objectValue.is_utf8_string() ? builtins_.utf8_methods : builtins_.string_methods;
 		auto methodIt = table.find(expr->member_id);
 		if (methodIt != table.end()) {
@@ -12696,6 +12704,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
 			};
 			out = script_value::make_function(boundMethod, engine_);
+			return {};
+		}
+		if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {   // e.file, e.line, ... on a caught error
+			out = std::move(*error_member);
 			return {};
 		}
 		std::string member_str(expr->member);
@@ -16431,6 +16443,7 @@ op_status vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
 		active_exception_value_ = val;
 		std::string message = val.to_string();
 		current_exception_ = script_exception(message, node ? node->location : source_location{});
+		current_exception_->thrown = true;
 	} else {
 		// Re-throw protocol parity: a bare rethrow with no active exception is a real
 		// C++ throw (caught at the nearest call boundary, exactly like the interpreter)
@@ -16549,6 +16562,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			active_exception_value_ = script_value(message, engine_);
 			current_exception_ = script_exception(message);
 		}
+		if (!trace_captured_) { capture_stack_trace(); }   // the stack at the error, for the caught value
 		is_unwinding_ = false;
 		trace_captured_ = false;
 		current_catch_var_id_ = handler.catch_var;
@@ -16583,7 +16597,9 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		// the interpreter's visit_try_stmt bind): frame slot, or a scope env the matching
 		// op_catch_end pops (exec_iter_init's env_pushed shape)
 		if (handler.catch_var != 0 && !symbolizer_->get_string(handler.catch_var).empty()) {
-			script_value caught = active_exception_value_ ? *active_exception_value_ : make_null();
+			const bool by_throw = current_exception_ && current_exception_->thrown;
+			script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_null(), by_throw,
+			                                                 by_throw ? &current_exception_->location() : nullptr, captured_trace_);
 			if (handler.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
 				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {

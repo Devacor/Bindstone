@@ -1578,7 +1578,7 @@ public:
                            {"c.resume();", "c.resume();", "c.done();"}, "2|abc|true", "e itself after the yield");
             both_drained("coroutine int g() { try { throw \"abc\"; } catch (e) { yield 2; return to_string(e).size(); } }\nauto h = g(); drain(h)",
                          "2|3", "drained in one execute");
-            check_executes("coroutine var g() { try { throw 42; } catch (e) { yield 1; e = e + 1; yield e; return e * 2; } } auto c = g();",
+            check_executes("coroutine var g() { try { throw 42; } catch (err) { var e = err.value; yield 1; e = e + 1; yield e; return e * 2; } } auto c = g();",
                            {"c.resume();", "c.resume();", "c.resume();"}, "1|43|86", "the catch variable is a mutable local across yields");
             check_executes("coroutine var g() { try { throw \"c\"; } catch (e) { yield 1; var l = [=]() { return e + \"!\"; }; yield l(); var m = [&]() { e = e + \"?\"; }; m(); var n = [e]() { return e; }; return n(); } } auto c = g();",
                            {"c.resume();", "c.resume();", "c.resume();"}, "1|c!|c?", "[=], [&] and [e] lambdas created after yields capture the catch variable");

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -236,18 +237,63 @@ public:
         
         test("exception_with_numeric_values", [this]() {
             auto engine = make_engine();
-            
-            std::string script = R"(
-                try {
-                    throw 42;
-                } catch (e) {
-                    return e;
-                }
-            )";
-            
-            script_value result = engine->execute(script);
+
+            // the caught error reads as its message; the thrown value is e.value
+            script_value message = engine->execute("try { throw 42; } catch (e) { return e; }");
+            check_true(message.is_string());
+            check_eq(std::string("42"), message.as_string());
+            script_value result = engine->execute("try { throw 42; } catch (e) { return e.value; }");
             check_eq(result.is_int(), true);
             check_eq(result.as<int>(), 42);
+        });
+
+        test("a_caught_error_is_its_message_with_its_place_and_stack", [this]() {
+            // catch (e) binds the error's message as a string (every string operation reads it unchanged) that also answers
+            // e.message, e.file, e.line, e.column, e.stack (file:line per frame, innermost first) and e.value (a throw's
+            // value, null for a run-time error); a copy keeps the answers, a new string made from it does not
+            const std::string path = (jai::foundry::test_temp_directory() / "caught_probe.jai").generic_string();
+            const std::string runtime_src =
+                "int inner(array<int> a) {\n"                                             // 1
+                "    return a[5];\n"                                                      // 2
+                "}\n"                                                                     // 3
+                "int outer() { return inner([1]); }\n"                                    // 4
+                "string info = \"\";\n"                                                 // 5
+                "try {\n"                                                                 // 6
+                "    outer();\n"                                                          // 7
+                "} catch (err) {\n"                                                       // 8
+                "    var copy = err;\n"                                                   // 9
+                "    info = err + \"|\" + err.message + \"|\" + to_string(err.line) + \"|\" + err.stack.join(\",\") + \"|\" + type_of(err) +\n"
+                "           \"|\" + to_string(err == \"Array index 5 out of bounds for array of size 1\") + \"|\" + to_string(err.value == null) +\n"
+                "           \"|\" + to_string(copy.line) + \"|\" + to_string(err.file == \"" + path + "\") + \"|\" + to_string(err.column > 0);\n"
+                "    string made = err + \"\";\n"
+                "    try { var f = made.file; } catch (inner_err) { info = info + \"|\" + inner_err; }\n"
+                "}\n"
+                "info;\n";
+            const std::string throw_src =
+                "class Oops { int code = 7; }\n"                                          // 1
+                "void boom() {\n"                                                         // 2
+                "    throw Oops();\n"                                                     // 3
+                "}\n"                                                                     // 4
+                "string r = \"\";\n"                                                    // 5
+                "try { boom(); } catch (e) {\n"                                           // 6
+                "    r = to_string(e.code) + \"|\" + to_string(e.line) + \"|\" + to_string(e.value.code) + \"|\" + to_string(e.stack.size()) + \"|\" + e.stack[0];\n"
+                "}\n"
+                "try { throw 42; } catch (e2) { r = r + \"|\" + e2 + \"|\" + to_string(e2.value + 1); }\n"   // 9
+                "try { try { throw \"deep\"; } catch (a) { throw; } } catch (b) { r = r + \"|\" + b.value + \"|\" + to_string(b.line); }\n"   // 10
+                "r;\n";
+            std::string first_runtime, first_throw;
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(*e);
+                const std::string runtime = e->execute_file_source(path, runtime_src).to_string();
+                check_eq(std::string("Array index 5 out of bounds for array of size 1|Array index 5 out of bounds for array of size 1|2|") +
+                         path + ":2," + path + ":4," + path + ":7|string|true|true|2|true|true|string has no member 'file'", runtime);
+                const std::string thrown = e->execute_file_source(path, throw_src).to_string();
+                check_eq(std::string("7|3|7|2|") + path + ":3|42|43|deep|10", thrown);
+                if (!use_vm) { first_runtime = runtime; first_throw = thrown; }
+                else { check_eq(first_runtime, runtime, "backends agree"); check_eq(first_throw, thrown, "backends agree"); }
+            }
         });
         
         test("exception_scope_isolation", [this]() {

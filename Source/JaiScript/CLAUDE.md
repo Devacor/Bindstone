@@ -501,7 +501,11 @@ engine stays usable", not by `check_throws`.
   binds `e` as a frame-slot local of the catch body (scope env at top level) - C++ `catch`
   semantics: shadows for the block only, invisible to callees and after the block, captured
   like any local, survives yields; the exception pair + in-catch marker are parked per
-  coroutine. `.jaibite` version 12.
+  coroutine. `.jaibite` version 12. The bound value is an ERROR VALUE (Dev ruling 2026-09-28, guide ch. 5): its message
+  as a string (every string operation unchanged) that answers `e.message/file/line/column/stack/value` - a throw's value
+  with its type in `e.value` (`throw 42`: `e` reads "42"; a thrown object's/map's fields read through `e`), the place
+  the throw's or the raising statement's, the stack `file:line` innermost first; `engine::make_caught_error` at both
+  backends' catch, `engine::caught_error_member` before `string has no member`, `script_exception::thrown`.
 - **Files and locations** (guide ch. 10 "Where files are"): ONE resolution ladder for `import`, `include`,
   the checker's closure gather and the `resolve_path(name)` builtin: absolute as given; relative against the
   ASKING file's folder, then the include paths in order, then the working directory (canonical spelling is

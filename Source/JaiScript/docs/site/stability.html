@@ -93,7 +93,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><code>0.0</code> and <code>-0.0</code> are distinct map keys.</li>
 <li>A JSON round trip loses a <code>char</code> field and an int-keyed map field, and <code>from_json</code> returns a map when the class's default constructor raises.</li>
 <li>A bare <code>throw;</code> with nothing to rethrow, directly inside a top-level <code>try</code>, ends the program instead of reaching the <code>catch</code>.</li>
-<li>A compound assignment's operand error reads differently on a variable, a field and an element.</li>
+<li>A compound assignment with an operand of the wrong type raises a different text on an array element than on a variable or a field.</li>
 </ul>
 </article>
 </main>

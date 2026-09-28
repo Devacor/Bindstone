@@ -69,7 +69,7 @@ jobs:
           '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug>:Embedded>'
 
       - name: Build
-        run: cmake --build build --target jaiscript_tests jaiscript_fuzz jaiscript_runner jai_gloom jai_crawler jai_demoreel
+        run: cmake --build build --target jaiscript_tests jaiscript_fuzz jaiscript_runner jaiscript_lsp jai_gloom jai_crawler jai_demoreel
 
       - name: Tests (interpreter)
         run: bash tools/ci/gates.sh tests-interp
@@ -86,6 +86,9 @@ jobs:
       - name: crawler hash gate
         run: bash tools/ci/gates.sh crawler
 
+      - name: Language server tests
+        run: bash tools/ci/gates.sh lsp
+
       # Release only: in a Debug build these two runs take tens of minutes.
       - name: demoreel hash gate
         if: matrix.config == 'Release'
@@ -94,6 +97,11 @@ jobs:
       - name: Gator Quest hash gate
         if: matrix.config == 'Release'
         run: bash tools/ci/gates.sh gatorquest
+
+      # Release only: it holds a wall-clock budget (median edit-to-diagnostics under 100 ms).
+      - name: Language server latency
+        if: matrix.config == 'Release'
+        run: bash tools/ci/gates.sh lsp-latency
 
   # Cheap conformance gate: catches MSVC-isms and missing standard includes
   # without waiting for the full matrix.

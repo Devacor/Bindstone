@@ -362,11 +362,23 @@ def run_gatorquest(exe, checks):
             r = client.request("textDocument/definition", {"textDocument": {"uri": root_uri}, "position": at(needle, occurrence, delta)})
             return (relativize(r["uri"], GATORQUEST.parent), r["range"]["start"]["line"] + 1) if r else None
 
-        checks.check(definition("CHARS[slot]") == ("scripts/gq_state.jai", 103), "definition CHARS -> gq_state.jai:103", str(definition("CHARS[slot]")))
-        checks.check(definition("Character& c") == ("scripts/gq_types.jai", 141), "definition Character -> gq_types.jai:141", str(definition("Character& c")))
-        checks.check(definition("mob_live(m)") == ("scripts/gq_mobs.jai", 130), "definition mob_live -> gq_mobs.jai:130", str(definition("mob_live(m)")))
-        checks.check(definition("c.name", 1, 2) == ("scripts/gq_types.jai", 144), "definition c.name -> Character.name", str(definition("c.name", 1, 2)))
-        checks.check(definition("c.pack.size", 1, 2) == ("scripts/gq_types.jai", 151), "definition c.pack -> Character.pack", str(definition("c.pack.size", 1, 2)))
+        def declared(file, pattern, after=None):
+            # the example keeps changing, so the expected line is read from the file
+            lines = (GATORQUEST / file).read_text(encoding="utf-8").split("\n")
+            start = 0 if after is None else declared(file, after)[1]
+            line = next(i for i in range(start, len(lines)) if re.search(pattern, lines[i])) + 1
+            return ("scripts/" + file, line)
+
+        chars = declared("gq_state.jai", r"^array<Character> CHARS;")
+        character = declared("gq_types.jai", r"^class Character\b")
+        mob_live = declared("gq_mobs.jai", r"^bool mob_live\(")
+        name = declared("gq_types.jai", r"^\s+string name\b", r"^class Character\b")
+        pack = declared("gq_types.jai", r"^\s+array<Item> pack;", r"^class Character\b")
+        checks.check(definition("CHARS[slot]") == chars, "definition CHARS -> gq_state.jai:%d" % chars[1], str(definition("CHARS[slot]")))
+        checks.check(definition("Character& c") == character, "definition Character -> gq_types.jai:%d" % character[1], str(definition("Character& c")))
+        checks.check(definition("mob_live(m)") == mob_live, "definition mob_live -> gq_mobs.jai:%d" % mob_live[1], str(definition("mob_live(m)")))
+        checks.check(definition("c.name", 1, 2) == name, "definition c.name -> Character.name", str(definition("c.name", 1, 2)))
+        checks.check(definition("c.pack.size", 1, 2) == pack, "definition c.pack -> Character.pack", str(definition("c.pack.size", 1, 2)))
 
         hover = client.request("textDocument/hover", {"textDocument": {"uri": root_uri}, "position": at("mob_live(m)")})
         checks.check(hover and "bool mob_live(int m)" in hover["contents"]["value"], "hover mob_live shows its signature", str(hover))

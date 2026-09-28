@@ -208,6 +208,8 @@ Ubuntu 24.04 — and each of the six builds runs:
 - a 300-program differential-fuzz campaign (`jaiscript_fuzz --isolate`)
 - the example hash gates: GLOOM and GRUBWELL (and, in Release, demoreel and Gator Quest) must
   reproduce their reference hashes on both backends
+- the language server's protocol tests (`tools/lsp/tests/lsp_test.py`: golden fixtures and the
+  Gator Quest checks, plus its edit-latency budget in Release)
 
 A separate job runs a cheap `-fsyntax-only` sweep of every implementation file, which catches
 MSVC-isms and missing standard includes without waiting for the matrix. The gates live in

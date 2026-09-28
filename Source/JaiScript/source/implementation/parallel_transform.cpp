@@ -1247,6 +1247,10 @@ namespace {
 						}
 						return true;
 					}
+					if (m->object && m->object->get_type() == node_type::identifier_expr &&
+					    static_cast<identifier_expr*>(m->object.get())->name == "time") {
+						return wall(m, "time:: calls are not allowed in a parallel body (engine-owned clock)");
+					}
 					return fail(m, "static member calls are not allowed in a parallel body");
 				}
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }   // warm

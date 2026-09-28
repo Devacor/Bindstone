@@ -56,6 +56,8 @@ GUIDE = [
      "The reflect:: surface: ask a value what it is, walk fields and methods by name, and build tools on top of live objects."),
     ("13-strict-checking.html", "Types That Fail Early: strict checking",
      "What fails at load and what waits for run time, how to read a diagnostic, cast&lt;T&gt; as the explicit boundary, extern, and the [[warn_mode]] / [[strict_mode]] attributes."),
+    ("14-time.html", "Time: Clocks, Stopwatches &amp; Dates",
+     "The time:: namespace: monotonic and wall clocks, execute_elapsed, value-type stopwatches, validated calendar dates in UTC or local time, templates with format specs, and why parallel bodies cannot read the clock."),
 ]
 
 EMBEDDING = [
@@ -93,7 +95,7 @@ SECTION_INDEX_DESC = {
     "tour/index.html":
         "Ten minutes, one small game: value semantics, the strict checker, a swarm, coroutines, hot reload and parallel_for, every line run on both backends.",
     "guide/index.html":
-        "Thirteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
+        "Fourteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
     "embedding/index.html":
         "Fourteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, and editor support.",
     "examples/index.html":

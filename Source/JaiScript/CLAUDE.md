@@ -511,6 +511,14 @@ engine stays usable", not by `check_throws`.
   count, two remembered positions, breadcrumbs every 64 characters) live only on utf8_string, clear on every write
   (`unchecked_as_utf8_ref` is the copy-on-write gate), and are written only while no parallel region runs. `utf8_string` is
   an identifier the parser reads as a type (like `double`); `.jaibite` version 19.
+- **`time::`** (stdlib `register_time_functions`, part of `register_all`; guide ch. 14): `now()`/`engine_elapsed()`,
+  `execute_elapsed()`, `unix_time()`/`unix_ms()`, `date_now(template)` (`${name:spec}` placeholders, the template-string
+  specs), `sleep`/`sleep_ms`, and the value types `time::stopwatch` and `time::date` (host classes registered under their
+  qualified names; `ns::Type` parses as a type name wherever a class name does). Every call reads the engine's
+  replaceable time source once (`engine::time_source(monotonic, wall, sleep)`); outside time:: calls the engine reads the
+  monotonic clock only at a host entry, and only after a loaded program names `time::execute_elapsed` (the parse-tail
+  marking pass flags it). time:: calls are a parallel-body wall (all modes); the checker types them through
+  `script_namespace_data::signatures`.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

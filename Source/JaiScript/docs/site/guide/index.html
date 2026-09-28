@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guide — JaiScript docs</title>
-<meta name="description" content="Thirteen chapters covering the whole core language - every sample executed on both backends before it was written down.">
+<meta name="description" content="Fourteen chapters covering the whole core language - every sample executed on both backends before it was written down.">
 <meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
 <meta property="og:title" content="Guide — JaiScript docs">
-<meta property="og:description" content="Thirteen chapters covering the whole core language - every sample executed on both backends before it was written down.">
+<meta property="og:description" content="Fourteen chapters covering the whole core language - every sample executed on both backends before it was written down.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
@@ -29,10 +29,10 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1">
 <h1>The Language Guide</h1>
-<p>Thirteen chapters covering the whole core language. Every code sample was executed on <strong>both</strong> backends (tree-walking interpreter and bytecode VM); the output shown beneath each example is the real, verified output.</p>
+<p>Fourteen chapters covering the whole core language. Every code sample was executed on <strong>both</strong> backends (tree-walking interpreter and bytecode VM); the output shown beneath each example is the real, verified output.</p>
 <p>Follow along in a terminal. Drop a sample into <code>try.jai</code>, run <code>jaiscript try.jai</code> with the standalone runner, and you get what the page shows, with one small convention: the <code>== result:</code> line, explained in <a href="01-hello.html#try-it-from-a-terminal">Hello &amp; Basics</a> along with the two-minute setup.</p>
 <p>One thing to know before chapter&nbsp;1: the <strong>static checker is on, in strict mode, by default</strong>. A typed mistake the checker can see (a string into an <code>int</code>, a call with the wrong number of arguments, an undeclared name) fails the load, before a single statement runs. <a href="02-type-ladder.html#when-a-mismatch-is-caught">Chapter&nbsp;2</a> draws the line between those and the mistakes that still wait for run time; <a href="13-strict-checking.html">Chapter&nbsp;13</a> collects the whole story, escape hatches included.</p>
 <p>Which of these rules are settled for 1.0, and which may still change in a 0.x release, is on the <a href="../stability.html">Stability</a> page.</p>
@@ -50,6 +50,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><a href="11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a><p class="toc-desc">The smaller conveniences: enums, namespaces, destructuring, the ternary operator, and null-safe access.</p></li>
 <li><a href="12-reflection.html">Reflection: reflect::</a><p class="toc-desc">Ask, act, and navigate by name: fields, methods, get/set/invoke, spawn-by-name. Live queries that survive hot reload, enforcing exactly what direct syntax enforces.</p></li>
 <li><a href="13-strict-checking.html">Types That Fail Early: strict checking</a><p class="toc-desc">What fails at load and what waits for run time, how to read a diagnostic, the promise that a clean program is never rejected, <code>cast&lt;T&gt;</code> as the explicit boundary, <code>extern</code>, and the <code>[[warn_mode]]</code> / <code>[[strict_mode]]</code> attributes.</p></li>
+<li><a href="14-time.html">Time: Clocks, Stopwatches &amp; Dates</a><p class="toc-desc">The <code>time::</code> namespace: monotonic and wall clocks, value-type stopwatches, validated calendar dates in UTC or local time, templates with format specs, and a clock a host can replace.</p></li>
 </ol>
 </main>
 </div>

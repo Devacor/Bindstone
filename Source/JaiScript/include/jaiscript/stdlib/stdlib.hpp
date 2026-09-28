@@ -7,6 +7,7 @@
 #include "math.hpp"
 #include "strings.hpp"
 #include "reflection.hpp"
+#include "time.hpp"
 // Optional: #include "vector.hpp"  // Vec2/Vec3 types - many engines have their own
 
 namespace jai {
@@ -24,6 +25,7 @@ namespace stdlib {
         register_reflection_functions(eng_ref);   // the reflect:: capability — separately
                                                   // composable for hosts that grant stdlib
                                                   // without reflection
+        register_time_functions(eng_ref);         // time:: over the engine's time source
 
         // Optional: register_vector_types(eng_ref);  // Vec2/Vec3 with move_towards
     }

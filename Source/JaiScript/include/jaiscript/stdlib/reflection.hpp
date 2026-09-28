@@ -819,6 +819,19 @@ inline void register_reflection_functions(engine& eng_ref) {
                     }
                     return arr;
                 }
+                // a host entry that declares its signature answers it (arguments argN, as host methods do)
+                auto sig_it = ns_it->second->signatures.find(sym->intern(name.substr(pos + 2)));
+                if (sig_it != ns_it->second->signatures.end()) {
+                    const host_entry_signature& sig = sig_it->second;
+                    auto params = script_value::make_array(nullptr, eng);
+                    for (size_t i = 0; i < sig.max_args; ++i) {
+                        const script_value_type t = i < sig.params.size() ? sig.params[i] : script_value_type::jai_null_type;
+                        params.as_array().push_back(reflect_detail::make_param_entry(eng, "arg" + std::to_string(i),
+                            reflect_detail::cpp_param_type_name(eng, param_type_info(t)), i >= sig.min_args));
+                    }
+                    arr.as_array().push_back(std::move(params));
+                    return arr;
+                }
             }
         } else {
             auto found = eng->get_global_environment()->get(name);

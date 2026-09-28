@@ -1729,6 +1729,12 @@ private:
         else if (sig.result == script_value_type::jai_string_type) { t = ctype::make(ctype::string_k); }
         else if (sig.result == script_value_type::jai_bool_type) { t = ctype::make(ctype::bool_k); }
         else if (sig.result == script_value_type::jai_int_type) { t = ctype::make(ctype::int_k); }
+        else if (sig.result == script_value_type::jai_float_type) { t = ctype::make(ctype::float_k); }
+        else if (sig.result == script_value_type::jai_object_type && !sig.result_class.empty()) {
+            const type_info* ti = eng_.get_type_info_object(sig.result_class);
+            t = ctype::object(ti->type_name);
+            t.ti = ti;
+        }
         else { return {}; }
         t.tentative = true;
         return t;
@@ -1738,6 +1744,7 @@ private:
         switch (p) {
             case script_value_type::jai_string_type: return arg.kind == ctype::string_k || arg.kind == ctype::utf8_k;
             case script_value_type::jai_int_type: return arg.kind == ctype::int_k;
+            case script_value_type::jai_float_type: return arg.kind == ctype::int_k || arg.kind == ctype::float_k;
             case script_value_type::jai_bool_type: return arg.kind == ctype::bool_k;
             case script_value_type::jai_array_type: return arg.kind == ctype::array_k;
             case script_value_type::jai_map_type: return arg.kind == ctype::map_k;
@@ -1748,6 +1755,7 @@ private:
         switch (p) {
             case script_value_type::jai_string_type: return "a string";
             case script_value_type::jai_int_type: return "an int";
+            case script_value_type::jai_float_type: return "a number";
             case script_value_type::jai_bool_type: return "a bool";
             case script_value_type::jai_array_type: return "an array";
             case script_value_type::jai_map_type: return "a map";

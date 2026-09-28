@@ -49,7 +49,9 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
             "Coroutine is already running");
     }
 
-    return eng->get_execution_backend()->resume_coroutine(*this);
+    execution_backend* backend = eng->get_execution_backend();
+    if (!backend->is_executing()) { eng->note_host_entry(); }
+    return backend->resume_coroutine(*this);
 }
 
 } // namespace jai

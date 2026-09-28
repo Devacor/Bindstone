@@ -26,6 +26,7 @@
 #include <cstring>
 #include <limits>
 #include <filesystem>
+#include <thread>
 #ifndef _WIN32
 #include <sys/stat.h>
 #endif
@@ -90,6 +91,7 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
     // Host-boundary detection BEFORE the call (the backends' host-level-resume rule):
     // an invocation with no execute in flight is a fresh host entry.
     const bool host_boundary = !backend->is_executing() && !backend->is_unwinding();
+    if (host_boundary) { eng->note_host_entry(); }
     auto result = backend->execute_callable(payload, args);
     if (host_boundary && result.has_value() && backend->is_unwinding()) [[unlikely]] {
         // Uncaught script throw crossing the host boundary: report EXACTLY like
@@ -1247,6 +1249,13 @@ struct engine::implementation {
     std::string root_source_file_;   // engine::root_source_file
     std::function<std::string(const std::string&)> app_data_resolver;    // engine::app_directory_resolvers
     std::function<std::string(const std::string&)> app_cache_resolver;
+    engine::clock_reading monotonic_clock, wall_clock;   // engine::time_source (empty = system)
+    engine::clock_sleep sleep_clock;
+    std::chrono::nanoseconds system_origin = std::chrono::steady_clock::now().time_since_epoch();
+    std::chrono::nanoseconds entry_start{};
+    uint64_t entry_generation = 0;
+    uint64_t stamped_generation = UINT64_MAX;
+    bool entry_stamps = false;
     void note_root_source(const std::string& path) {
         if (path.empty() || path == "<script>") return;
         if (!backend || !backend->is_executing()) root_source_file_ = path;
@@ -1317,7 +1326,7 @@ struct engine::implementation {
             // jaibite carries structure, not the parser-pass flags (ref-escape,
             // value-decl naming, typed-store proofs, transient reads) — re-derive
             // them exactly like the parse tail does
-            detail::run_ast_marking_passes(declarations, &string_symbolizer_);
+            if (detail::run_ast_marking_passes(declarations, &string_symbolizer_)) { entry_stamps = true; }
             auto entry = store_cached_script(sourcePath, source, std::move(declarations));
             if (flags & detail::k_jaibite_flag_checked_clean) {
                 // Trusted stamp (fingerprint matched): skip the re-check exactly like a
@@ -1987,6 +1996,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
     if (!textual) { impl->string_symbolizer_.set_current_unit(unit_stamp{ unit, impl->string_symbolizer_.next_execution() }); }   // an include runs under the including unit
     try {
         execution_backend* be = backend();
+        if (!be->is_executing()) { note_host_entry(); }
 
         // Push scope for instance variables if any
         bool hasInstanceVars = instanceVars && !instanceVars->empty();
@@ -2131,7 +2141,7 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags, nullptr, own_path);
     // jaibite carries structure, not the parser-pass flags — re-derive them (see
     // try_load_jaibite_entry's twin)
-    detail::run_ast_marking_passes(declarations, get_symbolizer());
+    if (detail::run_ast_marking_passes(declarations, get_symbolizer())) { note_execute_elapsed_use(); }
     jai::jaibite bite(weak_from_this(), std::move(declarations));
     bite.registration_mismatch_ = (saved_fingerprint != registration_fingerprint());
     // Trust the checked-clean stamp only when the registration surface matches the
@@ -3677,6 +3687,54 @@ std::string engine::app_cache_dir(const std::string& app) const {
     auto allowed = require_privilege(privilege::filesystem);
     if (!allowed) { throw runtime_error(std::string(allowed.static_message())); }
     return impl->app_cache_resolver ? impl->app_cache_resolver(app) : default_app_cache_dir(app);
+}
+
+void engine::time_source(clock_reading monotonic, clock_reading wall, clock_sleep sleep) {
+    impl->monotonic_clock = std::move(monotonic);
+    impl->wall_clock = std::move(wall);
+    impl->sleep_clock = std::move(sleep);
+    impl->stamped_generation = UINT64_MAX;   // an entry stamp from the previous source means nothing on this one
+}
+
+std::chrono::nanoseconds engine::monotonic_now() {
+    return impl->monotonic_clock ? impl->monotonic_clock() : std::chrono::steady_clock::now().time_since_epoch();
+}
+
+std::chrono::nanoseconds engine::wall_now() {
+    return impl->wall_clock ? impl->wall_clock()
+                            : std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch());
+}
+
+void engine::sleep_for(std::chrono::nanoseconds duration) {
+    if (impl->sleep_clock) { impl->sleep_clock(duration); return; }
+    if (duration.count() > 0) { std::this_thread::sleep_for(duration); }
+}
+
+double engine::engine_elapsed() {
+    const auto origin = impl->monotonic_clock ? std::chrono::nanoseconds{} : impl->system_origin;
+    return std::chrono::duration<double>(monotonic_now() - origin).count();
+}
+
+double engine::execute_elapsed() {
+    const auto now = monotonic_now();
+    if (impl->stamped_generation != impl->entry_generation) {   // an entry that began before any loaded program named execute_elapsed counts from here
+        impl->entry_stamps = true;
+        impl->entry_start = now;
+        impl->stamped_generation = impl->entry_generation;
+    }
+    return std::chrono::duration<double>(now - impl->entry_start).count();
+}
+
+void engine::note_host_entry() {
+    ++impl->entry_generation;
+    if (impl->entry_stamps) {
+        impl->entry_start = monotonic_now();
+        impl->stamped_generation = impl->entry_generation;
+    }
+}
+
+void engine::note_execute_elapsed_use() {
+    impl->entry_stamps = true;
 }
 
 void engine::register_location_builtins() {

@@ -699,6 +699,7 @@ struct engine::implementation {
         uint64_t checked_epoch = 0;
         check_report check_result;
         uint64_t proof_epoch = UINT64_MAX;   // surface epoch the nodes' proofs were stamped at; UINT64_MAX = unproven
+        bool autos_typed = false;            // the first proof pass types the auto slots, in every mode
         bool proofs_deferred = false;        // the proof pass met a class the engine had not defined yet: re-stamp after an import defines one
         std::vector<std::string> deferred_classes;   // those classes' names
         // Program closure (checked_report): gathered once per surface epoch, and again
@@ -913,7 +914,7 @@ struct engine::implementation {
     void check_entry(engine& self, script_cache_entry& entry, bool want_diagnostics) {
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
         const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
-        const bool need_proofs = entry.proof_epoch != want_proof_epoch;
+        const bool need_proofs = entry.proof_epoch != want_proof_epoch || !entry.autos_typed;
         if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
             detail::check_options o;
             o.diagnostics = true;
@@ -929,6 +930,7 @@ struct engine::implementation {
         if (need_check || need_proofs) {
             stamp_proofs(self, entry);
             entry.proof_epoch = want_proof_epoch;
+            entry.autos_typed = true;
         }
     }
 
@@ -2056,11 +2058,11 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
     const uint64_t want_proof_epoch = impl->type_proofs_ ? impl->check_surface_epoch_ : UINT64_MAX;
     const bool need_check = impl->static_check_mode_ != check_mode::off &&
                             bite.check_state_ == jaibite::check_state::unchecked;
-    const bool need_proofs = bite.proof_epoch_ != want_proof_epoch;
+    const bool need_proofs = bite.proof_epoch_ != want_proof_epoch || !bite.autos_typed_;
     if (need_check || need_proofs) {
         detail::check_options o;
         o.diagnostics = need_check;
-        o.proofs = impl->type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
+        o.proofs = need_check ? detail::check_options::proofs_t::leave : impl->type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
         o.stats = &impl->last_proof_stats_;
         o.program_names = &impl->program_names_;
         o.program_classes = &impl->program_classes_;
@@ -2071,9 +2073,13 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
             bite.check_report_ = std::move(r);
             bite.check_state_ = bite.check_report_.has_errors()
                 ? jaibite::check_state::flagged : jaibite::check_state::clean;
-            if (impl->type_proofs_) { detail::check_options p = o; p.diagnostics = false; detail::run_static_check(*this, bite.declarations_, nullptr, p); }   // the proof pass alone reads the program's globals
+            detail::check_options p = o;   // the proof pass alone reads the program's globals and types the auto slots
+            p.diagnostics = false;
+            p.proofs = impl->type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
+            detail::run_static_check(*this, bite.declarations_, nullptr, p);
         }
         bite.proof_epoch_ = want_proof_epoch;
+        bite.autos_typed_ = true;
     }
     if (impl->static_check_mode_ == check_mode::off) { return; }
     impl->last_check_ = bite.check_report_;

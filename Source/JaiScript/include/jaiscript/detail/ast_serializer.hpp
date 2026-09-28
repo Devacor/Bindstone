@@ -455,7 +455,7 @@ namespace jai::detail {
                 }
                 case node_type::variable_decl: {
                     auto* d = static_cast<const variable_decl*>(n);
-                    type(d->type);
+                    type(d->auto_spelled ? type_info_ptr{} : d->type);   // auto stays auto: the checker re-types it at load
                     str(d->name);
                     symbol(d->name_id, UINT64_MAX);
                     node(d->initializer.get());

@@ -547,10 +547,10 @@ private:
         return &c;
     }
 
-    // The proof pass alone (never a diagnostics walk) types a top-level global exactly one other unit declares once with a spelled
-    // non-reference type; a class-typed one needs its class defined, or the unit's proofs wait for the next import (deferred_)
+    // The proof pass alone, stamping or clearing (never a diagnostics walk), types a top-level global exactly one other unit declares
+    // once with a spelled non-reference type; a class-typed one needs its class defined, or the unit's proofs wait for the next import (deferred_)
     const variable_decl* program_global(const std::string& name) {
-        if (collect_diagnostics_ || !stamping() || !program_globals_) { return nullptr; }
+        if (!semantic_walk() || !program_globals_) { return nullptr; }
         auto it = program_globals_->find(name);
         if (it == program_globals_->end() || it->second.size() != 1 || it->second.begin()->second.size() != 1) { return nullptr; }
         const variable_decl* g = it->second.begin()->second.front().get();
@@ -1196,6 +1196,7 @@ private:
     // stale one the pass no longer derives.
 
     bool stamping() const { return proofs_ == proof_mode::stamp; }
+    bool semantic_walk() const { return !collect_diagnostics_ && proofs_ != proof_mode::leave; }
 
     template <class F, class V>
     void stamp(F& field, V value, V def) {
@@ -3052,7 +3053,20 @@ private:
         }
     }
 
+	// An auto declaration takes its initializer's static type (Dev ruling 2026-09-27): var or unknown makes the slot a
+	// var; any other type keeps auto, which the runtime locks to the value. Semantic: the unit's first proof pass
+	// decides it in every mode (stamp or clear see the same program), and it never changes under a running unit.
+	void type_auto_slot(variable_decl* decl, const ctype& init) {
+		if (!decl->auto_spelled || decl->auto_typed || !semantic_walk()) { return; }
+		decl->auto_typed = true;
+		if (init.is_unknown()) {
+			decl->type = eng_.get_type_info_any();
+			decl->decl_fast_flags = variable_decl::classify_decl_fast(decl->type);
+		}
+	}
+
 	void walk_variable_decl(variable_decl* decl) {
+		if (!decl->type && !decl->function_spelling) { decl->auto_spelled = true; }
 		ctype init{};
 		bool has_init = decl->initializer != nullptr;
 		bool is_reference_decl = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
@@ -3106,7 +3120,7 @@ private:
 				diag(diag_level::error, decl->location, "cannot initialize '" + std::string(decl->name) +
 					 "' declared 'function' with '" + ctype_name(init) + "'");
 			}
-		} else if (decl->type) {
+		} else if (decl->type && !decl->auto_spelled) {
 			entry.declared = decl->type.get();
 			entry.display = decl->type->canonical_name();
 			entry.type = ctype_from_type_info(decl->type.get());
@@ -3144,22 +3158,21 @@ private:
 				// Recovery keeps the declared type; reference use remains conservative.
 			}
 		} else if (has_init) {
-			// auto with initializer: infer then enforce as that type. null carries no type:
-			// the runtime locks at the first non-null store, so a null init stays dynamic.
+			// auto with initializer: the initializer's static type, then enforced as that type; a var or unknown
+			// static type makes the slot a var. null carries no type: the runtime locks at the first non-null
+			// store, so a null init stays dynamic.
 			entry.type = init;
 			entry.dynamic = init.is_unknown() || init.kind == ctype::null_k;
 			entry.display = ctype_name(init);
-			// The one place inference is VALUE-dependent and silent: mixed-branch
-			// ternaries lock auto to whichever branch runtime takes (int-locked then
-			// truncates later float assignments; other-shape mixes turn later
-			// assignments into runtime type mismatches on only one path).
+			type_auto_slot(decl, init);
+			// A mixed-branch ternary has no single static type, so the auto is a var: say so where it reads like a typed slot
 			if (init.is_unknown() && last_mixed_ternary_.node == decl->initializer.get()) {
 				diag(diag_level::warning, decl->location, "auto '" + std::string(decl->name) +
 					 "' is initialized from a ternary with branch types '" +
 					 ctype_name(last_mixed_ternary_.then_type) + "' and '" +
 					 ctype_name(last_mixed_ternary_.else_type) +
-					 "' - the locked type follows the branch taken at runtime; declare the type "
-					 "explicitly, use 'var', or make both branches the same type");
+					 "' - it has no single static type, so '" + std::string(decl->name) +
+					 "' is a var; declare the type explicitly, or make both branches the same type");
 			}
 		} else {
 			// auto without initializer: locked by the first runtime assignment — the

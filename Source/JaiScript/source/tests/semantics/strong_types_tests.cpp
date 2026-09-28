@@ -3499,7 +3499,7 @@ public:
                 class Foo2 : Foo { }
                 var keep = shared_ptr<Foo>(); var sub = shared_ptr<Foo2>(); var nothing = null; var five = 5;
                 string r1 = "ok"; try { weak_ptr<Foo> w = keep; weak_ptr<Foo> w2 = sub; weak_ptr<Foo> w3 = nothing; w = sub; w2 = nothing; w3 = keep; } catch (e) { r1 = e; }
-                string r2 = "ok"; try { auto p = keep; p = five; } catch (e) { r2 = e; }
+                string r2 = "ok"; try { shared_ptr<Foo> p = keep; p = five; } catch (e) { r2 = e; }
                 r1 + "|" + r2 + "|" + to_string(keep.a)
             )JAI", "ok|Cannot assign int to 'p' (declared shared_ptr<Foo>)|1",
                 "handles and subclass handles still bind; a rejected handle store leaves the pointee untouched");

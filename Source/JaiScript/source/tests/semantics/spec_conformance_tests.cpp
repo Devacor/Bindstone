@@ -132,6 +132,7 @@ public:
 		lambda_globals_and_init_captures();
 		compound_member_order();
 		compound_subscript_order();
+		auto_static_type();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1875,6 +1876,73 @@ private:
 				function t(function f) -> string { string r = "none"; LOG = ""; try { f(); } catch (e) { r = e; } return r + LOG; }
 				t([]() { var na = null; na[idx()] += bad(); }) + "|" + t([]() { A[5] += bad(); }) + "|" + t([]() { A[5] += 1; });
 			)", "rhs|rhs|Array index 5 out of bounds for array of size 3", check_mode::off);
+		});
+	}
+
+	void auto_static_type() {
+		test("an_auto_from_a_var_or_unknown_static_type_is_a_var", [this]() {
+			// Dev ruling 2026-09-27: `auto x = e` takes e's static type; a var element, a var local, a var-returning call and a
+			// mixed-branch ternary have none, so x is a var (a later store of another type lands as is)
+			const char* src = R"(
+				var arr = [1, 2];
+				array<var> av = [1];
+				var v = 5;
+				function f() -> var { return 5; }
+				bool c = true;
+				auto x = arr[0]; x = "s";
+				auto y = av[0]; y = 2.5;
+				auto z = v; z = "t";
+				auto w = f(); w = 1.5;
+				auto m = c ? 1 : 2.5; m = "u";
+				type_of(x) + ":" + x + "|" + type_of(y) + ":" + y + "|" + type_of(z) + ":" + z + "|" + type_of(w) + ":" + w + "|" + type_of(m) + ":" + m;
+			)";
+			const std::string want = "string:s|float:2.5|string:t|float:1.5|string:u";
+			expect("auto from var", src, want, check_mode::warn);
+			expect("auto from var (strict)", src, want, check_mode::strict);
+			expect("auto from var (checks off)", src, want, check_mode::off);
+		});
+		test("an_auto_from_a_known_static_type_keeps_that_type", [this]() {
+			const char* src = R"(
+				array<int> ai = [1, 2];
+				class P { int n = 0; }
+				auto n = 5; n = 1.5;
+				auto e = ai[0]; e = 2.9;
+				auto s = "a"; s = "b" + 5;
+				auto p = P();
+				function t(function g) -> string { string r = "none"; try { g(); } catch (err) { r = err; } return r; }
+				type_of(n) + ":" + n + "|" + type_of(e) + ":" + e + "|" + s + "|" + t([]() { auto q = P(); var o = 5; q = o; });
+			)";
+			expect("auto from known", src, "int:1|int:2|b5|Cannot assign int to 'q' (declared P)", check_mode::warn);
+			expect("auto from known (checks off)", src, "int:1|int:2|b5|Cannot assign int to 'q' (declared P)", check_mode::off);
+		});
+		test("an_auto_in_a_counted_loop_follows_the_static_type_on_every_lane", [this]() {
+			expect("auto in loops", R"(
+				function from_var() -> string {
+					var arr = [1, 2, 3]; string s = "";
+					for (int i = 0; i < 3; i++) { auto x = arr[i]; x = x + 0.5; s += "" + x + " "; }
+					return s;
+				}
+				function from_ints() -> string {
+					array<int> arr = [1, 2, 3]; string s = "";
+					for (int i = 0; i < 3; i++) { auto x = arr[i]; x = x + 0.5; s += "" + x + " "; }
+					return s;
+				}
+				function sum_var() -> float {
+					array<var> arr = [1, 2, 3]; float total = 0.0;
+					for (int i = 0; i < 3; i++) { auto x = arr[i]; x += 0.25; total += x; }
+					return total;
+				}
+				from_var() + "|" + from_ints() + "|" + sum_var();
+			)", "1.5 2.5 3.5 |1 2 3 |6.75", check_mode::warn);
+		});
+		test("a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load", [this]() {
+			every_config("auto through jaibite", "string:s|int:1", [](engine& e) {
+				auto bite = e.jaibite("var arr = [1]; auto x = arr[0]; x = \"s\"; auto n = 5; n = 1.5; type_of(x) + \":\" + x + \"|\" + type_of(n) + \":\" + n;");
+				std::string first = spec::render(e.execute(bite));
+				auto loaded = e.jaibite_load_bytes(bite.save_bytes());
+				std::string second = spec::render(e.execute(loaded));
+				return first == second ? first : first + " vs " + second;
+			}, check_mode::warn);
 		});
 	}
 

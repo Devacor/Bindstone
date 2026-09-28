@@ -33,7 +33,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="the-type-ladder">The Type Ladder<a class="hlink" href="#the-type-ladder" aria-label="link">&#8203;</a></h1>
 <p>Pick your strictness per variable: prototype loosely with <code>var</code>, lock things down with explicit types as the code matures, in the same file, with no rewrite. JaiScript has three rungs of typing strictness for variables (and class fields):</p>
-<div class="tablewrap"><table><thead><tr><th>Declaration</th><th>Meaning</th></tr></thead><tbody><tr><td><code>int x = 5;</code> (any explicit type)</td><td><strong>Enforced.</strong> The variable holds this type forever; assignments convert if <a href="#conversion-table-typed-locked-auto-targets">the conversion table</a> allows it and error if not.</td></tr><tr><td><code>auto x = 5;</code></td><td><strong>Inferred, then enforced.</strong> The initializer&#x27;s type is inferred once, then locked. From that point <code>auto</code> behaves exactly like the explicit type. <code>auto</code> is <em>not</em> dynamic.</td></tr><tr><td><code>var x = 5;</code></td><td><strong>Dynamic.</strong> Any type may be assigned at any time.</td></tr></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>Declaration</th><th>Meaning</th></tr></thead><tbody><tr><td><code>int x = 5;</code> (any explicit type)</td><td><strong>Enforced.</strong> The variable holds this type forever; assignments convert if <a href="#conversion-table-typed-locked-auto-targets">the conversion table</a> allows it and error if not.</td></tr><tr><td><code>auto x = 5;</code></td><td><strong>Inferred, then enforced.</strong> The initializer&#x27;s static type is inferred once, then locked. From that point <code>auto</code> behaves exactly like the explicit type. <code>auto</code> is <em>not</em> dynamic, unless the initializer&#x27;s static type is <code>var</code> (<a href="#auto-takes-the-static-type">below</a>).</td></tr><tr><td><code>var x = 5;</code></td><td><strong>Dynamic.</strong> Any type may be assigned at any time.</td></tr></tbody></table></div>
 <p>&quot;Error&quot; comes in two flavors, and which one you get depends on what the checker could see. A mismatch it can see (a literal, a typed local, a typed return) is a <strong>load error</strong>: the script never starts. A mismatch it cannot see (a value that came through a <code>var</code>) is a <strong>catchable run-time error</strong>. Nothing here is opt-in; the checker is on, in strict mode, from the first line.</p>
 <h2 id="declarations-without-an-initializer">Declarations without an initializer<a class="hlink" href="#declarations-without-an-initializer" aria-label="link">&#8203;</a></h2>
 <p>A typed declaration always holds a value of its type. Leave the initializer off and it takes the type&#x27;s default, the way a C++ object is value-initialized:</p>
@@ -114,6 +114,16 @@ print(x, &quot; (&quot;, type_of(x), &quot;)&quot;);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot assign string to &#x27;x&#x27; (declared int)
 5 (int)</code></pre></div>
 <p>Once locked, <code>null</code> does not un-lock it either: an <code>int</code>-locked <code>auto</code> rejects <code>null</code> exactly as an <code>int</code> would (the table below has no null row for primitives; class-typed slots do take a typed null).</p>
+<h3 id="auto-takes-the-static-type">auto takes the static type<a class="hlink" href="#auto-takes-the-static-type" aria-label="link">&#8203;</a></h3>
+<p>The type <code>auto</code> locks to is the initializer&#x27;s <strong>static</strong> type, the one the checker sees at load, never the type the value happens to hold when the line runs. An initializer whose static type is <code>var</code> or unknown (a <code>var</code> local, an element of an <code>array&lt;var&gt;</code>, a call that returns <code>var</code>, a ternary whose branches differ) has nothing to lock to, so that <code>auto</code> is a <code>var</code>. The same line means the same thing on every run:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var row = [1, 2.5, &quot;three&quot;];
+auto a = row[0];     // an array&lt;var&gt; element: static type var, so a is a var
+a = &quot;now a string&quot;;
+array&lt;int&gt; ints = [1, 2];
+auto b = ints[0];    // static type int: locked to int
+b = 2.9;
+print(&quot;a = {} ({}), b = {} ({})&quot;, a, type_of(a), b, type_of(b));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a = now a string (string), b = 2 (int)</code></pre></div>
 <h2 id="var-is-genuinely-dynamic">var is genuinely dynamic<a class="hlink" href="#var-is-genuinely-dynamic" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var y = 5;
 print(&quot;y is {} ({})&quot;, y, type_of(y));

@@ -308,3 +308,21 @@ box), so the value is taken explicitly, and only where a later argument may run 
 A new call form must stamp its arguments and capture on both backends; an operand held across a later operand's
 evaluation must leave the interpreter's value stack (statements clear it at their boundaries). Suite `Call Argument
 Capture` pins it.
+
+## 14. An auto declaration takes its initializer's static type, once (2026-09-27)
+
+`auto x = e` is the type the checker gives `e`, never the kind the value holds when the line runs: a `var` or
+unknown static type makes `x` a `var`, any other type keeps `auto` (the runtime locks to the value, which has
+that type). The checker writes the decision into the declaration (`variable_decl::type` becomes the var marker,
+`decl_fast_flags` recomputed; `auto_spelled` keeps the spelling for re-checks and `.jaibite`, which saves the slot
+as `auto` and types it again at load). The rules for an implementation:
+
+- Only a proof pass decides (stamping or clearing, never a diagnostics walk or a per-call instance-variable
+  check), and both proof modes see the same program (`program_global` answers in either), so proofs on and off
+  decide alike.
+- The first proof pass of every unit runs in every mode (`script_cache_entry::autos_typed`, `jaibite::autos_typed_`),
+  before either backend compiles or runs the unit; `auto_typed` then freezes the decision, so a later re-stamp
+  (a surface epoch move, a deferred class defined by an import mid-run) never re-types a declaration under a
+  running unit or a compiled chunk.
+
+Suite `Spec Conformance` (`auto_static_type`) pins it, both backends, proofs on and off, every check mode.

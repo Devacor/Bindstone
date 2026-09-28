@@ -749,6 +749,11 @@ namespace jai {
         // Declared without an initializer (`T x;`, `var x;`): the parser supplies the type's default, and a same-unit re-run
         // of a program-scope declaration keeps the existing value (detail::redeclaration_keeps_value)
         bool default_initialized = false;
+        // Declared `auto` (Dev ruling 2026-09-27): the unit's first proof pass types the slot by its initializer's
+        // STATIC type, once - a known type keeps auto (the runtime locks to the value, which has that type), a var
+        // or unknown static type makes `type` the var marker; the spelling stays auto for re-checks and .jaibite
+        bool auto_spelled = false;
+        bool auto_typed = false;
         // Parser escape analysis: the variable may be bound by reference, so its
         // declaration boxes the value into a cell (storage IS the cell from birth)
         bool ref_escaping = false;

@@ -80,6 +80,8 @@ namespace jai::vm {
             std::unordered_set<uint32_t> primitive_slots;
             // the declared type of each value slot as its declaration compiled (null: untyped): what a store of the variable enforces
             std::unordered_map<uint32_t, const type_info*> slot_types;
+            // per frame slot: the scalar kind an untyped local certainly holds (vm_compiler::infer_local_kinds), a stamp's input
+            std::vector<script_value_type> slot_kinds;
             bool active = false;
         };
 
@@ -184,6 +186,7 @@ namespace jai::vm {
         script_value_type arg_kind(const expression* a, const std::vector<const type_info*>* frame) const;
         std::vector<script_value_type> site_kinds(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, script_value_type* result) const;
         script_value_type untyped_result_kind(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame) const;
+        void infer_local_kinds(const std::vector<parameter>& parameters, const block_stmt* body, size_t local_count);
         void graft_param_types(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, std::vector<const type_info*>& out) const;
         bool names_slot(const expression* e, uint32_t slot);
         bool push_value_temp(const std::shared_ptr<call_expr>& expr, identifier_expr* recv, const expression_ptr& arg, fused_operand& out);

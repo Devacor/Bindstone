@@ -154,22 +154,26 @@ unknown records are skipped and missing ones keep their defaults, so older saves
 jaiscript scripts/gatorquest.jai -- dev
 ```
 
-Edit any `gq_*.jai` script while playing and save it: within a second the file is re-run in place, and the HUD says
-what was reloaded (or why the edit was rejected, with the file and line). The world, your gator and every monster
-carry on. Functions pick up their new bodies everywhere, constants and content tables are re-evaluated (change a
-monster's line in `gq_data.jai` and the next spawn has the new stats), and classes gain or lose fields with live
-instances migrating. The convention that makes it safe: in a reloadable file, a top-level declaration with an
-initializer is a constant, one without an initializer is state and is never reset. `gq_state.jai`, `gq_cstate.jai`
-and `gq_enums.jai` are not reloaded. On `--backend=interp` a broken edit ends the session instead of being rejected
-(an engine bug, see DX_REPORT.md).
+Edit any `gq_*.jai` script while playing and save it: on the next frame it re-runs in place, and the HUD says what
+was reloaded (or why the edit was rejected, with the file and line). The world, your gator and every monster carry on.
+
+Dev mode reaches every module's `import` again each frame. An import re-runs its module only when the file changed,
+and checks it (with the modules it imports) before any of it runs, so a mistake is rejected and the running code
+stays as it was. When it re-runs, functions pick up their new bodies everywhere, classes gain or lose fields with live
+instances migrating, and enums take their new members. A top-level declaration with an initializer takes its new
+value (change a monster's line in `gq_data.jai` and the next spawn has the new stats); one without an initializer
+keeps what it holds. That is the whole convention: state is declared without an initializer. `gq_state.jai` and
+`gq_cstate.jai` declare nothing else, so they reload too; the starting values that are not a type's default live in
+`client_state_init()` and `sim_reset()`. A run-time error while a module re-runs is reported as well, and the
+declarations above the failing line have already taken effect; saving the fixed file re-runs it whole. With nothing
+edited, the check costs about 0.4 ms per frame for the game's 34 modules.
 
 ## Headless modes (tests and captures)
 
 ```
 jaiscript scripts/gatorquest.jai -- smoke ticks 3000 bots 2      # autopilot session with a save/load round trip, prints STATE_HASH
 jaiscript scripts/gatorquest.jai -- savetest                     # save robustness: missing, corrupt, truncated, newer, sparse files
-jaiscript scripts/gatorquest.jai -- hotreload                    # edits five scripts mid-session and checks the carry-over
-jaiscript --backend=interp scripts/gatorquest.jai -- hotreload interp
+powershell -File hotreload.ps1 [-Backend interp]                # edits scripts mid-session in a scratch copy, checks the carry-over
 jaiscript scripts/gatorquest.jai -- nettest                      # host + 17 client sessions over loopback, one process
 powershell -File nettest2.ps1 [-Backend interp]                  # a dedicated host and two clients as three processes
 jaiscript scripts/gatorquest.jai -- predtest [lag N jitter N loss N]   # movement prediction under a simulated link

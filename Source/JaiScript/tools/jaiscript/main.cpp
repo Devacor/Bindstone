@@ -1855,7 +1855,7 @@ int run_selftest(const console_state& con) {
 		for (int i = 0; i < 256 && exact; ++i) { exact = static_cast<unsigned char>(disk[i]) == i; }
 		expect(exact, name("the file on disk holds exactly those bytes").c_str());
 		expect(run("binary::writer w; w.uint32(0xCAFEBABE).text(\"hdr\", 8).float64(-0.5); write_file(bin_path, w.to_string()); "
-			"var r = read_file(bin_path).reader(); to_string(r.uint32()) + \" \" + r.text_null_terminated(8) + \" \" + to_string(r.float64()) + \" \" + to_string(r.at_end());") ==
+			"var r = read_file(bin_path).reader(); to_string(r.uint32()) + \" \" + r.text(8) + \" \" + to_string(r.float64()) + \" \" + to_string(r.at_end());") ==
 			"3405691582 hdr -0.5 true", name("a binary::writer file reads back through binary::reader").c_str());
 		expect(run("read_file(empty_path).size();") == "0", name("an empty file reads as \"\"").c_str());
 		expect(run("var m = \"\"; try { read_file(missing_path); } catch (e) { m = e; } m;") == "Cannot read file '" + missing.generic_string() + "': not found",

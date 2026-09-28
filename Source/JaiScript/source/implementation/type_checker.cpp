@@ -1931,11 +1931,11 @@ private:
         }
     }
 
-    // binary::layout(...), binary::text(n), binary::text_null_terminated(n), binary::reader(...), binary::writer(), string::from_bytes(...)
+    // binary::layout(...), binary::text(n), binary::bytes(n), binary::reader(...), binary::writer(), string::from_bytes(...)
     bool library_namespace_call(const call_expr* c, const member_expr* m, const std::vector<ctype>& args, ctype& out) {
         if (static_path(m, "binary") && library_namespace("binary")) {
             if (m->member == "layout") { check_binary_pairs(c, args, "binary::layout"); out = object_of("binary::layout"); return true; }
-            if (m->member == "text" || m->member == "text_null_terminated") { out = object_of("binary::width"); return true; }
+            if (m->member == "text" || m->member == "bytes") { out = object_of("binary::width"); return true; }
             if (m->member == "reader") { out = object_of("binary::reader"); return true; }
             if (m->member == "writer") { out = object_of("binary::writer"); return true; }
             return false;
@@ -1959,7 +1959,7 @@ private:
         return static_layout(it->second[0], depth + 1);
     }
 
-    // a statically known layout's field kinds: 1 integer, 2 float, 3 text; empty when any width is not a token
+    // a statically known layout's field kinds: 1 integer, 2 float, 3 text, 4 bytes; empty when any width is not a token
     std::vector<uint8_t> layout_kinds(const call_expr* l) {
         std::vector<uint8_t> kinds;
         if (l->arguments.size() % 2 != 0) { return {}; }
@@ -1968,8 +1968,10 @@ private:
             if (w->get_type() == node_type::member_expr && binary_width_token(static_cast<const member_expr*>(w))) {
                 const std::string_view n = static_cast<const member_expr*>(w)->member;
                 kinds.push_back(n == "float32" || n == "float64" ? 2 : 1);
-            } else if (binary_call(w, "text") || binary_call(w, "text_null_terminated")) {
+            } else if (binary_call(w, "text")) {
                 kinds.push_back(3);
+            } else if (binary_call(w, "bytes")) {
+                kinds.push_back(4);
             } else {
                 return {};
             }
@@ -2014,7 +2016,8 @@ private:
             if (!t || t->base_type == script_value_type::jai_any_type || fields[i]->function_spelling) { continue; }
             const bool ok = (kinds[i] == 1 && t->base_type == script_value_type::jai_int_type) ||
                             (kinds[i] == 2 && t->base_type == script_value_type::jai_float_type) ||
-                            (kinds[i] == 3 && (t->base_type == script_value_type::jai_string_type || t->base_type == script_value_type::jai_utf8_string_type));
+                            (kinds[i] == 3 && (t->base_type == script_value_type::jai_string_type || t->base_type == script_value_type::jai_utf8_string_type)) ||
+                            (kinds[i] == 4 && t->base_type == script_value_type::jai_array_type);
             if (!ok) {
                 diag(diag_level::error, c->location, "Cannot read layout field " + std::to_string(i + 1) + " into " + std::string(cname) +
                      "." + std::string(fields[i]->name) + " (declared " + t->canonical_name() + ")");

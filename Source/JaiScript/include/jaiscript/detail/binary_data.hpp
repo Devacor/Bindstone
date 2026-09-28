@@ -4,8 +4,8 @@
 #define __JAISCRIPT_DETAIL_BINARY_DATA_HPP__
 
 // The binary:: library over byte strings (guide ch. 9 "Binary data"). binary::reader walks a string's bytes with a cursor,
-// binary::writer builds bytes, the width tokens (binary::int8 ... binary::float64, binary::text(n),
-// binary::text_null_terminated(n)) name an encoding, and a binary::layout is a validated list of named widths that unpack, pack
+// binary::writer builds bytes, the width tokens (binary::int8 ... binary::float64, binary::text(n), binary::bytes(n))
+// name an encoding, and a binary::layout is a validated list of named widths that unpack, pack
 // and read(Class, layout) apply in order. Little-endian until big_endian(). A read past the end, a value that does not fit its
 // width, a malformed layout and a C-string scan past engine::binary_scan_limit raise catchable errors
 // (docs/diagnostics.md "binary data"). Engine-core: every engine registers it (engine.cpp), and string's to_bytes()/reader()
@@ -29,7 +29,7 @@
 
 namespace jai::binary {
 
-	enum class kind : uint8_t { int8, int16, int32, int64, uint8, uint16, uint32, float32, float64, text, text_null_terminated };
+	enum class kind : uint8_t { int8, int16, int32, int64, uint8, uint16, uint32, float32, float64, text, bytes };
 
 	struct width {
 		kind k = kind::int8;
@@ -40,7 +40,7 @@ namespace jai::binary {
 				case kind::int16: case kind::uint16: return 2;
 				case kind::int32: case kind::uint32: case kind::float32: return 4;
 				case kind::int64: case kind::float64: return 8;
-				case kind::text: case kind::text_null_terminated: return length;
+				case kind::text: case kind::bytes: return length;
 			}
 			return 0;
 		}
@@ -56,12 +56,13 @@ namespace jai::binary {
 				case kind::float32: return "float32";
 				case kind::float64: return "float64";
 				case kind::text: return "text(" + std::to_string(length) + ")";
-				case kind::text_null_terminated: return "text_null_terminated(" + std::to_string(length) + ")";
+				case kind::bytes: return "bytes(" + std::to_string(length) + ")";
 			}
 			return "?";
 		}
-		bool is_text() const noexcept { return k == kind::text || k == kind::text_null_terminated; }
-		bool is_integer() const noexcept { return k != kind::float32 && k != kind::float64 && !is_text(); }
+		bool is_text() const noexcept { return k == kind::text; }
+		bool is_bytes() const noexcept { return k == kind::bytes; }
+		bool is_integer() const noexcept { return k != kind::float32 && k != kind::float64 && k != kind::text && k != kind::bytes; }
 		bool is_float() const noexcept { return k == kind::float32 || k == kind::float64; }
 	};
 
@@ -171,18 +172,54 @@ namespace jai::binary {
 
 	[[noreturn]] inline void raise(const std::string& text) { throw std::runtime_error(text); }
 
-	// "" when s can be written as null-terminated text, else why not (its first NUL byte)
+	// "" when s can be written as text (NUL-ended), else why not (its first NUL byte)
 	inline std::string embedded_nul(const std::string& s) {
 		const size_t at = s.find('\0');
 		return at == std::string::npos ? std::string() : "the text holds a NUL at byte " + std::to_string(at);
 	}
 
-	// s as a null-terminated field of n bytes (n >= 1): at most n - 1 bytes of s, then NULs to the end, so the field always
-	// ends in a terminator
-	inline void store_null_terminated_field(unsigned char* p, const std::string& s, size_t n) {
-		const size_t k = s.size() < n - 1 ? s.size() : n - 1;
-		std::memcpy(p, s.data(), k);
-		std::memset(p + k, 0, n - k);
+	// "" when s fits an n-byte text field (no NUL inside, at most n bytes), else why not
+	inline std::string text_field_misfit(const std::string& s, size_t n) {
+		std::string why = embedded_nul(s);
+		if (why.empty() && s.size() > n) { why = "the text is " + count_text(s.size(), " byte", " bytes") + ", longer than text(" + std::to_string(n) + ")"; }
+		return why;
+	}
+
+	// s (at most n bytes) in an n-byte text field: its bytes, then NULs to the end; exactly n bytes leave no terminator
+	inline void store_text_field(unsigned char* p, const std::string& s, size_t n) {
+		std::memcpy(p, s.data(), s.size());
+		std::memset(p + s.size(), 0, n - s.size());
+	}
+
+	// the raw bytes a bytes() write takes: a string as it is, or an array of ints / chars 0..255; "" and ok, or why not
+	inline bool raw_bytes_of(const script_value& value, std::string& out, std::string& why) {
+		const script_value& v = value.deref();
+		if (const std::string* s = v.text_bytes()) { out = *s; return true; }
+		if (!v.is_array()) { why = value_kind_name(v) + " is not bytes (a string or an array of 0 to 255)"; return false; }
+		const script_array* node = v.unchecked_array_node();
+		const size_t n = node ? node->size() : 0;
+		out.assign(n, '\0');
+		if (n == 0) { return true; }
+		if (node->kind() == script_array::kind_t::i64) {
+			const auto& ints = node->ints();
+			for (size_t i = 0; i < n; ++i) {
+				if (ints[i] < 0 || ints[i] > 255) { why = "element " + std::to_string(i) + " is " + std::to_string(ints[i]) + ", not 0 to 255"; return false; }
+				out[i] = static_cast<char>(ints[i]);
+			}
+			return true;
+		}
+		if (node->kind() == script_array::kind_t::c8) { std::memcpy(out.data(), node->bytes().data(), n); return true; }
+		size_t i = 0;
+		bool ok = true;
+		node->for_each(v.get_engine(), [&](const script_value& el) {
+			if (!ok) { return; }
+			const script_value& e = el.deref();
+			if (e.is_int() && e.as_int() >= 0 && e.as_int() <= 255) { out[i] = static_cast<char>(e.as_int()); }
+			else if (e.is_char()) { out[i] = e.as_char(); }
+			else { why = "element " + std::to_string(i) + " is " + (e.is_int() ? std::to_string(e.as_int()) : value_kind_name(e)) + ", not 0 to 255"; ok = false; }
+			++i;
+		});
+		return ok;
 	}
 
 	inline const width* as_width(const script_value& v, uint64_t width_type_id) {
@@ -261,7 +298,7 @@ namespace jai::binary {
 			if (n > remaining()) { past_end(n, what); }
 			return advance(n);
 		}
-		// a counted read (text, text_null_terminated, bytes): its name built only for the error
+		// a counted read (text, bytes): its name built only for the error
 		const unsigned char* take_counted(size_t c, const char* what, script_int n) {
 			if (c > remaining()) { past_end(c, std::string(what) + "(" + std::to_string(n) + ")"); }
 			return advance(c);
@@ -281,21 +318,15 @@ namespace jai::binary {
 			return load_integer(k, take(w.size(), names[static_cast<size_t>(k)]), big_);
 		}
 		script_float floating(kind k) { return load_float(k, take(k == kind::float32 ? 4 : 8, k == kind::float32 ? float32_name() : float64_name()), big_); }
+		// an n-byte text field: the cursor moves n, the text is the bytes before the first NUL (all n when there is none)
 		std::string text(script_int n) {
 			const size_t c = count_arg(n, "text");
-			const unsigned char* p = take_counted(c, "text", n);
-			return std::string(reinterpret_cast<const char*>(p), c);
-		}
-		// a null-terminated field of exactly n bytes: the cursor moves n, the text is the bytes before the first NUL (all n
-		// when there is none)
-		std::string text_null_terminated(script_int n) {
-			const size_t c = count_arg(n, "text_null_terminated");
-			return load_text(take_counted(c, "text_null_terminated", n), c);
+			return load_text(take_counted(c, "text", n), c);
 		}
 		// a C string at the cursor: the bytes before the next NUL, the cursor past the NUL. The scan reads at most the
 		// remaining bytes and the engine's binary_scan_limit (the host's; no script can raise it); no NUL in reach raises,
 		// naming the bound that stopped it, and moves nothing
-		std::string text_null_terminated() {
+		std::string text() {
 			const size_t left = remaining();
 			const size_t limit = get_engine()->execution_limits().binary_scan_limit;
 			const size_t window = limit < left ? limit : left;
@@ -322,8 +353,12 @@ namespace jai::binary {
 		script_value read_field(const field& f) {
 			const unsigned char* p = take_field(f);
 			engine* eng = get_engine();
-			if (f.w.k == kind::text) { return script_value(std::string(reinterpret_cast<const char*>(p), f.w.length), eng); }
-			if (f.w.k == kind::text_null_terminated) { return script_value(load_text(p, f.w.length), eng); }
+			if (f.w.k == kind::text) { return script_value(load_text(p, f.w.length), eng); }
+			if (f.w.k == kind::bytes) {
+				script_value out = script_value::make_array(eng->get_type_info_int(), eng);
+				out.unchecked_get_array_storage()->ints().assign(p, p + f.w.length);
+				return out;
+			}
 			if (f.w.is_float()) { return script_value(load_float(f.w.k, p, big_), eng); }
 			return script_value(load_integer(f.w.k, p, big_), eng);
 		}
@@ -396,37 +431,25 @@ namespace jai::binary {
 			if (!misfit.empty()) { raise("Cannot write " + misfit); }
 			store_float(k, v, room(w.size()), big_);
 		}
-		void text(const std::string& s) { put(s.data(), s.size()); }
-		void text(const std::string& s, script_int n) {
-			if (n < 0) { raise("Cannot write text(s, " + std::to_string(n) + "): a count cannot be negative"); }
-			const size_t c = static_cast<size_t>(n);
-			unsigned char* p = room(c);
-			const size_t k = s.size() < c ? s.size() : c;
-			std::memcpy(p, s.data(), k);
-			std::memset(p + k, 0, c - k);
-		}
-		void text_null_terminated(const std::string& s) {
+		// a C string: the text, then a NUL
+		void text(const std::string& s) {
 			const std::string why = embedded_nul(s);
-			if (!why.empty()) { raise("Cannot write text_null_terminated: " + why); }
+			if (!why.empty()) { raise("Cannot write text: " + why); }
 			put(s.data(), s.size());
 			put("", 1);
 		}
-		void text_null_terminated(const std::string& s, script_int n) {
-			if (n < 1) {
-				raise("Cannot write text_null_terminated(s, " + std::to_string(n) + "): " + (n < 0 ? "a count cannot be negative" : "the field needs 1 byte for its NUL"));
-			}
-			const std::string why = embedded_nul(s);
-			if (!why.empty()) { raise("Cannot write text_null_terminated: " + why); }
-			store_null_terminated_field(room(static_cast<size_t>(n)), s, static_cast<size_t>(n));
+		// an n-byte text field: the text, then NULs to n (a text of exactly n bytes fills it); a longer text raises
+		void text(const std::string& s, script_int n) {
+			if (n < 0) { raise("Cannot write text(s, " + std::to_string(n) + "): a count cannot be negative"); }
+			const std::string why = text_field_misfit(s, static_cast<size_t>(n));
+			if (!why.empty()) { raise("Cannot write text: " + why); }
+			store_text_field(room(static_cast<size_t>(n)), s, static_cast<size_t>(n));
 		}
-		void bytes(const std::vector<script_int>& b) {
-			for (size_t i = 0; i < b.size(); ++i) {
-				if (b[i] < 0 || b[i] > 255) {
-					raise("Cannot write bytes: element " + std::to_string(i) + " is " + std::to_string(b[i]) + ", not 0 to 255");
-				}
-			}
-			unsigned char* p = room(b.size());
-			for (size_t i = 0; i < b.size(); ++i) { p[i] = static_cast<unsigned char>(b[i]); }
+		// raw bytes as they are: a string's, or an array's (each 0 to 255)
+		void bytes(const script_value& b) {
+			std::string raw, why;
+			if (!raw_bytes_of(b, raw, why)) { raise("Cannot write bytes: " + why); }
+			put(raw.data(), raw.size());
 		}
 
 		// the value's encoding for f, or "" with the reason in why
@@ -435,15 +458,19 @@ namespace jai::binary {
 			if (f.w.is_text()) {
 				const std::string* s = v.text_bytes();
 				if (!s) { why = value_kind_name(v) + " does not fit " + f.w.name(); return false; }
-				if (f.w.k == kind::text_null_terminated) {
-					why = embedded_nul(*s);
-					if (!why.empty()) { return false; }
-					store_null_terminated_field(p, *s, f.w.length);
-					return true;
+				why = text_field_misfit(*s, f.w.length);
+				if (!why.empty()) { return false; }
+				store_text_field(p, *s, f.w.length);
+				return true;
+			}
+			if (f.w.is_bytes()) {
+				std::string raw;
+				if (!raw_bytes_of(v, raw, why)) { return false; }
+				if (raw.size() != f.w.length) {
+					why = f.w.name() + " takes exactly " + count_text(f.w.length, " byte", " bytes") + ", got " + std::to_string(raw.size());
+					return false;
 				}
-				const size_t k = s->size() < f.w.length ? s->size() : f.w.length;
-				std::memcpy(p, s->data(), k);
-				std::memset(p + k, 0, f.w.length - k);
+				std::memcpy(p, raw.data(), raw.size());
 				return true;
 			}
 			if (f.w.is_float()) {
@@ -531,7 +558,8 @@ namespace jai::binary {
 			const bool ok = t == script_value_type::jai_any_type ||
 				(f.w.is_integer() && t == script_value_type::jai_int_type) ||
 				(f.w.is_float() && t == script_value_type::jai_float_type) ||
-				(f.w.is_text() && (t == script_value_type::jai_string_type || t == script_value_type::jai_utf8_string_type));
+				(f.w.is_text() && (t == script_value_type::jai_string_type || t == script_value_type::jai_utf8_string_type)) ||
+				(f.w.is_bytes() && t == script_value_type::jai_array_type);
 			if (!ok) {
 				raise("Cannot read field '" + f.key.unchecked_as_string() + "' (" + f.w.name() + ") into " + cname + "." +
 					std::string(sym->get_string(slots[i].second)) + " (declared " + declared->canonical_name() + ")");
@@ -577,8 +605,7 @@ namespace jai::binary {
 			.method("float32", [](reader& r) -> script_float { return r.floating(kind::float32); })
 			.method("float64", [](reader& r) -> script_float { return r.floating(kind::float64); })
 			.method("text", [](reader& r, script_int n) -> std::string { return r.text(n); })
-			.method("text_null_terminated", [](reader& r, script_int n) -> std::string { return r.text_null_terminated(n); })
-			.method("text_null_terminated", [](reader& r) -> std::string { return r.text_null_terminated(); })
+			.method("text", [](reader& r) -> std::string { return r.text(); })
 			.method("bytes", [](reader& r, script_int n) -> script_value { return r.bytes(n); })
 			.method("seek", [](reader& r, script_int to) -> reader& { r.seek(to); return r; })
 			.method("skip", [](reader& r, script_int n) -> reader& { r.skip(n); return r; })
@@ -617,9 +644,7 @@ namespace jai::binary {
 			.method("float64", [](writer& w, script_float v) -> writer& { w.floating(kind::float64, v); return w; })
 			.method("text", [](writer& w, const std::string& s) -> writer& { w.text(s); return w; })
 			.method("text", [](writer& w, const std::string& s, script_int n) -> writer& { w.text(s, n); return w; })
-			.method("text_null_terminated", [](writer& w, const std::string& s) -> writer& { w.text_null_terminated(s); return w; })
-			.method("text_null_terminated", [](writer& w, const std::string& s, script_int n) -> writer& { w.text_null_terminated(s, n); return w; })
-			.method("bytes", [](writer& w, const std::vector<script_int>& b) -> writer& { w.bytes(b); return w; })
+			.method("bytes", [](writer& w, const script_value& b) -> writer& { w.bytes(b); return w; })
 			.method("pack", [layout_id](writer& w, const script_value& l, const script_value& values) -> writer& {
 				const layout* lay = as_layout(l, layout_id);
 				if (!lay) { raise("pack expects a binary::layout, got " + value_kind_name(l)); }
@@ -653,11 +678,11 @@ namespace jai::binary {
 			if (n < 0) { raise("binary::text expects a length of 0 or more, got " + std::to_string(n)); }
 			return width_value(kind::text, static_cast<size_t>(n));
 		}, &eng);
-		ns->variables[eng.symbolize("text_null_terminated")] = script_value::make_function([width_value](const std::vector<script_value>& args) -> checked_result<script_value> {
-			if (args.size() != 1 || !args[0].deref().is_int()) { raise("binary::text_null_terminated expects one int length"); }
+		ns->variables[eng.symbolize("bytes")] = script_value::make_function([width_value](const std::vector<script_value>& args) -> checked_result<script_value> {
+			if (args.size() != 1 || !args[0].deref().is_int()) { raise("binary::bytes expects one int length"); }
 			const script_int n = args[0].deref().as_int();
-			if (n < 1) { raise("binary::text_null_terminated expects a length of 1 or more (room for the NUL), got " + std::to_string(n)); }
-			return width_value(kind::text_null_terminated, static_cast<size_t>(n));
+			if (n < 0) { raise("binary::bytes expects a length of 0 or more, got " + std::to_string(n)); }
+			return width_value(kind::bytes, static_cast<size_t>(n));
 		}, &eng);
 		add_lanes(eng);
 		ns->variables[eng.symbolize("layout")] = script_value::make_function([e, width_id](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -749,19 +774,13 @@ namespace jai::binary {
 		on(r, "float32", &read_float_lane<kind::float32>);
 		on(r, "float64", &read_float_lane<kind::float64>);
 		on(r, "text", [](void* s, const script_value& recv, const script_value* args, size_t argc, script_value& out) {
-			script_int n;
-			if (!lane_int(args, argc, n)) { return false; }
-			out = script_value(static_cast<reader*>(s)->text(n), recv.get_engine());
-			return true;
-		});
-		on(r, "text_null_terminated", [](void* s, const script_value& recv, const script_value* args, size_t argc, script_value& out) {
 			if (argc == 0) {
-				out = script_value(static_cast<reader*>(s)->text_null_terminated(), recv.get_engine());
+				out = script_value(static_cast<reader*>(s)->text(), recv.get_engine());
 				return true;
 			}
 			script_int n;
 			if (!lane_int(args, argc, n)) { return false; }
-			out = script_value(static_cast<reader*>(s)->text_null_terminated(n), recv.get_engine());
+			out = script_value(static_cast<reader*>(s)->text(n), recv.get_engine());
 			return true;
 		});
 		on(r, "bytes", [](void* s, const script_value&, const script_value* args, size_t argc, script_value& out) {

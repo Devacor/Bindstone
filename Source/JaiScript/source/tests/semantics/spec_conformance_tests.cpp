@@ -160,6 +160,7 @@ public:
 		auto_static_type();
 		call_argument_capture();
 		simplification_audit_fixes();
+		rulings_2026_09_28();
 #ifdef JAISCRIPT_SPEC_KNOWN_BUGS
 		known_bugs();
 #endif
@@ -1024,9 +1025,8 @@ private:
 	// docs/EXCEPTION_DESIGN.md
 	void exceptions_more() {
 		test("a_bare_rethrow_outside_any_catch_raises", [this]() {
-			// whether a script catch sees this text is an open question (docs/spec_conformance.md); the host always does
-			every_config("rethrow nothing", "No exception to re-throw", [](engine& e) {
-				try { e.execute("function f() { throw; } f();"); } catch (const std::exception& ex) { return std::string(ex.what()).substr(0, 24); }
+			every_config("rethrow nothing", "Bare throw with no active exception thrown.", [](engine& e) {
+				try { e.execute("function f() { throw; } f();"); } catch (const std::exception& ex) { return std::string(ex.what()).substr(0, 43); }
 				return std::string("no error");
 			});
 		});
@@ -1054,16 +1054,15 @@ private:
 					return r;
 				}
 				run();
-			)", "No exception to re-throw|outer");
+			)", "Bare throw with no active exception thrown.|outer");
 		});
-		test("a_native_exception_out_of_a_typed_callee_leaves_the_callers_frame_intact", [this]() {
-			// docs/EXCEPTION_DESIGN.md addendum: a native exception converts at the caller, the throwing frame popped first;
+		test("an_error_out_of_a_typed_callee_leaves_the_callers_frame_intact", [this]() {
 			// the caller's own typed return still converts against the caller's declaration
 			expect("frame pop", R"(
 				function f() -> int { throw; }
 				function a() -> string { string r = ""; try { f(); } catch (e) { r = "caught:" + e; } return r; }
 				a();
-			)", "caught:No exception to re-throw");
+			)", "caught:Bare throw with no active exception thrown.");
 		});
 		test("a_finished_coroutine_restores_the_resumers_exception", [this]() {
 			expect("resumer trio", R"(
@@ -2150,6 +2149,32 @@ private:
 	}
 
 	// Dev ruling (being implemented by another change): a by-value argument is captured at the call site, left to right
+	// Dev's rulings of 2026-09-28 (docs/spec_conformance.md section 9)
+	void rulings_2026_09_28() {
+		test("a_bare_throw_with_nothing_active_is_a_catchable_runtime_error", [this]() {
+			expect("bare throw", R"(
+				string r = "none"; try { throw; } catch (e) { r = "top:" + e; }
+				function f() -> string { string s = "none"; try { throw; } catch (e) { s = "own:" + e; } return s; }
+				function g() -> int { throw; return 1; }
+				function h() -> string { string s = "none"; try { g(); } catch (e) { s = "caller:" + e; } return s; }
+				r + "|" + f() + "|" + h();
+			)", "top:Bare throw with no active exception thrown.|own:Bare throw with no active exception thrown.|caller:Bare throw with no active exception thrown.", check_mode::warn);
+		});
+		test("a_native_exception_is_caught_by_the_running_functions_own_try", [this]() {
+			// docs/EXCEPTION_DESIGN.md: a store through a property reference whose host setter refuses raises natively inside the
+			// statement; the function's own try catches it, else it unwinds to the caller's
+			const std::string src = R"(
+				function f() -> string { Probe a = Probe(); var& r = a.lv; string s = "none"; try { r = 500; } catch (e) { s = "own:" + e; } return s + ":" + a.lv; }
+				Probe b = Probe(); var& rb = b.lv; string top = "none"; try { rb = 700; } catch (e) { top = "top:" + e; }
+				function g() -> string { Probe a = Probe(); var& r = a.lv; r = 900; return "unreached"; }
+				function h() -> string { string s = "none"; try { g(); } catch (e) { s = "caller:" + e; } return s; }
+				f() + "|" + top + "|" + h();
+			)";
+			every_config("own try", "own:lv too big:1|top:lv too big|caller:lv too big",
+				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::off);
+		});
+	}
+
 	// Dev ruling 2026-09-27: a by-value argument takes its value when it is evaluated, left to right
 	void call_argument_capture() {
 		test("by_value_arguments_capture_their_values_left_to_right", [this]() {

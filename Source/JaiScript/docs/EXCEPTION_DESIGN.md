@@ -42,7 +42,7 @@
 >   / the in-catch marker are fiber state (vm `vm_coroutine_state`, interpreter
 >   `interpreter_coroutine_state`): a resume installs the fiber's parked trio (a fresh
 >   coroutine starts with no active exception - a bare `throw;` outside any catch in the
->   body raises `No exception to re-throw` even when the resumer sits inside a catch), a
+>   body raises `Bare throw with no active exception thrown.` even when the resumer sits inside a catch), a
 >   yield parks it, and the resumer's trio comes back on every exit except an escaping
 >   throw, whose exception pair stays live for the resumer's handler. So a resumer's own
 >   `try/catch` between resumes never touches the fiber's `e`, and a resumer's `catch (e)`
@@ -54,21 +54,15 @@
 >   where they stand, at top level or in a function, like a bound free function (`FunctionBinder`). An archive skips a
 >   host property that refuses a read or a store, and passes a host exception on (`to_json`, `from_json`, the
 >   binary archive).
-> - **A native exception converts at a call boundary, on both backends.** A C++ exception a bound function,
->   getter or setter raises becomes the script's exception where the call it belongs to stands: during a call's
->   argument evaluation, in the calling frame (the unfused call's argument zone; the fused push's own instruction,
->   which reads its argument itself, row 138a); at a native call; and, raised by any other instruction of a script
->   function (an element load through a property reference), at that function's caller, the throwing frame popped
->   first, so the function's own `try` does not see it. The VM's `run` converts (`ip_in_call_arg_zone`,
->   `convert_cpp_exception_in_frame`, `convert_cpp_exception_at_frame`); the interpreter's `visit_call` does.
-> - **An error in an included or imported file is the includer's error, on both backends.** Include is textual, so a
->   failure of the nested run re-raises at the op that started it exactly as if the file's code ran there: a `throw`
->   keeps its value and type, a runtime error is caught with its text alone (and carries its category suffix only when
->   uncaught), and a load failure - the file's parse error, or its static-check listing named by the file's resolved path -
->   raises that text as a string. The nested run parks its failure and its own frames (`detail::nested_failure`,
->   `execution_backend::park_nested_failure`) before the engine turns it into a C++ exception; the include/import op
->   takes it back (`raise_nested_failure`, one per backend) and prepends those frames to its own, so an uncaught error's
->   trace reads innermost file first, then each include/import site.
+> - **A native exception is the running function's exception, on both backends.** A C++ exception raised while a
+>   statement runs (a host call, a store through a property reference whose setter refuses, a read through a removed
+>   element's reference) becomes a script exception where it was raised: that function's own `try` catches it, and
+>   without one it unwinds to the callers like a script `throw`, each frame popped on the way (C++). The VM's `run`
+>   converts in the running frame (`convert_cpp_exception_in_frame`, then `handle_throw_unwind`); the interpreter's
+>   `visit_try_stmt` takes it from its block, `call_function` pops its frame on the way out, and `visit_call` converts
+>   it at the call site.
+> - **A bare `throw;` with no active exception** raises the catchable runtime error
+>   `Bare throw with no active exception thrown.` (`invalid_operation`) where it stands.
 > - `finally` remains unimplemented (still-future, as designed).
 
 ## Overview
@@ -186,7 +180,7 @@ void interpreter::visit_throw_expr(throw_expr* expr) {
     } else {
         // Re-throw current exception
         if (!current_exception_) {
-            throw script_exception("No exception to re-throw", expr->location);
+            return runtime_error(invalid_operation, "Bare throw with no active exception thrown.");
         }
     }
     

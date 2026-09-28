@@ -9392,10 +9392,9 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
         current_exception_ = script_exception(message, expr->location);
         current_exception_->thrown = true;
     } else {
-        // Re-throw current exception
+        // Re-throw current exception; with none active it is a catchable runtime error (KEEP BYTE-PARALLEL with vm_backend::exec_throw)
         if (!current_exception_) {
-            // No exception to re-throw (note: this uses exception unwinding, not error codes)
-            throw script_exception("No exception to re-throw", expr->location);
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_operation), detail::bare_throw_text);
         }
         // Keep the existing active_exception_value_
     }
@@ -10897,8 +10896,21 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         is_unwinding_ = false; trace_captured_ = false;
     }
 
-    // Execute try block (a catch resume skips it: it completed before the suspension)
-    auto try_result = resuming_catch ? checked_result<void>{} : dispatch_stmt(stmt->try_block.get());
+    // Execute try block (a catch resume skips it: it completed before the suspension). A native exception an instruction of the
+    // block raises is this try's exception, as in C++ (docs/EXCEPTION_DESIGN.md; KEEP BYTE-PARALLEL with vm_backend::run)
+    checked_result<void> try_result;
+    if (!resuming_catch) {
+        const size_t try_stack_mark = valueStack_.size();
+        try {
+            try_result = dispatch_stmt(stmt->try_block.get());
+        } catch (const std::exception& e) {
+            while (valueStack_.size() > try_stack_mark) { (void)valueStack_.pop(); }
+            if (auto* se = dynamic_cast<const script_exception*>(&e)) { current_exception_ = *se; }
+            else { current_exception_ = script_exception(e.what()); }
+            active_exception_value_ = make_value(std::string(e.what()));
+            is_unwinding_ = true;
+        }
+    }
     if (!resuming_catch && hasYieldRequest_) [[unlikely]] {
         // The try block suspended: its own frames carry the position, this statement adds none
         current_catch_var_id_ = saved_catch_var_id;

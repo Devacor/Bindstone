@@ -1622,10 +1622,10 @@ public:
                            {"var log = \"\"; try { throw \"r\"; } catch (re) { try { c.resume(); } catch (err) { log = err + \"/\" + re; } log = log + \"/\" + re; } log;"},
                            "in/r/r", "the resumer's catch variable survives a throw out of the fiber");
             // a coroutine body starts with no active exception: a bare throw; outside any catch
-            // in the body raises No exception to re-throw even when the resumer is inside a catch
+            // in the body raises the bare-throw error even when the resumer is inside a catch
             check_executes("coroutine var g() { yield 1; throw; } auto c = g(); c.resume();",
                            {"var got = \"\"; try { throw \"r\"; } catch (re) { try { c.resume(); } catch (err) { got = err; } } got;"},
-                           "No exception to re-throw", "bare throw; in a body with no catch active");
+                           "Bare throw with no active exception thrown.", "bare throw; in a body with no catch active");
         });
 
         test("resumer_try_catch_between_resumes_keeps_fiber_catch_var", [this, check_both]() {

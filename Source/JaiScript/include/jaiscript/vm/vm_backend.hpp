@@ -1105,9 +1105,6 @@ namespace jai::vm {
         __declspec(noinline)
 #endif
         void materialize_return(frame& f, script_value& result, uint32_t operand_class, uint32_t own_slot);
-        void convert_cpp_exception_at_frame(frame*& fp, const script_exception& e);
-        // Interpreter parity: arg-eval throws convert at the frame MAKING the call
-        bool ip_in_call_arg_zone(const frame& f) const;
         void convert_cpp_exception_in_frame(const script_exception& e);
         void pop_records_to(size_t records_base, frame*& fp);
         script_value run_program(std::shared_ptr<chunk> program, bool textual = false);   // textual: an include, run in the current environment

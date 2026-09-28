@@ -150,6 +150,7 @@ function tex_warm_map() -> void {
 	}
 	int nt = tids.size();
 	if (nt == 0) { return; }
+	for (int s0 = 0; s0 < nt; ++s0) { tex_patches_prepare(tids[s0]); }
 	if (TEX_WORKERS == 0) {
 		for (int s = 0; s < nt; ++s) { int sid = tids[s]; tex_prepare(sid); }
 		return;

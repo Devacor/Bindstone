@@ -1,8 +1,6 @@
-// JaiDOOM wad.jai — WAD file access in pure JaiScript.
-// Bytes are language-native now (docs/char_semantics.md, both rounds landed
-// off this project's feedback): WAD[ofs] + 0 reads the unsigned byte, char
-// comparisons promote the same way, and to_char / \xNN literals mint bytes.
-// The sort-bootstrap and base64-LUT eras are fully retired.
+// JaiDOOM wad.jai — WAD file access in pure JaiScript. The file's bytes are one string, read
+// through binary::reader (little-endian, the format's own order); the directory entry is a
+// binary::layout, and whole lumps come out as array<int> through to_bytes.
 
 string WAD = "";              // raw file bytes
 string WAD_ID = "";           // "IWAD" | "PWAD"
@@ -14,25 +12,25 @@ array<int> LUMP_SIZE = [];
 array<string> LUMP_NAME = [];
 map<string, int> LUMP_INDEX = {}; // name -> index, later lumps win (W_GetNumForName scans backward)
 
-function u8(int ofs) -> int { return WAD[ofs] + 0; }
-function u16(int ofs) -> int { return (WAD[ofs] + 0) | (WAD[ofs + 1] << 8); }
-function i16(int ofs) -> int {
-	int v = (WAD[ofs] + 0) | (WAD[ofs + 1] << 8);
-	return v >= 32768 ? v - 65536 : v;
-}
-function u32(int ofs) -> int {
-	return (WAD[ofs] + 0) | (WAD[ofs + 1] << 8) | (WAD[ofs + 2] << 16) | (WAD[ofs + 3] << 24);
-}
-function i32(int ofs) -> int {
-	int v = u32(ofs);
-	return v >= 2147483648 ? v - 4294967296 : v;
-}
+// a directory entry: the lump's offset and size, its name NUL-padded to 8 bytes
+binary::layout LUMP_ENTRY = binary::layout("pos", binary::int32, "size", binary::int32, "name", binary::text(8));
 
-// 8-byte lump name, NUL-padded
-function name8(int ofs) -> string {
-	int len = 0;
-	while (len < 8 && WAD[ofs + len] != 0) { len = len + 1; }
-	return WAD.substr(ofs, len);
+// a reader over the WAD at a lump's first byte
+function lump_reader(int idx) -> binary::reader { return WAD.reader().seek(LUMP_POS[idx]); }
+
+// whole lump as a flat byte array (decode once, then hot code reads ints only)
+function lump_bytes(int idx) -> array<int> { return WAD.to_bytes(LUMP_POS[idx], LUMP_SIZE[idx]); }
+
+// count directory entries at r's cursor join the lump tables, their offsets shifted by base
+function wad_directory(binary::reader& r, int base, int count) -> void {
+	for (int i = 0; i < count; ++i) {
+		var e = r.unpack(LUMP_ENTRY);
+		string nm = e["name"];
+		LUMP_POS.push(base + e["pos"]);
+		LUMP_SIZE.push(e["size"]);
+		LUMP_NAME.push(nm);
+		LUMP_INDEX[nm] = NUM_LUMPS + i;
+	}
 }
 
 // The game folder is the one holding wads/ and cache/: the folder above scripts/ in the
@@ -86,20 +84,14 @@ function wad_add(string path) -> bool {
 	if (!file_exists(path)) { return false; }
 	string more = read_file(path);
 	if (more.size() < 12) { return false; }
-	string id = more.substr(0, 4);
+	binary::reader r = more.reader();
+	string id = r.text(4);
 	if (id != "IWAD" && id != "PWAD") { return false; }
+	int count = r.int32();
+	r.seek(r.int32());
 	int base = WAD.size();
 	WAD = WAD + more;
-	int count = i32(base + 4);
-	int dir = base + i32(base + 8);
-	for (int i = 0; i < count; ++i) {
-		int e = dir + i * 16;
-		LUMP_POS.push(base + i32(e));
-		LUMP_SIZE.push(i32(e + 4));
-		string nm = name8(e + 8);
-		LUMP_NAME.push(nm);
-		LUMP_INDEX[nm] = NUM_LUMPS + i;
-	}
+	wad_directory(r, base, count);
 	NUM_LUMPS = NUM_LUMPS + count;
 	WAD_FILES.push(path);
 	return true;
@@ -132,22 +124,18 @@ function wad_load(string path) -> bool {
 	string file = slash >= 0 ? path.substr(slash + 1) : path;
 	int dot = file.rfind(".");
 	WAD_BASE = dot > 0 ? file.substr(0, dot) : file;
-	WAD_ID = WAD.substr(0, 4);
+	binary::reader r = WAD.reader();
+	WAD_ID = r.text(4);
 	if (WAD_ID != "IWAD" && WAD_ID != "PWAD") { return false; }
-	NUM_LUMPS = i32(4);
-	int dir = i32(8);
+	int count = r.int32();
+	r.seek(r.int32());
 	LUMP_POS = [];
 	LUMP_SIZE = [];
 	LUMP_NAME = [];
 	LUMP_INDEX = {};
-	for (int i = 0; i < NUM_LUMPS; ++i) {
-		int e = dir + i * 16;
-		LUMP_POS.push(i32(e));
-		LUMP_SIZE.push(i32(e + 4));
-		string nm = name8(e + 8);
-		LUMP_NAME.push(nm);
-		LUMP_INDEX[nm] = i;
-	}
+	NUM_LUMPS = 0;
+	wad_directory(r, 0, count);
+	NUM_LUMPS = count;
 	return true;
 }
 
@@ -164,12 +152,3 @@ function lump_num_from(string name, int start) -> int {
 	return -1;
 }
 
-// whole lump decoded to a flat byte array (decode once, then hot code reads ints only)
-function lump_bytes(int idx) -> array<int> {
-	array<int> out = [];
-	int pos = LUMP_POS[idx];
-	int stop = pos + LUMP_SIZE[idx];
-	var& w = WAD;
-	for (int i = pos; i < stop; ++i) { out.push(w[i] + 0); }
-	return out;
-}

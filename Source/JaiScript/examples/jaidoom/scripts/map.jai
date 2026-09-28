@@ -74,121 +74,113 @@ function map_load(string mapname) -> bool {
 	MAP_NAME = mapname;
 
 	int lu = lump_num_from("VERTEXES", marker);
-	int pos = LUMP_POS[lu];
+	binary::reader r = lump_reader(lu);
 	int count = LUMP_SIZE[lu] / 4;
 	VX_X = []; VX_Y = [];
 	MAP_MINX = 100000; MAP_MINY = 100000; MAP_MAXX = -100000; MAP_MAXY = -100000;
 	for (int i = 0; i < count; ++i) {
-		int x = i16(pos); int y = i16(pos + 2);
+		int x = r.int16(); int y = r.int16();
 		VX_X.push(x); VX_Y.push(y);
 		if (x < MAP_MINX) { MAP_MINX = x; }
 		if (x > MAP_MAXX) { MAP_MAXX = x; }
 		if (y < MAP_MINY) { MAP_MINY = y; }
 		if (y > MAP_MAXY) { MAP_MAXY = y; }
-		pos = pos + 4;
 	}
 
 	lu = lump_num_from("LINEDEFS", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 14;
 	LD_V1 = []; LD_V2 = []; LD_FLAGS = []; LD_SPECIAL = []; LD_TAG = []; LD_SIDE0 = []; LD_SIDE1 = [];
 	for (int i2 = 0; i2 < count; ++i2) {
-		LD_V1.push(u16(pos));
-		LD_V2.push(u16(pos + 2));
-		LD_FLAGS.push(u16(pos + 4));
-		LD_SPECIAL.push(u16(pos + 6));
-		LD_TAG.push(u16(pos + 8));
-		LD_SIDE0.push(side_or_none(u16(pos + 10)));
-		LD_SIDE1.push(side_or_none(u16(pos + 12)));
-		pos = pos + 14;
+		LD_V1.push(r.uint16());
+		LD_V2.push(r.uint16());
+		LD_FLAGS.push(r.uint16());
+		LD_SPECIAL.push(r.uint16());
+		LD_TAG.push(r.uint16());
+		LD_SIDE0.push(side_or_none(r.uint16()));
+		LD_SIDE1.push(side_or_none(r.uint16()));
 	}
 
 	lu = lump_num_from("SIDEDEFS", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 30;
 	SD_XOFS = []; SD_YOFS = []; SD_SEC = []; SD_TOP = []; SD_BOT = []; SD_MID = [];
 	for (int i3 = 0; i3 < count; ++i3) {
-		SD_XOFS.push(i16(pos));
-		SD_YOFS.push(i16(pos + 2));
-		SD_TOP.push(name8(pos + 4));
-		SD_BOT.push(name8(pos + 12));
-		SD_MID.push(name8(pos + 20));
-		SD_SEC.push(u16(pos + 28));
-		pos = pos + 30;
+		SD_XOFS.push(r.int16());
+		SD_YOFS.push(r.int16());
+		SD_TOP.push(r.text_z(8));
+		SD_BOT.push(r.text_z(8));
+		SD_MID.push(r.text_z(8));
+		SD_SEC.push(r.uint16());
 	}
 
 	lu = lump_num_from("SECTORS", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 26;
 	SE_FLOORH = []; SE_CEILH = []; SE_LIGHT = []; SE_SPECIAL = []; SE_TAG = []; SE_FLOORPIC = []; SE_CEILPIC = [];
 	for (int i4 = 0; i4 < count; ++i4) {
-		SE_FLOORH.push(i16(pos));
-		SE_CEILH.push(i16(pos + 2));
-		SE_FLOORPIC.push(name8(pos + 4));
-		SE_CEILPIC.push(name8(pos + 12));
-		SE_LIGHT.push(i16(pos + 20));
-		SE_SPECIAL.push(u16(pos + 22));
-		SE_TAG.push(u16(pos + 24));
-		pos = pos + 26;
+		SE_FLOORH.push(r.int16());
+		SE_CEILH.push(r.int16());
+		SE_FLOORPIC.push(r.text_z(8));
+		SE_CEILPIC.push(r.text_z(8));
+		SE_LIGHT.push(r.int16());
+		SE_SPECIAL.push(r.uint16());
+		SE_TAG.push(r.uint16());
 	}
 
 	lu = lump_num_from("SEGS", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 12;
 	SG_V1 = []; SG_V2 = []; SG_ANG = []; SG_LINE = []; SG_DIR = []; SG_OFS = [];
 	for (int i5 = 0; i5 < count; ++i5) {
-		SG_V1.push(u16(pos));
-		SG_V2.push(u16(pos + 2));
-		SG_ANG.push(u16(pos + 4));
-		SG_LINE.push(u16(pos + 6));
-		SG_DIR.push(u16(pos + 8));
-		SG_OFS.push(i16(pos + 10));
-		pos = pos + 12;
+		SG_V1.push(r.uint16());
+		SG_V2.push(r.uint16());
+		SG_ANG.push(r.uint16());
+		SG_LINE.push(r.uint16());
+		SG_DIR.push(r.uint16());
+		SG_OFS.push(r.int16());
 	}
 
 	lu = lump_num_from("SSECTORS", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 4;
 	SS_COUNT = []; SS_FIRST = [];
 	for (int i6 = 0; i6 < count; ++i6) {
-		SS_COUNT.push(u16(pos));
-		SS_FIRST.push(u16(pos + 2));
-		pos = pos + 4;
+		SS_COUNT.push(r.uint16());
+		SS_FIRST.push(r.uint16());
 	}
 
 	lu = lump_num_from("NODES", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 28;
 	ND_X = []; ND_Y = []; ND_DX = []; ND_DY = []; ND_BBOX = []; ND_RIGHT = []; ND_LEFT = [];
 	for (int i7 = 0; i7 < count; ++i7) {
-		ND_X.push(i16(pos));
-		ND_Y.push(i16(pos + 2));
-		ND_DX.push(i16(pos + 4));
-		ND_DY.push(i16(pos + 6));
-		for (int b = 0; b < 8; ++b) { ND_BBOX.push(i16(pos + 8 + b * 2)); }
-		ND_RIGHT.push(u16(pos + 24));
-		ND_LEFT.push(u16(pos + 26));
-		pos = pos + 28;
+		ND_X.push(r.int16());
+		ND_Y.push(r.int16());
+		ND_DX.push(r.int16());
+		ND_DY.push(r.int16());
+		for (int b = 0; b < 8; ++b) { ND_BBOX.push(r.int16()); }
+		ND_RIGHT.push(r.uint16());
+		ND_LEFT.push(r.uint16());
 	}
 
 	lu = lump_num_from("THINGS", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 10;
 	TH_X = []; TH_Y = []; TH_ANG = []; TH_TYPE = []; TH_FLAGS = [];
 	for (int i8 = 0; i8 < count; ++i8) {
-		TH_X.push(i16(pos));
-		TH_Y.push(i16(pos + 2));
-		TH_ANG.push(i16(pos + 4));
-		TH_TYPE.push(i16(pos + 6));
-		TH_FLAGS.push(i16(pos + 8));
-		pos = pos + 10;
+		TH_X.push(r.int16());
+		TH_Y.push(r.int16());
+		TH_ANG.push(r.int16());
+		TH_TYPE.push(r.int16());
+		TH_FLAGS.push(r.int16());
 	}
 
 	lu = lump_num_from("BLOCKMAP", marker);
-	pos = LUMP_POS[lu];
+	r = lump_reader(lu);
 	count = LUMP_SIZE[lu] / 2;
 	BMAP = [];
-	for (int i9 = 0; i9 < count; ++i9) { BMAP.push(i16(pos + i9 * 2)); }
+	for (int i9 = 0; i9 < count; ++i9) { BMAP.push(r.int16()); }
 	BMAP_ORGX = BMAP[0];
 	BMAP_ORGY = BMAP[1];
 	BMAP_W = BMAP[2] & 65535;

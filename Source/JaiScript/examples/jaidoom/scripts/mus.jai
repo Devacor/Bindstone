@@ -8,11 +8,6 @@
 import "wad.jai";
 import "sound.jai";
 
-function be16(int v) -> string { return "" + to_char((v >> 8) & 255) + to_char(v & 255); }
-function be32(int v) -> string {
-	return "" + to_char((v >> 24) & 255) + to_char((v >> 16) & 255) + to_char((v >> 8) & 255) + to_char(v & 255);
-}
-
 function midi_varlen(int v) -> string {
 	if (v < 0) { v = 0; }
 	var out = "" + to_char(v & 127);
@@ -43,9 +38,11 @@ function mus_midi_bytes(string name) -> string {
 	if (lu < 0) { return ""; }
 	int pos = LUMP_POS[lu];
 	if (LUMP_SIZE[lu] < 16 || WAD.substr(pos, 3) != "MUS" || WAD[pos + 3] != 0x1A) { return ""; }
-	int slen = u16(pos + 4);
-	int p = pos + u16(pos + 6);
-	int stop = p + slen;
+	binary::reader r = lump_reader(lu);
+	r.skip(4);
+	int slen = r.uint16();
+	r.seek(pos + r.uint16());
+	int stop = r.pos() + slen;
 	int lend = pos + LUMP_SIZE[lu];
 	if (stop > lend) { stop = lend; }
 
@@ -54,25 +51,25 @@ function mus_midi_bytes(string name) -> string {
 	for (int c = 0; c < 16; ++c) { chvol.push(100); }
 	int delay = 0;
 	bool done = false;
-	while (p < stop && !done) {
-		int ev = u8(p); p = p + 1;
+	while (r.pos() < stop && !done) {
+		int ev = r.uint8();
 		int last = ev & 0x80;
 		int etype = (ev >> 4) & 7;
 		int mch = ev & 15;
 		int ch = mch == 15 ? 9 : (mch >= 9 ? mch + 1 : mch);   // MUS 15 = percussion = MIDI 9
 		var out = "";
 		if (etype == 0) {
-			int note = u8(p) & 127; p = p + 1;
+			int note = r.uint8() & 127;
 			out = "" + to_char(0x80 | ch) + to_char(note) + to_char(64);
 		} else if (etype == 1) {
-			int nb = u8(p); p = p + 1;
-			if ((nb & 0x80) != 0) { chvol[ch] = u8(p) & 127; p = p + 1; }
+			int nb = r.uint8();
+			if ((nb & 0x80) != 0) { chvol[ch] = r.uint8() & 127; }
 			out = "" + to_char(0x90 | ch) + to_char(nb & 127) + to_char(chvol[ch]);
 		} else if (etype == 2) {
-			int w = u8(p) * 64; p = p + 1;
+			int w = r.uint8() * 64;
 			out = "" + to_char(0xE0 | ch) + to_char(w & 127) + to_char((w >> 7) & 127);
 		} else if (etype == 3) {
-			int sy = u8(p) & 127; p = p + 1;
+			int sy = r.uint8() & 127;
 			int cc = 120;
 			if (sy == 11) { cc = 123; }
 			else if (sy == 12) { cc = 126; }
@@ -80,20 +77,20 @@ function mus_midi_bytes(string name) -> string {
 			else if (sy == 14) { cc = 121; }
 			out = "" + to_char(0xB0 | ch) + to_char(cc) + to_char(0);
 		} else if (etype == 4) {
-			int cn = u8(p) & 127; p = p + 1;
-			int cv = u8(p) & 127; p = p + 1;
+			int cn = r.uint8() & 127;
+			int cv = r.uint8() & 127;
 			if (cn == 0) { out = "" + to_char(0xC0 | ch) + to_char(cv); }
 			else { out = "" + to_char(0xB0 | ch) + to_char(mus_cc(cn)) + to_char(cv); }
 		} else if (etype == 6) { done = true; }
-		else if (etype == 7) { p = p + 1; }
+		else if (etype == 7) { r.skip(1); }
 		if (out != "") {
 			trk += midi_varlen(delay) + out;
 			delay = 0;
 		}
 		if (last != 0) {
 			int d = 0;
-			while (p < stop) {
-				int b = u8(p); p = p + 1;
+			while (r.pos() < stop) {
+				int b = r.uint8();
 				d = (d << 7) | (b & 127);
 				if ((b & 0x80) == 0) { break; }
 			}
@@ -101,7 +98,9 @@ function mus_midi_bytes(string name) -> string {
 		}
 	}
 	trk += midi_varlen(delay) + to_char(0xFF) + to_char(0x2F) + to_char(0);
-	return "MThd" + be32(6) + be16(0) + be16(1) + be16(70) + "MTrk" + be32(trk.size()) + trk;
+	binary::writer mid;
+	mid.big_endian().text("MThd").uint32(6).uint16(0).uint16(1).uint16(70).text("MTrk").uint32(trk.size()).text(trk);
+	return mid.to_string();
 }
 
 // ------------------------------------------------------------------ player ---

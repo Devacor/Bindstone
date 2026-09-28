@@ -56,6 +56,10 @@ else()
         set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
     endif()
 
+    # Clang (and GCC outside ISO modes) fuse a*b+c into FMA by default, which changes float results per target;
+    # MSVC's /fp:precise never contracts, so every build computes the same bits
+    add_compile_options(-ffp-contract=off)
+
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         add_compile_options(-O3)
         if(JAISCRIPT_NATIVE_ARCH)

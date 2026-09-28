@@ -249,6 +249,7 @@ def run_fixtures(exe, update, checks):
         ask("hover.local_auto", "textDocument/hover", main_uri, main_text, "party =", 1, 0)
         ask("hover.class", "textDocument/hover", main_uri, main_text, "Hero h", 1, 0)
         ask("hover.namespace_fn", "textDocument/hover", main_uri, main_text, "shout", 1, 0)
+        ask("hover.doc_comment", "textDocument/hover", main_uri, main_text, "twice", 1, 0)
         ask("hover.enum_value", "textDocument/hover", main_uri, main_text, "green", 1, 0)
         ask("hover.host_fn", "textDocument/hover", main_uri, main_text, "to_string", 1, 0)
         ask("hover.param", "textDocument/hover", main_uri, main_text, "xs)", 2, 0)

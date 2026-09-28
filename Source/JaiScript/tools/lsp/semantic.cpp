@@ -122,7 +122,6 @@ void build_unit_index(const std::vector<jai::declaration_ptr>& decls, const std:
 	}
 }
 
-// ------------------------------------------------------------------ program_view
 
 program_view::program_view(workspace& w, const program& p, unit& cur) : ws(w), prog(p), current(cur) {}
 
@@ -394,7 +393,31 @@ uint32_t program_view::member_symbol(unit_model& m, const member_ref& r, std::st
 		s.kind = symbol_kind::host_member;
 		s.name = std::string(member);
 		s.container = r.host_class;
-		s.detail = r.host_class + "." + std::string(member) + "  (registered by the host)";
+		auto& eng = ws.engine();
+		const uint64_t id = eng.symbolize(member);
+		std::vector<const jai::class_definition*> chain;
+		if (auto def = eng.get_class_definition(r.host_class)) { chain.push_back(def.get()); }
+		for (size_t i = 0; i < chain.size() && i < 32; ++i) {
+			const jai::class_definition* d = chain[i];
+			if (auto it = d->cpp_method_overload_table().find(id); it != d->cpp_method_overload_table().end()) {
+				for (const auto& [arity, overloads] : it->second) {
+					for (const auto& entry : overloads) {
+						std::string label = std::string(member) + "(";
+						for (size_t p = 0; p < arity; ++p) {
+							if (p) { label += ", "; }
+							label += p < entry.param_types.size() ? cpp_param_text(eng, entry.param_types[p]) : "var";
+						}
+						s.signatures.push_back(label + ")");
+					}
+				}
+			}
+			if (auto it = d->script_method_overloads().find(id); it != d->script_method_overloads().end()) {
+				for (const auto& fd : it->second) { s.signatures.push_back(function_signature(*fd, member, false).label); }
+			}
+			for (const auto& parent : d->get_parent_classes()) { if (parent) { chain.push_back(parent.get()); } }
+			if (auto base = d->get_cpp_base_class()) { chain.push_back(base.get()); }
+		}
+		s.detail = (s.signatures.empty() ? r.host_class + "." + std::string(member) : s.signatures.front()) + "  (registered by the host)";
 		return add_symbol(m, std::move(s));
 	}
 	std::string key = "m:" + std::string(r.owner->name) + "." + std::string(member);
@@ -491,7 +514,6 @@ uint32_t program_view::builtin_symbol(unit_model& m, std::string_view receiver, 
 	return add_symbol(m, std::move(s));
 }
 
-// ------------------------------------------------------------------ semantic_walker
 
 semantic_walker::semantic_walker(workspace& ws, unit& u, const program& prog, unit_model& m)
 	: u_(u), m_(m), view_(ws, prog, u), eng_(ws.engine()) {}
@@ -709,6 +731,7 @@ void semantic_walker::walk_decls(const std::vector<jai::declaration_ptr>& decls)
 
 void semantic_walker::walk_decl(const jai::declaration* d) {
 	if (!d) { return; }
+	if (!d->location.filename.empty() && d->location.filename != u_.path) { return; }   // spliced from an include: its positions are another file's
 	switch (d->get_type()) {
 		case jai::node_type::variable_decl: walk_variable(static_cast<const jai::variable_decl*>(d)); break;
 		case jai::node_type::function_decl: walk_function(static_cast<const jai::function_decl*>(d)); break;

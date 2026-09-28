@@ -59,6 +59,22 @@ public:
             check_eq(0, wrappingDistance(0, 8, 3, 3, &wrapped));
             check_false(wrapped);
         });
+        test("wrappingMix (Collider::interpolateDrawAngle) goes the short way around, from wrapped angles", [this]() {
+            auto offZero = [](float a_angle) { return wrappingDistance(0.0f, 360.0f, a_angle, 0.0f); };
+            check_near(0.0f, offZero(wrappingMix(0.0f, 360.0f, 350.0f, 10.0f, 0.5f)), 1e-4f);
+            check_near(0.0f, offZero(wrappingMix(0.0f, 360.0f, 10.0f, 350.0f, 0.5f)), 1e-4f);
+            check_near(355.0f, wrappingMix(0.0f, 360.0f, 350.0f, 10.0f, 0.25f), 1e-4f);
+            check_near(5.0f, wrappingMix(0.0f, 360.0f, 10.0f, 350.0f, 0.25f), 1e-4f);
+            check_near(20.0f, wrappingMix(0.0f, 360.0f, 10.0f, 50.0f, 0.25f), 1e-4f);
+            check_near(40.0f, wrappingMix(0.0f, 360.0f, 50.0f, 10.0f, 0.25f), 1e-4f);
+            check_near(350.0f, wrappingMix(0.0f, 360.0f, 350.0f, 10.0f, 0.0f), 1e-4f);
+            check_near(10.0f, wrappingMix(0.0f, 360.0f, 350.0f, 10.0f, 1.0f), 1e-4f);
+            check_near(0.0f, offZero(wrappingMix(0.0f, 360.0f, -5.0f, 5.0f, 0.5f)), 1e-4f);
+            check_near(0.0f, offZero(wrappingMix(0.0f, 360.0f, 355.0f, 365.0f, 0.5f)), 1e-4f);
+            check_near(0.0f, offZero(wrappingMix(0.0f, 360.0f, 725.0f, 715.0f, 0.5f)), 1e-4f);
+            check_near(90.0f, wrappingMix(0.0f, 360.0f, 450.0f, 450.0f, 0.5f), 1e-4f);
+            check_near(105.0, wrappingMix(100.0, 200.0, 190.0, 120.0, 0.5), 1e-9);
+        });
         test("startsWith is true exactly when the string begins with the prefix", [this]() {
             check_true(startsWith("Assets/Interface", "Assets/"));
             check_true(startsWith("abc", "abc"));

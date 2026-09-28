@@ -752,26 +752,7 @@ namespace MV {
 			void applyScenePositionUpdate(Point<> a_location, double a_angle);
 
 			PointPrecision interpolateDrawAngle(PointPrecision a_percentOfStep) {
-				PointPrecision current = *currentAngle;
-				if (current == previousAngle) { return current; }
-				bool wrapped;
-				PointPrecision rotation = wrappingDistance(0.0f, 360.0f, current, previousAngle, &wrapped);
-				if (wrapped) {
-					if (previousAngle > current) {
-						rotation = previousAngle + ((rotation)* a_percentOfStep);
-					}
-					else {
-						rotation = previousAngle - ((rotation)* a_percentOfStep);
-					}
-				} else {
-					if (previousAngle > current) {
-						rotation = previousAngle - ((rotation)* a_percentOfStep);
-					}
-					else {
-						rotation = previousAngle + ((rotation)* a_percentOfStep);
-					}
-				}
-				return wrap(0.0f, 360.0f, rotation);
+				return wrappingMix<PointPrecision>(0.0f, 360.0f, previousAngle, *currentAngle, a_percentOfStep);
 			}
 
 			void deleteCollisionObject(Collider* a_collisionWith) {

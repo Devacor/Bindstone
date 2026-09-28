@@ -118,7 +118,7 @@ loading engine</strong>, which is exactly why one <code>.jaibite</code> file ser
 bites serve only their own. <code>save_bytes()</code> exists specifically for host VFS/pack-file routing.
 <code>jaibite_load*</code> throws <code>jai::runtime_error</code> on a missing file, bad format, version
 mismatch, or corrupt data.</p>
-<p>The format is <strong>versioned</strong> (currently <strong>11</strong>), and the number moves whenever the
+<p>The format is <strong>versioned</strong>, and the number moves whenever the
 parser gains a node, so a bite is readable only by builds that share its format version. An explicit
 <code>jaibite_load*</code> of an older file throws (<code>unsupported format version 9 (expected 20)</code>);
 a stale <em>sibling</em> in the automatic disk cache is simply reparsed and rewritten, silently. Practical

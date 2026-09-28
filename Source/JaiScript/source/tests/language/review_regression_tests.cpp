@@ -3189,7 +3189,7 @@ public:
                 fn()
             )", "2,1", "shadowing in a function");
             expect(R"(
-                class C { int e = 7; string m() { int a = 0; try { throw 2; } catch (e) { a = e; } return to_string(a) + "," + to_string(e) + "," + to_string(this.e); } }
+                class C { int e = 7; string m() { int a = 0; try { throw 2; } catch (e) { a = e.value; } return to_string(a) + "," + to_string(e) + "," + to_string(this.e); } }
                 C().m()
             )", "2,7,7", "shadowing a field: bare e is the field again after the block");
             expect(R"(
@@ -3221,9 +3221,9 @@ public:
             )", "inner:k", "a nested try inside the catch keeps the caught exception for throw; (the in-catch marker)");
             expect(R"(
                 class V { int x = 1; }
-                string h() { try { try { var v = V(); throw v; } catch (e) { e.x = 9; e = 5; throw; } } catch (o) { return to_string(o.x); } return ""; }
+                string h() { try { try { var v = V(); v.x = 9; throw v; } catch (e) { e = 5; throw; } } catch (o) { return to_string(o.x) + "," + to_string(o.value.x); } return ""; }
                 h()
-            )", "9", "the catch variable binds the thrown object itself; throw; rethrows the original after e is reassigned");
+            )", "9,9", "the thrown object reads through the caught error (o.x, o.value.x); throw; rethrows the original after e is reassigned");
             expect(R"(
                 string f() { string s = ""; try { throw "1"; } catch (e) { s = s + e; } try { throw "2"; } catch (e) { s = s + e; } return s; }
                 string t = "";
@@ -3232,19 +3232,19 @@ public:
                 f() + t
             )", "1234", "two sequential catches reusing the name");
             expect(R"(
-                string f() { string s = ""; try { throw [1, 2, 3]; } catch (e) { for (auto v : e) { s = s + to_string(v); } } return s; }
+                string f() { string s = ""; try { throw [1, 2, 3]; } catch (e) { for (auto v : e.value) { s = s + to_string(v); } } return s; }
                 f()
-            )", "123", "catch variable as a range-for source");
+            )", "123", "a thrown array as a range-for source (e.value)");
             expect(R"(
                 string f() { string s = ""; try { throw "x"; } catch (e) { e += "!"; s = e; } return s; }
-                int g() { int r = 0; try { throw 5; } catch (e) { e++; r = e; } return r; }
+                int g() { int r = 0; try { throw 5; } catch (e) { e = e.value; e++; r = e; } return r; }
                 int h() { int out = 0; try { throw 1; } catch (e) { var& r = e; r = 5; out = e; } return out; }
                 f() + to_string(g()) + to_string(h())
             )", "x!65", "catch variable as an lvalue: compound, ++, reference alias");
             expect(R"(
                 string s = ""; int n = 0; int m = 0;
                 try { throw "x"; } catch (e) { e += "!"; s = e; }
-                try { throw 5; } catch (e) { e++; n = e; }
+                try { throw 5; } catch (e) { e = e.value; e++; n = e; }
                 try { throw 1; } catch (e) { var& r = e; r = 5; m = e; }
                 s + to_string(n) + to_string(m)
             )", "x!65", "catch variable as an lvalue at top level");
@@ -3258,8 +3258,8 @@ public:
                 log
             )", "t0|Undefined variable 'e'", "continue/break out of a top-level catch body inside a loop");
             expect(R"(
-                int f() { for (int i = 0; i < 3; i++) { try { throw i; } catch (e) { if (e == 1) { return e * 10; } continue; } } return -1; }
-                string g() { int i = 0; while (true) { i++; try { throw i; } catch (e) { if (e == 2) { break; } } } return to_string(i); }
+                int f() { for (int i = 0; i < 3; i++) { try { throw i; } catch (e) { if (e.value == 1) { return e.value * 10; } continue; } } return -1; }
+                string g() { int i = 0; while (true) { i++; try { throw i; } catch (e) { if (e.value == 2) { break; } } } return to_string(i); }
                 to_string(f()) + g()
             )", "102", "return/continue/break out of a function catch");
             expect(R"(
@@ -3269,7 +3269,7 @@ public:
                 log
             )", "baba/Undefined variable 'e'", "a throw out of a top-level catch drops its scope");
             expect(R"(
-                int f() { int r = 0; try { try { throw 1; } catch (e) { throw e + 1; } } catch (e) { r = e; } return r; }
+                int f() { int r = 0; try { try { throw 1; } catch (e) { throw e.value + 1; } } catch (e) { r = e.value; } return r; }
                 f()
             )", "2", "a throw out of a function catch rebinds the outer catch variable");
             expect(R"(

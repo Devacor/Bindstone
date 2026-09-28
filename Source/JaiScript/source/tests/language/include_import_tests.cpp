@@ -1375,8 +1375,9 @@ public:
                 eng->type_proofs(proofs);
                 eng->add_include_path(dir);
                 check_eq(std::string("boom"), run(*eng, "throw \"boom\";\n").to_string());
-                auto typed = run(*eng, "throw 42;\n");
-                check_true(typed.is_int(), "a thrown int stays an int across the include");
+                check_eq(std::string("42"), run(*eng, "throw 42;\n").to_string(), "the caught error reads as its message");
+                auto typed = eng->execute("var r = null;\ntry { include(\"inc_err.jai\"); } catch (e) { r = e.value; }\nr;");
+                check_true(typed.is_int(), "a thrown int stays an int across the include (e.value)");
                 check_eq((int64_t)42, typed.as_int());
                 check_eq(std::string("Cannot initialize 'x' (declared int) with string"), run(*eng, "var s = \"s\";\nint x = s;\n").to_string());
                 check_eq(std::string("Array index 5 out of bounds for array of size 1"), run(*eng, "int boom() { array<int> a = [1]; return a[5]; }\nboom();\n").to_string());

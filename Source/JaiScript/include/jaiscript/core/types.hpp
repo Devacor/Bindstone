@@ -196,6 +196,7 @@ namespace jai {
         std::string function;
         std::string file;
         size_t line = 0;
+        size_t column = 0;
     };
 
     // Base exception class with source location tracking
@@ -234,6 +235,8 @@ namespace jai {
     // Script exception for try/catch/throw
     class script_exception : public runtime_error {
         using runtime_error::runtime_error;
+    public:
+        bool thrown = false;   // a script `throw value` (the caught error keeps the value as e.value), not a run-time error
     };
     
 } // namespace jai

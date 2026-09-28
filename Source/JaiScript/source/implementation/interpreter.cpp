@@ -8337,6 +8337,12 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
 
     // Handle string methods
     if (objectValue.is_string() || objectValue.is_utf8_string()) {
+        if (!as_callee) {   // a caught error's own members and a thrown object's fields before the string methods (KEEP BYTE-PARALLEL with vm_backend::member_access_value)
+            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {
+                push_value(std::move(*error_member));
+                return {};
+            }
+        }
         const auto& table = objectValue.is_utf8_string() ? utf8_methods_ : string_methods_;
         auto methodIt = table.find(expr->member_id);
         if (methodIt != table.end()) {
@@ -8353,6 +8359,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             return {};
         }
         else {
+            if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {   // e.file, e.line, ... on a caught error
+                push_value(std::move(*error_member));
+                return {};
+            }
             // Set exception state instead of throwing
             std::string text = std::string(objectValue.is_utf8_string() ? "utf8_string" : "string") + " has no member '" + std::string(expr->member) + "'";
             active_exception_value_ = make_value(text);
@@ -9954,6 +9964,7 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
         active_exception_value_ = val;
         std::string message = val.to_string();
         current_exception_ = script_exception(message, expr->location);
+        current_exception_->thrown = true;
     } else {
         // Re-throw current exception
         if (!current_exception_) {
@@ -11494,6 +11505,8 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     }
 
     if (caught_error) {
+        // the stack at the error, for the caught value (a callee's frame exit captured it already)
+        if (!resuming_catch && !trace_captured_) { capture_stack_trace(); }
         // Reset unwinding flag
         is_unwinding_ = false; trace_captured_ = false;
 
@@ -11507,7 +11520,9 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // of the block. A catch resume skips the bind - the restored frame holds it.
         bool catch_env_pushed = false;
         if (stmt->catch_var_id != UINT64_MAX && !resuming_catch) {
-            script_value caught = active_exception_value_ ? *active_exception_value_ : make_value();
+            const bool by_throw = current_exception_ && current_exception_->thrown;
+            script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_value(), by_throw,
+                                                             by_throw ? &current_exception_->location() : nullptr, captured_trace_);
             if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
                 call_stack_.back().set_local(stmt->catch_slot_index, std::move(caught));
             } else {
@@ -15219,13 +15234,15 @@ void interpreter::capture_stack_trace() {
         captured_trace_.push_back({
             it->function_name.empty() ? std::string("<anonymous>") : std::string(it->function_name),
             node ? node->location.filename : std::string(),
-            node ? node->location.line : 0
+            node ? node->location.line : 0,
+            node ? node->location.column : 0
         });
     }
     captured_trace_.push_back({
         "<script>",
         top_level_node_ ? top_level_node_->location.filename : std::string(),
-        top_level_node_ ? top_level_node_->location.line : 0
+        top_level_node_ ? top_level_node_->location.line : 0,
+        top_level_node_ ? top_level_node_->location.column : 0
     });
     trace_captured_ = true;
 }

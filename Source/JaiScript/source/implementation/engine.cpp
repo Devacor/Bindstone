@@ -685,6 +685,17 @@ struct engine::implementation {
     uint32_t import_reach_count_ = 0;
     uint64_t import_stats_ = 0;
     std::string cwd_;   // the working directory resolution keys use, refreshed when a check pass opens
+    // caught errors (engine::make_caught_error): the catch variable is its message as a string whose node keys the error's
+    // place, stack and thrown value; an entry goes when nothing but this table holds the string
+    struct caught_error {
+        script_value text;
+        std::string file;
+        size_t line = 0;
+        size_t column = 0;
+        std::vector<std::string> stack;
+        script_value value;
+    };
+    std::unordered_map<const void*, caught_error> caught_errors_;
     struct resolution_entry {
         std::vector<std::string> misses;   // the earlier rungs' candidates, which held no file
         std::string candidate;             // the rung that answered
@@ -4033,6 +4044,65 @@ uint64_t engine::import_stat_count() const noexcept {
     return impl->import_stats_;
 }
 
+script_value engine::make_caught_error(const script_value& thrown_in, bool by_throw, const source_location* throw_site,
+                                       const std::vector<stack_frame>& trace) {
+    const script_value& thrown = thrown_in.deref();
+    const std::string* text = thrown.text_bytes();
+    script_value caught(text ? *text : thrown.to_string(), this);
+    caught.set_type_info(type_info_ptr{get_type_info_any()});   // the catch variable stays a dynamic local
+    if (parallel_region_active()) { return caught; }
+    auto& table = impl->caught_errors_;
+    if (table.size() >= 32) {
+        for (auto it = table.begin(); it != table.end();) {
+            it = it->second.text.unchecked_string_handle().unique() ? table.erase(it) : std::next(it);
+        }
+    }
+    implementation::caught_error info{caught, {}, 0, 0, {}, script_value(std::monostate{}, this)};
+    const auto spell = [](const std::string& file) { return file.empty() ? std::string("<script>") : file; };
+    if (throw_site && throw_site->line > 0) {
+        info.file = spell(throw_site->filename);
+        info.line = throw_site->line;
+        info.column = throw_site->column;
+    } else if (!trace.empty()) {
+        info.file = spell(trace.front().file);
+        info.line = trace.front().line;
+        info.column = trace.front().column;
+    }
+    for (const auto& frame : trace) { info.stack.push_back(spell(frame.file) + ":" + std::to_string(frame.line)); }
+    if (by_throw) { info.value = thrown; }
+    table.erase(&caught.unchecked_as_string());
+    table.emplace(&caught.unchecked_as_string(), std::move(info));
+    return caught;
+}
+
+std::optional<script_value> engine::caught_error_member(const script_value& receiver, uint64_t member_id) {
+    const script_value& r = receiver.deref();
+    if (impl->caught_errors_.empty() || r.raw_storage_index() != script_value::TYPEID_STRING) { return std::nullopt; }
+    auto it = impl->caught_errors_.find(&r.unchecked_as_string());
+    if (it == impl->caught_errors_.end()) { return std::nullopt; }
+    const implementation::caught_error& info = it->second;
+    const std::string_view name = get_symbolizer()->get_string(member_id);
+    if (name == "message") { return script_value(r.unchecked_as_string(), this); }
+    if (name == "file") { return script_value(info.file, this); }
+    if (name == "line") { return script_value(static_cast<script_int>(info.line), this); }
+    if (name == "column") { return script_value(static_cast<script_int>(info.column), this); }
+    if (name == "value") { return info.value; }
+    if (name == "stack") {
+        script_value frames = script_value::make_array(get_type_info_string(), this);
+        for (const auto& s : info.stack) { frames.unchecked_get_array_storage()->push(script_value(s, this)); }
+        return frames;
+    }
+    // a thrown object or map answers its own fields through the error (catch (e) { e.code })
+    script_value v = info.value.deref();
+    if (auto instance = v.is_object() ? v.get_class_instance() : nullptr) {
+        if (const script_value* field = instance->find_field_value(member_id)) { return script_value(field->deref()); }
+    } else if (v.is_map()) {
+        const auto& map = v.as_map();
+        auto found = map.find(script_value(std::string(name), this));
+        if (found != map.end()) { return script_value(found->second.deref()); }
+    }
+    return std::nullopt;
+}
 
 // The reach the pass lets through. A pass opens here when forced or when none is open and the window expired; a site that
 // reaches a path it already checked in the open pass (the frame loop came around) closes it, and a new one opens only once

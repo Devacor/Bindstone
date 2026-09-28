@@ -5,8 +5,19 @@
 > below is the original sketch; where it disagrees with the addendum, the addendum wins.
 >
 > **Since this doc:**
-> - **Typed throw values.** `throw 42` delivers the int 42 to `catch (e)` — the thrown VALUE is
->   preserved with its type, not stringified (the "e is a string" claims below are stale).
+> - **A caught error is an error value** (Dev ruling 2026-09-28). `catch (e)` binds the error's message as a
+>   string - every string operation reads it unchanged (printing, `to_string(e)`, `e + "..."`, `e == "text"`, a
+>   `string` slot, the string methods, `type_of(e)` is `"string"`) - that also answers `e.message`, `e.file`,
+>   `e.line`, `e.column`, `e.stack` (the script call stack at the error, `file:line` per frame, innermost first) and
+>   `e.value`. A `throw value` keeps the thrown value, with its type, as `e.value` (`throw 42`: `e` reads `"42"`,
+>   `e.value` is the int 42; a thrown object's or map's own fields also read through `e`), and its place is the
+>   throw expression; a run-time error's place is the statement that raised it and its `e.value` is null. One
+>   engine call builds it at every catch on both backends (`engine::make_caught_error`): a fresh string whose node
+>   keys an engine table entry holding the place, the stack (the same capture the uncaught trace uses,
+>   `capture_stack_trace`, with columns) and the value; a member read on a string receiver consults the table
+>   before `string has no member` (`engine::caught_error_member`). A copy shares the node and answers the same; a
+>   string built from it is a new node and is text only. An entry is dropped once the table holds the only
+>   reference. `script_exception::thrown` tells a script throw (a rethrow keeps it) from a run-time error.
 > - **Terminal-error tier.** Execution-budget exhaustion ALWAYS latches a terminal error (never
 >   catchable); a `memory_cap` denial is catchable on its FIRST raise per execute, terminal on the
 >   second. A latched terminal error skips every script `catch` to the host boundary

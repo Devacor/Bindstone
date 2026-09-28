@@ -2314,11 +2314,11 @@ public:
 				try { middle(); } catch (err) { caught = err; }
 				caught;
 			)").as<std::string>());
-			// Typed payloads stay typed across frames
+			// Typed payloads stay typed across frames (the caught error's value)
 			check_eq((int64_t)42, e->execute(R"(
 				auto thrower() { throw 42; }
 				var got = 0;
-				try { thrower(); } catch (err) { got = err; }
+				try { thrower(); } catch (err) { got = err.value; }
 				got;
 			)").as_int());
 			// Unwinding across intermediate frames leaves the engine consistent
@@ -3373,7 +3373,7 @@ public:
 			// catch variable from the active exception
 			auto [i1, v1] = run_both_backends(R"(
 				var s = 10;
-				try { throw 5; } catch (err) { s += err; }
+				try { throw 5; } catch (err) { s += err.value; }
 				s;
 			)");
 			check_eq(std::string("15"), i1, "interp catch-var rhs");

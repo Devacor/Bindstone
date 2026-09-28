@@ -39,7 +39,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 22;   // 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 23;   // 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -287,6 +287,7 @@ namespace jai::detail {
                         flag(c.by_reference);
                         symbol(c.symbol_id, UINT64_MAX);
                         slot(c.outer_slot);
+                        node(c.initializer.get());
                     }
                     parameters(e->parameters);
                     type(e->return_type);
@@ -1023,7 +1024,8 @@ namespace jai::detail {
                         c.symbol_id = symbol(UINT64_MAX);
                         c.outer_slot = slot_val();
                         track_slot(c.outer_slot, c.symbol_id);
-                        e->captures.push_back(c);
+                        c.initializer = expr_opt();
+                        e->captures.push_back(std::move(c));
                     }
                     e->parameters = parameters();
                     e->return_type = type();

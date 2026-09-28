@@ -496,6 +496,7 @@ namespace {
                 }
                 case node_type::lambda_expr: {
                     auto* l = static_cast<lambda_expr*>(e);
+                    for (const auto& cap : l->captures) { walk_expr(cap.initializer.get()); }   // init-captures evaluate in this scope
                     // Explicit by-ref captures escape the captured variable
                     for (const auto& cap : l->captures) {
                         if (cap.by_reference) {
@@ -2748,7 +2749,7 @@ checked_result<expression_ptr> parser::lambda_expression() {
     lambda->default_capture = capture_result.second;
     for (auto& cap : lambda->captures) {
         if (cap.symbol_id == UINT64_MAX && symbolizer_) cap.symbol_id = symbolizer_->intern(cap.name);
-        if (cap.symbol_id != UINT64_MAX) cap.outer_slot = lookup_capture_slot(cap.symbol_id);
+        if (cap.symbol_id != UINT64_MAX && !cap.initializer) cap.outer_slot = lookup_capture_slot(cap.symbol_id);   // an init-capture names no outer variable
     }
     JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after capture list"));
 
@@ -2830,6 +2831,22 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
         }
     };
 
+    // One named entry: `name`, `&name`, or the init-capture `name = expression` (evaluated at creation in the
+    // enclosing scope into the lambda's own name; a reference capture takes no initializer)
+    auto push_capture = [&](std::string_view name, bool byRef) -> checked_result<void> {
+        lambda_expr::capture cap(name, byRef);
+        if (check(token_type::equal)) {
+            if (byRef || name == symbolizer_->get_string(symbolizer_->get_this_id())) {
+                report_error(byRef ? "A reference capture takes no initializer" : "'this' takes no initializer", peek());
+                return make_error_code(parse_error_code::unexpected_token);
+            }
+            advance();   // consume '='
+            JAISCRIPT_TRY_ASSIGN(cap.initializer, expression());
+        }
+        captures.push_back(std::move(cap));
+        return {};
+    };
+
     if (!check(token_type::right_bracket)) {
         // Check for default capture first
         if (check(token_type::equal)) {
@@ -2842,7 +2859,7 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
                 do {
                     bool byRef = match(token_type::ampersand);
                     JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
-                    captures.emplace_back(name, byRef);
+                    JAISCRIPT_TRY(push_capture(name, byRef));
                 } while (match(token_type::comma));
             }
         } else if (check(token_type::ampersand)) {
@@ -2861,27 +2878,27 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
                             byRef = true;
                         }
                         JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
-                        captures.emplace_back(name, byRef);
+                        JAISCRIPT_TRY(push_capture(name, byRef));
                     } while (match(token_type::comma));
                 }
             } else {
                 // [&variable] - specific variable by reference
                 JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
-                captures.emplace_back(name, true);
+                JAISCRIPT_TRY(push_capture(name, true));
 
                 // Continue parsing other captures
                 while (match(token_type::comma)) {
                     bool byRef = match(token_type::ampersand);
                     JAISCRIPT_TRY_ASSIGN(std::string_view varName, parse_capture_name());
-                    captures.emplace_back(varName, byRef);
+                    JAISCRIPT_TRY(push_capture(varName, byRef));
                 }
             }
         } else {
-            // Regular explicit captures: [x, y, &z, this]
+            // Regular explicit captures: [x, y, &z, this, w = e]
             do {
                 bool byRef = match(token_type::ampersand);
                 JAISCRIPT_TRY_ASSIGN(std::string_view name, parse_capture_name());
-                captures.emplace_back(name, byRef);
+                JAISCRIPT_TRY(push_capture(name, byRef));
             } while (match(token_type::comma));
         }
     }

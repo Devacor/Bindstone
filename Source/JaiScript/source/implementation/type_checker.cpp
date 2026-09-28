@@ -2390,7 +2390,7 @@ private:
         if (!ov && program_ov.empty() && c->callee && c->callee->get_type() == node_type::identifier_expr) {
             auto* id = static_cast<identifier_expr*>(c->callee.get());
             const var_entry* local = id->slot_index != SIZE_MAX && !id->global_qualified ? find_local(id->name) : nullptr;
-            if (local && local->lambda) {
+            if (local && local->lambda && !lambda_copies_at_creation(local->lambda)) {
                 auto* lam = const_cast<lambda_expr*>(local->lambda);
                 if (!lam->graft_decl && lam->body && lam->body->get_type() == node_type::block_stmt) {
                     auto d = std::make_shared<function_decl>(lam->location, std::string_view("<lambda>"));
@@ -3296,8 +3296,19 @@ private:
 		class_ctx_name_ = prev_name;
 	}
 
+    // An init-capture, or an explicit by-value capture of a program-scope name, holds a copy taken at creation:
+    // the call reads that copy, never the name, so the body is not grafted at the call site
+    bool lambda_copies_at_creation(const lambda_expr* l) {
+        for (const auto& cap : l->captures) {
+            if (cap.initializer) { return true; }
+            if (!cap.by_reference && cap.name != "this" && !find_local(cap.name)) { return true; }
+        }
+        return false;
+    }
+
     void walk_lambda(lambda_expr* l) {
         for (const auto& cap : l->captures) {
+            if (cap.initializer) { infer(cap.initializer.get()); continue; }   // an init-capture: its expression, in the enclosing scope
             if (cap.name == "this") { continue; }   // capture-list entries are not identifier uses
             if (find_local(cap.name)) { continue; }
             if (class_ctx_) {
@@ -3325,6 +3336,13 @@ private:
         fn_stack_.push_back(std::move(ctx));
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         define_params(l->parameters, l->location);
+        for (const auto& cap : l->captures) {
+            if (!cap.initializer) { continue; }
+            var_entry entry;
+            entry.dynamic = true;   // the lambda's own copy, typed by the value it holds
+            entry.line = l->location.line; entry.column = l->location.column;
+            scopes_.back().emplace(cap.name, std::move(entry));
+        }
         walk_stmt(l->body.get());
         {
             const fn_ctx& done = fn_stack_.back();
@@ -3563,6 +3581,7 @@ void static_checker::collect_names_expr(const expression* e) {
         case node_type::lambda_expr: {
             auto* l = static_cast<const lambda_expr*>(e);
             for (const auto& p : l->parameters) { all_names_.insert(std::string_view(p.name)); }
+            for (const auto& cap : l->captures) { if (cap.initializer) { all_names_.insert(cap.name); collect_names_expr(cap.initializer.get()); } }
             collect_names(l->body.get());
             break;
         }

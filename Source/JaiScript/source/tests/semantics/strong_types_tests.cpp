@@ -3588,7 +3588,7 @@ public:
             check_quad("function f(string s) { s.to_upper(); return s; } string a = \"hello\"; f(a) + a", "HELLOhello", "by-value string parameter");
             check_quad("function f(var s) { s.to_upper(); return s; } string a = \"hello\"; f(a) + a", "HELLOhello", "by-value var parameter");
             check_quad("function f(string& s) { s.to_upper(); } string a = \"hello\"; string b = a; f(b); a + \"|\" + b", "hello|HELLO", "string& parameter mutates its argument alone");
-            check_quad("string a = \"c\"; var lam = [=]() { a.to_upper(); return a; }; lam() + a", "Cc", "[=] capture is a copy");
+            check_quad("function run() { string a = \"c\"; var lam = [=]() { a.to_upper(); return a; }; return lam() + a; } run()", "Cc", "[=] capture of a local is a copy");
             check_quad("string a = \"c\"; var lam = [&]() { a.to_upper(); return a; }; lam() + a", "CC", "[&] capture aliases");
             check_quad("string a = \"e\"; var arr = [a]; arr[0].to_upper(); arr.push(a); arr[1].to_lower(); a + to_json(arr)", "e[\"E\",\"e\"]", "array literal element and push are copies; the elements mutate");
             check_quad("string a = \"e\"; array<string> arr = [a]; arr[0].to_upper(); a + to_json(arr)", "e[\"E\"]", "array<string> element is a copy");

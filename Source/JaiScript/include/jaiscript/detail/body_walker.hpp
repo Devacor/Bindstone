@@ -77,6 +77,10 @@ namespace jai::detail {
 			case node_type::cast_expr:
 				expr(static_cast<cast_expr*>(e.get())->operand);
 				return;
+			case node_type::lambda_expr:
+				// a nested lambda's body is its own; its init-captures evaluate here
+				for (const auto& cap : static_cast<lambda_expr*>(e.get())->captures) { expr(cap.initializer); }
+				return;
 			default:
 				return;
 			}

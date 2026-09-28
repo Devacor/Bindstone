@@ -28,8 +28,9 @@ public:
 
         test("capture_all_by_value", [this]() {
             auto eng = make_engine();
-            
+            // function locals: [=] copies them (a top-level variable is a global, read when the lambda runs)
             std::string script = R"(
+                function run() -> auto {
                 auto x = 10;
                 auto y = 20;
                 auto z = 30;
@@ -42,7 +43,9 @@ public:
                 y = 200;
                 z = 300;
                 
-                lambda(5);  // Should use original values: 10 + 20 + 30 + 5 = 65
+                return lambda(5);  // Should use original values: 10 + 20 + 30 + 5 = 65
+                }
+                run();
             )";
             
             auto result = eng->execute(script);
@@ -74,8 +77,8 @@ public:
 
         test("mixed_capture_value_default_with_ref", [this]() {
             auto eng = make_engine();
-            
             std::string script = R"(
+                function run() -> auto {
                 auto x = 10;
                 auto y = 20;
                 auto counter = 0;
@@ -91,7 +94,9 @@ public:
                 auto result1 = lambda(1);  // 10 + 20 + 1 + 1 = 32
                 auto result2 = lambda(2);  // 10 + 20 + 2 + 2 = 34
                 
-                result1 * 100 + result2;   // Should be 3234
+                return result1 * 100 + result2;   // Should be 3234
+                }
+                run();
             )";
             
             auto result = eng->execute(script);
@@ -369,9 +374,9 @@ public:
 
         test("global_still_reached_when_nothing_shadows", [expect]() {
             expect("int g = 1; int f() { auto l = [&]() { g = g + 10; return g; }; return l(); } to_string(f()) + \"|\" + to_string(g)",
-                   "11|11", "[&] of an unshadowed global cell-shares it");
+                   "11|11", "[&] of an unshadowed global reaches it when the lambda runs");
             expect("int g = 1; int h() { auto l = [=]() { return g; }; g = 99; return l(); } to_string(h()) + \"|\" + to_string(g)",
-                   "1|99", "[=] of an unshadowed global snapshots it");
+                   "99|99", "[=] never captures a global: it is read when the lambda runs");
             expect("int g = 1; int k() { auto l = []() { return g; }; g = 7; return l(); } to_string(k()) + \"|\" + to_string(g)",
                    "7|7", "[] of a global stays live");
             expect("int g = 1; class C { int m() { auto l = [&]() { g = g + 10; return g; }; return l(); } } to_string(C().m()) + \"|\" + to_string(g)",

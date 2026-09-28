@@ -441,6 +441,7 @@ captureList = captureDefault ("," capture)*    // [=] / [&] with optional explic
 captureDefault = "=" | "&"
 
 capture = "&"? (IDENTIFIER | "this")
+        | IDENTIFIER "=" expression          // init-capture: the value of expression at creation, copied into the lambda's own name
 
 arrayLiteral = "[" (expression ("," expression)*)? "]"
 

@@ -50,9 +50,21 @@ the global environment directly, so these resolve **live, at call time**:
 - Exception: `execute()` called with `instance_variables` puts top-level `var`s in a
   temporary overlay that evaporates (see `docs/LOCAL_VARIABLES_BEHAVIOR.md`).
 
-To pin a global's current value into a closure, either capture it explicitly —
-`[self](){ ... }` snapshots the global at creation (legal here; ill-formed in C++) — or
-assign it to a *function-scope* local first and let Tier 1 capture it.
+This holds for every default capture (Dev ruling 2026-09-27): `[=]`, `[&]` and bare `[]` take no
+global, so a global named in the body is read, and written, when the lambda runs. `[&g]` is the
+same as not listing `g`.
+
+To pin a global's current value into a closure, capture it explicitly — `[self](){ ... }` copies
+the global at creation (legal here; ill-formed in C++) — or copy it through an init-capture.
+
+## Init-captures
+
+`[x = e]` evaluates `e` when the lambda is created, in the enclosing scope, and copies the value
+into the lambda's own `x` (value semantics: an array or a class instance is copied, a
+`shared_ptr` handle shares its object). `e` is any expression; `x` names nothing outside, and an
+outer variable of the same name is not captured. Init-captures combine with defaults and other
+entries (`[=, w = 5]`, `[z = x + y, &y]`). A reference capture takes no initializer: `[&r = x]` is
+the parse error `A reference capture takes no initializer`.
 
 ## Comparison with other languages
 
@@ -61,7 +73,8 @@ assign it to a *function-scope* local first and let Tier 1 capture it.
 | Bare `[]` referencing a local | compile error | by-value snapshot | by-reference (upvalue/cell) | by-value snapshot |
 | By-reference capture escaping the frame | dangling, UB | cell-boxed, safe | safe (cells) | `__block`, safe |
 | Explicit capture of a global | ill-formed | allowed (snapshots) | n/a | n/a |
-| Global referenced in body | live at call time | live at call time | live at call time | live at call time |
+| Global referenced in body (`[=]`, `[&]`, `[]`) | live at call time | live at call time | live at call time | live at call time |
+| Init-capture `[x = e]` | copy of `e` | copy of `e` | n/a | n/a |
 
 C++ intuitions transfer with one exception: `[]` here means `[=]`, not "capture nothing".
 Where JaiScript differs from C++ it is strictly safer (`[&]` cannot dangle) or more

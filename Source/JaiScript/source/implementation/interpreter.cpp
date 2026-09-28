@@ -9101,6 +9101,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     if (src.what == detail::capture_source::kind::denied) [[unlikely]] {
                         return *src.access_error;
                     }
+                    if (src.global) { continue; }   // a global resolves when the lambda runs (KEEP BYTE-PARALLEL with vm exec_closure)
                     if (src.cell) {
                         if (capture_by_ref) {
                             captureEnv->define(var_id, share_boxed_env_storage(*src.cell, engine_));
@@ -9159,6 +9160,17 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 }
                 continue;
             }
+            // An init-capture [x = e]: e evaluated here, in the enclosing scope, copied into the lambda's own x
+            if (capture.initializer) {
+                JAISCRIPT_TRY(dispatch_expr(capture.initializer.get()));
+                script_value init = pop_value();
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
+                }
+                captureEnv->define(capture.symbol_id, clone_for_assignment(init.deref()));
+                continue;
+            }
             // The capture source in the runtime's order (detail/capture_ladder.hpp): the
             // outer frame's slot, the function's own scopes, then the env chain - a member
             // shadows the chain and is not a capturable variable
@@ -9167,6 +9179,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
                     "Cannot capture undefined variable '{0}'", capture.symbol_id);
             }
+            if (capture.by_reference && src.global) { continue; }   // [&g] of a global: the lambda reads it when it runs
             if (capture.by_reference) {
                 // Cell share (escape-legal, C++ [&x] semantics): the storage boxes in
                 // place; the closure and the original share the cell

@@ -5851,8 +5851,11 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 	uint64_t this_id = symbolizer_->get_this_id();
 	for (const auto& cap : expr->captures) {
 		uint64_t id = cap.symbol_id != UINT64_MAX ? cap.symbol_id : symbolizer_->intern(cap.name);
-		proto.captures.push_back({id, cap.by_reference, cap.outer_slot});
+		proto.captures.push_back({id, cap.by_reference, cap.outer_slot, cap.initializer != nullptr});
 		if (id == this_id) proto.captures_this = true;
+	}
+	for (const auto& cap : expr->captures) {
+		if (cap.initializer) { compile_expression(cap.initializer); }   // evaluated at creation, in the enclosing scope, in capture order
 	}
 
 	std::unordered_set<uint64_t> declared;

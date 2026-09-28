@@ -358,7 +358,7 @@ public:
             // the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)22, (int)bytes[4], "jaibite format version");   // 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
+            check_eq((int)23, (int)bytes[4], "jaibite format version");   // 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
             // a loaded bite carries the attributes: a warn region's errors stay warnings on the
             // loading engine's own check, and the runtime raises
             for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",
@@ -545,6 +545,11 @@ public:
                 check_true(std::string(ex.what()).find("version") != std::string::npos);
             }
             check_true(threw);
+            // the previous format (22: no init-capture expressions) is refused too, so a sibling written before it re-parses
+            bytes[4] = 22;
+            bool older_threw = false;
+            try { e->jaibite_load_bytes(bytes); } catch (const std::exception&) { older_threw = true; }
+            check_true(older_threw, "a version-22 bite is refused");
         });
 
         // Every strict prefix must fail with a clean error — never UB, crash, or success.

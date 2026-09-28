@@ -11780,6 +11780,10 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const closure_proto& proto = f.code->closure_protos[ins.a];
 	auto closure_env = environment_;
+	size_t init_count = 0;
+	for (const auto& capture : proto.captures) { if (capture.init) { ++init_count; } }
+	const size_t init_base = stack_.size() - init_count;   // the init-captures' values, in capture order
+	size_t init_next = init_base;
 
 	// Runtime filter over the compile-time plan (parity: only live outer-frame slots capture)
 	std::vector<std::pair<uint64_t, size_t>> outer_refs;
@@ -11845,6 +11849,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				if (src.what == detail::capture_source::kind::denied) [[unlikely]] {
 					return raise_from(*src.access_error);
 				}
+				if (src.global) { continue; }   // a global resolves when the lambda runs (KEEP BYTE-PARALLEL with the interpreter)
 				if (src.cell) {
 					if (capture_by_ref_default) {
 						captureEnv->define(var_id, share_env_ref(*src.cell));
@@ -11866,6 +11871,10 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		}
 
 		for (const auto& capture : proto.captures) {
+			if (capture.init) {
+				captureEnv->define(capture.symbol_id, clone_for_assignment(stack_[init_next++].deref()));   // KEEP BYTE-PARALLEL with the interpreter
+				continue;
+			}
 			script_value* slot_val = nullptr;
 			if (f.locals && !f.top_level) {
 				if (capture.outer_slot != SIZE_MAX && capture.outer_slot < frame_slot_count(f)) {
@@ -11914,6 +11923,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
 					"Cannot capture undefined variable '{0}'", capture.symbol_id);
 			}
+			if (capture.by_reference && src.global) { continue; }   // [&g] of a global: the lambda reads it when it runs
 			if (capture.by_reference) {
 				// Cell share (escape-legal, C++ [&x] semantics): the storage boxes in
 				// place; the closure and the original share the cell
@@ -12006,6 +12016,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	payload.fn = lambdaFunc;
 	script_function funcWrapper = script_callable_thunk{engine_, std::move(payload)};
 
+	if (init_count) { stack_.truncate(init_base); }
 	stack_.push_back(script_value::make_function(funcWrapper, engine_));
 	return {};
 }

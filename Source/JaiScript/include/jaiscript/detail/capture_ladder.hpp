@@ -11,6 +11,9 @@
 // bind_cpp_property_ref / read_bare_cpp_property. An explicit [x]/[&x] takes variables
 // only (slot, own scope, chain): a member is not a capturable variable (C++: ill-formed),
 // so [field] keeps the undefined-capture text whether or not a global shares the name.
+// A program-scope (global) variable is never captured by default (Dev ruling 2026-09-27): [=], [&]
+// and bare [] leave it to resolve when the lambda runs, [&g] is the same as not listing it, and only
+// an explicit [g] (or an init-capture [x = g]) copies it at creation.
 
 #include <jaiscript/detail/member_scope.hpp>
 
@@ -22,12 +25,21 @@ struct capture_source {
     script_value* cell = nullptr;   // slot / own_scope / member / chain: stable storage
     member_probe_hit property;      // cpp_property: the probe (instance, _get_ accessor, getter id)
     std::optional<error_propagator> access_error;   // denied: a member out of reach (bare_member_access)
+    bool global = false;            // chain: the root environment owns the cell (a program-scope variable)
 
     // Default captures take every cell; explicit captures take variables only
     bool is_variable() const {
         return what == kind::slot || what == kind::own_scope || what == kind::chain;
     }
 };
+
+// The environment that owns sym along the chain from `from` is the root (no parent)
+inline bool owned_by_root(environment* from, uint64_t sym) {
+    for (environment* e = from; e; e = e->parent_raw()) {
+        if (e->get_own_value_ptr(sym)) { return e->parent_raw() == nullptr; }
+    }
+    return false;
+}
 
 inline capture_source resolve_capture_source(script_value* frame_slot_cell,
                                              environment* current,
@@ -69,9 +81,12 @@ inline capture_source resolve_capture_source(script_value* frame_slot_cell,
         case member_probe_hit::kind::miss:
             break;
         }
-        src.cell = scope.floor ? scope.floor->get_value_ptr(sym) : current->get_value_ptr(sym);
+        environment* start = scope.floor ? scope.floor : current;
+        src.cell = start->get_value_ptr(sym);
+        if (src.cell) { src.global = owned_by_root(start, sym); }
     } else {
         src.cell = current->get_value_ptr(sym);
+        if (src.cell) { src.global = owned_by_root(current, sym); }
     }
     if (src.cell) src.what = capture_source::kind::chain;
     return src;

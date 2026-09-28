@@ -1437,13 +1437,13 @@ private:
 			expect_texts({
 				{"local /= 0", "", "function f() { int x = 5; int z = 0; x /= z; } f();", "Division by zero", check_mode::warn},
 				{"global /= 0", "int gx = 5; int gz = 0;", "gx /= gz;", "Division by zero", check_mode::warn},
-				{"local -= string", "", "function f() { int x = 5; var s = \"s\"; x -= s; } f();", "Type mismatch", check_mode::warn},
-				{"string += int", "", "function f() { string s = \"a\"; s += 5; } f();", "Type mismatch", check_mode::warn},
-				{"bool += int", "", "function f() { bool b = true; b += 1; } f();", "Type mismatch", check_mode::warn},
+				{"local -= string", "", "function f() { int x = 5; var s = \"s\"; x -= s; } f();", "Cannot apply '-=' to int and string", check_mode::warn},
+				{"string += int", "", "function f() { string s = \"a\"; s += 5; } f();", "Cannot apply '+=' to string and int", check_mode::warn},
+				{"bool += int", "", "function f() { bool b = true; b += 1; } f();", "Cannot apply '+=' to bool and int", check_mode::warn},
 			});
 		});
 		test("the_catch_text_matches_the_uncaught_text", [this]() {
-			every_config("host text", "Type mismatch|Type mismatch", [](engine& e) {
+			every_config("host text", "Cannot apply '+=' to string and int|Cannot apply '+=' to string and int", [](engine& e) {
 				e.static_checking(check_mode::warn);
 				const std::string caught = e.execute("string r = \"\"; function f() { string s = \"a\"; s += 5; } try { f(); } catch (x) { r = x; } r;").as_string();
 				std::string uncaught;

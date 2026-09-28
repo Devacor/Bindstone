@@ -226,10 +226,10 @@ try { throw; } catch (e) { print("caught " + e); }
 Today: the catch does not see it; the program ends with `No exception to re-throw`. The same statement inside a
 function called from the `try` is caught with that text.
 
-**Q9. A compound assignment's operand error has a different text per destination.**
+**Q9. A compound assignment's operand error on an element has its own text.**
 ```
-int x = 5; var s = "s"; x -= s;          // Type mismatch
-F f = F(); f.n -= s;                     // Invalid operands for -=
+int x = 5; var s = "s"; x -= s;          // Cannot apply '-=' to int and string
+F f = F(); f.n -= s;                     // Cannot apply '-=' to int and string
 array<int> a = [5]; a[0] -= s;           // Right operand must be numeric
 ```
 `/=` by zero reads `Division by zero` on a variable, a field and an element, while `x / 0` reads
@@ -2941,7 +2941,7 @@ Source codes: diag = `docs/diagnostics.md` ("Errors in script the runtime calls"
 | CB-31 | `operator=` runs on plain assignment only: a declaration converts through the constructor (`B2 e = 4` builds `B2(4)`) | sc Rule table (object C) | semantics/spec_conformance_tests.cpp:same_class_and_subclass_sources_copy_and_exact_operator_beats_the_converting_constructor | no | pinned |
 | CB-32 | A container element store never dispatches `operator=`: `xs[0] = 5` into `array<OK2>` raises `Cannot assign 'int' to element of type 'OK2'` (elements need the exact type) | CL Element conversions | semantics/spec_conformance_tests.cpp:an_element_store_needs_the_exact_type | no | pinned |
 | CB-33 | A compound division by zero on a variable (function local or global `/=`) is caught with the text `Division by zero` | diag intro; diag Untouched (arithmetic) | semantics/spec_conformance_tests.cpp:a_compound_error_on_a_variable_has_a_text; semantics/strong_types_tests.cpp:static_compound_battery (a static `/=`) | partial | pinned |
-| CB-34 | A compound on a typed variable whose operation raises without a text of its own (`int -=` a var-held string, `string += int`, `bool += int`) is caught with its code's message, `Type mismatch` | diag intro | semantics/spec_conformance_tests.cpp:a_compound_error_on_a_variable_has_a_text | partial | pinned |
+| CB-34 | A compound on a typed variable whose operator does not take its operands (`int -=` a var-held string, `string += int`, `bool += int`) raises `Cannot apply '-=' to int and string` (target type, then operand type) | diag Compound assignment | semantics/spec_conformance_tests.cpp:a_compound_error_on_a_variable_has_a_text | partial | pinned |
 | CB-35 | For such an error the catch text is the leading text of the uncaught `what()` (`<text>: <category>`) | diag intro | semantics/spec_conformance_tests.cpp:the_catch_text_matches_the_uncaught_text | partial | pinned |
 | CB-36 | `throw` is an expression: it composes in a ternary arm (a return value, a typed declaration's initializer, a `var` initializer, an operand of `+`), and an untaken arm throws nothing | gr throwExpression; gr Exception Handling | semantics/spec_conformance_tests.cpp:a_throw_expression_composes_inside_a_ternary; semantics/spec_conformance_tests.cpp:guide_function_and_lambda_examples; language/exception_handling_tests.cpp:throw_in_expressions (a `+` operand, no ternary) | no | pinned |
 | CB-37 | A default `sort()` orders instances by the language's `<` (the left element's `operator<`); an instance without one, an array, a map or a callable raises `Invalid operands for < operator`; primitives keep their order | CL memberwise == (ordering stays off containers/instances) | semantics/spec_conformance_tests.cpp:a_default_sort_of_instances_orders_by_the_languages_less_than | no | pinned |

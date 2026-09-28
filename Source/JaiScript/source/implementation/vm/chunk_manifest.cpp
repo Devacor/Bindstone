@@ -212,7 +212,7 @@ namespace {
 				}
 				out << "\n" << pre << "  entry_cells";
 				for (uint32_t c : l.entry_cells) { out << " " << c; }
-				if (!l.param_cells.empty()) { out << "\n" << pre << "  param_cells"; for (uint32_t c : l.param_cells) { out << " " << c; } }
+				if (!l.param_cells.empty()) { out << "\n" << pre << "  param_cells"; for (uint32_t c : l.param_cells) { out << " " << c; } out << " kinds=" << std::hex << l.param_kinds << std::dec; }
 				out << "\n" << pre << "  site_env_cache";
 				for (uint32_t c : l.site_env_cache) { out << " " << u(c); }
 				out << "\n" << pre << "  slot_to_cell";
@@ -227,7 +227,7 @@ namespace {
 				for (const auto& e : l.env_operands) { out << " " << operand(ch, e.operand) << "@" << e.cache_slot; }
 				out << "\n" << pre << "  calls";
 				for (const auto& c : l.calls) {
-					out << " (" << c.probe_ip << " " << c.call_ip << " " << c.consumer_ip << " c" << static_cast<int>(c.consumer) << " dst=" << u(c.dst) << " raw=" << static_cast<int>(c.raw) << " args=[";
+					out << " (" << c.probe_ip << " " << c.call_ip << " " << c.consumer_ip << " c" << static_cast<int>(c.consumer) << " dst=" << u(c.dst) << " raw=" << static_cast<int>(c.raw) << " proven=" << static_cast<int>(c.raw_proven) << " kinds=" << std::hex << c.raw_kinds << std::dec << " args=[";
 					for (const auto& a : c.args) { out << "(" << static_cast<int>(a.kind) << " " << a.v << " " << a.ip << ")"; }
 					out << "])";
 				}

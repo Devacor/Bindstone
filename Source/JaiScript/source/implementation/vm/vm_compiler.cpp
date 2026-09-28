@@ -3625,7 +3625,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (c.call_sites[st.a].call_node < c.nodes.size() && code[call_ip].c == 0) {   // a tail call keeps the general splice (no raw frame grows the chain)
 					const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[st.a].call_node].get());
 					const auto decl = ce->proven_callee_decl.lock();
-					if (calls.size() < 65534 && decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_)) { cc.raw = 1; }   // the arguments instruction may enter the callee's frame program raw
+					if (calls.size() < 65534 && decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_)) {
+						cc.raw = 1;   // the arguments instruction may enter the callee's frame program raw
+						for (size_t pi = 0; pi < decl->parameters.size(); ++pi) { cc.raw_kinds |= static_cast<uint32_t>(raw_scalar_kind(decl->parameters[pi].type.get())) << (4 * pi); }
+					}
 				}
 				std::vector<ir_op> seq;   // one operation per instruction from the probe to the call
 				ir_op probe_op; probe_op.kind = ir::probe; probe_op.a = static_cast<uint32_t>(calls.size()); seq.push_back(probe_op);   // the probe runs first, at its own place: its resolution may run a getter, which no argument value may precede
@@ -3903,6 +3906,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		struct fixup { uint32_t at; uint8_t field; uint32_t target; uint32_t bits; };   // field 0 = a (a jump), 1 = c (a compare's target | its sense bit), 2 = b (a guard: alias | read offset << 8)
 		std::vector<fixup> fixups;
 		loop.calls = calls;
+		for (const auto& cc : calls) { if (cc.raw) { loop.plans.resize(calls.size()); loop.raw_sites = true; break; } }   // a raw site's run-time plan
 		loop.inline_sites = loop_inline_sites;
 		loop.math_alias_sites = loop_alias_sites;
 		size_t origin_override = SIZE_MAX;   // an argument's value records the probe as its origin
@@ -4033,6 +4037,23 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					if (arg.kind != 0) continue;
 					const uint32_t cl = arg.v < current.size() ? current[arg.v] : k_invalid_u32;
 					if (cl != k_invalid_u32) { arg.kind = 1; arg.v = cl; } else { arg.kind = 2; arg.v = arg.ip; }
+				}
+				if (cc.raw) {
+					// every argument a pinned cell or a constant of its parameter's kind: the raw entry checks none (the plan compares the callee's kinds once)
+					uint32_t kinds = 0;
+					bool proven = true;
+					for (size_t ai = 0; ai < cc.args.size() && proven; ++ai) {
+						const chunk::cell_loop::call_arg& arg = cc.args[ai];
+						uint8_t k = 0;
+						if (arg.kind == 1) { k = arg.v < loop.cells.size() ? loop.cells[arg.v].kind : 0; }
+						else if (code[arg.v].op == opcode::op_const && code[arg.v].a < c.constants.size()) {
+							const size_t ck = c.constants[code[arg.v].a].raw_storage_index();
+							k = ck == script_value::TYPEID_INT || ck == script_value::TYPEID_FLOAT || ck == script_value::TYPEID_BOOL ? static_cast<uint8_t>(ck) : 0;
+						}
+						proven = k != 0;
+						kinds |= static_cast<uint32_t>(k) << (4 * ai);
+					}
+					cc.raw_proven = proven && kinds == cc.raw_kinds ? 1 : 0;
 				}
 				c.call_arg_zones.emplace_back(static_cast<uint32_t>(code.size()), static_cast<uint32_t>(code.size() + 1));
 				append(vm_instruction{opcode::op_c_args, op.a, loop_index, cc.call_ip}, cc.probe_ip);
@@ -4256,6 +4277,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint32_t k = i < loop.slot_to_cell.size() ? loop.slot_to_cell[i] : k_invalid_u32;
 				if (k == k_invalid_u32 || loop.cells[k].kind != frame_param_kinds_[i] || loop.cells[k].temp) { enterable = false; }
 				loop.param_cells.push_back(k);
+				loop.param_kinds |= static_cast<uint32_t>(frame_param_kinds_[i]) << (4 * i);
 			}
 			for (const uint32_t k : loop.entry_cells) { if (std::find(loop.param_cells.begin(), loop.param_cells.end(), k) == loop.param_cells.end()) { enterable = false; } }
 			for (const auto& cl : loop.cells) { if (cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING)) { enterable = false; } }

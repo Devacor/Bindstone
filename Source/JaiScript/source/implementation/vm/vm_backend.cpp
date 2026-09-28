@@ -38,6 +38,14 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (interp parity)
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
+// the cell blocks' own costs (inclusive cycles and counts): a block run from the dispatcher, the entry, a flush, a miss, a landing, a raw entry,
+// a raw return, a door call
+namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; cell_cost_scope(uint64_t& a, uint64_t& c) : acc(a), cnt(c), t0(__rdtsc()) {} ~cell_cost_scope() { acc += __rdtsc() - t0; ++cnt; } }; }
+#define JAI_CELL_COST(i) cell_cost_scope cell_cost_guard_{profile_cell_cost_cyc_[i], profile_cell_cost_n_[i]};
+#else
+#define JAI_CELL_COST(i)
+#endif
+#ifdef JAISCRIPT_VM_PROFILE
 
 // Op-layer TRY twins: callees returning op_status pass through vm_check; fat-returning
 // helpers route their failure into pending_error_ (see raise_from).
@@ -485,6 +493,7 @@ void vm_backend::sync_debug_hook() {
 	auto* dbg = debug_controller_.load(std::memory_order_acquire);
 	debug::controller* next = (dbg && dbg->sync_hot_state()) ? dbg : nullptr;
 	if (debug_hook_ && !next) { arm_execution_deadline(); }
+	if (debug_hook_ != next) { raw_epoch_advance(); }   // an attach or a detach: no raw call plan outlives it
 	debug_hook_ = next;
 }
 
@@ -7092,6 +7101,7 @@ void vm_backend::build_raw_window(frame& f) {
 }
 
 void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
+	JAI_CELL_COST(2)
 	JAI_COARSE(coarse_flush_, coarse_flushes_)
 	materialize_raw_window(f);
 	cell_state& cs = *f.cells;
@@ -7199,6 +7209,7 @@ JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop&
 }
 
 void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
+	JAI_CELL_COST(3)
 	JAI_COARSE(coarse_miss_, coarse_misses_)
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 	park_raw_callee(f, loop);   // a miss inside a raw call's argument zone: the general form resumes with the callee parked
@@ -7680,6 +7691,7 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 
 // the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
 bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
+	JAI_CELL_COST(1)
 	JAI_COARSE(coarse_enter_, coarse_enters_)
 #ifdef JAISCRIPT_MISS_INJECTION
 	miss_every_ = engine_ ? engine_->cells_miss_every() : 0;
@@ -7879,7 +7891,11 @@ JAI_FORCEINLINE op_status vm_backend::cells_run_frame(frame& f, const chunk::cel
 		}
 		// a frame program's calls and returns: on the raw loop's switch; a raw call or a raw return leaves f (its ip set by the switch)
 		case opcode::op_c_probe:
-			if constexpr (Raw) { f.ip = ip; st = exec_c_probe(f, ci); ip = f.ip; break; }
+			if constexpr (Raw) {
+				const chunk::cell_loop::cell_call& pc = loop.calls[ci.a];
+				if (pc.raw && loop.plans[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; break; }   // the site's plan holds: nothing to resolve
+				f.ip = ip; st = exec_c_probe(f, ci); ip = f.ip; break;
+			}
 			[[fallthrough]];
 		case opcode::op_c_args:
 			if constexpr (Raw) { f.ip = ip; st = exec_c_args(f, ci); if (raw_switch_) return st; ip = f.ip; break; }
@@ -7910,6 +7926,10 @@ JAI_FORCEINLINE op_status vm_backend::cells_run_frame(frame& f, const chunk::cel
 // its status; the budget is polled at the cell back edge as before. A raw call or a raw return hands the block loop
 // another frame (raw_switch_): the raw chain runs it next, and the dispatcher takes whichever frame the chain ends in
 op_status vm_backend::cells_run(frame& entry, const chunk::cell_loop& entry_loop) {
+	JAI_CELL_COST(0)
+	// general code may have run since the last block run: a block that can call raw re-validates its sites' plans (a raw chain starts at such a
+	// block, so no plan outlives general code; a block without raw sites pays nothing)
+	if (entry_loop.raw_sites) [[unlikely]] { raw_epoch_advance(); }
 	if (entry_loop.frame_program) [[unlikely]] return cells_run_raw(entry, op_status::ok, true);
 	const op_status st = cells_run_frame<false>(entry, entry_loop);
 	if (!raw_switch_) [[likely]] return st;
@@ -7970,9 +7990,10 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
 	if (f.cells->raw_call != 0) [[unlikely]] { park_raw_callee(f, loop); }   // a probe inside a raw call's arguments: the outer callee parks first (only the innermost probe stays unparked)
-	if (cc.raw && raw_probe(f, cc)) {
-		// a raw call's probe: the callee's binding is the site's cached script function (the lookup cache's fast head, no getter) and its body
-		// has a raw-enterable frame program; nothing is parked, and a miss before the arguments instruction parks it (cells_miss)
+	if (cc.raw && (loop.plans[ins.a].epoch == raw_epoch_ || raw_probe(f, loop, ins.a))) {
+		// a raw call's probe: the site's plan holds for this epoch (no general code ran since the probe validated it), or the callee's binding
+		// is the site's cached script function (the lookup cache's fast head, no getter) and its body has a raw-enterable frame program of the
+		// arguments' kinds; nothing is parked, and a miss before the arguments instruction parks it (cells_miss)
 		f.cells->raw_call = static_cast<uint16_t>(ins.a + 1);
 		++f.ip;
 		return {};
@@ -7985,6 +8006,7 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 	bool observed = false;   // the resolution ran a getter (a property reference or a bare C++ property): an effect point
 	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip], &observed);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
+	if (observed && loop.raw_sites) [[unlikely]] { raw_epoch_advance(); }   // a getter ran: no plan outlives it
 	if (observed && !cells_reland(f, loop, cc)) [[unlikely]] { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }   // the callee stays parked: the general form pushes the arguments, the getter never runs twice
 	++f.ip;
 	return {};
@@ -8042,6 +8064,7 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 				// the block's (the second would answer the first's binding)
 				const size_t here = f.ip;
 				f.ip = a.v;
+				if (loop.raw_sites) { raw_epoch_advance(); }   // the load may run a getter
 				const op_status st = exec_load(f, oi);
 				f.ip = here;
 				if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = a.v; return st; }
@@ -8054,9 +8077,10 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 	return {};
 }
 op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
+	JAI_CELL_COST(7)
 	JAI_CELLS_COUNT(7); JAI_CELLS_COUNT(11);
-	++door_calls_;   // user code may run: a raw call in flight around this one re-validates its caller at its return
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
+	if (loop.raw_sites) { raw_epoch_advance(); }   // user code may run: plans re-validate, and a raw call in flight around this one re-validates its caller at its return
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
 	const op_status st = exec_call_from_scratch(f, f.code->code[cc.call_ip]);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.call_ip; return st; }
@@ -8070,7 +8094,8 @@ op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 // the probe's own lookup-cache row by its fast head (a plain environment cell: no getter can run, and no cell instruction between the probe and
 // the arguments instruction can rebind it), in a frame whose member scope cannot shadow the name, and the function's body has a raw-enterable
 // frame program of the call's arity; the general probe's own resolution otherwise
-bool vm_backend::raw_probe(frame& f, const chunk::cell_loop::cell_call& cc) {
+bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index) {
+	const chunk::cell_loop::cell_call& cc = loop.calls[index];
 	if (parallel_worker_ || debug_hook_ || has_custom_numeric_ops_ || !cached_global_env_ || !f.window_backed || !f.locals || f.top_level || f.locals->is_method) return false;
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
 	if (!site.ic_fn || site.ic_argc != cc.args.size() || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
@@ -8084,10 +8109,13 @@ bool vm_backend::raw_probe(frame& f, const chunk::cell_loop::cell_call& cc) {
 	      e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity)) return false;
 	const script_defined_function& fn = *site.ic_fn;
 	if (fn.closure_env) return false;
-	const chunk* body = static_cast<const chunk*>(fn.backend_body_cache.get());
+	chunk* body = static_cast<chunk*>(fn.backend_body_cache.get());
 	if (!body || body->frame_program == k_invalid_u32) return false;
 	const chunk::cell_loop& program = body->cell_loops[body->frame_program];
-	return program.raw_enterable && program.param_cells.size() == cc.args.size() && cc.args.size() <= 8;
+	if (!program.raw_enterable || program.param_cells.size() != cc.args.size() || cc.args.size() > 8 || program.param_kinds != cc.raw_kinds) return false;
+	loop.plans[index].epoch = raw_epoch_;   // the plan: until general code runs, this site's callee is this body's frame program
+	loop.plans[index].body = body;
+	return true;
 }
 // a raw call's probe ran without parking the callee: the general form resumes inside the call's argument zone with it parked, as the general
 // probe's fast path parks it (no user code ran between the probe and here)
@@ -8107,31 +8135,34 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 // returns through the general return and the door's landing. A depth or budget limit raises at the caller's call instruction, as the general push
 // raises it. false: the callee is parked and the general door runs
 bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st) {
+	JAI_CELL_COST(5)
 	cell_state& cs = *f.cells;
 	if (cs.raw_call != ins.a + 1) return false;   // the probe parked the callee
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
 	const script_defined_function& fn = *site.ic_fn;
-	chunk* body = static_cast<chunk*>(fn.backend_body_cache.get());
+	chunk* body = loop.plans[ins.a].body;   // the probe's plan, of this epoch
 	const uint32_t program = body->frame_program;
 	const chunk::cell_loop& callee_loop = body->cell_loops[program];
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
+	const size_t argc = cc.args.size();
 	int64_t bits[8];
-	uint8_t kinds[8];
-	for (size_t i = 0; i < cc.args.size(); ++i) {
+	for (size_t i = 0; i < argc; ++i) {
 		const chunk::cell_loop::call_arg& a = cc.args[i];
+		uint8_t kind;
 		if (a.kind == 1) {
-			kinds[i] = cs.kind[a.v]; bits[i] = cs.payload[a.v];
+			kind = cs.kind[a.v]; bits[i] = cs.payload[a.v];
 		} else {
 			const vm_instruction& oi = f.code->code[a.v];
 			const script_value* k = oi.op == opcode::op_const ? &f.code->constants[oi.a] : nullptr;   // an environment name: its load runs at the door
 			const size_t ck = k ? k->raw_storage_index() : script_value::TYPEID_NULL;
-			if (ck == script_value::TYPEID_INT) { kinds[i] = kint; bits[i] = static_cast<int64_t>(k->unchecked_as_int()); }
-			else if (ck == script_value::TYPEID_FLOAT) { kinds[i] = kflt; bits[i] = cell_bits_of_float(k->unchecked_as_float()); }
-			else if (ck == script_value::TYPEID_BOOL) { kinds[i] = kbool; bits[i] = k->unchecked_as_bool() ? 1 : 0; }
+			if (ck == script_value::TYPEID_INT) { kind = kint; bits[i] = static_cast<int64_t>(k->unchecked_as_int()); }
+			else if (ck == script_value::TYPEID_FLOAT) { kind = kflt; bits[i] = cell_bits_of_float(k->unchecked_as_float()); }
+			else if (ck == script_value::TYPEID_BOOL) { kind = kbool; bits[i] = k->unchecked_as_bool() ? 1 : 0; }
 			else { park_raw_callee(f, loop); return false; }
 		}
-		if (kinds[i] != callee_loop.cells[callee_loop.param_cells[i]].kind) { park_raw_callee(f, loop); return false; }   // a conversion the binder makes
+		// a proven site's arguments are its parameters' kinds by construction (the plan compared the callee's); any other converts in the binder
+		if (!cc.raw_proven && kind != ((callee_loop.param_kinds >> (4 * i)) & 0xFu)) { park_raw_callee(f, loop); return false; }
 	}
 	cs.raw_call = 0;
 	if (current_call_depth_ >= limits_->vm_call_depth_limit) [[unlikely]] {
@@ -8140,11 +8171,14 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 		st = raise_from(detail::raise_call_depth());
 		return true;
 	}
-	if (execution_limit_exhausted()) [[unlikely]] {
-		cells_flush(f, loop);
-		f.ip = cc.call_ip;
-		st = raise_from(execution_limit_failure());
-		return true;
+	if (++budget_tick_ >= 1024 || limits_->memory_tripped()) [[unlikely]] {
+		--budget_tick_;   // the general check ticks it
+		if (execution_limit_exhausted()) {
+			cells_flush(f, loop);
+			f.ip = cc.call_ip;
+			st = raise_from(execution_limit_failure());
+			return true;
+		}
 	}
 	strong_ptr<script_function> pin = site.ic_pin;
 	if (call_records_top_ == call_records_.size()) { call_records_.push_back(std::make_unique<call_record>()); }
@@ -8186,16 +8220,22 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 	rec.f.raw = true;
 	cell_state& ncs = rec.cells;
 	const size_t n = callee_loop.cells.size();
-	if (ncs.payload.size() < n) { ncs.payload.resize(n); ncs.kind.resize(n); ncs.stamp.resize(n); }
-	std::fill_n(ncs.kind.begin(), n, uint8_t{0});
-	std::fill_n(ncs.stamp.begin(), n, nullptr);
-	for (size_t i = 0; i < callee_loop.param_cells.size(); ++i) {
+	constexpr size_t small = 16;   // a small program's cells clear with fixed-size stores (the vectors keep at least this many)
+	if (ncs.payload.size() < n || ncs.payload.size() < small) { const size_t m = std::max(n, small); ncs.payload.resize(m); ncs.kind.resize(m); ncs.stamp.resize(m); }
+	if (n <= small) {
+		std::memset(ncs.kind.data(), 0, small);
+		std::memset(static_cast<void*>(ncs.stamp.data()), 0, small * sizeof(type_info*));
+	} else {
+		std::fill_n(ncs.kind.begin(), n, uint8_t{0});
+		std::fill_n(ncs.stamp.begin(), n, nullptr);
+	}
+	for (size_t i = 0; i < argc; ++i) {
 		const uint32_t k = callee_loop.param_cells[i];
-		ncs.payload[k] = bits[i]; ncs.kind[k] = kinds[i]; ncs.dirty.set(k);
+		ncs.payload[k] = bits[i]; ncs.kind[k] = static_cast<uint8_t>((callee_loop.param_kinds >> (4 * i)) & 0xFu); ncs.dirty.set(k);
 	}
 	ncs.loop = program;
 	cs.raw_landing = static_cast<uint16_t>(ins.a + 1);
-	rec.raw_mark = door_calls_;
+	rec.raw_mark = raw_epoch_;
 	f.ip = f.ip + 1;   // parked on the call instruction (the door's C_CALL follows its C_ARGS)
 	raw_switch_ = &rec.f;
 	switch_to_ = &rec.f;   // the block loop returns on it (its door check); the raw chain clears it and runs the callee in place
@@ -8207,6 +8247,7 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 // its landing; when a general call ran during the raw call or the landing converts, the door's landing takes the boxed result. Any other frame
 // (entered by a general call, a native entry, a result the declared type converts) boxes the result and runs the general return at the pad
 op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
+	JAI_CELL_COST(6)
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	uint8_t kind;
 	int64_t bits;
@@ -8242,7 +8283,7 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 		return {};
 	}
 	frame& caller = *rec->caller;
-	const bool no_general_call = rec->raw_mark == door_calls_;
+	const bool no_general_call = rec->raw_mark == raw_epoch_;
 	if (stack_.size() > rec->f.stack_base) { stack_.truncate(rec->f.stack_base); }
 	rec->direct_pin = {};
 	rec->return_type = nullptr;
@@ -8316,6 +8357,7 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any
 // change misses at the consumer with the result on the stack, exactly the general form's state there
 op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
+	JAI_CELL_COST(4)
 	JAI_COARSE(coarse_land_, coarse_lands_)
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
 	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer == 0 ? cc.consumer_ip + 1 : cc.consumer_ip, 4); return {}; };   // a statement's result is not on the stack here (a script callee never pushed it, the native path dropped it): the general form resumes after its drop
@@ -17424,6 +17466,8 @@ void vm_backend::profile_reset() {
 	std::fill(std::begin(profile_cells_miss_step_), std::end(profile_cells_miss_step_), 0ull);
 	std::fill(std::begin(profile_cell_ops_), std::end(profile_cell_ops_), 0ull);
 	std::fill(std::begin(profile_cell_cycles_), std::end(profile_cell_cycles_), 0ull);
+	std::fill(std::begin(profile_cell_cost_cyc_), std::end(profile_cell_cost_cyc_), 0ull);
+	std::fill(std::begin(profile_cell_cost_n_), std::end(profile_cell_cost_n_), 0ull);
 	std::fill(std::begin(profile_fn_counts_), std::end(profile_fn_counts_), 0ull); std::fill(std::begin(profile_fn_cycles_), std::end(profile_fn_cycles_), 0ull);
 	std::fill(std::begin(profile_fn_cell_ops_), std::end(profile_fn_cell_ops_), 0ull); std::fill(std::begin(profile_fn_cell_cycles_), std::end(profile_fn_cell_cycles_), 0ull);
 	profile_cells_area_bytes_max_ = 0; profile_cells_records_ = 0;
@@ -17927,6 +17971,16 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
 		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
 			(unsigned long long)profile_cells_push_[0], (unsigned long long)profile_cells_push_[1], (unsigned long long)profile_cells_push_[2], (unsigned long long)profile_cells_push_[3]);
+		{
+			// inclusive: a block run holds its entry, its body, its flushes and misses; a miss holds its flush; a landing may hold a miss
+			static const char* const cost_names[8] = { "block runs from the dispatcher", "entries (guards, unboxing, sites)", "flushes (reboxing)", "misses", "landings after a call", "raw entries", "raw returns", "door calls (callee push or a native callee's run)" };
+			fprintf(stderr, "[vm-profile] cell block costs (inclusive Mcycles, count, avg cycles):");
+			for (int i = 0; i < 8; ++i) {
+				fprintf(stderr, " %s %.1f / %llu / %.0f |", cost_names[i], profile_cell_cost_cyc_[i] / 1e6, (unsigned long long)profile_cell_cost_n_[i],
+					profile_cell_cost_n_[i] ? double(profile_cell_cost_cyc_[i]) / double(profile_cell_cost_n_[i]) : 0.0);
+			}
+			fprintf(stderr, "\n");
+		}
 		fprintf(stderr, "[vm-profile] cell instructions by opcode (measured span):");
 		for (size_t k = 0; k < 256; ++k) { if (profile_cell_ops_[k]) { fprintf(stderr, " %s %llu |", std::string(opcode_name(static_cast<opcode>(k))).c_str(), (unsigned long long)profile_cell_ops_[k]); } }
 		fprintf(stderr, "\n");

@@ -777,15 +777,25 @@ form reads them.
   parameter cells and runs the callee's frame program from its head in the same block loop; the caller parks on its call
   instruction, exactly where the door leaves it. Any other case parks the callee as the general probe parks it and runs the door
   (the binder converts, the general call runs).
+- **The plan.** What the probe establishes holds until general code runs, so a raw site keeps it as a plan: the raw epoch in
+  which the probe validated the callee and the callee's body. The epoch advances wherever general code may have run before the
+  next instruction of a block that can call raw (its entry from the dispatcher, its door calls, a callee getter or an
+  environment load at its doors) and when the debugger's hook changes; a block without raw sites never advances it. A probe
+  whose plan is of the current epoch resolves nothing. The compiler records the callee's parameter kinds at the site and
+  whether every argument is a pinned cell or a constant of exactly those kinds; such a site's arguments are never checked at
+  run time, and the plan compares the callee's frame program's kinds with the site's once (a callee redefined with other
+  parameter kinds takes the door).
 - **A miss before the arguments instruction** (an argument value's miss, an injected miss) parks the callee first, so the
-  general form resumes inside the argument zone with the pending register it expects.
+  general form resumes inside the argument zone with the pending register it expects. A probe inside a raw call's arguments
+  parks the outer callee first, so only the innermost probe is ever unparked and a miss stacks the callees in order.
 - **Limits.** The raw entry checks the depth limit and ticks the budget as the general push does; a hit raises at the caller's
   call instruction after the caller's flush, with the general call's frame chain.
 - **The return.** A ret in a raw-entered frame whose value kind is its declared return kind pops the record (the window
   truncated, the pin released; nothing else moved) and lands the payload in the caller's destination cell by the declared-type
-  rule; the caller continues past its landing. When a general call ran during the raw call (the door counter the entry
-  records) or the landing converts, the door's landing runs with the boxed result and re-validates what the callee could have
-  reached. In any other frame (entered by a general call, a native entry, a kind the declared type converts) the ret boxes its
+  rule; the caller continues past its landing. When the raw epoch moved during the raw call (the entry records it) or the
+  landing converts, the door's landing runs with the boxed result and re-validates what the callee could have reached. A
+  frame is raw-entered exactly when its caller's block is parked on the call instruction of the raw call in flight (a block's
+  entry and every landing clear that mark, and a door call never sets it), so the general push and pop carry no raw state. In any other frame (entered by a general call, a native entry, a kind the declared type converts) the ret boxes its
   value and runs the general `op_return` at a pad after the copy, which converts, pops and lands as a general return.
 - **A callee that leaves its cells** (a miss) flushes and continues on the general form; its general return lands on the
   caller's parked call instruction, and the door's landing re-validates and lands the result without checking the arguments'

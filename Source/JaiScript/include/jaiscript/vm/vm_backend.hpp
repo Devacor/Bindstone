@@ -224,6 +224,7 @@ namespace jai::vm {
         uint64_t profile_cells_push_[4] = {};            // block pushes: 0 a raw int into a typed buffer, 1 a raw float, 2 a string handle, 3 a value (boxed or a value source)
         uint64_t profile_cell_ops_[256] = {};            // cell instructions dispatched by the block loop, by opcode
         uint64_t profile_cell_cycles_[256] = {};         // rdtsc cycles per cell opcode (the block loop's own switch; diagnostic builds)
+        uint64_t profile_cell_cost_cyc_[8] = {}, profile_cell_cost_n_[8] = {};   // block runs, entries, flushes, misses, landings, raw entries, raw returns, door calls (inclusive)
         std::string profile_filter_name_;                // JAI_VMPROF_FUNCTION: one function's own tables (empty = none)
         const chunk* profile_filter_chunk_ = nullptr;    // the first chunk whose function_name matched, bound when it first runs
         uint64_t profile_fn_counts_[256] = {}, profile_fn_cycles_[256] = {};           // that function's general instructions
@@ -376,6 +377,7 @@ namespace jai::vm {
             switch_to_ = nullptr;
             raw_switch_ = nullptr;
             cells_frame_ = nullptr;
+            raw_epoch_ = 0;   // even: no plan the main backend wrote ever matches
             pending_site_ctx_ = {};
             external_site_stack_.clear();
             execution_budget_ = budget;
@@ -741,7 +743,7 @@ namespace jai::vm {
             size_t iter_base = 0;
             size_t cfor_base = 0;
             size_t pending_base = 0;
-            uint64_t raw_mark = 0;     // a raw-entered record: door_calls_ at its entry (its raw return re-validates the caller when a general call ran since)
+            uint64_t raw_mark = 0;     // a raw-entered record: the raw epoch at its entry (its raw return re-validates the caller when the epoch moved)
         };
         std::vector<std::unique_ptr<call_record>> call_records_;  // grows, never shrinks mid-run
         size_t call_records_top_ = 0;                  // records [0, top) are live
@@ -1829,7 +1831,7 @@ namespace jai::vm {
         // frame program raw when it has one whose parameter kinds are the arguments' kinds (false: the general door runs); a frame program's return
         // lands raw in a raw caller's cell, else boxes through its return pad. Both switch the block loop's frame through raw_switch_
         bool raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st);
-        bool raw_probe(frame& f, const chunk::cell_loop::cell_call& cc);          // the callee found through the site's cache: a raw-enterable frame program
+        bool raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index);   // the callee found through the site's cache: a raw-enterable frame program
         void park_raw_callee(frame& f, const chunk::cell_loop& loop);             // a raw probe's callee parked as the general probe parks it (a miss before the arguments)
         op_status exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         void materialize_raw_window(frame& f) { if (f.raw) [[unlikely]] { build_raw_window(f); } }   // a raw-entered frame's window, built when the general form first needs it
@@ -2061,7 +2063,13 @@ namespace jai::vm {
 
         frame* raw_switch_ = nullptr;    // the frame a raw call or a raw return handed the block loop
         frame* cells_frame_ = nullptr;   // the frame the innermost block loop runs (a C++ exception converts there)
-        uint64_t door_calls_ = 0;        // general calls made from blocks: a raw return re-validates its caller when one ran during the raw call
+        // the raw epoch: advanced wherever general code may have run before the next instruction of a block that can call raw (its entry from
+        // the dispatcher, its door calls, a callee getter or an environment load at its doors) and when the debugger's hook changes. A call site's
+        // plan holds for the epoch that validated it (a raw chain starts at such a block, so no plan outlives general code), and a raw return
+        // re-validates its caller when the epoch moved during the raw call. Odd on the main backend, even on a worker (never equal: a worker
+        // never plans, and a plan written by the main thread never matches a worker's epoch)
+        uint64_t raw_epoch_ = 1;
+        void raw_epoch_advance() { raw_epoch_ += 2; }
     };
 
 } // namespace jai::vm

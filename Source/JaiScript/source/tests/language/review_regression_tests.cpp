@@ -2669,7 +2669,14 @@ public:
             }
             check_eq(ref_msg[0], ref_msg[1], "mistyped-store text is byte-identical across backends");
             check_eq(direct_msg[0], direct_msg[1]);
-            check_eq(direct_msg[0], ref_msg[0], "the reference raises the direct store's own conversion text");
+            // docs/diagnostics.md: a native boundary may append ': C++ exception' to the shared text (the direct store's
+            // setter error leaves as that runtime error, the reference store's as a throw of its text)
+            const std::string boundary_suffix = ": C++ exception";
+            std::string direct_text = direct_msg[0];
+            if (direct_text.size() > boundary_suffix.size() && direct_text.compare(direct_text.size() - boundary_suffix.size(), boundary_suffix.size(), boundary_suffix) == 0) {
+                direct_text.resize(direct_text.size() - boundary_suffix.size());
+            }
+            check_eq(direct_text, ref_msg[0], "the reference raises the direct store's own conversion text");
             // Narrow widths: the CPP-MEMBER box stores like an add_global_ref int32 (a
             // silent truncation) where the direct setter range-checks ("Integer value out
             // of range for int") - pinned as observed; flagged for a Dev ruling.

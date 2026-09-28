@@ -505,8 +505,8 @@ namespace stdlib {
                     // a store the member refuses leaves its constructed value; a setter the
                     // script declared fails the load with its own error
                     auto stored = setter.as_function()({ instance, v });
-                    if (!stored && inst->get_class_definition() &&
-                        inst->get_class_definition()->script_declares_user_accessor(setter_id)) {
+                    if (!stored && ((inst->get_class_definition() && inst->get_class_definition()->script_declares_user_accessor(setter_id)) ||
+                                    stored.error() == make_error_code(runtime_error_code::cpp_exception))) {
                         throw runtime_error(eng->format_error(stored));
                     }
                     if (backend && backend->is_unwinding()) { return instance; }

@@ -317,7 +317,8 @@ public:
                                     std::vector<script_value> args = {value};
                                     auto result = getter.as_function()(args);
                                     if (!result) {
-                                        if (class_def->script_declares_user_accessor(getter_id)) {
+                                        if (class_def->script_declares_user_accessor(getter_id) ||
+                                            result.error() == make_error_code(runtime_error_code::cpp_exception)) {
                                             throw runtime_error(eng->format_error(result));
                                         }
                                         continue;   // a host property that cannot read stays out of the payload
@@ -1006,7 +1007,8 @@ private:
                                     if (setter.type() == script_value_type::jai_function_type) {
                                         std::vector<script_value> args = {constructed_obj, prop_value};
                                         auto stored = setter.as_function()(args);
-                                        if (!stored && class_def->script_declares_user_accessor(setter_id)) {
+                                        if (!stored && (class_def->script_declares_user_accessor(setter_id) ||
+                                                        stored.error() == make_error_code(runtime_error_code::cpp_exception))) {
                                             throw runtime_error(class_eng->format_error(stored));
                                         }
                                         if (auto* backend = class_eng->get_execution_backend(); backend && backend->is_unwinding()) {

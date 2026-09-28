@@ -21,9 +21,11 @@ namespace jai {
 
     class engine;
     class declaration;
+    class expression;
     class class_decl;
     class function_decl;
         class variable_decl;
+    class type_info;
     using declaration_ptr = std::shared_ptr<declaration>;
 
     enum class check_mode : uint8_t {
@@ -98,6 +100,26 @@ namespace jai {
         uint32_t calls = 0;     // call_expr nodes with a proven callee body
     };
 
+    // A tool's view of the walk (tools/lsp): every expression's inferred static type, in the
+    // checker's own lattice and spelling.
+    struct check_expression_type {
+        enum class kind_t : uint8_t {
+            unknown, null_k, int_k, float_k, string_k, char_k, bool_k,
+            array_k, map_k, function_k, object_k, weak_k, class_ref_k, enum_ref_k, utf8_k
+        };
+        kind_t kind = kind_t::unknown;
+        std::string_view cls{};            // object_k / class_ref_k / enum_ref_k
+        const type_info* ti = nullptr;     // the declared type it came from, when there is one
+        bool tentative = false;
+        std::string name;
+    };
+
+    class check_observer {
+    public:
+        virtual ~check_observer() = default;
+        virtual void expression_type(const expression* e, const check_expression_type& t) = 0;
+    };
+
     namespace detail {
 
         inline constexpr size_t k_check_diagnostic_cap = 100;
@@ -139,6 +161,7 @@ namespace jai {
             const program_function_map* program_functions = nullptr;
             const program_global_map* program_globals = nullptr;
             std::vector<std::string>* deferred_classes = nullptr;   // out: the program-table classes the walk met before the engine defined them
+            check_observer* observer = nullptr;
         };
 
         // Every top-level name `decls` declares (functions, variables, externs, destructured

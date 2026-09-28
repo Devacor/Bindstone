@@ -5,63 +5,78 @@ MutedVision engine / Bindstone.
 
 ## What it does
 
-- **Syntax highlighting** (works now, standalone) — TextMate grammar for `.script`, `.jai`,
-  and `.jaibite` files: keywords, the `int` / `auto` / `var` type ladder, `function` / `lambda`,
-  strings and format-strings, comments, numbers.
-- **Attach debugging** (once the C++ `debug_connector` ships) — breakpoints, stepping, call
-  stack, and variable inspection/edit, over the Debug Adapter Protocol (DAP).
+- **Language server** - the extension launches `jaiscript_lsp` (`tools/lsp`, the
+  `jaiscript_lsp` CMake target) for every `.jai` file. It answers from the engine's own parser and
+  strict checker: diagnostics as you type across the whole program (an error in an imported file is
+  reported in that file, at its line), go to definition, find references, hover (declared and
+  inferred types, signatures, class fields), completion (scope, members after `.`, namespaces and
+  enums after `::`, builtin container and string methods, host functions), signature help, rename
+  (refused with the reason when it cannot be proven complete), document and workspace symbols.
+- **Syntax highlighting** - TextMate grammar for `.script`, `.jai`, and `.jaibite` files.
+- **Attach debugging** - breakpoints, stepping, call stack and variables over the Debug Adapter
+  Protocol. The DAP server lives inside the C++ host (`jai::debug_connector`, a raw TCP port); this
+  extension points VS Code's DAP client straight at that socket, with nothing to spawn.
 
-The debugger uses the **attach model with no bundled adapter process**: the DAP server lives
-*inside* the C++ host (`jai::debug_connector`), which opens a raw TCP port. This extension just
-points VS Code's DAP client straight at that socket via a `DebugAdapterServer` descriptor — there
-is nothing to spawn.
+The full guide is the docs page `docs/site/embedding/14-language-server.html` (and
+`12-debugging.html` for the debugger).
 
-## How to attach
+## Install
 
-1. Build the host with the debugger enabled (CMake `-DJAISCRIPT_ENABLE_DEBUGGER=ON`; the
-   `debug_connector` and socket code are compiled out otherwise).
-2. In the host, inject a connector on the engine:
+`out/extension.js` is a single bundled file (the language client included), so the folder runs as
+it is:
 
-   ```cpp
-   engine->set_debug_connector(std::make_shared<jai::debug_connector>(1234));
-   ```
+```
+code tools/vscode-jaiscript        # F5 opens an Extension Development Host
+```
 
-3. Add a `.vscode/launch.json` (the `port` must match the one above):
+or link it into your extensions folder
+(`mklink /J "%USERPROFILE%\.vscode\extensions\snapjaw.jaiscript" tools\vscode-jaiscript` on
+Windows), or package it: `npm install`, `npx @vscode/vsce package`, then
+`code --install-extension jaiscript-0.2.0.vsix`.
 
-   ```json
-   {
-     "version": "0.2.0",
-     "configurations": [
-       {
-         "type": "jaiscript",
-         "request": "attach",
-         "name": "Attach to JaiScript",
-         "host": "127.0.0.1",
-         "port": 1234
-       }
-     ]
-   }
-   ```
+Build the server with `cmake --build "out/build/x64-Release BENCHMARKS" --target jaiscript_lsp`.
+The extension looks for it in this order: the `jaiscript.languageServer.path` setting,
+`server/jaiscript_lsp.exe` inside the extension folder, the repository's build
+(`out/build/x64-Release BENCHMARKS`, `x64-Release`, `x64-Debug`), then `PATH`.
 
-4. Run the host, then start the "Attach to JaiScript" configuration. Set breakpoints in your
-   `.jai` sources; VS Code auto-opens the top stack frame's file on each stop.
+## Settings
+
+| setting | default | meaning |
+|---|---|---|
+| `jaiscript.languageServer.enabled` | `true` | run the server |
+| `jaiscript.languageServer.path` | empty | the server executable (`${workspaceFolder}` expands) |
+| `jaiscript.languageServer.host` | `runner` | registrations scripts are checked against: `runner` (the jaiscript runner's), `stdlib`, `bare` |
+| `jaiscript.languageServer.includePaths` | `[]` | include paths for `import` / `include` |
+| `jaiscript.languageServer.log` | `false` | log requests and timings to the output channel |
+
+*JaiScript: Restart Language Server* restarts it; a settings change does too.
+
+## Attach debugging
+
+In the host, inject a connector on the engine:
+
+```cpp
+engine->set_debug_connector(std::make_shared<jai::debug_connector>(1234));
+```
+
+then add a `.vscode/launch.json` attach configuration with the same port and start it while the
+host runs:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    { "type": "jaiscript", "request": "attach", "name": "Attach to JaiScript", "host": "127.0.0.1", "port": 1234 }
+  ]
+}
+```
 
 Breakpoints key on the original `.jai` source path, so they bind whether a unit was loaded from
-source or from a pre-parsed `.jaibite`.
-
-## Current status
-
-- Grammar: works standalone, no host required.
-- Debugger: requires the app built with `JAISCRIPT_ENABLE_DEBUGGER` and a running
-  `debug_connector`. See `docs/DEBUGGER_DESIGN.md` for the design and phasing (interpreter
-  backend first, VM parity later).
+source or from a pre-parsed `.jaibite`. The host must be built with `JAISCRIPT_ENABLE_DEBUGGER`.
 
 ## Building the extension
 
 ```
 npm install
-npm run compile   # tsc -p ./  ->  ./out/extension.js
+npm run compile   # type check, then bundle src/extension.ts -> out/extension.js
 ```
-
-The grammar (`syntaxes/jaiscript.tmLanguage.json`) and `language-configuration.json` are
-maintained separately and referenced from `package.json`.

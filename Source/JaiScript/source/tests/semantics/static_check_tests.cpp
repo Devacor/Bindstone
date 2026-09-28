@@ -8,6 +8,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
+#include <jaiscript/detail/parser.hpp>
 #include <jaiscript/core/class_registry.hpp>
 
 #include "fuzz/fuzz_generator.hpp"
@@ -2309,6 +2310,60 @@ public:
             check_true(what.find("ERROR Cannot initialize") == 0, "the strict engine loads the unit; the runtime raises (got: " + what + ")");
             auto strict = e->check(body);
             check_eq((size_t)5, error_count(strict), strict.format(body));
+        });
+
+        // A tool's view of the walk (tools/lsp): the observer sees every inferred expression type and
+        // changes nothing about the diagnostics.
+        test("observer_reports_expression_types", [this]() {
+            auto e = engine::make();
+            const std::string src =
+                "class P { int hp = 3; }\n"
+                "P p = P();\n"
+                "auto t = p.hp + 1.5;\n"
+                "array<string> names = [\"a\"];\n"
+                "auto n = names[0];\n"
+                "int bad = \"s\";\n";
+            auto types = e->get_registered_template_types();
+            lexer lex(src, e->get_symbolizer(), types);
+            auto tokens = lex.tokenize();
+            parser prs(tokens, e->get_symbolizer(), e.get(), types);
+            auto parsed = prs.parse();
+            check_true(static_cast<bool>(parsed), "fixture parses");
+            struct recorder : check_observer {
+                std::vector<std::string> names;
+                void expression_type(const expression*, const check_expression_type& t) override { names.push_back(t.name); }
+            } rec;
+            detail::check_options quiet;
+            quiet.proofs = detail::check_options::proofs_t::leave;
+            detail::check_options observed = quiet;
+            observed.observer = &rec;
+            auto without = detail::run_static_check(*e, parsed.value(), nullptr, quiet);
+            auto with = detail::run_static_check(*e, parsed.value(), nullptr, observed);
+            check_eq(without.format(src), with.format(src));
+            check_eq((size_t)1, error_count(with), with.format(src));
+            auto saw = [&](const std::string& name) { return std::find(rec.names.begin(), rec.names.end(), name) != rec.names.end(); };
+            check_true(saw("P"), "the constructor call types as P");
+            check_true(saw("float"), "p.hp + 1.5 types as float");
+            check_true(saw("array<string>"), "the typed global keeps its element type");
+            check_true(saw("string"), "names[0] types as string");
+        });
+
+        test("parser_keeps_declarations_around_errors", [this]() {
+            auto e = engine::make();
+            const std::string src = "int a = 1;\nint broken( {\nint b = 2;\n";
+            auto types = e->get_registered_template_types();
+            lexer lex(src, e->get_symbolizer(), types);
+            auto tokens = lex.tokenize();
+            parser prs(tokens, e->get_symbolizer(), e.get(), types);
+            auto parsed = prs.parse();
+            check_false(static_cast<bool>(parsed), "the fixture does not parse");
+            const auto& kept = prs.recovered_declarations();
+            std::vector<std::string> names;
+            for (const auto& d : kept) {
+                if (d && d->get_type() == node_type::variable_decl) { names.emplace_back(static_cast<const variable_decl*>(d.get())->name); }
+            }
+            check_eq((size_t)2, names.size());
+            check_true(names.size() == 2 && names[0] == "a" && names[1] == "b", "the declarations on both sides of the error are kept");
         });
 
     }

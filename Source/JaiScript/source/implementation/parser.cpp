@@ -824,6 +824,7 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
             all_errors += errors_[i];
         }
         uint64_t error_id = symbolizer_->intern(all_errors);
+        recovered_ = std::move(declarations);
         return checked_result<std::vector<declaration_ptr>>(
             make_error_code(parse_error_code::invalid_expression),
             "Parse error: {0}",

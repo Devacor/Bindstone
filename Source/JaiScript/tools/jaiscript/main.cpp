@@ -1911,6 +1911,15 @@ int run_selftest(const console_state& con) {
 
 } // namespace
 
+#ifdef JAISCRIPT_RUNNER_HOST_ONLY
+// The language server (tools/lsp) checks scripts against the runner's exact host surface.
+std::shared_ptr<jai::engine> jaiscript_runner_host_engine() {
+	options opt;
+	opt.check = "off";
+	opt.debug = false;
+	return make_runner_engine(opt, nullptr);
+}
+#else
 int main(int argc, char** argv) {
 	console_state con;
 	con.init();
@@ -1924,3 +1933,4 @@ int main(int argc, char** argv) {
 	if (!opt.script.empty()) { return run_file_mode(opt, con); }
 	return run_repl_mode(opt, con);
 }
+#endif

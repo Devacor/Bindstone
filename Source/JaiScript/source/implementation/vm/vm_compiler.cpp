@@ -1959,7 +1959,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 		    assign->target->get_type() == node_type::binary_expr) {
 			auto* sub = static_cast<binary_expr*>(assign->target.get());
 			if (sub->op.type == token_type::left_bracket &&
-			    try_emit_fused_index_store(sub, assign->value, true)) {
+			    try_emit_fused_index_store(sub, assign->value, true, string_target_site_for(assign->target))) {
 				return true;
 			}
 		}
@@ -5585,7 +5585,22 @@ void vm_compiler::compile_unary(const std::shared_ptr<unary_expr>& expr) {
 	emit(opcode::op_unary, static_cast<uint32_t>(expr->op.type));
 }
 
-bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result) {
+uint32_t vm_compiler::string_target_site_for(const expression_ptr& target) {
+	auto* sub = static_cast<binary_expr*>(target.get());
+	string_target_site site;
+	if (sub->left->get_type() == node_type::identifier_expr) {
+		auto* ident = static_cast<identifier_expr*>(sub->left.get());
+		site.base_slot = identifier_slot_operand(ident);
+		site.base_symbol = add_symbol(ident->symbol_id);
+	} else if (!detail::is_member_final_ref_lvalue(sub->left.get())) {
+		return k_invalid_u32;
+	}
+	site.node = add_node(target);
+	chunk_->string_target_sites.push_back(site);
+	return static_cast<uint32_t>(chunk_->string_target_sites.size() - 1);
+}
+
+bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site) {
 	const uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
 	const bool operand_index = sub->right->get_type() == node_type::identifier_expr ||
 	                           sub->right->get_type() == node_type::literal_expr;
@@ -5668,6 +5683,7 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	// the typed store lane's shape proof (typed_index_store): the value rides the stack or
 	// resolves as an operand; container and index as the read lane requires
 	p.typed_lane = index_proto_typed_lane_shape(*chunk_, p);
+	p.string_target = string_site;
 	chunk_->fused_index_protos.push_back(p);
 	emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape,
 	     no_result ? 1u : 0u);
@@ -5735,14 +5751,15 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 	    static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket) {
 		auto* sub = static_cast<binary_expr*>(expr->target.get());
 		uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
+		const uint32_t string_site = string_target_site_for(expr->target);
 		if (!compound) {
 			// Fused store: the array fast path writes in place (no reference mint);
 			// other shapes replay the INDEX(lvalue_write)+INDEX_ASSIGN semantics inside
-			if (!try_emit_fused_index_store(sub, expr->value, false)) {
+			if (!try_emit_fused_index_store(sub, expr->value, false, string_site)) {
 				compile_expression(expr->value);
 				compile_expression(sub->left);
 				compile_expression(sub->right);
-				emit(opcode::op_index_store, shape);
+				emit(opcode::op_index_store, shape, 0, string_site);
 			}
 		} else {
 			// C++17: the value first, then the container and the index (Dev ruling 2026-09-27); an inert value keeps the
@@ -5764,7 +5781,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			if (expr->postfix_old_result) kind |= compound_flag_old_result;
 			if (expr->incdec_desugar) kind |= compound_flag_incdec;
 			if (value_first) kind |= compound_flag_value_first;
-			emit(opcode::op_index_compound_fused, kind, shape);
+			emit(opcode::op_index_compound_fused, kind, shape, string_site);
 		}
 		return;
 	}

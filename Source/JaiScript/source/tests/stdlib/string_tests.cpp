@@ -482,6 +482,46 @@ public:
             check_eq(std::string("3|\xC3\xA9"), engine->execute("var c = utf8_string(\"\xC3\xA9t\xC3\xA9\").explode(\"\"); to_string(c.size()) + \"|\" + c[0];").as<std::string>());
         });
 
+        test("subscript_store_replaces_a_character_with_its_text", [this]() {
+            // s[i] = c replaces byte i, s[i] = "text" replaces byte i with the whole text; a utf8_string counts characters;
+            // compound stores read, concatenate and write back; the string stays a value (copies never see the write)
+            for (bool proofs : {true, false}) {
+                auto engine = make_engine();
+                stdlib::register_all(*engine);
+                if (!proofs) { engine->type_proofs(false); }
+                auto es = [&](const std::string& src) { return engine->execute(src).as<std::string>(); };
+                auto caught = [&](const std::string& src) { return es("string m = \"\"; try { " + src + " } catch (e) { m = e; } m;"); };
+                check_eq(std::string("hallo"), es("string s = \"hello\"; s[1] = 'a'; s;"));
+                check_eq(std::string("helllo"), es("string s = \"hello\"; s[2] = \"ll\"; s;"));
+                check_eq(std::string("hellllo"), es("string s = \"hello\"; s[2] = s[2] + \"ll\"; s;"));
+                check_eq(std::string("hellllo"), es("string s = \"hello\"; s[2] += \"ll\"; s;"));
+                check_eq(std::string("heo"), es("string s = \"hello\"; s[2] = \"\"; s[2] = \"\"; s;"));
+                check_eq(std::string("hello|jello"), es("string s = \"hello\"; string t = s; s[0] = 'j'; t + \"|\" + s;"));
+                check_eq(std::string("abc|aXc"), es("var s = \"abc\"; var t = s; t[1] = 'X'; s + \"|\" + t;"));
+                check_eq(std::string("abXd|aYY"), es("array<string> a = [\"ab\", \"cd\"]; a[1][0] = 'X'; array<var> v = [\"ab\"]; v[0][1] = \"YY\"; a[0] + a[1] + \"|\" + v[0];"));
+                check_eq(std::string("abZ"), es("map<string, string> m = {\"k\": \"abc\"}; m[\"k\"][2] = 'Z'; m[\"k\"];"));
+                check_eq(std::string("Bob|Xbc"), es("class P { string name = \"bob\"; } class Q { string n = \"abc\"; void f() { n[0] = 'X'; } } P p = P(); p.name[0] = 'B'; Q q = Q(); q.f(); p.name + \"|\" + q.n;"));
+                check_eq(std::string("Word|word|Zbc"), es("string up(string w) { w[0] = 'W'; return w; } void set0(string& w) { w[0] = 'Z'; } string o = \"word\"; string x = \"abc\"; set0(x); up(o) + \"|\" + o + \"|\" + x;"));
+                check_eq(std::string("xxx|zzz"), es("string f() { string s = \"abc\"; for (int i = 0; i < 3; ++i) { s[i] = 'z'; } return s; } string g = \"abc\"; for (int i = 0; i < g.size(); ++i) { g[i] = 'x'; } g + \"|\" + f();"));
+                check_eq(std::string("char|Q|Qb"), es("string s = \"ab\"; auto r = (s[0] = 'Q'); type_of(r) + \"|\" + r + \"|\" + s;"));
+                check_eq(std::string("hello"), es("utf8_string u = \"h\xC3\xA9llo\"; u[1] = \"e\"; u;"));
+                check_eq(std::string("a\xE6\x97\xA5" "c|3|5"), es("utf8_string u = \"abc\"; u[1] = \"\xE6\x97\xA5\"; u + \"|\" + to_string(u.size()) + \"|\" + to_string(u.byte_size());"));
+                check_eq(std::string("a\xC3\xA9xc|zb"), es("utf8_string u = \"a\xC3\xA9" "c\"; u[1] += \"x\"; utf8_string w = \"ab\"; w[0] = 'z'; u + \"|\" + w;"));
+                check_eq(std::string("3|\xE8\xAA\x9E|\xE6\x97\xA5" "b\xE8\xAA\x9E|4|\xE6\x9C\xAC"), es("utf8_string u = \"\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\"; utf8_string keep = u; int n = u.size(); u[1] = \"b\"; string first = to_string(u.size()) + \"|\" + u[2] + \"|\" + u; keep[0] = \"ab\"; first + \"|\" + to_string(keep.size()) + \"|\" + keep[2];"));
+                check_eq(std::string("String index 9 out of bounds for string of size 5"), caught("var s9 = \"hello\"; s9[9] = 'x';"));
+                check_eq(std::string("String index 3 out of bounds for string of size 3"), caught("var u3 = utf8_string(\"\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\"); u3[3] = \"x\";"));
+                check_eq(std::string("Cannot assign int to a string character (it takes a char or a string)"), caught("var si = \"hello\"; si[0] = 5;"));
+                check_eq(std::string("Cannot assign int to a string character (it takes a char or a string)"), caught("var sc = \"hi\"; sc[0] += 1;"));
+                check_eq(std::string("Cannot assign to rvalue expression"), caught("var gl = [](){ return \"ab\"; }; gl()[0] = 'x';"));
+                try {
+                    engine->execute("string s = \"hi\"; s[0] = 5;");
+                    check_true(false, "a non-text store into a string character is a load error");
+                } catch (const std::exception& ex) {
+                    check_true(std::string(ex.what()).find("cannot store into 'string': a string character takes a char or a string, got 'int'") != std::string::npos, ex.what());
+                }
+            }
+        });
+
         test("split_first_element", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
@@ -883,7 +923,7 @@ public:
             check_eq(std::string("a\xC3\xB1\xE6\x97\xA5" "b|aZ\xC3\xB1\xE6\x97\xA5" "b"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; var c = u; c.insert(1, \"Z\"); u + \"|\" + c;"));
             check_eq(std::string("String index 4 out of bounds for string of size 4"), es("string m = \"\"; try { utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; u[4]; } catch (e) { m = e; } m;"));
             check_eq(std::string("Cannot iterate a utf8_string by reference: its characters are not lvalues (use for (auto c : s))"), es("string m = \"\"; try { utf8_string u = \"ab\"; for (auto& c : u) {} } catch (e) { m = e; } m;"));
-            check_eq(std::string("Strings are read-only through subscript: use substr()/+ to build a new string"), es("string m = \"\"; try { utf8_string u = \"ab\"; u[0] = \"x\"; } catch (e) { m = e; } m;"));
+            check_eq(std::string("xb"), es("utf8_string u = \"ab\"; u[0] = \"x\"; u;"));
             check_eq(std::string("utf8_string has no member 'to_utf8'"), es("string m = \"\"; try { var u = utf8_string(\"ab\"); u.to_utf8(); } catch (e) { m = e; } m;"));
         });
 

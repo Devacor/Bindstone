@@ -1261,6 +1261,9 @@ namespace jai::vm {
         // a pointer (:: door, slot, member scope, env). KEEP BYTE-PARALLEL with
         // interpreter::string_receiver_cell.
         script_value* string_receiver_cell(frame& f, const call_site& site, const identifier_expr* ident);
+        // The pin a string subscript store target writes through (detail/string_element.hpp);
+        // null for a temporary base. KEEP BYTE-PARALLEL with interpreter::string_element_pin.
+        script_value string_element_pin(frame& f, script_value& base_raw, uint32_t site_index);
         // Env-path lookup memoized per instruction (cache_slot = 2*ip [+1 for fused right]).
         // Returns the same pointer environment::get_ref/get_value_ptr's storage prefix
         // would; nullptr = caller must run its original full lookup (fallback tails).

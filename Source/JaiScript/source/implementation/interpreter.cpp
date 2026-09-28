@@ -10,6 +10,7 @@
 #include <jaiscript/detail/redeclaration.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/string_mutator_receiver.hpp>
+#include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
@@ -3708,7 +3709,9 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
     // subscript, then clear the flag so any nested subscripts evaluated while
     // computing the operands below are treated as reads (no map auto-insert).
     const bool want_lvalue_write = lvalue_target_context_;
+    const bool want_string_target = want_lvalue_write || string_target_context_;
     lvalue_target_context_ = false;
+    string_target_context_ = false;
 
     // Evaluate operands once and use them throughout (or use pre-fetched values)
     std::optional<script_value> left_raw_opt, left_opt, right_opt;
@@ -3947,16 +3950,10 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 }
             }
         } else if (left.is_string()) {
-            // Read-only char subscript (C++-familiar s[i]). Writes stay an error:
-            // strings share storage under copy, so subscript writes would need
-            // copy-on-write - future work, a clear error instead of a silent trap.
-            // (KEEP BYTE-PARALLEL with vm_backend::exec_index)
+            // s[i]: byte i as a char; a store target mints a STRING-ELEMENT reference
+            // (detail/string_element.hpp; KEEP BYTE-PARALLEL with vm_backend::exec_index)
             if (!right.is_int()) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
-            }
-            if (want_lvalue_write) {
-                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                    "Strings are read-only through subscript: use substr()/+ to build a new string");
             }
             const auto& str = left.unchecked_as_string();
             script_int index = right.unchecked_as_int();
@@ -3966,15 +3963,19 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     string_symbolizer_->intern(std::to_string(index)),
                     string_symbolizer_->intern(std::to_string(str.size())));
             }
-            push_value(script_value(static_cast<script_char>(str[static_cast<size_t>(index)]), engine_));
+            const script_char byte = static_cast<script_char>(str[static_cast<size_t>(index)]);
+            if (want_string_target) {
+                script_value pin = string_element_pin(left_raw, expr->left.get());
+                if (pin.is_reference()) {
+                    push_value(script_value::make_string_element_reference(pin, static_cast<size_t>(index), engine_));
+                    return {};
+                }
+            }
+            push_value(script_value(byte, engine_));
         } else if (left.is_utf8_string()) {
-            // u[i]: character i as a utf8_string, read-only like s[i] (KEEP BYTE-PARALLEL with vm_backend::exec_index)
+            // u[i]: character i as a utf8_string, a store target like s[i] (KEEP BYTE-PARALLEL with vm_backend::exec_index)
             if (!right.is_int()) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_index_type), "String index must be an integer");
-            }
-            if (want_lvalue_write) {
-                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                    "Strings are read-only through subscript: use substr()/+ to build a new string");
             }
             const script_utf8& text = left.unchecked_as_utf8();
             const bool cache = !engine_->parallel_region_active();
@@ -3985,6 +3986,13 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     "String index {0} out of bounds for string of size {1}",
                     string_symbolizer_->intern(std::to_string(index)),
                     string_symbolizer_->intern(std::to_string(len)));
+            }
+            if (want_string_target) {
+                script_value pin = string_element_pin(left_raw, expr->left.get());
+                if (pin.is_reference()) {
+                    push_value(script_value::make_string_element_reference(pin, static_cast<size_t>(index), engine_));
+                    return {};
+                }
             }
             push_value(detail::utf8::char_value(text, static_cast<size_t>(index), engine_, cache));
         } else {
@@ -5414,7 +5422,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
                 rightValue = pop_value();
             }
-            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->target.get(), rs, 1), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
+            string_target_context_ = expr->target->get_type() == node_type::binary_expr &&
+                                     static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket;
+            auto target_read = eval_child<Replaying>(expr->target.get(), rs, 1);
+            string_target_context_ = false;
+            JAISCRIPT_TRY_OPERAND(std::move(target_read), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
             script_value currentValue = pop_value();
             if (is_unwinding_) {
                 push_value(make_value());
@@ -6305,6 +6317,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 // vm_backend::exec_index_assign). Leaves the assigned value on the stack.
 checked_result<void> interpreter::store_through_subscript_reference(script_value& target_ref, script_value value) {
     auto refHolder = target_ref.get_reference_holder();
+    if (refHolder && refHolder->string_element()) {
+        JAISCRIPT_TRY(detail::store_string_element(*refHolder, value, engine_));
+        push_value(expression_result_needed_ ? clone_for_assignment(value.deref()) : std::move(value));
+        return {};
+    }
     const bool typed_element = refHolder && refHolder->typed_element();
     script_value* target_ptr;
     if (typed_element) {
@@ -6345,6 +6362,31 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
     }
     push_value(expression_result_needed_ ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value  // Assignment expressions return the assigned value
     return {};
+}
+
+// The pin a string subscript store target writes through (detail/string_element.hpp): the
+// base's own reference, its field / property reference, or its variable cell boxed like a
+// reference binding boxes it; null for a temporary base. KEEP BYTE-PARALLEL with
+// vm_backend::string_element_pin.
+script_value interpreter::string_element_pin(script_value& base_raw, const expression* base_expr) {
+    if (base_raw.is_reference()) {
+        return base_raw;
+    }
+    if (base_expr->get_type() == node_type::identifier_expr) {
+        if (script_value* cell = string_receiver_cell(static_cast<const identifier_expr*>(base_expr))) {
+            return share_boxed_env_storage(*cell, engine_);
+        }
+        return make_value();
+    }
+    if (detail::is_member_final_ref_lvalue(base_expr)) {
+        auto resolved = detail::resolve_ref_lvalue(base_expr,
+            detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
+            environment_.get(), engine_, string_symbolizer_);
+        if (resolved && resolved.value().is_reference()) {
+            return std::move(resolved.value());
+        }
+    }
+    return make_value();
 }
 
 // statement visitors

@@ -2,6 +2,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
+#include <jaiscript/detail/string_element.hpp>
 #include <atomic>
 #include <sstream>
 #include <thread>
@@ -93,6 +94,36 @@ const script_value& script_value::reference_holder::materialize_typed_element(en
     return *cell();
 }
 
+const script_value& script_value::reference_holder::materialize_string_element(engine* eng) {
+    script_value pin = make_string_element_pin(*this, eng);
+    script_value* storage = &pin.deref();
+    while (storage->is_reference()) { storage = &storage->deref(); }
+    script_value v(std::monostate{}, eng);
+    if (storage->raw_storage_index() == TYPEID_UTF8_STRING) {
+        const bool cache = !eng->parallel_region_active();
+        if (container_index >= detail::utf8::length(storage->unchecked_as_utf8(), cache)) {
+            throw runtime_error("Reference to a removed string character");
+        }
+        v = detail::utf8::char_value(storage->unchecked_as_utf8(), container_index, eng, cache);
+    } else if (storage->is_string()) {
+        const script_string& bytes = storage->raw_storage_index() == TYPEID_STRING ? storage->unchecked_as_string()
+                                                                                    : storage->unchecked_as_string_ref();
+        if (container_index >= bytes.size()) {
+            throw runtime_error("Reference to a removed string character");
+        }
+        v = script_value(static_cast<script_char>(bytes[container_index]), eng);
+    } else {
+        throw runtime_error("Reference to a removed string character");
+    }
+    if (has_elem_scratch) {
+        *cell() = std::move(v);
+    } else {
+        new (cell_storage) script_value(std::move(v));
+        has_elem_scratch = true;
+    }
+    return *cell();
+}
+
 // PROPERTY mode touches re-resolve the receiver's class and accessor every time (a
 // reload that adds a same-named script field re-points the reference at that field; a
 // retired layer reports). Touch points throw like the other modes do; bind points take
@@ -157,6 +188,14 @@ void script_value::reference_holder::commit_scratch() {
     }
     if (property && property->has_scratch) {
         store_property(*cell(), cell()->get_engine());
+        return;
+    }
+    if (string_base && has_elem_scratch) {
+        engine* eng = cell()->get_engine();
+        auto stored = detail::store_string_element(*this, *cell(), eng);
+        if (!stored) {
+            throw runtime_error(format_error(stored, *eng->get_symbolizer()));
+        }
     }
 }
 
@@ -666,6 +705,29 @@ script_value script_value::make_property_reference(const script_value& receiver,
     ref->property->receiver_tag = receiver.get_type_info();
     ref->property->field_id = field_id;
     v.storage_ = ref;
+    return v;
+}
+
+script_value script_value::make_string_element_reference(const script_value& pin, size_t index, engine* eng) {
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    if (!pin.get_reference_holder()) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(nullptr);
+    auto ref = acquire_reference_holder(eng);
+    ref->string_base = pin.storage_.get<strong_ptr<reference_holder>>();
+    ref->container_index = index;
+    v.storage_ = ref;
+    return v;
+}
+
+script_value script_value::make_string_element_pin(const reference_holder& holder, engine* eng) {
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(nullptr);
+    v.storage_ = holder.string_base;
     return v;
 }
 
@@ -1248,6 +1310,9 @@ const script_value& script_value::deref_slow() const {
             // PROPERTY: the getter result, refreshed on every touch
             return refHolder->property->live_member ? *refHolder->cell() : refHolder->materialize_property(engine_);
         }
+        if (refHolder->string_base) {
+            return refHolder->materialize_string_element(engine_);
+        }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
     // For C++ references, we don't deref here - they need special handling
@@ -1297,6 +1362,10 @@ script_value& script_value::deref_slow() {
             // through assign_through / commit_scratch, never through this deref
             return refHolder->property->live_member ? *refHolder->cell()
                                                     : const_cast<script_value&>(refHolder->materialize_property(engine_));
+        }
+        if (refHolder->string_base) {
+            // a materialized VIEW: writers go through the string-element store (detail/string_element.hpp)
+            return const_cast<script_value&>(refHolder->materialize_string_element(engine_));
         }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
@@ -1356,6 +1425,13 @@ void script_value::assign_through(const script_value& value) {
                 refHolder->cell()->assign_through(value);
             } else {
                 refHolder->store_property(value, engine_);
+            }
+            return;
+        }
+        if (refHolder->string_base) {
+            auto stored = detail::store_string_element(*refHolder, value, engine_);
+            if (!stored) {
+                throw runtime_error(format_error(stored, *engine_->get_symbolizer()));
             }
             return;
         }
@@ -1455,6 +1531,13 @@ void script_value::assign_through(script_value&& value) {
                 refHolder->cell()->assign_through(value);
             } else {
                 refHolder->store_property(value, engine_);
+            }
+            return;
+        }
+        if (refHolder->string_base) {
+            auto stored = detail::store_string_element(*refHolder, value, engine_);
+            if (!stored) {
+                throw runtime_error(format_error(stored, *engine_->get_symbolizer()));
             }
             return;
         }

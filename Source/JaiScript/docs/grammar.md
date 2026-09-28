@@ -911,13 +911,15 @@ string healthLevel = health > 75 ? "healthy" :
 13. **Collection Literals**: arrays always use `[...]`; maps use `{...}` with either
     `{key, value}` entries or JSON-style `key: value` pairs.
 14. **Subscript Operations**: Full support for array/map subscripting with both read and write
-    operations; `operator[]` is overloadable on script classes. Strings support READ-ONLY
-    char subscript: `s[i]` yields a `char` (bounds-checked like arrays: "String index {i}
+    operations; `operator[]` is overloadable on script classes. Strings support char
+    subscript: `s[i]` yields a `char` (bounds-checked like arrays: "String index {i}
     out of bounds for string of size {n}"; negative indices are out of bounds — `at(i)`
-    keeps its negative-index normalization and returns a 1-char string). `s[i] = c` is a
-    clear error ("Strings are read-only through subscript") — strings share storage under
-    copy; a subscript write would go through the same copy-on-write gate the mutators and
-    `+=` use (`docs/invariants.md` 11); possible future work. `char`
+    keeps its negative-index normalization and returns a 1-char string). As a store target
+    `s[i] = c` replaces byte i and `s[i] = text` replaces byte i with the whole text (a
+    `utf8_string` counts characters); compound stores read, apply and write back. The target
+    read mints a STRING-ELEMENT reference pinned through the base (its own reference, a
+    field/property reference, or the boxed variable cell) and the write goes through the
+    copy-on-write gate (`docs/invariants.md` 11; `detail/string_element.hpp`). `char`
     supports the full comparison set including ordering (`c >= '1' && c <= '9'`);
     char-vs-int ordering is deliberately an error (no silent promotion).
 15. **Parallel Builtins and the `parallel_for` statement**: `parallel_transform(arr, fn)` and

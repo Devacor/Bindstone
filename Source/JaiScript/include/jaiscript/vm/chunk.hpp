@@ -334,6 +334,18 @@ namespace jai::vm {
         // the guard's always form (op_operand_temp c = 2): the container's value is taken ahead of an index that may run user
         // code (a custom numeric operator, a getter, an operator[]), whatever the slot holds; the readers take the temp every time
         bool guard_always = false;
+        // op_index_store_fused: the store target's chunk::string_target_sites entry (k_invalid_u32 = none)
+        uint32_t string_target = k_invalid_u32;
+    };
+
+    // A subscript store target (op_index_store c, op_index_compound_fused c, op_index_store_fused's
+    // proto): a string base mints a STRING-ELEMENT reference pinned through the base
+    // (detail/string_element.hpp) - an identifier base through its slot and symbol (the
+    // string receiver ladder), a member base through the ref-lvalue kernel on the node
+    struct string_target_site {
+        uint32_t node = k_invalid_u32;          // chunk::nodes index of the subscript binary_expr
+        uint32_t base_slot = k_invalid_u32;     // identifier base: frame slot (k_invalid_u32 = env)
+        uint32_t base_symbol = k_invalid_u32;   // identifier base: chunk::symbols index
     };
 
     struct chunk {
@@ -512,6 +524,7 @@ namespace jai::vm {
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;
         std::vector<fused_index_proto> fused_index_protos;
+        std::vector<string_target_site> string_target_sites;
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
         // an inlined leaf (docs/typed_regions_design.md, Inlined leaves): the guard at guard_ip admits [begin_ip, fallback_ip) when the callee

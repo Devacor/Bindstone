@@ -580,6 +580,14 @@ engine stays usable", not by `check_throws`.
   `detail::k_whitespace_text`); `s.split(sep)` cuts at the exact separator and keeps empties; `s.split("")` splits into
   characters (bytes for string, characters for utf8_string); an optional max-splits argument leaves the rest in the last
   piece; `explode` is a synonym for every form.
+- **String subscript stores** (guide ch. 9): `s[i] = 'c'` replaces byte i, `s[i] = "text"` replaces
+  byte i with the whole text (`"hello"` with `s[2] = "ll"` is `"helllo"`); `s[i] op= v` reads the char, applies op and writes
+  back (`s[2] += "ll"` is `"hellllo"`); on a utf8_string `u[i]` names character i whatever its width. The store-target read
+  mints a STRING-ELEMENT reference (`reference_holder::string_base` pins the base: its own reference, a field/property
+  reference via the ref-lvalue kernel, or the variable cell boxed like a ref bind; VM sites `chunk::string_target_sites`,
+  `index_flag_string_target`) and `detail/string_element.hpp` writes through the copy-on-write gates, so copies never see
+  it. Anything but a char or text raises `Cannot assign int to a string character (it takes a char or a string)` (strict
+  checker: a load error on a declared string); a temporary base keeps `Cannot assign to rvalue expression`.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

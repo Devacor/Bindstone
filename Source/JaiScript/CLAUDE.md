@@ -357,7 +357,16 @@ engine stays usable", not by `check_throws`.
   lane (vm member IC, field proofs — `class_definition::user_accessor`), is a non-lvalue to
   references, and adding/removing an accessor on hot reload takes effect for existing instances.
 - Functions & lambdas with captures (`[=]`/`[&]`, auto-capture), variadics, default args,
-  by-reference params.
+  by-reference params. A default capture (`[=]`, `[&]`, bare `[]`) never captures a program-scope name: the
+  lambda reads it when it runs; `[g]` copies it at creation and an init-capture `[x = e]` copies `e` into the
+  lambda's own `x` (Dev ruling 2026-09-27, `docs/closures_and_captures.md`, `.jaibite` version 23).
+- **Evaluation order** (Dev rulings 2026-09-27, C++17): arguments left to right after the callee, each taking
+  its value when evaluated; an assignment `t = e` / `t op= e` evaluates `e` before every part of the target
+  (a member's receiver, a static, a namespace variable, a subscript's container and index). `auto x = e` takes
+  `e`'s static type; a `var` or unknown static type makes `x` a `var` (`docs/invariants.md` 12-14).
+- **Access control** (Dev ruling 2026-09-27): `public:` for everyone, `private:` (and its synonym `protected:`)
+  for the declaring class and every class derived from it; outside that family every access raises
+  `Cannot access private member 'x' of class 'C'`, a load error when the checker knows the receiver's class.
 - Script classes: inheritance with `super()`, ctor overloading + `: this(...)` delegation,
   field-init in **declaration order**, static members/methods, hot reload with instance migration.
 - **Declarations without an initializer** (Dev ruling 2026-09-26): `T x;` takes its type's default - a class

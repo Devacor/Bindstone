@@ -259,6 +259,52 @@ namespace detail {
 		}
 		return static_cast<T*>(native_cast_or_throw(checked_native_reference(val, typeid(T), target_id), val.get_engine()));
 	}
+
+	template<typename ValueT>
+	script_value script_value_from_cpp(const ValueT& value, engine* eng) {
+		if constexpr (std::is_same_v<ValueT, int> || std::is_same_v<ValueT, int32_t>) {
+			return script_value(static_cast<script_int>(value), eng);
+		} else if constexpr (std::is_same_v<ValueT, int64_t>) {
+			return script_value(value, eng);
+		} else if constexpr (std::is_same_v<ValueT, uint64_t> || std::is_same_v<ValueT, uint32_t> ||
+							std::is_same_v<ValueT, uint16_t> || std::is_same_v<ValueT, uint8_t> ||
+							std::is_same_v<ValueT, int16_t> || std::is_same_v<ValueT, int8_t>) {
+			return script_value(static_cast<script_int>(value), eng);
+		} else if constexpr (std::is_same_v<ValueT, float>) {
+			return script_value(static_cast<script_float>(value), eng);
+		} else if constexpr (std::is_same_v<ValueT, double>) {
+			return script_value(static_cast<script_float>(value), eng);
+		} else if constexpr (std::is_same_v<ValueT, bool>) {
+			return script_value(value, eng);
+		} else if constexpr (std::is_same_v<ValueT, std::string>) {
+			return script_value(value, eng);
+		} else {
+			return value_converter<ValueT>::to(value, eng);
+		}
+	}
+
+	// Out of line (schema_binding.cpp) so each registrar TU no longer instantiates the 13 primitive binders.
+	struct schema_property_access {
+		void* (*extract)(const script_value&, uint64_t);
+		property_base* (*find)(void*, const std::string&);
+		property_manager* (*manager)(void*);
+	};
+
+	template<typename T>
+	void* schema_extract(const script_value& val, uint64_t target_id) {
+		return extract_cpp_object_ptr<T>(val, target_id);
+	}
+	template<typename T>
+	property_base* schema_find(void* self, const std::string& name) {
+		return static_cast<T*>(self)->find_reflected_property(name);
+	}
+	template<typename T>
+	property_manager* schema_manager(void* self) {
+		return &static_cast<T*>(self)->property_mgr;
+	}
+
+	bool bind_schema_primitive_property(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
+		const std::string& prop_name, std::type_index value_type, bool is_observable, const schema_property_access& access);
 } // namespace detail
 
 // ============================================================================
@@ -1303,6 +1349,7 @@ private:
     void bind_properties_from_schema() {
         // Get the schema for this type (includes inherited properties)
         auto all_props = type_registry::instance().all_properties<T>();
+        const detail::schema_property_access access{ &detail::schema_extract<T>, &detail::schema_find<T>, &detail::schema_manager<T> };
 
         for (const auto* prop_meta : all_props) {
             if (!prop_meta) continue;
@@ -1318,24 +1365,9 @@ private:
                 continue;
             }
 
-            // Dispatch to the appropriate template based on value type
-            // We use a type-switch here because we have runtime type_index
-            if (!try_bind_property_typed<int>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<float>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<double>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<bool>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<std::string>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<int64_t>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<uint64_t>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<int32_t>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<uint32_t>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<int16_t>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<uint16_t>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<int8_t>(prop_name, value_type, is_observable) &&
-                !try_bind_property_typed<uint8_t>(prop_name, value_type, is_observable)) {
-                // No primitive matched: non-primitive property types are bound manually.
-                // (The chain above is evaluated for its binding side effects.)
-            }
+            // Non-primitive property types are bound manually.
+            detail::bind_schema_primitive_property(engine_, *class_def_, serialization_metadata_,
+                prop_name, value_type, is_observable, access);
         }
     }
 
@@ -1379,216 +1411,9 @@ private:
         property(prop_name, std::move(getter), nullptr);
     }
 
-    // Try to bind a property if the value type matches ValueT
-    // Returns true if bound, false if type doesn't match
-    // For observable properties, also binds an observation method
-    template<typename ValueT>
-    bool try_bind_property_typed(const std::string& prop_name, std::type_index value_type, bool is_observable) {
-        if (value_type != std::type_index(typeid(ValueT))) {
-            return false;
-        }
-
-        engine* eng = &engine_;
-
-        // For observable properties, register the wrapper type and use a different getter
-        if (is_observable) {
-            // Ensure the observable_property_ref<ValueT> type is registered
-            ensure_observable_ref_type_registered<ValueT>();
-
-            // Create getter that returns the wrapper for observable properties
-            // This enables player.score.on_change(callback) syntax.
-            // Lookup is find_reflected_property (virtual, whole chain) so BASE-level
-            // properties resolve through DERIVED registrations in any registration
-            // order — the same rule the signal property view already follows. The
-            // wrapper's manager stays the registration level's (receiver-lifetime
-            // anchor only; every level's manager shares the object's lifetime).
-            auto getter = [prop_name, eng](T& self) -> script_value {
-                auto* base_prop = self.find_reflected_property(prop_name);
-                if (!base_prop) {
-                    return script_value(std::monostate{}, eng);
-                }
-                auto* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
-                if (!obs_prop) {
-                    return script_value(std::monostate{}, eng);
-                }
-                // Create an observable_property_ref wrapper and return it as a script object
-                auto ref = std::make_shared<observable_property_ref<ValueT>>(obs_prop, &self.property_mgr);
-                return eng->make_object(ref);
-            };
-
-            // Create setter that assigns through the property to trigger the signal
-            auto setter = [prop_name](T& self, ValueT val) {
-                jai::property_base* base_prop = self.find_reflected_property(prop_name);
-                if (!base_prop) return;
-                jai::observable_property<ValueT>* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
-                if (obs_prop) {
-                    *obs_prop = std::move(val);
-                }
-            };
-
-            property(prop_name, std::move(getter), std::move(setter));
-
-            // Also bind the legacy on_<prop>_change method for backwards compatibility
-            bind_observable_property<ValueT>(prop_name);
-        } else {
-            // Regular (non-observable) properties just return the value directly.
-            // Whole-chain lookup: see the observable getter's note above.
-            auto getter = [prop_name, eng](T& self) -> script_value {
-                if (auto* prop = dynamic_cast<jai::property<ValueT>*>(self.find_reflected_property(prop_name))) {
-                    return script_value_from_cpp(prop->get(), eng);
-                }
-                return script_value(std::monostate{}, eng);
-            };
-
-            auto setter = [prop_name](T& self, ValueT val) {
-                jai::property_base* base_prop = self.find_reflected_property(prop_name);
-                if (!base_prop) return;
-                jai::property<ValueT>* regular_prop = dynamic_cast<jai::property<ValueT>*>(base_prop);
-                if (regular_prop) {
-                    regular_prop->get() = std::move(val);
-                }
-            };
-
-            property(prop_name, std::move(getter), std::move(setter));
-        }
-
-        return true;
-    }
-
-    // Bind observation method for an observable property
-    // Allows scripts to connect callbacks that fire when the property changes
-    // Supports both:
-    //   - obj.on_score_change(callback)   (legacy API)
-    //   - obj.score.on_change(callback)   (new API via transparent wrapper)
-    template<typename ValueT>
-    void bind_observable_property(const std::string& prop_name) {
-        engine* eng = &engine_;
-        std::string observe_method_name = "on_" + prop_name + "_change";
-
-        // Method signature: on_<prop>_change(callback) where callback(old_value, new_value)
-        // The connection persists for the lifetime of the owner object
-        method(observe_method_name, [prop_name, eng](T& self, const script_value& callback) -> script_value {
-            if (!callback.is_function()) {
-                throw runtime_error("on_" + prop_name + "_change requires a function argument");
-            }
-
-            // Get the property_base by name and cast to observable_property
-            auto* base_prop = self.property_mgr.get(prop_name);
-            if (!base_prop) {
-                throw runtime_error("Property '" + prop_name + "' not found");
-            }
-
-            // Dynamic cast to observable_property to access the on_change signal
-            auto* obs_prop = dynamic_cast<observable_property<ValueT>*>(base_prop);
-            if (!obs_prop) {
-                throw runtime_error("Property '" + prop_name + "' is not observable");
-            }
-
-            // Capture the script function
-            const script_function& script_func = callback.as_function();
-
-            // Create a C++ callback that invokes the script function
-            // The observable_property's on_change signal passes (old_value, new_value)
-            auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
-                // Convert C++ values to script_values
-                script_value old_sv = script_value_from_cpp(old_val, eng);
-                script_value new_sv = script_value_from_cpp(new_val, eng);
-
-                // Call the script function
-                auto result = script_func({old_sv, new_sv});
-                // Ignore result (void callback)
-            };
-
-            // Connect to the signal and get the receiver
-            auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
-
-            // Track the receiver in property_manager so it lives as long as the owner
-            self.property_mgr.template track_receiver<void(const ValueT&, const ValueT&)>(recv);
-
-            return script_value(std::monostate{}, eng); // Return null (disconnect not yet supported)
-        });
-    }
-
-    // Register the observable_property_ref<ValueT> wrapper type if not already registered.
-    // This wrapper enables the player.score.on_change(callback) syntax by:
-    //   1. Having an on_change method for callback registration
-    //   2. Being a transparent wrapper that forwards operations to the underlying value
-    template<typename ValueT>
-    void ensure_observable_ref_type_registered() {
-        using RefType = observable_property_ref<ValueT>;
-
-        // Generate type name based on ValueT
-        std::string type_name = "observable_property_ref<" + std::string(typeid(ValueT).name()) + ">";
-
-        // Check if already registered (engine tracks registered types)
-        if (engine_.is_type_registered(type_name)) {
-            return;
-        }
-
-        // Register the wrapper type
-        dynamic_binder<RefType>(engine_, type_name)
-            // Transparent wrapper - unwraps to the value type for arithmetic, etc.
-            .transparent_wrapper([](RefType& self) -> ValueT {
-                return self.get();
-            })
-            // on_change method - connects a callback to the property's signal
-            .method("on_change", [](RefType& self, const script_value& callback) -> script_value {
-                if (!callback.is_function()) {
-                    throw runtime_error("on_change requires a function argument");
-                }
-
-                auto* obs_prop = self.property();
-                auto* prop_mgr = self.manager();
-                if (!obs_prop || !prop_mgr) {
-                    throw runtime_error("Invalid observable property reference");
-                }
-
-                engine* eng = callback.get_engine();
-                const script_function& script_func = callback.as_function();
-
-                // Create callback that invokes the script function
-                auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
-                    script_value old_sv = script_value_from_cpp(old_val, eng);
-                    script_value new_sv = script_value_from_cpp(new_val, eng);
-                    auto result = script_func({old_sv, new_sv});
-                };
-
-                // Connect and track the receiver
-                auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
-                prop_mgr->template track_receiver<void(const ValueT&, const ValueT&)>(recv);
-
-                return script_value(std::monostate{}, eng);
-            })
-            .build();
-    }
-
-    // Helper to convert C++ value to script_value
-    // For primitive types, uses direct construction for efficiency.
-    // For custom types (classes registered via jai::registrar), delegates to value_converter
-    // which uses the engine's type conversion registry.
     template<typename ValueT>
     static script_value script_value_from_cpp(const ValueT& value, engine* eng) {
-        if constexpr (std::is_same_v<ValueT, int> || std::is_same_v<ValueT, int32_t>) {
-            return script_value(static_cast<script_int>(value), eng);
-        } else if constexpr (std::is_same_v<ValueT, int64_t>) {
-            return script_value(value, eng);
-        } else if constexpr (std::is_same_v<ValueT, uint64_t> || std::is_same_v<ValueT, uint32_t> ||
-                            std::is_same_v<ValueT, uint16_t> || std::is_same_v<ValueT, uint8_t> ||
-                            std::is_same_v<ValueT, int16_t> || std::is_same_v<ValueT, int8_t>) {
-            return script_value(static_cast<script_int>(value), eng);
-        } else if constexpr (std::is_same_v<ValueT, float>) {
-            return script_value(static_cast<script_float>(value), eng);
-        } else if constexpr (std::is_same_v<ValueT, double>) {
-            return script_value(static_cast<script_float>(value), eng);
-        } else if constexpr (std::is_same_v<ValueT, bool>) {
-            return script_value(value, eng);
-        } else if constexpr (std::is_same_v<ValueT, std::string>) {
-            return script_value(value, eng);
-        } else {
-            // For custom types, use value_converter which handles registered classes
-            // This works for any type registered via jai::registrar
-            return detail::value_converter<ValueT>::to(value, eng);
-        }
+        return detail::script_value_from_cpp(value, eng);
     }
 
     // Helper to convert script_value to C++ type

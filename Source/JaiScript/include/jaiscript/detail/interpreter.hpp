@@ -1275,7 +1275,8 @@ namespace jai {
                                                       const expression* argExpr,
                                                       const std::shared_ptr<environment>& caller_env,
                                                       const script_value* evaluated_arg,
-                                                      unit_stamp caller_unit);
+                                                      unit_stamp caller_unit,
+                                                      const script_defined_function* callee = nullptr, size_t param_index = 0);
         // Share-or-box against the caller's variable storage (cell model)
         checked_result<void> bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot);
 

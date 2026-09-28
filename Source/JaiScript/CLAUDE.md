@@ -588,6 +588,17 @@ engine stays usable", not by `check_throws`.
   `index_flag_string_target`) and `detail/string_element.hpp` writes through the copy-on-write gates, so copies never see
   it. Anything but a char or text raises `Cannot assign int to a string character (it takes a char or a string)` (strict
   checker: a load error on a declared string); a temporary base keeps `Cannot assign to rvalue expression`.
+- **Inferred-const reference parameters** (guide ch. 3): a declared function's or method's `T&`
+  parameter that its body never writes through takes a literal or a temporary (bound to a temporary cell, C++ `const T&`
+  without the keyword); a variable still binds with no copy. ONE kernel `detail/ref_param_writes.hpp` decides: writes are
+  stores/compounds/`++` rooted at the parameter or a reference alias, a method call on it (reading builtins excepted on an
+  array/map/string parameter), passing it to a writing `&` parameter (transitive, recursion optimistic), a `shared_ptr`
+  parameter, a constructor or an unseen callee (lambda, host function, user method, overloaded name; print/to_string,
+  `math::`/`string::` and container builtins copy), or a reference return. The checker (resolving this unit's,
+  the program's, then the engine's functions; a method counts every override in derived classes) reports a literal for a
+  writer as `'set_name' writes through parameter 'name' (line 12); pass a variable`; both backends bind by the same
+  verdict, cached on the `parameter` against `engine::definition_epoch()` (a redefinition re-derives it). Lambdas and
+  host functions keep `Cannot pass non-lvalue to reference parameter`.
 - **Runtime diagnostics** (`docs/diagnostics.md`): one catalog of every runtime error text, byte-identical
   on both backends. Null receiver / "no member" / arity+overload / typed-boundary texts name the
   action, the slot and the concrete type (`Cannot call 'push' on null ('v8' is null)`, `Vec2 has no

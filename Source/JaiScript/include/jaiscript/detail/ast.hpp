@@ -104,6 +104,10 @@ namespace jai {
         bool ref_escaping = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
+        // A reference parameter the body never writes through takes a temporary
+        // (detail/ref_param_writes.hpp): the verdict and the definition epoch it was derived at
+        mutable uint64_t temporary_epoch = 0;
+        mutable bool takes_temporary = false;
         expression_ptr default_value;
 
         parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)

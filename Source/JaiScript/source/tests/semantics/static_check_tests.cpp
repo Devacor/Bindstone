@@ -1716,26 +1716,57 @@ public:
             }
         });
 
-        test("a_literal_passed_to_a_reference_parameter_is_reported_at_check_time", [this]() {
-            const std::string decl = "int index_of_name(array<string>& names, string n, int def) { return def; }\n";
+        test("a_literal_binds_a_reference_parameter_the_callee_never_writes_through", [this]() {
+            // inferred-const reference parameters: a declared function or method that never writes through its T& parameter
+            // takes a literal or a temporary (bound to a temporary cell); one that writes keeps needing a variable, and the
+            // strict load names the write
+            const std::string decl = "int index_of_name(array<string>& names, string n, int def) { for (int i = 0; i < names.size(); ++i) { if (names[i] == n) { return i; } } return def; }\n";
             for (bool proofs : {true, false}) {
                 auto e = make_engine();
                 e->type_proofs(proofs);
-                auto r = e->check(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);");
+                auto run = [&](const std::string& src) { return e->execute(src).to_string(); };
+                check_eq((size_t)0, error_count(e->check(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);")));
+                check_eq(std::string("1"), run(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);"));
+                check_eq(std::string("hi bob|hi ab"), run("string greet(string& name) { return \"hi \" + name; }\ngreet(\"bob\") + \"|\" + greet(\"a\" + \"b\");"));
+                check_eq(std::string("43"), run("int len(string& s) { return s.size(); }\nint outer(string& s) { return len(s); }\n"
+                                                "int count(array<int>& xs, int i) { if (i >= xs.size()) { return 0; } return 1 + count(xs, i + 1); }\n"
+                                                "outer(\"abcd\") * 10 + count([5, 6, 7], 0);"));
+                check_eq(std::string("true"), run("bool same(array<int>& a, array<int>& b) { return same_object(a, b); }\nvoid grow(array<int>& xs) { xs.push(4); }\n"
+                                                  "array<int> v = [1];\nbool s = same(v, v);\ngrow(v);\ns && v.size() == 2;"));
+                check_eq(std::string("true"), run("class P { string name = \"p\"; bool is(string& n) { return name == n; } }\nP p = P();\np.is(\"p\");"));
+
+                auto r = e->check("void inc(int& x) { x = x + 1; }\ninc(5);");
                 check_eq((size_t)1, error_count(r));
-                check_true(has_diag(r, dlevel::error, "cannot pass a literal to reference parameter 'names' of 'index_of_name'"), r.format());
-                check_eq((size_t)1, error_count(e->check("void inc(int& x) { x = x + 1; }\ninc(5);")));
+                check_true(has_diag(r, dlevel::error, "'inc' writes through parameter 'x' (line 1); pass a variable"), r.format());
+                check_true(has_diag(e->check("void shout(string& s) { s.to_upper(); }\nshout(\"hi\");"), dlevel::error, "'shout' writes through parameter 's' (line 1)"));
+                check_true(has_diag(e->check("void set0(string& s) { s = \"x\"; }\nvoid outer2(string& s) {\n    set0(s);\n}\nouter2(\"lit\");"), dlevel::error,
+                                    "'outer2' writes through parameter 's' (line 3); pass a variable"));
+                check_eq((size_t)1, error_count(e->check("void clear_all(array<int>& xs) { auto& r = xs; r.clear(); }\nclear_all([1]);")));
                 check_eq((size_t)1, error_count(e->check("class K { void put(string& s) { s = \"\"; } }\nK k = K();\nk.put(\"lit\");")));
+                const std::string log = "class Log { string last = \"\"; void say(string& m) { last = m; } }\n";
+                check_eq((size_t)0, error_count(e->check(log + "Log l = Log();\nl.say(\"hi\");")));
+                check_true(has_diag(e->check(log + "class Loud : Log { void say(string& m) override {\n    m = m + \"!\";\n} }\nLog l = Log();\nl.say(\"hi\");"), dlevel::error,
+                                    "'say' writes through parameter 'm' (line 3); pass a variable"), "an override that writes makes the method's parameter a writer");
                 check_eq((size_t)0, error_count(e->check(decl + "array<string> names = [\"a\"];\nindex_of_name(names, \"a\", 0);")));
                 check_eq((size_t)0, error_count(e->check("void inc(int& x) { x = x + 1; }\nvoid inc(int x, int y) { }\nint v = 1;\ninc(v);")));
                 check_eq((size_t)0, error_count(e->check("coroutine int gen(int& x) { yield x + 1; }\nauto g = gen(6);")), "a coroutine binds a copy of the argument");
-                // the runtime keeps its verdict: warn mode reports the diagnostic and the call still raises
+
+                // the runtime binds by the same verdict: a writer refuses a temporary, a lambda keeps needing a variable,
+                // and a redefinition that adds a write is seen on the next call
+                check_eq(std::string("Cannot pass non-lvalue to reference parameter"),
+                         run("void set_name(string& name) { name = \"x\"; }\nstring g() { return \"a\"; }\nvar m = \"\";\ntry { set_name(g()); } catch (err) { m = err; }\nm;"));
+                check_eq(std::string("Cannot pass non-lvalue to reference parameter"),
+                         run("auto lf = [](string& s) { return s.size(); };\nvar m = \"\";\ntry { lf(\"abc\"); } catch (err) { m = err; }\nm;"));
+                check_eq(std::string("2"), run("int peek(string& s) { return s.size(); }\nstring g2() { return \"ab\"; }\npeek(g2());"));
+                run("int peek(string& s) { s = \"zzz\"; return 0; }");
+                check_eq(std::string("Cannot pass non-lvalue to reference parameter"), run("var m = \"\";\ntry { peek(g2()); } catch (err) { m = err; }\nm;"));
+
                 auto w = make_engine();
                 w->type_proofs(proofs);
                 w->static_checking(check_mode::warn);
                 check_eq(std::string("Cannot pass non-lvalue to reference parameter"),
-                         w->execute(decl + "var m = \"\";\ntry { index_of_name([\"a\"], \"a\", 0); } catch (e) { m = e; }\nm;").to_string());
-                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "cannot pass a literal to reference parameter 'names'"));
+                         w->execute("void inc(int& x) { x = x + 1; }\nvar m = \"\";\ntry { inc(5); } catch (err) { m = err; }\nm;").to_string());
+                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "'inc' writes through parameter 'x' (line 1); pass a variable"));
             }
         });
 

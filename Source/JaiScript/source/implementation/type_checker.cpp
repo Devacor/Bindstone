@@ -20,6 +20,8 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/detail/ref_param_writes.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -467,6 +469,44 @@ private:
     std::vector<fn_ctx> fn_stack_;
     sclass* class_ctx_ = nullptr;
     std::string_view class_ctx_name_{};
+    std::string_view ov_class_{};   // the class whose methods infer_call_impl resolved the call to (empty: not a method call)
+
+    static ref_write_callee ref_write_callee_of(const function_decl* f) {
+        return ref_write_callee{&f->parameters, f->body.get(), f->name, false, f->is_coroutine};
+    }
+    // detail/ref_param_writes.hpp with the checker's names: this unit's function, then the program's, then the engine's;
+    // an overloaded name is not seen (the backends' global lookup cannot see an overload set either)
+    ref_param_write ref_writes(const function_decl* fn, size_t i) {
+        ref_write_analysis analysis([this](const identifier_expr& id, std::vector<ref_write_callee>& out) {
+            if (auto it = functions_.find(id.name); it != functions_.end()) {
+                if (it->second.size() != 1) { return false; }
+                out.push_back(ref_write_callee_of(it->second.front()));
+                return true;
+            }
+            if (program_functions_) {
+                if (auto pit = program_functions_->find(std::string(id.name)); pit != program_functions_->end()) {
+                    if (pit->second.size() != 1 || pit->second.begin()->second.size() != 1) { return false; }
+                    out.push_back(ref_write_callee_of(pit->second.begin()->second.front().get()));
+                    return true;
+                }
+            }
+            return resolve_global_ref_write_callee(eng_, id, out);
+        });
+        return analysis.analyze(ref_write_callee_of(fn), i);
+    }
+    // every method named `name` a class derived from `cls` declares (a call through a `cls` receiver may reach any)
+    std::vector<const function_decl*> overrides_of(std::string_view cls, std::string_view name) {
+        std::vector<const function_decl*> out;
+        for (const auto* table : {&classes_, &program_sclasses_}) {
+            for (const auto& [cname, sc] : *table) {
+                if (cname == cls || class_relation(cname, cls) != 1) { continue; }
+                if (auto m = sc.methods.find(name); m != sc.methods.end()) {
+                    for (const auto* f : m->second) { out.push_back(f); }
+                }
+            }
+        }
+        return out;
+    }
 
     // -------------------------------------------------------------- diagnostics
 
@@ -2631,7 +2671,9 @@ private:
         args.reserve(c->arguments.size());
         for (auto& a : c->arguments) { args.push_back(infer(a.get())); }
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
+        ov_class_ = {};
         ctype t = infer_call_impl(c, args, ov);
+        const std::string_view ov_class = ov ? ov_class_ : std::string_view{};
         bool free_callee = false;   // resolved through the program's free functions (a method by its bare name, a constructor: never inlined)
         if (ov && c->callee && c->callee->get_type() == node_type::identifier_expr) {
             auto it = functions_.find(static_cast<identifier_expr*>(c->callee.get())->name);
@@ -2700,22 +2742,31 @@ private:
                 }
                 if (viable && aliasing) { map_key_alias(c->arguments[i]->location, c->arguments[i].get()); }
             }
-            // a literal where every viable overload binds the parameter by reference: the runtime refuses the call
-            // (Cannot pass non-lvalue to reference parameter), so the load reports it, naming the parameter
+            // a literal where every viable overload binds the parameter by reference: it binds a temporary when the
+            // callee (every override of a method) never writes through the parameter, else the load reports the write
             for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
                 const node_type k = c->arguments[i]->get_type();
                 if (k != node_type::literal_expr && k != node_type::array_literal_expr && k != node_type::map_literal_expr) { continue; }
-                const function_decl* by_ref = nullptr;
+                std::vector<const function_decl*> by_ref;
                 bool all_ref = false;
                 for (const auto* fn : *ov) {
                     if (!script_fn_viable(fn, args)) { continue; }
                     all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference;   // a coroutine binds a copy
                     if (!all_ref) { break; }
-                    by_ref = fn;
+                    by_ref.push_back(fn);
                 }
-                if (all_ref && by_ref) {
-                    diag(diag_level::error, c->arguments[i]->location, "cannot pass a literal to reference parameter '" +
-                         by_ref->parameters[i].name + "' of '" + std::string(by_ref->name) + "' (a reference parameter binds a variable)");
+                if (!all_ref || by_ref.empty()) { continue; }
+                if (!ov_class.empty()) {
+                    for (const auto* fn : overrides_of(ov_class, by_ref.front()->name)) { by_ref.push_back(fn); }
+                }
+                for (const auto* fn : by_ref) {
+                    if (i >= fn->parameters.size() || !fn->parameters[i].is_reference || fn->is_coroutine) { continue; }
+                    const ref_param_write w = ref_writes(fn, i);
+                    if (w.writes) {
+                        diag(diag_level::error, c->arguments[i]->location, "'" + std::string(fn->name) + "' writes through parameter '" +
+                             fn->parameters[i].name + "' (line " + std::to_string(w.line) + "); pass a variable");
+                        break;
+                    }
                 }
             }
         }
@@ -2740,7 +2791,7 @@ private:
 					if (global_tier_name(id->name)) { return {}; }
 					if (access_denied(hit, id->name, id->location)) { return {}; }
 					if (hit.methods) {
-						if (hit.provable) { ov = hit.methods; }
+						if (hit.provable) { ov = hit.methods; ov_class_ = class_ctx_name_; }
 						ctype r = check_script_overloads(id->name, *hit.methods, args, c->location, hit.foreign).result;
 						if (!hit.provable) { r.tentative = true; }
 						return r;
@@ -2803,7 +2854,7 @@ private:
 				if (!hit.found && !want_static && chain_has_user_accessor(recv.cls, m->member)) { return {}; }   // calling what a user _get_ returns
 				if (hit.found) {
 					if (hit.methods) {
-						if (hit.provable) { ov = hit.methods; }
+						if (hit.provable) { ov = hit.methods; ov_class_ = recv.cls; }
 						ctype r = check_script_overloads(m->member, *hit.methods, args, c->location, hit.foreign).result;
 						if (!hit.provable) { r.tentative = true; }
 						return r;

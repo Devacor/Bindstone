@@ -779,6 +779,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		walker.on_declared = [this](uint64_t id) { callable_.declared.insert(id); };
 		walker.stmt(body);
 	}
+	infer_local_kinds(parameters, body.get(), local_count);
 
 	// Default arguments compile as standalone expression chunks evaluated at call time
 	chunk_->param_default_chunks.resize(parameters.size());

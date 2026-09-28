@@ -324,7 +324,26 @@ struct site_walk {
 	std::vector<def> defs;
 	std::vector<const expression*> returns;
 	bool ok = true;
+	const engine* eng = nullptr;           // the registered stdlib aliases
 };
+
+script_value_type walk_kind(const expression* e, const site_walk& w);
+
+// every open slot keeps its kind only while each of its definitions yields that kind under the kinds so far, to a fixpoint
+void settle(site_walk& w) {
+	using K = script_value_type;
+	for (bool changed = true; changed;) {
+		changed = false;
+		for (const site_walk::def& d : w.defs) {
+			if (!w.open[d.slot] || w.kind[d.slot] == K::jai_null_type) continue;
+			const K cur = w.kind[d.slot];
+			const K k = d.op == token_type::equal ? walk_kind(d.value, w)
+			          : d.op == token_type::plus_plus ? (cur == K::jai_int_type || cur == K::jai_float_type ? cur : K::jai_null_type)
+			          : arith_kind(d.op, cur, walk_kind(d.value, w));
+			if (k != cur) { w.kind[d.slot] = K::jai_null_type; changed = true; }
+		}
+	}
+}
 
 script_value_type walk_kind(const expression* e, const site_walk& w) {
 	return kind_of(e, [&w](size_t s) { return s < w.kind.size() ? w.kind[s] : script_value_type::jai_null_type; }, nullptr, script_value_type::jai_null_type);
@@ -379,7 +398,10 @@ void walk_expr(const expression* e, site_walk& w) {
 	case node_type::cast_expr: walk_expr(static_cast<const cast_expr*>(e)->operand.get(), w); return;
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e);
-		const bool by_value = math_call(ce) || (ce->callee && ce->callee->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(ce->callee.get())->slot_index == SIZE_MAX && ce->arguments.size() == 1 && !ever_stamped(ce->proven_callee_decl));
+		// a name passed to a call keeps its kind only where the call provably binds it by value: a math:: intrinsic, a stdlib alias (while
+		// its name binds the builtin, its guard's condition), a by-value parameter of the callee the checker proved (its guard's condition);
+		// any other call may bind it by reference
+		const bool by_value = math_call(ce) || alias_call(ce, w.eng);
 		const std::shared_ptr<const function_decl> callee = ever_stamped(ce->proven_callee_decl) ? ce->proven_callee_decl.lock() : nullptr;
 		for (size_t i = 0; i < ce->arguments.size(); ++i) {
 			const bool ref = callee ? (i >= callee->parameters.size() || callee->parameters[i].is_reference) : !by_value;
@@ -420,7 +442,9 @@ void walk_decls(const std::vector<declaration_ptr>& decls, site_walk& w) {
 		case node_type::variable_decl: {
 			auto* v = static_cast<const variable_decl*>(d.get());
 			walk_expr(v->initializer.get(), w);
+			if (v->type && v->type->is_reference()) { walk_unknown(v->initializer.get(), w); }
 			if (v->slot_index >= w.kind.size()) break;
+			if (v->ref_escaping) { w.kind[v->slot_index] = script_value_type::jai_null_type; break; }   // a reference or a capture may write it
 			const bool reference = v->type && v->type->is_reference();
 			if (scalar_type(v->type.get()) && !reference) { w.kind[v->slot_index] = v->type->base_type; break; }
 			if (!any_type(v->type.get()) || reference || v->is_static || !v->initializer) { w.kind[v->slot_index] = script_value_type::jai_null_type; break; }
@@ -997,9 +1021,12 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		}
 		default: {
 			const script_value_type kind = spill_kind(p.get());
-			if (kind == script_value_type::jai_null_type || !landable(p.get(), &plain)) { out.why = "an operand before the call the block cannot spill"; return false; }   // a spill is a block instruction of a known kind
-			out.spills.emplace_back(p, kind);
-			break;
+			if (kind != script_value_type::jai_null_type && landable(p.get(), &plain)) { out.spills.emplace_back(p, kind); break; }   // a spill is a block instruction of a known kind
+			if (p->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(p.get())->op.type == token_type::left_bracket && fusable_index_expr(p.get())) {
+				out.spills.emplace_back(p, script_value_type::jai_array_type);   // an element read of no proven kind: the fused read into a temp, the value as it stands
+				break;
+			}
+			out.why = "an operand before the call the block cannot spill"; return false;
 		}
 		}
 	}
@@ -1069,8 +1096,29 @@ script_value_type vm_compiler::arg_kind(const expression* a, const std::vector<c
 		const type_info* t = nullptr;
 		if (frame) { t = s < frame->size() ? (*frame)[s] : nullptr; }
 		else if (const auto it = callable_.slot_types.find(static_cast<uint32_t>(s)); it != callable_.slot_types.end()) { t = it->second; }
-		return scalar_type(t) ? t->base_type : script_value_type::jai_null_type;
+		if (scalar_type(t)) return t->base_type;
+		return !frame && s < callable_.slot_kinds.size() ? callable_.slot_kinds[s] : script_value_type::jai_null_type;
 	}, nullptr, script_value_type::jai_null_type));
+}
+
+// the kinds a callable's untyped locals certainly hold: a `var` local every definition of which (its initializer, each store, each
+// increment) yields one scalar kind from the kinds of the names it reads, to a fixpoint; a local a call may bind by reference, a reference
+// or a capture reaches has none, and a body the walk does not open gives none. A stamp's input (every consumer guards it), never a declaration
+void vm_compiler::infer_local_kinds(const std::vector<parameter>& parameters, const block_stmt* body, size_t local_count) {
+	callable_.slot_kinds.clear();
+	if (!body || !ir_passes_ || !typed_lowering_) return;
+	site_walk w;
+	w.eng = engine_;
+	w.kind.assign(local_count, script_value_type::jai_null_type);
+	w.open.assign(local_count, 0);
+	for (const parameter& p : parameters) {
+		if (p.slot_index < local_count && !p.is_reference && !p.ref_escaping && scalar_type(p.type.get())) { w.kind[p.slot_index] = p.type->base_type; }
+	}
+	walk_decls(body->declarations, w);
+	if (!w.ok) return;
+	settle(w);
+	for (size_t s = 0; s < local_count; ++s) { if (!w.open[s]) { w.kind[s] = script_value_type::jai_null_type; } }   // a declared slot's kind is its declaration's
+	callable_.slot_kinds = std::move(w.kind);
 }
 
 // the kinds a callee's slots take at the site: a scalar parameter or local its declared type, an untyped by-value parameter its argument's
@@ -1081,6 +1129,7 @@ std::vector<script_value_type> vm_compiler::site_kinds(const call_expr* call, co
 	if (result) { *result = K::jai_null_type; }
 	if (!fn || !fn->body) return {};
 	site_walk w;
+	w.eng = engine_;
 	w.kind.assign(fn->local_count, K::jai_null_type);
 	w.open.assign(fn->local_count, 0);
 	for (size_t i = 0; i < fn->parameters.size() && i < call->arguments.size(); ++i) {
@@ -1093,17 +1142,7 @@ std::vector<script_value_type> vm_compiler::site_kinds(const call_expr* call, co
 	}
 	walk_decls(fn->body->declarations, w);
 	if (!w.ok) return {};
-	for (bool changed = true; changed;) {
-		changed = false;
-		for (const site_walk::def& d : w.defs) {
-			if (!w.open[d.slot] || w.kind[d.slot] == K::jai_null_type) continue;
-			const K cur = w.kind[d.slot];
-			const K k = d.op == token_type::equal ? walk_kind(d.value, w)
-			          : d.op == token_type::plus_plus ? (cur == K::jai_int_type || cur == K::jai_float_type ? cur : K::jai_null_type)
-			          : arith_kind(d.op, cur, walk_kind(d.value, w));
-			if (k != cur) { w.kind[d.slot] = K::jai_null_type; changed = true; }
-		}
-	}
+	settle(w);
 	if (result && !w.returns.empty()) {
 		K r = scalar_kind(walk_kind(w.returns.front(), w));
 		for (const expression* v : w.returns) { if (scalar_kind(walk_kind(v, w)) != r) { r = K::jai_null_type; break; } }
@@ -1239,6 +1278,26 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			auto* pc = static_cast<const call_expr*>(sub.get());
 			callee_probes_[pc] = { static_cast<uint32_t>(emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(pc->arguments.size()))), 0u };
 			pinned.push_back(pc);
+			continue;
+		}
+		if (kind == script_value_type::jai_array_type) {
+			// an element read of no proven kind, read where the statement reads it: the fused read's value into a temp (the general read
+			// into one when the fused shape is refused)
+			fused_operand landed;
+			if (!compile_subscript_into_temp(sub, 0xFF, landed)) {
+				compile_expression(sub);
+				landed = fused_operand{};
+				landed.slot = static_cast<uint32_t>(temp_next_++);
+				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+				emit(opcode::op_call_temp, landed.slot);
+			}
+			if (inline_symbol_ == 0) { inline_symbol_ = symbolizer_->intern("\x01inl"); }
+			callable_.declared.insert(inline_symbol_);
+			auto tid = std::make_shared<identifier_expr>(sub->location, std::string_view("\x01inl"), inline_symbol_);
+			tid->slot_index = landed.slot; tid->names_value_decl = true;
+			callable_.slot_types.erase(landed.slot);
+			chunk_->nodes.push_back(tid);
+			sc.spills.emplace_back(sub.get(), tid);
 			continue;
 		}
 		auto tid = inline_temp(sub->location);

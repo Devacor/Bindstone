@@ -2760,6 +2760,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string lights = R"(
 				var LT_MAX = [200, 180, 160, 140]; var LT_MIN = [100, 90, 80, 70]; var SE_LIGHT = [0, 0, 0, 0]; var LT_CNT = [1, 2, 1, 3]; var LT_SEC = [0, 1, 2, 3]; var LT_KIND = [0, 1, 2, 0];
 				function jitter(int k) -> int { return k % 3 + 1; }
+				function wobble(int k) -> int { for (int q = 0; q < 1; ++q) { if (q > 5) { return 0; } } return k % 3 + 1; }
 				var tic = function() {
 					int n = LT_SEC.size();
 					for (int i = 0; i < n; ++i) {
@@ -2770,7 +2771,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 							if (SE_LIGHT[s] == LT_MAX[i]) { SE_LIGHT[s] = LT_MIN[i]; LT_CNT[i] = jitter(i); }
 							else { SE_LIGHT[s] = LT_MAX[i]; LT_CNT[i] = jitter(i + 1); }
 						} else {
-							int l2 = LT_MAX[i] - jitter(i) * 16;
+							int l2 = LT_MAX[i] - wobble(i) * 16;
 							if (l2 < LT_MIN[i]) { l2 = LT_MIN[i]; }
 							SE_LIGHT[s] = l2; LT_CNT[i] = 4;
 						}
@@ -2785,13 +2786,24 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string k = listing_of(lights);
 			size_t bails = 0, last_bail = std::string::npos;
 			for (size_t at = k.find("C_BAIL"); at != std::string::npos; at = k.find("C_BAIL", at + 1)) { ++bails; last_bail = at; }
-			// row 153: the two element stores of jitter's result graft (their arguments are locals), while `int l2 = LT_MAX[i] - jitter(i) * 16`
-			// stands behind `LT_MAX[i]`, an element read of a var array with no kind to spill, so it keeps its call and its bail, standing for
-			// the rest of its arm (the skips after it in the region's listing)
+			// row 153: the two element stores of jitter's result graft (their arguments are locals), while `int l2 = LT_MAX[i] - wobble(i) * 16`
+			// keeps its call (wobble returns inside a loop) and its bail, standing for the rest of its arm (the skips after it in the region's
+			// listing)
 			(void)last_bail;
 			size_t jitter_grafts = 0; for (size_t at = k.find("-- inlined jitter"); at != std::string::npos; at = k.find("-- inlined jitter", at + 1)) { ++jitter_grafts; }
 			check_true(bails == 1 && jitter_grafts == 2 && k.find("-- open loop") == std::string::npos && k.find("bail->exit;") != std::string::npos && k.find("bail->exit;") < k.find("skip;", k.find("bail->exit;")),
 			           "the light loop closes with one bail standing for the rest of its arm and two jitter grafts: " + k);
+			// the same declaration over a leaf: `LT_MAX[i]`, an element read of a var array with no proven kind, reads into a temp ahead of
+			// the graft, so jitter grafts there too and the arm needs no bail
+			std::string graft_lights = lights;
+			const std::string wob = "wobble(i) * 16";
+			graft_lights.replace(graft_lights.find(wob), wob.size(), "jitter(i) * 16");
+			both(graft_lights, "", "an element read ahead of a graft in an arm");
+			both(graft_lights, "", "an element read ahead of a graft in an arm, proofs off", false);
+			check_eq(std::string("184,180,112,124|2,2,2,4"), run_on(true, graft_lights));
+			const std::string g = listing_of(graft_lights);
+			size_t g_grafts = 0; for (size_t at = g.find("-- inlined jitter"); at != std::string::npos; at = g.find("-- inlined jitter", at + 1)) { ++g_grafts; }
+			check_true(g_grafts == 3 && g.find("C_BAIL") == std::string::npos && g.find("-- open loop") == std::string::npos, "all three jitter calls graft and the loop closes without a bail: " + g);
 			const size_t cells_at = k.find("-- cell loop");
 			const std::string cells_line = cells_at == std::string::npos ? std::string() : k.substr(cells_at, k.find('\n', cells_at) - cells_at);
 			bool adopted_slot = false;
@@ -5475,6 +5487,45 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(rl.find("-- inlined A") != std::string::npos && rl.find("-- inlined sq") != std::string::npos && rl.find("-- inlined inner") != std::string::npos, "the untyped leaves graft: " + rl);
 			check_true(rl.find("-- call kept mixed") != std::string::npos && rl.find("-- call kept drift") != std::string::npos, "a result of two kinds keeps the call: " + rl);
 			check_true(fl.find("-- inlined A") != std::string::npos && fl.find("-- inlined sq") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "an argument of arithmetic grafts and the loop closes: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(want, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// a `var` local's kind is the kind every definition of it yields (its initializer, each store, each increment), to a fixpoint over the
+		// callable: an untyped leaf over such locals grafts with those kinds, and an element read of no proven kind ahead of the graft reads
+		// into a temp where the statement reads it, so a fully dynamic kernel's loop closes; a local stored another kind, one a call binds by
+		// reference, or a body the walk does not open keeps the call
+		test("a_var_local_takes_the_kind_its_definitions_give", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function A(var i, var j) { var ij = i + j - 1; return 1.0 / (ij * (ij - 1) * 0.5 + i); }\n"
+				"function bump(var& v, var i) { v[0] = v[0] + 1; return i * 2; }\n"
+				"function setv(var& r) -> void { r = \"s\"; }\n"
+				"function Av(var& x, var& y, var n) { for (var i = 1; i <= n; ++i) { var a = 0.0; for (var j = 1; j <= n; ++j) { a = a + x[j - 1] * A(i, j); } y[i - 1] = a; } }\n"
+				"function run(var n) { var u = []; var v = []; for (var i = 0; i < n; ++i) { u.push(1.0 + i); v.push(0.0); } Av(u, v, n); return to_json(v); }\n"
+				"function seen(var n) { var x = [1, 2, 3]; var s = 0; for (var i = 0; i < n; ++i) { s = s + x[0] * bump(x, i); } return to_string(s) + to_json(x); }\n"
+				"function rebound(var n) { var k = 1; var s = 0.0; for (var i = 0; i < n; ++i) { if (i == 2) { k = 2.5; } s = s + A(k, i + 1); } return to_string(s); }\n"
+				"function byref(var n) { var k = 1; var s = \"\"; for (var i = 0; i < n; ++i) { if (i == 2) { setv(k); } s = s + to_string(k); } return s; }\n"
+				"function mixed(var n) { var x = [1, 2.5, \"q\"]; var s = \"\"; for (var i = 0; i < 3; ++i) { s = s + to_string(x[i]) + to_string(A(i + 1, n)); } return s; }\n"
+				"function touch(var v) { return 0; }\n"
+				"var poke = function(var& r) { r = \"s\"; return 0; };\n"
+				"function unresolved(var n) { var k = 1; var s = 0.0; for (var i = 0; i < n; ++i) { if (i == 2) { poke(k); } s = s + to_string(k).size(); } return to_string(s) + type_of(k); }\n"
+				"function trusted(var n) { try { var k = 1; var s = 0.0; for (var i = 0; i < n; ++i) { s = s + touch(k) + A(k, i + 1); } return to_string(s) + type_of(k); } catch (e) { return \"E:\" + e; } }\n"
+				"string out = run(5) + \" \" + seen(3) + \" \" + rebound(4) + \" \" + byref(4) + \" \" + mixed(2) + \" \" + unresolved(4) + \" \" + trusted(3);\n"
+				"touch = function(var& r) { r = \"s\"; return 0; };\n"
+				"out + \" \" + trusted(3);";
+			const std::string want = "[3.7759740259740258,1.7357843137254902,1.0502136752136753,0.7170018796992481,0.5252146227755984] 16[4,2,3] 1.6636124329249773 11ss 10.52.50.2q0.1111111111111111 "
+				"4.0string 1.75int E:Invalid operands for - operator";
+			both(src, want, "var local kinds");
+			both(src, want, "var local kinds, proofs off", false);
+			const std::string l = listing_run(src);
+			auto chunk = [&l](const char* name) { const size_t b = l.find(std::string("== ") + name + " "); return b == std::string::npos ? l : l.substr(b, l.find("\n== ", b + 1) - b); };
+			const std::string av = chunk("Av"), rb = chunk("rebound");
+			check_true(av.find("-- inlined A") != std::string::npos && av.find("-- cell loop") != std::string::npos && av.find("open loop") == std::string::npos, "the dynamic kernel grafts A and its loops close: " + av);
+			check_true(rb.find("-- call kept A") != std::string::npos, "a local stored two kinds keeps the call: " + rb);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);

@@ -11,12 +11,26 @@ Toolchain for the whole project: a frozen copy of `jaiscript.exe` (Release BENCH
 
 | # | date | what | status |
 |---|------|------|--------|
-| 1 | 09-27 | A run-time error raised while an imported file's top level runs loses its location. Repro: `c.jai`: `int boom() { array<int> a = [1]; return a[5]; }` / `int X = boom();`, `d.jai`: `import "c.jai";`. VM: `at <script> (d.jai:1)` (the import line); interpreter: `at <script> (c.jai:2)`. Neither shows the `boom` frame (c.jai:1). Errors inside functions called later have full traces on both | worked around (rerun on `--backend=interp` to locate) |
-| 2 | 09-27 | A parse error in an imported file is not reported when the root loads; the checker instead lists every name that file declares as "use of undeclared identifier" in the other files | worked around (run the imported file directly to see its parse error) |
-| 3 | 09-27 | **Backend divergence.** On the interpreter, an error raised inside a file run by `include(path)` (a `throw`, a run-time error, or a static-check failure of the included file) escapes the `try` around the include and ends the program; the VM catches it. Repro below (milestone b entry). Also: the static-check listing of an included file says `script:L:C`, not the file's path | reported, not fixed (engine batch); the hot-reload test skips its two broken-edit steps on the interpreter |
-| 4 | 09-27 | A runtime `include` inside a function declares an `enum` only in that function's scope, silently: re-running `enum Color { red, green, blue }` leaves the global `Color` unchanged, with no warning | by design as far as I can tell (include is textual); worked around by keeping enums in a file that is never reloaded |
+| 1 | 09-27 | A run-time error raised while an imported file's top level runs loses its location. Repro: `c.jai`: `int boom() { array<int> a = [1]; return a[5]; }` / `int X = boom();`, `d.jai`: `import "c.jai";`. VM: `at <script> (d.jai:1)` (the import line); interpreter: `at <script> (c.jai:2)`. Neither shows the `boom` frame (c.jai:1). Errors inside functions called later have full traces on both | fixed on master (09-28: the trace lists `boom` at c.jai:1, then c.jai:2, then the import line, on both backends) |
+| 2 | 09-27 | A parse error in an imported file is not reported when the root loads; the checker instead lists every name that file declares as "use of undeclared identifier" in the other files | fixed on master (09-28: the parse error is reported with the imported file's path and line) |
+| 3 | 09-27 | **Backend divergence.** On the interpreter, an error raised inside a file run by `include(path)` (a `throw`, a run-time error, or a static-check failure of the included file) escapes the `try` around the include and ends the program; the VM catches it. Repro below (milestone b entry). Also: the static-check listing of an included file says `script:L:C`, not the file's path | fixed on master (09-28: caught on both backends); dev mode no longer uses include. The root file's own listing still says `script:L:C` |
+| 4 | 09-27 | A runtime `include` inside a function declares an `enum` only in that function's scope, silently: re-running `enum Color { red, green, blue }` leaves the global `Color` unchanged, with no warning | by design (include is textual); a run-time include now warns. Moot for the game: modules reload by import, and an enum re-run at program scope replaces the enum |
 | 5 | 09-27 | **Runner:** `NetServer.listen` and `NetChannel.listen` set `SO_REUSEADDR`, which on Windows lets a second listener bind a port that is already listening: two hosts on one machine both "succeed" on 28777 and the OS picks which gets each connection. Found by the menu test's busy-port check | fixed in the runner (`SO_EXCLUSIVEADDRUSE` on Windows, POSIX unchanged), own commit |
-| 6 | 09-27 | **Checker gap:** an unknown method on a typed array passes the strict check and fails only when it runs: `array<string> a = ["x"]; a.insert(0, "y");` loads under `--check=strict` and raises `array has no member 'insert'` at run time | reported, not fixed (engine batch) |
+| 6 | 09-27 | **Checker gap:** an unknown method on a typed array passes the strict check and fails only when it runs: `array<string> a = ["x"]; a.insert(0, "y");` loads under `--check=strict` and raises `array has no member 'insert'` at run time | fixed on master (09-28: `no member 'insert' on 'array<string>'` at load) |
+| 7 | 09-28 | A run-time error caught with `try`/`catch` (here, at an import that re-runs a module) is its message string only: `Array index 3 out of bounds for array of size 1`, without the file and line the uncaught path prints | reported; the dev HUD names the module itself |
+
+## Hot reload re-rated (2026-09-28, import-anywhere)
+
+Dev mode now reloads by reaching each module's `import` again every frame; the stub generator is gone (gq_dev.jai went
+from 153 lines of text rewriting, temp files and `::f = f;` rebinding to 68 lines: a module list and one
+`try { import(module); }` each). The state convention is now the language's own rule, so the two state files reload
+too once their declarations lost their initializers. The hot-reload test runs all 29 checks on both backends (the
+interpreter used to skip the broken-edit steps) and its STATE_HASH is unchanged at 2485888746; smoke (3237070200) and
+endgame (61631680) are unchanged too. An idle import costs 10-11 microseconds, so the 34 modules cost ~0.37 ms per
+frame. Ratings: **hot reload in practice good** (was okay), **enums on reload good** (was bad), **error handling
+during a reload good on both backends** (the interpreter was bad). Still awkward: an import does not say whether it
+re-ran, a copy of a module at another path is another unit, and a caught run-time error has lost its location
+(bug 7). Details in the 2026-09-28 journal entry.
 
 ## Summary at milestone e (menus and movement prediction)
 
@@ -575,3 +589,68 @@ five minutes, the same shape as in milestone a.
 typed parallel arrays; receivers that push into inboxes by captured index; queues with `push`/`remove(0)`; the whole
 host/client/prediction stack is ~700 lines. Hard: nothing the language caused. What I would want next time: a
 loopback transport for deterministic tests, and the method-name check (bug 6).
+
+### 2026-09-28: hot reload on import-anywhere
+
+**What changed in practice.** The whole reload mechanism is now the language's: dev mode keeps a list of the 34
+modules and, every frame, reaches each one's import again inside its own `try`:
+
+```jaiscript
+for (int i = 0; i < DEV_MODULES.size(); ++i) {
+	try { import(DEV_MODULES[i]); } catch (e) { msgs.push(`Reload FAILED (${DEV_MODULES[i]}): ` + first_line(e)); }
+}
+```
+
+An unchanged module costs its stamp check; a touched one is checked, together with what it imports, before any of it
+runs, then re-runs as its own unit. Gone with the stub generator: the text rewriting that depended on my formatting
+(declaration heads on one line at column 0), the temp files and their parse caches, the `::fn = fn;` rebind lines, the
+`script:` prefix rewriting, and the watcher that read every file once a second to compare contents. Edits reach the
+game on the next frame instead of within a second. Rating: good (was okay).
+
+**The convention became the rule, and that paid for the state files.** My "initializer = constant, none = state" is
+exactly what a re-run now does, so no logic file changed. The two state files, which the stub generator had to skip,
+reload now too: I removed the initializers from their scalars (12 in `gq_state.jai`, 67 in `gq_cstate.jai`) and put the
+22 non-default starting values (`PRED_ON = true`, `NET_PORT = 28777`, `SHADE_WORLD = -1`...) in a
+`client_state_init()` that `main` calls once, plus one line in `sim_reset` for the spectator camera. That is the C++
+shape (declare, then initialize in a function) and it read fine. Finding the state that still had initializers in
+logic files was mechanical: a 20-line script listing initialized globals that are assigned anywhere else found two
+(`PRED_BUMP`, `PRED_WALL_DIR`, both now in the state file) and four test counters. The test proves the state files'
+reload: appending a comment to both re-runs them, and the world hash, the tick, the players and the client settings
+come through untouched.
+
+**Errors are the language's too.** A constant of the wrong type and a function returning the wrong type are rejected
+by the checker before anything runs (`gq_items.jai:6:5: error: cannot initialize 'PACK_MAX' declared 'int' with
+'string'`), on both backends; the interpreter no longer ends the session, so the test's broken-edit steps run
+everywhere (29 checks on both backends, was 23 and 20). A run-time error during a re-run is caught at the import too.
+
+**Enums reload.** An enum re-run at program scope replaces the enum (a member added in the middle renumbers the ones
+after it, as in C++; ints already stored keep their old meaning, which is the programmer's business).
+
+**The frozen-harness gates held.** Hot reload 2485888746, smoke 3237070200, endgame 61631680: the same edits give
+the same simulation, so the reload path is invisible to it, as it should be. The harness was rebuilt from master
+132b70c7 for this entry (import-anywhere is an engine feature).
+
+**Cost, measured.** An idle import is 10-11 microseconds on both backends (a bare `file_exists` from script is 2.8,
+so "one stat" is one stat plus about 7 microseconds of bookkeeping; the resolution key includes the working directory,
+fetched per import). For 34 modules that is ~0.37 ms per frame, about 1% of a 33 ms frame: fine for dev mode, and the
+announced 0.2 s throttle would make it nearly free.
+
+**Still awkward, most costly first:**
+
+1. **An import does not say whether it re-ran.** The HUD's "Reloaded gq_ai.jai" needs its own stamp, and the only
+   stamp is `file_data`, which costs 43 microseconds (a map and a canonical path per call: four idle imports, fifteen
+   `file_exists`). Stamping all 34 modules every frame would be 1.5 ms, so the loop looks at one module's stamp per
+   frame: the reload happens on the next frame, the HUD line can trail it by up to a second. Suggestion: let the import
+   report it (a statement form that yields whether it ran, or a `last_import_ran()` query), or a cheap
+   `file_stamp(path)` returning an int.
+2. **A module at another path is another unit.** The old test edited copies of five files in a scratch folder. Imported
+   from there now, a copy's variables would be new cells the rest of the program never reads (its functions and classes
+   do replace the originals). That is the right semantics, but it means the test must edit the files the program runs
+   from, so it now runs from a scratch copy of the whole scripts folder made by `hotreload.ps1`, and refuses to run
+   anywhere else. A gate moved from script into PowerShell.
+3. **A caught run-time error has lost its location** (bug 7). The HUD shows `Reload FAILED (gq_items.jai): Array index
+   3 out of bounds for array of size 1` because the module name is mine to add; the line is gone. It is also a partial
+   run: a probe shows the declarations above the failing line took effect and the ones below did not. Check failures
+   are all-or-nothing, run-time failures are not; the next save of the file re-runs it whole.
+4. **`T x;` state with a non-zero start needs an init function.** Twenty-two variables in `gq_cstate.jai`. Natural, but a
+   pattern a newcomer has to know; the guide's reload section could show it.

@@ -157,6 +157,13 @@ big;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Integer overflow in &#x27;+&#x27;
 == result: 9223372036854775807</code></pre></div>
 <p>Note the value is untouched after the failed operation. <code>++</code>/<code>--</code> are covered by the same policy, as are the intermediate results of compound assignments.</p>
+<p><strong>When wraparound is the point</strong> (a hash, a checksum, a random generator), say so: <code>math::wrap_add(a, b)</code>, <code>math::wrap_sub(a, b)</code> and <code>math::wrap_mul(a, b)</code> compute the two&#x27;s-complement result modulo 2<sup>64</sup> in every build, with no mask to keep a product small, and the shifts <code>&lt;&lt;</code> / <code>&gt;&gt;</code> always wrap. An FNV-1a hash:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int h = -3750763034362895579;             // the FNV-1a offset basis, 0xcbf29ce484222325, as an int
+for (auto c : &quot;abc&quot;) {
+    h = math::wrap_mul(h ^ c, 1099511628211); // the FNV prime; the product wraps modulo 2^64
+}
+print(&quot;fnv1a(\&quot;abc\&quot;) = {}&quot;, h);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">fnv1a(&quot;abc&quot;) = -1792535898324117685</code></pre></div>
 <h2 id="division-by-zero">Division by zero<a class="hlink" href="#division-by-zero" aria-label="link">&#8203;</a></h2>
 <p>Both integer <strong>and</strong> float division by zero raise a catchable error (floats do not produce IEEE infinity):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {

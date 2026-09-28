@@ -18,6 +18,8 @@ void run() {
 	party[0].heal(util::twice(1));
 	Actor& a = party[0];
 	print(s + to_string(total([1, 2, 3]) + hp + shade + LIMIT + a.power()));
+	var dyn = h;
+	dyn.level = 3;
 }
 
 run();

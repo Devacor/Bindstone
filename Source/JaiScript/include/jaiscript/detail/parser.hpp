@@ -30,8 +30,11 @@ namespace jai {
         const std::vector<std::string>& get_errors() const { return errors_; }
         // the files spliced into function bodies by this parse (resolved paths), for the parse cache's stamps
         const std::vector<std::string>& spliced_files() const { return spliced_files_; }
-        
+        // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
+        std::vector<declaration_ptr>& recovered_declarations() { return recovered_; }
+
     private:
+        std::vector<declaration_ptr> recovered_;
         const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
         std::string filename_;
         size_t current_ = 0;

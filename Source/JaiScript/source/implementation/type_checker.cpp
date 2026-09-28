@@ -261,6 +261,7 @@ public:
         program_functions_ = opts.program_functions;
         program_globals_ = opts.program_globals;
         deferred_out_ = opts.deferred_classes;
+        observer_ = opts.observer;
     }
 
     check_report run() {
@@ -313,6 +314,7 @@ private:
     bool collect_diagnostics_ = true;
     proof_stats* stats_out_ = nullptr;
     proof_stats counts_{};
+    check_observer* observer_ = nullptr;
 
     std::vector<check_diagnostic> diags_;
     std::unordered_set<std::string> seen_;   // "line:col:message" dedupe keys
@@ -1816,7 +1818,19 @@ private:
 	ctype infer(expression* e) {
 		ctype result = infer_impl(e);
 		result.origin = e;
+		if (observer_ && e) { observe(e, result); }
 		return result;
+	}
+
+	void observe(const expression* e, const ctype& t) {
+		static_assert(static_cast<uint8_t>(check_expression_type::kind_t::utf8_k) == ctype::utf8_k);
+		check_expression_type view;
+		view.kind = static_cast<check_expression_type::kind_t>(t.kind);
+		view.cls = t.cls;
+		view.ti = t.ti;
+		view.tentative = t.tentative;
+		view.name = ctype_name(t);
+		observer_->expression_type(e, view);
 	}
 
 	ctype infer_impl(expression* e) {

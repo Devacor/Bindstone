@@ -104,3 +104,10 @@ if(JAISCRIPT_BUILD_RUNNER)
     add_subdirectory(tools/jaiscript)
 endif()
 # --- end jaiscript runner ---
+
+# --- jaiscript_lsp (tools/lsp): the language server (LSP over stdio) the VS Code extension launches ---
+option(JAISCRIPT_BUILD_LSP "Build the jaiscript_lsp language server" ON)
+if(JAISCRIPT_BUILD_LSP)
+    add_subdirectory(tools/lsp)
+endif()
+# --- end jaiscript_lsp ---

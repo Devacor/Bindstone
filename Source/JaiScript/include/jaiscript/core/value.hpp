@@ -1538,29 +1538,31 @@ namespace jai {
                 if (!map_result) {
                     return map_result.error_value();
                 }
-                const auto& m = *map_result.value();
+                // dependent on T: script_map is complete only where the conversion is instantiated (two-phase lookup)
+                using map_view = std::conditional_t<sizeof(T) != 0, script_map, void>;
+                const map_view& m = *map_result.value();
 
                 for (const auto& [k, v] : m) {
                     if constexpr (std::is_same_v<key_type, script_value> && std::is_same_v<mapped_type, script_value>) {
                         result.emplace(k, v);
                     } else if constexpr (std::is_same_v<key_type, script_value>) {
-                        auto val_result = v.checked_as<mapped_type>();
+                        auto val_result = v.template checked_as<mapped_type>();
                         if (!val_result) {
                             return val_result.error_value();
                         }
                         result.emplace(k, val_result.value());
                     } else if constexpr (std::is_same_v<mapped_type, script_value>) {
-                        auto key_result = k.checked_as<key_type>();
+                        auto key_result = k.template checked_as<key_type>();
                         if (!key_result) {
                             return key_result.error_value();
                         }
                         result.emplace(key_result.value(), v);
                     } else {
-                        auto key_result = k.checked_as<key_type>();
+                        auto key_result = k.template checked_as<key_type>();
                         if (!key_result) {
                             return key_result.error_value();
                         }
-                        auto val_result = v.checked_as<mapped_type>();
+                        auto val_result = v.template checked_as<mapped_type>();
                         if (!val_result) {
                             return val_result.error_value();
                         }

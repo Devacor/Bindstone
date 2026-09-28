@@ -133,10 +133,7 @@ public:
 		compound_member_order();
 		compound_subscript_order();
 		auto_static_type();
-#ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
-		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
-		pending_call_argument_capture();
-#endif
+		call_argument_capture();
 #ifdef JAISCRIPT_SPEC_KNOWN_BUGS
 		known_bugs();
 #endif
@@ -1976,7 +1973,8 @@ private:
 	}
 
 	// Dev ruling (being implemented by another change): a by-value argument is captured at the call site, left to right
-	void pending_call_argument_capture() {
+	// Dev ruling 2026-09-27: a by-value argument takes its value when it is evaluated, left to right
+	void call_argument_capture() {
 		test("by_value_arguments_capture_their_values_left_to_right", [this]() {
 			expect("call args", R"(
 				var GA = [1, 2];

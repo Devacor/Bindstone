@@ -1137,6 +1137,21 @@ public:
             for (const char* f : {"gi_a.jai", "gi_b.jai"}) { cleanup_temp_file((dir / f).string()); }
         });
 
+        test("a_root_file_lists_its_check_errors_under_its_path", [=, this]() {
+            // the root file's listing names the file like an included or imported one does; source text stays "script"
+            const std::string path = (jai::foundry::test_temp_directory() / "root_listing.jai").generic_string();
+            for (bool use_vm : {false, true}) {
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                std::string from_file, from_text;
+                try { eng->execute_file_source(path, "int x = \"s\";\n"); } catch (const std::exception& ex) { from_file = ex.what(); }
+                try { eng->execute("int y = \"s\";\n"); } catch (const std::exception& ex) { from_text = ex.what(); }
+                check_true(from_file.find(path + ":1:5: error: cannot initialize 'x'") != std::string::npos, from_file);
+                check_true(from_file.find("script:1:5") == std::string::npos, from_file);
+                check_true(from_text.find("script:1:5: error: cannot initialize 'y'") != std::string::npos, from_text);
+            }
+        });
+
         test("a_module_rerun_keeps_a_variable_declared_without_an_initializer", [=, this]() {
             // Dev's ruling (2026-09-27): a same-unit re-run resets a variable only when its declaration assigns; `T x;` keeps the
             // value (the first run defaults it), unless its declared type changed, which resets it to the new type's default

@@ -1988,8 +1988,8 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Runs in every mode (the proof pass rides it); diagnostics surface under warn/strict.
         const check_report& rep = impl->checked_report(*this, *cached, impl->static_check_mode_ != check_mode::off);
         if (impl->static_check_mode_ != check_mode::off) {
-            // a unit reached through include or import lists under its resolved path
-            const std::string_view listing_name = textual || impl->importing_.count(sourcePath) ? std::string_view(sourcePath) : std::string_view("script");
+            // a unit from a file (the root file, an include, an import) lists under its path
+            const std::string_view listing_name = sourcePath.empty() || sourcePath == "<script>" ? std::string_view("script") : std::string_view(sourcePath);
             if (instanceVars.empty()) {
                 impl->gate_checked(rep, scriptContent, listing_name);
             } else {

@@ -35,6 +35,28 @@ public:
             check_near(45.0f, angle2D(Point<>(0.0f, 0.0f), Point<>(3.0f, 3.0f)), 1e-4f);
             check_near(45.0f, angle2D(Point<int>(0, 0), Point<int>(3, 3)), 1e-4f);
         });
+        test("wrappingDistance is the shorter way around the range and says when it wraps", [this]() {
+            bool wrapped = false;
+            check_near(20.0f, wrappingDistance(0.0f, 360.0f, 10.0f, 350.0f, &wrapped), 1e-4f);
+            check_true(wrapped);
+            check_near(40.0f, wrappingDistance(0.0f, 360.0f, 10.0f, 50.0f, &wrapped), 1e-4f);
+            check_false(wrapped);
+            check_near(10.0f, wrappingDistance(0.0f, 360.0f, 370.0f, 20.0f, &wrapped), 1e-4f);
+            check_false(wrapped);
+            check_near(20.0f, wrappingDistance(0.0f, 360.0f, -10.0f, 10.0f, &wrapped), 1e-4f);
+            check_true(wrapped);
+            check_near(20.0f, wrappingDistance(360.0f, 0.0f, 350.0f, 10.0f, &wrapped), 1e-4f);
+            check_true(wrapped);
+        });
+        test("wrappingDistance honors a nonzero lower bound and integer ranges", [this]() {
+            bool wrapped = false;
+            check_near(20.0, wrappingDistance(100.0, 200.0, 110.0, 190.0, &wrapped), 1e-9);
+            check_true(wrapped);
+            check_eq(2, wrappingDistance(0, 8, 1, 7, &wrapped));
+            check_true(wrapped);
+            check_eq(0, wrappingDistance(0, 8, 3, 3, &wrapped));
+            check_false(wrapped);
+        });
     }
 };
 

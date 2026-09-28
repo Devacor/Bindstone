@@ -1837,8 +1837,13 @@ namespace jai::vm {
         void materialize_raw_window(frame& f) { if (f.raw) [[unlikely]] { build_raw_window(f); } }   // a raw-entered frame's window, built when the general form first needs it
         void build_raw_window(frame& f);
         // one frame's block run; Raw: a frame program's, whose calls and returns are on the hot switch. A run that hands the block loop another
-        // frame (raw_switch_) returns, and the raw chain (cells_run_raw, which holds the C++ boundary) runs that frame next
-        template <bool Raw> op_status cells_run_frame(frame& f, const chunk::cell_loop& loop);
+        // frame (raw_switch_) returns, and the raw chain (cells_run_raw, which holds the C++ boundary) runs that frame next. Each loop is its own
+        // function (the block loop's code generation is the scalar ops' alone)
+        template <bool Raw>
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status cells_run_frame(frame& f, const chunk::cell_loop& loop);
         op_status cells_run_raw(frame& entry, op_status st, bool run_first);   // the raw chain from a block run (run_first false: the block already ran and switched)
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold

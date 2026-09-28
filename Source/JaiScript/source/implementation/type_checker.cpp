@@ -1931,11 +1931,11 @@ private:
         }
     }
 
-    // binary::layout(...), binary::text(n), binary::reader(...), binary::writer(), string::from_bytes(...)
+    // binary::layout(...), binary::text(n), binary::text_null_terminated(n), binary::reader(...), binary::writer(), string::from_bytes(...)
     bool library_namespace_call(const call_expr* c, const member_expr* m, const std::vector<ctype>& args, ctype& out) {
         if (static_path(m, "binary") && library_namespace("binary")) {
             if (m->member == "layout") { check_binary_pairs(c, args, "binary::layout"); out = object_of("binary::layout"); return true; }
-            if (m->member == "text") { out = object_of("binary::width"); return true; }
+            if (m->member == "text" || m->member == "text_null_terminated") { out = object_of("binary::width"); return true; }
             if (m->member == "reader") { out = object_of("binary::reader"); return true; }
             if (m->member == "writer") { out = object_of("binary::writer"); return true; }
             return false;
@@ -1968,7 +1968,7 @@ private:
             if (w->get_type() == node_type::member_expr && binary_width_token(static_cast<const member_expr*>(w))) {
                 const std::string_view n = static_cast<const member_expr*>(w)->member;
                 kinds.push_back(n == "float32" || n == "float64" ? 2 : 1);
-            } else if (binary_call(w, "text")) {
+            } else if (binary_call(w, "text") || binary_call(w, "text_null_terminated")) {
                 kinds.push_back(3);
             } else {
                 return {};

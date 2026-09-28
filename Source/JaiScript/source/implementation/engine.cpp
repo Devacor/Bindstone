@@ -3469,6 +3469,14 @@ size_t engine::memory_cap() const {
     return impl->limits_.memory_cap;
 }
 
+void engine::binary_scan_limit(size_t bytes) {
+    impl->limits_.binary_scan_limit = bytes;
+}
+
+size_t engine::binary_scan_limit() const {
+    return impl->limits_.binary_scan_limit;
+}
+
 detail::execution_limits& engine::execution_limits() noexcept {
     // While a parallel region's workers run, every charge site resolves to the calling
     // worker's own accounting through this ONE chokepoint (docs/parallel_design.md §2).

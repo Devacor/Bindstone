@@ -57,7 +57,7 @@ function gfx_init() -> void {
 	int npatch = names.int32();
 	PNAME_LUMP = []; PATCH_W = []; PATCH_COL0 = []; PATCH_POST = [];
 	for (int p = 0; p < npatch; ++p) {
-		PNAME_LUMP.push(lump_num(names.text_z(8).to_upper()));
+		PNAME_LUMP.push(lump_num(names.text_null_terminated(8).to_upper()));
 		PATCH_W.push(-1);
 		PATCH_COL0.push(0);
 	}
@@ -73,7 +73,7 @@ function gfx_init() -> void {
 	TP_OX = []; TP_OY = []; TP_PIDX = [];
 	for (int t = 0; t < ntex; ++t) {
 		def.seek(t1 + dir.int32());
-		TEX_NAMES[def.text_z(8)] = t;
+		TEX_NAMES[def.text_null_terminated(8)] = t;
 		def.skip(4);
 		TEX_W.push(def.int16());
 		TEX_H.push(def.int16());

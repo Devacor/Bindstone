@@ -108,9 +108,9 @@ function map_load(string mapname) -> bool {
 	for (int i3 = 0; i3 < count; ++i3) {
 		SD_XOFS.push(r.int16());
 		SD_YOFS.push(r.int16());
-		SD_TOP.push(r.text_z(8));
-		SD_BOT.push(r.text_z(8));
-		SD_MID.push(r.text_z(8));
+		SD_TOP.push(r.text_null_terminated(8));
+		SD_BOT.push(r.text_null_terminated(8));
+		SD_MID.push(r.text_null_terminated(8));
 		SD_SEC.push(r.uint16());
 	}
 
@@ -121,8 +121,8 @@ function map_load(string mapname) -> bool {
 	for (int i4 = 0; i4 < count; ++i4) {
 		SE_FLOORH.push(r.int16());
 		SE_CEILH.push(r.int16());
-		SE_FLOORPIC.push(r.text_z(8));
-		SE_CEILPIC.push(r.text_z(8));
+		SE_FLOORPIC.push(r.text_null_terminated(8));
+		SE_CEILPIC.push(r.text_null_terminated(8));
 		SE_LIGHT.push(r.int16());
 		SE_SPECIAL.push(r.uint16());
 		SE_TAG.push(r.uint16());

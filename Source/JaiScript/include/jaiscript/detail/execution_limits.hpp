@@ -33,6 +33,9 @@ namespace jai::detail {
 		// Cleared only by a non-reentrant prepare_for_execution or a host-level resume.
 		bool terminal_error = false;
 
+		// The longest NUL scan one binary::reader read runs (engine::binary_scan_limit); only the host sets it
+		size_t binary_scan_limit = size_t(1) << 20;
+
 		// Approximate script memory accounting (engine::memory_cap). HIGH-WATER MARK:
 		// charges only grow during one top-level execute (releases are not credited
 		// back - v1 simplification) and the counter resets per top-level execute. On

@@ -1,144 +1,59 @@
-// Gator Quest - dev-mode hot reload. A changed script is re-run in place while
-// the world, the players and the monsters keep going.
-//
-// How: a script cannot re-run a file at global scope, and include() inside a
-// function scopes the file's definitions to that function. So each reload
-// writes a stub: the file's text with its imports blanked out, every top-level
-// "T NAME = expr;" rewritten to "::NAME = expr;" (constants and tables are
-// re-evaluated into the existing globals), every top-level "T NAME;" blanked
-// (state is kept), and one "::fn = fn;" line per top-level function at the
-// end (the fresh definitions replace the global bindings). Classes reload by
-// themselves: a class redefinition migrates live instances. Line numbers stay
-// aligned with the source, so an error in the stub names the right line.
-//
-// The convention this relies on, for every reloadable file: a top-level
-// declaration WITH an initializer is a constant; WITHOUT one it is state.
-// Enums do not reload (gq_enums.jai), nor do the two state files.
+// Gator Quest - dev-mode hot reload. Reaching a module's import again re-runs
+// it when its file changed since it last ran: functions and classes are
+// replaced in place (live instances migrate), a declaration with an
+// initializer takes its new value, one without keeps the live value. The
+// module is checked before any of it runs, so a broken edit raises at the
+// import and the running code stays as it was. An unchanged module costs a
+// stat. The two state files reload like the rest: all they declare is state.
 
 import "gq_save.jai";
 
 bool DEV_ON;
-array<string> DEV_FILES;
-map<string, string> DEV_SEEN;
-int DEV_STUBS;
 int DEV_RELOADS;
-string DEV_LAST;
+int DEV_SCAN;                    // the next module whose stamp the HUD looks at
+map<string, string> DEV_STAMP;   // module -> "modified:size" when last seen
 
-array<string> DEV_SKIP = ["gq_state.jai", "gq_cstate.jai", "gq_enums.jai", "gq_dev.jai", "gatorquest.jai"];
+// every module the running game can reload, in load order (this file and the entry file are not)
+array<string> DEV_MODULES = ["gq_enums.jai", "gq_types.jai", "gq_state.jai", "gq_cstate.jai", "gq_util.jai", "gq_defs.jai",
+	"gq_data.jai", "gq_world.jai", "gq_mobs.jai", "gq_items.jai", "gq_combat.jai", "gq_ai.jai", "gq_magic.jai", "gq_quests.jai",
+	"gq_actions.jai", "gq_sim.jai", "gq_bot.jai", "gq_proto.jai", "gq_vid.jai", "gq_art.jai", "gq_render.jai", "gq_audio.jai",
+	"gq_predict.jai", "gq_hud.jai", "gq_game.jai", "gq_net.jai", "gq_save.jai", "gq_title.jai", "gq_png.jai", "gq_tests.jai",
+	"gq_serve.jai", "gq_endgame.jai", "gq_predtest.jai", "gq_menutest.jai"];
 
-bool ident_char(int c) { return c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 || c == 95; }
-
-// the identifier that ends just before position `at` (skipping spaces)
-string ident_before(string s, int at) {
-	int e = at - 1;
-	while (e >= 0 && (s[e] == ' ' || s[e] == '\t')) { e = e - 1; }
-	int b = e;
-	while (b >= 0 && ident_char(s[b] + 0)) { b = b - 1; }
-	return e >= b + 1 ? s.substr(b + 1, e - b) : "";
+string dev_stamp(string module) {
+	var fd = file_data(module);
+	return fd == null ? "" : to_string(fd["modified"]) + ":" + to_string(fd["size"]);
 }
 
-// the stub text for one source file; function names land in `fns`, counts in `stats` [functions, constants, state]
-string reload_stub(string src, array<string>& fns, array<int>& stats) {
-	array<string> lines = src.lines();       // \n or \r\n, blank lines kept (the stub's line numbers must match)
-	string out = "";
-	stats = [0, 0, 0];
-	for (int i = 0; i < lines.size(); ++i) {
-		string line = lines[i];
-		string keep = line;
-		bool top = line.size() > 0 && line[0] != ' ' && line[0] != '\t';
-		if (top && !line.starts_with("//") && !line.starts_with("}") && !line.starts_with("]") && !line.starts_with(")")
-			&& !line.starts_with("class ") && !line.starts_with("nocopy ") && !line.starts_with("enum ") && !line.starts_with("[[")) {
-			if (line.starts_with("import ") || line.starts_with("#import ")) {
-				keep = "";
-			} else {
-				int eq = line.find("=");
-				int par = line.find("(");
-				if (eq > 0 && (par < 0 || eq < par) && line[eq + 1] != '=') {
-					string name = ident_before(line, eq);
-					keep = "::" + name + " =" + line.substr(eq + 1, line.size() - eq - 1);
-					stats[1] = stats[1] + 1;
-				} else if (par > 0) {
-					string name = ident_before(line, par);
-					if (name != "" && line.substr(0, par).trim().contains(" ")) {
-						fns.push(name);
-						stats[0] = stats[0] + 1;
-					}
-				} else if (line.trim().ends_with(";")) {
-					keep = "";
-					stats[2] = stats[2] + 1;
-				}
-			}
-		}
-		out += keep + "\n";
-	}
-	for (int k = 0; k < fns.size(); ++k) { out += "::" + fns[k] + " = " + fns[k] + ";\n"; }
-	return out;
+void dev_start() {
+	DEV_STAMP = {};
+	DEV_SCAN = 0;
+	for (int i = 0; i < DEV_MODULES.size(); ++i) { DEV_STAMP[DEV_MODULES[i]] = dev_stamp(DEV_MODULES[i]); }
 }
 
-// re-run one file in place; "" on success, else the error
-string dev_reload_file(string path) {
-	string src = read_file(path);
-	if (src == "") { return "could not read " + path; }
-	array<string> fns;
-	array<int> stats;
-	string stub = reload_stub(src, fns, stats);
-	make_dirs(data_root() + "/cache");
-	DEV_STUBS = DEV_STUBS + 1;
-	string stub_path = data_root() + "/cache/.reload_" + to_string(DEV_STUBS) + "_" + file_name(path);
-	if (!write_file(stub_path, stub)) { return "could not write " + stub_path; }
-	string err = "";
-	try {
-		include(stub_path);
-	} catch (e) {
-		err = to_string(e);
-	}
-	delete_file(stub_path);
-	string bite = stub_path.substr(0, stub_path.size() - 4) + ".jaibite";
-	if (file_exists(bite)) { delete_file(bite); }
-	if (err != "") {
-		err.replace_all("script:", file_name(path) + ":");
-		return err;
-	}
-	DEV_RELOADS = DEV_RELOADS + 1;
-	DEV_LAST = `${file_name(path)}: ${stats[0]} functions, ${stats[1]} constants re-run, ${stats[2]} state kept`;
-	return "";
-}
-
-// watch every reloadable script in a folder (or an explicit list)
-void dev_watch_dir(string dir) {
-	array<string> names = list_dir(dir);
-	array<string> files;
-	for (int i = 0; i < names.size(); ++i) {
-		string n = names[i];
-		if (!n.ends_with(".jai") || !n.starts_with("gq_") || DEV_SKIP.contains(n)) { continue; }
-		files.push(dir + "/" + n);
-	}
-	dev_watch(files);
-}
-
-void dev_watch(array<string> files) {
-	DEV_FILES = files;
-	DEV_SEEN = {};
-	for (int i = 0; i < files.size(); ++i) { DEV_SEEN[files[i]] = read_file(files[i]); }
-}
-
-// reload whatever changed since the last poll; one message per reloaded file
-array<string> dev_poll() {
+// reach every import again (a module re-runs if its file changed), then look at `scan` stamps
+// to name what reloaded: an import does not say whether it re-ran, and a stamp costs 4x an idle import
+array<string> dev_poll(int scan) {
 	array<string> msgs;
-	for (int i = 0; i < DEV_FILES.size(); ++i) {
-		string f = DEV_FILES[i];
-		string now = read_file(f);
-		if (now == "" || now == DEV_SEEN.get(f, "")) { continue; }
-		DEV_SEEN[f] = now;
-		string err = dev_reload_file(f);
-		if (err == "") {
-			msgs.push("Reloaded " + DEV_LAST);
-			dev_after_reload(file_name(f));
-		} else {
-			array<string> el = err.lines();
-			string first = el.size() > 0 ? el[0] : err;
-			msgs.push("Reload FAILED, old code kept: " + first + (el.size() > 1 ? " " + string::trim(el[1]) : ""));
+	for (int i = 0; i < DEV_MODULES.size(); ++i) {
+		string module = DEV_MODULES[i];
+		try {
+			import(module);
+		} catch (e) {
+			array<string> el = to_string(e).lines();
+			msgs.push(`Reload FAILED (${module}): ` + (el.size() > 0 ? el[0] + (el.size() > 1 ? " " + string::trim(el[1]) : "") : "?"));
+			DEV_STAMP[module] = dev_stamp(module);
 		}
+	}
+	for (int k = 0; k < scan && k < DEV_MODULES.size(); ++k) {
+		string module = DEV_MODULES[DEV_SCAN];
+		DEV_SCAN = (DEV_SCAN + 1) % DEV_MODULES.size();
+		string stamp = dev_stamp(module);
+		if (stamp == DEV_STAMP.get(module, "")) { continue; }
+		DEV_STAMP[module] = stamp;
+		DEV_RELOADS = DEV_RELOADS + 1;
+		msgs.push("Reloaded " + module);
+		dev_after_reload(module);
 	}
 	return msgs;
 }

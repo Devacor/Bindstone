@@ -415,9 +415,9 @@ void play_loop() {
 		int held = UI_MODE == "play" || UI_MODE == "map" ? held_dir() : -1;
 		if (PRED_ON) { pred_input(CV, held, NOW_MS); }
 		else { client_move(held); }
-		// dev mode: pick up edited scripts about once a second
-		if (DEV_ON && FRAME % 30 == 0) {
-			array<string> msgs = dev_poll();
+		// dev mode: an edited script re-runs on the next frame
+		if (DEV_ON) {
+			array<string> msgs = dev_poll(1);
 			for (int i = 0; i < msgs.size(); ++i) {
 				toast(msgs[i]);
 				cv_log(CV, msgs[i], msgs[i].contains("FAILED") ? 2 : 5);

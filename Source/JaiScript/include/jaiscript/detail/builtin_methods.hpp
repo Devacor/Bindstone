@@ -40,6 +40,11 @@ namespace jai {
         std::string_view{"reverse"}, std::string_view{"repeat"}
     };
 
+    // The whitespace the string library classifies (trim, split's no-separator form): string::whitespace spells it, and
+    // split/explode read exactly this text as "any run of whitespace" rather than a literal separator
+    inline constexpr std::string_view k_whitespace_text = " \t\n\v\f\r";
+    inline constexpr bool is_string_whitespace(char c) noexcept { return c == ' ' || (c >= '\t' && c <= '\r'); }
+
     // Backend-neutral invocation context for the builtin container/string/pointer methods
     struct builtin_method_context {
         engine* engine_ref = nullptr;

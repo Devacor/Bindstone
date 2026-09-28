@@ -1876,11 +1876,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             std::string delim = "";
+            bool whitespace = args.empty();
             if (args.size() > 0) {
                 if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "split() argument must be a string");
                 }
                 delim = args[0].unchecked_text();
+                whitespace = delim == k_whitespace_text;
             }
 
             const auto& str = self.unchecked_text();
@@ -1894,7 +1896,21 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             script_value array_val = script_value::make_array(eng->get_type_info_string(), eng);
             script_array& result = *array_val.unchecked_get_array_storage();   // array<string> is a handle buffer: push through the node
 
-            if (delim.empty()) {
+            if (whitespace) {
+                // runs of whitespace separate the pieces and no piece is empty; past max_splits the rest is the last piece
+                size_t at = 0;
+                script_int splits = 0;
+                while (true) {
+                    while (at < str.size() && is_string_whitespace(str[at])) { ++at; }
+                    if (at == str.size()) { break; }
+                    if (max_splits >= 0 && splits == max_splits) { result.push(ctx.make_value(str.substr(at))); break; }
+                    size_t end = at;
+                    while (end < str.size() && !is_string_whitespace(str[end])) { ++end; }
+                    result.push(ctx.make_value(str.substr(at, end - at)));
+                    at = end;
+                    ++splits;
+                }
+            } else if (delim.empty()) {
                 // Split into individual characters
                 for (char c : str) {
                     result.push(ctx.make_value(std::string(1, c)));
@@ -2168,6 +2184,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     };
     detail::add_more_string_methods(out.string_methods, symbolizer);
     detail::add_binary_string_methods(out.string_methods, symbolizer);
+    out.string_methods[symbolizer->intern("explode")] = out.string_methods[symbolizer->intern("split")];
     out.string_methods[symbolizer->intern("to_utf8")] = [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_utf8() takes no arguments");
         return script_value::make_utf8(self.unchecked_text(), ctx.get_engine());

@@ -8278,6 +8278,10 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 	if (!raw) {
 		materialize_raw_window(f);   // the boxed result goes above this frame's window
 		stack_.push_back(boxed());
+		const chunk::cell_loop& loop = *cr.loop;
+		if ((f.cells->dirty & loop.env_mask).any()) [[unlikely]] {   // the environment values the body wrote reach their bindings before the frame returns
+			for (const uint32_t k : loop.env_cells) { if (f.cells->dirty.test(k) && f.cells->kind[k] != 0) { env_flush_one(f, loop, k); } }
+		}
 		f.cells->reset();
 		ip = ins.b;
 		return {};

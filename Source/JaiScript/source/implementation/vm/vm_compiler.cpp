@@ -5410,9 +5410,13 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				emit(opcode::op_index_store, shape);
 			}
 		} else {
+			// C++17: the value first, then the container and the index (Dev ruling 2026-09-27); an inert value keeps the
+			// target-first shape, which observes the same
+			const bool value_first = !compound_rhs_inert(expr->value.get());
+			if (value_first) { compile_expression(expr->value); }
 			compile_expression(sub->left);
 			compile_expression(sub->right);
-			compile_expression(expr->value);
+			if (!value_first) { compile_expression(expr->value); }
 			uint32_t kind;
 			switch (expr->op.type) {
 			case token_type::plus_equal: kind = compound_plus; break;
@@ -5424,6 +5428,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			}
 			if (expr->postfix_old_result) kind |= compound_flag_old_result;
 			if (expr->incdec_desugar) kind |= compound_flag_incdec;
+			if (value_first) kind |= compound_flag_value_first;
 			emit(opcode::op_index_compound_fused, kind, shape);
 		}
 		return;

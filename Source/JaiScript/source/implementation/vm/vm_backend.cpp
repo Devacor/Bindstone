@@ -9987,6 +9987,10 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 // replays INDEX(shape)+INDEX_COMPOUND byte-identically (string concat routing, S8 bound
 // decode, object operator methods, rvalue-target errors).
 op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& ins) {
+	if (ins.a & compound_flag_value_first) {
+		// [rhs, container, index] -> [container, index, rhs]
+		std::rotate(&stack_[stack_.size() - 3], &stack_[stack_.size() - 2], &stack_[stack_.size() - 1] + 1);
+	}
 	// stack: [container, index, rhs]. Numeric fast path: all peeks are read-only and
 	// evaluate_arithmetic on raw int/float runs no user code, so in-place refs are safe.
 	if ((ins.b & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&

@@ -721,10 +721,9 @@ public:
             check_eq((size_t)0, error_count(e->check("string s = 1 + \"b\";")));
         });
 
-        // auto locks its type from the RUNTIME-taken ternary branch ('auto x = c ? 0 : 1.5'
-        // is int on one path, float on the other; the int lock then silently truncates
-        // later float assignments). The one value-dependent, silently-lossy inference
-        // shape gets a warning; typed decls absorb the join and var stays dynamic.
+        // A mixed-branch ternary has no single static type, so 'auto x = c ? 0 : 1.5' is a var
+        // (Dev ruling 2026-09-27); the warning says so, since the spelling reads like a typed
+        // slot. Typed decls absorb the join and var stays dynamic.
         test("warn_auto_from_mixed_branch_ternary", [this]() {
             auto e = make_engine();
             auto r = e->check("bool c = true; auto x = c ? 0 : 1.5;");
@@ -732,6 +731,7 @@ public:
             check_eq((size_t)1, warning_count(r));
             check_true(r.diagnostics[0].message.find("'int'") != std::string::npos &&
                        r.diagnostics[0].message.find("'float'") != std::string::npos);
+            check_true(r.diagnostics[0].message.find("so 'x' is a var") != std::string::npos);
 
             // container/class-shaped mixes warn too, naming both shapes
             auto rc = e->check("bool c = true; auto a = c ? [1] : {\"k\": 1};");

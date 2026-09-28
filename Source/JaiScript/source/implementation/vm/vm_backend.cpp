@@ -7706,7 +7706,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		if (st.is_map || st.is_string || st.coroutine || st.env_pushed || !st.container || !st.container->is_array()) { JAI_CELLS_COUNT(1); return false; }
 	}
 	cs.env_of = environment_.get(); cs.env_serial = env_symbolizer_->env_epoch();
-	cs.raw_landing = 0; cs.raw_call = 0;   // no raw call is in flight at a block's entry (an earlier run may have ended in a C++ exception)
+	cs.raw_landing = 0; cs.raw_call = 0;   // no raw call is in flight at a block's entry (an earlier run may have ended in a C++ exception or an unwind)
 	if (cs.env_ptr.size() < loop.cells.size()) { cs.env_ptr.resize(loop.cells.size(), nullptr); }
 	if (cs.payload.size() < loop.cells.size()) {
 #ifdef JAISCRIPT_VM_PROFILE
@@ -7817,7 +7817,7 @@ static bool cells_miss_plain(opcode op) {
 #endif
 // one frame's block run (Raw: a frame program's, its calls and returns on the hot switch); a raw switch returns to the raw chain
 template <bool Raw>
-JAI_FORCEINLINE op_status vm_backend::cells_run_frame(frame& f, const chunk::cell_loop& loop) {
+op_status vm_backend::cells_run_frame(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	const cell_regs regs{cs.payload.data(), cs.kind.data(), &cs.dirty, f.code->constants.data(), f.code->code.data(), &loop};   // the run's registers: the vectors never move during a run (the entry sized them)
 #ifdef JAISCRIPT_VM_PROFILE

@@ -23,7 +23,7 @@ PAGES = (
     + sorted(p.relative_to(SITE).as_posix() for p in (SITE / "guide").glob("[0-9]*.html"))
     + ["embedding/index.html"]
     + sorted(p.relative_to(SITE).as_posix() for p in (SITE / "embedding").glob("[0-9]*.html"))
-    + ["examples/index.html", "reference/index.html"]
+    + ["examples/index.html", "reference/index.html", "stability.html"]
 )
 
 SECTION = {"guide": "Guide", "embedding": "Embedding", "examples": "Examples", "reference": "Reference"}

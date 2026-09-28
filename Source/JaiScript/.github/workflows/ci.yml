@@ -4,42 +4,96 @@ name: CI
 
 on:
   push:
-    branches: [ master, main ]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  windows-msvc:
-    runs-on: windows-latest
+  # Three compilers x two configurations. Every cell builds the library, the suite, the
+  # fuzzer, the runner and the example games, then runs the suite on both backends, a
+  # short differential-fuzz campaign and the games' deterministic hash checks. The gate
+  # logic lives in tools/ci/gates.sh so any step can be reproduced locally.
+  build:
+    name: ${{ matrix.name }} ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [windows-msvc, linux-gcc, linux-clang]
+        config: [Debug, Release]
+        include:
+          - name: windows-msvc
+            os: windows-latest
+            cxx: cl
+          - name: linux-gcc
+            os: ubuntu-24.04
+            cxx: g++-14
+          - name: linux-clang
+            os: ubuntu-24.04
+            cxx: clang++
+    defaults:
+      run:
+        shell: bash
+    env:
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
     steps:
       - uses: actions/checkout@v4
-      - name: Configure
-        run: cmake -S . -B build
-      - name: Build
-        run: cmake --build build --config Release --target jaiscript_tests
-      - name: Test
-        run: build/bin/Release/jaiscript_tests.exe
 
-  linux-gcc:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14
-      - name: Build
-        run: cmake --build build --target jaiscript_tests
-      - name: Test
-        run: ./build/bin/jaiscript_tests
+      - name: MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
-  linux-clang:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.name }}-${{ matrix.config }}
+          max-size: 1G
+
+      # Embedded (/Z7) debug info on MSVC Debug: ccache cannot cache /Zi's shared PDB.
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_POLICY_DEFAULT_CMP0141=NEW
+          '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug>:Embedded>'
+
       - name: Build
-        run: cmake --build build --target jaiscript_tests
-      - name: Test
-        run: ./build/bin/jaiscript_tests
+        run: cmake --build build --target jaiscript_tests jaiscript_fuzz jaiscript_runner jai_gloom jai_crawler jai_demoreel
+
+      - name: Tests (interpreter)
+        run: bash tools/ci/gates.sh tests-interp
+
+      - name: Tests (vm)
+        run: bash tools/ci/gates.sh tests-vm
+
+      - name: Differential fuzz smoke
+        run: bash tools/ci/gates.sh fuzz
+
+      - name: GLOOM hash gate
+        run: bash tools/ci/gates.sh gloom
+
+      - name: crawler hash gate
+        run: bash tools/ci/gates.sh crawler
+
+      # Release only: in a Debug build these two runs take tens of minutes.
+      - name: demoreel hash gate
+        if: matrix.config == 'Release'
+        run: bash tools/ci/gates.sh demoreel
+
+      - name: Gator Quest hash gate
+        if: matrix.config == 'Release'
+        run: bash tools/ci/gates.sh gatorquest
 
   # Cheap conformance gate: catches MSVC-isms and missing standard includes
   # without waiting for the full matrix.

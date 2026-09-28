@@ -32,6 +32,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
+#include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/interpreter_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
@@ -3710,6 +3711,33 @@ uint32_t prove_readonly_parameters(engine& eng, const script_defined_function& f
 		}
 	}
 	return mask;
+}
+
+bool resolve_global_ref_write_callee(engine& eng, const identifier_expr& id, std::vector<ref_write_callee>& out) {
+	uint64_t symbol = id.symbol_id;
+	if (symbol == UINT64_MAX) { symbol = eng.get_symbolizer()->intern(std::string(id.name)); }
+	const script_value* value = eng.get_global_environment()->get_value_ptr(symbol);
+	if (!value || !value->deref().is_function()) { return false; }
+	const script_callable* payload = payload_from_function_value(value->deref());
+	if (!payload || payload->kind != script_callable::kind_type::function || !payload->fn || payload->fn->name == "<lambda>") { return false; }
+	const script_defined_function& target = *payload->fn;
+	out.push_back(ref_write_callee{&target.parameters(), target.body.get(), target.name, false, false});
+	return true;
+}
+
+bool ref_parameter_takes_temporary(engine& eng, const std::vector<parameter>& params, const statement* body, size_t i, bool may_prove) {
+	if (i >= params.size() || !params[i].is_reference || !body) { return false; }
+	const parameter& p = params[i];
+	const uint64_t epoch = eng.definition_epoch();
+	if (p.temporary_epoch != epoch) {
+		if (!may_prove) { return false; }
+		ref_write_analysis analysis([&eng](const identifier_expr& id, std::vector<ref_write_callee>& out) {
+			return resolve_global_ref_write_callee(eng, id, out);
+		});
+		p.takes_temporary = !analysis.analyze(ref_write_callee{&params, body, {}, false, false}, i).writes;
+		p.temporary_epoch = epoch;
+	}
+	return p.takes_temporary;
 }
 
 const script_string* parallel_borrow_string_source(const script_value& borrow, const script_value& index_raw) noexcept {

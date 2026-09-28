@@ -19347,7 +19347,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	try {
 		bound = bind_parameters(rec.ast_pin->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc), nullptr, caller_frame_unit());
+		                        site_arg_proofs(site, caller.code, rec.ast_pin->body.get(), rec.ast_pin->parameters.size(), argc), nullptr, caller_frame_unit(),
+		                        0, false, rec.ast_pin->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -19508,7 +19509,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit());
+		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
+		                        0, false, ast->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -20125,7 +20127,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  chunk* caller_code, const uint8_t* arg_proofs,
                                                  const script_defined_function* alias_fn,
                                                  unit_stamp caller_unit,
-                                                 size_t first_param, bool later_taken) {
+                                                 size_t first_param, bool later_taken,
+                                                 const statement* callee_body) {
 	// Stage-2 in-place binding: for zero-copy callers the args slice IS the window
 	// (window_base == args_base and param i sits in slot i), so a matching-type
 	// primitive argument is ALREADY its own slot - the bind copy is elided outright
@@ -20335,6 +20338,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					// bind point, so the fast-path constraint holds.
 					// (KEEP BYTE-PARALLEL with the interpreter's bind_reference_parameter)
 					frame_slot_set(callee, param.slot_index, script_value(arg));
+				} else if (detail::ref_parameter_takes_temporary(*engine_, parameters, callee_body ? callee_body : (alias_fn && alias_fn->name != "<lambda>" ? alias_fn->body.get() : nullptr), i, !parallel_worker_)) {
+					// a temporary binds a parameter the callee never writes through (detail/ref_param_writes.hpp)
+					frame_slot_set(callee, param.slot_index, script_value::make_cell_reference(script_value(arg.deref()), engine_));
 				} else {
 					return raise_(
 						make_error_code(runtime_error_code::invalid_reference),
@@ -20350,6 +20356,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				} else if (arg_type == script_value_type::jai_object_type ||
 				    arg_type == script_value_type::jai_shared_ptr_type) {
 					frame_slot_set(callee, param.slot_index, script_value(arg));
+				} else if (detail::ref_parameter_takes_temporary(*engine_, parameters, callee_body ? callee_body : (alias_fn && alias_fn->name != "<lambda>" ? alias_fn->body.get() : nullptr), i, !parallel_worker_)) {
+					frame_slot_set(callee, param.slot_index, script_value::make_cell_reference(script_value(arg), engine_));
 				} else {
 					return raise_(
 						make_error_code(runtime_error_code::invalid_reference),
@@ -20454,7 +20462,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						for (size_t j = i + 1; j < argc; ++j) {
 							detail::capture_argument(held[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
 						}
-						return bind_parameters(parameters, held, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, true);
+						return bind_parameters(parameters, held, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, true, callee_body);
 					}
 					for (size_t j = i + 1; j < argc; ++j) {
 						detail::capture_argument(stack_[args_base + j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));

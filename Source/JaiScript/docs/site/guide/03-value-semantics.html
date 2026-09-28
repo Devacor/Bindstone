@@ -91,6 +91,19 @@ print(&quot;h.hp = {}&quot;, h.hp);</code></pre></div>
 items.size() = 1
 h.hp = 15</code></pre></div>
 <p>Reference parameters survive pass-through chains, block and loop scopes, methods, globals, and recursion. The aliasing follows the value wherever the call takes it.</p>
+<p><strong>A reference parameter the function only reads takes a literal.</strong> For every <code>&amp;</code> parameter of a declared function or method, the checker works out whether the body can write through it. One that is only read behaves like C++&#x27;s <code>const T&amp;</code> without the keyword: a literal or a temporary binds a temporary copy for the call, and a variable still binds with no copy:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function total(array&lt;int&gt;&amp; xs) {          // reads xs, never writes through it
+    int sum = 0;
+    for (auto x : xs) { sum += x; }
+    return sum;
+}
+print(&quot;total([1, 2, 3]) = {}&quot;, total([1, 2, 3]));   // the literal binds a temporary
+auto scores = [4, 5];
+print(&quot;total(scores) = {}&quot;, total(scores));          // the variable binds, no copy</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total([1, 2, 3]) = 6
+total(scores) = 9</code></pre></div>
+<p>A write is an assignment, a compound assignment or <code>++</code>/<code>--</code> on the parameter or anything inside it (also through a reference alias such as <code>auto&amp; r = xs;</code> or <code>for (auto&amp; x : xs)</code>), a method call on it (on an array, map or string, the library&#x27;s reading methods such as <code>size</code>, <code>find</code> and <code>keys</code> are reads), passing it on to an <code>&amp;</code> parameter that writes (followed through the calls), to a <code>shared_ptr</code> parameter, a constructor or a function the checker cannot see (a lambda, a host function, a method; <code>print</code>, <code>to_string</code>, <code>math::</code>, <code>string::</code> and the container methods take copies), or returning it by reference. For a method, every override in a class derived from the receiver&#x27;s counts. A parameter that is written keeps needing a variable, and a literal argument fails the load with the write&#x27;s line, <code>&#x27;set_name&#x27; writes through parameter &#x27;name&#x27; (line 12); pass a variable</code>; at run time a temporary raises <code>Cannot pass non-lvalue to reference parameter</code>. A lambda called through a variable and a host function keep needing a variable too.</p>
+<p>The body becomes part of the interface: adding a write to a function that callers pass literals to breaks those calls loudly, at the next load or hot reload (which checks them again), instead of letting the write vanish into a temporary.</p>
 <h2 id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments">Escape hatch 2: field and element lvalues as ref arguments<a class="hlink" href="#escape-hatch-2-field-and-element-lvalues-as-ref-arguments" aria-label="link">&#8203;</a></h2>
 <p>You can pass <code>obj.field</code> or <code>arr[i]</code> straight into a <code>&amp;</code> parameter. Element references re-resolve <strong>through the container</strong>, so they stay correct even if the array reallocates its storage:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }

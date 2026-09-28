@@ -13749,7 +13749,8 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
                                                            const expression* argExpr,
                                                            const std::shared_ptr<environment>& caller_env,
                                                            const script_value* evaluated_arg,
-                                                           unit_stamp caller_unit) {
+                                                           unit_stamp caller_unit,
+                                                           const script_defined_function* callee, size_t param_index) {
     // the argument is the caller's code: its identifier resolves under the caller's unit (docs/global_shadowing.md); the
     // callee's unit, entered by the call ahead of the binding, resumes when the binding returns
     unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
@@ -13881,6 +13882,13 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     // (KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch)
     if (evaluated_arg && evaluated_arg->is_reference() && evaluated_arg->get_reference_holder()) {
         call_stack_[frame_index].set_local(param.slot_index, script_value(*evaluated_arg));
+        return {};
+    }
+    // a temporary binds a parameter a declared function never writes through (detail/ref_param_writes.hpp); a lambda keeps
+    // needing a variable
+    if (evaluated_arg && callee && callee->name != "<lambda>" &&
+        detail::ref_parameter_takes_temporary(*engine_, callee->parameters(), callee->body.get(), param_index, !parallel_worker_)) {
+        call_stack_[frame_index].set_local(param.slot_index, script_value::make_cell_reference(script_value(evaluated_arg->deref()), engine_));
         return {};
     }
 
@@ -14211,7 +14219,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (param.is_reference) {
             if (call_ctx && i < call_ctx->arg_exprs->size()) {
                 auto bound = bind_reference_parameter(param, frame_index,
-                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg, caller_unit);
+                                                      (*call_ctx->arg_exprs)[i].get(), previousEnv, &arg, caller_unit, &function, i);
                 if (!bound) {
                     cleanup();
                     return bound.error_value();
@@ -14228,6 +14236,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 } else if (arg_type == script_value_type::jai_object_type ||
                     arg_type == script_value_type::jai_shared_ptr_type) {
                     call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
+                } else if (function.name != "<lambda>" &&
+                           detail::ref_parameter_takes_temporary(*engine_, function.parameters(), function.body.get(), i, !parallel_worker_)) {
+                    call_stack_[frame_index].set_local(param.slot_index, script_value::make_cell_reference(script_value(arg), engine_));
                 } else {
                     cleanup();
                     return checked_result<script_value>(

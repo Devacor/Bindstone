@@ -1129,7 +1129,8 @@ namespace jai::vm {
                                              const uint8_t* arg_proofs,
                                              const script_defined_function* alias_fn,
                                              unit_stamp caller_unit,   // a by-reference argument resolves under the caller's unit
-                                             size_t first_param = 0, bool later_taken = false);   // a resumed bind (the arguments after a user-code conversion taken)
+                                             size_t first_param = 0, bool later_taken = false,   // a resumed bind (the arguments after a user-code conversion taken)
+                                             const statement* callee_body = nullptr);   // a method's body (a function's is alias_fn's): a temporary may bind a reference parameter it never writes through
         // V-C1: the call site's per-argument same_type proofs, valid only when the site's
         // call_expr was proven against THIS callee body with THIS arity (null otherwise)
         const uint8_t* site_arg_proofs(const call_site* site, const chunk* caller_code,

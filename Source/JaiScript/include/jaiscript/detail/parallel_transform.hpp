@@ -32,6 +32,9 @@ namespace jai {
     class engine;
     class environment;
     class function_decl;
+    class identifier_expr;
+    class statement;
+    struct parameter;
     class parallel_for_stmt;
     class type_info;
     struct script_defined_function;
@@ -329,6 +332,17 @@ namespace jai::detail {
     // by-value pass must keep raising whatever the callee does), an array or a map. Host
     // objects keep the clone.
     bool parameter_alias_allows(const script_value& derefed);
+
+    // Inferred-const reference parameters (detail/ref_param_writes.hpp): the body never
+    // writes through reference parameter i, callees resolved through the global
+    // environment. Main thread only (resolves globals).
+    // A temporary argument may bind reference parameter i (the verdict cached on the
+    // parameter; a parallel worker consumes only a verdict the main thread already derived)
+    bool ref_parameter_takes_temporary(engine& eng, const std::vector<parameter>& params, const statement* body, size_t i, bool may_prove);
+    // A callee name that is a declared script function in the global environment (the
+    // backends' resolution for the kernel; the checker falls back to it)
+    struct ref_write_callee;
+    bool resolve_global_ref_write_callee(engine& eng, const identifier_expr& id, std::vector<ref_write_callee>& out);
 
     // The cached verdict for parameter i (recomputed when the definition epoch moved; a
     // parallel worker may only consume a verdict the main thread already stamped).

@@ -187,6 +187,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\jaiscript.cpp">
       <Filter>jaiscript</Filter>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\implementation\schema_binding.cpp">
+      <Filter>jaiscript</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.h">

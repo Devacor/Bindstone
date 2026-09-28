@@ -378,8 +378,8 @@ namespace MV {
 		return  !(maxPoint.x <= a_other.minPoint.x ||
 			maxPoint.y <= a_other.minPoint.y ||
 			minPoint.x >= a_other.maxPoint.x ||
-			minPoint.y >= a_other.maxPoint.y) ||
-			(a_useDepth &&
+			minPoint.y >= a_other.maxPoint.y) &&
+			(!a_useDepth ||
 				!(maxPoint.z <= a_other.minPoint.z || minPoint.z >= a_other.maxPoint.z)
 			);
 	}

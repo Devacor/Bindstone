@@ -94,6 +94,29 @@ public:
             check_eq(1, ic.x);
             check_eq(7, ic.y);
         });
+        test("BoxAABB collides with depth needs overlap in x, y and z", [this]() {
+            BoxAABB<> box(Point<>(0.0f, 0.0f, 0.0f), Point<>(10.0f, 10.0f, 10.0f));
+            BoxAABB<> besideInZ(Point<>(20.0f, 0.0f, 5.0f), Point<>(30.0f, 10.0f, 15.0f));
+            BoxAABB<> aboveInZ(Point<>(5.0f, 5.0f, 20.0f), Point<>(15.0f, 15.0f, 30.0f));
+            BoxAABB<> inside(Point<>(5.0f, 5.0f, 5.0f), Point<>(15.0f, 15.0f, 15.0f));
+            check_false(box.collides(besideInZ, true));
+            check_false(box.collides(besideInZ));
+            check_false(box.collides(aboveInZ, true));
+            check_true(box.collides(aboveInZ));
+            check_true(box.collides(inside, true));
+            check_true(box.collides(inside));
+
+            BoxAABB<int> ibox(Point<int>(0, 0, 0), Point<int>(10, 10, 10));
+            BoxAABB<int> ibesideInZ(Point<int>(20, 0, 5), Point<int>(30, 10, 15));
+            BoxAABB<int> iaboveInZ(Point<int>(5, 5, 20), Point<int>(15, 15, 30));
+            BoxAABB<int> iinside(Point<int>(5, 5, 5), Point<int>(15, 15, 15));
+            check_false(ibox.collides(ibesideInZ, true));
+            check_false(ibox.collides(ibesideInZ));
+            check_false(ibox.collides(iaboveInZ, true));
+            check_true(ibox.collides(iaboveInZ));
+            check_true(ibox.collides(iinside, true));
+            check_true(ibox.collides(iinside));
+        });
     }
 };
 

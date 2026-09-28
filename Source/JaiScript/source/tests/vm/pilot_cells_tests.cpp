@@ -5156,6 +5156,32 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(oracle, session(true), "a rebound callee and a converting argument, both backends");
 			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
 		});
+		test("raw_frames_write_back_environment_values_on_a_general_return", [this]() {
+			// a frame program entered by a general call (its environment write keeps it off the raw entry) returns through its pad: the environment
+			// values its body wrote reach their bindings first (order band seed 23 lost two writes of a global this way)
+			const std::string src =
+				"function rec0(int n) -> int { if (n <= 0) { return 0; } return rec0(n - 1); }\n"
+				"float G = 1.0;\n"
+				"int H = 10;\n"
+				"function w(float p) -> int { rec0(1); G = G - 2.25; return p * 2; }\n"
+				"function w2(int p) -> int { rec0(2); H = H - 3; return p + H; }\n"
+				"int s = 0;\n"
+				"for (int i = 0; i < 3; ++i) { s = s + w(1.0) + w2(i); }\n"
+				"to_string(G) + \" \" + to_string(H) + \" \" + to_string(s);";
+			both(src, "-5.75 1 21", "environment writes before a general return");
+			both(src, "-5.75 1 21", "environment writes before a general return, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t wb = l.find("== w ");
+			const std::string wl = wb == std::string::npos ? l : l.substr(wb, l.find("\n== ", wb + 1) - wb);
+			check_true(wl.find("-- frame program") != std::string::npos && wl.find("(general entry only)") != std::string::npos, "w is a frame program entered generally: " + wl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("-5.75 1 21"), got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("raw_frames_replan_after_general_code_inside_the_chain", [this]() {
 			// a call site's plan holds only until general code runs: a host function called from a raw frame redefines the raw callee mid-chain
 			// (the next raw probe resolves the new body), and a callee redefined with another parameter kind takes the door from a site whose

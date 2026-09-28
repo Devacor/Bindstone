@@ -184,10 +184,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\webServer.cpp">
       <Filter>MV\Network</Filter>
     </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\jaiscript.cpp">
-      <Filter>jaiscript</Filter>
-    </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\implementation\schema_binding.cpp">
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\implementation\**\*.cpp">
       <Filter>jaiscript</Filter>
     </ClCompile>
   </ItemGroup>

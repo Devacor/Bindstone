@@ -1,14 +1,11 @@
-// The MSBuild JaiScript unity (Source/JaiScript/source/jaiscript.cpp) omits the debug TUs
-// and parallel_transform.cpp, so the host compiles them here. connector.cpp must come
-// first: it includes winsock2 before anything can drag in windows.h. Sockets are desktop
-// Windows only by design — shipping/mobile builds compile no socket code
-// (see docs/DEBUGGER_DESIGN.md).
 #ifdef _WIN32
 #define JAISCRIPT_ENABLE_DEBUGGER
-#include "JaiScript/source/implementation/debug/connector.cpp"
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
-#include "JaiScript/source/implementation/debug/controller.cpp"
-#include "JaiScript/source/implementation/parallel_transform.cpp"
+#include <winsock2.h>
+#include <jaiscript/debug/connector.hpp>
+#endif
 
 #include "MV/Script/script.h"
 

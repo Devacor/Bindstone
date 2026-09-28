@@ -15,8 +15,7 @@
     <ProjectCapability Include="SourceItemsFromImports" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\jaiscript.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\implementation\schema_binding.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\source\implementation\**\*.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\ArtificialIntelligence\pathfinding.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Interface\tapDevice.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)..\..\Source\MV\Network\download.cpp" />

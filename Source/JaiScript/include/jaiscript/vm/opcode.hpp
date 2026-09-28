@@ -78,7 +78,7 @@ namespace jai::vm {
         op_try_push,        // a=handler instruction index, b=catch var symbol index, c=catch var frame slot (k_invalid_u32 = scope env)
         op_try_pop,         // normal try-block completion
         op_catch_end,       // normal catch-block completion
-        op_case_eq,         // pops case value + switch value copy, pushes bool(v == cv); compare failure = false
+        op_case_eq,         // pops case value + switch value copy, pushes the language's v == cv (an error raises)
         op_iter_init,       // a=iter proto index; pops container, pushes iteration state + loop-var scope
         op_iter_next,       // a=iter proto index; assigns loop var, pushes bool(has element); budget check
         op_iter_pop,        // pops iteration state + loop-var scope

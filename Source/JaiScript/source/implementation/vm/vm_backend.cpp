@@ -16666,13 +16666,10 @@ op_status vm_backend::exec_case_eq(frame&, const vm_instruction&) {
 	stack_.pop_back();
 	script_value switch_value = std::move(stack_.back());
 	stack_.pop_back();
-	bool matches = false;
-	try {
-		matches = (switch_value == case_value);
-	} catch (const std::exception&) {
-		matches = false;
-	}
-	stack_.push_back(script_value(matches, engine_));
+	// a case matches when the language's == holds (KEEP BYTE-PARALLEL with interpreter::visit_switch_stmt)
+	auto equal = binary_general(token_type::equal_equal, switch_value.deref(), case_value.deref());
+	if (!equal) { return raise_from(equal); }
+	stack_.push_back(script_value(is_truthy(equal.value()), engine_));
 	return {};
 }
 

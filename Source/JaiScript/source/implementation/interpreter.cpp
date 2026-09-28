@@ -2181,6 +2181,22 @@ bool interpreter::object_defines_custom_equality(const script_value& v) const {
     return cd && cd->defines_method(eq_method_id_);
 }
 
+// The language's ==: a global operator== first, then the value's own (a class operator==, memberwise, numeric across kinds)
+checked_result<bool> interpreter::language_equal(const script_value& left, const script_value& right) {
+    const script_value& l = left.deref();
+    const script_value& r = right.deref();
+    if (operator_table_ && operator_table_->any()) {
+        if (const script_value* opFunc = operator_table_->entry(detail::binary_op_slot(token_type::equal_equal))) {
+            auto result = opFunc->as_function()({l, r});
+            if (!result) { return result.error_value(); }
+            return is_truthy(result.value());
+        }
+    }
+    auto equal = handle_equal(l, r);
+    if (!equal) { return equal.error_value(); }
+    return is_truthy(equal.value());
+}
+
 std::optional<checked_result<bool>> interpreter::object_equality_via_method(const script_value& left, const script_value& right) {
     // Safe-mode workers never dispatch operator methods (increment B twin of the vm's
     // gate; handle_equal raises the verdict before the structural fallback diverges)
@@ -11091,13 +11107,14 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 }
                 script_value case_value = pop_value();
 
-                // Check if values match using operator==
-                try {
-                    case_matches = (switch_value == case_value);
-                } catch (const std::exception&) {
-                    // If comparison fails, treat as non-match
-                    case_matches = false;
+                // A case matches when the language's == holds (KEEP BYTE-PARALLEL with vm_backend::exec_case_eq)
+                auto equal = language_equal(switch_value, case_value);
+                if (!equal) {
+                    in_switch_ = old_in_switch;
+                    should_fallthrough_ = old_should_fallthrough;
+                    return equal.error_value();
                 }
+                case_matches = equal.value();
             }
 
             // Execute case if it matches OR if we're falling through from a previous case

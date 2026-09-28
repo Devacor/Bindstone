@@ -69,7 +69,7 @@ alice scored 3
 bob scored 5
 == result: sword!</code></pre></div>
 <h2 id="switch-break-by-default-explicit-fallthrough">switch: break by default, explicit <code>fallthrough;</code><a class="hlink" href="#switch-break-by-default-explicit-fallthrough" aria-label="link">&#8203;</a></h2>
-<p>The classic C footgun is inverted: cases <strong>never</strong> fall through unless you write <code>fallthrough;</code>. Case values can be integers, strings, enum members, or expressions. <code>fallthrough;</code> outside a switch is an error.</p>
+<p>The classic C footgun is inverted: cases <strong>never</strong> fall through unless you write <code>fallthrough;</code>. Case values can be integers, strings, enum members, or expressions, and a case matches when the language&#x27;s <code>==</code> holds: <code>switch (1)</code> matches <code>case 1.0</code>, an instance matches memberwise or through its <code>operator==</code>, and an error that <code>operator==</code> raises leaves the switch. <code>fallthrough;</code> outside a switch is an error.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function describe(weapon) {
     auto damage = 0;
     switch (weapon) {

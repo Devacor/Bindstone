@@ -2173,6 +2173,23 @@ private:
 			every_config("own try", "own:lv too big:1|top:lv too big|caller:lv too big",
 				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::off);
 		});
+		ruling_switch_equality();
+	}
+
+	void ruling_switch_equality() {
+		test("a_switch_case_matches_when_the_languages_equality_holds", [this]() {
+			expect("switch ==", R"(
+				class E { int v = 0; E(int x) { v = x; } bool operator==(E o) { return v == o.v; } }
+				class P { int a = 1; int b = 2; }
+				class B { bool operator==(B o) { throw "cmp"; return true; } }
+				function pick(var x) -> string { switch (x) { case 1.0: return "one"; case "s": return "s"; default: return "none"; } }
+				function inst(var x) -> string { switch (x) { case E(2): return "E2"; default: return "none"; } }
+				function memberwise(var x) -> string { switch (x) { case P(): return "P"; default: return "none"; } }
+				string r = pick(1) + pick(1.0) + pick("s") + pick(2) + "|" + inst(E(2)) + inst(E(3)) + memberwise(P());
+				string t = "none"; try { switch (B()) { case B(): t = "hit"; } } catch (e) { t = "raised:" + e; }
+				r + "|" + t;
+			)", "oneonesnone|E2noneP|raised:cmp", check_mode::warn);
+		});
 	}
 
 	// Dev ruling 2026-09-27: a by-value argument takes its value when it is evaluated, left to right

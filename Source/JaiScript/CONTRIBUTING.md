@@ -164,7 +164,7 @@ Two catalogues move with the code:
   byte-identical across backends. Change a text, update the catalog, and check the site for
   output blocks that quote it.
 - **The AST format.** A change to what the serializer writes bumps `k_jaibite_version` in
-  `include/jaiscript/detail/ast_serializer.hpp` (currently 11), so stale `.jaibite` caches are
+  `include/jaiscript/detail/ast_serializer.hpp`, so stale `.jaibite` caches are
   rejected instead of misread.
 
 Before you touch value layout, `strong_ptr`, raw-index dispatch or the VM run loop, read
@@ -200,9 +200,21 @@ Before you open a PR:
 
 ## CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds `jaiscript_tests` on three
-compilers — MSVC on Windows, GCC 14 and Clang on Ubuntu 24.04 — and runs a cheap
-`-fsyntax-only` sweep of every implementation file, which catches MSVC-isms and missing
-standard includes without waiting for the full matrix. Each job runs the suite on the interpreter
-only — CI does not run the VM half of the parity rule at all. Run `--backend=vm` locally before
-you push. CI is a safety net, not a substitute.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request.
+It builds Debug and Release with three compilers — MSVC on Windows, GCC 14 and Clang on
+Ubuntu 24.04 — and each of the six builds runs:
+
+- `jaiscript_tests` and `jaiscript_tests --backend=vm`
+- a 300-program differential-fuzz campaign (`jaiscript_fuzz --isolate`)
+- the example hash gates: GLOOM and GRUBWELL (and, in Release, demoreel and Gator Quest) must
+  reproduce their reference hashes on both backends
+
+A separate job runs a cheap `-fsyntax-only` sweep of every implementation file, which catches
+MSVC-isms and missing standard includes without waiting for the matrix. The gates live in
+[`tools/ci/gates.sh`](tools/ci/gates.sh), so any of them runs locally the way CI runs it:
+
+```bash
+BIN=build/bin bash tools/ci/gates.sh tests-vm gloom
+```
+
+CI is a safety net, not a substitute for the checklist above.

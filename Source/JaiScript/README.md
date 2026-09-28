@@ -233,9 +233,10 @@ Bugs and questions: [github.com/Devacor/JaiScript/issues](https://github.com/Dev
 ## Status
 
 JaiScript 0.1.0 — first public release (September 2026). The language, both backends, the
-embedding API and the `.jaibite` format (version 11) are complete and covered by 2,400+ tests
+embedding API and the `.jaibite` format are complete and covered by 2,400+ tests
 run on both backends and a differential fuzzer. Pre-1.0 means the C++ API may still change
-between minor versions.
+between minor versions; [`docs/site/stability.html`](docs/site/stability.html) lists what is
+settled and what may change before 1.0.
 
 ## License
 

@@ -3,6 +3,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include "MV/Utility/generalUtility.h"
+#include "MV/Utility/stringUtility.h"
 #include "MV/Render/points.h"
 
 using namespace jai::foundry;
@@ -56,6 +57,14 @@ public:
             check_true(wrapped);
             check_eq(0, wrappingDistance(0, 8, 3, 3, &wrapped));
             check_false(wrapped);
+        });
+        test("startsWith is true exactly when the string begins with the prefix", [this]() {
+            check_true(startsWith("Assets/Interface", "Assets/"));
+            check_true(startsWith("abc", "abc"));
+            check_true(startsWith("abc", ""));
+            check_false(startsWith("abc", "abd"));
+            check_false(startsWith("ab", "abc"));
+            check_false(startsWith("xabc", "abc"));
         });
     }
 };

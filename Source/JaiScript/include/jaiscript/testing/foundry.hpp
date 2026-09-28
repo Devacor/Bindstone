@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <chrono>
+#include <algorithm>
 #include <string>
 #include <sstream>
 #include <format>
@@ -291,6 +292,38 @@ void check_throws(Func&& func, const std::string& message = "Expected specific e
     } catch (...) {
         throw test_failure("Caught unexpected exception type");
     }
+}
+
+// Wall-clock checks that hold on any machine: the two sides run interleaved and their medians are compared, so machine speed,
+// build type and background load scale both alike; a timed function returns the seconds of the part it measures
+inline double time_seconds(const std::function<void()>& fn) {
+    const auto start = std::chrono::steady_clock::now();
+    fn();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+inline double median_seconds(std::vector<double> samples) {
+    std::sort(samples.begin(), samples.end());
+    const size_t n = samples.size();
+    return n == 0 ? 0.0 : (n % 2 ? samples[n / 2] : (samples[n / 2 - 1] + samples[n / 2]) / 2.0);
+}
+
+inline void check_relative_cost(const std::function<double()>& reference, const std::function<double()>& measured, double max_ratio,
+                                int rounds = 7, const std::string& what = "relative cost") {
+    std::vector<double> ref, got;
+    for (int i = 0; i < rounds; ++i) { ref.push_back(reference()); got.push_back(measured()); }
+    const double r = median_seconds(ref), m = median_seconds(got);
+    const double ratio = m / std::max(r, 1e-9);
+    if (ratio > max_ratio) {
+        throw test_failure(std::format("{}: {:.2f}x the reference exceeds {:.2f}x (medians {:.1f} us vs {:.1f} us over {} rounds)",
+                                       what, ratio, max_ratio, m * 1e6, r * 1e6, rounds));
+    }
+}
+
+inline void check_scales_linearly(const std::function<double(int)>& timed_run, int small_n, int large_n, double grace = 3.0,
+                                  int rounds = 7, const std::string& what = "scaling") {
+    check_relative_cost([&] { return timed_run(small_n); }, [&] { return timed_run(large_n); },
+                        grace * static_cast<double>(large_n) / static_cast<double>(small_n), rounds, what);
 }
 
 // Additional check functions

@@ -755,7 +755,7 @@ namespace MV {
 				PointPrecision current = *currentAngle;
 				if (current == previousAngle) { return current; }
 				bool wrapped;
-				PointPrecision rotation = wrappingDistance(current, previousAngle, 0.0f, 360.0f, &wrapped);
+				PointPrecision rotation = wrappingDistance(0.0f, 360.0f, current, previousAngle, &wrapped);
 				if (wrapped) {
 					if (previousAngle > current) {
 						rotation = previousAngle + ((rotation)* a_percentOfStep);
@@ -771,7 +771,7 @@ namespace MV {
 						rotation = previousAngle + ((rotation)* a_percentOfStep);
 					}
 				}
-				return wrap(rotation, 0.0f, 360.0f);
+				return wrap(0.0f, 360.0f, rotation);
 			}
 
 			void deleteCollisionObject(Collider* a_collisionWith) {

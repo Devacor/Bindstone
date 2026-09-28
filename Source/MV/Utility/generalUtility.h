@@ -377,16 +377,10 @@ namespace MV {
 			if(wrapDist != nullptr){*wrapDist = false;}
 			return 0;
 		}
-		val = wrap(val, lowerBound, upperBound);
-		val2 = wrap(val2, lowerBound, upperBound);
-		Type dist1, dist2;
-		if(val>val2){
-			dist1 = val-val2;
-			dist2 = (upperBound-val)+val2;
-		}else{
-			dist1 = val2-val;
-			dist2 = (upperBound-val2)+val;
-		}
+		val = wrap(lowerBound, upperBound, val);
+		val2 = wrap(lowerBound, upperBound, val2);
+		Type dist1 = val > val2 ? val - val2 : val2 - val;
+		Type dist2 = (upperBound - lowerBound) - dist1;
 
 		if(wrapDist!=nullptr){
 			*wrapDist = !(dist1 <= dist2);

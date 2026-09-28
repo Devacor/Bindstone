@@ -3629,8 +3629,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined pure") != std::string::npos, "pure is inlined after a global read: " + l);
 		});
 		test("string_and_var_parameters_at_the_grafts_edge", [this]() {
-			// row 152: a var parameter taking a scalar local with a proven int return is a graft; a string parameter, a string result or a
-			// var result keeps the call (their declarations would open the enclosing block); the values hold either way
+			// row 152: a var parameter taking a scalar local with a proven int return is a graft, and so is a var result the site's kinds make
+			// one scalar kind (it holds what the return yields); a string parameter or a string result keeps the call (their declarations
+			// would open the enclosing block); the values hold either way
 			const std::string prelude =
 				"string tag(string s, int k) { if (k > 2) { return s + \"!\"; } return s; }\n"
 				"var half(var v) { return v / 2; }\n"
@@ -3638,8 +3639,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var run = function(int n) { int s = 0; string acc = \"\"; for (int i = 0; i < n; ++i) { acc = acc + tag(\"a\", i); s = s + tag(\"bc\", i).size(); s = s + half(i); s = s + half2(i); } return acc + \"|\" + to_string(s); };\n";
 			both(prelude + "run(6);", "", "string and var parameters");
 			const std::string l = listing_run(prelude + "run(6);");
-			check_true(l.find("-- inlined half2") != std::string::npos, "half2 is inlined: " + l);
-			check_true(l.find("-- inlined tag") == std::string::npos && l.find("-- inlined half ") == std::string::npos, "tag (a string) and half (a var result) keep their calls: " + l);
+			check_true(l.find("-- inlined half2") != std::string::npos && l.find("-- inlined half ") != std::string::npos, "half2 and half are inlined: " + l);
+			check_true(l.find("-- inlined tag") == std::string::npos, "tag (a string) keeps its call: " + l);
 		});
 		test("a_call_under_a_conditional_operand_keeps_its_call", [this]() {
 			// row 152: a leaf in a ternary's arm or on the right side of && / || runs on the paths that choose it; a graft would run its body
@@ -5430,6 +5431,56 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("75091 276 98"), got, "a miss at every " + std::to_string(every));
+			}
+		});
+		// an untyped leaf grafts with the kinds its site gives: a `var` parameter takes its argument's kind (a literal, a local declared a
+		// scalar, arithmetic over those), an untyped local the kind every definition of it yields, and the operations over them take those
+		// classes as stamps every consumer guards (a local holding another kind at run time, here after a store through a reference, takes the
+		// general form); an untyped result lands when every return yields one scalar kind at the site, else the call stays
+		test("an_untyped_leaf_grafts_with_the_kinds_its_site_gives", [this]() {
+			const std::string src = "[[warn_mode]]\n"
+				"function A(var i, var j) { var ij = i + j - 1; return 1.0 / (ij * (ij - 1) * 0.5 + i); }\n"
+				"function sq(var a) { return a * a; }\n"
+				"function mixed(var a) { if (a > 2) { return a * 0.5; } return a; }\n"
+				"function drift(var a) { var s = 0; s = s + a * 0.5; return s; }\n"
+				"function inner(var x) { return x * 3 + 1; }\n"
+				"function outer(int x) -> int { return inner(x) + inner(x + 1); }\n"
+				"function idiv(var a, var b) { return a / b; }\n"
+				"function setf(var& r) -> void { r = 2.5; }\n"
+				"function run(int n) -> string {\n"
+				"  array<float> x = [1.0, 2.0, 3.0, 4.0];\n"
+				"  float a = 0.0; int s = 0; float m = 0.0; float d = 0.0; int o = 0;\n"
+				"  for (int i = 1; i <= n; ++i) {\n"
+				"    for (int j = 1; j <= n; ++j) { a = a + x[(j - 1) & 3] * A(i, j); }\n"
+				"    s += sq(i); m += mixed(i); d += drift(i); o += outer(i);\n"
+				"  }\n"
+				"  return to_string(a) + \" \" + to_string(s) + \" \" + to_string(m) + \" \" + to_string(d) + \" \" + to_string(o);\n"
+				"}\n"
+				"function flip(int n) -> string {\n"
+				"  float t = 0.0; int k = 3;\n"
+				"  for (int i = 0; i < n; ++i) { if (i == 2) { setf(k); } t = t + sq(k) + A(k, i + 1); }\n"
+				"  return to_string(t) + \":\" + type_of(k);\n"
+				"}\n"
+				"function big(int n) -> string { try { int r = 0; for (int i = 0; i < n; ++i) { r += sq(3037000499 + i); } return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"function zero(int n) -> string { try { int r = 0; for (int i = 0; i < n; ++i) { r += idiv(6, 1 - i); } return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"string out = run(6) + \" | \" + flip(5) + \" | \" + big(3) + \" | \" + zero(3);\n"
+				"A = function(var i, var j) { return 7; };\n"
+				"out + \" | \" + run(2);";
+			const std::string want = "7.5400642840316 91 12.0 10.5 156 | 37.24046996530398:float | E:Integer overflow in '*' | E:Division by zero in integer operation | 42.0 5 3.0 1.5 28";
+			both(src, want, "untyped leaves");
+			both(src, want, "untyped leaves, proofs off", false);
+			const std::string l = listing_run(src);
+			auto chunk = [&l](const char* name) { const size_t b = l.find(std::string("== ") + name + " "); return b == std::string::npos ? l : l.substr(b, l.find("\n== ", b + 1) - b); };
+			const std::string rl = chunk("run"), fl = chunk("flip");
+			check_true(rl.find("-- inlined A") != std::string::npos && rl.find("-- inlined sq") != std::string::npos && rl.find("-- inlined inner") != std::string::npos, "the untyped leaves graft: " + rl);
+			check_true(rl.find("-- call kept mixed") != std::string::npos && rl.find("-- call kept drift") != std::string::npos, "a result of two kinds keeps the call: " + rl);
+			check_true(fl.find("-- inlined A") != std::string::npos && fl.find("-- inlined sq") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "an argument of arithmetic grafts and the loop closes: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(want, got, "a miss at every " + std::to_string(every));
 			}
 		});
 		// a miss inside a block's inner loop resumes with what the general form reads next: an inner counted loop's compare back to its body

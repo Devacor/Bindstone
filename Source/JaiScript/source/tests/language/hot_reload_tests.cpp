@@ -684,8 +684,6 @@ public:
                 }
             )");
             
-            auto start = std::chrono::high_resolution_clock::now();
-            
             engine->execute(R"(
                 class Entity {
                     auto x = 0.0;
@@ -698,11 +696,6 @@ public:
                 }
             )");
             
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            
-            // Should be reasonably fast even with 100 instances
-            check_true(duration < 10000); // Less than 10ms
             
             engine->execute(R"(
                 // Check first entity
@@ -732,6 +725,14 @@ public:
                     check(false, result);
                 }
             }
+            // migrating ten times the instances costs about ten times as much on any machine
+            auto reload_cost = [](int n) -> double {
+                auto eng = jai::foundry::make_engine();
+                eng->execute("class Entity { auto x = 0.0; auto health = 100; auto active = true; } auto entities = []; "
+                             "for (auto i = 0; i < " + std::to_string(n) + "; i = i + 1) { auto e = Entity(); e.x = i * 1.0; entities.push(e); }");
+                return time_seconds([&] { eng->execute("class Entity { auto x = 0.0; auto z = 0.0; auto health = 100; auto armor = 0; }"); });
+            };
+            check_scales_linearly(reload_cost, 100, 1000, 3.0, 5, "hot reload migration of 1000 vs 100 instances");
         });
 
         test("fields_unchanged_optimization", [this]() {

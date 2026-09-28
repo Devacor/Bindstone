@@ -94,7 +94,7 @@ scores[1] = 20;
 print(&quot;by reference: &quot;, add_ref(scores[1], bump()));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">by value:     21
 by reference: 100</code></pre></div>
-<p>Assignment runs the other way, again as in C++17: in <code>target = value</code> and <code>target op= value</code> the right side is evaluated first, then the target. For <code>obj.f op= e</code>, <code>this.f op= e</code>, <code>C::s op= e</code> and <code>ns::x op= e</code> that means <code>e</code>, then the receiver, then the member&#x27;s read (a user getter included), the arithmetic and the store. An error in the right side is the one you see, and the target is never touched:</p>
+<p>Assignment runs the other way, again as in C++17: in <code>target = value</code> and <code>target op= value</code> the right side is evaluated first, then the target. For <code>obj.f op= e</code>, <code>this.f op= e</code>, <code>C::s op= e</code> and <code>ns::x op= e</code> that means <code>e</code>, then the receiver, then the member&#x27;s read (a user getter included), the arithmetic and the store; for <code>a[j] = e</code> and <code>a[j] op= e</code>, <code>e</code>, then <code>a</code>, then <code>j</code>, then the element. An error in the right side is the one you see, and the target is never touched:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string log = &quot;&quot;;
 class Box { int v = 1; }
 shared_ptr&lt;Box&gt; b = new Box();

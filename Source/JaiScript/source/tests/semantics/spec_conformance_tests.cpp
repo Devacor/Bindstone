@@ -131,6 +131,7 @@ public:
 		access_control();
 		lambda_globals_and_init_captures();
 		compound_member_order();
+		compound_subscript_order();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1846,6 +1847,34 @@ private:
 				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
 				t([]() { var nv = null; nv.f += bad(); }) + "|" + t([]() { ns::missing += bad(); }) + "|" + t([]() { var nv = null; nv.f += 1; });
 			)", "rhs|rhs|Cannot access 'f' on null ('nv' is null)", check_mode::off);
+		});
+	}
+
+	// Dev ruling 2026-09-27, C++17 [expr.ass]: a[j] op= e evaluates e before a and j (the plain store already did)
+	void compound_subscript_order() {
+		test("a_subscript_compound_evaluates_its_right_side_before_the_container_and_index", [this]() {
+			expect("subscript order", R"(
+				string LOG = ""; int K = 0;
+				array<int> A = [1, 2, 3];
+				map<string, int> M = {"k": 1};
+				function idx() -> int { LOG += "j" + K; return 1; }
+				function key() -> string { LOG += "k" + K; return "k"; }
+				function t(function f) -> string { LOG = ""; K = 0; f(); return LOG; }
+				function self_write() -> int { array<int> a = [1, 2, 3]; a[1] += (a[1] = 10); return a[1]; }
+				function index_write() -> string { array<int> a = [1, 2, 3]; int i = 0; a[i] += (i = 2); return "" + a[0] + a[2]; }
+				t([]() { A[idx()] += ++K; }) + "|" + t([]() { A[idx()] = ++K; }) + "|" + t([]() { M[key()] += ++K; }) + "|" +
+				self_write() + "|" + index_write();
+			)", "j1|j1|k1|20|15", check_mode::warn);
+		});
+		test("a_right_side_error_comes_before_the_subscripts", [this]() {
+			expect("subscript error order", R"(
+				string LOG = "";
+				function bad() -> int { throw "rhs"; return 1; }
+				function idx() -> int { LOG += "j"; return 1; }
+				array<int> A = [1, 2, 3];
+				function t(function f) -> string { string r = "none"; LOG = ""; try { f(); } catch (e) { r = e; } return r + LOG; }
+				t([]() { var na = null; na[idx()] += bad(); }) + "|" + t([]() { A[5] += bad(); }) + "|" + t([]() { A[5] += 1; });
+			)", "rhs|rhs|Array index 5 out of bounds for array of size 3", check_mode::off);
 		});
 	}
 

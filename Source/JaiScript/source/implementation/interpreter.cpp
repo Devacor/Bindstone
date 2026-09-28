@@ -5326,7 +5326,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         // typed nodes take the general path (holder scratch + buffer
                         // commit); 2b gives them a raw load-op-store fast path
                         if (index && storage && !storage->is_typed() && *index >= 0 && *index < static_cast<script_int>(storage->size())) {
-                            // RHS after target probing (general path's order); callout_free
+                            // RHS after the probes: they read no user code and cannot raise, so this observes the value-first order
                             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                             if (is_unwinding_) {
                                 push_value(make_value());
@@ -5375,21 +5375,28 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // General compound assignment for any expression
             // This handles subscripts, function calls that return references, etc.
 
-            // First, evaluate the target expression to get current value (replay: parked)
-            script_value currentValue;
-            script_value postfix_old;
+            // C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27): the value first, then the
+            // subscript's container and index and the element's read (replay: rhs 0, target 1, partial {rhs}). KEEP
+            // BYTE-PARALLEL with the vm's value-first index compound.
+            script_value rightValue;
             if (parked<Replaying>(rs, 0)) {
-                currentValue = rs->partial[0];
-                postfix_old = rs->partial[1];
+                rightValue = rs->partial[0];
             } else {
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->target.get(), rs, 0), expr, rp_asg_general, 0, {});
-                currentValue = pop_value();
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_general, 0, {});
                 if (is_unwinding_) {
+                    // RHS raised: surface the original exception, never touch the target
                     push_value(make_value());
                     return {};
                 }
-                postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
+                rightValue = pop_value();
             }
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->target.get(), rs, 1), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
+            script_value currentValue = pop_value();
+            if (is_unwinding_) {
+                push_value(make_value());
+                return {};
+            }
+            script_value postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
             if (expr->incdec_desugar) {
                 // ++/-- gate: numeric targets only, the identifier path's exact error
                 const size_t ci = currentValue.deref().raw_storage_index();
@@ -5397,16 +5404,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     return detail::incdec_mismatch(expr->op.type == token_type::plus_equal, currentValue.deref(), engine_);
                 }
             }
-
-            // Evaluate the right-hand side
-            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 1), expr, rp_asg_general, 1, (std::vector<script_value>{currentValue, postfix_old}));
-            if (is_unwinding_) {
-                // RHS raised: surface the original exception, don't run the compound
-                // arithmetic on the placeholder (KEEP BYTE-PARALLEL with the vm)
-                push_value(make_value());
-                return {};
-            }
-            script_value rightValue = pop_value();
 
             // Perform the compound operation
             script_value resultValue = make_value();

@@ -83,6 +83,7 @@ function audio_cache_dir() -> string { return data_root() + "/cache/" + WAD_BASE
 // a name it repeats wins (doom's W_GetNumForName scans backward), so a PWAD's MAP01 or its
 // replaced textures take effect while everything it does not mention stays from the base.
 function wad_add(string path) -> bool {
+	if (!file_exists(path)) { return false; }
 	string more = read_file(path);
 	if (more.size() < 12) { return false; }
 	string id = more.substr(0, 4);
@@ -123,6 +124,7 @@ function map_list() -> array<string> {
 }
 
 function wad_load(string path) -> bool {
+	if (!file_exists(path)) { return false; }
 	WAD = read_file(path);
 	if (WAD.size() < 12) { return false; }
 	WAD_FILES = [path];

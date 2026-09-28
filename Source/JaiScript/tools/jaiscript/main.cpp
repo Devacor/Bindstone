@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -1095,6 +1096,30 @@ std::string slurp_file(const std::string& path) {
 	return ss.str();
 }
 
+// read_file: the file's bytes, "" for an empty file; a missing or unreadable one raises the catchable
+// "Cannot read file '<path>': <reason>" (docs/diagnostics.md)
+std::string read_file_or_raise(const std::string& path) {
+	std::error_code ec;
+	const fs::file_status st = fs::status(path, ec);
+	const char* reason = nullptr;
+	if (st.type() == fs::file_type::not_found) { reason = "not found"; }
+	else if (ec) { reason = ec == std::errc::permission_denied ? "permission denied" : "cannot be opened"; }
+	else if (!fs::is_regular_file(st)) { reason = "not a file"; }
+	if (!reason) {
+		errno = 0;
+		std::ifstream in(path, std::ios::binary);
+		if (!in) {
+			reason = errno == EACCES ? "permission denied" : "cannot be opened";
+		} else {
+			std::ostringstream ss;
+			ss << in.rdbuf();
+			if (!in.bad()) { return ss.str(); }
+			reason = "read failed";
+		}
+	}
+	throw std::runtime_error("Cannot read file '" + path + "': " + reason);
+}
+
 bool spill_file(const std::string& path, const std::string& content) {
 	if (const fs::path parent = fs::path(path).parent_path(); !parent.empty()) {
 		std::error_code ec;
@@ -1129,7 +1154,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	jai::stdlib::register_all(eng);
 
 	// Host file IO — a runner without it can't save anything (same shapes as the example games).
-	eng->add_function("read_file", [](const std::string& path) -> std::string { return slurp_file(path); }, jai::filesystem);
+	eng->add_function("read_file", [](const std::string& path) -> std::string { return read_file_or_raise(path); }, jai::filesystem);
 	eng->add_function("write_file", [](const std::string& path, const std::string& content) -> bool {
 		return spill_file(path, content);
 	}, jai::filesystem);
@@ -1804,6 +1829,28 @@ int run_selftest(const console_state& con) {
 		std::string text = out.str();
 		expect(text.find("JaiScript " + jai::version()) != std::string::npos, "repl: banner shows version");
 		expect(text.find("jai> ") != std::string::npos, "repl: prompt prints when interactive");
+	}
+
+	for (const char* backend : {"interp", "vm"}) {   // read_file's contract through the real file functions
+		options file_opt = opt;
+		file_opt.backend = backend;
+		auto eng = make_runner_engine(file_opt, nullptr);
+		const fs::path empty = dir / (std::string("empty ") + backend + ".txt");
+		const fs::path missing = dir / "no such file.txt";
+		spill_file(empty.string(), "");
+		eng->add_global("empty_path", jai::script_value(empty.generic_string(), eng.get()));
+		eng->add_global("missing_path", jai::script_value(missing.generic_string(), eng.get()));
+		eng->add_global("dir_path", jai::script_value(dir.generic_string(), eng.get()));
+		auto run = [&](const std::string& src) {
+			try { return eng->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+		};
+		auto name = [&](const char* what) { return std::string("files [") + backend + "]: " + what; };
+		expect(run("read_file(empty_path).size();") == "0", name("an empty file reads as \"\"").c_str());
+		expect(run("var m = \"\"; try { read_file(missing_path); } catch (e) { m = e; } m;") == "Cannot read file '" + missing.generic_string() + "': not found",
+			name("a missing file raises").c_str());
+		expect(run("var m = \"\"; try { read_file(dir_path); } catch (e) { m = e; } m;") == "Cannot read file '" + dir.generic_string() + "': not a file",
+			name("a folder raises").c_str());
+		expect(run("file_exists(missing_path) ? read_file(missing_path) : \"fallback\";") == "fallback", name("check first, then read").c_str());
 	}
 
 	for (const char* backend : {"interp", "vm"}) {

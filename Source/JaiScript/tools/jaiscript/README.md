@@ -122,6 +122,13 @@ the new one, never half of either; across volumes it copies, then removes the so
 function above requires the engine's `filesystem` privilege. A file's metadata (size, created and
 modified times) is the engine-core `file_data(path)` builtin, on every engine.
 
+`read_file` returns the file's bytes exactly (binary mode: every byte value, NULs and `\r\n` as they
+are; `""` for an existing empty file). A file that is missing or cannot be read raises a catchable
+error, `Cannot read file '<path>': <reason>`, the reason one of `not found`, `not a file` (a folder),
+`permission denied`, `cannot be opened` or `read failed`. Ask `file_data(path) != null` (or `file_exists(path)`)
+first when absence is expected, or catch the error; uncaught, it ends the run with the usual trace. `write_file` writes
+the bytes exactly and answers `false` when it cannot.
+
 Where things are is not the host's to invent: every engine carries the location builtins
 (`resolve_path`, `current_script_dir`, `root_script_dir`, `executable_dir` with alias
 `bin_dir`, `app_data_dir`, `app_cache_dir`, `working_dir`, `parent_dir`, `file_name` and the

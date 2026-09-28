@@ -321,7 +321,7 @@ loopVariable = "const"? type "&"? IDENTIFIER
 
 switchStatement = "switch" "(" expression ")" "{" caseClause* "}"
 
-caseClause = ("case" expression | "default") ":" statement* fallthroughStatement?
+caseClause = ("case" expression | "default") ":" statement* fallthroughStatement?   // a case matches when switchValue == caseValue holds (the language's ==)
 
 fallthroughStatement = "fallthrough" ";"
 

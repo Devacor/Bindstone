@@ -643,6 +643,7 @@ namespace jai {
         checked_result<script_value> handle_greater(const script_value& left, const script_value& right);
         checked_result<script_value> handle_greater_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_equal(const script_value& left, const script_value& right);
+        checked_result<bool> language_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_not_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_spaceship(const script_value& left, const script_value& right);
         checked_result<script_value> handle_bitwise_and(const script_value& left, const script_value& right);

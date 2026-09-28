@@ -91,9 +91,3 @@ there (`/p:SolutionDir=D:\git\bindstone-baseline\`) → `build_frame.bat
   stops re-running the full 4×4 inverse for every point. Needs a 1000-point projection bench.
 - **affine inverse** for the (orthographic ⇒ affine) projection product — ~3–4× on `inverse`, but the
   only caller is mouse-move hit-testing, not per-frame.
-
-## Out of scope — correctness bugs (behavior-changing, NOT touched)
-- **`BoxAABB::centerPoint()`** (boxaabb.h:63): returns `minPoint + ((minPoint+maxPoint)/2)` instead
-  of `(minPoint+maxPoint)/2` — wrong unless minPoint==0. Appears unused; needs a consumer audit.
-- **`BoxAABB::collides(..., useDepth=true)`** (boxaabb.h:381): depth uses OR, so Z-separated boxes
-  still report collision. No caller passes `useDepth=true` today. Needs a gameplay decision + test.

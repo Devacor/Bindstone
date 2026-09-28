@@ -58,6 +58,9 @@ struct inline_context {
 	std::shared_ptr<identifier_expr> receiver;                     // a method graft: `this` and the bare fields read through the caller's receiver
 	bool returns_proven = false;                                   // an untyped lambda whose returns the checker proved one scalar kind
 	std::unordered_map<const expression*, const call_expr*> origins;   // per cloned call: the call it copies
+	std::vector<script_value_type> site_kinds;                     // per callee slot: the kind the site's arguments give it (a stamp's input, never a declaration)
+	script_value_type replace_kind = script_value_type::jai_null_type;   // the statement's clone: the kind the graft's result has
+	bool stamps = false;                                           // an operation the checker left unclassified takes the class these kinds give (every consumer guards it)
 	const class_definition* field_class = nullptr;
 	std::vector<uint64_t> field_ids;
 	std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>>* alias_pins = nullptr;   // the statement's clone: a pinned alias call keeps its guard
@@ -245,6 +248,194 @@ void note_store(const expression* target, inline_context& c, bool proven) {
 	c.writes_member = true;
 }
 
+script_value_type spill_kind(const expression* e);
+bool ever_stamped(const std::weak_ptr<const function_decl>& w);
+
+// the kind of a value from the kinds of its names: a literal, plain arithmetic, a comparison, a logical operator, a negation, a cast to
+// a scalar, a ternary whose arms agree, a subtree the checker classified, the call the statement's clone replaces; jai_null_type otherwise
+template <class F>
+script_value_type kind_of(const expression* e, const F& slot_kind, const call_expr* replace, script_value_type replace_kind) {
+	using K = script_value_type;
+	if (!e) return K::jai_null_type;
+	switch (e->get_type()) {
+	case node_type::literal_expr: {
+		const script_value& v = static_cast<const literal_expr*>(e)->value;
+		return v.is_int() ? K::jai_int_type : v.is_float() ? K::jai_float_type : v.is_bool() ? K::jai_bool_type : K::jai_null_type;
+	}
+	case node_type::identifier_expr: {
+		auto* id = static_cast<const identifier_expr*>(e);
+		return id->slot_index == SIZE_MAX || id->global_qualified ? K::jai_null_type : slot_kind(id->slot_index);
+	}
+	case node_type::binary_expr: {
+		auto* b = static_cast<const binary_expr*>(e);
+		if (logical_op(b->op.type)) return K::jai_bool_type;
+		if (b->static_operand_class != operand_class_unknown) {
+			const K k = spill_kind(b);
+			if (k == K::jai_int_type || k == K::jai_float_type || k == K::jai_bool_type) return k;
+		}
+		if (b->op.type == token_type::left_bracket) return K::jai_null_type;
+		return arith_kind(b->op.type, kind_of(b->left.get(), slot_kind, replace, replace_kind), kind_of(b->right.get(), slot_kind, replace, replace_kind));
+	}
+	case node_type::unary_expr: {
+		auto* u = static_cast<const unary_expr*>(e);
+		if (u->op.type == token_type::bang) return K::jai_bool_type;
+		const K k = kind_of(u->operand.get(), slot_kind, replace, replace_kind);
+		if (u->op.type == token_type::minus) return k == K::jai_int_type || k == K::jai_float_type ? k : K::jai_null_type;
+		if (u->op.type == token_type::tilde) return k == K::jai_int_type ? k : K::jai_null_type;
+		return K::jai_null_type;
+	}
+	case node_type::ternary_expr: {
+		auto* t = static_cast<const ternary_expr*>(e);
+		const K a = kind_of(t->then_expression.get(), slot_kind, replace, replace_kind);
+		return a == kind_of(t->else_expression.get(), slot_kind, replace, replace_kind) ? a : K::jai_null_type;
+	}
+	case node_type::cast_expr: { auto* k = static_cast<const cast_expr*>(e); return !k->by_reference && scalar_type(k->target.get()) ? k->target->base_type : K::jai_null_type; }
+	case node_type::call_expr: return e == replace ? replace_kind : K::jai_null_type;
+	default: return K::jai_null_type;
+	}
+}
+
+uint8_t kind_class(script_value_type l, script_value_type r) {
+	using K = script_value_type;
+	if (l == K::jai_int_type && r == K::jai_int_type) return operand_class_int_int;
+	if (l == K::jai_float_type && r == K::jai_float_type) return operand_class_float_float;
+	if (l == K::jai_int_type && r == K::jai_float_type) return operand_class_int_float;
+	if (l == K::jai_float_type && r == K::jai_int_type) return operand_class_float_int;
+	if (l == K::jai_bool_type && r == K::jai_bool_type) return operand_class_bool_bool;
+	return operand_class_unknown;
+}
+
+// a stamp's kind: the site's kind of a callee slot, else its declared scalar type (the statement's clone: the caller's); a reference
+// parameter is the caller's lvalue, whose kind is the caller's stamps' business
+script_value_type stamp_kind(const expression* e, const inline_context& c) {
+	return kind_of(e, [&c](size_t s) {
+		if (s < c.ref_slots.size() && c.ref_slots[s]) return script_value_type::jai_null_type;
+		if (s < c.site_kinds.size() && c.site_kinds[s] != script_value_type::jai_null_type) return c.site_kinds[s];
+		return s < c.slot_types.size() && scalar_type(c.slot_types[s]) ? c.slot_types[s]->base_type : script_value_type::jai_null_type;
+	}, c.replace, c.replace_kind);
+}
+
+// the definitions of a callee's untyped slots at one site (a `var` parameter's argument, a `var` local's initializer, each store, each
+// increment) and its returns' values, for the kinds a fixpoint gives them
+struct site_walk {
+	std::vector<script_value_type> kind;   // per callee slot (jai_null_type: none)
+	std::vector<uint8_t> open;             // an untyped slot the walk types
+	struct def { size_t slot; token_type op; const expression* value; };   // equal: the value; plus_plus: an increment; else a compound store's base op
+	std::vector<def> defs;
+	std::vector<const expression*> returns;
+	bool ok = true;
+};
+
+script_value_type walk_kind(const expression* e, const site_walk& w) {
+	return kind_of(e, [&w](size_t s) { return s < w.kind.size() ? w.kind[s] : script_value_type::jai_null_type; }, nullptr, script_value_type::jai_null_type);
+}
+
+script_value_type scalar_kind(script_value_type k) {
+	return k == script_value_type::jai_int_type || k == script_value_type::jai_float_type || k == script_value_type::jai_bool_type ? k : script_value_type::jai_null_type;
+}
+
+void walk_unknown(const expression* a, site_walk& w) {   // a slot a call may bind by reference takes no kind
+	if (!a || a->get_type() != node_type::identifier_expr) return;
+	const size_t s = static_cast<const identifier_expr*>(a)->slot_index;
+	if (s < w.kind.size()) { w.open[s] = 0; w.kind[s] = script_value_type::jai_null_type; }
+}
+
+void walk_expr(const expression* e, site_walk& w) {
+	if (!e || !w.ok) return;
+	switch (e->get_type()) {
+	case node_type::literal_expr: case node_type::identifier_expr: case node_type::this_expr: return;
+	case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); walk_expr(b->left.get(), w); walk_expr(b->right.get(), w); return; }
+	case node_type::unary_expr: {
+		auto* u = static_cast<const unary_expr*>(e);
+		if (incdec_op(u->op.type) && u->operand && u->operand->get_type() == node_type::identifier_expr) {
+			const size_t s = static_cast<const identifier_expr*>(u->operand.get())->slot_index;
+			if (s < w.kind.size()) { w.defs.push_back({s, token_type::plus_plus, nullptr}); }
+		}
+		walk_expr(u->operand.get(), w);
+		return;
+	}
+	case node_type::assignment_expr: {
+		auto* a = static_cast<const assignment_expr*>(e);
+		if (a->target->get_type() == node_type::identifier_expr) {
+			const size_t s = static_cast<const identifier_expr*>(a->target.get())->slot_index;
+			token_type op = a->op.type;
+			switch (op) {
+			case token_type::plus_equal: op = token_type::plus; break;
+			case token_type::minus_equal: op = token_type::minus; break;
+			case token_type::star_equal: op = token_type::star; break;
+			case token_type::slash_equal: op = token_type::slash; break;
+			case token_type::percent_equal: op = token_type::percent; break;
+			default: break;   // any other compound keeps its own token, which yields no kind
+			}
+			if (s < w.kind.size()) { w.defs.push_back({s, op, a->value.get()}); }
+		} else {
+			walk_expr(a->target.get(), w);
+		}
+		walk_expr(a->value.get(), w);
+		return;
+	}
+	case node_type::member_expr: { auto* m = static_cast<const member_expr*>(e); if (!m->is_static) { walk_expr(m->object.get(), w); } return; }
+	case node_type::ternary_expr: { auto* t = static_cast<const ternary_expr*>(e); walk_expr(t->condition.get(), w); walk_expr(t->then_expression.get(), w); walk_expr(t->else_expression.get(), w); return; }
+	case node_type::cast_expr: walk_expr(static_cast<const cast_expr*>(e)->operand.get(), w); return;
+	case node_type::call_expr: {
+		auto* ce = static_cast<const call_expr*>(e);
+		const bool by_value = math_call(ce) || (ce->callee && ce->callee->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(ce->callee.get())->slot_index == SIZE_MAX && ce->arguments.size() == 1 && !ever_stamped(ce->proven_callee_decl));
+		const std::shared_ptr<const function_decl> callee = ever_stamped(ce->proven_callee_decl) ? ce->proven_callee_decl.lock() : nullptr;
+		for (size_t i = 0; i < ce->arguments.size(); ++i) {
+			const bool ref = callee ? (i >= callee->parameters.size() || callee->parameters[i].is_reference) : !by_value;
+			if (ref) { walk_unknown(ce->arguments[i].get(), w); }
+			walk_expr(ce->arguments[i].get(), w);
+		}
+		return;
+	}
+	default: w.ok = false; return;
+	}
+}
+
+void walk_decls(const std::vector<declaration_ptr>& decls, site_walk& w);
+
+void walk_stmt(const statement* s, site_walk& w) {
+	if (!s || !w.ok) return;
+	switch (s->get_type()) {
+	case node_type::block_stmt: walk_decls(static_cast<const block_stmt*>(s)->declarations, w); return;
+	case node_type::if_stmt: { auto* i = static_cast<const if_stmt*>(s); walk_expr(i->condition.get(), w); walk_stmt(i->then_statement.get(), w); walk_stmt(i->else_statement.get(), w); return; }
+	case node_type::return_stmt: { auto* r = static_cast<const return_stmt*>(s); if (r->value) { w.returns.push_back(r->value.get()); walk_expr(r->value.get(), w); } return; }
+	case node_type::expression_stmt: walk_expr(static_cast<const expression_stmt*>(s)->expression.get(), w); return;
+	case node_type::for_stmt: {
+		auto* f = static_cast<const for_stmt*>(s);
+		if (f->initializer) { walk_decls({f->initializer}, w); }
+		walk_expr(f->condition.get(), w); walk_expr(f->update.get(), w); walk_stmt(f->body.get(), w);
+		return;
+	}
+	case node_type::while_stmt: { auto* ws = static_cast<const while_stmt*>(s); walk_expr(ws->condition.get(), w); walk_stmt(ws->body.get(), w); return; }
+	case node_type::break_stmt: case node_type::continue_stmt: return;
+	default: w.ok = false; return;
+	}
+}
+
+void walk_decls(const std::vector<declaration_ptr>& decls, site_walk& w) {
+	for (const declaration_ptr& d : decls) {
+		if (!w.ok) return;
+		switch (d->get_type()) {
+		case node_type::variable_decl: {
+			auto* v = static_cast<const variable_decl*>(d.get());
+			walk_expr(v->initializer.get(), w);
+			if (v->slot_index >= w.kind.size()) break;
+			const bool reference = v->type && v->type->is_reference();
+			if (scalar_type(v->type.get()) && !reference) { w.kind[v->slot_index] = v->type->base_type; break; }
+			if (!any_type(v->type.get()) || reference || v->is_static || !v->initializer) { w.kind[v->slot_index] = script_value_type::jai_null_type; break; }
+			w.open[v->slot_index] = 1;
+			w.kind[v->slot_index] = scalar_kind(walk_kind(v->initializer.get(), w));
+			w.defs.push_back({v->slot_index, token_type::equal, v->initializer.get()});
+			break;
+		}
+		case node_type::expression_decl: walk_expr(static_cast<const expression_decl*>(d.get())->expression.get(), w); break;
+		case node_type::statement_decl: walk_stmt(static_cast<const statement_decl*>(d.get())->statement.get(), w); break;
+		default: w.ok = false; return;
+		}
+	}
+}
+
 // the expression forms an inlined body and an inlined statement may hold: no call but a math intrinsic, no lambda, no `this`, no
 // literal container, no yield, no throw, no include. The clone keeps every proof the checker stamped, so the graft compiles as
 // typed as the original.
@@ -277,6 +468,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto n = c.make<binary_expr>(b->location, l, b->op, r);
 		n->transient_element_read = b->transient_element_read;
 		n->static_operand_class = b->static_operand_class;
+		if (c.stamps && n->static_operand_class == operand_class_unknown && b->op.type != token_type::left_bracket && !logical_op(b->op.type)) { n->static_operand_class = kind_class(stamp_kind(b->left.get(), c), stamp_kind(b->right.get(), c)); }
 		return n;
 	}
 	case node_type::unary_expr: {
@@ -312,6 +504,15 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto n = c.make<assignment_expr>(a->location, t, a->op, v);
 		n->typed_store_provable = a->typed_store_provable; n->static_store_proof = a->static_store_proof; n->static_operand_class = a->static_operand_class;
 		n->postfix_old_result = a->postfix_old_result; n->incdec_desugar = a->incdec_desugar;
+		if (c.stamps && a->target->get_type() == node_type::identifier_expr) {
+			const script_value_type tk = stamp_kind(a->target.get(), c), vk = stamp_kind(a->value.get(), c);
+			if (a->op.type != token_type::equal && n->static_operand_class == operand_class_unknown) { n->static_operand_class = kind_class(tk, vk); }
+			const size_t ts = static_cast<const identifier_expr*>(a->target.get())->slot_index;
+			if (a->op.type == token_type::equal && tk != script_value_type::jai_null_type && tk == vk && n->static_store_proof == proof_none && ts < c.slot_types.size() && scalar_type(c.slot_types[ts])) {
+				n->static_store_proof = proof_same_type;   // a declared scalar slot storing its own kind
+				if (tk != script_value_type::jai_bool_type) { n->typed_store_provable = true; }
+			}
+		}
 		return n;
 	}
 	case node_type::member_expr: {
@@ -416,7 +617,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 		} else {
 			if (!r->value || r->binds_reference) { c.fail("a return without a value or by reference"); return nullptr; }
 			const bool proven_return = r->static_return_proof == proof_same_type || c.returns_proven;
-			if (c.in_loop && !proven_return && !scalar_type(c.result_type.get())) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven, or a scalar the block lands by its declared type (converting, or missing onto the return's own text)
+			if (c.in_loop && !proven_return && !scalar_type(c.result_type.get()) && !any_type(c.result_type.get())) { c.fail("an unproven return in a loop"); return nullptr; }   // the result's declaration must be a block instruction: proven, a scalar the block lands by its declared type (converting, or missing onto the return's own text), or untyped (it holds what the return yields, as the call's result does)
 			expression_ptr v = clone_expr(r->value, c);
 			if (!c.ok) return nullptr;
 			if (c.in_loop && !landable(v.get(), &c.lc)) { c.fail("a return the block cannot land"); return nullptr; }
@@ -607,9 +808,9 @@ script_value_type spill_kind(const expression* e) {
 } // namespace
 
 // the callee's shape and the site's arguments (the statement's position is the caller's business): one small body of the forms the
-// clone takes, every by-value parameter a scalar the checker proved or a `var` taking a scalar local or a literal, every reference
-// parameter a `var&` bound to a plain identifier or an element lvalue. frame: the declared types of the slots the arguments are read
-// from, when the call is a body's (null: the caller's frame)
+// clone takes, every by-value parameter a scalar the checker proved or a `var` taking a literal or a value of a scalar kind, every
+// reference parameter a `var&` bound to a plain identifier or an element lvalue, an untyped result one scalar kind at the site. frame:
+// the declared types of the slots the arguments are read from, when the call is a body's (null: the caller's frame)
 const char* vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame) const {
 	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
 	if (!fn || !fn->body) return "a callee without a body";
@@ -617,7 +818,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
 	const type_info* rt = fn->return_type.get();
-	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
+	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0) || (any_type(rt) && untyped_result_kind(call, fn, frame) != script_value_type::jai_null_type))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
@@ -639,8 +840,8 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 		if (scalar_type(p.type.get())) { if (!proven) return "an unproven argument"; continue; }   // an unproven argument would bind out of the call's order (every argument before the first binding)
 		if (any_type(p.type.get())) {
 			if (a->get_type() == node_type::literal_expr) continue;
-			if (a->get_type() == node_type::identifier_expr && arg_kind(a, frame) != script_value_type::jai_null_type) continue;
-			return "a var parameter bound to more than a scalar local or a literal";
+			if (arg_kind(a, frame) != script_value_type::jai_null_type) continue;   // a scalar value: binding it copies it, before or after the next argument alike
+			return "a var parameter bound to more than a scalar value or a literal";
 		}
 		return "a parameter type the graft does not take";
 	}
@@ -861,20 +1062,61 @@ land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
 	return lc;
 }
 
-// an argument's kind where the call reads it: a literal's, or a local's declared scalar type in the frame (null: the caller's)
+// an argument's kind where the call reads it: a literal's, a local's declared scalar type in the frame (null: the caller's), or what plain
+// arithmetic over those yields (a kind a stamp may assume: its consumers guard it)
 script_value_type vm_compiler::arg_kind(const expression* a, const std::vector<const type_info*>* frame) const {
+	return scalar_kind(kind_of(a, [this, frame](size_t s) {
+		const type_info* t = nullptr;
+		if (frame) { t = s < frame->size() ? (*frame)[s] : nullptr; }
+		else if (const auto it = callable_.slot_types.find(static_cast<uint32_t>(s)); it != callable_.slot_types.end()) { t = it->second; }
+		return scalar_type(t) ? t->base_type : script_value_type::jai_null_type;
+	}, nullptr, script_value_type::jai_null_type));
+}
+
+// the kinds a callee's slots take at the site: a scalar parameter or local its declared type, an untyped by-value parameter its argument's
+// kind, an untyped local the kind every definition of it yields (its initializer, each store, each increment), to a fixpoint; a slot a
+// call may bind by reference none. result: the kind every return yields (jai_null_type: none)
+std::vector<script_value_type> vm_compiler::site_kinds(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, script_value_type* result) const {
 	using K = script_value_type;
-	if (a->get_type() == node_type::literal_expr) {
-		const script_value& v = static_cast<const literal_expr*>(a)->value;
-		return v.is_int() ? K::jai_int_type : v.is_float() ? K::jai_float_type : v.is_bool() ? K::jai_bool_type : K::jai_null_type;
+	if (result) { *result = K::jai_null_type; }
+	if (!fn || !fn->body) return {};
+	site_walk w;
+	w.kind.assign(fn->local_count, K::jai_null_type);
+	w.open.assign(fn->local_count, 0);
+	for (size_t i = 0; i < fn->parameters.size() && i < call->arguments.size(); ++i) {
+		const parameter& p = fn->parameters[i];
+		if (p.slot_index >= fn->local_count || p.is_reference) continue;
+		if (scalar_type(p.type.get())) { w.kind[p.slot_index] = p.type->base_type; continue; }
+		if (!any_type(p.type.get())) continue;
+		w.kind[p.slot_index] = arg_kind(call->arguments[i].get(), frame);
+		w.open[p.slot_index] = 1;
 	}
-	if (a->get_type() != node_type::identifier_expr) return K::jai_null_type;
-	auto* id = static_cast<const identifier_expr*>(a);
-	if (id->slot_index == SIZE_MAX || id->global_qualified) return K::jai_null_type;
-	const type_info* t = nullptr;
-	if (frame) { t = id->slot_index < frame->size() ? (*frame)[id->slot_index] : nullptr; }
-	else if (const auto it = callable_.slot_types.find(static_cast<uint32_t>(id->slot_index)); it != callable_.slot_types.end()) { t = it->second; }
-	return scalar_type(t) ? t->base_type : K::jai_null_type;
+	walk_decls(fn->body->declarations, w);
+	if (!w.ok) return {};
+	for (bool changed = true; changed;) {
+		changed = false;
+		for (const site_walk::def& d : w.defs) {
+			if (!w.open[d.slot] || w.kind[d.slot] == K::jai_null_type) continue;
+			const K cur = w.kind[d.slot];
+			const K k = d.op == token_type::equal ? walk_kind(d.value, w)
+			          : d.op == token_type::plus_plus ? (cur == K::jai_int_type || cur == K::jai_float_type ? cur : K::jai_null_type)
+			          : arith_kind(d.op, cur, walk_kind(d.value, w));
+			if (k != cur) { w.kind[d.slot] = K::jai_null_type; changed = true; }
+		}
+	}
+	if (result && !w.returns.empty()) {
+		K r = scalar_kind(walk_kind(w.returns.front(), w));
+		for (const expression* v : w.returns) { if (scalar_kind(walk_kind(v, w)) != r) { r = K::jai_null_type; break; } }
+		*result = r;
+	}
+	return w.kind;
+}
+
+// an untyped leaf's result at the site: the scalar kind every return yields under the site's kinds, else none (the call stays)
+script_value_type vm_compiler::untyped_result_kind(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame) const {
+	script_value_type r = script_value_type::jai_null_type;
+	(void)site_kinds(call, fn, frame, &r);
+	return r;
 }
 
 // the declared types of a graft's parameter slots as its clone reads them: a by-value parameter's own, a reference parameter bound to a
@@ -1044,6 +1286,11 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 	inline_context ctx;
 	setup(ctx, base, result);
+	// the operations over the callee's slots the checker left unclassified take the classes the site's argument kinds give them: stamps
+	// every consumer guards (an argument holding another kind at run time takes the general form), never a declaration
+	script_value_type site_result = script_value_type::jai_null_type;
+	ctx.site_kinds = site_kinds(call.get(), fn, nullptr, &site_result);
+	ctx.stamps = !ctx.site_kinds.empty();
 	// the parameters: a by-value parameter is a declaration of the callee's type from the argument (the assignment table
 	// bind_parameters runs; the checker proved the type, so nothing converts); a reference parameter bound to an identifier is a
 	// renaming, bound to an element lvalue an alias declaration (a rebind)
@@ -1107,6 +1354,15 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	if (result) { callable_.primitive_slots.erase(static_cast<uint32_t>(result->slot_index)); }   // the fallback declares it as anything
 	inlining_off_ = was_off;
 	sc.replace = call.get(); sc.result = result; sc.result_type = graft_result_type(fn);   // a replaced argument's proof reads the type
+	// the statement's operations over the result the checker could not classify (an untyped callee's result) take the classes the kinds give
+	sc.replace_kind = scalar_type(sc.result_type.get()) ? sc.result_type->base_type : site_result;
+	if (sc.replace_kind != script_value_type::jai_null_type) {
+		sc.stamps = true;
+		size_t hi = 0;
+		for (const auto& [s, t] : callable_.slot_types) { hi = std::max<size_t>(hi, static_cast<size_t>(s) + 1); }
+		sc.slot_types.assign(hi, nullptr);
+		for (const auto& [s, t] : callable_.slot_types) { sc.slot_types[s] = t; }
+	}
 	expression_ptr replaced = clone_expr(root, sc);
 	for (const call_expr* p : pinned) { alias_pins_.erase(p); callee_probes_.erase(p); }   // moved to the clone's node when the clone holds it
 	for (auto& n : sc.pins) { chunk_->nodes.push_back(n); }

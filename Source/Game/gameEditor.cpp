@@ -260,8 +260,8 @@ int GameEditor::runDriver(const std::string& a_scriptPath, bool a_live) {
 		return clickable ? a_node->screenFromLocal(clickable->bounds()) : a_node->screenBounds();
 	};
 	auto center = [&](const std::shared_ptr<MV::Scene::Node>& a_node) {
-		auto bounds = hitBox(a_node);
-		return MV::Point<int>((bounds.minPoint.x + bounds.maxPoint.x) / 2, (bounds.minPoint.y + bounds.maxPoint.y) / 2);
+		auto middle = hitBox(a_node).centerPoint();
+		return MV::Point<int>(middle.x, middle.y);
 	};
 	auto target = [&](const std::vector<std::string>& a_args) -> std::optional<MV::Point<int>> {
 		if (a_args.size() >= 2 && a_args[0] == "node") {

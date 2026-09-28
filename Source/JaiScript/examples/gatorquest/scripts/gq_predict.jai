@@ -11,8 +11,6 @@ import "gq_audio.jai";
 
 // ---------------------------------------------------------------- rules ---
 // the host's player movement rules, as the client can know them
-int PRED_BUMP = -1;
-
 // 0 free, 1 wall (turn only), 2 somebody is there (the host bumps: attack or talk)
 int pred_blocked(ClientView& v, int x0, int y0, int dir) {
 	int x = x0 + DX[dir];
@@ -61,6 +59,7 @@ void pred_reset() {
 	PRED_W = -1;
 	PRED_READY = 0;
 	PRED_LUNGE_T = -1000;
+	PRED_WALL_DIR = -1;
 	CORR_X = 0.0;
 	CORR_Y = 0.0;
 	PRED_CORRECTIONS = 0;
@@ -126,8 +125,6 @@ void pred_footstep(ClientView& v, int x, int y) {
 		for (int n = 0; n < 2; ++n) { particle(fx + (prandf() - 0.5) * 0.5, fy, (prandf() - 0.5) * 0.03, -0.015, 12 + prand(6), c, 4); }
 	}
 }
-
-int PRED_WALL_DIR = -1;
 
 // called every frame with the held direction (-1 none); a step happens on this frame when it can
 void pred_input(ClientView& v, int dir, int now) {

@@ -8,10 +8,10 @@
 
 import "gq_endgame.jai";
 
-int PT_S = -1;
-int PT_NEXT_TICK = 0;
-int PT_SAME_FRAME_CHECKS = 0;
-int PT_SAME_FRAME_MISSES = 0;
+int PT_S;
+int PT_NEXT_TICK;
+int PT_SAME_FRAME_CHECKS;
+int PT_SAME_FRAME_MISSES;
 
 int pt_mob() { return CHARS[NCS_SLOT[PT_S]].mob; }
 

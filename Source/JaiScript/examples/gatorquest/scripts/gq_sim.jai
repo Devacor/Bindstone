@@ -60,6 +60,7 @@ void sim_reset() {
 	IN_ACK = [];
 	IN_DROPPED = [];
 	CHAR_ARCHIVE = [];
+	CAMERA_W = -1;
 	events_clear();
 }
 

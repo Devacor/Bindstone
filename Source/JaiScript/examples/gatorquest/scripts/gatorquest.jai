@@ -8,7 +8,7 @@
 //   jaiscript gatorquest.jai -- shot [ticks N] [every N] [screen 150x44] [out DIR] [keys "i down enter"]
 //                                                    headless frame captures (.ans + .txt sketch)
 //   jaiscript gatorquest.jai -- savetest             save robustness suite
-//   jaiscript gatorquest.jai -- hotreload [interp]   hot-reload test (pass interp on --backend=interp)
+//   powershell -File hotreload.ps1 [-Backend interp]  hot-reload test (it edits its scripts: runs a scratch copy)
 //   jaiscript gatorquest.jai -- dev                  play with live script reload
 //   jaiscript gatorquest.jai -- predtest | menutest | nettest | endgame | tour | serve | client   see README.md
 
@@ -149,7 +149,7 @@ int run_play() {
 	if (arg_flag("join") && TM_PAGE == "main") { tm_open("join"); }
 	bool dev = arg_flag("dev");
 	if (dev) {
-		dev_watch_dir(current_script_dir());
+		dev_start();
 		DEV_ON = true;
 	}
 	while (true) {
@@ -160,7 +160,7 @@ int run_play() {
 		string choice = title_screen(resumed, demo ? 45 : 0);
 		if (choice == "quit") { break; }
 		string welcome = session_start(choice, demo);
-		if (dev) { welcome = welcome + ` Dev mode: watching ${DEV_FILES.size()} scripts for changes.`; }
+		if (dev) { welcome = welcome + ` Dev mode: ${DEV_MODULES.size()} scripts reload when saved.`; }
 		if (!NET_CLIENT) {
 			say_to(LOCAL_SLOT, welcome, C_YELLOW);
 			music_play(MOB_WORLD[CHARS[LOCAL_SLOT].mob]);
@@ -247,6 +247,7 @@ int run_prepare() {
 }
 
 int main() {
+	client_state_init();
 	if (arg_flag("nodelta")) { SNAP_DELTAS = false; }
 	if (arg_flag("noprediction")) { PRED_ON = false; }
 	// the network simulator: lag N (round trip ms), jitter N (ms), loss N (percent)
@@ -259,7 +260,7 @@ int main() {
 	// "tag X" gives a test run its own folders, so runs in parallel never share files
 	string tests = data_root() + "/saves" + (arg_value("tag", "") == "" ? "" : "/" + arg_value("tag", ""));
 	if (arg_flag("savetest")) { return run_savetest(tests); }
-	if (arg_flag("hotreload")) { return run_hotreload(tests, !arg_flag("interp")); }
+	if (arg_flag("hotreload")) { return run_hotreload(); }
 	if (arg_flag("nettest")) { return run_nettest(tests, arg_value("port", "28911").to_int(28911)); }
 	if (arg_flag("prepare")) { return run_prepare(); }
 	if (arg_flag("endgame")) { return run_endgame(); }

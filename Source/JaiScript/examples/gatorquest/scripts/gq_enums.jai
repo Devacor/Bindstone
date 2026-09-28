@@ -1,5 +1,4 @@
-// Gator Quest - enums and flag bits. Not reloadable: a runtime include declares an
-// enum only in its own scope, so these stay where the first load put them.
+// Gator Quest - enums and flag bits.
 
 enum Dir { n, ne, e, se, s, sw, w, nw }
 

@@ -1,16 +1,15 @@
-// Gator Quest - the live world. This is the ONLY file hot reload never re-runs:
-// every declaration here is mutable state that must survive a reload. Logic
-// and data files may be re-run in place at any time (see gq_dev.jai), so they
-// declare no state of their own.
+// Gator Quest - the live world. Every declaration here is state, written without
+// an initializer, so a reload of this file keeps what it holds (sim_reset and
+// world generation give it its starting values).
 
 import "gq_types.jai";
 
 // ---- run
-int SEED = 1;
-int TICK = 0;
-int RNG_S = 1;
-int NEXT_SER = 1;
-bool WORLD_READY = false;
+int SEED;
+int TICK;
+int RNG_S;
+int NEXT_SER;
+bool WORLD_READY;
 
 // ---- terrain: every world's tiles in one flat array, W_OFF[w] = first index
 array<int> W_OFF;
@@ -77,7 +76,7 @@ array<int> MOB_OWNER;
 array<int> MOB_AUX;
 array<int> MOB_ROLE;
 array<int> MOB_LEVEL;
-int MOB_LIVE = 0;
+int MOB_LIVE;
 
 // ---- spawners
 array<int> SP_W;
@@ -121,17 +120,17 @@ array<int> EV_TO;             // player slot, -1 = everyone near (EV_W, EV_X, EV
 array<string> EV_TEXT;
 
 // ---- a spectator camera keeps its surroundings awake (title screen); -1 = none
-int CAMERA_W = -1;
-int CAMERA_X = 0;
-int CAMERA_Y = 0;
+int CAMERA_W;
+int CAMERA_X;
+int CAMERA_Y;
 
 // ---- autopilots
 array<Bot> BOTS;
 
 // ---- snapshots and the client side
 array<int> NET_SHEET_SENT;     // host: sheet version last sent to each slot
-shared_ptr<ClientView> CV = null;   // the view the renderer draws
+shared_ptr<ClientView> CV;          // the view the renderer draws
 
 // ---- dev/stat counters (not hashed)
-int STAT_KILLS = 0;
-int STAT_SPAWNS = 0;
+int STAT_KILLS;
+int STAT_SPAWNS;

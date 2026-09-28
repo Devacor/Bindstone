@@ -13170,6 +13170,11 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	const bool old_result = (ins.c & compound_flag_old_result) != 0;
 	const bool result_needed = assignment_result_used(f);   // member compounds carry no result flag; the POP after a statement does
 
+	if (ins.c & compound_flag_value_first) {
+		// [rhs, receiver, current] / [rhs, current] -> the target-first layout below
+		const size_t n = member->is_static ? 2 : 3;
+		std::rotate(&stack_[stack_.size() - n], &stack_[stack_.size() - n + 1], &stack_[stack_.size() - 1] + 1);
+	}
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 	script_value currentValue = std::move(stack_.back());

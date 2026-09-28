@@ -130,6 +130,7 @@ public:
 		native_exceptions();
 		access_control();
 		lambda_globals_and_init_captures();
+		compound_member_order();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1816,6 +1817,35 @@ private:
 					return std::string(w.find("A reference capture takes no initializer") != std::string::npos ? "parse error" : w);
 				}
 			});
+		});
+	}
+
+	// Dev ruling 2026-09-27, C++17 [expr.ass]: in E1 op= E2 every value computation and side effect of E2 is sequenced before
+	// E1 - the right side runs first, then the target's receiver, its read (a user getter included), the arithmetic and the store
+	void compound_member_order() {
+		test("a_member_compound_evaluates_its_right_side_before_the_target", [this]() {
+			expect("member order", R"(
+				string LOG = ""; int K = 0;
+				class O { int f = 1; static int s = 1; int self_add() { this.f += (f = 10); return f; } }
+				namespace ns { int x = 1; }
+				O G = O();
+				function obj() -> O { LOG += "t" + K; return G; }
+				class H { int f = 1; int _get_g() { LOG += "g" + K; return f; } void _set_g(int v) { LOG += "s" + K; f = v; } }
+				H hh = H();
+				function t(function f) -> string { LOG = ""; K = 0; f(); return LOG; }
+				function field() -> int { O o = O(); o.f += (o.f = 10); return o.f; }
+				t([]() { obj().f += ++K; }) + "|" + t([]() { hh.g += ++K; }) + "|" +
+				t([]() { O::s += (K = 3); LOG += "" + O::s; }) + "|" + t([]() { ns::x += (K = 4); LOG += "" + ns::x; }) + "|" +
+				field() + "|" + O().self_add();
+			)", "t1|g1s1|4|5|20|20", check_mode::warn);
+		});
+		test("a_right_side_error_comes_before_the_targets", [this]() {
+			expect("member error order", R"(
+				function bad() -> int { throw "rhs"; return 1; }
+				namespace ns { int x = 1; }
+				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+				t([]() { var nv = null; nv.f += bad(); }) + "|" + t([]() { ns::missing += bad(); }) + "|" + t([]() { var nv = null; nv.f += 1; });
+			)", "rhs|rhs|Cannot access 'f' on null ('nv' is null)", check_mode::off);
 		});
 	}
 

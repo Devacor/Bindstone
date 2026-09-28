@@ -228,6 +228,14 @@ An archive tolerates only a store the member itself refuses: a read-only host
 property, or a value the synthesized field store rejects, leaves the member at its
 constructed value.
 
+## Order of errors in an assignment
+
+C++17 [expr.ass] (Dev ruling 2026-09-27): in `E1 = E2` and `E1 op= E2` every value computation and
+side effect of `E2` comes before `E1`. For a member target (`obj.f`, `this.f`, `C::s`, `ns::x`) the
+right side runs first, then the receiver, the member's read (a user getter included), the
+arithmetic and the store; an error in the right side is the one raised, and the target is never
+evaluated (`nv.f += bad()` with a null `nv` raises `bad()`'s error, not the null receiver's).
+
 ## Call-depth limits (`max_recursion_depth`)
 
 `Maximum recursion depth exceeded - possible infinite recursion`

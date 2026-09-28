@@ -1499,7 +1499,7 @@ public:
             both_drained("class P { int v = 0; }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var arr = [P(), P()]; arr[nz(yield 1)].v += 5; return arr[1].v; }\nauto h = g(); drain(h)",
                 "1|5", "yield inside the index of a member-compound receiver");
             both_drained("class P { int v = 3; }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var p = P(); ((yield 1) == null ? p : p).v += nz(yield 2) * 4; return p.v; }\nauto h = g(); drain(h)",
-                "1|2|7", "yields in both the receiver and the rhs of a member compound");
+                "2|1|7", "yields in both the receiver and the rhs of a member compound: the rhs first (C++17, Dev ruling 2026-09-27)");
         });
 
         test("yield_in_method_field_stores", [this, both_drained]() {

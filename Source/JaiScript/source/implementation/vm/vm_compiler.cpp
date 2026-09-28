@@ -5335,6 +5335,16 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	return true;
 }
 
+// A compound's right-hand side that can neither raise nor write: evaluating it before or after the target observes the same
+bool vm_compiler::compound_rhs_inert(const expression* e) {
+	if (e->get_type() == node_type::literal_expr) { return true; }
+	if (e->get_type() == node_type::identifier_expr) {
+		const auto* id = static_cast<const identifier_expr*>(e);
+		return id->slot_index != SIZE_MAX && id->names_value_decl && !id->global_qualified;
+	}
+	return false;
+}
+
 void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement) {
 	const bool compound = expr->op.type != token_type::equal;
 	if (expr->target->get_type() == node_type::identifier_expr) {
@@ -5431,6 +5441,10 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				else { compile_expression(member->object); emit(opcode::op_set_member, add_node(member), expr->static_store_proof); }
 			}
 		} else {
+			// C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27); a right side that can
+			// neither raise nor write (a literal, a value local) keeps the target-first shape, which observes the same
+			const bool value_first = !compound_rhs_inert(expr->value.get());
+			if (value_first) { compile_expression(expr->value); }
 			if (member->is_static) {
 				emit(opcode::op_get_static, add_node(member));
 			} else {
@@ -5440,7 +5454,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				emit(opcode::op_dup);
 				emit(opcode::op_get_member, add_node(member));
 			}
-			compile_expression(expr->value);
+			if (!value_first) { compile_expression(expr->value); }
 			uint32_t kind;
 			switch (expr->op.type) {
 			case token_type::plus_equal: kind = compound_plus; break;
@@ -5452,6 +5466,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			}
 			if (expr->postfix_old_result) kind |= compound_flag_old_result;
 			if (expr->incdec_desugar) kind |= compound_flag_incdec;
+			if (value_first) kind |= compound_flag_value_first;
 			emit(opcode::op_member_compound, add_node(member), expr->static_store_proof, kind);
 		}
 		return;

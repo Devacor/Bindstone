@@ -5059,52 +5059,49 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 return std::move(stored.value());
             };
             // Handle compound assignment to member expression (e.g., obj.value += 10)
-            // The receiver is evaluated ONCE and held raw (a reference receiver re-resolves by
-            // mode at the store) across the read, the rhs and the store-back; a :: target has
-            // no receiver (replay: receiver 0, rhs 1, partial {object, current, old})
+            // C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27), then the
+            // receiver is evaluated ONCE and held raw (a reference receiver re-resolves by mode at the store)
+            // across the read and the store-back; a :: target has no receiver (replay: rhs 0, receiver 1,
+            // partial {rhs}). KEEP BYTE-PARALLEL with the vm's value-first member compound.
+            script_value rightValue;
             script_value objectValue;
             script_value currentValue;
             script_value postfix_old;
             if (parked<Replaying>(rs, 0)) {
-                objectValue = rs->partial[0];
-                currentValue = rs->partial[1];
-                postfix_old = rs->partial[2];
+                rightValue = rs->partial[0];
             } else {
-                if (memberExpr->is_static) {
-                    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 0), expr, rp_asg_member_compound, 0, {});
-                } else {
-                    JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr->object.get(), rs, 0), expr, rp_asg_member_compound, 0, {});
-                    objectValue = pop_value();
-                    if (is_unwinding_) {
-                        push_value(make_value());
-                        return {};
-                    }
-                    JAISCRIPT_TRY(member_read_on(memberExpr, objectValue, false));
-                }
-                currentValue = pop_value().deref();
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_member_compound, 0, {});
                 if (is_unwinding_) {
-                    // Target read raised: surface it, not the ++/-- gate's error on the placeholder
+                    // RHS raised: surface the original exception, never touch the target
                     push_value(make_value());
                     return {};
                 }
-                postfix_old = expr->postfix_old_result ? currentValue : make_value();
+                rightValue = pop_value();
             }
+            if (memberExpr->is_static) {
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{rightValue}));
+            } else {
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr->object.get(), rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{rightValue}));
+                objectValue = pop_value();
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
+                }
+                JAISCRIPT_TRY(member_read_on(memberExpr, objectValue, false));
+            }
+            currentValue = pop_value().deref();
+            if (is_unwinding_) {
+                // Target read raised: surface it, not the ++/-- gate's error on the placeholder
+                push_value(make_value());
+                return {};
+            }
+            postfix_old = expr->postfix_old_result ? currentValue : make_value();
             if (expr->incdec_desugar) {
                 const size_t ci = currentValue.raw_storage_index();
                 if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
                     return detail::incdec_mismatch(expr->op.type == token_type::plus_equal, currentValue, engine_);
                 }
             }
-
-            // Evaluate the right-hand side
-            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{objectValue, currentValue, postfix_old}));
-            if (is_unwinding_) {
-                // RHS raised: surface the original exception, don't run the compound
-                // arithmetic on the placeholder (KEEP BYTE-PARALLEL with the vm)
-                push_value(make_value());
-                return {};
-            }
-            script_value rightValue = pop_value();
 
             // Check for custom arithmetic operators on class instances
             if (currentValue.is_object()) {

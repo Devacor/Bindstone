@@ -35,6 +35,7 @@ async function run() {
 		await vscode.window.showTextDocument(doc);
 		check('language id', doc.languageId === 'jaiscript', doc.languageId);
 		const ext = vscode.extensions.getExtension('snapjaw.jaiscript');
+		if (ext) { await waitFor('activation', async () => ext.isActive, 30000).catch(() => {}); }
 		check('extension active', ext && ext.isActive, ext ? ext.isActive : 'missing');
 
 		const text = doc.getText();
@@ -62,19 +63,36 @@ async function run() {
 		const completion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', file, new vscode.Position(insertAt.line, insertAt.character + 2), '.');
 		const labels = new Set((completion ? completion.items : []).map((i) => typeof i.label === 'string' ? i.label : i.label.label));
 		check('completion c. lists Character fields', ['pack', 'gold', 'skill', 'name'].every((l) => labels.has(l)), [...labels].slice(0, 20).join(','));
+		const remove = new vscode.WorkspaceEdit();
+		remove.delete(file, new vscode.Range(insertAt, new vscode.Position(insertAt.line + 1, 1)));
+		await vscode.workspace.applyEdit(remove);
 
+		const probe = 'int typo_probe = "text";\n\t';
 		const broken = new vscode.WorkspaceEdit();
-		broken.insert(file, insertAt, 'int typo_probe = "text";\n\t');
+		broken.insert(file, insertAt, probe);
 		await vscode.workspace.applyEdit(broken);
 		const diagnostics = await waitFor('the typed error', async () => {
 			const list = vscode.languages.getDiagnostics(file);
 			return list.some((d) => d.message.includes('typo_probe')) ? list : undefined;
 		}, 60000);
 		check('typing a type error shows its diagnostic', diagnostics.some((d) => d.message.includes("cannot initialize 'typo_probe'")), diagnostics.map((d) => d.message).join(' | '));
-		await vscode.commands.executeCommand('undo');
-		await vscode.commands.executeCommand('undo');
+		const fix = new vscode.WorkspaceEdit();
+		fix.delete(file, new vscode.Range(insertAt, new vscode.Position(insertAt.line + 1, 1)));
+		await vscode.workspace.applyEdit(fix);
 		await waitFor('the diagnostic to clear', async () => !vscode.languages.getDiagnostics(file).some((d) => d.message.includes('typo_probe')), 60000);
-		check('undo clears it', true);
+		check('fixing it clears the diagnostic', vscode.languages.getDiagnostics(file).length === 0, vscode.languages.getDiagnostics(file).map((d) => d.message).join(' | '));
+
+		const importedFile = vscode.Uri.file(path.join(root, 'scripts', 'gq_util.jai'));
+		const leaf = await vscode.workspace.openTextDocument(importedFile);
+		const leafEdit = new vscode.WorkspaceEdit();
+		leafEdit.insert(importedFile, new vscode.Position(leaf.lineCount - 1, 0), 'int leaf_probe = "text";\n');
+		await vscode.workspace.applyEdit(leafEdit);
+		const leafDiagnostics = await waitFor('the imported file\'s error', async () => {
+			const list = vscode.languages.getDiagnostics(importedFile);
+			return list.some((d) => d.message.includes('leaf_probe')) ? list : undefined;
+		}, 60000);
+		const leafLine = leafDiagnostics.find((d) => d.message.includes('leaf_probe')).range.start.line;
+		check('an error in an imported file is reported in that file at its line', leafLine === leaf.lineCount - 2, 'line ' + (leafLine + 1) + ' of ' + leaf.lineCount);
 
 		const debuggers = ext ? ext.packageJSON.contributes.debuggers.map((d) => d.type) : [];
 		check('debugger type still contributed', debuggers.includes('jaiscript'), debuggers.join(','));

@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Embedding — JaiScript docs</title>
-<meta name="description" content="Thirteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, and shipping.">
+<meta name="description" content="Fourteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, and editor support.">
 <meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
 <meta property="og:title" content="Embedding — JaiScript docs">
-<meta property="og:description" content="Thirteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, and shipping.">
+<meta property="og:description" content="Fourteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, and editor support.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="../assets/style.css">
@@ -29,7 +29,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1">
 <h1>Embedding &amp; Engine Guide</h1>
 <p>How to put JaiScript inside a C++ engine: the two-line quickstart, binding classes, choosing a backend, precompiled <code>.jaibite</code> bites, safety rails for untrusted script, static checking, hot reload, serialization, coroutine hosting, signals, and the honest performance numbers. All host snippets were compiled and run against the real library.</p>
@@ -46,6 +46,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><a href="10-signals-properties.html">Signals &amp; Observable Properties</a><p class="toc-desc">Gameplay is event-shaped: firing and receiving signals from C++, the three routes a signal takes to become script-connectable (auto-bound, one binder line, or a named type), and observable values that announce their own changes.</p></li>
 <li><a href="11-performance.html">Performance Notes</a><p class="toc-desc">What the VM does for you (fused superinstructions, typed arrays, in-language parallelism), what idiomatic-fast code looks like, the honest cost model, and real measured numbers: microbenchmarks vs Lua/Squirrel/ChaiScript and two whole games.</p></li><li><a href="12-debugging.html">Debugging</a><p class="toc-desc">JaiScript ships a step-debugger core (breakpoints, pause, inspect/edit variables, step, resume) on both backends, a VS&nbsp;Code DAP attach, and a syntax-highlighting extension. It costs nothing until a session attaches.</p></li>
 <li><a href="13-script-extensible.html">Script-Extensible Objects: extend</a><p class="toc-desc">A script class can derive a bound C++ class, and the script decides which object becomes which class: <code>extend(object, Class)</code> re-classes a host-owned object in place; every road back into script hands back the layer; hybrids serialize as themselves.</p></li>
+<li><a href="14-language-server.html">Editor Support: the Language Server</a><p class="toc-desc"><code>jaiscript_lsp</code> answers the editor from the engine&#x27;s own parser and strict checker: diagnostics as you type across a whole program (imported files at their own lines), go to definition, references, hover, completion, signature help and rename; the VS&nbsp;Code extension that launches it, and the host profile scripts are checked against.</p></li>
 </ol>
 </main>
 </div>

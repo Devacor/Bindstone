@@ -738,6 +738,7 @@ namespace {
 			case node_type::lambda_expr: {
 				auto* n = static_cast<lambda_expr*>(e.get());
 				for (const auto& prm : n->parameters) { if (prm.symbol_id == UINT64_MAX) { prm.symbol_id = sym.intern(prm.name); } warm_expr(prm.default_value); }
+				for (const auto& cap : n->captures) { warm_expr(cap.initializer); }
 				warm_stmt(n->body);
 				return;
 			}

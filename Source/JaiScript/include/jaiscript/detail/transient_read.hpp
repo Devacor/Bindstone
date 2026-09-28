@@ -226,6 +226,7 @@ namespace jai::detail {
                     for (auto& p : l->parameters) {
                         walk_expr(p.default_value.get(), false);
                     }
+                    for (auto& cap : l->captures) { walk_expr(cap.initializer.get(), false); }
                     walk_stmt(l->body.get());
                     return;
                 }

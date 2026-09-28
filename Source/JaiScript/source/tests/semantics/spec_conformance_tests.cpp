@@ -129,6 +129,7 @@ public:
 		parallel_contracts();
 		native_exceptions();
 		access_control();
+		lambda_globals_and_init_captures();
 #ifdef JAISCRIPT_SPEC_PENDING_CALL_ARGS
 		// Dev ruling (being implemented): by-value call arguments capture their value at the call site, left to right
 		pending_call_argument_capture();
@@ -1755,6 +1756,65 @@ private:
 				e.static_checking(check_mode::warn);
 				out += "|" + e.execute(src + "string r = \"\"; try { peek(Wallet()); } catch (x) { r = x == \"Cannot access private member 'secret' of class 'Wallet'\" ? \"S\" : x; } r;").as_string();
 				return out;
+			});
+		});
+	}
+
+	// Dev ruling 2026-09-27 (docs/closures_and_captures.md): a program-scope variable is never captured by default - [=],
+	// [&] and bare [] read it when the lambda runs, [&g] is the same as not listing it, an explicit [g] copies it at creation;
+	// an init-capture [x = e] copies e, evaluated at creation in the enclosing scope, into the lambda's own x. Locals and
+	// parameters keep their contract (bare [] and [=] copy, [&] shares the cell)
+	void lambda_globals_and_init_captures() {
+		test("a_global_resolves_when_the_lambda_runs_unless_an_explicit_capture_copies_it", [this]() {
+			expect("globals", R"(
+				var g = 1;
+				function t1() -> int { auto l = [=]() { return g; }; g = 5; return l(); }
+				function t2() -> int { auto l = []() { return g; }; g = 6; return l(); }
+				function t3() -> int { auto l = [g]() { return g; }; g = 7; return l(); }
+				function t4() -> int { auto l = [&g]() { return g; }; g = 8; return l(); }
+				function t5() -> int { auto l = [x = g]() { return x; }; g = 9; return l(); }
+				function t6() -> int { auto l = [&]() { g = 10; }; l(); return g; }
+				function t7() -> int { auto l = [=]() { g = 11; }; l(); return g; }
+				function t8() -> int { int k = 1; auto l = [=]() { return k; }; k = 2; return l(); }
+				function t9() -> int { int k = 1; auto l = [&]() { return k; }; k = 2; return l(); }
+				"" + t1() + "," + t2() + "," + t3() + "," + t4() + "," + t5() + "," + t6() + "," + t7() + "," + t8() + "," + t9();
+			)", "5,6,6,8,8,10,11,1,2");
+		});
+		test("a_top_level_lambda_reads_a_global_when_it_runs", [this]() {
+			expect("top level", R"(
+				var h = 1; auto lh = [=]() { return h; }; h = 2;
+				var h2 = 1; auto lc = [h2]() { return h2; }; h2 = 2;
+				function make() { return [=]() { return h; }; }
+				auto late = make(); h = 3;
+				"" + lh() + "," + lc() + "," + late();
+			)", "3,1,3");
+		});
+		test("an_init_capture_copies_its_expression_at_creation", [this]() {
+			expect("init captures", R"(
+				function run() -> string {
+					int x = 1; int y = 2;
+					auto a = [x = y * 10]() { return x; };
+					auto b = [z = x + y, &y]() { y = 100; return z; };
+					int bz = b();
+					string s = "q";
+					auto c = [s2 = s + "!"]() { return s2; };
+					s = "changed";
+					array<int> arr = [1];
+					auto d = [cp = arr]() { return cp.size(); };
+					arr.push(2);
+					auto e = [=, w = 5]() { return w + x; };
+					return "" + a() + "," + bz + "," + y + "," + c() + "," + x + "," + d() + "," + e();
+				}
+				run();
+			)", "20,3,100,q!,1,1,6");
+		});
+		test("a_reference_capture_takes_no_initializer", [this]() {
+			every_config("ref init", "parse error", [](engine& e) {
+				try { e.execute("int x = 1; auto l = [&r = x]() { return r; };"); return std::string("accepted"); }
+				catch (const std::exception& ex) {
+					const std::string w = ex.what();
+					return std::string(w.find("A reference capture takes no initializer") != std::string::npos ? "parse error" : w);
+				}
 			});
 		});
 	}

@@ -763,15 +763,20 @@ public:
             check_eq((int64_t)8, r.as_int());
         });
         test("closure_capture_local_snapshot", [this]() {
-            // Captured value is a snapshot — mutation of outer var doesn't affect closure
+            // A captured local is a snapshot; a top-level (global) x is read when the lambda runs (Dev ruling 2026-09-27)
             auto e = make_engine();
             auto r = e->execute(R"(
-                auto x = 10;
-                auto f = [=]() -> auto { return x; };
-                x = 999;
-                f()
+                function run() -> auto {
+                    auto x = 10;
+                    auto f = [=]() -> auto { return x; };
+                    x = 999;
+                    return f();
+                }
+                run()
             )");
             check_eq((int64_t)10, r.as_int());
+            auto g = e->execute("auto gx = 10; auto gf = [=]() -> auto { return gx; }; gx = 999; gf()");
+            check_eq((int64_t)999, g.as_int());
         });
         test("closure_capture_local_explicit", [this]() {
             // Explicit [local] capture of a function local

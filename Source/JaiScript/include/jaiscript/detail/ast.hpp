@@ -393,6 +393,7 @@ namespace jai {
             bool by_reference;          // True if this specific variable is captured by reference
             mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
             size_t outer_slot = SIZE_MAX;  // Enclosing-frame slot the parser resolved the name to
+            expression_ptr initializer;    // an init-capture `[x = e]`: e, evaluated at creation into the lambda's own x
 
             // Constructor for explicit variable captures
             capture(std::string_view n, bool by_ref)

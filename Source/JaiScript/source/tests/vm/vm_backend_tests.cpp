@@ -2197,10 +2197,8 @@ public:
 		test("lambda_capture_by_value", [this]() {
 			auto e = vm_engine();
 			check_eq((int64_t)1, e->execute(R"(
-				var x = 1;
-				var f = [=]() { return x; };
-				x = 2;
-				f();
+				function run() { var x = 1; var f = [=]() { return x; }; x = 2; return f(); }
+				run();
 			)").as_int());
 		});
 

@@ -79,17 +79,22 @@ string unseal(string text, string magic) {
 	return body;
 }
 
+// the file's text, "" when it is missing or cannot be read (read_file raises for those)
+string read_file_or_empty(string path) {
+	try { return read_file(path); } catch (e) { return ""; }
+}
+
 // write, read back, keep the previous good copy as .bak, then replace
 bool safe_write(string path, string text) {
 	string tmp = path + ".tmp";
 	if (!write_file(tmp, text)) { return false; }
-	if (read_file(tmp) != text) { return false; }
+	if (read_file_or_empty(tmp) != text) { return false; }
 	if (file_exists(path)) {
-		string old = read_file(path);
+		string old = read_file_or_empty(path);
 		if (unseal(old, text.substr(0, text.find(" "))) != "") { write_file(path + ".bak", old); }
 	}
 	if (!write_file(path, text)) { return false; }
-	if (read_file(path) != text) { return false; }
+	if (read_file_or_empty(path) != text) { return false; }
 	delete_file(tmp);
 	return true;
 }
@@ -103,7 +108,7 @@ string load_sealed(string path, string magic) {
 			if (i == 0) { first_problem = "missing"; }
 			continue;
 		}
-		string body = unseal(read_file(tries[i]), magic);
+		string body = unseal(read_file_or_empty(tries[i]), magic);
 		if (body != "") {
 			SAVE_NOTE = i == 0 ? "" : `${file_name(path)} was ${first_problem}; restored from ${file_name(tries[i])}`;
 			return body;

@@ -712,6 +712,7 @@ function save_game() -> void {
 }
 
 function load_game() -> bool {
+	if (!file_exists(SAVE_PATH)) { return false; }
 	var text = read_file(SAVE_PATH);
 	if (text == "") { return false; }
 	var state = from_json(text);

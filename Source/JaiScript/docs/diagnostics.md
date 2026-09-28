@@ -296,6 +296,13 @@ parser's weighted recursion limit of 250, which is not an AST-depth limit or a
 complete native-stack guarantee; recursive assignment and type parsing are not
 covered by that parser counter.
 
+## Host file reads
+
+The runner's `read_file(path)` (and the crawler host's) raises one shape for a file it cannot hand back,
+catchable on both backends: `Cannot read file 'saves/world.gqw': not found`, with `not a file` (a folder),
+`permission denied`, `cannot be opened` or `read failed` in place of `not found`. An existing empty file
+reads as `""`; absence is asked with `file_exists(path)` first.
+
 ## Untouched families (one-line recommendation each)
 
 | family | representative texts | recommendation |

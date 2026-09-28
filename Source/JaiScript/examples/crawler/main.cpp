@@ -10,6 +10,7 @@
 #include <jaiscript/debug/connector.hpp>
 #endif
 
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
@@ -243,12 +244,28 @@ struct crawler_rng {
 	}
 };
 
-std::string slurp_file(const std::string& path) {
-	std::ifstream in(path, std::ios::binary);
-	if (!in) { return ""; }
-	std::ostringstream ss;
-	ss << in.rdbuf();
-	return ss.str();
+// read_file: the file's bytes, "" for an empty file; a missing or unreadable one raises the catchable
+// "Cannot read file '<path>': <reason>", the runner's contract (tools/jaiscript/README.md)
+std::string read_file_or_raise(const std::string& path) {
+	std::error_code ec;
+	const std::filesystem::file_status st = std::filesystem::status(path, ec);
+	const char* reason = nullptr;
+	if (st.type() == std::filesystem::file_type::not_found) { reason = "not found"; }
+	else if (ec) { reason = ec == std::errc::permission_denied ? "permission denied" : "cannot be opened"; }
+	else if (!std::filesystem::is_regular_file(st)) { reason = "not a file"; }
+	if (!reason) {
+		errno = 0;
+		std::ifstream in(path, std::ios::binary);
+		if (!in) {
+			reason = errno == EACCES ? "permission denied" : "cannot be opened";
+		} else {
+			std::ostringstream ss;
+			ss << in.rdbuf();
+			if (!in.bad()) { return ss.str(); }
+			reason = "read failed";
+		}
+	}
+	throw std::runtime_error("Cannot read file '" + path + "': " + reason);
 }
 
 bool spill_file(const std::string& path, const std::string& content) {
@@ -396,7 +413,7 @@ int main(int argc, char** argv) {
 	});
 
 	// --- file IO for saves ---
-	eng->add_function("read_file", [](const std::string& path) -> std::string { return slurp_file(path); });
+	eng->add_function("read_file", [](const std::string& path) -> std::string { return read_file_or_raise(path); });
 	eng->add_function("write_file", [](const std::string& path, const std::string& content) -> bool {
 		return spill_file(path, content);
 	});

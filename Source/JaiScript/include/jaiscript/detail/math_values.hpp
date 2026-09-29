@@ -109,6 +109,10 @@ namespace jai::detail::math {
 		const int c = component_slot(name);
 		return (c >= 0 && static_cast<size_t>(c) < dims(k)) ? c : -1;
 	}
+	// A name some kind reads as a component (a vector's or a color's)
+	inline bool any_component_name(std::string_view name) noexcept {
+		return component_slot(name) >= 0 || component_of(vk::jai_color_type, name) >= 0;
+	}
 	// The canonical component name (the archives' keys)
 	inline const char* component_name(vk k, size_t c) noexcept {
 		static constexpr const char* const vec_names[4] = {"x", "y", "z", "w"};

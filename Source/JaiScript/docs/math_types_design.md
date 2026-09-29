@@ -8,8 +8,8 @@ A host engine maps its own C++ types onto them with one adapter line per type. T
 measured baseline, the representation, the semantics, the API, the binding layer, the VM, the checker, the Bindstone
 migration and the plan with its gates. The measurements come from throwaway harnesses described in "Measurements".
 
-Items needing a ruling are marked **[Dev]** and collected in the last section. Dev accepted all fourteen
-recommendations of section 13 on 2026-09-27; the **[Dev]** marks record where each ruling applies.
+Items needing a ruling are marked **[Dev]** and collected in the last section. Dev accepted the first fourteen
+recommendations of section 13 on 2026-09-27; the **[Dev]** marks record where each ruling applies, and item 15 is open.
 
 ## 1. Decisions already made (Dev, 2026-09-27 and 2026-09-28)
 
@@ -404,8 +404,8 @@ longer but round-trips through the language.
 
 ## 6. API
 
-Names follow MV's vocabulary where MV has one (`magnitude`, `normalized`, `at_origin`, `set`, `translate`, `scale`),
-in snake_case.
+Names are snake_case: the geometry library's (`length`, `normalized`, `dot`, `cross`, `distance_to`, `rotated`; Dev,
+2026-09-29), and MV's vocabulary for the rest (`at_origin`, `set`, `translate`, `scale`).
 - Pure methods return a new value.
 - Mutators (marked **m**) write the storage the receiver names under the string mutator receiver rule: `self` is the
   named storage, never a copy (`detail/string_mutator_receiver.hpp`, invariant 11), and a temporary receiver's mutation
@@ -419,13 +419,31 @@ in snake_case.
 | construct | `math::vec3()` zero; `math::vec3(x, y)` z = 0, MV's `Point`/`Size` default **[Dev]** (GLSL has no two-argument vec3); `math::vec3(x, y, z)`; `math::vec3(v2, z)`; `math::vec4(v3, w)`; `math::vec3::zero()`, `::one()`, `::splat(s)` |
 | fields | 5.4 |
 | operators | unary `-`; `+ - * /` with the same kind (componentwise) and with a scalar on either side; `+= -= *= /=`; `== !=` |
-| length | `magnitude()`, `magnitude_squared()`, `normalized()` (the zero vector stays zero, as MV), `at_origin()` |
-| pairs | `dot(o)`, `cross(o)` (vec3; for vec2 the scalar z of the 3D cross), `distance(o)`, `distance_squared(o)`, `lerp(o, t)`, `min(o)`, `max(o)`, `clamp(lo, hi)`, `approx_equal(o, ulps = 1)` |
-| 2D helpers (MV `generalUtility`) | `angle_2d(o)` (degrees in [0, 360) of `o - self`), `angle_2d_rad(o)`, `rotated_2d(degrees)`, `rotated_2d_rad(radians)` (x/y about the origin, z kept), `move_toward(goal, max_distance)` |
-| per component | `abs()`, `floor()`, `ceil()`, `round()` (float results), `to_degrees()`, `to_radians()` |
-| reshape | `xy()` (vec3, vec4), `xyz()` (vec4), `with_x(v)` / `with_y(v)` / `with_z(v)` / `with_w(v)` |
-| mutators (**m**) | `set(x, y[, z[, w]])`, `translate(dx, dy[, dz])`, `scale(s)`, `normalize()`, `clear()` |
-| free intrinsics | `math::dot`, `math::cross`, `math::distance`, `math::distance_squared`, and the component-wise family below |
+| methods | `length()`, `length_squared()`, `normalized()`, `dot(o)`, `cross(o)`, `distance_to(o)`, `rotated(angle)` (vec2), `rotated(axis, angle)` (vec3): the geometry library below with the receiver first |
+| free functions | the geometry library and the component-wise family below; `mix` and its family stay free functions |
+| later: 2D helpers (MV `generalUtility`) | `angle_2d(o)` (degrees in [0, 360) of `o - self`), `angle_2d_rad(o)`, `move_toward(goal, max_distance)`, `at_origin()`, `approx_equal(o, ulps = 1)` |
+| later: per component | `to_degrees()`, `to_radians()` |
+| later: reshape | `xy()` (vec3, vec4), `xyz()` (vec4), `with_x(v)` / `with_y(v)` / `with_z(v)` / `with_w(v)` |
+| later: mutators (**m**) | `set(x, y[, z[, w]])`, `translate(dx, dy[, dz])`, `scale(s)`, `normalize()`, `clear()` |
+
+**The geometry library** (Dev, 2026-09-29): `math::dot(a, b)`; `math::cross(a, b)` (vec3, and the scalar 2D cross
+`a.x * b.y - a.y * b.x` on vec2); `math::length(v)`, `math::length_squared(v)`; `math::normalize(v)`;
+`math::distance(a, b)` and `math::distance_squared(a, b)` over two vectors (the four-number forms stay); `math::reflect(v,
+n)` (`v - 2 dot(v, n) n`, `n` taken as a unit normal, as GLSL's); `math::project(a, onto)`; `math::angle_between(a, b)`
+(radians, the cosine clamped to [-1, 1] before `acos`); `math::perpendicular(v)` (vec2: `(-y, x)`);
+`math::rotate(v, angle)` (vec2, radians, counterclockwise) and `math::rotate(v, axis, angle)` (vec3, Rodrigues' formula
+about the normalized axis). One kernel runs them (`math_intrinsics.hpp` `eval_geometry`), and the methods call it with
+the receiver first:
+- vectors only: a color has no geometry, and the vector arguments of a call have the same dimensions;
+- a scalar result is binary64 computed from the widened components; a vector result is computed in binary64 and lands
+  as binary32, so an ivec argument gives a vec;
+- `dot`, `length_squared`, `distance_squared`, `cross` and `perpendicular` stay exact when every vector argument is an
+  ivec: each step takes the scalar operator's overflow text under the integer policy, and an ivec component narrows to
+  int32; `length`, `normalize`, `distance`, `angle_between`, `reflect`, `project` and `rotate` give floats and vecs;
+- a zero vector has no direction: `normalize` and a projection onto it give the zero vector (no raise), `angle_between`
+  with it gives 0, and a rotation about a zero axis leaves the vector as it is;
+- in the aggregate rewrite each is a known intrinsic that lowers to scalar operations on the components (no call, no
+  box), with the kernel's order of operations.
 
 **The component-wise family** (Dev, 2026-09-29): `math::lerp`, `mix`, `unmix`, `mix_in`, `mix_out`, `mix_in_out`,
 `mix_out_in`, `unmix_in`, `unmix_out`, `unmix_in_out`, `unmix_out_in`, `remap(v, in_lo, in_hi, out_lo, out_hi)`,
@@ -449,7 +467,8 @@ from a scalar row's type failure, so the scalar path is unchanged):
 |---|---|
 | construct | `math::ivec3()`, `(x, y)` z = 0 **[Dev]**, `(x, y, z)`, `(v2, z)`; from floats through the checked kernel: `math::ivec3::trunc(v)`, `::round(v)`, `::floor(v)`, `::ceil(v)` (MV `round<int>` / `cast<int>`) |
 | operators | unary `-`; `+ - *` with the same kind and an int scalar; `/`, `%` (truncating; a zero divisor raises); compound forms; `== !=` |
-| methods | `to_vec()` (exact below 2^24 per component), `manhattan(o)`, `chebyshev(o)`, `distance(o)` (float), `min/max/abs/clamp`, `approx_equal` not provided (exact type) |
+| methods | the geometry methods of 6.1: `dot`, `length_squared` and `cross` exact ints, `length`, `normalized`, `distance_to` and `rotated` floats and vecs; later `to_vec()` (exact below 2^24 per component), `manhattan(o)`, `chebyshev(o)`; `approx_equal` not provided (exact type) |
+| free functions | the geometry library (exact where 6.1 says so), `min/max/abs/clamp` exact |
 | mutators (**m**) | `set`, `translate`, `clear` |
 
 ### 6.3 `math::color`, `math::hsv`, `math::hsl` (f32)
@@ -478,7 +497,8 @@ for `mix_hsv`, and alpha. The `MV::Color` adapter maps to `math::color`.
 
 ### 6.4 `math::mat3`, `math::mat4` (f32, column-major, column vectors)
 
-`m.at(col, row)`, as MV's `access(x, y)` indexes it. `M * v` transforms a column vector (MV's `Matrix<4,4> * Point`).
+Step 1e with `math::quat` (6.5), designed here and built after the aggregate lowering. `m.at(col, row)`, as MV's
+`access(x, y)` indexes it. `M * v` transforms a column vector (MV's `Matrix<4,4> * Point`).
 Products compose right to left, as glm.
 
 | group | members |
@@ -496,8 +516,10 @@ so this has no migration cost.
 
 ### 6.5 Deferred
 
-- `math::quat`: MV has no quaternion; rotation is Euler `AxisAngles`, an alias of `Point<float>`. It arrives with a
-  consumer.
+- `math::quat` (step 1e, with the matrices): fields `x y z w`; `math::quat()` identity, `::from_axis_angle(axis,
+  angle)`, `::from_euler(v3)` (radians, MV's `AxisAngles` order); `q * q`, `q * v3` (rotates the vector); `normalized()`,
+  `conjugate()`, `inverse()`, `to_mat4()`, `math::slerp(a, b, t)` and the transform helpers of 6.4. MV has no
+  quaternion; its rotation is Euler `AxisAngles`, an alias of `Point<float>`.
 - `math::aabb`: MV's `BoxAABB<float>`/`<int>` are bound (`Node.bounds`, `Component.bounds`, `Clipped.captureBounds`,
   `screenBounds`), but no script uses them. They stay a bound class whose `Point`/`Size` members convert through the
   adapters. **[Dev]** Decide the name (`aabb`, `rect`, `box3`) and when.
@@ -761,6 +783,15 @@ instructions are an optional last step (section 12) held to the 1.5% bar.
     `script_namespace.hpp`, but these names are reserved.
   - Kinds are reachable only qualified. **[Dev]** `vec3` bare, or a `using` spelling. The recommendation is qualified
     only, since bare `color` would collide with MV's `color()` methods and ordinary variable names.
+  - The language has no `using` form. The smallest C++-like one, proposed and not built (**[Dev]**, decision 15): a
+    using-declaration, `using math::vec3;` (several names: `using math::vec3, math::dot;`), at program, namespace or block
+    scope, lexically scoped like a declaration. The parser records the alias in its scope; inside it the bare name is
+    the qualified one in every position (a type in declarations, parameters, returns, `array<vec3>` and `cast<vec3>`, the
+    constructor or function in expression position), and declaring a variable, function or class of that name in the
+    same scope is a parse error, so the alias never silently changes meaning. The rewrite happens at parse time, so the
+    checker, both backends and the lowering see only qualified names and nothing else changes; the `.jaibite` version
+    bumps. `using namespace math;` is left out: it would make every `math::` function name (`length`, `dot`, `min`) a
+    bare name and collide with ordinary locals.
 - **ctype.**
   - One new kind `math_k`, with a sub-kind naming the math type.
   - Tables per sub-kind feed diagnostics and completion:
@@ -897,12 +928,14 @@ whole-program regression.
 | 1. The boxed kind | 4.2: `TYPEID_VEC` with the pooled copy-on-write `script_vec_node`; `vec2`, `vec3`, `vec4`, `ivec2`, `ivec3`: `script_value_type`, `type_info` stamps, the fused type token, constructors, components with aliases, component stores over every lvalue kind (5.5), operators, equality/`<=>`/hash, truthiness, typed-slot and container-element conversions, text, JSON and binary archives, debugger locals, reflection, the checker's vector ctype (components typed for diagnostics; assignability; unknown components) | suite `Math Types` on both backends, proofs on and off (the 5.1 edges, copy independence, node churn); the math fuzz band; whole-program A/B: programs without vectors flat against master |
 | 1b. The component-wise library | 6.1's component-wise family on vectors (`eval_vec_math`), `math::round` and `math::remap` for scalars and vectors, checker and typed-store classification of vector results | pinned values for vec2/vec3/vec4/ivec inputs and float/vector `t` on both backends; the math band draws the family; whole-program A/B flat (the scalar rows are unchanged) |
 | 1c. `math::color` | 6.3's color as a sixth boxed kind (the same node, r g b a channels, opaque white by default, straight alpha), `math::mix` and the eased mixes in OKLab on colors, `math::mix_rgb`, `math::mix_hsv`; a color never converts to or equals a vec4 | the 6.3 reference values on both backends |
+| 1d. The geometry library | 6.1's geometry library (`dot`, `cross`, `length`, `length_squared`, `normalize`, `distance` and `distance_squared` over vectors, `reflect`, `project`, `angle_between`, `perpendicular`, `rotate`) and the methods (`length`, `length_squared`, `normalized`, `dot`, `cross`, `distance_to`, `rotated`) on the boxed path, one kernel (`eval_geometry`); the checker types the results and a method's arity | pinned values, exact ivec results and the zero-vector rules on both backends; the math band draws the functions and the methods, and colors |
+| 1e. Matrices and quaternions (design) | 6.4 and 6.5: `mat3`, `mat4`, `quat` and the transform helpers as node kinds | design only here; built after step 2 |
 | 2. Aggregate lowering | 4.3: the post-check rewrite (locals, operators, parameters, fields, boundaries, conservative escape), `engine::aggregate_lowering`, the slot map for diagnostics and the debugger, hot-reload field mapping | the lowering differential fuzz (math band, lowering on and off, byte-identical); whole-program A/B plus a vector-heavy microbenchmark and a no-cliff pair: the same loop over a `var` vector and a typed vector, with the ratio reported (node pooling is the first mitigation if it is above 3x) |
 | 3. Typed buffers | 4.4 and 5.6: the vector buffer kinds, element stores and unpacking reads | typed-kind fuzz for the vector kinds; the element-argument band |
 | 4. Host adapters | section 8: `jai::vec_adapter`, component exchange at statically resolved binder call sites, boxed values at dynamic ones; MV's vector-shaped bindings through adapters (Bindstone scripts at scale only with Dev) | suite `Math Adapters`; MutedVision builds from the CLI; `mv_tests`; the Bindstone client gates of section 11 |
 | 5. User classes (design) | the same lowering for user by-value classes with typed scalar fields; user operator bodies grafted | design document only |
 | 6. Fused vector cells (optional) | vector operations as cell instructions | only if it clears the 1.5% bar |
-| later | the rest of 6.3's color API (`from_hex`, `to_hsv`, `math::hsv`, `math::hsl`), `mat3`, `mat4` (6.4) as node kinds; `quat`, `aabb` (6.5) | per kind; matrices against MV's own products |
+| later | the rest of 6.3's color API (`from_hex`, `to_hsv`, `math::hsv`, `math::hsl`); `aabb` (6.5) | per kind |
 
 ## 13. Decisions needed from Dev
 
@@ -934,3 +967,6 @@ whole-program regression.
 14. **Floating-point contraction** (3.2): pin `-ffp-contract=off` for Clang/GCC builds (including Xcode for iOS). The
     vector kernels need it, and today's double kernels have the same exposure. The finding comes from compiler
     defaults, not a measured divergence.
+15. **A `using` declaration** (10; open): `using math::vec3;` at program, namespace or block scope, rewritten at parse
+    time (recommended as the smallest C++-like form), or qualified names only as decided in 10. `using namespace math;`
+    is not recommended.

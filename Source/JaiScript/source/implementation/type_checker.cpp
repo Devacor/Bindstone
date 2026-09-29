@@ -1813,6 +1813,39 @@ private:
                 if (unknown) { return {}; }
                 break;
             }
+            case math_fn::dot_: case math_fn::cross_: case math_fn::length_: case math_fn::length_squared_:
+            case math_fn::normalize_: case math_fn::reflect_: case math_fn::project_: case math_fn::angle_between_:
+            case math_fn::perpendicular_: case math_fn::rotate_: case math_fn::distance: case math_fn::distance_squared: {
+                // the geometry library (math_intrinsics.hpp eval_geometry): the vector arguments' kinds decide; the scalar
+                // distance form (four numbers) stays float
+                if (args.empty() || args[0].kind != ctype::math_k) {
+                    if (fn == math_fn::distance || fn == math_fn::distance_squared) { break; }
+                    return {};
+                }
+                const script_value_type vk = math_type_from_name(args[0].cls);
+                if (detail::math::is_color(vk)) { return {}; }
+                const size_t dims = detail::math::dims(vk);
+                bool exact = detail::math::integral(vk);
+                const bool two = fn != math_fn::length_ && fn != math_fn::length_squared_ && fn != math_fn::normalize_ &&
+                                 fn != math_fn::perpendicular_ && !(fn == math_fn::rotate_ && args.size() == 2);
+                if (two) {
+                    if (args.size() < 2 || args[1].kind != ctype::math_k) { return {}; }
+                    exact = exact && detail::math::integral(math_type_from_name(args[1].cls));
+                }
+                switch (fn) {
+                    case math_fn::dot_: case math_fn::length_squared_: case math_fn::distance_squared:
+                        return ctype::make(exact ? ctype::int_k : ctype::float_k);
+                    case math_fn::cross_:
+                        if (dims == 2) { return ctype::make(exact ? ctype::int_k : ctype::float_k); }
+                        return math_ctype(exact ? script_value_type::jai_ivec3_type : script_value_type::jai_vec3_type);
+                    case math_fn::perpendicular_:
+                        return math_ctype(vk);
+                    case math_fn::length_: case math_fn::angle_between_: case math_fn::distance:
+                        return ctype::make(ctype::float_k);
+                    default:
+                        return math_ctype(detail::math::family_kind(false, dims));
+                }
+            }
             default:
                 break;
         }
@@ -2721,6 +2754,7 @@ private:
 			// VM's component rows are a later phase); anything else is the runtime's no-member text, statically
 			const script_value_type kind = math_type_from_name(recv.cls);
 			if (detail::math::component_of(kind, m->member) < 0) {
+				if (detail::vec_method_fn(kind, m->member) != math_fn::none) { return ctype::make(ctype::function_k); }
 				diag(diag_level::error, m->location, std::string(recv.cls) + " has no member '" + std::string(m->member) + "'");
 				return {};
 			}
@@ -2954,6 +2988,25 @@ private:
 				if (namespace_path_receiver(m)) { return check_namespace_entry(m, args, c->location); }
 			}
 			ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
+			if (recv.kind == ctype::math_k && !m->is_static) {
+				// a vector's method: the free function with the receiver first (detail::vec_method_fn); anything else is the
+				// runtime's no-member text
+				const script_value_type kind = math_type_from_name(recv.cls);
+				const math_fn fn = detail::vec_method_fn(kind, m->member);
+				if (fn == math_fn::none) {
+					if (!recv.tentative) { diag(diag_level::error, m->location, std::string(recv.cls) + " has no member '" + std::string(m->member) + "'"); }
+					return {};
+				}
+				if (args.size() != detail::vec_method_arity(fn, kind)) {
+					if (!recv.tentative) { diag(diag_level::error, c->location, detail::vec_method_arity_text(fn, kind)); }
+					return {};
+				}
+				std::vector<ctype> full;
+				full.reserve(args.size() + 1);
+				full.push_back(recv);
+				full.insert(full.end(), args.begin(), args.end());
+				return math_intrinsic_result(fn, full);
+			}
 			if (ctype t; binary_member_call(c, m, recv, args, t)) { return t; }
 			if (recv.kind == ctype::array_k && recv.ti && m->member == "push" && args.size() == 1) {
 				const auto issue = container_element_issue(args[0], recv.ti->element_type().get());

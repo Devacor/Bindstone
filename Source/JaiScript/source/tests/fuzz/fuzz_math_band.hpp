@@ -1,10 +1,11 @@
 #pragma once
 
-// Math band: the inline math kinds (math::vec2, vec3, ivec2, ivec3; docs/math_types_design.md) as typed, auto and var
+// Math band: the math kinds (math::vec2, vec3, vec4, ivec2, ivec3, color; docs/math_types_design.md) as typed, auto and var
 // locals, array elements, map values, class fields, statics, namespace variables and parameters, read and written through every lvalue kind
 // (component stores and compounds, whole-value compounds, reference parameters, range-for aliases and copies, [&] and
 // [=] captures, a function writing a global) inside counted loops, so a lane that takes a math value for a scalar or a
-// store that lands in a copy diverges. Its own RNG stream and name prefix `u`: the main program's draws are unchanged.
+// store that lands in a copy diverges; values flow through the operators, the component-wise and color libraries and the
+// geometry library and its methods. Its own RNG stream and name prefix `u`: the main program's draws are unchanged.
 // Operands pair the same kind and ivec scalars are ints, so the band raises only on its rare deliberate errors, and
 // those must raise alike. The result is [uout, every value].
 
@@ -52,7 +53,7 @@ namespace jai::fuzz {
 		}
 
 	private:
-		enum kind { v2, v3, i2, i3, v4 };
+		enum kind { v2, v3, i2, i3, v4, c4 };
 		struct value { std::string text; int k; bool local = false; bool result = false; };
 
 		fuzz_rng rng_;
@@ -66,12 +67,12 @@ namespace jai::fuzz {
 
 		std::string fresh(const char* prefix) { return prefix + std::to_string(names_++); }
 		static bool integral(int k) { return k == i2 || k == i3; }
-		static int dims(int k) { return k == v4 ? 4 : (k == v3 || k == i3) ? 3 : 2; }
-		static int other_precision(int k) { switch (k) { case v2: return i2; case v3: return i3; case i2: return v2; case i3: return v3; default: return v4; } }
+		static int dims(int k) { return (k == v4 || k == c4) ? 4 : (k == v3 || k == i3) ? 3 : 2; }
+		static int other_precision(int k) { switch (k) { case v2: return i2; case v3: return i3; case i2: return v2; case i3: return v3; case c4: return c4; default: return v4; } }
 		static const char* type_name(int k) {
-			switch (k) { case v2: return "math::vec2"; case v3: return "math::vec3"; case v4: return "math::vec4"; case i2: return "math::ivec2"; default: return "math::ivec3"; }
+			switch (k) { case v2: return "math::vec2"; case v3: return "math::vec3"; case v4: return "math::vec4"; case c4: return "math::color"; case i2: return "math::ivec2"; default: return "math::ivec3"; }
 		}
-		int random_kind() { return static_cast<int>(rng_.below(5)); }
+		int random_kind() { return static_cast<int>(rng_.below(6)); }
 
 		std::string int_literal() { return std::to_string(rng_.range(-3, 9)); }
 		std::string float_literal() {
@@ -91,6 +92,8 @@ namespace jai::fuzz {
 			static constexpr const char* const two[] = {"x", "y", "x", "y", "width", "height"};
 			static constexpr const char* const three[] = {"x", "y", "z", "x", "y", "z", "width", "height", "depth"};
 			static constexpr const char* const four[] = {"x", "y", "z", "w", "w", "width", "height", "depth"};
+			static constexpr const char* const rgba[] = {"r", "g", "b", "a"};
+			if (k == c4) return rgba[rng_.below(4)];
 			return dims(k) == 4 ? four[rng_.below(8)] : dims(k) == 3 ? three[rng_.below(9)] : two[rng_.below(6)];
 		}
 
@@ -153,13 +156,14 @@ namespace jai::fuzz {
 		}
 
 		std::string scalar(int k, const std::string& ivar) {
-			switch (rng_.below(integral(k) ? 4 : 6)) {
+			switch (rng_.below(integral(k) ? 5 : 7)) {
 				case 0: case 1: return int_literal();
 				case 2: if (!ivar.empty()) return ivar; return int_literal();
 				case 3: {
 					const value* v = pick_value(integral(k) ? (rng_.chance(50) ? i2 : i3) : random_kind());
 					return v ? v->text + "." + component(v->k) : int_literal();
 				}
+				case 4: return geometry_scalar(integral(k));
 				default: return float_literal();
 			}
 		}
@@ -185,17 +189,56 @@ namespace jai::fuzz {
 				}
 			}
 		}
+		// a scalar from the geometry library: an exact int from ivecs where the site needs an int, any float otherwise
+		std::string geometry_scalar(bool need_int) {
+			const value* v = pick_value(need_int ? (rng_.chance(50) ? i2 : i3) : (rng_.chance(50) ? v3 : (rng_.chance(50) ? v2 : i3)));
+			if (!v) return int_literal();
+			const std::string w = ctor(v->k);
+			switch (rng_.below(need_int ? 3 : 7)) {
+				case 0: return v->text + ".length_squared()";
+				case 1: return "math::dot(" + v->text + ", " + w + ")";
+				case 2: return "math::distance_squared(" + v->text + ", " + w + ")";
+				case 3: return v->text + ".length()";
+				case 4: return "math::distance(" + v->text + ", " + w + ")";
+				case 5: return "math::angle_between(" + v->text + ", " + w + ")";
+				default: return v->text + ".dot(" + w + ")";
+			}
+		}
 		// the component-wise library: an ivec kind keeps its kind only through abs/min/max/clamp with int bounds (the
-		// interpolation family gives a vec), so an ivec site draws from those
+		// interpolation family gives a vec), so an ivec site draws from those; the geometry rows keep the kind where they do
 		std::string library_call(int k, const std::string& self, const std::string& ivar, int depth) {
 			const std::string other = mexpr(k, ivar, depth + 1);
 			const std::string ib = int_literal(), ib2 = std::to_string(rng_.range(10, 20));
 			if (integral(k)) {
-				switch (rng_.below(4)) {
+				switch (rng_.below(5)) {
 					case 0: return "math::abs(" + self + ")";
 					case 1: return "math::min(" + self + ", " + other + ")";
 					case 2: return "math::max(" + self + ", " + (rng_.chance(50) ? other : ib) + ")";
+					case 3:
+						if (k == i3) return rng_.chance(50) ? "math::cross(" + self + ", " + other + ")" : "(" + self + ").cross(" + other + ")";
+						return "math::perpendicular(" + self + ")";
 					default: return "math::clamp(" + self + ", " + ib + ", " + ib2 + ")";
+				}
+			}
+			if (k == c4) {
+				switch (rng_.below(6)) {
+					case 0: return "math::mix(" + self + ", " + other + ", " + float_literal() + ")";
+					case 1: return "math::mix_rgb(" + self + ", " + other + ", " + float_literal() + ")";
+					case 2: return "math::mix_hsv(" + self + ", " + other + ", " + float_literal() + ")";
+					case 3: return "math::mix_in_out(" + self + ", " + other + ", 0.25, 2.0)";
+					case 4: return "math::clamp(" + self + ", 0.0, 1.0)";
+					default: return "math::abs(" + self + ")";
+				}
+			}
+			if (rng_.chance(30)) {
+				switch (rng_.below(4)) {
+					case 0: return rng_.chance(50) ? "math::normalize(" + self + ")" : "(" + self + ").normalized()";
+					case 1: return "math::reflect(" + self + ", " + other + ")";
+					case 2: return "math::project(" + self + ", " + other + ")";
+					default:
+						if (k == v2) return rng_.chance(50) ? "math::rotate(" + self + ", 0.5)" : rng_.chance(50) ? "(" + self + ").rotated(1.25)" : "math::perpendicular(" + self + ")";
+						if (k == v3) return rng_.chance(50) ? "math::cross(" + self + ", " + other + ")" : rng_.chance(50) ? "math::rotate(" + self + ", " + other + ", 0.75)" : "(" + self + ").rotated(" + other + ", 0.75)";
+						return "math::normalize(" + self + ")";
 				}
 			}
 			const std::string t = rng_.chance(70) ? float_literal() : ctor(k);
@@ -233,7 +276,7 @@ namespace jai::fuzz {
 		std::string statement(const std::string& ivar) {
 			const value& t = any_value();
 			const int k = t.k;
-			switch (pick({18, 16, 12, 10, 14, 8, 8, 6, 6, 5, 5, 3, 3, 3, 2})) {
+			switch (pick({18, 16, 12, 10, 14, 8, 8, 6, 6, 5, 5, 3, 3, 3, 2, 4})) {
 				case 0: return t.text + "." + component(k) + " = " + scalar(k, ivar) + ";";
 				case 1: {
 					switch (rng_.below(4)) {
@@ -295,6 +338,7 @@ namespace jai::fuzz {
 					funcs_.push_back("function " + h + "() -> void { " + t.text + "." + component(k) + " += 3; }");
 					return h + "();";
 				}
+				case 15: return "uout = uout + " + geometry_scalar(false) + " + \";\";";
 				default: {
 					switch (rng_.below(4)) {
 						case 0: return "uout = uout + " + t.text + ".w;";

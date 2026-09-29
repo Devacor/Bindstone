@@ -7828,6 +7828,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         const script_value_type kind = objectValue.unchecked_vec_kind();
         const int component = detail::math::component_of(kind, expr->member);
         if (component < 0) {
+            if (const detail::math_fn method = detail::vec_method_fn(kind, expr->member); method != detail::math_fn::none) {
+                push_value(detail::vec_bound_method(method, objectValue, engine_));
+                return {};
+            }
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found), detail::math::no_member_text(kind), expr->member_id);
         }
         push_value(detail::math::component_value(objectValue, static_cast<size_t>(component), engine_));

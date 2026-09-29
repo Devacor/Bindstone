@@ -71,7 +71,7 @@ public:
             expect("type_of(math::ivec3(1, 2, 3).x) + \" \" + type_of(math::vec3(1, 2, 3).x)", "int float", "component kinds");
             expect(raised("var w = math::vec2(); var z = w.z;"), "math::vec2 has no member 'z'", "vec2 has no z");
             expect(raised("var v = math::vec3(); var q = v.w;"), "math::vec3 has no member 'w'", "no w");
-            expect(raised("var v = math::vec3(); v.length();"), "math::vec3 has no member 'length'", "no methods yet");
+            expect(raised("var v = math::vec3(); v.magnitude();"), "math::vec3 has no member 'magnitude'", "no such method");
             expect("to_string(math::vec2(0.1, 0).x)", "0.10000000149011612", "a component widens exactly");
             expect("to_string(math::vec2(0.1, 0).x == 0.1)", "false", "binary32 is not binary64");
             expect("math::vec4 q = math::vec4(1, 2, 3, 4); q.w += 1; to_string(q.w + q.depth * 10)", "35.0", "vec4's w");
@@ -200,6 +200,7 @@ public:
             expect("math::color c = math::color(0.25, 0.5, 0.75, 0.5); c.g = 0.125; c.a *= 2; to_string(c.r + c.g * 10 + c.b * 100 + c.a * 1000)",
                    "1076.5", "the r g b a channels");
             expect(raised("var c = math::color(); var q = c.x;"), "math::color has no member 'x'", "no x on a color");
+            expect("function f(math::color p) -> math::color { p.r = p.r + 1; p.a -= 0.5; return p; } to_string(f(math::color()))", "(2.0, 1.0, 1.0, 0.5)", "a channel store on a parameter lands in its slot");
             expect(raised("var c = math::color(1, 2);"), "math::color expects 0, 1, 3 or 4 arguments", "arity");
             expect("to_string(math::color(0.25, 0.5, 0.5, 1) * 2)", "(0.5, 1.0, 1.0, 2.0)", "arithmetic over all four channels");
             expect(raised("var q = math::color() + math::vec4(1, 1, 1, 1);"), "Invalid operands for + operator", "a color and a vec4 do not add");
@@ -231,6 +232,49 @@ public:
             expect(raised("var q = math::mix(math::color(), math::vec4(), 0.5);"), "math::mix on colors expects (math::color, math::color, float)", "a color and a vector do not mix");
             expect(raised("var q = math::min(math::color(), math::vec4());"), "a math::color combines only with colors and scalars", "nor combine per channel");
             expect("var c = math::clamp(math::color(2, -1, 0.5, 1), 0.0, 1.0); to_string(c) + type_of(c)", "(1.0, 0.0, 0.5, 1.0)math::color", "per-channel rows keep the color");
+        });
+
+        test("geometry", [expect, raised]() {
+            expect("to_string(math::dot(math::vec3(1, 2, 3), math::vec3(4, 5, 6))) + to_string(math::vec3(1, 2, 3).dot(math::vec3(4, 5, 6)))", "32.032.0", "dot, free and method");
+            expect("var d = math::dot(math::ivec2(2, 3), math::ivec2(4, 5)); to_string(d) + type_of(d)", "23int", "dot of ivecs is an exact int");
+            expect("to_string(math::dot(math::vec2(0.5, 1), math::ivec2(2, 3)))", "4.0", "a vec and an ivec dot as floats");
+            expect("to_string(math::cross(math::vec3(1, 0, 0), math::vec3(0, 1, 0))) + to_string(math::vec3(0, 1, 0).cross(math::vec3(1, 0, 0)))", "(0.0, 0.0, 1.0)(0.0, 0.0, -1.0)", "cross");
+            expect("var c = math::cross(math::ivec3(1, 2, 3), math::ivec3(4, 5, 6)); to_string(c) + type_of(c)", "(-3, 6, -3)math::ivec3", "cross of ivec3 stays exact");
+            expect("to_string(math::cross(math::vec2(1, 2), math::vec2(3, 4))) + to_string(math::cross(math::ivec2(1, 2), math::ivec2(3, 4)))", "-2.0-2", "the 2D cross is a scalar");
+            expect("var v = math::vec3(3, 4, 0); to_string(v.length()) + to_string(math::length_squared(v)) + to_string(math::length(v))", "5.025.05.0", "length");
+            expect("var p = math::ivec2(3, 4); to_string(p.length_squared()) + type_of(p.length_squared()) + to_string(p.length())", "25int5.0", "an ivec's length_squared is exact, its length a float");
+            expect("to_string(math::normalize(math::vec2(3, 4))) + to_string(math::vec2(0, -2).normalized())", "(0.6, 0.8)(0.0, -1.0)", "normalize");
+            expect("to_string(math::normalize(math::vec3())) + to_string(math::vec3().normalized())", "(0.0, 0.0, 0.0)(0.0, 0.0, 0.0)", "the zero vector normalizes to zero");
+            expect("var n = math::ivec2(0, 5).normalized(); to_string(n) + type_of(n)", "(0.0, 1.0)math::vec2", "normalizing an ivec gives a vec");
+            expect("to_string(math::distance(math::vec2(0, 0), math::vec2(3, 4))) + to_string(math::distance_squared(math::vec2(1, 1), math::vec2(4, 5))) + to_string(math::vec2(0, 0).distance_to(math::vec2(3, 4)))",
+                   "5.025.05.0", "distance over vectors");
+            expect("var d = math::distance_squared(math::ivec3(1, 1, 1), math::ivec3(4, 5, 1)); to_string(d) + type_of(d) + to_string(math::distance(0, 0, 3, 4))", "25int5.0", "exact ivec distance_squared; the scalar form stays");
+            expect("to_string(math::reflect(math::vec2(1, -1), math::vec2(0, 1)))", "(1.0, 1.0)", "reflect");
+            expect("to_string(math::project(math::vec2(2, 3), math::vec2(4, 0))) + to_string(math::project(math::vec2(2, 3), math::vec2()))", "(2.0, 0.0)(0.0, 0.0)", "project, onto zero is zero");
+            expect("to_string(math::angle_between(math::vec2(1, 0), math::vec2(0, 1))) + to_string(math::angle_between(math::vec2(1, 0), math::vec2()))", "1.57079632679489660.0", "angle_between in radians; a zero vector gives 0");
+            expect("to_string(math::angle_between(math::vec3(1, 1, 1), math::vec3(2, 2, 2)) < 1e-7) + to_string(math::abs(math::angle_between(math::vec2(1, 0), math::vec2(-1, 0)) - 3.141592653589793) < 1e-12)",
+                   "truetrue", "the cosine is clamped");
+            expect("var p = math::perpendicular(math::ivec2(1, 2)); to_string(math::perpendicular(math::vec2(1, 2))) + to_string(p) + type_of(p)", "(-2.0, 1.0)(-2, 1)math::ivec2", "perpendicular");
+            expect("var r = math::rotate(math::vec2(1, 0), 1.5707963267948966); var s = math::vec2(1, 0).rotated(3.141592653589793); "
+                   "to_string(math::abs(r.x) < 1e-7 && math::abs(r.y - 1) < 1e-7 && math::abs(s.x + 1) < 1e-7 && math::abs(s.y) < 1e-7)", "true", "rotate a vec2");
+            expect("var r = math::rotate(math::vec3(1, 0, 0), math::vec3(0, 0, 2), 1.5707963267948966); var s = math::vec3(0, 1, 0).rotated(math::vec3(1, 0, 0), 3.141592653589793); "
+                   "to_string(math::abs(r.x) < 1e-7 && math::abs(r.y - 1) < 1e-7 && math::abs(r.z) < 1e-7 && math::abs(s.y + 1) < 1e-7 && math::abs(s.z) < 1e-6)", "true", "rotate a vec3 about an axis (Rodrigues; the axis is normalized)");
+            expect("to_string(math::rotate(math::vec3(1, 2, 3), math::vec3(), 1.0)) + type_of(math::rotate(math::ivec2(1, 0), 0.5))", "(1.0, 2.0, 3.0)math::vec2", "a zero axis leaves the vector; an ivec rotates into a vec");
+            expect("var f = math::vec3(3, 4, 0).length; to_string(f())", "5.0", "a method read is a function value");
+            expect("function speed(math::vec3 v) -> float { return v.length(); } math::vec3 n = math::vec3(0, 3, 4).normalized(); float d = n.dot(math::vec3(0, 1, 0)); to_string(speed(math::vec3(0, 3, 4))) + to_string(d)",
+                   "5.00.6000000238418579", "typed slots take the results");
+            expect(raised("var q = math::dot(math::vec2(), math::vec3());"), "math::dot expects two vectors of the same dimensions", "dimensions must agree");
+            expect(raised("var q = math::dot(math::color(), math::color());"), "math::dot expects two vectors of the same dimensions", "a color has no geometry");
+            expect(raised("var q = math::cross(math::vec4(), math::vec4());"), "math::cross expects two vec2 or two vec3 vectors", "no 4D cross");
+            expect(raised("var q = math::perpendicular(math::vec3());"), "math::perpendicular expects a vec2", "perpendicular is 2D");
+            expect(raised("var q = math::rotate(math::vec3(1, 0, 0), 1.0);"), "math::rotate expects (vec2, angle) or (vec3, axis, angle)", "a vec3 rotates about an axis");
+            expect(raised("var q = math::length(5);"), "math::length expects a vector", "a scalar has no length here");
+            expect(raised("var q = math::distance(1, 2, 3);"), "math::distance expects 2 vectors or 4 arguments (x1, y1, x2, y2)", "distance arity");
+            expect(raised("var v = math::vec3(); var q = v.dot();"), "'dot' expects 1 argument", "method arity");
+            expect(raised("var v = math::vec3(); var q = v.rotated(1.0);"), "'rotated' expects 2 arguments (axis, angle)", "a vec3 rotates about an axis, as a method too");
+            expect(raised("var v = math::vec3(); var q = v.foo();"), "math::vec3 has no member 'foo'", "an unknown method");
+            expect(raised("var c = math::color(); var q = c.length();"), "math::color has no member 'length'", "no geometry methods on a color");
+            expect(raised("var q = math::length_squared(math::ivec3(-2147483647 - 1, -2147483647 - 1, 0));"), "Integer overflow in '+'", "an exact sum follows the integer policy");
         });
 
         test("equality_and_truthiness", [expect]() {
@@ -308,7 +352,11 @@ public:
             check(errors("math::vec4 v = math::color();").find("math::vec4") != std::string::npos, "a color into a vec4 slot is a load error");
             check_eq(std::string("math::color has no member 'x'|"), errors("math::color c; var q = c.x;"), "a vector name on a color");
             check_eq(std::string(""), errors("var v = math::vec2(1, 2); var w = math::floor(v); math::vec2 x = w;"), "a var argument leaves the result dynamic");
-        });
+            check_eq(std::string(""), errors("math::vec3 a; math::vec3 b; float d = a.dot(b); math::vec3 n = a.normalized(); math::vec3 c = math::cross(a, b); int e = math::ivec2(1, 2).length_squared(); "
+                                             "math::vec2 r = math::ivec2(1, 0).rotated(0.5); float l = math::length(a) + a.distance_to(b) + math::angle_between(a, b); int k = math::dot(math::ivec3(), math::ivec3());"),
+                     "the geometry library types its results");
+            check_eq(std::string("math::vec3 has no member 'foo'|"), errors("math::vec3 v; var q = v.foo();"), "an unknown method");
+            check_eq(std::string("'dot' expects 1 argument|"), errors("math::vec3 v; var q = v.dot();"), "a method's arity");        });
     }
 };
 

@@ -2173,6 +2173,7 @@ private:
 		ruling_typed_range_for();
 		ruling_auto_fields();
 		ruling_numeric_ternary_auto();
+		ruling_from_json_constructor_errors();
 	}
 
 	void ruling_auto_fields() {
@@ -2208,6 +2209,19 @@ private:
 				auto ternary = [](const auto& r) { size_t n = 0; for (const auto& d : r.diagnostics) { if (d.message.find("ternary") != std::string::npos) { ++n; } } return std::to_string(n); };
 				return ternary(numeric) + "|" + ternary(mixed);
 			});
+		});
+	}
+
+	void ruling_from_json_constructor_errors() {
+		test("from_json_propagates_a_raising_constructor", [this]() {
+			// the load constructs the class as Name() would; that call's throw or error is the load's
+			expect("from_json ctor", R"(
+				class R { int v = 0; R() { throw "no R"; } }
+				class Ok { int v = 0; }
+				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { var x = from_json("{\"_type_\": \"R\", \"v\": 3}"); return "loaded"; }) + "|" +
+				t([]() { var x = from_json("{\"_type_\": \"Ok\", \"v\": 3}"); return type_of(x) + ":" + x.v; });
+			)", "no R|Ok:3", check_mode::warn);
 		});
 	}
 

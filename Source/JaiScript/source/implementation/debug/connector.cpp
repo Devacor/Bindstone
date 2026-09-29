@@ -106,11 +106,13 @@ struct jval {
     double num = 0;
     std::string str;
     std::vector<jval> arr;
-    std::vector<std::pair<std::string, jval>> obj;
+    // object members as parallel vectors: a pair<string, jval> member needs jval complete inside its own definition
+    std::vector<std::string> keys;
+    std::vector<jval> vals;
 
     const jval* find(const std::string& k) const {
         if (kind != t::object) return nullptr;
-        for (const auto& p : obj) if (p.first == k) return &p.second;
+        for (size_t i = 0; i < keys.size(); ++i) if (keys[i] == k) return &vals[i];
         return nullptr;
     }
     std::string as_str() const { return kind == t::string ? str : std::string(); }
@@ -189,7 +191,8 @@ bool parse_value(const std::string& s, size_t& i, jval& out, int depth) {
             ++i;
             jval v;
             if (!parse_value(s, i, v, depth + 1)) return false;
-            out.obj.emplace_back(std::move(key), std::move(v));
+            out.keys.push_back(std::move(key));
+            out.vals.push_back(std::move(v));
             skip_ws(s, i);
             if (i >= s.size()) return false;
             if (s[i] == ',') { ++i; continue; }

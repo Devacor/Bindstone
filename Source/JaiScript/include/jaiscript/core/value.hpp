@@ -149,6 +149,7 @@ namespace detail { struct argument_capture_storage; }
         script_value(const vec4& v, engine* eng);
         script_value(const ivec2& v, engine* eng);
         script_value(const ivec3& v, engine* eng);
+        script_value(const color& v, engine* eng);
         // A vec of `kind` (jai_vec2_type ... jai_ivec3_type) from its component words (binary32 or int32 bits)
         static script_value make_vec(script_value_type kind, const uint32_t* words, engine* eng);
         
@@ -219,6 +220,7 @@ namespace detail { struct argument_capture_storage; }
                 case TYPEID_VEC3:
                 case TYPEID_IVEC3:
                 case TYPEID_VEC4:
+                case TYPEID_COLOR:
                     return *this;
                 default:
                     if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
@@ -394,6 +396,7 @@ namespace detail { struct argument_capture_storage; }
                 case 19: return script_value_type::jai_vec3_type;
                 case 20: return script_value_type::jai_ivec3_type;
                 case 21: return script_value_type::jai_vec4_type;
+                case 22: return script_value_type::jai_color_type;
                 default: return script_value_type::jai_invalid_type;
             }
         }
@@ -2138,8 +2141,10 @@ namespace detail { struct argument_capture_storage; }
         static constexpr size_t TYPEID_VEC3 = 19;
         static constexpr size_t TYPEID_IVEC3 = 20;
         static constexpr size_t TYPEID_VEC4 = 21;
-        static constexpr bool is_math_index(size_t idx) noexcept { return idx >= TYPEID_VEC2 && idx <= TYPEID_VEC4; }
-        static constexpr uint8_t vec_index_of(uint8_t count, uint8_t integral) noexcept {
+        static constexpr size_t TYPEID_COLOR = 22;   // math::color: the same node, r g b a
+        static constexpr bool is_math_index(size_t idx) noexcept { return idx >= TYPEID_VEC2 && idx <= TYPEID_COLOR; }
+        static constexpr uint8_t vec_index_of(uint8_t count, uint8_t integral, uint8_t color) noexcept {
+            if (color) { return static_cast<uint8_t>(TYPEID_COLOR); }
             if (integral) { return static_cast<uint8_t>(count == 2 ? TYPEID_IVEC2 : TYPEID_IVEC3); }
             return static_cast<uint8_t>(count == 2 ? TYPEID_VEC2 : count == 3 ? TYPEID_VEC3 : TYPEID_VEC4);
         }
@@ -2197,7 +2202,7 @@ namespace detail { struct argument_capture_storage; }
             storage(strong_ptr<cpp_bound_holder> v) noexcept : index_(TYPEID_CPP_BOUND) { new (&p_.cb) strong_ptr<cpp_bound_holder>(std::move(v)); }
             storage(strong_ptr<script_utf8> v) noexcept : index_(TYPEID_UTF8_STRING) { new (&p_.u) strong_ptr<script_utf8>(std::move(v)); }
             // precondition: a live node (its count and element type name the index)
-            storage(strong_ptr<script_vec_node> v) noexcept : index_(vec_index_of(v->count, v->integral)) { new (&p_.vn) strong_ptr<script_vec_node>(std::move(v)); }
+            storage(strong_ptr<script_vec_node> v) noexcept : index_(vec_index_of(v->count, v->integral, v->color)) { new (&p_.vn) strong_ptr<script_vec_node>(std::move(v)); }
             JAI_FORCEINLINE strong_ptr<script_vec_node>& vec_node() noexcept { return p_.vn; }
             JAI_FORCEINLINE const strong_ptr<script_vec_node>& vec_node() const noexcept { return p_.vn; }
 
@@ -2213,7 +2218,7 @@ namespace detail { struct argument_capture_storage; }
                     case TYPEID_WEAK_PTR: new (&p_.w) jai::weaker_ptr<object_holder>(o.p_.w); break;
                     case TYPEID_CPP_BOUND: new (&p_.cb) strong_ptr<cpp_bound_holder>(o.p_.cb); break;
                     case TYPEID_UTF8_STRING: new (&p_.u) strong_ptr<script_utf8>(o.p_.u); break;
-                    case TYPEID_VEC2: case TYPEID_IVEC2: case TYPEID_VEC3: case TYPEID_IVEC3: case TYPEID_VEC4: new (&p_.vn) strong_ptr<script_vec_node>(o.p_.vn); break;
+                    case TYPEID_VEC2: case TYPEID_IVEC2: case TYPEID_VEC3: case TYPEID_IVEC3: case TYPEID_VEC4: case TYPEID_COLOR: new (&p_.vn) strong_ptr<script_vec_node>(o.p_.vn); break;
                     default: std::memcpy(&p_, &o.p_, sizeof(p_)); break;   // trivial payloads
                 }
             }
@@ -2275,7 +2280,7 @@ namespace detail { struct argument_capture_storage; }
                 strong_ptr<shared_value_holder>, jai::weaker_ptr<object_holder>, invalid_tag,
                 strong_ptr<cpp_bound_holder>, parallel_borrow_tag, strong_ptr<script_utf8>,
                 strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>,
-                strong_ptr<script_vec_node>>>;
+                strong_ptr<script_vec_node>, strong_ptr<script_vec_node>>>;
 
             template <size_t I> JAI_FORCEINLINE alt_t<I>* get_if() noexcept {
                 return index_ == I ? &alt<I>() : nullptr;
@@ -2321,7 +2326,7 @@ namespace detail { struct argument_capture_storage; }
                 (1u << TYPEID_NULL) | (1u << TYPEID_INT) | (1u << TYPEID_FLOAT) |
                 (1u << TYPEID_CHAR) | (1u << TYPEID_BOOL) | (1u << TYPEID_INVALID) |
                 (1u << TYPEID_PARALLEL_BORROW);
-            static_assert(TYPEID_VEC4 < 32, "k_trivial_mask is one bit per storage index");
+            static_assert(TYPEID_COLOR < 32, "k_trivial_mask is one bit per storage index");
 
             JAI_FORCEINLINE void destroy() noexcept {
                 if ((k_trivial_mask >> index_) & 1u) {
@@ -2338,7 +2343,7 @@ namespace detail { struct argument_capture_storage; }
                     case TYPEID_WEAK_PTR: p_.w.~weaker_ptr(); break;
                     case TYPEID_CPP_BOUND: p_.cb.~strong_ptr(); break;
                     case TYPEID_UTF8_STRING: p_.u.~strong_ptr(); break;
-                    case TYPEID_VEC2: case TYPEID_IVEC2: case TYPEID_VEC3: case TYPEID_IVEC3: case TYPEID_VEC4: p_.vn.~strong_ptr(); break;
+                    case TYPEID_VEC2: case TYPEID_IVEC2: case TYPEID_VEC3: case TYPEID_IVEC3: case TYPEID_VEC4: case TYPEID_COLOR: p_.vn.~strong_ptr(); break;
                     default: break;
                 }
             }
@@ -2364,7 +2369,7 @@ namespace detail { struct argument_capture_storage; }
                 else if constexpr (I == TYPEID_INVALID) { return invalid_alt_; }
                 else if constexpr (I == TYPEID_CPP_BOUND) { return p_.cb; }
                 else if constexpr (I == TYPEID_UTF8_STRING) { return p_.u; }
-                else if constexpr (I >= TYPEID_VEC2 && I <= TYPEID_VEC4) { return p_.vn; }
+                else if constexpr (I >= TYPEID_VEC2 && I <= TYPEID_COLOR) { return p_.vn; }
                 else { return p_.pb; }
             }
             template <size_t I> JAI_FORCEINLINE const auto& alt() const noexcept {
@@ -2426,6 +2431,7 @@ namespace detail { struct argument_capture_storage; }
         vec4 unchecked_as_vec4() const noexcept { return vec_payload<vec4>(); }
         ivec2 unchecked_as_ivec2() const noexcept { return vec_payload<ivec2>(); }
         ivec3 unchecked_as_ivec3() const noexcept { return vec_payload<ivec3>(); }
+        color unchecked_as_color() const noexcept { return vec_payload<color>(); }
         void unchecked_set_vec_word(size_t i, uint32_t bits) {
             strong_ptr<script_vec_node>& node = storage_.vec_node();
             if (!node.unique()) [[unlikely]] { unshare_vec_node(); }

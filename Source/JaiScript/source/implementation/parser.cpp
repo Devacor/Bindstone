@@ -4580,7 +4580,7 @@ expression_ptr parser::default_initializer(const type_info_ptr& type, const sour
     case script_value_type::jai_object_type:
         if (!type->type_name.empty()) return std::make_shared<new_expr>(loc, type, std::vector<expression_ptr>());
         return nullptr;
-    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
+    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
     case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type:
         return math_constructor_call(type->base_type, {}, loc);
     default: return nullptr;
@@ -4599,7 +4599,7 @@ expression_ptr parser::math_constructor_call(script_value_type kind, std::vector
 
 checked_result<expression_ptr> parser::initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, const source_location& loc) {
     switch (type ? type->base_type : script_value_type::jai_any_type) {
-    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
+    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
     case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type:
         return math_constructor_call(type->base_type, std::move(arguments), loc);
     case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:

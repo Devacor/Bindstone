@@ -154,6 +154,7 @@ const char* spec_value_type_name(const script_value& v) {
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
         case script_value_type::jai_vec4_type:
+        case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type: return math_type_name(v.type());
         default: return "unknown";
@@ -1472,7 +1473,7 @@ struct engine::implementation {
 
     // The math vectors' canonical stamps and node pool, last for the same reason (the pool's teardown orphans it while
     // any vector is still out, so its place in the destruction order does not matter)
-    type_info* type_info_math_[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};   // vec2, vec3, ivec2, ivec3, vec4
+    type_info* type_info_math_[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};   // vec2, vec3, ivec2, ivec3, vec4, color
     ref_holder_pool_slot_holder vec_node_pool_;
 };
 
@@ -1531,10 +1532,10 @@ engine::implementation::implementation()
     type_id_index_[type_info_any_->id] = type_info_any_;
 
     // after the older canonical types, so their interned ids stay put
-    const script_value_type math_kinds[5] = {script_value_type::jai_vec2_type, script_value_type::jai_vec3_type,
+    const script_value_type math_kinds[6] = {script_value_type::jai_vec2_type, script_value_type::jai_vec3_type,
                                              script_value_type::jai_ivec2_type, script_value_type::jai_ivec3_type,
-                                             script_value_type::jai_vec4_type};
-    for (size_t k = 0; k < 5; ++k) {
+                                             script_value_type::jai_vec4_type, script_value_type::jai_color_type};
+    for (size_t k = 0; k < 6; ++k) {
         type_info math_info = type_info::make_math(string_symbolizer_, math_kinds[k]);
         type_info_math_[k] = &type_infos_.emplace(type_key{math_kinds[k], 0, 0}, math_info).first->second;
         type_id_index_[type_info_math_[k]->id] = type_info_math_[k];
@@ -2982,6 +2983,7 @@ type_info* engine::get_type_info_math(script_value_type kind) {
         case script_value_type::jai_ivec2_type: return impl->type_info_math_[2];
         case script_value_type::jai_ivec3_type: return impl->type_info_math_[3];
         case script_value_type::jai_vec4_type: return impl->type_info_math_[4];
+        case script_value_type::jai_color_type: return impl->type_info_math_[5];
         default: return nullptr;
     }
 }

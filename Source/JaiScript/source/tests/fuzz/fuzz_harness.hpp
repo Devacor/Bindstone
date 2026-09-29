@@ -89,6 +89,7 @@ namespace jai::fuzz {
 			case script_value_type::jai_vec2_type: return "math::vec2";
 			case script_value_type::jai_vec3_type: return "math::vec3";
 			case script_value_type::jai_vec4_type: return "math::vec4";
+			case script_value_type::jai_color_type: return "math::color";
 			case script_value_type::jai_ivec2_type: return "math::ivec2";
 			case script_value_type::jai_ivec3_type: return "math::ivec3";
 			default: return "unknown";

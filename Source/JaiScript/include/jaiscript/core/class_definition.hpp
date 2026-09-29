@@ -2685,7 +2685,7 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
                 case script_value::TYPEID_FLOAT: truthy = v.unchecked_as_float() != 0.0; break;
                 case script_value::TYPEID_STRING: truthy = !v.unchecked_as_string().empty(); break;
                 case script_value::TYPEID_UTF8_STRING: truthy = !v.unchecked_as_utf8().bytes.empty(); break;
-                case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: truthy = v.math_truthy(); break;
+                case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: case script_value::TYPEID_COLOR: truthy = v.math_truthy(); break;
                 case script_value::TYPEID_CHAR: truthy = true; break;
                 case script_value::TYPEID_ARRAY: { auto& arr = const_cast<script_value&>(v).get_array_storage(); truthy = arr && !arr->empty(); break; }
                 case script_value::TYPEID_MAP: { auto& map = const_cast<script_value&>(v).get_map_storage(); truthy = map && !map->empty(); break; }
@@ -2733,13 +2733,14 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
         case script_value_type::jai_vec4_type:
+        case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type: {
             // the same kind; the other precision of the same dimensions converts (int32 to binary32 in one rounding, binary32
             // to int32 through the checked kernel; Dev decision 5); anything else rejects with the site's text
             const script_value_type have = detail::math::kind_of(v);
             if (have == target) return slot_conversion::of(verdict::identity);
-            if (!detail::math::is_vec_type(have) || detail::math::dims(have) != detail::math::dims(target)) return slot_conversion::of(verdict::reject);
+            if (!detail::math::converts(have, target)) return slot_conversion::of(verdict::reject);
             auto converted = detail::math::convert(v, target, eng);
             if (!converted) { return converted.error_value(); }
             return slot_conversion::converted_to(std::move(converted.value()));

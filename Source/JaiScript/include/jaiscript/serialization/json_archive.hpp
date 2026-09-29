@@ -463,16 +463,16 @@ private:
             case script_value_type::jai_vec2_type:
             case script_value_type::jai_vec3_type:
             case script_value_type::jai_vec4_type:
+            case script_value_type::jai_color_type:
             case script_value_type::jai_ivec2_type:
             case script_value_type::jai_ivec3_type: {
                 // {"$type": "math::K", "$val": {canonical components}}: binary32 in the shortest round-tripping text
                 const script_value& m = val.deref();
                 const script_value_type kind = m.unchecked_vec_kind();
-                static constexpr const char* names[4] = {"x", "y", "z", "w"};
                 std::string body = std::string("{\"$type\":\"") + detail::math::kind_name(kind) + "\",\"$val\":{";
                 for (size_t k = 0; k < detail::math::dims(kind); ++k) {
                     if (k) body += ',';
-                    body += '"'; body += names[k]; body += "\":";
+                    body += '"'; body += detail::math::component_name(kind, k); body += "\":";
                     if (detail::math::integral(kind)) {
                         body += std::to_string(detail::math::i32_at(m, k));
                     } else {

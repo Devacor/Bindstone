@@ -70,6 +70,7 @@ namespace jai::detail {
 			case script_value_type::jai_vec2_type: return "math::vec2";
 			case script_value_type::jai_vec3_type: return "math::vec3";
 			case script_value_type::jai_vec4_type: return "math::vec4";
+			case script_value_type::jai_color_type: return "math::color";
 			case script_value_type::jai_ivec2_type: return "math::ivec2";
 			case script_value_type::jai_ivec3_type: return "math::ivec3";
 			case script_value_type::jai_char_type: return "char";
@@ -172,7 +173,7 @@ namespace jai::detail {
 		}
 		// math kinds: the other precision of the same dimensions converts, as at a typed slot
 		if (is_math_type(target_type) && is_math_type(elem_type)) {
-			return math::dims(target_type) == math::dims(elem_type);
+			return math::converts(elem_type, target_type);
 		}
 
 		// A shared_ptr-tagged instance stores into an object-typed element slot exactly

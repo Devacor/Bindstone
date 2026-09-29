@@ -1256,7 +1256,7 @@ namespace jai {
                 case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0; // float
                 case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty(); // string
                 case script_value::TYPEID_UTF8_STRING: return !value.unchecked_as_utf8().bytes.empty();
-                case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: return value.math_truthy();   // not all zero
+                case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: case script_value::TYPEID_COLOR: return value.math_truthy();   // not all zero
                 case script_value::TYPEID_CHAR: return true;                          // char - any char is truthy
                 case script_value::TYPEID_ARRAY: {
                     // array - empty is falsy (const_cast required, get_array_storage is non-const)

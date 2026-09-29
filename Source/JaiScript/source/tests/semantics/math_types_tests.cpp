@@ -194,6 +194,45 @@ public:
                    "(1.0, 2.0, 4.0)", "typed slots take the library's vectors");
         });
 
+        test("color", [expect, raised]() {
+            expect("to_string(math::color()) + to_string(math::color(1, 0, 0)) + to_string(math::color(0.5, 0.25, 0, 0.5)) + type_of(math::color())",
+                   "(1.0, 1.0, 1.0, 1.0)(1.0, 0.0, 0.0, 1.0)(0.5, 0.25, 0.0, 0.5)math::color", "construction: opaque white by default, alpha 1 when omitted");
+            expect("math::color c = math::color(0.25, 0.5, 0.75, 0.5); c.g = 0.125; c.a *= 2; to_string(c.r + c.g * 10 + c.b * 100 + c.a * 1000)",
+                   "1076.5", "the r g b a channels");
+            expect(raised("var c = math::color(); var q = c.x;"), "math::color has no member 'x'", "no x on a color");
+            expect(raised("var c = math::color(1, 2);"), "math::color expects 0, 1, 3 or 4 arguments", "arity");
+            expect("to_string(math::color(0.25, 0.5, 0.5, 1) * 2)", "(0.5, 1.0, 1.0, 2.0)", "arithmetic over all four channels");
+            expect(raised("var q = math::color() + math::vec4(1, 1, 1, 1);"), "Invalid operands for + operator", "a color and a vec4 do not add");
+            expect("to_string(math::color() == math::color(1, 1, 1, 1)) + to_string(math::color() == math::vec4(1, 1, 1, 1))", "truefalse", "a color never equals a vec4");
+            expect("var c = math::color(); string m = \"\"; try { math::vec4 v = c; } catch (e) { m = e; } to_string(m.contains(\"declared math::vec4\"))", "true", "a color does not convert to a vec4");
+            expect("to_json(math::color(1, 0.5, 0, 1))", "{\"$type\":\"math::color\",\"$val\":{\"r\":1.0,\"g\":0.5,\"b\":0.0,\"a\":1.0}}", "JSON channels");
+            expect("var c = from_json(to_json(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c) + type_of(c)", "(0.1, 0.2, 0.3, 0.4)math::color", "JSON round trip");
+            expect("var c = from_base64(to_base64(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c)", "(0.1, 0.2, 0.3, 0.4)", "binary round trip");
+            // OKLab (reference values from an independent implementation of Ottosson's transform)
+            expect("var m = math::mix(math::color(1, 0, 0), math::color(0, 0, 1), 0.5); "
+                   "to_string(math::abs(m.r - 0.55044109) < 1e-5 && math::abs(m.g - 0.32562068) < 1e-5 && math::abs(m.b - 0.63650066) < 1e-5 && m.a == 1.0)",
+                   "true", "mix(red, blue, 0.5) in OKLab");
+            expect("var m = math::mix(math::color(1, 1, 1), math::color(0, 0, 0), 0.5); "
+                   "to_string(math::abs(m.r - 0.38857287) < 1e-5 && math::abs(m.g - m.r) < 1e-6 && math::abs(m.b - m.r) < 1e-6)",
+                   "true", "mix(white, black, 0.5) is the perceptual mid-gray");
+            expect("function near(math::color a, math::color b) -> bool { return math::abs(a.r - b.r) < 1e-5 && math::abs(a.g - b.g) < 1e-5 && math::abs(a.b - b.b) < 1e-5; } "
+                   "bool ok = true; for (auto c : [math::color(1, 0, 0), math::color(0, 1, 0), math::color(0, 0, 1), math::color(0.2, 0.4, 0.6)]) { ok = ok && near(math::mix(c, c, 0.3), c); } to_string(ok)",
+                   "true", "primaries round trip within 1e-5");
+            expect("var r = math::color(1, 0, 0); var b = math::color(0, 0, 1); to_string(math::mix_in(r, b, 0.5, 2.0) == math::mix(r, b, 0.25)) + to_string(math::lerp(r, b, 0.5) == math::mix(r, b, 0.5))",
+                   "truetrue", "the eased mixes weight OKLab");
+            expect("to_string(math::mix(math::color(0, 0, 0, 0), math::color(0, 0, 0, 1), 0.25).a)", "0.25", "alpha blends linearly");
+            expect("to_string(math::mix_rgb(math::color(1, 0, 0), math::color(0, 0, 1), 0.5))", "(0.5, 0.0, 0.5, 1.0)", "mix_rgb is per channel");
+            expect("var m = math::mix_hsv(math::color(1, 0, 0.16666667), math::color(1, 0.16666667, 0), 0.5); to_string(math::abs(m.r - 1.0) < 1e-5 && m.g < 1e-5 && m.b < 1e-5)",
+                   "true", "mix_hsv takes the shortest arc across 0/360");
+            expect("var m = math::mix_hsv(math::color(0.5, 0.5, 0.5), math::color(1, 0, 0), 0.5); to_string(math::abs(m.r - 0.75) < 1e-5 && math::abs(m.g - 0.375) < 1e-5 && math::abs(m.b - 0.375) < 1e-5)",
+                   "true", "an achromatic endpoint takes the other's hue");
+            expect("to_string(math::mix_hsv(math::color(1, 0, 0), math::color(0, 0, 1), 0.5))", "(1.0, 0.0, 1.0, 1.0)", "red to blue through magenta");
+            expect(raised("var q = math::mix(math::color(), math::color(), math::vec4(0.5, 0.5, 0.5, 0.5));"), "math::mix on colors expects (math::color, math::color, float)", "t is a float for colors");
+            expect(raised("var q = math::mix(math::color(), math::vec4(), 0.5);"), "math::mix on colors expects (math::color, math::color, float)", "a color and a vector do not mix");
+            expect(raised("var q = math::min(math::color(), math::vec4());"), "a math::color combines only with colors and scalars", "nor combine per channel");
+            expect("var c = math::clamp(math::color(2, -1, 0.5, 1), 0.0, 1.0); to_string(c) + type_of(c)", "(1.0, 0.0, 0.5, 1.0)math::color", "per-channel rows keep the color");
+        });
+
         test("equality_and_truthiness", [expect]() {
             expect("to_string(math::vec3(1, 2, 3) == math::vec3(1, 2, 3))", "true", "equal");
             expect("to_string(math::vec3(1, 2, 3) != math::vec3(1, 2, 4))", "true", "not equal");
@@ -264,6 +303,10 @@ public:
             check_eq(std::string(""), errors("math::vec3 a; math::vec3 b; math::vec3 m = math::mix(a, b, 0.5); math::ivec2 c = math::min(math::ivec2(1, 2), 3); float f = math::mix(1.0, 2.0, 0.5);"),
                      "the library types its vector results");
             check(errors("math::vec3 a; float f = math::floor(a);").find("float") != std::string::npos, "a vector result is not a float");
+            check_eq(std::string(""), errors("math::color c = math::mix(math::color(), math::color(0, 0, 0), 0.5); math::color d = math::mix_hsv(c, c, 0.5); float r = c.r;"),
+                     "colors type through the library");
+            check(errors("math::vec4 v = math::color();").find("math::vec4") != std::string::npos, "a color into a vec4 slot is a load error");
+            check_eq(std::string("math::color has no member 'x'|"), errors("math::color c; var q = c.x;"), "a vector name on a color");
             check_eq(std::string(""), errors("var v = math::vec2(1, 2); var w = math::floor(v); math::vec2 x = w;"), "a var argument leaves the result dynamic");
         });
     }

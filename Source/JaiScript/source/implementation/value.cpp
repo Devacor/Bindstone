@@ -85,6 +85,7 @@ script_value script_value::make_vec(script_value_type kind, const uint32_t* word
         case script_value_type::jai_vec3_type: node->count = 3; break;
         case script_value_type::jai_vec4_type: node->count = 4; break;
         case script_value_type::jai_ivec2_type: node->count = 2; node->integral = 1; break;
+        case script_value_type::jai_color_type: node->count = 4; node->color = 1; break;
         default: node->count = 3; node->integral = 1; break;
     }
     std::memcpy(node->words, words, sizeof(uint32_t) * node->count);
@@ -107,6 +108,7 @@ script_value::script_value(const vec3& v, engine* eng) : script_value(vec_from(v
 script_value::script_value(const vec4& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_vec4_type, eng)) {}
 script_value::script_value(const ivec2& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_ivec2_type, eng)) {}
 script_value::script_value(const ivec3& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_ivec3_type, eng)) {}
+script_value::script_value(const color& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_color_type, eng)) {}
 
 
 script_value::reference_holder::~reference_holder() {
@@ -1172,7 +1174,8 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
         case TYPEID_IVEC2:
         case TYPEID_VEC3:
         case TYPEID_IVEC3:
-        case TYPEID_VEC4: {
+        case TYPEID_VEC4:
+        case TYPEID_COLOR: {
             auto fresh = make_strong<script_vec_node>(*storage_.vec_node());
             if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
             result.storage_ = std::move(fresh);
@@ -1391,6 +1394,7 @@ std::string script_value::to_string() const {
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
         case script_value_type::jai_vec4_type:
+        case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type:
             return detail::math::is_kind(raw_storage_index()) ? detail::math::text(*this) : std::string("[unknown]");
@@ -1725,6 +1729,7 @@ bool script_value::operator==(const script_value& other) const {
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
         case script_value_type::jai_vec4_type:
+        case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type:
             return lhs.raw_storage_index() == rhs.raw_storage_index() && detail::math::is_kind(lhs.raw_storage_index()) &&
@@ -1777,6 +1782,7 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
         case script_value_type::jai_vec4_type:
+        case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type:
             if (raw_storage_index() == other.raw_storage_index() && detail::math::is_kind(raw_storage_index())) {
@@ -1843,6 +1849,7 @@ size_t script_value::map_key_hash() const noexcept {
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
         case script_value_type::jai_vec4_type:
+        case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type:
             return mix(detail::math::is_kind(raw_storage_index()) ? detail::math::hash_bits(*this) : 0);

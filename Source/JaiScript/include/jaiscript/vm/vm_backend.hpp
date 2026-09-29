@@ -1308,7 +1308,12 @@ namespace jai::vm {
         checked_result<script_value> handle_not_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_spaceship(const script_value& left, const script_value& right);
 
-        builtin_method_context builtin_ctx() const { return {engine_, symbolizer_}; }
+        builtin_method_context builtin_ctx() const {
+            return {engine_, symbolizer_,
+                [](void* self, const script_value& a, const script_value& b) { return static_cast<vm_backend*>(self)->language_equal(a, b); },
+                [](void* self) { return static_cast<vm_backend*>(self)->is_unwinding_; }, const_cast<vm_backend*>(this)};
+        }
+        checked_result<bool> language_equal(const script_value& a, const script_value& b);   // the language's == (a global operator==, the value's own)
 
         void raise_script_exception(const std::string& message, const source_location& location);
 

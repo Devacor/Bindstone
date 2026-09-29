@@ -2632,6 +2632,12 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 	return script_value(false, engine_);
 }
 
+checked_result<bool> vm_backend::language_equal(const script_value& a, const script_value& b) {
+	auto equal = binary_general(token_type::equal_equal, a.deref(), b.deref());
+	if (!equal) { return equal.error_value(); }
+	return is_truthy(equal.value());
+}
+
 checked_result<script_value> vm_backend::handle_not_equal(const script_value& left, const script_value& right) {
 	if ((left.is_weak_ptr() && right.is_null()) || (left.is_null() && right.is_weak_ptr())) {
 		bool is_expired = false;
@@ -16667,9 +16673,9 @@ op_status vm_backend::exec_case_eq(frame&, const vm_instruction&) {
 	script_value switch_value = std::move(stack_.back());
 	stack_.pop_back();
 	// a case matches when the language's == holds (KEEP BYTE-PARALLEL with interpreter::visit_switch_stmt)
-	auto equal = binary_general(token_type::equal_equal, switch_value.deref(), case_value.deref());
+	auto equal = language_equal(switch_value, case_value);
 	if (!equal) { return raise_from(equal); }
-	stack_.push_back(script_value(is_truthy(equal.value()), engine_));
+	stack_.push_back(script_value(equal.value(), engine_));
 	return {};
 }
 

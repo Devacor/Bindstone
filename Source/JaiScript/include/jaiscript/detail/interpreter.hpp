@@ -644,6 +644,11 @@ namespace jai {
         checked_result<script_value> handle_greater_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_equal(const script_value& left, const script_value& right);
         checked_result<bool> language_equal(const script_value& left, const script_value& right);
+        builtin_method_context builtin_ctx() {
+            return builtin_method_context{engine_, string_symbolizer_,
+                [](void* self, const script_value& a, const script_value& b) { return static_cast<interpreter*>(self)->language_equal(a, b); },
+                [](void* self) { return static_cast<interpreter*>(self)->is_unwinding_; }, this};
+        }
         checked_result<script_value> handle_not_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_spaceship(const script_value& left, const script_value& right);
         checked_result<script_value> handle_bitwise_and(const script_value& left, const script_value& right);

@@ -173,6 +173,7 @@ ctype ctype_from_type_info(const type_info* ti) {
 		case script_value_type::jai_vec2_type:
 		case script_value_type::jai_vec3_type:
 		case script_value_type::jai_vec4_type:
+		case script_value_type::jai_color_type:
 		case script_value_type::jai_ivec2_type:
 		case script_value_type::jai_ivec3_type:
 			t = math_ctype(ti->base_type);
@@ -1698,7 +1699,7 @@ private:
 			case ctype::math_k: {
 				// the same kind, or the other precision of the same dimensions (the typed-slot table's row)
 				if (src.kind != ctype::math_k) { return false; }
-				return detail::math::dims(math_type_from_name(src.cls)) == detail::math::dims(math_type_from_name(dst.cls));
+				return detail::math::converts(math_type_from_name(src.cls), math_type_from_name(dst.cls));
 			}
 			case ctype::object_k: {
 				if (src.kind == ctype::null_k) { return true; }
@@ -1803,7 +1804,9 @@ private:
                     }
                 }
                 if (vec) {
-                    const size_t dims = detail::math::dims(math_type_from_name(vec->cls));
+                    const script_value_type vk = math_type_from_name(vec->cls);
+                    if (detail::math::is_color(vk)) { return unknown ? ctype{} : math_ctype(vk); }
+                    const size_t dims = detail::math::dims(vk);
                     const bool exact = integral && (fn == math_fn::abs_ || fn == math_fn::min_ || fn == math_fn::max_ || fn == math_fn::clamp_);
                     return unknown ? ctype{} : math_ctype(detail::math::family_kind(exact, dims));
                 }
@@ -1833,6 +1836,7 @@ private:
             case math_fn::ivec2_: return math_ctype(script_value_type::jai_ivec2_type);
             case math_fn::ivec3_: return math_ctype(script_value_type::jai_ivec3_type);
             case math_fn::vec4_: return math_ctype(script_value_type::jai_vec4_type);
+            case math_fn::color_: case math_fn::mix_rgb_: case math_fn::mix_hsv_: return math_ctype(script_value_type::jai_color_type);
             default:
                 return ctype::make(ctype::float_k);
         }

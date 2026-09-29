@@ -9,6 +9,7 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/math_values.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -44,6 +45,8 @@ namespace jai::detail {
         // The native math types' constructors (math::vec3(1, 2, 3); detail/math_values.hpp construct)
         vec2_, vec3_, ivec2_, ivec3_, vec4_,
         round_, remap_,
+        // math::color and its alternative blends (docs/math_types_design.md 6.3)
+        color_, mix_rgb_, mix_hsv_,
         count,
         none = count
     };
@@ -58,6 +61,7 @@ namespace jai::detail {
                 if (name == "cos") return math_fn::cos_;
                 if (name == "ceil") return math_fn::ceil_;
                 if (name == "clamp") return math_fn::clamp_;
+                if (name == "color") return math_fn::color_;
                 return math_fn::none;
             case 'd':
                 if (name == "distance") return math_fn::distance;
@@ -87,6 +91,8 @@ namespace jai::detail {
                 if (name == "mix_out") return math_fn::mix_out_;
                 if (name == "mix_in_out") return math_fn::mix_in_out_;
                 if (name == "mix_out_in") return math_fn::mix_out_in_;
+                if (name == "mix_rgb") return math_fn::mix_rgb_;
+                if (name == "mix_hsv") return math_fn::mix_hsv_;
                 return math_fn::none;
             case 'u':
                 if (name == "unmix") return math_fn::unmix_;
@@ -247,6 +253,125 @@ namespace jai::detail {
         }
     }
 
+    // ---- color blending (Dev ruling 2026-09-29) --------------------------------------------------------------------------
+    // Everything in binary64, landing binary32. OKLab is Bjorn Ottosson's published transform: gamma-encoded sRGB to linear
+    // sRGB to LMS (cube root) to Lab and back; the result clamps to the sRGB gamut per channel. Alpha is straight.
+    namespace color_math {
+        inline double to_linear(double c) noexcept { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
+        inline double to_gamma(double c) noexcept { return c <= 0.0031308 ? 12.92 * c : 1.055 * std::pow(c, 1.0 / 2.4) - 0.055; }
+        inline double unit(double c) noexcept { return c < 0.0 ? 0.0 : (c > 1.0 ? 1.0 : c); }
+        inline void to_oklab(const double rgb[3], double lab[3]) noexcept {
+            const double r = to_linear(rgb[0]), g = to_linear(rgb[1]), b = to_linear(rgb[2]);
+            const double l = std::cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+            const double m = std::cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+            const double s = std::cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+            lab[0] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+            lab[1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+            lab[2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+        }
+        inline void from_oklab(const double lab[3], double rgb[3]) noexcept {
+            const double l_ = lab[0] + 0.3963377774 * lab[1] + 0.2158037573 * lab[2];
+            const double m_ = lab[0] - 0.1055613458 * lab[1] - 0.0638541728 * lab[2];
+            const double s_ = lab[0] - 0.0894841775 * lab[1] - 1.2914855480 * lab[2];
+            const double l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+            const double lin[3] = {4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+                                   -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+                                   -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s};
+            for (int c = 0; c < 3; ++c) { rgb[c] = unit(to_gamma(unit(lin[c]))); }
+        }
+        // hue in degrees [0, 360), saturation and value in [0, 1]
+        inline void to_hsv(const double rgb[3], double hsv[3]) noexcept {
+            const double mx = std::max(rgb[0], std::max(rgb[1], rgb[2])), mn = std::min(rgb[0], std::min(rgb[1], rgb[2])), d = mx - mn;
+            double h = 0.0;
+            if (d > 0.0) {
+                if (mx == rgb[0]) { h = 60.0 * std::fmod((rgb[1] - rgb[2]) / d, 6.0); }
+                else if (mx == rgb[1]) { h = 60.0 * ((rgb[2] - rgb[0]) / d + 2.0); }
+                else { h = 60.0 * ((rgb[0] - rgb[1]) / d + 4.0); }
+                if (h < 0.0) { h += 360.0; }
+            }
+            hsv[0] = h; hsv[1] = mx > 0.0 ? d / mx : 0.0; hsv[2] = mx;
+        }
+        inline void from_hsv(const double hsv[3], double rgb[3]) noexcept {
+            const double c = hsv[2] * hsv[1], hp = hsv[0] / 60.0, x = c * (1.0 - std::fabs(std::fmod(hp, 2.0) - 1.0)), m = hsv[2] - c;
+            double r = 0, g = 0, b = 0;
+            switch (static_cast<int>(hp) % 6) {
+                case 0: r = c; g = x; break;
+                case 1: r = x; g = c; break;
+                case 2: g = c; b = x; break;
+                case 3: g = x; b = c; break;
+                case 4: r = x; b = c; break;
+                default: r = c; b = x; break;
+            }
+            rgb[0] = r + m; rgb[1] = g + m; rgb[2] = b + m;
+        }
+        enum class space : uint8_t { oklab, rgb, hsv };
+        // start, end: r g b a; w the blend weight (already eased for the eased family)
+        inline void blend(space how, const double start[4], const double end[4], double w, float out[4]) noexcept {
+            double rgb[3] = {0, 0, 0};
+            if (how == space::rgb) {
+                for (int c = 0; c < 3; ++c) { rgb[c] = start[c] + (end[c] - start[c]) * w; }
+            } else if (how == space::oklab) {
+                double a[3], b[3], lab[3];
+                to_oklab(start, a);
+                to_oklab(end, b);
+                for (int c = 0; c < 3; ++c) { lab[c] = a[c] + (b[c] - a[c]) * w; }
+                from_oklab(lab, rgb);
+            } else {
+                double a[3], b[3];
+                to_hsv(start, a);
+                to_hsv(end, b);
+                if (a[1] < 1e-6) { a[0] = b[0]; }   // an achromatic endpoint takes the other's hue
+                if (b[1] < 1e-6) { b[0] = a[0]; }
+                double d = b[0] - a[0];
+                if (d > 180.0) { d -= 360.0; }
+                if (d < -180.0) { d += 360.0; }
+                double h = std::fmod(a[0] + d * w, 360.0);
+                if (h < 0.0) { h += 360.0; }
+                const double hsv[3] = {h, a[1] + (b[1] - a[1]) * w, a[2] + (b[2] - a[2]) * w};
+                from_hsv(hsv, rgb);
+            }
+            for (int c = 0; c < 3; ++c) { out[c] = static_cast<float>(rgb[c]); }
+            out[3] = static_cast<float>(start[3] + (end[3] - start[3]) * w);
+        }
+    }
+    inline const char* color_mix_text(math_fn fn) noexcept {
+        switch (fn) {
+            case math_fn::mix_rgb_: return "math::mix_rgb expects (math::color, math::color, float)";
+            case math_fn::mix_hsv_: return "math::mix_hsv expects (math::color, math::color, float)";
+            case math_fn::lerp_: return "math::lerp on colors expects (math::color, math::color, float)";
+            case math_fn::mix_: return "math::mix on colors expects (math::color, math::color, float)";
+            default: return "an eased mix on colors expects (math::color, math::color, float, float)";
+        }
+    }
+    // mix, lerp and the eased mixes with color endpoints (OKLab), mix_rgb and mix_hsv: both endpoints colors, t (and the
+    // eased strength) scalars
+    JAI_MATH_COLD inline checked_result<script_value> eval_color_mix(math_fn fn, const script_value* const* args, size_t argc, engine* eng) {
+        const bool eased = fn != math_fn::mix_ && fn != math_fn::lerp_ && fn != math_fn::mix_rgb_ && fn != math_fn::mix_hsv_;
+        auto bad = [&] { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), color_mix_text(fn)); };
+        if (argc != (eased ? 4u : 3u)) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), color_mix_text(fn));
+        }
+        double ends[2][4];
+        for (int e = 0; e < 2; ++e) {
+            if (math::kind_of(*args[e]) != script_value_type::jai_color_type) { return bad(); }
+            for (size_t c = 0; c < 4; ++c) { ends[e][c] = static_cast<double>(math::f32_at(*args[e], c)); }
+        }
+        const math::scalar t = math::read_scalar(*args[2]);
+        if (!t.ok) { return bad(); }
+        double w = t.is_int ? static_cast<double>(t.i) : t.f;
+        if (eased) {
+            const math::scalar k = math::read_scalar(*args[3]);
+            if (!k.ok) { return bad(); }
+            w = eased_value(fn, 0.0, 1.0, w, k.is_int ? static_cast<double>(k.i) : k.f);
+        }
+        const color_math::space how = fn == math_fn::mix_rgb_ ? color_math::space::rgb
+                                    : fn == math_fn::mix_hsv_ ? color_math::space::hsv : color_math::space::oklab;
+        float out[4];
+        color_math::blend(how, ends[0], ends[1], w, out);
+        int32_t unused[4] = {0, 0, 0, 0};
+        return math::make(script_value_type::jai_color_type, out, unused, eng);
+    }
+
     // The vector rows of the component-wise family (floor, ceil, round, abs, min, max, clamp, lerp, mix, unmix, remap and
     // the eased mixes): reached only when a scalar row found an operand that is not a number. Every vector operand has the
     // same dimensions; a scalar operand applies to every component (a vector t gives each component its own). Each component
@@ -267,6 +392,7 @@ namespace jai::detail {
         if (argc > k_max_args) { return type_error(); }
         operand ops[k_max_args];
         size_t dims = 0;
+        bool any_color = false, all_vec_color = true;
         for (size_t a = 0; a < argc; ++a) {
             script_value decoded(std::monostate{}, eng);
             const script_value* v = args[a];
@@ -275,6 +401,8 @@ namespace jai::detail {
             operand& o = ops[a];
             if (math::is_kind(raw)) {
                 const script_value_type k = v->unchecked_vec_kind();
+                any_color = any_color || math::is_color(k);
+                all_vec_color = all_vec_color && math::is_color(k);
                 o.vec = true;
                 o.integral = math::integral(k);
                 o.dims = math::dims(k);
@@ -296,6 +424,17 @@ namespace jai::detail {
             }
         }
         if (dims == 0) { return type_error(); }
+        if (any_color) {
+            switch (fn) {
+                case math_fn::lerp_: case math_fn::mix_: case math_fn::mix_in_: case math_fn::mix_out_:
+                case math_fn::mix_in_out_: case math_fn::mix_out_in_:
+                    return eval_color_mix(fn, args, argc, eng);
+                default: break;   // the other rows are per channel
+            }
+            if (!all_vec_color) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "a math::color combines only with colors and scalars");
+            }
+        }
 
         const bool exact_family = fn == math_fn::abs_ || fn == math_fn::min_ || fn == math_fn::max_ || fn == math_fn::clamp_;
         bool all_integral = true;
@@ -335,7 +474,7 @@ namespace jai::detail {
             }
             f[c] = math::to_f32(r);
         }
-        return math::make(math::family_kind(false, dims), f, out, eng);
+        return math::make(any_color ? script_value_type::jai_color_type : math::family_kind(false, dims), f, out, eng);
     }
 
     // math::vec2(...) ... math::ivec3(...): out of line, so the constructor's temporaries stay off the scalar kernel's frame
@@ -343,6 +482,7 @@ namespace jai::detail {
         const script_value_type kind = fn == math_fn::vec2_ ? script_value_type::jai_vec2_type
                                      : fn == math_fn::vec3_ ? script_value_type::jai_vec3_type
                                      : fn == math_fn::vec4_ ? script_value_type::jai_vec4_type
+                                     : fn == math_fn::color_ ? script_value_type::jai_color_type
                                      : fn == math_fn::ivec2_ ? script_value_type::jai_ivec2_type : script_value_type::jai_ivec3_type;
         if (argc > math::k_max_dims) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), math::ctor_arity_text(kind));
@@ -625,7 +765,11 @@ namespace jai::detail {
             case math_fn::vec4_:
             case math_fn::ivec2_:
             case math_fn::ivec3_:
+            case math_fn::color_:
                 return eval_vec_constructor(fn, args, argc, eng);
+            case math_fn::mix_rgb_:
+            case math_fn::mix_hsv_:
+                return eval_color_mix(fn, args, argc, eng);
 
             case math_fn::round_: {
                 if (argc != 1) return bad_arity("math::round expects 1 argument");

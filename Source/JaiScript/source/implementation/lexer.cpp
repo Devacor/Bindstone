@@ -843,7 +843,7 @@ token lexer::scan_identifier() {
         return token(token_type::super_keyword, "super::", loc);
     }
 
-    // math::vec2 / vec3 / vec4 / ivec2 / ivec3 spelled contiguously is ONE identifier token "math::K": the parser's
+    // math::vec2 / vec3 / vec4 / ivec2 / ivec3 / color spelled contiguously is ONE identifier token "math::K": the parser's
     // type-name rules then take it wherever a class name may stand (declarations, fields, parameters, returns,
     // array<...>, cast<...>), and expression position rewrites it to the static member math::K
     if (lexeme_view == "math" && peek() == ':' && peek_next() == ':') {
@@ -852,7 +852,7 @@ token lexer::scan_identifier() {
             ++end;
         }
         const std::string_view kind(source_.data() + current_ + 2, end - (current_ + 2));
-        if (kind == "vec2" || kind == "vec3" || kind == "vec4" || kind == "ivec2" || kind == "ivec3") {
+        if (kind == "vec2" || kind == "vec3" || kind == "vec4" || kind == "ivec2" || kind == "ivec3" || kind == "color") {
             while (current_ < end) {
                 advance();
             }

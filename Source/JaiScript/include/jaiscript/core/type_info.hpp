@@ -20,6 +20,7 @@ namespace jai {
             case script_value_type::jai_vec2_type: return "math::vec2";
             case script_value_type::jai_vec3_type: return "math::vec3";
             case script_value_type::jai_vec4_type: return "math::vec4";
+            case script_value_type::jai_color_type: return "math::color";
             case script_value_type::jai_ivec2_type: return "math::ivec2";
             case script_value_type::jai_ivec3_type: return "math::ivec3";
             default: return nullptr;
@@ -31,6 +32,7 @@ namespace jai {
         if (name == "math::vec2") return script_value_type::jai_vec2_type;
         if (name == "math::vec3") return script_value_type::jai_vec3_type;
         if (name == "math::vec4") return script_value_type::jai_vec4_type;
+        if (name == "math::color") return script_value_type::jai_color_type;
         if (name == "math::ivec2") return script_value_type::jai_ivec2_type;
         if (name == "math::ivec3") return script_value_type::jai_ivec3_type;
         return script_value_type::jai_null_type;
@@ -140,6 +142,7 @@ namespace jai {
                 case script_value_type::jai_vec2_type: return "math::vec2";
                 case script_value_type::jai_vec3_type: return "math::vec3";
                 case script_value_type::jai_vec4_type: return "math::vec4";
+                case script_value_type::jai_color_type: return "math::color";
                 case script_value_type::jai_ivec2_type: return "math::ivec2";
                 case script_value_type::jai_ivec3_type: return "math::ivec3";
                 case script_value_type::jai_bool_type: return "bool";

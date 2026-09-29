@@ -1384,7 +1384,7 @@ bool vm_backend::is_truthy(const script_value& value) {
 		case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0;
 		case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty();
 		case script_value::TYPEID_UTF8_STRING: return !value.unchecked_as_utf8().bytes.empty();
-		case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: return value.math_truthy();
+		case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: case script_value::TYPEID_COLOR: return value.math_truthy();
 		case script_value::TYPEID_CHAR: return true;
 		case script_value::TYPEID_ARRAY: {
 			auto& arr = const_cast<script_value&>(value).get_array_storage();

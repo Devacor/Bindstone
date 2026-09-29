@@ -207,6 +207,7 @@ public:
             case script_value_type::jai_vec2_type:
             case script_value_type::jai_vec3_type:
             case script_value_type::jai_vec4_type:
+            case script_value_type::jai_color_type:
             case script_value_type::jai_ivec2_type:
             case script_value_type::jai_ivec3_type: {
                 // the components' raw little-endian bits, binary32 or int32 (exact round trip)
@@ -890,6 +891,7 @@ private:
             case script_value_type::jai_vec2_type:
             case script_value_type::jai_vec3_type:
             case script_value_type::jai_vec4_type:
+            case script_value_type::jai_color_type:
             case script_value_type::jai_ivec2_type:
             case script_value_type::jai_ivec3_type: {
                 const script_value_type kind = vtype;

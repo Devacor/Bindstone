@@ -58,7 +58,8 @@ namespace jai {
         jai_vec3_type,           // math::vec3 (3 x f32)
         jai_ivec2_type,          // math::ivec2 (2 x i32)
         jai_ivec3_type,          // math::ivec3 (3 x i32)
-        jai_vec4_type            // math::vec4 (4 x f32)
+        jai_vec4_type,           // math::vec4 (4 x f32)
+        jai_color_type           // math::color (r, g, b, a f32, straight alpha)
     };
     
     // The unit whose code is running and the execution that compiled it (docs/global_shadowing.md):

@@ -20,6 +20,7 @@ std::string type_info::to_string() const {
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:
         case script_value_type::jai_vec4_type:
+        case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type:
             return math_type_name(base_type);

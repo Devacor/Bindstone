@@ -51,7 +51,8 @@ namespace jai::detail::math {
 	inline vk kind_of(const script_value& v) noexcept { return is_kind(v.raw_storage_index()) ? v.unchecked_vec_kind() : vk::jai_invalid_type; }
 	inline bool is_vec_type(vk k) noexcept {
 		switch (k) {
-			case vk::jai_vec2_type: case vk::jai_vec3_type: case vk::jai_vec4_type: case vk::jai_ivec2_type: case vk::jai_ivec3_type: return true;
+			case vk::jai_vec2_type: case vk::jai_vec3_type: case vk::jai_vec4_type: case vk::jai_ivec2_type: case vk::jai_ivec3_type:
+			case vk::jai_color_type: return true;
 			default: return false;
 		}
 	}
@@ -59,11 +60,17 @@ namespace jai::detail::math {
 		switch (k) {
 			case vk::jai_vec2_type: case vk::jai_ivec2_type: return 2;
 			case vk::jai_vec3_type: case vk::jai_ivec3_type: return 3;
-			case vk::jai_vec4_type: return 4;
+			case vk::jai_vec4_type: case vk::jai_color_type: return 4;
 			default: return 0;
 		}
 	}
 	inline bool integral(vk k) noexcept { return k == vk::jai_ivec2_type || k == vk::jai_ivec3_type; }
+	inline bool is_color(vk k) noexcept { return k == vk::jai_color_type; }
+	// The typed-slot row between two kinds (Dev decision 5): the same kind, or the other precision of the same dimensions; a
+	// color and a vector never convert into each other
+	inline bool converts(vk from, vk to) noexcept {
+		return from == to || (is_vec_type(from) && is_vec_type(to) && dims(from) == dims(to) && is_color(from) == is_color(to));
+	}
 	inline const char* kind_name(vk k) noexcept { return math_type_name(k); }
 	// The kind with `n` components of the family `integral_family` (jai_invalid_type when the family has none)
 	inline vk family_kind(bool integral_family, size_t n) noexcept {
@@ -89,14 +96,31 @@ namespace jai::detail::math {
 		return -1;
 	}
 	inline int component_of(vk k, std::string_view name) noexcept {
+		if (is_color(k)) {   // a color's channels are r, g, b, a
+			if (name.size() != 1) return -1;
+			switch (name[0]) {
+				case 'r': return 0;
+				case 'g': return 1;
+				case 'b': return 2;
+				case 'a': return 3;
+				default: return -1;
+			}
+		}
 		const int c = component_slot(name);
 		return (c >= 0 && static_cast<size_t>(c) < dims(k)) ? c : -1;
+	}
+	// The canonical component name (the archives' keys)
+	inline const char* component_name(vk k, size_t c) noexcept {
+		static constexpr const char* const vec_names[4] = {"x", "y", "z", "w"};
+		static constexpr const char* const color_names[4] = {"r", "g", "b", "a"};
+		return is_color(k) ? color_names[c] : vec_names[c];
 	}
 	inline const char* no_member_text(vk k) noexcept {
 		switch (k) {
 			case vk::jai_vec2_type: return "math::vec2 has no member '{0}'";
 			case vk::jai_vec3_type: return "math::vec3 has no member '{0}'";
 			case vk::jai_vec4_type: return "math::vec4 has no member '{0}'";
+			case vk::jai_color_type: return "math::color has no member '{0}'";
 			case vk::jai_ivec2_type: return "math::ivec2 has no member '{0}'";
 			default: return "math::ivec3 has no member '{0}'";
 		}
@@ -174,7 +198,7 @@ namespace jai::detail::math {
 	JAI_MATH_COLD inline checked_result<script_value> convert(const script_value& v, vk target, engine* eng) {
 		const vk k = kind_of(v);
 		if (k == target) { return v; }
-		if (!is_vec_type(k) || dims(k) != dims(target)) {
+		if (!converts(k, target)) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "math kinds of different dimensions do not convert");
 		}
 		float f[k_max_dims] = {0, 0, 0, 0};
@@ -199,6 +223,7 @@ namespace jai::detail::math {
 			case vk::jai_vec2_type: return "math::vec2 expects 0, 1 or 2 arguments";
 			case vk::jai_vec3_type: return "math::vec3 expects 0 to 3 arguments";
 			case vk::jai_vec4_type: return "math::vec4 expects 0 to 4 arguments";
+			case vk::jai_color_type: return "math::color expects 0, 1, 3 or 4 arguments";
 			case vk::jai_ivec2_type: return "math::ivec2 expects 0, 1 or 2 arguments";
 			default: return "math::ivec3 expects 0 to 3 arguments";
 		}
@@ -208,6 +233,7 @@ namespace jai::detail::math {
 			case vk::jai_vec2_type: return "math::vec2 expects numeric components";
 			case vk::jai_vec3_type: return "math::vec3 expects numeric components";
 			case vk::jai_vec4_type: return "math::vec4 expects numeric components";
+			case vk::jai_color_type: return "math::color expects numeric components";
 			case vk::jai_ivec2_type: return "math::ivec2 expects numeric components";
 			default: return "math::ivec3 expects numeric components";
 		}
@@ -229,6 +255,22 @@ namespace jai::detail::math {
 			}
 			return {};
 		};
+		if (is_color(k)) {   // () opaque white; (c) a color; (r, g, b) opaque; (r, g, b, a)
+			float rgba[k_max_dims] = {1.0f, 1.0f, 1.0f, 1.0f};
+			if (argc == 1) {
+				if (!is_kind(args[0]->raw_storage_index()) || kind_of(*args[0]) != k) { return bad_type(); }
+				return *args[0];
+			}
+			if (argc != 0 && argc != 3 && argc != 4) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), ctor_arity_text(k));
+			}
+			for (size_t a = 0; a < argc; ++a) {
+				const scalar sc = read_scalar(*args[a]);
+				if (!sc.ok) { return bad_type(); }
+				rgba[a] = scalar_f32(sc);
+			}
+			return make(k, rgba, i, eng);
+		}
 		if (argc == 0) { return make(k, f, i, eng); }
 		if (argc == 1) {
 			if (!is_kind(args[0]->raw_storage_index()) || dims(kind_of(*args[0])) != n) { return bad_type(); }
@@ -263,6 +305,7 @@ namespace jai::detail::math {
 			case vk::jai_vec2_type: return "Cannot store a non-numeric value in a math::vec2 component";
 			case vk::jai_vec3_type: return "Cannot store a non-numeric value in a math::vec3 component";
 			case vk::jai_vec4_type: return "Cannot store a non-numeric value in a math::vec4 component";
+			case vk::jai_color_type: return "Cannot store a non-numeric value in a math::color component";
 			case vk::jai_ivec2_type: return "Cannot store a non-numeric value in a math::ivec2 component";
 			default: return "Cannot store a non-numeric value in a math::ivec3 component";
 		}
@@ -405,7 +448,7 @@ namespace jai::detail::math {
 	// and an ivec holding the same values are equal; NaN is unequal, as for floats); anything else is unequal
 	JAI_MATH_COLD inline bool equal(const script_value& l, const script_value& r) noexcept {
 		const vk lk = kind_of(l), rk = kind_of(r);
-		if (!is_vec_type(lk) || !is_vec_type(rk) || dims(lk) != dims(rk)) { return false; }
+		if (!is_vec_type(lk) || !is_vec_type(rk) || dims(lk) != dims(rk) || is_color(lk) != is_color(rk)) { return false; }
 		for (size_t c = 0; c < dims(lk); ++c) {
 			const double a = integral(lk) ? static_cast<double>(i32_at(l, c)) : static_cast<double>(f32_at(l, c));
 			const double b = integral(rk) ? static_cast<double>(i32_at(r, c)) : static_cast<double>(f32_at(r, c));
@@ -418,6 +461,7 @@ namespace jai::detail::math {
 			case vk::jai_vec2_type: return "math::vec2 has no ordering";
 			case vk::jai_vec3_type: return "math::vec3 has no ordering";
 			case vk::jai_vec4_type: return "math::vec4 has no ordering";
+			case vk::jai_color_type: return "math::color has no ordering";
 			case vk::jai_ivec2_type: return "math::ivec2 has no ordering";
 			default: return "math::ivec3 has no ordering";
 		}

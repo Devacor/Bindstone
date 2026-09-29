@@ -4846,8 +4846,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 const script_value* vm_backend::fused_subscript_value(frame& f, const fused_operand& operand,
                                                       std::optional<script_value>& scratch,
                                                       size_t cache_slot) {
-	std::optional<script_value> base_scratch;
-	const script_value* current = fused_ident_value(f, operand, base_scratch, cache_slot);
+	const script_value* current = fused_ident_value(f, operand, scratch, cache_slot);   // a field or getter copy lives in the caller's scratch: the pointer outlives this frame
 	if (!current) return nullptr;
 
 	for (const fused_subscript_index& level : operand.subscript_chain) {

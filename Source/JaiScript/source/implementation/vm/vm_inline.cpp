@@ -1016,8 +1016,10 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	for (const expression_ptr& p : pre) {
 		switch (p->get_type()) {
 		case node_type::literal_expr: break;
-		case node_type::call_expr: {   // an alias's guard, or a callee's probe
-			const bool alias = std::find(alias_pins.begin(), alias_pins.end(), static_cast<const call_expr*>(p.get())) != alias_pins.end();
+		case node_type::call_expr: {   // an alias's guard, or a callee's probe; any other call (an intrinsic over a name the call may write) has no spill
+			auto* pc = static_cast<const call_expr*>(p.get());
+			const bool alias = std::find(alias_pins.begin(), alias_pins.end(), pc) != alias_pins.end();
+			if (!alias && std::find(probe_pins.begin(), probe_pins.end(), pc) == probe_pins.end()) { out.why = "an operand before the call the block cannot spill"; return false; }
 			out.spills.emplace_back(p, alias ? script_value_type::jai_function_type : script_value_type::jai_object_type);
 			break;
 		}

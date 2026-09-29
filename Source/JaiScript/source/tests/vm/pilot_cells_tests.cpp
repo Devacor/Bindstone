@@ -5565,6 +5565,18 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(args, args_want, "leaves in the arguments of a reference callee");
 			both(args, args_want, "leaves in the arguments of a reference callee, proofs off", false);
 		});
+		// an intrinsic over a name ahead of a graft reads the name before the graft writes it: only an alias guard or a callee probe the plan
+		// pinned spills as a call, any other call among the earlier operands keeps the statement general (order band seed 13:
+		// math::abs(G1) * w7(x) read G1 after w7 wrote it)
+		test("an_intrinsic_ahead_of_a_writing_graft_reads_first", [this]() {
+			const std::string src = "[[warn_mode]]\nint G1 = 143;\nfloat G2 = 2.0;\n"
+				"function w7(int p) -> float { G1 = G1 + p; return (G1 > 2) ? 4 : 3; }\n"
+				"function wf(float p) -> float { G2 = G2 + p; return 1.5; }\n"
+				"function run(int n) -> string { var acc = 0; float f = 0.0; for (int i = 0; i < n; ++i) { var r = math::abs(G1) * w7(7); acc = acc + r; f = f + math::sqrt(G2) * wf(2.0); } return to_string(acc) + \" \" + to_string(f) + \" \" + to_string(G1); }\n"
+				"run(3);";
+			both(src, "1800.0 8.79555495773441 164", "intrinsics ahead of a writing graft");
+			both(src, "1800.0 8.79555495773441 164", "intrinsics ahead of a writing graft, proofs off", false);
+		});
 		// a miss inside a block's inner loop resumes with what the general form reads next: an inner counted loop's compare back to its body
 		// resumes at the generic path's loop back (the var already stepped, never stepped twice), and a compiler value live where the inner
 		// loop's body begins (a graft's parameter over the graft's own loop) is flushed anywhere in that loop, since its back edge reads it again

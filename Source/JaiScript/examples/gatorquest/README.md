@@ -113,18 +113,18 @@ is held, that the prediction agrees with the host at every stop, that correction
 most one tile, that nothing snaps, and that a step into a monster the host saw first corrects once, by one tile,
 without the drawn gator jumping. Every byte either side writes reaches the other before it next reads (the loopback
 takes no virtual time), so the counts depend on the seeds alone and are the same on every machine and both
-backends (64 seconds of walking at each round trip):
+backends. Each round starts a fresh gator in its own save folder (64 seconds of walking at each round trip):
 
 ```
   rtt  jitter loss | walked  steps | corrections /min  max  snaps | same-frame misses | stops converged
      0      0   0% |    64s    268 |           0   0.0    0      0 |     0 of   268 | 12 of 12
     60     10   0% |    64s    275 |           0   0.0    0      0 |     0 of   275 | 12 of 12
-   150     25   1% |    64s    275 |           0   0.0    0      0 |     0 of   275 | 12 of 12
-  rejected move at 150 ms: step taken on the key frame yes, 1 correction of 1 tile 66 ms after the press, 0 snaps, largest frame-to-frame move of the drawn gator 0.16 tiles, back in agreement yes
-   300     50   1% |    64s    213 |           6   5.6    2      0 |     0 of   213 | 12 of 12
+   150     25   1% |    64s    231 |           8   7.5    1      0 |     0 of   231 | 12 of 12
+  rejected move at 150 ms: step taken on the key frame yes, 1 correction of 1 tile 99 ms after the press, 0 snaps, largest frame-to-frame move of the drawn gator 0.16 tiles, back in agreement yes
+   300     50   1% |    64s    244 |           0   0.0    0      0 |     0 of   244 | 12 of 12
 ```
 
-The corrections at 300 ms are monsters stepping into the gator's path before the client heard they had moved.
+Corrections under latency are monsters stepping into the gator's path before the client heard they had moved.
 
 ## Saves
 

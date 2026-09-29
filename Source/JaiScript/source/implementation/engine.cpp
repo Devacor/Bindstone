@@ -2871,6 +2871,11 @@ bool engine::backend_unwinding() const {
     return be && be->is_unwinding();
 }
 
+std::string engine::backend_exception_text() const {
+    auto* be = get_execution_backend();
+    return be ? std::string(be->get_current_exception().what()) : std::string();
+}
+
 checked_result<std::string> engine::text_of(const script_value& v) const {
     auto* be = get_execution_backend();
     return be ? be->text_of(v) : checked_result<std::string>(v.deref().to_string());

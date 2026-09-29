@@ -51,7 +51,9 @@ public:
 			check_eq((int64_t)7, eng->execute("3 + 4").as_int(), "engine usable afterwards");
 		});
 
-		test("nested_execute_failure_in_converted_callback_reports_nonempty_error", [this]() {
+		test("nested_execute_failure_in_converted_callback_propagates_to_the_script", [this]() {
+			// Dev ruling 2026-09-28: a script callback behind a host std::function throws its error through to the host, which
+			// hands it back to the calling script as the host call's error
 			auto eng = make_engine();
 			engine* raw = eng.get();
 			std::vector<std::string> reported;
@@ -64,23 +66,23 @@ public:
 			});
 			eng->execute("var g_boom = \"nested boom\"; var g_after = 0;");
 			auto r = eng->execute(R"(
-				invoke([]() -> void {
-					host_eval_unguarded("throw g_boom;");
-					g_after = 1;
-				});
+				var got = "none";
+				try {
+					invoke([]() -> void {
+						host_eval_unguarded("throw g_boom;");
+						g_after = 1;
+					});
+				} catch (e) { got = e; }
 				g_after = g_after + 10;
-				g_after;
+				"" + g_after + ":" + got;
 			)");
-			check_eq((int64_t)10, r.as_int(), "callback unwound at the failed nested execute; outer run continued");
-			check_true(host_continued, "converted callback returned to its C++ caller");
-			check_false(reported.empty(), "callback failure reached the error handler");
-			for (const auto& msg : reported) {
-				check_false(msg.empty(), "reported message is never empty");
-			}
+			check_true(r.as_string().rfind("10:", 0) == 0 && r.as_string().find("nested boom") != std::string::npos, r.as_string());
+			check_false(host_continued, "the host call ended at the callback's error");
+			check_true(reported.empty(), "nothing is reported: the error travelled");
 			check_eq((int64_t)7, eng->execute("3 + 4").as_int(), "engine usable afterwards");
 		});
 
-		test("callback_error_after_swallowed_nested_failure_reports_nonempty_error", [this]() {
+		test("callback_error_after_swallowed_nested_failure_propagates_its_own_text", [this]() {
 			auto eng = make_engine();
 			engine* raw = eng.get();
 			std::vector<std::string> reported;
@@ -97,19 +99,19 @@ public:
 			eng->add_function("invoke", [](script_value cb) { convert_script_function<void()>(cb)(); });
 			eng->execute("var g_boom = \"nested boom\"; var g_after = 0;");
 			auto r = eng->execute(R"(
-				invoke([]() -> void {
-					if (!host_eval("throw g_boom;")) { host_throw(); }
-					g_after = 1;
-				});
+				var got = "none";
+				try {
+					invoke([]() -> void {
+						if (!host_eval("throw g_boom;")) { host_throw(); }
+						g_after = 1;
+					});
+				} catch (e) { got = e; }
 				g_after = g_after + 10;
-				g_after;
+				"" + g_after + ":" + got;
 			)");
 			check_true(host_saw_failure, "host caught the nested failure with its text");
-			check_eq((int64_t)10, r.as_int(), "callback unwound at its own error; outer run continued");
-			check_false(reported.empty(), "callback error reached the error handler");
-			for (const auto& msg : reported) {
-				check_false(msg.empty(), "reported message is never empty after a scrubbed nested failure");
-			}
+			check_eq(std::string("10:callback boom"), r.as_string(), "the callback's own error reached the script after a scrubbed nested failure");
+			check_true(reported.empty(), "nothing is reported: the error travelled");
 			check_eq((int64_t)7, eng->execute("3 + 4").as_int(), "engine usable afterwards");
 		});
 

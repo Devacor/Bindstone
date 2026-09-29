@@ -23,23 +23,20 @@ namespace detail {
 					if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
 				}
 				engine::external_call_guard scope(eng);
-				// No error-value channel through std::function and throwing into game
-				// callsites (frame hooks, signal emits) is unsafe - report and default.
-				try {
-					std::vector<script_value> values;
-					values.reserve(sizeof...(Args));
-					(values.push_back(eng->make_value(args)), ...);
-					auto result = fn.as_function()(values);
-					if (!result) {
-						eng->report_script_error(eng->format_error(result), result.error());
-						if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
-					}
-					if constexpr (!std::is_void_v<R>) {
-						return result.value().template as<R>();
-					}
-				} catch (const std::exception& e) {
-					eng->report_script_error(e.what());
-					if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
+				// A script error is the host call's error: it throws through to the host (a host function called from script
+				// hands it back to the script as that call's runtime error, text included)
+				std::vector<script_value> values;
+				values.reserve(sizeof...(Args));
+				(values.push_back(eng->make_value(args)), ...);
+				auto result = fn.as_function()(values);
+				if (!result) {
+					throw runtime_error(eng->format_error(result));
+				}
+				if (eng->backend_unwinding()) {   // a script throw the callback did not catch
+					throw runtime_error(eng->backend_exception_text());
+				}
+				if constexpr (!std::is_void_v<R>) {
+					return result.value().template as<R>();
 				}
 			};
 		}

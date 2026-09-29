@@ -2175,6 +2175,19 @@ private:
 		ruling_numeric_ternary_auto();
 		ruling_from_json_constructor_errors();
 		ruling_json_tagged_values();
+		ruling_base_slots_keep_the_class();
+	}
+
+	void ruling_base_slots_keep_the_class() {
+		test("a_derived_value_in_a_base_typed_slot_keeps_its_class", [this]() {
+			// a deliberate deviation from C++ slicing: the slot's static type is the base, the value stays whole
+			expect("no slicing", R"(
+				class B { int a = 1; } class D : B { int d = 2; }
+				B b = D(); B c = b; array<B> xs = [D()];
+				function by_value(B p) -> string { return type_of(p); }
+				type_of(b) + " " + type_of(c) + " " + type_of(cast<B>(D())) + " " + cast<D&>(b).d + " " + type_of(xs[0]) + " " + by_value(D());
+			)", "D D D 2 D D", check_mode::warn);
+		});
 	}
 
 	void ruling_json_tagged_values() {

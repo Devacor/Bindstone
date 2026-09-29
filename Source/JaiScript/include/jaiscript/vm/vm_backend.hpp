@@ -1289,7 +1289,7 @@ namespace jai::vm {
         op_status compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name = {});
         checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
                                                                const detail::slot_site& site = detail::slot_site{});
-        checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in);
+        checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound = -1);
 
         checked_result<script_value> binary_general(token_type op, const script_value& left, const script_value& right);
         bool binary_fast_shape(token_type op, uint32_t shape, const script_value& left, const script_value& right,

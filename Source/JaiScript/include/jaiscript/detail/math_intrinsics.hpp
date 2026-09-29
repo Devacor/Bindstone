@@ -47,6 +47,8 @@ namespace jai::detail {
         round_, remap_,
         // math::color and its alternative blends (docs/math_types_design.md 6.3)
         color_, mix_rgb_, mix_hsv_,
+        // the geometry library on vectors (docs/math_types_design.md 6.1; distance and distance_squared take two vectors too)
+        dot_, cross_, length_, length_squared_, normalize_, reflect_, project_, angle_between_, perpendicular_, rotate_,
         count,
         none = count
     };
@@ -56,18 +58,23 @@ namespace jai::detail {
             case 'a':
                 if (name == "abs") return math_fn::abs_;
                 if (name == "atan2") return math_fn::atan2_;
+                if (name == "angle_between") return math_fn::angle_between_;
                 return math_fn::none;
             case 'c':
                 if (name == "cos") return math_fn::cos_;
                 if (name == "ceil") return math_fn::ceil_;
                 if (name == "clamp") return math_fn::clamp_;
                 if (name == "color") return math_fn::color_;
+                if (name == "cross") return math_fn::cross_;
                 return math_fn::none;
             case 'd':
                 if (name == "distance") return math_fn::distance;
                 if (name == "distance_squared") return math_fn::distance_squared;
                 if (name == "degrees_to_radians") return math_fn::degrees_to_radians;
+                if (name == "dot") return math_fn::dot_;
                 return math_fn::none;
+            case 'n':
+                return name == "normalize" ? math_fn::normalize_ : math_fn::none;
             case 'f':
                 return name == "floor" ? math_fn::floor_ : math_fn::none;
             case 'i':
@@ -82,7 +89,10 @@ namespace jai::detail {
                 if (name == "vec4") return math_fn::vec4_;
                 return math_fn::none;
             case 'l':
-                return name == "lerp" ? math_fn::lerp_ : math_fn::none;
+                if (name == "lerp") return math_fn::lerp_;
+                if (name == "length") return math_fn::length_;
+                if (name == "length_squared") return math_fn::length_squared_;
+                return math_fn::none;
             case 'm':
                 if (name == "min") return math_fn::min_;
                 if (name == "max") return math_fn::max_;
@@ -102,13 +112,18 @@ namespace jai::detail {
                 if (name == "unmix_out_in") return math_fn::unmix_out_in_;
                 return math_fn::none;
             case 'p':
-                return name == "pow" ? math_fn::pow_ : math_fn::none;
+                if (name == "pow") return math_fn::pow_;
+                if (name == "project") return math_fn::project_;
+                if (name == "perpendicular") return math_fn::perpendicular_;
+                return math_fn::none;
             case 'r':
                 if (name == "random") return math_fn::random_;   // arity picks range form
                 if (name == "random_seed") return math_fn::random_seed;
                 if (name == "radians_to_degrees") return math_fn::radians_to_degrees;
                 if (name == "round") return math_fn::round_;
                 if (name == "remap") return math_fn::remap_;
+                if (name == "reflect") return math_fn::reflect_;
+                if (name == "rotate") return math_fn::rotate_;
                 return math_fn::none;
             case 's':
                 if (name == "sin") return math_fn::sin_;
@@ -502,6 +517,308 @@ namespace jai::detail {
         return math::construct(kind, view, argc, eng);
     }
 
+    // ---- the geometry library (docs/math_types_design.md 6.1) ------------------------------------------------------------
+    // Vectors only (a color has no geometry). A scalar result is binary64 from the widened components; a vector result is
+    // computed in binary64 and lands as binary32, so an ivec argument gives a vec. The integral answers stay exact when
+    // every vector argument is an ivec: dot, length_squared, distance_squared, cross and perpendicular, each step with the
+    // scalar operator's overflow text (integer policy) and an ivec component narrowed to int32. A zero vector has no
+    // direction: normalize and project onto it give the zero vector, angle_between with it gives 0, rotate about it leaves
+    // the vector as it is.
+    namespace geometry {
+        struct operand {
+            bool integral = false;
+            size_t dims = 0;
+            script_float f[math::k_max_dims] = {0, 0, 0, 0};
+            script_int i[math::k_max_dims] = {0, 0, 0, 0};
+        };
+        // a vector argument (a bound one decoded); false for anything else, a color included
+        inline bool read(const script_value& arg, operand& out, engine* eng) {
+            script_value decoded(std::monostate{}, eng);
+            const script_value* v = &arg;
+            if (v->raw_storage_index() == script_value::TYPEID_CPP_BOUND) { decoded = v->bound_decoded_temp(); v = &decoded; }
+            if (!math::is_kind(v->raw_storage_index())) { return false; }
+            const script_value_type k = v->unchecked_vec_kind();
+            if (math::is_color(k)) { return false; }
+            out.integral = math::integral(k);
+            out.dims = math::dims(k);
+            for (size_t c = 0; c < out.dims; ++c) {
+                if (out.integral) { out.i[c] = math::i32_at(*v, c); out.f[c] = static_cast<script_float>(out.i[c]); }
+                else { out.f[c] = static_cast<script_float>(math::f32_at(*v, c)); }
+            }
+            return true;
+        }
+        // the scalar operators' checked int64 steps (the texts of `+`, `-` and `*` on ints)
+        inline bool add(script_int a, script_int b, script_int& r) noexcept {
+            const uint64_t u = static_cast<uint64_t>(a) + static_cast<uint64_t>(b);
+            r = static_cast<script_int>(u);
+            return !(((a ^ r) & (b ^ r)) < 0);
+        }
+        inline bool sub(script_int a, script_int b, script_int& r) noexcept {
+            const uint64_t u = static_cast<uint64_t>(a) - static_cast<uint64_t>(b);
+            r = static_cast<script_int>(u);
+            return !(((a ^ b) & (a ^ r)) < 0);
+        }
+        inline bool mul(script_int a, script_int b, script_int& r) noexcept {
+            r = static_cast<script_int>(static_cast<uint64_t>(a) * static_cast<uint64_t>(b));
+            if (a == 0 || b == 0) { return true; }
+            const uint64_t ua = a < 0 ? 0 - static_cast<uint64_t>(a) : static_cast<uint64_t>(a);
+            const uint64_t ub = b < 0 ? 0 - static_cast<uint64_t>(b) : static_cast<uint64_t>(b);
+            const uint64_t limit = (a < 0) != (b < 0) ? (uint64_t{1} << 63) : (uint64_t{1} << 63) - 1;
+            return ua <= limit / ub;
+        }
+        inline checked_result<script_value> overflow(math::bop op) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), math::overflow_text(op));
+        }
+        // a step that overflowed: the error in a checked build, the wrapped value otherwise
+        inline bool fails(bool ok) noexcept { return !ok && math::k_checked_overflow; }
+
+        inline double dot(const operand& a, const operand& b) noexcept {
+            double s = a.f[0] * b.f[0];
+            for (size_t c = 1; c < a.dims; ++c) { s = s + a.f[c] * b.f[c]; }
+            return s;
+        }
+        inline script_value vec_of(size_t dims, const double* comps, engine* eng) {
+            float f[math::k_max_dims] = {0, 0, 0, 0};
+            int32_t unused[math::k_max_dims] = {0, 0, 0, 0};
+            for (size_t c = 0; c < dims; ++c) { f[c] = math::to_f32(comps[c]); }
+            return math::make(math::family_kind(false, dims), f, unused, eng);
+        }
+
+        inline const char* arity_text(math_fn fn) noexcept {
+            switch (fn) {
+                case math_fn::dot_: return "math::dot expects 2 arguments";
+                case math_fn::cross_: return "math::cross expects 2 arguments";
+                case math_fn::length_: return "math::length expects 1 argument";
+                case math_fn::length_squared_: return "math::length_squared expects 1 argument";
+                case math_fn::normalize_: return "math::normalize expects 1 argument";
+                case math_fn::reflect_: return "math::reflect expects 2 arguments (vector, normal)";
+                case math_fn::project_: return "math::project expects 2 arguments (vector, onto)";
+                case math_fn::angle_between_: return "math::angle_between expects 2 arguments";
+                case math_fn::perpendicular_: return "math::perpendicular expects 1 argument";
+                case math_fn::rotate_: return "math::rotate expects (vec2, angle) or (vec3, axis, angle)";
+                case math_fn::distance: return "math::distance expects 2 vectors or 4 arguments (x1, y1, x2, y2)";
+                default: return "math::distance_squared expects 2 vectors or 4 arguments (x1, y1, x2, y2)";
+            }
+        }
+        inline const char* type_text(math_fn fn) noexcept {
+            switch (fn) {
+                case math_fn::dot_: return "math::dot expects two vectors of the same dimensions";
+                case math_fn::cross_: return "math::cross expects two vec2 or two vec3 vectors";
+                case math_fn::length_: return "math::length expects a vector";
+                case math_fn::length_squared_: return "math::length_squared expects a vector";
+                case math_fn::normalize_: return "math::normalize expects a vector";
+                case math_fn::reflect_: return "math::reflect expects two vectors of the same dimensions";
+                case math_fn::project_: return "math::project expects two vectors of the same dimensions";
+                case math_fn::angle_between_: return "math::angle_between expects two vectors of the same dimensions";
+                case math_fn::perpendicular_: return "math::perpendicular expects a vec2";
+                case math_fn::rotate_: return "math::rotate expects (vec2, angle) or (vec3, axis, angle)";
+                case math_fn::distance: return "math::distance expects two vectors of the same dimensions";
+                default: return "math::distance_squared expects two vectors of the same dimensions";
+            }
+        }
+    }
+
+    // dot, cross, length, length_squared, normalize, reflect, project, angle_between, perpendicular, rotate, and distance /
+    // distance_squared over two vectors
+    JAI_MATH_COLD inline checked_result<script_value> eval_geometry(math_fn fn, const script_value* const* args, size_t argc, engine* eng) {
+        using geometry::operand;
+        auto bad_type = [&] { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), geometry::type_text(fn)); };
+        size_t want = 2;
+        switch (fn) {
+            case math_fn::length_: case math_fn::length_squared_: case math_fn::normalize_: case math_fn::perpendicular_: want = 1; break;
+            case math_fn::rotate_: want = argc == 3 ? 3 : 2; break;
+            default: break;
+        }
+        if (argc != want) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), geometry::arity_text(fn));
+        }
+        operand a, b;
+        if (!geometry::read(*args[0], a, eng)) { return bad_type(); }
+        const bool two_vectors = fn != math_fn::length_ && fn != math_fn::length_squared_ && fn != math_fn::normalize_ &&
+                                 fn != math_fn::perpendicular_ && !(fn == math_fn::rotate_ && argc == 2);
+        if (two_vectors) {
+            if (!geometry::read(*args[1], b, eng) || b.dims != a.dims) { return bad_type(); }
+        }
+        const bool exact = a.integral && (!two_vectors || b.integral);
+        const size_t n = a.dims;
+        switch (fn) {
+            case math_fn::dot_:
+            case math_fn::length_squared_: {
+                const operand& r = fn == math_fn::dot_ ? b : a;
+                if (exact) {
+                    script_int s = a.i[0] * r.i[0];
+                    for (size_t c = 1; c < n; ++c) {
+                        if (geometry::fails(geometry::add(s, a.i[c] * r.i[c], s))) { return geometry::overflow(math::bop::add); }
+                    }
+                    return script_value(s, eng);
+                }
+                return script_value(geometry::dot(a, r), eng);
+            }
+            case math_fn::length_:
+                return script_value(std::sqrt(geometry::dot(a, a)), eng);
+            case math_fn::distance:
+            case math_fn::distance_squared: {
+                if (exact && fn == math_fn::distance_squared) {
+                    script_int s = 0;
+                    for (size_t c = 0; c < n; ++c) {
+                        const script_int d = b.i[c] - a.i[c];
+                        script_int sq = 0;
+                        if (geometry::fails(geometry::mul(d, d, sq))) { return geometry::overflow(math::bop::mul); }
+                        if (c == 0) { s = sq; continue; }
+                        if (geometry::fails(geometry::add(s, sq, s))) { return geometry::overflow(math::bop::add); }
+                    }
+                    return script_value(s, eng);
+                }
+                double s = 0.0;
+                for (size_t c = 0; c < n; ++c) {
+                    const double d = b.f[c] - a.f[c];
+                    s = c == 0 ? d * d : s + d * d;
+                }
+                return script_value(fn == math_fn::distance ? std::sqrt(s) : s, eng);
+            }
+            case math_fn::normalize_: {
+                const double len = std::sqrt(geometry::dot(a, a));
+                double out[math::k_max_dims] = {0, 0, 0, 0};
+                if (len != 0.0) { for (size_t c = 0; c < n; ++c) { out[c] = a.f[c] / len; } }
+                return geometry::vec_of(n, out, eng);
+            }
+            case math_fn::cross_: {
+                if (n == 2) {
+                    if (exact) {
+                        script_int r = 0;
+                        if (geometry::fails(geometry::sub(a.i[0] * b.i[1], a.i[1] * b.i[0], r))) { return geometry::overflow(math::bop::sub); }
+                        return script_value(r, eng);
+                    }
+                    return script_value(a.f[0] * b.f[1] - a.f[1] * b.f[0], eng);
+                }
+                if (n != 3) { return bad_type(); }
+                if (exact) {
+                    float unused[math::k_max_dims] = {0, 0, 0, 0};
+                    int32_t out[math::k_max_dims] = {0, 0, 0, 0};
+                    static constexpr size_t p[3] = {1, 2, 0}, q[3] = {2, 0, 1};
+                    for (size_t c = 0; c < 3; ++c) {
+                        script_int r = 0;
+                        if (geometry::fails(geometry::sub(a.i[p[c]] * b.i[q[c]], a.i[q[c]] * b.i[p[c]], r))) { return geometry::overflow(math::bop::sub); }
+                        auto narrowed = math::to_i32(r);
+                        if (!narrowed) { return narrowed.error_value(); }
+                        out[c] = narrowed.value();
+                    }
+                    return math::make(script_value_type::jai_ivec3_type, unused, out, eng);
+                }
+                const double out[3] = {a.f[1] * b.f[2] - a.f[2] * b.f[1], a.f[2] * b.f[0] - a.f[0] * b.f[2], a.f[0] * b.f[1] - a.f[1] * b.f[0]};
+                return geometry::vec_of(3, out, eng);
+            }
+            case math_fn::reflect_: {
+                const double d = geometry::dot(a, b);
+                double out[math::k_max_dims] = {0, 0, 0, 0};
+                for (size_t c = 0; c < n; ++c) { out[c] = a.f[c] - 2.0 * d * b.f[c]; }
+                return geometry::vec_of(n, out, eng);
+            }
+            case math_fn::project_: {
+                const double d = geometry::dot(b, b);
+                double out[math::k_max_dims] = {0, 0, 0, 0};
+                if (d != 0.0) {
+                    const double s = geometry::dot(a, b) / d;
+                    for (size_t c = 0; c < n; ++c) { out[c] = b.f[c] * s; }
+                }
+                return geometry::vec_of(n, out, eng);
+            }
+            case math_fn::angle_between_: {
+                const double la = std::sqrt(geometry::dot(a, a)), lb = std::sqrt(geometry::dot(b, b));
+                if (la == 0.0 || lb == 0.0) { return script_value(0.0, eng); }
+                double c = geometry::dot(a, b) / (la * lb);
+                c = c < -1.0 ? -1.0 : (c > 1.0 ? 1.0 : c);
+                return script_value(std::acos(c), eng);
+            }
+            case math_fn::perpendicular_: {
+                if (n != 2) { return bad_type(); }
+                if (a.integral) {
+                    auto x = math::to_i32(-a.i[1]);
+                    if (!x) { return x.error_value(); }
+                    float unused[math::k_max_dims] = {0, 0, 0, 0};
+                    int32_t out[math::k_max_dims] = {x.value(), static_cast<int32_t>(a.i[0]), 0, 0};
+                    return math::make(script_value_type::jai_ivec2_type, unused, out, eng);
+                }
+                const double out[2] = {-a.f[1], a.f[0]};
+                return geometry::vec_of(2, out, eng);
+            }
+            default: {   // rotate
+                const math::scalar t = math::read_scalar(*args[argc - 1]);
+                if (!t.ok) { return bad_type(); }
+                const double angle = t.is_int ? static_cast<double>(t.i) : t.f;
+                const double cs = std::cos(angle), sn = std::sin(angle);
+                if (argc == 2) {
+                    if (n != 2) { return bad_type(); }
+                    const double out[2] = {a.f[0] * cs - a.f[1] * sn, a.f[0] * sn + a.f[1] * cs};
+                    return geometry::vec_of(2, out, eng);
+                }
+                if (n != 3) { return bad_type(); }
+                const double len = std::sqrt(geometry::dot(b, b));
+                if (len == 0.0) { return geometry::vec_of(3, a.f, eng); }
+                const double k[3] = {b.f[0] / len, b.f[1] / len, b.f[2] / len};
+                const double kv = k[0] * a.f[0] + k[1] * a.f[1] + k[2] * a.f[2];
+                const double kx[3] = {k[1] * a.f[2] - k[2] * a.f[1], k[2] * a.f[0] - k[0] * a.f[2], k[0] * a.f[1] - k[1] * a.f[0]};
+                double out[3];
+                for (size_t c = 0; c < 3; ++c) { out[c] = a.f[c] * cs + kx[c] * sn + k[c] * kv * (1.0 - cs); }
+                return geometry::vec_of(3, out, eng);
+            }
+        }
+    }
+
+    // The methods on a vector (never a color): v.length(), length_squared(), normalized(), dot(b), cross(b), distance_to(b),
+    // rotated(angle) on a vec2 and rotated(axis, angle) on a vec3 - the free functions with the receiver first
+    inline math_fn vec_method_fn(script_value_type kind, std::string_view name) noexcept {
+        if (math::is_color(kind) || name.size() < 3) { return math_fn::none; }
+        switch (name[0]) {
+            case 'l':
+                if (name == "length") return math_fn::length_;
+                if (name == "length_squared") return math_fn::length_squared_;
+                return math_fn::none;
+            case 'n': return name == "normalized" ? math_fn::normalize_ : math_fn::none;
+            case 'd':
+                if (name == "dot") return math_fn::dot_;
+                if (name == "distance_to") return math_fn::distance;
+                return math_fn::none;
+            case 'c': return name == "cross" ? math_fn::cross_ : math_fn::none;
+            case 'r': return name == "rotated" ? math_fn::rotate_ : math_fn::none;
+            default: return math_fn::none;
+        }
+    }
+    inline const char* vec_method_arity_text(math_fn fn, script_value_type kind) noexcept {
+        switch (fn) {
+            case math_fn::length_: return "'length' expects 0 arguments";
+            case math_fn::length_squared_: return "'length_squared' expects 0 arguments";
+            case math_fn::normalize_: return "'normalized' expects 0 arguments";
+            case math_fn::dot_: return "'dot' expects 1 argument";
+            case math_fn::cross_: return "'cross' expects 1 argument";
+            case math_fn::distance: return "'distance_to' expects 1 argument";
+            default: return math::dims(kind) == 3 ? "'rotated' expects 2 arguments (axis, angle)" : "'rotated' expects 1 argument (angle)";
+        }
+    }
+    inline size_t vec_method_arity(math_fn fn, script_value_type kind) noexcept {
+        switch (fn) {
+            case math_fn::length_: case math_fn::length_squared_: case math_fn::normalize_: return 0;
+            case math_fn::rotate_: return math::dims(kind) == 3 ? 2 : 1;
+            default: return 1;
+        }
+    }
+    JAI_MATH_COLD inline checked_result<script_value> call_vec_method(math_fn fn, const script_value& receiver, const std::vector<script_value>& args, engine* eng) {
+        const script_value_type kind = receiver.unchecked_vec_kind();
+        if (args.size() != vec_method_arity(fn, kind)) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), vec_method_arity_text(fn, kind));
+        }
+        const script_value* view[3] = {&receiver, nullptr, nullptr};
+        for (size_t k = 0; k < args.size(); ++k) { view[k + 1] = &args[k].deref(); }
+        return eval_geometry(fn, view, args.size() + 1, eng);
+    }
+    // A method named on a vector, as the function value a member read yields: the receiver is copied (a vector is a value)
+    inline script_value vec_bound_method(math_fn fn, const script_value& receiver, engine* eng) {
+        script_function bound = [fn, recv = receiver, eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+            return call_vec_method(fn, recv, args, eng);
+        };
+        return script_value::make_function(std::move(bound), eng);
+    }
+
     // The ONE evaluation kernel, used verbatim by both backends. Args arrive as an
     // array of DEREF'D pointers (zero-copy from the caller's stack). Type discipline
     // per ruling: ONE variant read per arg, switch on it; cpp_bound decodes through
@@ -646,10 +963,8 @@ namespace jai::detail {
             }
             case math_fn::distance:
             case math_fn::distance_squared: {
-                if (argc != 4) {
-                    return bad_arity(fn == math_fn::distance ? "math::distance expects 4 arguments (x1, y1, x2, y2)"
-                                                             : "math::distance_squared expects 4 arguments (x1, y1, x2, y2)");
-                }
+                if (argc == 2) { return eval_geometry(fn, args, argc, eng); }
+                if (argc != 4) { return bad_arity(geometry::arity_text(fn)); }
                 const num x1 = read(*args[0]), y1 = read(*args[1]), x2 = read(*args[2]), y2 = read(*args[3]);
                 if (!x1.ok || !y1.ok || !x2.ok || !y2.ok) {
                     return bad_type(fn == math_fn::distance ? "math::distance expects numeric arguments"
@@ -770,6 +1085,17 @@ namespace jai::detail {
             case math_fn::mix_rgb_:
             case math_fn::mix_hsv_:
                 return eval_color_mix(fn, args, argc, eng);
+            case math_fn::dot_:
+            case math_fn::cross_:
+            case math_fn::length_:
+            case math_fn::length_squared_:
+            case math_fn::normalize_:
+            case math_fn::reflect_:
+            case math_fn::project_:
+            case math_fn::angle_between_:
+            case math_fn::perpendicular_:
+            case math_fn::rotate_:
+                return eval_geometry(fn, args, argc, eng);
 
             case math_fn::round_: {
                 if (argc != 1) return bad_arity("math::round expects 1 argument");

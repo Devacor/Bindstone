@@ -4859,7 +4859,7 @@ uint8_t vm_compiler::operand_expect(const binary_expr* node) {
 // A store to a math component name on an identifier base records the identifier's slot operand for the member node, so a
 // component store on a math value resolves the variable it names (chunk::component_base_slots)
 void vm_compiler::note_component_base(uint32_t node, const member_expr* m) {
-	if (m->is_static || !m->object || m->object->get_type() != node_type::identifier_expr || detail::math::component_slot(m->member) < 0) return;
+	if (m->is_static || !m->object || m->object->get_type() != node_type::identifier_expr || !detail::math::any_component_name(m->member)) return;
 	auto* id = static_cast<identifier_expr*>(m->object.get());
 	const uint32_t slot = id->global_qualified ? k_invalid_u32 : identifier_slot_operand(id);
 	for (auto& entry : chunk_->component_base_slots) {

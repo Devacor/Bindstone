@@ -170,7 +170,7 @@ namespace jai::fuzz {
 		std::string mexpr(int k, const std::string& ivar, int depth = 0) {
 			const value* v = pick_value(k);
 			const std::string self = v ? v->text : ctor(k);
-			switch (depth > 1 ? 0 : rng_.below(8)) {
+			switch (depth > 1 ? 0 : rng_.below(10)) {
 				case 0: return self;
 				case 1: return ctor(k);
 				case 2: return "(" + self + " + " + mexpr(k, ivar, depth + 1) + ")";
@@ -178,10 +178,38 @@ namespace jai::fuzz {
 				case 4: return rng_.chance(50) ? "(" + self + " * " + scalar(k, ivar) + ")" : "(" + scalar(k, ivar) + " * " + self + ")";
 				case 5: return "-" + self;
 				case 6: return by_value_call(k) + "(" + self + ")";
+				case 7: case 8: return library_call(k, self, ivar, depth);
 				default: {
 					const value* o = pick_value(other_precision(k));
 					return std::string(type_name(k)) + "(" + (o ? o->text : ctor(other_precision(k))) + ")";
 				}
+			}
+		}
+		// the component-wise library: an ivec kind keeps its kind only through abs/min/max/clamp with int bounds (the
+		// interpolation family gives a vec), so an ivec site draws from those
+		std::string library_call(int k, const std::string& self, const std::string& ivar, int depth) {
+			const std::string other = mexpr(k, ivar, depth + 1);
+			const std::string ib = int_literal(), ib2 = std::to_string(rng_.range(10, 20));
+			if (integral(k)) {
+				switch (rng_.below(4)) {
+					case 0: return "math::abs(" + self + ")";
+					case 1: return "math::min(" + self + ", " + other + ")";
+					case 2: return "math::max(" + self + ", " + (rng_.chance(50) ? other : ib) + ")";
+					default: return "math::clamp(" + self + ", " + ib + ", " + ib2 + ")";
+				}
+			}
+			const std::string t = rng_.chance(70) ? float_literal() : ctor(k);
+			static constexpr const char* const eased[] = {"mix_in", "mix_out", "mix_in_out", "mix_out_in"};
+			switch (rng_.below(9)) {
+				case 0: return "math::mix(" + self + ", " + other + ", " + t + ")";
+				case 1: return "math::lerp(" + self + ", " + other + ", " + t + ")";
+				case 2: return "math::" + std::string(eased[rng_.below(4)]) + "(" + self + ", " + other + ", 0.25, 2.0)";
+				case 3: return "math::clamp(" + self + ", " + float_literal() + ", 8.0)";
+				case 4: return "math::min(" + self + ", " + other + ")";
+				case 5: return "math::max(" + self + ", " + float_literal() + ")";
+				case 6: return "math::abs(" + self + ")";
+				case 7: { static constexpr const char* const r[] = {"floor", "ceil", "round"}; return "math::" + std::string(r[rng_.below(3)]) + "(" + self + ")"; }
+				default: return "math::remap(" + self + ", 0.0, 4.0, " + ctor(k) + ", " + other + ")";
 			}
 		}
 		std::string by_value_call(int k) {

@@ -1782,6 +1782,38 @@ private:
             return !args.empty();
         };
         switch (fn) {
+            case math_fn::floor_: case math_fn::ceil_: case math_fn::round_: case math_fn::abs_: case math_fn::min_:
+            case math_fn::max_: case math_fn::clamp_: case math_fn::lerp_: case math_fn::mix_: case math_fn::unmix_:
+            case math_fn::remap_: case math_fn::mix_in_: case math_fn::mix_out_: case math_fn::mix_in_out_:
+            case math_fn::mix_out_in_: case math_fn::unmix_in_: case math_fn::unmix_out_: case math_fn::unmix_in_out_:
+            case math_fn::unmix_out_in_: {
+                // the component-wise family (math_intrinsics.hpp eval_vec_math): a vector argument makes a vector result
+                // (a vec of its dimensions; abs/min/max/clamp keep ivec when every argument is integral), and an argument
+                // of unknown type leaves the result unknown
+                const ctype* vec = nullptr;
+                bool unknown = false, integral = true;
+                for (const auto& a : args) {
+                    if (a.kind == ctype::math_k) {
+                        if (!vec) { vec = &a; }
+                        integral = integral && detail::math::integral(math_type_from_name(a.cls));
+                    } else if (!is_numeric(a.kind)) {
+                        unknown = true;
+                    } else if (a.kind != ctype::int_k) {
+                        integral = false;
+                    }
+                }
+                if (vec) {
+                    const size_t dims = detail::math::dims(math_type_from_name(vec->cls));
+                    const bool exact = integral && (fn == math_fn::abs_ || fn == math_fn::min_ || fn == math_fn::max_ || fn == math_fn::clamp_);
+                    return unknown ? ctype{} : math_ctype(detail::math::family_kind(exact, dims));
+                }
+                if (unknown) { return {}; }
+                break;
+            }
+            default:
+                break;
+        }
+        switch (fn) {
             case math_fn::itrunc: case math_fn::ifloor:
             case math_fn::wrap_add_: case math_fn::wrap_sub_: case math_fn::wrap_mul_:
                 return ctype::make(ctype::int_k);

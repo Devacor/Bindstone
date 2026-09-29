@@ -161,6 +161,39 @@ public:
             expect(raised("var q = math::ivec3(1, 1, 1) <=> math::ivec3(1, 1, 1);"), "math::ivec3 has no ordering", "no spaceship");
         });
 
+        test("component_wise_library", [expect, raised]() {
+            expect("to_string(math::mix(math::vec2(0, 10), math::vec2(10, 20), 0.5))", "(5.0, 15.0)", "mix, float t");
+            expect("to_string(math::lerp(math::vec3(0, 0, 0), math::vec3(10, 20, 40), math::vec3(0.5, 0.25, 1)))", "(5.0, 5.0, 40.0)", "lerp, per-component t");
+            expect("to_string(math::mix(math::vec4(0, 0, 0, 0), math::vec4(1, 2, 3, 4), 0.5))", "(0.5, 1.0, 1.5, 2.0)", "vec4");
+            expect("var m = math::mix(math::ivec2(0, 0), math::ivec2(1, 3), 0.5); to_string(m) + type_of(m)", "(0.5, 1.5)math::vec2", "ivec inputs give a vec");
+            expect("to_string(math::unmix(math::vec2(0, 10), math::vec2(10, 20), math::vec2(5, 20)))", "(0.5, 1.0)", "unmix");
+            expect("to_string(math::unmix(math::vec2(1, 1), math::vec2(1, 3), math::vec2(1, 2)))", "(0.0, 0.5)", "unmix over an empty range is 0");
+            expect("to_string(math::mix_in(math::vec2(0, 0), math::vec2(8, 8), 0.5, 2.0)) + to_string(math::mix_out(math::vec2(0, 0), math::vec2(8, 8), 0.5, 2.0))",
+                   "(2.0, 2.0)(6.0, 6.0)", "eased mixes");
+            expect("to_string(math::mix_in_out(math::vec2(0, 0), math::vec2(8, 8), 0.25, 2.0)) + to_string(math::mix_out_in(math::vec2(0, 0), math::vec2(8, 8), 0.75, 2.0))",
+                   "(1.0, 1.0)(5.0, 5.0)", "in-out and out-in");
+            expect("to_string(math::unmix_in(math::vec2(0, 0), math::vec2(4, 4), math::vec2(1, 4), 2.0))", "(0.5, 1.0)", "unmix_in");
+            expect("to_string(math::unmix_out(0.0, 4.0, 3.0, 2.0)) + to_string(math::unmix_in_out(0.0, 8.0, 2.0, 2.0)) + to_string(math::unmix_out_in(0.0, 8.0, 6.0, 2.0))",
+                   "0.50.35355339059327380.8535533905932737", "the float eased unmixes");
+            expect("to_string(math::remap(5.0, 0.0, 10.0, 100.0, 200.0)) + to_string(math::remap(math::vec2(0, 10), 0.0, 10.0, math::vec2(0, 0), math::vec2(1, 2)))",
+                   "150.0(0.0, 2.0)", "remap");
+            expect("to_string(math::remap(3.0, 1.0, 1.0, 7.0, 9.0))", "7.0", "remap over an empty range is the low end");
+            expect("to_string(math::round(2.5)) + to_string(math::round(-2.5)) + to_string(math::round(math::vec2(1.4, 1.6)))", "3.0-3.0(1.0, 2.0)", "round (half away from zero)");
+            expect("to_string(math::floor(math::vec3(1.5, -1.5, 2))) + to_string(math::ceil(math::vec2(1.2, -1.2)))", "(1.0, -2.0, 2.0)(2.0, -1.0)", "floor, ceil");
+            expect("var f = math::floor(math::ivec2(3, 4)); to_string(f) + type_of(f)", "(3.0, 4.0)math::vec2", "floor of an ivec gives a vec");
+            expect("to_string(math::abs(math::vec2(-1.5, 2))) + to_string(math::abs(math::ivec2(-3, 4)))", "(1.5, 2.0)(3, 4)", "abs keeps ivec exact");
+            expect("to_string(math::min(math::vec2(1, 5), math::vec2(3, 2))) + to_string(math::max(math::ivec2(1, 5), 3))", "(1.0, 2.0)(3, 5)", "min, max, scalar broadcast");
+            expect("to_string(math::clamp(math::vec3(-1, 0.5, 2), 0.0, 1.0)) + to_string(math::clamp(math::ivec2(-5, 9), math::ivec2(0, 0), math::ivec2(4, 4)))",
+                   "(0.0, 0.5, 1.0)(0, 4)", "clamp");
+            expect("var c = math::clamp(math::ivec2(-5, 9), 0.0, 4.0); to_string(c) + type_of(c)", "(0.0, 4.0)math::vec2", "a float bound gives a vec");
+            expect("to_string(math::mix(0.0, 10.0, math::vec2(0.1, 0.9)))", "(1.0, 9.0)", "scalar ends, vector t");
+            expect(raised("var q = math::mix(math::vec2(0, 0), math::vec3(1, 1, 1), 0.5);"), "math::mix expects vectors of the same dimensions", "dimensions must agree");
+            expect(raised("var q = math::sqrt(math::vec2(4, 9));"), "math::sqrt expects a numeric argument", "sqrt stays scalar");
+            expect(raised("var q = math::abs(math::ivec2(-2147483647 - 1, 0));"), "Integer overflow: the value does not fit an int32 component", "abs of INT32_MIN");
+            expect("function f(math::vec3 a, math::vec3 b) -> math::vec3 { math::vec3 m = math::mix(a, b, 0.5); return math::floor(m); } to_string(f(math::vec3(0, 1, 2), math::vec3(3, 4, 6)))",
+                   "(1.0, 2.0, 4.0)", "typed slots take the library's vectors");
+        });
+
         test("equality_and_truthiness", [expect]() {
             expect("to_string(math::vec3(1, 2, 3) == math::vec3(1, 2, 3))", "true", "equal");
             expect("to_string(math::vec3(1, 2, 3) != math::vec3(1, 2, 4))", "true", "not equal");
@@ -228,6 +261,10 @@ public:
             check(errors("math::vec3 v = 5;").find("math::vec3") != std::string::npos, "an int into a vec3 slot is a load error naming the type");
             check(errors("math::vec3 v = math::vec2(1, 2);").find("math::vec3") != std::string::npos, "another dimension is a load error");
             check_eq(std::string(""), errors("var d = math::vec2(1, 2); math::vec3 v = d;"), "a var source stays dynamic");
+            check_eq(std::string(""), errors("math::vec3 a; math::vec3 b; math::vec3 m = math::mix(a, b, 0.5); math::ivec2 c = math::min(math::ivec2(1, 2), 3); float f = math::mix(1.0, 2.0, 0.5);"),
+                     "the library types its vector results");
+            check(errors("math::vec3 a; float f = math::floor(a);").find("float") != std::string::npos, "a vector result is not a float");
+            check_eq(std::string(""), errors("var v = math::vec2(1, 2); var w = math::floor(v); math::vec2 x = w;"), "a var argument leaves the result dynamic");
         });
     }
 };

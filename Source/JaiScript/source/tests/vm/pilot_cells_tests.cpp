@@ -2887,8 +2887,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "", "range-for blocks");
 			both(script, "", "range-for blocks, proofs off", false);
 			const std::string vm = run_on(true, script);
-			check_true(vm.rfind("30|18|floatfloat|66|8|12|3|12|3.0|12|", 0) == 0 && vm.size() > 2 && vm.substr(vm.size() - 2) == "|6", "the shapes: " + vm);
-			const std::string l = listing_of("var f = function(var& a) { int s = 0; for (int v : a) { s = s + v; } return s; };");
+			check_true(vm.rfind("30|18|intint|66|8|12|3|12|3.0|12|", 0) == 0 && vm.size() > 2 && vm.substr(vm.size() - 2) == "|6", "the shapes: " + vm);
+			const std::string l = listing_of("var f = function(int n) { array<int> a = [n, 2]; int s = 0; for (int v : a) { s = s + v; } return s; };");
 			check_true(l.find("C_RANGE") != std::string::npos && l.find("C_BACK_STEP") != std::string::npos && l.find("C_LOAD") != std::string::npos && l.find("-- open loop") == std::string::npos, "a by-value range closes with the range head and the stepping back edge: " + l);
 			const std::string m = listing_of("var f = function(var& g) { int s = 0; for (auto& r : g) { r[0] = r[0] + 1; s = s + r[1]; } return s; };");
 			check_true(m.find("C_RANGE") != std::string::npos && m.find("C_REBIND") != std::string::npos && m.find("-- open loop") == std::string::npos, "a by-reference range closes with a rebind at the head: " + m);

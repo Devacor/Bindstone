@@ -3172,6 +3172,21 @@ private:
             case node_type::range_for_stmt: {
                 auto* f = static_cast<range_for_stmt*>(s);
                 const ctype container = infer(f->container.get());
+                // the elements' static type: an array's element type, a string's char; a var container, an array<var> or anything
+                // else has none
+                ctype elem{};
+                if (container.kind == ctype::array_k && container.ti && container.ti->element_type() &&
+                    container.ti->element_type()->base_type != script_value_type::jai_any_type) {
+                    elem = ctype_from_type_info(container.ti->element_type());
+                } else if (container.kind == ctype::string_k) {
+                    elem = ctype::make(ctype::char_k);
+                }
+                const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type;
+                stamp(f->element_conversion_free, !declared || (!elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
+                if (declared && f->is_reference && !elem.is_unknown() && !reference_type_compatible(elem, ctype_from_type_info(f->element_type.get()))) {
+                    diag(diag_level::error, f->location, "cannot bind '" + ctype_name(elem) + "' to '" + std::string(f->variable_name) +
+                         "' declared '" + f->element_type->canonical_name() + "&'");
+                }
                 scopes_.emplace_back();
                 var_entry entry;
                 entry.type = ctype_from_type_info(f->element_type.get());

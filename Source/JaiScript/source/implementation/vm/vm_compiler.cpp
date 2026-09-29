@@ -1595,6 +1595,11 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 		proto.slot = stmt->variable_slot_index;
 	}
 	proto.is_reference = stmt->is_reference;
+	if (jai::detail::range_for_declared(stmt->element_type.get())) {
+		proto.element_type = stmt->element_type;
+		proto.var_name = stmt->variable_name;
+		proto.conversion_free = stmt->element_conversion_free;
+	}
 	chunk_->iter_protos.push_back(proto);
 	const uint32_t proto_idx = static_cast<uint32_t>(chunk_->iter_protos.size() - 1);
 
@@ -2824,6 +2829,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			head = be.a; cmp_ip = head; hd = code[head + 1];
 			const iter_proto& ipr = c.iter_protos[range_proto];
 			if (ipr.slot == SIZE_MAX || ipr.slot >= k_typed_slot_mask) { refuse(chunk::cell_refusal_head, head); }
+			if (ipr.element_type && !ipr.conversion_free) { refuse(chunk::cell_refusal_head, head); }   // the binding converts: the general form
 		} else if (be.op == opcode::op_loop_back) {
 			head = be.a;
 			if (head >= back) continue;

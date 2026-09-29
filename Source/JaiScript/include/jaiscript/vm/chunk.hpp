@@ -183,6 +183,9 @@ namespace jai::vm {
         uint64_t var_symbol = UINT64_MAX;
         size_t slot = SIZE_MAX;                            // SIZE_MAX = define through the environment
         bool is_reference = false;
+        type_info_ptr element_type;                        // a declared loop variable type the binding converts to (null: auto, var)
+        std::string_view var_name;                         // the variable, for the binding's rejection text
+        bool conversion_free = true;                       // the checker saw the elements hold the declared type
     };
 
     // op_binary_fused: evaluates `left op right` without materializing operand loads

@@ -16799,6 +16799,11 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 		script_value value = std::move(resume_result.value());
+		if (proto.element_type) {   // a typed loop variable (KEEP BYTE-PARALLEL with the interpreter)
+			auto bound = detail::range_for_bind(std::move(value), proto.element_type, false, proto.var_name, engine_);
+			if (!bound) { return raise_from(bound); }
+			value = std::move(bound.value());
+		}
 		if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
 			frame_slot_set(f, proto.slot, std::move(value));
 		} else {
@@ -16857,6 +16862,10 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 					    cursor->container_element_type == element_constraint) {
 						cursor->container_index = state.index;
 						++state.index;
+						if (proto.element_type) {
+							auto bound = detail::range_for_bind(*cur, proto.element_type, true, proto.var_name, engine_);
+							if (!bound) { return raise_from(bound); }
+						}
 						stack_.push_back(script_value(true, engine_));
 						return {};
 					}
@@ -16901,6 +16910,11 @@ op_status vm_backend::exec_iter_next(frame& f, const vm_instruction& ins) {
 		++state.map_it;
 	}
 
+	if (proto.element_type && !state.is_map) {   // a typed loop variable (KEEP BYTE-PARALLEL with the interpreter)
+		auto bound = detail::range_for_bind(std::move(element), proto.element_type, proto.is_reference, proto.var_name, engine_);
+		if (!bound) { return raise_from(bound); }
+		element = std::move(bound.value());
+	}
 	if (proto.slot != SIZE_MAX && f.locals && !f.top_level) {
 		frame_slot_set(f, proto.slot, std::move(element));
 	} else {

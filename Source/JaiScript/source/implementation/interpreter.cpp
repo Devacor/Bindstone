@@ -10421,14 +10421,24 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     } else {
                         *loop_var_ptr = script_value::make_element_reference(array_storage, i, engine_, element_constraint);
                     }
+                    if (detail::range_for_declared(stmt->element_type.get())) {   // a T& binds an element holding a T (KEEP BYTE-PARALLEL with vm exec_iter_next)
+                        auto bound = detail::range_for_bind(*loop_var_ptr, stmt->element_type, true, stmt->variable_name, engine_);
+                        if (!bound) { pop_scope(); return bound.error_value(); }
+                    }
                 } else {
                     // Copy binding: values deep-copy per iteration, shared_ptr
                     // elements share (for (auto e : registry) e.hurt() mutates)
-                    *loop_var_ptr = array_storage->kind() == script_array::kind_t::obj
+                    script_value element = array_storage->kind() == script_array::kind_t::obj
                         ? clone_for_assignment(array_storage->get(i, engine_))   // object slots deep-copy like boxed elements
                         : array_storage->is_typed()
                         ? array_storage->get(i, engine_)   // raw buffer read
                         : clone_for_assignment(array_storage->values()[i]);
+                    if (detail::range_for_declared(stmt->element_type.get())) {   // T x : takes each element as T x = element; would
+                        auto bound = detail::range_for_bind(std::move(element), stmt->element_type, false, stmt->variable_name, engine_);
+                        if (!bound) { pop_scope(); return bound.error_value(); }
+                        element = std::move(bound.value());
+                    }
+                    *loop_var_ptr = std::move(element);
                 }
 
                 // Execute loop body
@@ -10516,8 +10526,14 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 if (replaying) {
                     replaying = false;
                 } else {
-                    *loop_var_ptr = utf8 ? detail::utf8::char_value(container.unchecked_as_utf8(), i, engine_, cache)
-                                         : script_value(static_cast<script_char>(container.unchecked_as_string()[i]), engine_);
+                    script_value element = utf8 ? detail::utf8::char_value(container.unchecked_as_utf8(), i, engine_, cache)
+                                                : script_value(static_cast<script_char>(container.unchecked_as_string()[i]), engine_);
+                    if (detail::range_for_declared(stmt->element_type.get())) {   // KEEP BYTE-PARALLEL with vm exec_iter_next
+                        auto bound = detail::range_for_bind(std::move(element), stmt->element_type, false, stmt->variable_name, engine_);
+                        if (!bound) { pop_scope(); return bound.error_value(); }
+                        element = std::move(bound.value());
+                    }
+                    *loop_var_ptr = std::move(element);
                 }
 
                 auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());
@@ -10716,7 +10732,13 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     }
                     if (handle->done()) break;
 
-                    *loop_var_ptr = std::move(resume_result.value());
+                    script_value element = std::move(resume_result.value());
+                    if (detail::range_for_declared(stmt->element_type.get())) {   // KEEP BYTE-PARALLEL with vm exec_iter_next
+                        auto bound = detail::range_for_bind(std::move(element), stmt->element_type, false, stmt->variable_name, engine_);
+                        if (!bound) { pop_scope(); return bound.error_value(); }
+                        element = std::move(bound.value());
+                    }
+                    *loop_var_ptr = std::move(element);
                 }
 
                 auto body_result = resume_body ? dispatch_stmt_resuming(stmt->body.get()) : dispatch_stmt(stmt->body.get());

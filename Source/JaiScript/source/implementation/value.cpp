@@ -3,6 +3,7 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/string_element.hpp>
+#include <jaiscript/detail/math_values.hpp>
 #include <atomic>
 #include <sstream>
 #include <thread>
@@ -65,6 +66,47 @@ script_value::script_value(script_bool b, engine* eng) : type_info_(nullptr), en
         type_info_ = eng->get_type_info_bool();
     }
 }
+
+bool script_value::math_truthy() const noexcept {
+    const script_vec_node& n = unchecked_vec_node();
+    for (uint8_t k = 0; k < n.count; ++k) {
+        if (n.integral) { if (n.words[k] != 0) { return true; } continue; }
+        float f;
+        std::memcpy(&f, &n.words[k], 4);
+        if (f != 0.0f) { return true; }
+    }
+    return false;
+}
+
+script_value script_value::make_vec(script_value_type kind, const uint32_t* words, engine* eng) {
+    auto node = acquire_vec_node(eng);
+    switch (kind) {
+        case script_value_type::jai_vec2_type: node->count = 2; break;
+        case script_value_type::jai_vec3_type: node->count = 3; break;
+        case script_value_type::jai_vec4_type: node->count = 4; break;
+        case script_value_type::jai_ivec2_type: node->count = 2; node->integral = 1; break;
+        default: node->count = 3; node->integral = 1; break;
+    }
+    std::memcpy(node->words, words, sizeof(uint32_t) * node->count);
+    script_value v(std::monostate{}, eng);
+    v.storage_ = std::move(node);
+    if (eng) { v.type_info_ = eng->get_type_info_math(kind); }
+    return v;
+}
+
+namespace {
+    template <typename M> script_value vec_from(const M& m, script_value_type kind, engine* eng) {
+        uint32_t words[4] = {0, 0, 0, 0};
+        std::memcpy(words, &m, sizeof(M));
+        return script_value::make_vec(kind, words, eng);
+    }
+}
+
+script_value::script_value(const vec2& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_vec2_type, eng)) {}
+script_value::script_value(const vec3& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_vec3_type, eng)) {}
+script_value::script_value(const vec4& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_vec4_type, eng)) {}
+script_value::script_value(const ivec2& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_ivec2_type, eng)) {}
+script_value::script_value(const ivec3& v, engine* eng) : script_value(vec_from(v, script_value_type::jai_ivec3_type, eng)) {}
 
 
 script_value::reference_holder::~reference_holder() {
@@ -316,6 +358,97 @@ strong_ptr<script_value::reference_holder> script_value::acquire_reference_holde
         eng->set_reference_holder_pool_teardown(&reference_holder_pool::teardown);
     }
     return static_cast<reference_holder_pool*>(slot)->acquire();
+}
+
+namespace {
+    // The math vector node pool, with the reference_holder pool's discipline: the free list is owner-thread
+    // only, a parallel region's workers take plain self-deleting blocks, a block released off the owner thread is
+    // deleted, and the engine's teardown orphans the pool until its last outstanding block returns
+    struct vec_node_pool {
+        struct block : jai::detail::control_block<script_vec_node> {
+            vec_node_pool* home = nullptr;
+        };
+        static_assert(offsetof(block, storage) == jai::detail::cb_storage_offset<script_vec_node>,
+                      "pooled blocks must keep storage at control_block<T>'s head offset (cb_from_object)");
+
+        static constexpr size_t max_free_blocks = 1024;
+        std::vector<block*> free_blocks;
+        std::atomic<size_t> outstanding{0};
+        bool engine_alive = true;
+        std::thread::id owner = std::this_thread::get_id();
+
+        vec_node_pool() { free_blocks.reserve(max_free_blocks); }
+
+        static void return_block(jai::detail::control_block_base* base) {
+            block* b = static_cast<block*>(static_cast<jai::detail::control_block<script_vec_node>*>(base));
+            vec_node_pool* pool = b->home;
+            const size_t left = --pool->outstanding;
+#ifndef NDEBUG
+            base->magic = jai::detail::cb_magic_dead;
+#endif
+            if (pool->engine_alive && std::this_thread::get_id() == pool->owner &&
+                pool->free_blocks.size() < max_free_blocks) {
+                pool->free_blocks.push_back(b);
+            } else {
+                delete b;
+                if (!pool->engine_alive && left == 0) {
+                    delete pool;
+                }
+            }
+        }
+
+        strong_ptr<script_vec_node> acquire() {
+            block* b;
+            if (!free_blocks.empty()) {
+                b = free_blocks.back();
+                free_blocks.pop_back();
+                b->strong_count = 1;
+                b->weak_count = 1;
+#ifndef NDEBUG
+                b->magic = jai::detail::cb_magic_live;
+#endif
+            } else {
+                b = new block();
+                b->home = this;
+                b->dealloc_fn = &return_block;
+            }
+            ++outstanding;
+            return jai::detail::adopt_pooled(new (b->storage) script_vec_node());
+        }
+
+        static void teardown(void* p) {
+            auto* pool = static_cast<vec_node_pool*>(p);
+            for (block* b : pool->free_blocks) {
+                delete b;
+            }
+            pool->free_blocks.clear();
+            if (pool->outstanding == 0) {
+                delete pool;
+            } else {
+                pool->engine_alive = false;
+            }
+        }
+    };
+
+}
+
+strong_ptr<script_vec_node> script_value::acquire_vec_node(engine* eng) {
+    if (!eng || eng->parallel_region_active()) [[unlikely]] {
+        return make_strong<script_vec_node>();
+    }
+    void*& slot = eng->vec_node_pool_slot();
+    if (!slot) [[unlikely]] {
+        slot = new vec_node_pool();
+        eng->set_vec_node_pool_teardown(&vec_node_pool::teardown);
+    }
+    return static_cast<vec_node_pool*>(slot)->acquire();
+}
+
+void script_value::unshare_vec_node() {
+    strong_ptr<script_vec_node>& node = storage_.vec_node();
+    auto fresh = acquire_vec_node(engine_);
+    *fresh = *node;
+    node = std::move(fresh);
 }
 
 script_value script_value::make_cell_reference(script_value&& boxed, engine* eng) {
@@ -1035,6 +1168,16 @@ script_value script_value::parallel_detached_copy(std::vector<type_info*>* colle
         case TYPEID_BOOL:
             result.storage_ = storage_;
             break;
+        case TYPEID_VEC2:
+        case TYPEID_IVEC2:
+        case TYPEID_VEC3:
+        case TYPEID_IVEC3:
+        case TYPEID_VEC4: {
+            auto fresh = make_strong<script_vec_node>(*storage_.vec_node());
+            if (collected_nodes) { collected_nodes->push_back(fresh.get()); }
+            result.storage_ = std::move(fresh);
+            break;
+        }
         case TYPEID_STRING: {
             const auto& handle = storage_.get<strong_ptr<script_string>>();
             if (!handle) { break; }   // null handle shares nothing
@@ -1245,6 +1388,12 @@ std::string script_value::to_string() const {
             return as_string();
         case script_value_type::jai_utf8_string_type:
             return unchecked_as_utf8().bytes;
+        case script_value_type::jai_vec2_type:
+        case script_value_type::jai_vec3_type:
+        case script_value_type::jai_vec4_type:
+        case script_value_type::jai_ivec2_type:
+        case script_value_type::jai_ivec3_type:
+            return detail::math::is_kind(raw_storage_index()) ? detail::math::text(*this) : std::string("[unknown]");
         case script_value_type::jai_char_type:
             return std::string(1, as_char());
         case script_value_type::jai_bool_type:
@@ -1573,6 +1722,13 @@ bool script_value::operator==(const script_value& other) const {
             return lhs.unchecked_as_char() == rhs.unchecked_as_char();
         case script_value_type::jai_bool_type:
             return lhs.unchecked_as_bool() == rhs.unchecked_as_bool();
+        case script_value_type::jai_vec2_type:
+        case script_value_type::jai_vec3_type:
+        case script_value_type::jai_vec4_type:
+        case script_value_type::jai_ivec2_type:
+        case script_value_type::jai_ivec3_type:
+            return lhs.raw_storage_index() == rhs.raw_storage_index() && detail::math::is_kind(lhs.raw_storage_index()) &&
+                   detail::math::same_kind_equal(lhs, rhs);
         default:
             return false;
     }
@@ -1618,6 +1774,15 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             return static_cast<unsigned char>(unchecked_as_char()) <=> static_cast<unsigned char>(other.unchecked_as_char());
         case script_value_type::jai_bool_type:
             return unchecked_as_bool() <=> other.unchecked_as_bool();
+        case script_value_type::jai_vec2_type:
+        case script_value_type::jai_vec3_type:
+        case script_value_type::jai_vec4_type:
+        case script_value_type::jai_ivec2_type:
+        case script_value_type::jai_ivec3_type:
+            if (raw_storage_index() == other.raw_storage_index() && detail::math::is_kind(raw_storage_index())) {
+                return detail::math::same_kind_order(*this, other);
+            }
+            return raw_storage_index() <=> other.raw_storage_index();
         default: {
             // Complex types (array/map/object/function/shared_ptr/reference): order
             // by the address of the HELD object, which is a STABLE identity for a
@@ -1675,6 +1840,12 @@ size_t script_value::map_key_hash() const noexcept {
         case script_value_type::jai_utf8_string_type: return std::hash<std::string_view>{}(unchecked_as_utf8().bytes) ^ seed;
         case script_value_type::jai_char_type: return mix(static_cast<unsigned char>(unchecked_as_char()));
         case script_value_type::jai_bool_type: return mix(unchecked_as_bool() ? 1 : 0);
+        case script_value_type::jai_vec2_type:
+        case script_value_type::jai_vec3_type:
+        case script_value_type::jai_vec4_type:
+        case script_value_type::jai_ivec2_type:
+        case script_value_type::jai_ivec3_type:
+            return mix(detail::math::is_kind(raw_storage_index()) ? detail::math::hash_bits(*this) : 0);
         default: {
             const void* identity = nullptr;   // KEEP IN STEP with operator<=>'s identity rows
             switch (raw_storage_index()) {

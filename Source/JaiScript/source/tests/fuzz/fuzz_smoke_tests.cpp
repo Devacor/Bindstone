@@ -21,13 +21,14 @@ class fuzz_smoke_tests : public suite {
 public:
 	fuzz_smoke_tests() : suite("Differential Fuzz Smoke") {}
 
-	void run_seed_range(uint64_t k_first_seed, uint64_t k_seed_count, bool proofs = true, fuzz::band_mode band = fuzz::band_mode::never) {
+	void run_seed_range(uint64_t k_first_seed, uint64_t k_seed_count, bool proofs = true, fuzz::band_mode band = fuzz::band_mode::never,
+	                    fuzz::band_mode math = fuzz::band_mode::never) {
 			constexpr double k_budget_seconds = 0.1; // budget-skips cost 2x this; keeps the suite fast
 
 			int divergences = 0;
 			std::string first_report;
 			for (uint64_t seed = k_first_seed; seed < k_first_seed + k_seed_count; ++seed) {
-				fuzz::program p = fuzz::generate_program(seed, 3, band);
+				fuzz::program p = fuzz::generate_program(seed, 3, band, math);
 				fuzz::compare_result cr = fuzz::compare_program(p, k_budget_seconds, proofs);
 				if (cr.kind != fuzz::compare_result::diverge) continue;
 				if (!fuzz::match_suppression(p, cr.diff).empty()) continue; // known, in-flight fix
@@ -47,7 +48,7 @@ public:
 					first_report = "fuzz seed " + std::to_string(seed) +
 						" diverged (repro: jaiscript_fuzz --seed " + std::to_string(seed) +
 						" --max-depth 3 --minimize" + (proofs ? "" : " --no-proofs") +
-						(band == fuzz::band_mode::always ? " --element-band" : "") + ")\n" + cr.diff;
+						(band == fuzz::band_mode::always ? " --element-band" : "") + (math == fuzz::band_mode::always ? " --math-band" : "") + ")\n" + cr.diff;
 				}
 			}
 			check_eq(0, divergences, first_report.empty() ? "no divergences" : first_report);
@@ -110,6 +111,11 @@ public:
 			// every program carries the element-argument band: mixed-kind element reads as several
 			// operands of one call inside loops the vm closes into cell blocks
 			run_seed_range(80, 120, true, fuzz::band_mode::always);   // 89, 97 and 192 caught the argument-zone miss (row 184)
+		});
+		test("math_band_seeds_no_new_divergence", [this]() {
+			// every program carries the math band: math::vec2/vec3/ivec2/ivec3 through every lvalue kind, in and out of functions
+			run_seed_range(300, 60, true, fuzz::band_mode::never, fuzz::band_mode::always);
+			run_seed_range(300, 30, false, fuzz::band_mode::never, fuzz::band_mode::always);
 		});
 		test("fixed_seeds_no_new_divergence_no_proofs", [this]() {
 			// interp-vs-vm parity must hold in both proof states (docs/static_checking.md "Proofs")

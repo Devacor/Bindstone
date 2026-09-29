@@ -92,6 +92,7 @@ namespace jai {
         checked_result<declaration_ptr> bare_coroutine_declaration();
         checked_result<declaration_ptr> variable_declaration();
         expression_ptr default_initializer(const type_info_ptr& type, const source_location& loc);   // a typed declaration without an initializer
+        expression_ptr math_constructor_call(script_value_type kind, std::vector<expression_ptr> arguments, const source_location& loc);
         checked_result<expression_ptr> initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, const source_location& loc);
         bool paren_group_ends_statement(size_t lparen) const;   // `name(...)` followed by ';': an object declaration, never a function
         checked_result<declaration_ptr> include_declaration();

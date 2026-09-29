@@ -13,6 +13,7 @@
 // backends is agreement; only mismatches are findings.
 
 #include "fuzz_harness.hpp"
+#include "fuzz_math_band.hpp"
 
 #include <string>
 #include <vector>
@@ -372,8 +373,8 @@ namespace jai::fuzz {
 
 	class generator {
 	public:
-		generator(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never)
-			: rng_(mix64(seed + 0xD1B54A32D192ED03ULL)), max_depth_(max_expr_depth), seed_(seed), band_(band) {}
+		generator(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never, band_mode math_mode = band_mode::never)
+			: rng_(mix64(seed + 0xD1B54A32D192ED03ULL)), max_depth_(max_expr_depth), seed_(seed), band_(band), math_(math_mode) {}
 
 		program generate() {
 			program p;
@@ -397,6 +398,9 @@ namespace jai::fuzz {
 			lines_.push_back(expr(random_value_type(), max_depth_) + ";");
 			element_arg_band band(seed_);
 			if (band.wanted(band_)) p.segments.push_back(band.emit());
+			math_band mband(seed_);
+			const bool math_roll = mband.roll();
+			if (math_ == band_mode::always || (math_ == band_mode::sometimes && math_roll)) p.segments.push_back(mband.emit());
 			p.segments.push_back(join());
 
 			// Hot-reload shape: a second execute() on the same engine that
@@ -419,6 +423,7 @@ namespace jai::fuzz {
 		int max_depth_;
 		uint64_t seed_;
 		band_mode band_;
+		band_mode math_;
 		int names_ = 0;
 		std::vector<class_info> classes_;
 		std::vector<func_info> funcs_;
@@ -1833,8 +1838,8 @@ namespace jai::fuzz {
 		}
 	};
 
-	inline program generate_program(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never) {
-		return generator(seed, max_expr_depth, band).generate();
+	inline program generate_program(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never, band_mode math_mode = band_mode::never) {
+		return generator(seed, max_expr_depth, band, math_mode).generate();
 	}
 
 } // namespace jai::fuzz

@@ -843,6 +843,24 @@ token lexer::scan_identifier() {
         return token(token_type::super_keyword, "super::", loc);
     }
 
+    // math::vec2 / vec3 / vec4 / ivec2 / ivec3 spelled contiguously is ONE identifier token "math::K": the parser's
+    // type-name rules then take it wherever a class name may stand (declarations, fields, parameters, returns,
+    // array<...>, cast<...>), and expression position rewrites it to the static member math::K
+    if (lexeme_view == "math" && peek() == ':' && peek_next() == ':') {
+        size_t end = current_ + 2;
+        while (end < source_.size() && (is_alpha_numeric(source_[end]) || source_[end] == '_')) {
+            ++end;
+        }
+        const std::string_view kind(source_.data() + current_ + 2, end - (current_ + 2));
+        if (kind == "vec2" || kind == "vec3" || kind == "vec4" || kind == "ivec2" || kind == "ivec3") {
+            while (current_ < end) {
+                advance();
+            }
+            uint64_t fused_id = symbolizer_->intern(std::string_view(source_.data() + start, end - start));
+            return token(token_type::identifier, symbolizer_->get_string(fused_id), fused_id, loc);
+        }
+    }
+
     // Check if it's a keyword (keywords use static string storage)
     // Need temporary std::string for map lookup (keyword map uses std::string keys)
     std::string lexeme_str(lexeme_view);

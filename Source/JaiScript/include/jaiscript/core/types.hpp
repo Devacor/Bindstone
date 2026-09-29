@@ -43,6 +43,13 @@ namespace jai {
         explicit script_utf8(std::string b) : bytes(std::move(b)) {}
         void changed() const noexcept { ascii = -1; chars = -1; hint_next = 0; hint_char[0] = hint_char[1] = 0; hint_byte[0] = hint_byte[1] = 0; crumbs.clear(); }
     };
+    // The node behind every math vector (math::vec2 / vec3 / vec4 / ivec2 / ivec3): the component count, the element type
+    // (binary32, or int32 when integral) and the component words; shared on copy, unshared on the first component write
+    struct script_vec_node {
+        uint8_t count = 0;
+        uint8_t integral = 0;
+        uint32_t words[4] = {0, 0, 0, 0};
+    };
     using script_char = char;       // 8-bit character
     using script_bool = bool;       // 1 byte boolean
     

@@ -624,6 +624,15 @@ namespace jai::vm {
         std::vector<declaration_ptr> pinned_decls;
 
         uint32_t frame_program = k_invalid_u32;   // the cell_loops index of the body's frame program (k_invalid_u32: none)
+
+        // a member store or compound whose member is a vector component name (x, y, z, w, width, height, depth) on an identifier
+        // base: (member node, the identifier's frame slot operand; k_invalid_u32 = not a frame slot), so a component store resolves
+        // the variable it names (detail/math_component_store.hpp). Last, so the hot members keep their offsets
+        std::vector<std::pair<uint32_t, uint32_t>> component_base_slots;
+        uint32_t component_base_slot(uint32_t node) const noexcept {
+            for (const auto& [n, slot] : component_base_slots) { if (n == node) { return slot; } }
+            return 0xFFFFFFFFu;
+        }
     };
 
 } // namespace jai::vm

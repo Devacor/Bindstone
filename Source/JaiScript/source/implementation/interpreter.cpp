@@ -8,6 +8,7 @@
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/redeclaration.hpp>
+#include <jaiscript/detail/math_component_store.hpp>   // math-value component stores (vm parity)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/string_element.hpp>
@@ -3718,6 +3719,12 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                 push_value(make_value(neg));
             } else if (oi == script_value::TYPEID_FLOAT) {
                 push_value(make_value(-operand.unchecked_as_float()));
+            } else if (detail::math::is_kind(oi)) {   // KEEP BYTE-PARALLEL with vm_backend::exec_unary
+                auto negated = detail::math::negate(operand, engine_);
+                if (!negated) {
+                    return negated.error_value();
+                }
+                push_value(std::move(negated.value()));
             } else {
                 if (auto landed = user_unary(token_type::minus)) { return std::move(*landed); }
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
@@ -3904,6 +3911,15 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
             return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
     }
     return {};
+}
+
+checked_result<script_value> interpreter::assign_math_component(script_value& base, member_expr* memberExpr, const script_value& value) {
+    return detail::math::assign_component(base, memberExpr, value,
+        [this](const identifier_expr* id) { return resolve_local_or_env(id->slot_index, id->symbol_id, id->global_qualified); },
+        [this](const member_expr* m) {
+            return detail::math::static_component_cell(m, *engine_, *environment_, *string_symbolizer_, environment_->find_access_context());
+        },
+        detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()}, environment_.get(), engine_, string_symbolizer_);
 }
 
 checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value) {
@@ -4354,7 +4370,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // Integral promotion (char_promotion.hpp): a char operand leaves the in-place
                 // ladder and takes the general arithmetic path as int64 0..255, storing back
                 // like the %= case does. KEEP BYTE-PARALLEL with the VM exec_compound_store.
-                if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx)) [[unlikely]] {
+                if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx)) [[unlikely]] {
                     token_type baseOp = token_type::plus;
                     switch (expr->op.type) {
                         case token_type::plus_equal: baseOp = token_type::plus; break;
@@ -4772,6 +4788,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             if (text_pair == detail::compound_text::mismatch) { return detail::compound_mismatch(0, currentValue, rightValue, engine_); }
             if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the VM)
                 JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+            } else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with vm_backend::exec_member_compound)
+                auto math_result = detail::math::binary(detail::math::bop_of(expr->op.type), currentValue, rightValue, engine_);
+                if (!math_result) {
+                    return math_result.error_value();
+                }
+                resultValue = std::move(math_result.value());
             } else
             switch (expr->op.type) {
                 case token_type::plus_equal: {
@@ -4857,6 +4879,17 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
             // Now assign the result back to the property (the receiver evaluated once above)
             script_value target_obj = objectValue.deref();
+
+            // A math value's component (KEEP BYTE-PARALLEL with vm_backend::exec_member_compound)
+            if (detail::math::is_kind(target_obj.raw_storage_index())) {
+                auto stored = assign_math_component(objectValue, memberExpr, resultValue);
+                if (!stored) {
+                    return stored.error_value();
+                }
+                push_value(expr->postfix_old_result ? std::move(postfix_old)
+                           : expression_result_needed_ ? std::move(stored.value()) : std::move(resultValue));
+                return {};
+            }
 
             // Check if it's an object
             if (!target_obj.is_object()) {
@@ -5769,6 +5802,17 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
             // Dereference if it's a reference (e.g., from array[index])
             script_value dereferenced = objectValue.deref();
+
+            // A math value's component lands in the storage the base names (detail/math_component_store.hpp;
+            // KEEP BYTE-PARALLEL with vm_backend::store_member)
+            if (detail::math::is_kind(dereferenced.raw_storage_index())) {
+                auto stored = assign_math_component(objectValue, memberExpr, value);
+                if (!stored) {
+                    return stored.error_value();
+                }
+                push_value(expression_result_needed_ ? std::move(stored.value()) : std::move(value));
+                return {};
+            }
 
             // Unwrap shared_ptr if needed
             // After refactor: shared_ptr<T> uses same storage, no unwrapping needed
@@ -6819,6 +6863,8 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     } else if (li == script_value::TYPEID_FLOAT) {
         leftNum = left.unchecked_as_float();
     } else {
+        if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
+            return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
         if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
@@ -6830,6 +6876,8 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     } else if (ri == script_value::TYPEID_FLOAT) {
         rightNum = right.unchecked_as_float();
     } else {
+        if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
+            return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
         if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
@@ -7771,6 +7819,18 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // Handle null-safe member access (?.)
     if (expr->null_safe && objectValue.is_null()) {
         push_value(make_value());  // push null
+        return {};
+    }
+
+    // A math value's component (x / width, y / height, z / depth; detail/math_values.hpp; KEEP BYTE-PARALLEL with
+    // vm_backend::member_access_value and exec_probe_member)
+    if (detail::math::is_kind(objectValue.raw_storage_index())) {
+        const script_value_type kind = objectValue.unchecked_vec_kind();
+        const int component = detail::math::component_of(kind, expr->member);
+        if (component < 0) {
+            return checked_result<void>(make_error_code(runtime_error_code::member_not_found), detail::math::no_member_text(kind), expr->member_id);
+        }
+        push_value(detail::math::component_value(objectValue, static_cast<size_t>(component), engine_));
         return {};
     }
 

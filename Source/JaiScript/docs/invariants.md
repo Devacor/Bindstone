@@ -11,7 +11,9 @@ nothrow-move (`valueless_by_exception` + the noexcept move ctor depend on it). L
 8B `type_info_ptr` + 8B `engine*` + 16B variant (8B max payload + index). The `engine_` and
 `type_info_` members are **the language**, not fat: zero-statics/multi-engine and the
 var/auto/int type ladder live in them — never evict either to buy payload bytes. A new variant
-alternative must be pointer-sized and nothrow-move or the asserts fire.
+alternative must be pointer-sized and nothrow-move or the asserts fire. The math vectors are one
+alternative, a copy-on-write `script_vec_node` handle: every relocation shape that carried a 12-byte
+inline payload measured 1-6% whole-program (`docs/math_types_design.md` 4.1).
 
 ## 2. strong_ptr single-pointer rules
 
@@ -21,8 +23,8 @@ offset (`cb_from_object`, via `cb_storage_offset = offsetof(control_block<T>, st
 Sound only because `make_strong` and `detail::adopt_pooled` are the only producers of a non-null
 handle: the raw-`T*` ctor is deleted and the cross-type converting ctors are deleted by design
 (a Derived→Base conversion would adjust the pointer off the storage head AND slice the
-static-type destroy). `adopt_pooled` exists solely for the per-engine `reference_holder` block
-pool (`script_value::reference_holder_pool`, value.cpp): pooled blocks derive `control_block<T>`
+static-type destroy). `adopt_pooled` exists solely for the per-engine block pools (value.cpp:
+`script_value::reference_holder_pool` and the `script_vec_node` pool): pooled blocks derive `control_block<T>`
 without moving `storage`'s offset (static_assert-gated) and reset counts + Debug magic on reuse,
 so the derivation invariant is preserved. `ptr_` MUST always be exactly `control_block<T>::storage`'s head.
 Enforced: negative `is_constructible` static_asserts (strong_ptr_tests.cpp:224-225),

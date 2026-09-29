@@ -185,6 +185,7 @@ std::vector<variable_info> controller::list_locals() const {
         if (value.is_array()) type = "array";
         else if (value.is_map()) type = "map";
         else if (value.is_object()) type = "object";
+        else if (value.is_math()) type = math_type_name(value.deref().current_type());
         out.push_back(variable_info{ name, value.to_string(), std::move(type) });
     }
     std::sort(out.begin(), out.end(),

@@ -750,6 +750,19 @@ namespace jai::detail {
 	inline checked_result<void> ref_store_through(script_value& refLocal, script_value& value,
 	                                              engine* eng, string_symbolizer* symbolizer) {
 		const auto* holder = refLocal.get_reference_holder();
+		if (holder && holder->plain_cell() && !holder->container_element_type) {
+			// a store through a reference to a typed variable obeys the variable's declared type: the assignment table and its
+			// text (Dev ruling 2026-09-28; the reference names no slot, so the text is the slot-less shape)
+			type_info_ptr tag = holder->cell()->get_type_info();
+			if (tag && tag->base_type != script_value_type::jai_any_type && tag->base_type != script_value_type::jai_reference_type) {
+				auto stored = typed_store_convert(value, tag, eng, []() { return slot_site{slot_kind::assignment, {}, {}}; });
+				if (!stored) { return stored.error_value(); }
+				script_value v = std::move(stored.value());
+				v.set_type_info(tag);
+				ref_write_through(refLocal, std::move(v));
+				return {};
+			}
+		}
 		if (!holder || !holder->container_element_type) {
 			ref_write_through(refLocal, clone_for_assignment(value));
 			return {};

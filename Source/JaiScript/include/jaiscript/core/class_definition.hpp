@@ -2980,11 +2980,10 @@ inline std::string typed_slot_rejection_text(const script_value& source, const t
     return format_error_message(slot_rejection_message_unnamed(site.kind, declared), src, declared);
 }
 
-// The field store: the full table (script rows included) plus the store-ready shaping.
-// KEEP the same-base head inline - every member store runs it. field_id / owner / is_static
-// only name the slot in the rejection text (resolved on the error path alone).
-inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng,
-                                                        uint64_t field_id, const class_definition* owner, bool is_static) {
+// The typed store: the full table (script rows included) plus the store-ready shaping. KEEP the same-base head inline -
+// every member store runs it. site_fn names the slot for the rejection text (called on the error path alone).
+template <typename SiteFn>
+inline checked_result<script_value> typed_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng, SiteFn&& site_fn) {
     {
         const script_value& v = value.is_reference() ? value.deref() : value;
         size_t want = script_value::TYPEID_INVALID;
@@ -3015,13 +3014,21 @@ inline checked_result<script_value> field_store_convert(const script_value& valu
     }
     auto stored = field_store_value(out, value, declared, eng);
     if (!stored) {
-        string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
-        return typed_slot_rejection(value, *declared,
-            slot_site{is_static ? slot_kind::static_field : slot_kind::field,
-                      field_id && symbols ? symbols->get_string(field_id) : std::string_view{},
-                      owner ? std::string_view(owner->get_name()) : std::string_view{}}, eng);
+        return typed_slot_rejection(value, *declared, site_fn(), eng);
     }
     return std::move(*stored);
+}
+
+
+// The field store (field_id / owner / is_static only name the slot in the rejection text)
+inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng,
+                                                        uint64_t field_id, const class_definition* owner, bool is_static) {
+    return typed_store_convert(value, declared, eng, [&]() {
+        string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+        return slot_site{is_static ? slot_kind::static_field : slot_kind::field,
+                         field_id && symbols ? symbols->get_string(field_id) : std::string_view{},
+                         owner ? std::string_view(owner->get_name()) : std::string_view{}};
+    });
 }
 
 // The no-script table (set_field, hot-reload migration): nullopt where a conversion would

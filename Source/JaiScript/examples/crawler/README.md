@@ -85,7 +85,7 @@ fits 80x28.
 `scripts/crawler.jai` replays the whole C++ host in pure JaiScript — drag it onto the
 standalone runner (`out/build/x64-Release BENCHMARKS/bin/jaiscript.exe`) and GRUBWELL
 runs with zero example-specific C++. It captures the runner's non-blocking `read_key`
-into a blocking wrapper, re-creates `draw`/`clear_screen`/`chr`/`host_log`/`sleep_ms`,
+into a blocking wrapper, re-creates `draw`/`clear_screen`/`chr`/`host_log`,
 the flag globals, and a **bit-exact script-side `Rng`** (xorshift64\* in 16/32-bit
 limbs under checked int64 — same hashes as the C++ host: seed 99's pilot still dies
 on floor 4, turn 341, to the same Grublin Slinger). Flags ride after `--`, dashes

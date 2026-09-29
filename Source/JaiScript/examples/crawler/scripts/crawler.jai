@@ -120,11 +120,6 @@ function chr(int code) -> string { return "" + to_char(code & 0x7F); }
 
 function host_log(string line) -> void { print(line); }
 
-function sleep_ms(int ms) -> void {
-	if (SHIM_QUIET || HOST_SCRIPTED) { return; }
-	HOST_SLEEP_MS(ms);
-}
-
 // Blocking read_key over the runner's non-blocking poll. Scripted input replays
 // main.cpp's stand-ins (';'=enter '^'=esc) and hard-quits with "Q" when exhausted.
 var SHIM_KEYS = [];
@@ -150,7 +145,7 @@ function read_key() -> string {
 	}
 	while (true) {
 		var k = HOST_READ_KEY_RAW();
-		if (k == "") { HOST_SLEEP_MS(10); continue; }
+		if (k == "") { time::sleep_ms(10); continue; }
 		if (k.size() == 1) {
 			return key_down("shift") ? shim_upper(k) : k;
 		}
@@ -237,12 +232,13 @@ class Rng {
 import "main.jai";
 
 var SHIM_FRAMES = [];
-var SHIM_FRAME_MS = 0;
+var SHIM_FRAME_MS = 0.0;
 
 function shim_view_probe() -> void {
-	int t0 = clock_ms();
+	time::stopwatch build;
+	build.start();
 	string frame = frame_join(frame_lines(game_view_lines()));
-	SHIM_FRAME_MS = SHIM_FRAME_MS + clock_ms() - t0;
+	SHIM_FRAME_MS += build.elapsed() * 1000;
 	SHIM_FRAMES.push(frame);
 	if (SHIM_SHOT_EVERY > 0 && G.turn % SHIM_SHOT_EVERY == 0) { shim_dump_view(`${SHIM_DUMP}_t${G.turn}`); }
 }
@@ -305,14 +301,14 @@ function shim_probe_report() -> void {
 		var path = SHIM_DUMP + ".ans";
 		write_file(path, SHIM_FRAMES.join(""));
 		print(`FRAME_HASH: ${sha256_file(path)} (${SHIM_FRAMES.size()} frames -> ${path})`);
-		print(`frame build: ${SHIM_FRAME_MS} ms total, ${(1.0 * SHIM_FRAME_MS) / imax(1, SHIM_FRAMES.size())} ms/frame`);
+		print(`frame build: ${SHIM_FRAME_MS:.0f} ms total, ${SHIM_FRAME_MS / imax(1, SHIM_FRAMES.size())} ms/frame`);
 	}
 	if (SHIM_BENCH > 0) {
-		int t0 = clock_ms();
+		time::stopwatch bench;
+		bench.start();
 		int bytes = 0;
 		for (int i = 0; i < SHIM_BENCH; ++i) { bytes = frame_join(frame_lines(game_view_lines())).size(); }
-		int spent = clock_ms() - t0;
-		print(`bench: ${SHIM_BENCH} frames, ${(1.0 * spent) / SHIM_BENCH} ms/frame, ${bytes} bytes/frame`);
+		print(`bench: ${SHIM_BENCH} frames, ${bench.elapsed() * 1000 / SHIM_BENCH} ms/frame, ${bytes} bytes/frame`);
 	}
 }
 

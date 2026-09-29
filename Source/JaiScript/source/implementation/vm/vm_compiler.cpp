@@ -1595,7 +1595,7 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 		proto.slot = stmt->variable_slot_index;
 	}
 	proto.is_reference = stmt->is_reference;
-	if (jai::detail::range_for_declared(stmt->element_type.get())) {
+	if (stmt->element_type) {
 		proto.element_type = stmt->element_type;
 		proto.var_name = stmt->variable_name;
 		proto.conversion_free = stmt->element_conversion_free;

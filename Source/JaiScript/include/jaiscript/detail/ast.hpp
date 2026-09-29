@@ -633,6 +633,10 @@ namespace jai {
         // Parser escape analysis (value-mode loop vars): per-iteration values are stored
         // through a cell so the variable can be bound by reference
         bool var_ref_escaping = false;
+        // Declared auto: the checker's first proof pass makes the variable a var when the container's elements have no static
+        // type (Dev ruling 2026-09-28); the spelling stays auto for re-checks and .jaibite
+        bool auto_spelled = false;
+        bool auto_typed = false;
         // The checker saw the container's elements already hold the declared type: the binding converts nothing (a cell head
         // may land the element as it is)
         bool element_conversion_free = false;

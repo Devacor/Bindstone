@@ -10421,7 +10421,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     } else {
                         *loop_var_ptr = script_value::make_element_reference(array_storage, i, engine_, element_constraint);
                     }
-                    if (detail::range_for_declared(stmt->element_type.get())) {   // a T& binds an element holding a T (KEEP BYTE-PARALLEL with vm exec_iter_next)
+                    if (stmt->element_type) {   // a T& binds an element holding a T (KEEP BYTE-PARALLEL with vm exec_iter_next)
                         auto bound = detail::range_for_bind(*loop_var_ptr, stmt->element_type, true, stmt->variable_name, engine_);
                         if (!bound) { pop_scope(); return bound.error_value(); }
                     }
@@ -10433,7 +10433,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                         : array_storage->is_typed()
                         ? array_storage->get(i, engine_)   // raw buffer read
                         : clone_for_assignment(array_storage->values()[i]);
-                    if (detail::range_for_declared(stmt->element_type.get())) {   // T x : takes each element as T x = element; would
+                    if (stmt->element_type) {   // T x : takes each element as T x = element; would
                         auto bound = detail::range_for_bind(std::move(element), stmt->element_type, false, stmt->variable_name, engine_);
                         if (!bound) { pop_scope(); return bound.error_value(); }
                         element = std::move(bound.value());
@@ -10528,7 +10528,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                 } else {
                     script_value element = utf8 ? detail::utf8::char_value(container.unchecked_as_utf8(), i, engine_, cache)
                                                 : script_value(static_cast<script_char>(container.unchecked_as_string()[i]), engine_);
-                    if (detail::range_for_declared(stmt->element_type.get())) {   // KEEP BYTE-PARALLEL with vm exec_iter_next
+                    if (stmt->element_type) {   // KEEP BYTE-PARALLEL with vm exec_iter_next
                         auto bound = detail::range_for_bind(std::move(element), stmt->element_type, false, stmt->variable_name, engine_);
                         if (!bound) { pop_scope(); return bound.error_value(); }
                         element = std::move(bound.value());
@@ -10733,7 +10733,7 @@ checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
                     if (handle->done()) break;
 
                     script_value element = std::move(resume_result.value());
-                    if (detail::range_for_declared(stmt->element_type.get())) {   // KEEP BYTE-PARALLEL with vm exec_iter_next
+                    if (stmt->element_type) {   // KEEP BYTE-PARALLEL with vm exec_iter_next
                         auto bound = detail::range_for_bind(std::move(element), stmt->element_type, false, stmt->variable_name, engine_);
                         if (!bound) { pop_scope(); return bound.error_value(); }
                         element = std::move(bound.value());

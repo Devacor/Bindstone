@@ -15,7 +15,9 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/detail/namespace_scope.hpp>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace jai::detail {
@@ -53,6 +55,30 @@ namespace jai::detail {
 			}
 		}
 		return class_def;
+	}
+
+	// A ::-qualified static (C::s) or namespace variable (ns::x) as a reference argument: its storage, a C++ lvalue. nullopt
+	// when the spelling names neither (the caller's other ladders decide); an error for a host entry (read-only) or a denied
+	// private static
+	inline std::optional<checked_result<script_value*>> static_member_lvalue(engine& eng, const member_expr* member, const environment& env,
+	                                                                         const string_symbolizer& symbols,
+	                                                                         const class_definition* access_context) {
+		using result = checked_result<script_value*>;
+		if (!member || !member->is_static) { return std::nullopt; }
+		if (auto ns = resolve_namespace_store(eng, member, symbols)) {
+			if (!ns->cell) {
+				return result(make_error_code(runtime_error_code::invalid_reference), "Cannot pass non-lvalue to reference parameter");
+			}
+			return result(ns->cell);
+		}
+		if (member->object->get_type() != node_type::identifier_expr) { return std::nullopt; }
+		auto cls = resolve_static_store_class(member, env, symbols, access_context);
+		if (!cls) {
+			if (cls.error() == make_error_code(runtime_error_code::access_violation)) { return result(cls.error_value()); }
+			return std::nullopt;
+		}
+		if (script_value* cell = cls.value()->get_static_field_ptr(member->member_id)) { return result(cell); }
+		return std::nullopt;
 	}
 
 	// Presence, the field ladder, the write; the stored value is the expression result.

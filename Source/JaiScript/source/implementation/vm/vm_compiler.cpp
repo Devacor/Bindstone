@@ -668,6 +668,11 @@ bool vm_compiler::call_args_need_probe(const call_expr& call) const {
 // every level transient (the element-elision ruling applies; the runtime replays the
 // full op_index semantics per level for any non-array shape). Truly N-level - the
 // depth cap is a sanity bound, not a semantic limit.
+// C::s / ns::x as an argument: a reference parameter binds its storage (bind_parameters)
+static bool static_member_arg(const expression* e) {
+	return e && e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->is_static;
+}
+
 static bool fusable_subscript_index(const expression* e) {
 	if (e->get_type() == node_type::identifier_expr) {
 		// ::name indexes can't ride fused levels (fused_subscript_index has no flags)
@@ -5974,7 +5979,7 @@ void vm_compiler::record_argument_source(call_site& site, const expression_ptr& 
 	} else {
 		site.arg_symbols.push_back(UINT64_MAX);
 		site.arg_slots.push_back(k_invalid_u32);
-		if (jai::detail::is_ref_bindable_lvalue(arg.get())) {
+		if (jai::detail::is_ref_bindable_lvalue(arg.get()) || static_member_arg(arg.get())) {
 			site.arg_lvalue_nodes.resize(argc, k_invalid_u32);
 			site.arg_lvalue_nodes[index] = add_node(arg);
 		}

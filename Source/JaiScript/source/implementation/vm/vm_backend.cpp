@@ -20268,6 +20268,18 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				// Field/subscript/chain lvalue argument: resolve through the shared
 				// helper into an owner-pinned reference (Tier 1)
 				const uint32_t lvalue_node = i < site->arg_lvalue_nodes.size() ? site->arg_lvalue_nodes[i] : k_invalid_u32;
+				// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter)
+				if (lvalue_node != k_invalid_u32 && caller_code && caller_env &&
+				    caller_code->nodes[lvalue_node]->get_type() == node_type::member_expr &&
+				    static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get())->is_static) {
+					const class_definition* access = caller_frame ? frame_access_context(*caller_frame) : caller_env->find_access_context();
+					if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get()),
+					                                             *caller_env, *symbolizer_, access)) {
+						if (!*cell) { return raise_from(*cell); }
+						VM_TRY(bind_reference_to_storage(*cell->value(), callee, param.slot_index));
+						continue;
+					}
+				}
 				if (lvalue_node != k_invalid_u32 && caller_code) {
 					if (caller_frame) {
 						// the kernel resolves in the CALLER's member scope (environment_

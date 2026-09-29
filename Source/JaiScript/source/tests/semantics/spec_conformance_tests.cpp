@@ -641,7 +641,7 @@ private:
 				run();
 			)", "Cannot assign string to 'y' (declared int)|2|4");
 		});
-		test("a_qualified_namespace_variable_is_not_an_lvalue_to_a_reference", [this]() {
+		test("a_qualified_namespace_variable_binds_a_reference", [this]() {
 			expect("ns ref", R"(
 				namespace n5 { var x = 1; }
 				function take(var& r) { r = 9; }
@@ -651,7 +651,7 @@ private:
 					return s + "|" + n5::x;
 				}
 				run();
-			)", "Cannot pass non-lvalue to reference parameter|1");
+			)", "bound|9");
 		});
 		test("a_namespace_function_does_not_see_the_callers_locals", [this]() {
 			expect("ns env", R"(
@@ -2184,6 +2184,23 @@ private:
 		ruling_missing_key_compound();
 		ruling_constructorless_call_text();
 		ruling_typed_reference_parameters();
+		static_members_bind_references();
+	}
+
+	void static_members_bind_references() {
+		test("a_static_member_and_a_namespace_variable_bind_a_reference_parameter", [this]() {
+			// C++: S::s and ns::x are lvalues; a reference parameter binds their storage
+			expect("static ref", R"(
+				class S { static int s = 1; static string name = "a"; }
+				namespace ns { int x = 1; }
+				function bump(int& r) { r = r + 10; }
+				function rename(string& r) { r += "b"; }
+				function run() -> string { bump(S::s); bump(ns::x); rename(S::name); bump(S::s); return "" + S::s + " " + ns::x + " " + S::name; }
+				string first = run();
+				S::s = 5; ns::x = 6; bump(S::s); bump(ns::x);
+				first + "|" + S::s + " " + ns::x;
+			)", "21 11 ab|15 16", check_mode::warn);
+		});
 	}
 
 	void ruling_typed_reference_parameters() {

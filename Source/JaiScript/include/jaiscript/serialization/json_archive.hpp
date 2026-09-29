@@ -10,7 +10,7 @@
 #include <string_view>
 #include <limits>
 #if !(defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L)
-#include <cerrno>       // strtod fallback: libc++ ships integer-only std::from_chars
+#include <jaiscript/detail/float_text.hpp>   // strtod fallback: libc++ ships integer-only std::from_chars
 #include <clocale>
 #include <cstdlib>
 #endif
@@ -1218,12 +1218,10 @@ private:
         if (locale_decimal != '.') {
             for (auto& c : text) { if (c == '.') c = locale_decimal; }
         }
-        errno = 0;
-        char* end = nullptr;
-        const double parsed = std::strtod(text.c_str(), &end);
-        if (end == text.c_str()) { return { first, std::errc::invalid_argument }; }
-        d = parsed;
-        return { first + (end - text.c_str()), errno == ERANGE ? std::errc::result_out_of_range : std::errc() };
+        const auto parsed = detail::parse_float_text(text.c_str());
+        if (parsed.end == text.c_str()) { return { first, std::errc::invalid_argument }; }
+        d = parsed.value;
+        return { first + (parsed.end - text.c_str()), parsed.out_of_range ? std::errc::result_out_of_range : std::errc() };
 #endif
     }
 

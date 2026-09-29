@@ -31,6 +31,9 @@ creation**:
   by the same rules at inner-creation time (the outer frame is live while the inner lambda
   is being created).
 
+`[this]` captures the instance itself (C++ captures the `this` pointer): the lambda reads and
+writes the object it was made in, never a copy.
+
 By-value capture uses `clone_for_capture`: pure script values (ints, strings, arrays,
 script objects) are deep-copied; `shared_ptr` values and C++-bound objects are **shared,
 not copied** — "by value" capture of an engine object pins *that exact object*, which is

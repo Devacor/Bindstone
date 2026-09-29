@@ -2176,6 +2176,24 @@ private:
 		ruling_switch_equality();
 		ruling_membership_equality();
 		ruling_compound_operand_text();
+		ruling_this_capture();
+	}
+
+	void ruling_this_capture() {
+		test("a_this_capture_is_the_instance_itself", [this]() {
+			expect("[this]", R"(
+				class C {
+					int v = 1;
+					int by_this() { auto l = [this]() { this.v = 8; }; l(); return v; }
+					int bare() { auto l = [this]() { v = 9; }; l(); return v; }
+					int later() { auto l = [this]() { return v; }; v = 4; return l(); }
+					function keep() { return [this]() { v = v + 1; return v; }; }
+				}
+				C c = C();
+				var inc = c.keep(); inc(); inc();
+				"" + C().by_this() + C().bare() + C().later() + c.v;
+			)", "8943", check_mode::warn);
+		});
 	}
 
 	void ruling_compound_operand_text() {

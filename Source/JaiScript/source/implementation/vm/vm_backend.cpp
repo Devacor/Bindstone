@@ -12380,9 +12380,10 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 					}
 					captureEnv->define(this_id_, share_env_ref(*targetPtr));
 				} else {
+					// [this] captures the instance itself, as C++ captures the this pointer (KEEP BYTE-PARALLEL with the interpreter)
 					auto capture_result = environment_->get(this_id_);
 					if (!capture_result) return raise_from(capture_result);
-					captureEnv->define(this_id_, vm_clone_for_capture(capture_result.value(), symbolizer_));
+					captureEnv->define(this_id_, script_value(capture_result.value().deref()));
 				}
 				continue;
 			}

@@ -175,7 +175,7 @@ print(&quot;empty.size(): {}&quot;, empty.size());
 empty[&quot;x&quot;] = 1;
 print(&quot;after assigning a literal: {}&quot;, to_json(empty));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot use &#x27;int&#x27; as a key of type &#x27;string&#x27;
-map&lt;var,int&gt;: {&quot;5&quot;:1,&quot;five&quot;:5}
+map&lt;var,int&gt;: {&quot;$map&quot;:[[5,1],[&quot;five&quot;,5]]}
 caught: Cannot use &#x27;string&#x27; as a key of type &#x27;int&#x27;
 empty.size(): 0
 after assigning a literal: {&quot;x&quot;:1}</code></pre></div>

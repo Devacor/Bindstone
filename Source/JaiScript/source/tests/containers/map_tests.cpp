@@ -556,7 +556,7 @@ public:
             row("map<string,int> m = {\"w\": 1}; for (auto kv : m) { kv.first += \"!\"; kv.first = \"zzz\"; } to_json(m)",
                 "{\"w\":1}", "stores to kv.first replace the pair field");
             row("map<int,string> m = {1: \"a\", 2: \"b\"}; for (auto kv : m) { kv.second.to_upper(); } string s1 = to_json(m); for (auto& kv : m) { kv.second.to_upper(); } s1 + to_json(m)",
-                "{\"1\":\"a\",\"2\":\"b\"}{\"1\":\"A\",\"2\":\"B\"}", "int keys: by-value second is a copy, by-reference second writes through");
+                "{\"$map\":[[1,\"a\"],[2,\"b\"]]}{\"$map\":[[1,\"A\"],[2,\"B\"]]}", "int keys: by-value second is a copy, by-reference second writes through");
             row("map<string,string> m = {\"k\": \"v\"}; m[\"k\"].to_upper(); string a = to_json(m); string key = \"k\"; m[key].to_lower(); a + to_json(m)",
                 "{\"k\":\"V\"}{\"k\":\"v\"}", "map value through a subscript receiver mutates in place");
             row("string src = \"v\"; map<string,string> m = {\"k\": src}; m[\"k\"].to_upper(); to_json(m) + src",

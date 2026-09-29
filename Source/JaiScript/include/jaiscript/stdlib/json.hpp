@@ -6,6 +6,7 @@
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
+#include <optional>
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -543,9 +544,16 @@ namespace stdlib {
 
 	// Every archive format restores nested script classes through the same walk.
 	// Serialized names remain data; reconstruction uses only registered classes/members.
+	// JSON's tagged values: {"$char": n} is the char n (0..255), {"$map": [[k, v], ...]} a map whose keys keep their kind. Any other
+	// shape stays the map it is
+	inline std::optional<script_value> json_tagged_value(engine* eng, const script_map& map, bool json_string_keys);
+
 	inline script_value reconstruct_archive_value(engine* eng, const script_value& value, bool json_string_keys = false) {
 		if (value.is_map()) {
 			const auto& map = value.as_map();
+			if (json_string_keys && map.size() == 1) {
+				if (auto tagged = json_tagged_value(eng, map, json_string_keys)) { return std::move(*tagged); }
+			}
 			auto type_it = map.find(script_value("_type_", eng));
 			if (type_it != map.end() && type_it->second.is_string()) {
 				auto object = reconstruct_typed_object(eng, map, type_it->second.as_string(),
@@ -571,6 +579,32 @@ namespace stdlib {
 			return result;
 		}
 		return value;
+	}
+
+	inline std::optional<script_value> json_tagged_value(engine* eng, const script_map& map, bool json_string_keys) {
+		const auto& [tag, payload] = *map.begin();
+		if (!tag.is_string()) { return std::nullopt; }
+		if (tag.as_string() == "$char") {
+			if (payload.is_int() && payload.as_int() >= 0 && payload.as_int() <= 255) {
+				return script_value(static_cast<script_char>(payload.as_int()), eng);
+			}
+			return std::nullopt;
+		}
+		if (tag.as_string() != "$map" || !payload.is_array()) { return std::nullopt; }
+		const script_array* pairs = payload.unchecked_array_node();
+		for (size_t i = 0; i < pairs->size(); ++i) {
+			script_value pair = pairs->get(i, eng);
+			if (!pair.is_array() || pair.unchecked_array_node()->size() != 2) { return std::nullopt; }
+		}
+		auto result = script_value::make_map(nullptr, nullptr, eng);
+		auto& restored = const_cast<script_map&>(result.as_map());
+		for (size_t i = 0; i < pairs->size(); ++i) {
+			script_value pair = pairs->get(i, eng);
+			const script_array* kv = pair.unchecked_array_node();
+			restored.emplace(reconstruct_archive_value(eng, kv->get(0, eng), json_string_keys),
+			                          reconstruct_archive_value(eng, kv->get(1, eng), json_string_keys));
+		}
+		return result;
 	}
 
     // Register JSON and binary serialization functions with an engine

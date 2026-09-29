@@ -6261,6 +6261,22 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 define_variable(share_boxed_env_storage(*targetPtr, engine_));
             }
         } else {
+            // C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value)
+            if (decl->initializer->get_type() == node_type::member_expr && static_cast<const member_expr*>(decl->initializer.get())->is_static) {
+                if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(decl->initializer.get()), *environment_,
+                                                             *string_symbolizer_, environment_->find_access_context())) {
+                    JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());   // the read's effects and errors come first, as the vm evaluates it
+                    (void)pop_value();
+                    if (is_unwinding_) { return {}; }
+                    if (!*cell) { return cell->error_value(); }
+                    script_value& storage = *cell->value();
+                    if (storage.is_reference() && !storage.get_reference_holder()) {
+                        return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+                    }
+                    define_variable(share_boxed_env_storage(storage, engine_));
+                    return {};
+                }
+            }
             // For other expressions, evaluate them and check if they return a reference
             JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
             script_value result = pop_value();

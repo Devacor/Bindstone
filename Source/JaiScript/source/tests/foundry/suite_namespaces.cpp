@@ -424,21 +424,20 @@ public:
             check_eq(std::string("100 2 2"), result.as<std::string>());
         });
 
-        test("namespace_variable_is_not_ref_bindable_by_its_qualified_name", [&]() {
+        test("namespace_variable_binds_a_reference_by_its_qualified_name", [&]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
             auto result = eng->execute(R"(
                 namespace ns { var x = 1; }
                 function take(var& a) { a = 77; }
                 var out = "";
-                try { var& r = ns::x; out = "bound"; } catch (e) { out = e; }
+                try { var& r = ns::x; r = 5; out = "bound:" + to_string(ns::x); } catch (e) { out = e; }
                 var out2 = "";
                 try { take(ns::x); out2 = "passed"; } catch (e) { out2 = e; }
                 out + "|" + out2 + "|" + to_string(ns::x)
             )");
             const std::string text = result.as<std::string>();
-            check(text.rfind("Cannot take reference of non-lvalue expression", 0) == 0);
-            check(text.find("|Cannot pass non-lvalue to reference parameter|1") != std::string::npos);
+            check_eq(std::string("bound:5|passed|77"), text);
         });
 
     }

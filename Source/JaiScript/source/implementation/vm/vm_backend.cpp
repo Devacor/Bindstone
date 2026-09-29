@@ -11026,6 +11026,19 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		}
 		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
 	}
+	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
+	if (decl->initializer && decl->initializer->get_type() == node_type::member_expr &&
+	    static_cast<const member_expr*>(decl->initializer.get())->is_static) {
+		if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(decl->initializer.get()),
+		                                             *environment_, *symbolizer_, frame_access_context(f))) {
+			if (!*cell) { return raise_from(*cell); }
+			script_value& storage = *cell->value();
+			if (storage.is_reference() && !storage.get_reference_holder()) {
+				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+			}
+			return define_decl_value(f, decl->name_id, decl->slot_index, share_env_ref(storage));
+		}
+	}
 	if (decl->initializer && detail::is_member_final_ref_lvalue(decl->initializer.get())) {
 		// Member-final initializer (auto& p = G.player): field reads evaluate to COPIES,
 		// so the evaluated result can't alias - resolve the chain through the shared

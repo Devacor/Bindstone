@@ -755,7 +755,7 @@ instructions are an optional last step (section 12) held to the 1.5% bar.
   - `math::vec3(...)` in expression position is a constructor call, resolved like `math::` intrinsics and cached on the
     AST.
   - `array<math::vec3>` and `map<math::ivec2, T>` nest through `parse_type`.
-  - `.jaibite` version 24.
+  - `.jaibite` version 27.
 - **Names.**
   - Script cannot declare the kind names in `math::`. `math::` stays open for script functions, per
     `script_namespace.hpp`, but these names are reserved.

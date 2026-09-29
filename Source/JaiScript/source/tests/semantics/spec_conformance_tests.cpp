@@ -2171,7 +2171,24 @@ private:
 		static_members_bind_references();
 		ruling_reference_store_types();
 		ruling_typed_range_for();
+		ruling_auto_fields();
 		ruling_numeric_ternary_auto();
+	}
+
+	void ruling_auto_fields() {
+		test("an_auto_field_takes_its_initializers_static_type", [this]() {
+			// ruling 4 (auto = static type) for class fields: an int-initialized auto field is an int field, an auto without a static
+			// type is a var
+			expect("auto fields", R"(
+				var FLAG = true;
+				class C { auto n = 5; auto v = FLAG ? 1 : "s"; auto f = FLAG ? 1 : 2.5; }
+				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { C c; c.n = 2.9; return type_of(c.n) + ":" + c.n; }) + "|" +
+				t([]() { C c; var s = "s"; c.n = s; return c.n; }) + "|" +
+				t([]() { C c; c.v = 2.5; c.v = "t"; return type_of(c.v) + ":" + c.v; }) + "|" +
+				t([]() { C c; return type_of(c.f) + ":" + c.f; });
+			)", "int:2|Cannot assign string to field 'n' of C (declared int)|string:t|float:1.0", check_mode::warn);
+		});
 	}
 
 	void ruling_numeric_ternary_auto() {

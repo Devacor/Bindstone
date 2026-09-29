@@ -17,7 +17,7 @@ endfunction()
 add_library(demoreel_host STATIC demoreel_host.cpp)
 target_include_directories(demoreel_host PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 demoreel_msvc_settings(demoreel_host)
-if(MSVC)
+if(WIN32)
     target_link_libraries(demoreel_host PUBLIC winmm)
 endif()
 

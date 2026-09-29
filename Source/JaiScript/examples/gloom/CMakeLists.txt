@@ -25,7 +25,7 @@ endfunction()
 add_library(gloom_host STATIC gloom_host.cpp)
 target_include_directories(gloom_host PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 gloom_msvc_settings(gloom_host)
-if(MSVC)
+if(WIN32)
     target_link_libraries(gloom_host PUBLIC winmm)
 endif()
 

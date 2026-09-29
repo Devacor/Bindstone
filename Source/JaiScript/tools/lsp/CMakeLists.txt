@@ -12,7 +12,7 @@ add_executable(jaiscript_lsp
 target_link_libraries(jaiscript_lsp PRIVATE jaiscript)
 
 if(WIN32)
-    target_link_libraries(jaiscript_lsp PRIVATE winhttp)
+    target_link_libraries(jaiscript_lsp PRIVATE winhttp winmm)
 else()
     find_package(CURL QUIET)
     if(CURL_FOUND)

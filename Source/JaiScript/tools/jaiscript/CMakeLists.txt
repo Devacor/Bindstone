@@ -8,7 +8,7 @@ target_link_libraries(jaiscript_runner PRIVATE jaiscript)
 # Download (tools/jaiscript/fetch.hpp): WinHTTP on Windows; libcurl on POSIX when present, else the
 # curl executable at run time. No new dependency is required to build.
 if(WIN32)
-    target_link_libraries(jaiscript_runner PRIVATE winhttp)
+    target_link_libraries(jaiscript_runner PRIVATE winhttp winmm)
 else()
     find_package(CURL QUIET)
     if(CURL_FOUND)

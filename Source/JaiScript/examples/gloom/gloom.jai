@@ -6,10 +6,11 @@
 //
 // The shared C++ host (gloom_host.cpp) owned the console, input, clock, Rng,
 // and flags; the runner already provides the console half (key_down/read_key/
-// clock_ms/sleep_ms/term_cols/term_rows/print). This file supplies the rest of
-// the REFERENCE.md section 2 contract in pure script — Rng (bit-exact
-// xorshift64* under checked overflow), host_log/itrunc/ifloor/utf8/ESC, the
-// HOST_* globals from ARGS — then loads scripts/ and runs the host pump.
+// term_cols/term_rows/print) and the stdlib's time:: the clock. This file
+// supplies the rest of the REFERENCE.md section 2 contract in pure script —
+// Rng (bit-exact xorshift64* under checked overflow), host_log/itrunc/ifloor/
+// utf8/ESC, the HOST_* globals from ARGS — then loads scripts/ and runs the
+// host pump.
 // key_down/read_key are NOT redefined: the runner's console-event versions
 // pass through (a script definition would shadow them; verified).
 //
@@ -258,12 +259,13 @@ function shim_run_smoke() -> int {
 	float dt = 1.0 / 30.0;
 	string pix_name = HOST_PIX == 0 ? "half" : (HOST_PIX == 2 ? "sext" : "quad");
 	print(`gloom.jai --smoke: ${HOST_TICKS} ticks @ 100x40, seed ${HOST_SEED}, pix ${pix_name}, workers ${HOST_WORKERS}`);
-	int t0 = clock_ms();
+	time::stopwatch run;
+	run.start();
 	for (int i = 0; i < HOST_TICKS; ++i) {
 		var text = gloom_frame(dt, "", 0.0, 0.0, 0.0);
 		if (i == SHIM_DUMP) { write_file("gloom_frame_shim.txt", text); }
 	}
-	int total = clock_ms() - t0;
+	int total = run.elapsed() * 1000;
 	float per_tick = 1.0 * total / HOST_TICKS;
 	int hash = gloom_state_hash();
 	print(`total ${total} ms | ${per_tick:.3f} ms/tick | STATE_HASH: ${hash}`);
@@ -297,7 +299,8 @@ function shim_run_live(int bench_frames) -> int {
 	if (bench) { gloom_force_autopilot(); }
 	gloom_boot(w, h);
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", true);   // alt screen, hide cursor
-	int t_prev = clock_ms();
+	time::stopwatch frame;
+	time::stopwatch split;
 	float fps_ema = SHIM_FPS;
 	float last_sim = 0.0;
 	float last_draw = 0.0;
@@ -305,9 +308,8 @@ function shim_run_live(int bench_frames) -> int {
 	float draw_sum = 0.0;
 	int done = 0;
 	while (true) {
-		int frame_start = clock_ms();
-		float dt = (frame_start - t_prev) / 1000.0;
-		t_prev = frame_start;
+		float dt = frame.elapsed();
+		frame.start();
 		if (dt > 0.1) { dt = 0.1; }
 		if (dt > 0.0001) { fps_ema = fps_ema * 0.92 + (1.0 / dt) * 0.08; }
 
@@ -315,12 +317,11 @@ function shim_run_live(int bench_frames) -> int {
 		if (key == "esc") { break; }
 		if (key == "space") { key = " "; }   // gloom_host's poll_key delivers space as " "
 
-		int sim_t0 = clock_ms();
+		split.start();
 		var text = gloom_frame(dt, key, fps_ema, last_sim, last_draw);
-		last_sim = 1.0 * (clock_ms() - sim_t0);
-		int draw_t0 = clock_ms();
+		last_sim = split.delta() * 1000;
 		print(ESC + "[H" + text + ESC + "[0m", true);
-		last_draw = 1.0 * (clock_ms() - draw_t0);
+		last_draw = split.delta() * 1000;
 
 		if (bench) {
 			sim_sum += last_sim;
@@ -331,8 +332,8 @@ function shim_run_live(int bench_frames) -> int {
 		if (gloom_wants_quit()) { break; }
 
 		int budget = itrunc(1000.0 / SHIM_FPS);
-		int used = clock_ms() - frame_start;
-		if (used < budget) { sleep_ms(budget - used); }
+		float used = frame.elapsed() * 1000;
+		if (used < budget) { time::sleep_ms(budget - used); }
 	}
 	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", true);   // restore screen + cursor
 	if (bench && done > 0) {

@@ -2272,6 +2272,7 @@ public:
 			// registration on the shared class definition must serialize, both node kinds
 			for (const char* decl : {"array<K> ks = [];", "var ks = [];"}) {
 				auto e = make_engine();
+				e->execution_budget(0);
 				e->parallel_thread_count(8);
 				auto r = e->execute(std::string(R"(
 					class K { int a = 1; string s = "x"; K() {} K(int v) { a = v; } }
@@ -2374,6 +2375,7 @@ public:
 			std::vector<double> serial;
 			for (size_t workers : {1, 2, 8}) {
 				auto e = make_engine();
+				e->execution_budget(0);
 				e->parallel_thread_count(workers);
 				auto r = e->execute(src);
 				const auto& v = r.as_array();
@@ -2606,6 +2608,7 @@ public:
 			// must open the whole subtree (a shared literal string would race otherwise)
 			auto e = make_engine();
 			jai::stdlib::register_all(e);
+			e->execution_budget(0);
 			e->parallel_thread_count(8);
 			auto r = e->execute(R"(
 				class Leaf { int v = 0; string tag = "leaf"; Leaf() {} Leaf(int n) { v = n; } }

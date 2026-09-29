@@ -60,6 +60,11 @@ else()
     # MSVC's /fp:precise never contracts, so every build computes the same bits
     add_compile_options(-ffp-contract=off)
 
+    if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        # COFF's /bigobj twin: Debug template-heavy TUs overflow the 2^16 section limit
+        add_compile_options(-Wa,-mbig-obj)
+    endif()
+
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         add_compile_options(-O3)
         if(JAISCRIPT_NATIVE_ARCH)

@@ -123,10 +123,6 @@ else()
         -Wextra
         -Wpedantic
     )
-    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        # COFF's /bigobj twin: Debug template-heavy TUs overflow the 2^16 section limit
-        target_compile_options(jaiscript PRIVATE -Wa,-mbig-obj)
-    endif()
 endif()
 
 # Precompiled headers - parse heavy templates once instead of per-TU

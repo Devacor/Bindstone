@@ -135,7 +135,7 @@ void bind_observable_change_method(engine& a_engine, class_definition& class_def
 	};
 
 	class_def.add_method(observe_method_name, a_engine.guard_function(std::move(method_func), privilege::none), 1,
-		std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<script_value>() });
+		std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<script_value>() }, engine::map_cpp_type_to_param_info<script_value>());
 }
 
 template<typename ValueT>

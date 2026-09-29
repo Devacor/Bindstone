@@ -1025,13 +1025,15 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		}
 		case node_type::identifier_expr: {
 			free_identifier = true;
+			// A private binding may still name aggregate storage the later call changes through a parameter. Keep the
+			// outer call's own capture/binding until a hoist can carry its snapshot and lvalue on both guard paths.
+			if (std::find(copied_args.begin(), copied_args.end(), p.get()) != copied_args.end()) { out.why = "a name an outer call binds by reference or copies, ahead of the call"; return false; }
 			const bool global = static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX;
 			if (global || !private_local(p.get()) || args_call) {
 				// a global, a closure's by-reference capture or a reference: the call (the graft, or the fallback's callee, whatever the name binds
 				// by then) may write it, so its value is taken ahead of the call, as the real call's operand order has it; with calls in the
 				// arguments, a private local too (a leaf there may bind it by reference). A temp holds its value only as a scalar: an outer call
 				// that binds it by reference or copies it (an array, a map, an instance) binds the name itself
-				if (std::find(copied_args.begin(), copied_args.end(), p.get()) != copied_args.end()) { out.why = "a name an outer call binds by reference or copies, ahead of the call"; return false; }
 				out.spills.emplace_back(p, script_value_type::jai_any_type);
 				break;
 			}

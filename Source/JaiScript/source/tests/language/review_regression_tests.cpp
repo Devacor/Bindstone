@@ -1166,6 +1166,45 @@ public:
             expect_both(fn("array<var> g = [[1, 2], [3, 4]]; int x = 3; int y = 4; return g[1][0] - (x * y);"), "-9", "materialized two-level operand");
             expect_both(fn("array<int> a = [7]; int x = 3; int y = 4; int acc = 0; for (int i = 0; i < 3; i++) { acc += a[0] - (x * y) + i; } return acc;"), "-12", "materialized operand across loop iterations");
         });
+        // ---- demoreel CANYONRUN (vm): a field container subscripted by an inlined call materializes
+        // into its temp ahead of the call (op_operand_temp); the field's copy lived in a scratch local
+        // to the subscript reader, so the temp copied a dead value and the index read crashed ----
+        test("field_container_subscripted_by_an_inlined_call", [this]() {
+            const std::string src =
+                "function twice(int v) -> int { return v * 2; }\n"
+                "function ifloor(float v) -> int { return math::ifloor(v); }\n"
+                "class Canyon {\n"
+                "\tvar hmap = [1, 2, 3, 4];\n"
+                "\tarray<int> ahmap = [10, 20, 30, 40];\n"
+                "\tmap<int, int> m = {2: 7};\n"
+                "\tstring s = \"abcd\";\n"
+                "\tfloat posx = 1.5;\n"
+                "\tint ip = 1;\n"
+                "\tint probe() { return hmap[twice(ip)]; }\n"
+                "\tint typed() { return ahmap[twice(ip)]; }\n"
+                "\tint floored() { int g0 = hmap[ifloor(posx)]; return g0; }\n"
+                "\tint mixed() { return ahmap[((ifloor(posx) & 3) * 2) + (twice(ip) & 1)]; }\n"
+                "\tint keyed() { return m[twice(ip)]; }\n"
+                "\tstring letter() { return to_string(s[twice(ip)]); }\n"
+                "\tint looped() { int acc = 0; for (int k = 0; k < 3; k++) { acc += ahmap[twice(k) & 3]; } return acc; }\n"
+                "}\n"
+                "auto c = Canyon();\n"
+                "to_string(c.probe()) + \" \" + to_string(c.typed()) + \" \" + to_string(c.floored()) + \" \" + to_string(c.mixed()) + \" \" +\n"
+                "\tto_string(c.keyed()) + \" \" + c.letter() + \" \" + to_string(c.looped());\n";
+            for (bool use_vm : {false, true}) {
+                for (bool proofs : {true, false}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    jai::stdlib::register_all(*e);
+                    if (!proofs) { e->type_proofs(false); }
+                    std::string out;
+                    try { out = e->execute(src).to_string(); }
+                    catch (const std::exception& ex) { out = std::string("ERROR: ") + ex.what(); }
+                    check_eq(std::string("3 30 2 30 7 c 50"), out,
+                        std::string(use_vm ? "vm" : "interpreter") + (proofs ? "" : " (proofs off)"));
+                }
+            }
+        });
         // ---- A member store on a non-object receiver raised the bool `true` on the
         // interpreter (make_value(const char*) picked the bool overload) while the vm raised
         // the text; the caught value is the string on both. ----

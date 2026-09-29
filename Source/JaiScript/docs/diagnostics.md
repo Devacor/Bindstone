@@ -114,6 +114,7 @@ is the writability question.
 | host `[]` overloads | `No matching overload found for '[]' with <symbol> arguments` | `No overload of '[]' takes (string)` |
 | namespace function overloads | `No matching overload in namespace 'ns' for <symbol> arguments` | `No overload of 'f' takes (int)` |
 | script constructor overloads | `No constructor found with matching arguments` | `No constructor of 'Vec2' takes (string)` |
+| a class without a constructor called with arguments | `Default constructor takes no arguments` | `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same text when it knows the arguments' types) |
 | `: Base(...)` / ancestor initializer | `No matching constructor for ancestor class` | `No constructor of 'Base' takes (string)` |
 | `: this(...)` delegation | `No matching constructor found for this() delegation` | `No constructor of 'Vec2' takes (string)` |
 | C++ method overloads by count | `Method argument count mismatch: no overload accepts this number of arguments` | `No overload of 'dot' takes (int, string)` |
@@ -128,7 +129,7 @@ Untouched in this family (builtin arity texts are their own consistent shape):
 `push() takes exactly one argument`, `size() takes no arguments`, ... (`{name}() takes ...`,
 ~90 texts in `interpreter.cpp`'s builtin registry, shared by both backends),
 `math::pow expects 2 arguments` (`math_intrinsics.hpp`), `weak_from_this() takes no arguments`,
-`Constructor parameter count mismatch`, `Default constructor takes no arguments`,
+`Constructor parameter count mismatch`,
 `No constructor found for class 'C'` (the class has no constructor at all - a different fact),
 `Coroutine has no function to run`.
 

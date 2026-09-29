@@ -2347,9 +2347,11 @@ private:
             // implicit default + implicit copy
             bool copy_ok = args.size() == 1 &&
                 (args[0].is_unknown() || (args[0].kind == ctype::object_k && class_relation(args[0].cls, cls_name) != 0));
-            if (!args.empty() && !copy_ok) {
-                diag(diag_level::error, loc, "no constructor of '" + std::string(cls_name) + "' takes " +
-                     std::to_string(args.size()) + " argument(s)",
+            if (!args.empty() && !copy_ok) {   // the runtime's text (detail::overload_miss)
+                std::string list = "(";
+                for (size_t i = 0; i < args.size() && i < 6; ++i) { if (i) { list += ", "; } list += ctype_name(args[i]); }
+                if (args.size() > 6) { list += ", ..."; }
+                diag(diag_level::error, loc, "No constructor of '" + std::string(cls_name) + "' takes " + list + ")",
                      c.foreign ? 0 : c.decl->location.line, c.foreign ? 0 : c.decl->location.column);
             }
             return;

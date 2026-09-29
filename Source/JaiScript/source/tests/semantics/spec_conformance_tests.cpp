@@ -2182,6 +2182,23 @@ private:
 		ruling_signed_zero_keys();
 		ruling_typed_slice();
 		ruling_missing_key_compound();
+		ruling_constructorless_call_text();
+	}
+
+	void ruling_constructorless_call_text() {
+		test("a_constructorless_class_called_with_arguments_has_one_text", [this]() {
+			expect("runtime text", R"(
+				class Bare { int v = 1; }
+				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+				var one = 1; var two = "s";
+				t([]() { var b = Bare(one, two); });
+			)", "No constructor of 'Bare' takes (int, string)", check_mode::warn);
+			every_config("checker text", "No constructor of 'Bare' takes (int, string)", [](engine& e) {
+				auto r = e.check("class Bare { int v = 1; } var b = Bare(1, \"s\");");
+				for (const auto& d : r.diagnostics) { if (d.message.find("constructor") != std::string::npos) { return d.message; } }
+				return std::string("no diagnostic");
+			});
+		});
 	}
 
 	void ruling_typed_slice() {

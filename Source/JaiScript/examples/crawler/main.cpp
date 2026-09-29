@@ -399,12 +399,6 @@ int main(int argc, char** argv) {
 	eng->add_function("chr", [](jai::script_int code) -> std::string {
 		return std::string(1, static_cast<char>(code & 0x7F));
 	});
-	eng->add_function("sleep_ms", [&console](jai::script_int ms) {
-		if (console.quiet || console.input_was_scripted) { return; }
-#ifdef _WIN32
-		Sleep(static_cast<DWORD>(ms));
-#endif
-	});
 	// stdout that works even while frames own the screen (smoke summaries, death dumps)
 	eng->add_function("host_log", [](const std::string& line) {
 		std::fputs(line.c_str(), stdout);

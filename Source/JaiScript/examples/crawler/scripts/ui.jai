@@ -138,7 +138,7 @@ function animate_turn(int old_facing, int rot) -> void {
 		float ca = cos(ang);
 		float sa = sin(ang);
 		compose_frame(render_view(dx0 * ca - dy0 * sa, dx0 * sa + dy0 * ca));
-		sleep_ms(26);
+		time::sleep_ms(26);
 	}
 }
 
@@ -754,7 +754,7 @@ function victory_ceremony(int bx, int by) -> void {
 	for (auto frame : rainbow_frames(bx, by)) {
 		if (frame == "") { continue; }
 		draw(frame + ESC + "[J");
-		sleep_ms(55);
+		if (!G.smoke && !HOST_SCRIPTED) { time::sleep_ms(55); }
 	}
 }
 

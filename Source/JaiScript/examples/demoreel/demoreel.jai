@@ -158,12 +158,13 @@ function run_headless(int frames) -> int {
 	int hash = 0;
 	int total_bytes = 0;
 	int min_len = 0; int max_len = 0;
-	int t0 = clock_ms();
-	int render_ms = 0;
+	time::stopwatch run;
+	time::stopwatch render;
+	run.start();
 	for (int f = 0; f < frames; ++f) {
-		int f0 = clock_ms();
+		render.resume();
 		string frame = demo_frame(f * dt, dt, "", 0.0, 0.0, 0.0, 0.0);
-		render_ms += clock_ms() - f0;
+		render.pause();
 		int len = frame.size();
 		total_bytes += len;
 		if (f == 0 || len < min_len) { min_len = len; }
@@ -174,9 +175,9 @@ function run_headless(int frames) -> int {
 			write_bmp(OPT_DUMP + "_" + to_string(f) + ".bmp");
 		}
 	}
-	int elapsed = clock_ms() - t0;
+	int elapsed = run.elapsed() * 1000;
 	print(format("frames {0} | bytes {1} (len {2}..{3}) | stream hash {4} | {5} ms total, {6} ms/frame incl. hashing, {7} ms/frame render",
-		frames, total_bytes, min_len, max_len, hash, elapsed, (elapsed * 1.0) / frames, (render_ms * 1.0) / frames));
+		frames, total_bytes, min_len, max_len, hash, elapsed, (elapsed * 1.0) / frames, render.elapsed() * 1000 / frames));
 	return 0;
 }
 
@@ -216,21 +217,22 @@ function run_bench(int frames) -> int {
 	demo_boot(w, h, OPT_SEED, "vm", false, false);
 	int n = reel.nscenes;
 	print(format("demoreel bench: {0} frames per scene @ {1}x{2} cells ({1}x{3} px)", frames, w, h, h * 2));
-	int total = 0;
+	float total = 0.0;
+	time::stopwatch scene;
 	for (int s = 0; s < n; ++s) {
 		demo_boot(w, h, OPT_SEED, "vm", false, false);
 		demo_jump(s, 3.0);
 		int bytes = 0;
-		int t0 = clock_ms();
+		scene.start();
 		for (int f = 0; f < frames; ++f) {
 			string fr = demo_frame(3.0 + f * dt, dt, "", 0.0, 0.0, 0.0, 0.0);
 			bytes += fr.size();
 		}
-		int el = clock_ms() - t0;
+		float el = scene.elapsed() * 1000;
 		total += el;
-		print(format("{0} {1} | {2} ms/frame | {3} KB/frame", s + 1, reel.cur.name, (el * 1.0) / frames, bytes / frames / 1024));
+		print(format("{0} {1} | {2} ms/frame | {3} KB/frame", s + 1, reel.cur.name, el / frames, bytes / frames / 1024));
 	}
-	print(format("mean {0} ms/frame", (total * 1.0) / (frames * n)));
+	print(format("mean {0} ms/frame", total / (frames * n)));
 	return 0;
 }
 
@@ -401,16 +403,17 @@ function run_interactive() -> int {
 	int frame_no = 0;
 
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", skip_newline);
-	int start_ms = clock_ms();
-	int prev_ms = start_ms;
+	time::stopwatch show;
+	time::stopwatch pace;
 	float fps_ema = OPT_FPS;
 	float sim_ms = 0.0;
 	float draw_ms = 0.0;
 	int budget_ms = itrunc(1000.0 / OPT_FPS);
+	show.start();
 	while (true) {
-		int frame_start = clock_ms();
-		float dt = (frame_start - prev_ms) * 0.001;
-		prev_ms = frame_start;
+		float t = show.elapsed();
+		float dt = pace.elapsed();
+		pace.start();
 		if (dt > 0.1) { dt = 0.1; }
 		if (dt > 0.0001) { fps_ema = fps_ema * 0.92 + (1.0 / dt) * 0.08; }
 
@@ -418,18 +421,16 @@ function run_interactive() -> int {
 		if (key == "q" || key == "esc") { break; }
 		if (key == "tab" || key == "r") { key = ""; }   // single engine, no eval: unsupported here
 
-		float t = (frame_start - start_ms) * 0.001;
 		string frame = demo_frame(t, dt, key, fps_ema, sim_ms, draw_ms, 0.0);
-		int sim_end = clock_ms();
-		sim_ms = (sim_end - frame_start) * 1.0;
+		sim_ms = pace.delta() * 1000;
 		print(ESC + "[H" + frame + ESC + "[0m", skip_newline);
-		draw_ms = (clock_ms() - sim_end) * 1.0;
+		draw_ms = pace.delta() * 1000;
 
 		frame_no = frame_no + 1;
 		if (music != "" && frame_no % 30 == 0 && midi_status() == "stopped") { play_midi(music); }
 
-		int used = clock_ms() - frame_start;
-		if (used < budget_ms) { sleep_ms(budget_ms - used); }
+		float used = pace.elapsed() * 1000;
+		if (used < budget_ms) { time::sleep_ms(budget_ms - used); }
 	}
 	if (music != "") { stop_midi(); }
 	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", skip_newline);

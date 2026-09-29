@@ -307,10 +307,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         if (start > end) start = end;
 
-        script_value result = script_value::make_array(nullptr, ctx.get_engine());
-        auto& resultPtr = result.unchecked_get_array_storage()->values();
+        // the slice has the receiver's element type (a typed array's slice is typed)
+        auto self_type = self.get_type_info();
+        type_info_ptr element_type = self_type && self_type->base_type == script_value_type::jai_array_type ? self_type->element_type() : nullptr;
+        script_value result = script_value::make_array(element_type, ctx.get_engine());
+        auto& result_node = *result.unchecked_get_array_storage();
         for (script_int i = start; i < end; ++i) {
-            resultPtr.push_back(node->get(static_cast<size_t>(i), ctx.get_engine()).clone());
+            result_node.push(node->get(static_cast<size_t>(i), ctx.get_engine()).clone());
         }
         return result;
     }},

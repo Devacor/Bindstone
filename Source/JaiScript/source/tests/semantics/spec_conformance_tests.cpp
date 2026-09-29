@@ -2180,6 +2180,20 @@ private:
 		ruling_to_string_builtin();
 		ruling_host_callbacks();
 		ruling_signed_zero_keys();
+		ruling_typed_slice();
+	}
+
+	void ruling_typed_slice() {
+		test("a_slice_of_a_typed_array_keeps_its_element_type", [this]() {
+			expect("typed slice", R"(
+				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
+				array<int> a = [1, 2, 3];
+				array<string> s = ["x", "y"];
+				var v = [1, "two", 3.0];
+				t([]() { a.slice(0, 2).push("x"); return 1; }) + "|" + t([]() { array<int> sl = a.slice(1, 3); return sl.size(); }) + "|" +
+				t([]() { s.slice(0, 1).push(5); return 1; }) + "|" + t([]() { var sl = v.slice(0, 2); sl.push("ok"); return sl.size(); });
+			)", "raised:Cannot push 'string' to array<int>|2|raised:Cannot push 'int' to array<string>|3", check_mode::warn);
+		});
 	}
 
 	void ruling_signed_zero_keys() {

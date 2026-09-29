@@ -323,7 +323,7 @@ public:
                                         }
                                         continue;   // a host property that cannot read stays out of the payload
                                     }
-                                    if (auto* backend = eng->get_execution_backend(); backend && backend->is_unwinding()) {
+                                    if (eng->backend_unwinding()) {
                                         return;   // the getter threw: the in-flight exception leaves to_binary
                                     }
                                     property_names.push_back(prop_name);
@@ -1011,7 +1011,7 @@ private:
                                                         stored.error() == make_error_code(runtime_error_code::cpp_exception))) {
                                             throw runtime_error(class_eng->format_error(stored));
                                         }
-                                        if (auto* backend = class_eng->get_execution_backend(); backend && backend->is_unwinding()) {
+                                        if (class_eng->backend_unwinding()) {
                                             return constructed_obj;   // the setter threw: the in-flight exception leaves the load
                                         }
                                     }

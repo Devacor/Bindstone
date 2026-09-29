@@ -862,6 +862,7 @@ namespace jai {
         backend_type get_backend_type() const;
         std::string get_backend_name() const;
         execution_backend* get_execution_backend() const;
+        bool backend_unwinding() const;
 
         // Engine-owned script namespace registry (namespace_id -> data); survives across backends
         std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();

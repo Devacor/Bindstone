@@ -556,7 +556,7 @@ private:
 							try { throw "A"; } catch (e) { o += e; }
 							fallthrough;
 						case 1:
-							try { throw 7; } catch (e) { o += to_string(e + 1); }
+							try { throw 7; } catch (e) { o += to_string(e.value + 1); }
 							fallthrough;
 						case 2:
 							o += "c";
@@ -592,8 +592,8 @@ private:
 		});
 		test("a_catch_variable_is_captured_and_survives_yields", [this]() {
 			expect("catch capture", R"(
-				coroutine int g() { try { throw 3; } catch (e) { yield e; var f = [=]() { return e * 2; }; yield f(); yield e + 1; } }
-				function mk() { var f = null; try { throw 5; } catch (e) { f = [&]() { return e * 2; }; } return f; }
+				coroutine int g() { try { throw 3; } catch (e) { yield e.value; var f = [=]() { return e.value * 2; }; yield f(); yield e.value + 1; } }
+				function mk() { var f = null; try { throw 5; } catch (e) { f = [&]() { return e.value * 2; }; } return f; }
 				function run() -> string { string o = ""; for (auto v : g()) { o += "" + v + ","; } var f = mk(); o += "" + f(); return o; }
 				run();
 			)", "3,6,4,10");

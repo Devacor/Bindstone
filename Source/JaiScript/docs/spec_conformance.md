@@ -25,7 +25,7 @@ and no test pins a reading of it.
   error texts, checker verdicts, instance-variable overlays, file locations, privilege order,
   guide examples, parallel contracts, native exceptions, access control, and the rulings on
   lambda captures of globals, the order of a compound or subscript store, `auto`'s static type and
-  call arguments).
+  call arguments, and the rulings of 2026-09-28).
 - `source/tests/vm/spec_attack_tests.cpp`, suite "Spec Attacks": the VM's fast paths under
   pressure (raises inside cell blocks and grafts, coroutines over fast paths, host callbacks
   re-entering mid-loop, redefinition and hot reload mid-loop and mid-recursion, callees that
@@ -35,9 +35,8 @@ and no test pins a reading of it.
 
 Every row runs against one expected string on the interpreter and the VM, with type proofs on
 and off, with the VM's IR passes off, and, in a build that carries the miss-injection lever
-(`x64-Release MISS`), with injected cell misses every one and every three blocks. One group is
-compiled out and never cited as a pin: `known_bugs` (`JAISCRIPT_SPEC_KNOWN_BUGS`, a derived
-expectation the runtime does not meet).
+(`x64-Release MISS`), with injected cell misses every one and every three blocks. No group is
+compiled out.
 
 ## Verdicts
 
@@ -56,7 +55,7 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 
 | Section | Claims | BEFORE pinned | BEFORE thin | BEFORE none | BEFORE contradicted | AFTER pinned | AFTER thin | AFTER none | AFTER contradicted |
 |---|---|---|---|---|---|---|---|---|---|
-| 1. CLAUDE.md language rules, integer_semantics.md, char_semantics.md (C-) | 362 | 321 | 24 | 16 | 1 | 345 | 13 | 2 | 2 |
+| 1. CLAUDE.md language rules, integer_semantics.md, char_semantics.md (C-) | 362 | 321 | 24 | 16 | 1 | 346 | 13 | 2 | 1 |
 | 2. diagnostics.md, static_checking.md, type_proofs_design.md (D-, S-, P-) | 530 | 375 | 49 | 101 | 5 | 423 | 38 | 64 | 5 |
 | 3. reference_model, namespaces, global_shadowing, EXCEPTION_DESIGN, closures, LOCAL_VARIABLES, script_extensible (R, N, G, E, L, V, X) | 315 | 246 | 20 | 47 | 2 | 289 | 10 | 15 | 1 |
 | 4. parallel_design, parallel_prove_or_serial, invariants, typed_regions_design, typed_array_design (PD-, PS-, I-, TR-, TA-) | 177 | 134 | 28 | 10 | 5 | 139 | 23 | 10 | 5 |
@@ -64,7 +63,8 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 | 6. Script the runtime calls, user operator=, error texts, throw expressions, sort, range-for (CB-) | 38 | 2 | 6 | 30 | 0 | 32 | 5 | 1 | 0 |
 | 7. Access control (AC-) | 14 | 3 | 2 | 7 | 2 | 13 | 1 | 0 | 0 |
 | 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions (RL-) | 18 | 3 | 1 | 11 | 3 | 18 | 0 | 0 | 0 |
-| **Total** | **2568** | **1955** | **283** | **296** | **34** | **2170** | **224** | **145** | **29** |
+| 9. The rulings of 2026-09-28 (RL2-) | 25 | 0 | 0 | 24 | 1 | 25 | 0 | 0 | 0 |
+| **Total** | **2593** | **1955** | **283** | **320** | **35** | **2196** | **224** | **145** | **28** |
 
 ## Script the runtime calls
 
@@ -96,25 +96,8 @@ error through `engine::report_script_error` and returns a default, and the membe
 
 ## Known deviations
 
-Derived expectations the runtime does not meet today. Each is pinned red in the compiled-out
-`known_bugs` group (`JAISCRIPT_SPEC_KNOWN_BUGS`), identical on both backends.
-
-1. **A callee of a top-level block sees the block's declaration.** `docs/global_shadowing.md`: a `{}` block
-   declaration shadows for the block and a function called from inside it still sees the outer binding.
-   ```
-   var G = 1; function g() { return G; }
-   { var G = 5; print(g()); }          // prints 5; the spec says 1
-   ```
-   Inside a function body the rule holds (pinned by `scopes_and_units`); the top-level block (and a top-level
-   `if` or `for` body) leaks.
-2. **A typed range-for variable binds each element unconverted.** `CLAUDE.md`, one conversion table for every
-   typed slot (a declaration); C++ converts each element.
-   ```
-   var a = [1.5, 2.5]; for (int v : a) { print(type_of(v)); }      // float, float; the spec says int
-   var b = ["x"];      for (int v : b) { }                          // runs; the spec says Cannot initialize 'v' (declared int) with string
-   ```
-   The declared type is enforced on stores inside the body (`v = "s"` raises `Cannot assign string to 'v'
-   (declared int)`); only the loop's own binding skips the table.
+None. Every derived expectation holds on both backends; the rulings of 2026-09-28 (section 9) settled the last two
+(a callee of a top-level block, a typed range-for variable).
 
 ## Execution census
 
@@ -157,165 +140,10 @@ of `as_block` (the parser wraps every loop body).
 
 ## Open questions
 
-The specification is silent, or two documents disagree. Each entry shows the current behavior, identical on
-the interpreter and the VM unless it says otherwise. No test pins a reading of these.
-
-**Q1. Bitwise compound assignment.** `CLAUDE.md` lists `& | ^ << >>` "and compound assigns"; `docs/grammar.md`
-omits `&= |= ^= <<= >>=` deliberately, and the guide agrees with the grammar.
-```
-int x = 6; x &= 3;
-```
-Today: a parse error. (`bitwise_compound_assignment_forms_are_not_in_the_grammar` pins the grammar's reading;
-ledger row C-044 is marked contradicted.)
-
-**Q2. `[this]` captures a copy of the instance.** C++ `[this]` captures the object by reference; the closures
-document does not say which.
-```
-class C { int v = 1; int f() { auto l = [this]() { this.v = 8; }; l(); return v; } }
-C().f();
-```
-Today: 1 (the lambda writes a copy; `[this]() { v = 9; }` likewise). Reads see the instance's value at capture.
-
-**Q3. `contains`, `index_of` and `has` compare by identity.** `==` on instances is memberwise with a user
-`operator==` taking precedence (`CLAUDE.md`); the membership builtins do not use it.
-```
-class E { int v = 0; E(int x) { v = x; } bool operator==(E o) { return v == o.v; } }
-[E(1)].contains(E(1));   // E(1) == E(1) is true
-```
-Today: `false` and `index_of` gives -1.
-
-**Q4. The `to_string(x)` builtin ignores a user `to_string()`.** String `+` uses the class's `to_string()`.
-```
-class T { string to_string() { return "t!"; } }
-print(to_string(T()) + " " + ("" + T()));
-```
-Today: `[object] t!`.
-
-**Q5. A script callback behind a `std::function` reports instead of propagating.** A host function that takes a
-`std::function` (and a signal emitting into script receivers) runs a script lambda through
-`convert_script_function`, which reports an error through `engine::report_script_error` and returns a default.
-```
-// host: eng.add_function("apply", [](std::function<int(int)> f) { return f(3); });
-apply([](int x) { int z = 0; return x / z; });
-```
-Today: `apply` returns 0, the error reaches the engine's error sink, and the script continues. The engine's
-comment gives the reason (a throw into a game call site that emits a signal is unsafe); the question is whether a
-host call made from script should propagate.
-
-**Q6. `from_json` with a raising default constructor.**
-```
-class C { int n = 1; C() { int z = 0; int q = 1 / z; } }
-type_of(from_json("{\"_type_\":\"C\",\"n\":3}"));
-```
-Today: `map` (the reconstruction falls back to the raw map; the constructor's error is not seen).
-
-**Q7. A JSON round trip drops a `char` field and an int-keyed map field.** `to_json` writes a char as a
-one-character string and a map key as a string; `from_json` hands those to the synthesized field stores, which
-refuse them, and the members keep their constructed values.
-```
-class K { char c = 'a'; map<int, int> m = {}; }
-K k = K(); k.c = 'z'; k.m[5] = 6;
-var back = from_json(to_json(k));     // {"_type_":"K","c":"z","m":{"5":6}}
-```
-Today: `back.c == 'a'` and `back.m.size() == 0`, silently.
-
-**Q8. A bare `throw;` with nothing to rethrow, directly in a top-level `try`.**
-```
-try { throw; } catch (e) { print("caught " + e); }
-```
-Today: the catch does not see it; the program ends with `No exception to re-throw`. The same statement inside a
-function called from the `try` is caught with that text.
-
-**Q9. A compound assignment's operand error on an element has its own text.**
-```
-int x = 5; var s = "s"; x -= s;          // Cannot apply '-=' to int and string
-F f = F(); f.n -= s;                     // Cannot apply '-=' to int and string
-array<int> a = [5]; a[0] -= s;           // Right operand must be numeric
-```
-`/=` by zero reads `Division by zero` on a variable, a field and an element, while `x / 0` reads
-`Division by zero in integer operation`.
-
-**Q10. A derived value in a base-typed slot keeps its class.** C++ slices.
-```
-class B { int a = 1; } class D : B { int d = 2; }
-B b = D(); type_of(b) + " " + type_of(cast<B>(D()));
-```
-Today: `D D`.
-
-**Q11. `0.0` and `-0.0` are distinct map keys while `0.0 == -0.0`.** (The map orders floats by `std::strong_order`.)
-```
-var m = {}; m[0.0] = 1; m[-0.0] = 2; m.size();
-```
-Today: 2.
-
-**Q12. A `var` copy of a typed array.** "Nothing demotes silently" (`CLAUDE.md`), but `var` takes any value.
-```
-array<int> a = [1]; var v = a; v.push("s"); v.size();
-```
-Today: 2 (the copy is an `array<var>`).
-
-**Q13. A store through a `var&` alias into a typed local.**
-```
-int x = 1; var& r = x; var s = "s"; r = s; type_of(x);
-```
-Today: `string` (the alias stores without the referent's declared type).
-
-**Q14. A compound on a missing map key.** C++ `operator[]` inserts a value-initialized entry first.
-```
-var m = {}; m["k"] += 1;
-```
-Today: raises `Left operand must be numeric` (reads do not insert).
-
-**Q15. `slice` of a typed array.**
-```
-array<int> a = [1, 2, 3]; var s = a.slice(0, 2); s.push("x");
-```
-Today: accepted (the slice is an `array<var>`).
-
-**Q16. `switch` matching across numeric kinds.**
-```
-switch (1) { case 1.0: print("hit"); default: print("miss"); }
-```
-Today: `miss`, though `1 == 1.0` is true.
-
-**Q17. A constructor-less class called with arguments: two texts.**
-```
-class Bare { int v = 1; } var b = Bare(1, 2);
-```
-Today: the runtime raises `Default constructor takes no arguments`; the checker reports `no constructor of 'Bare'
-takes 2 argument(s)`.
-
-**Q18. An `int&` parameter bound to a `float` variable.**
-```
-function set(int& a) { a = 3.7; } float u = 1.5; set(u); u;
-```
-Today: 3.7 (reference parameters take any lvalue and store without the declared element type).
-
-**Q19. An `auto` field.** The static-type rule for `auto` names declarations; a class field spelled `auto` is not
-typed by the checker.
-```
-var src = [1];
-class A { auto f = src[0]; }
-A a = A(); a.f = "s";
-```
-Today: raises `Cannot assign string to field 'f' of A (declared int)` (the field locks to the value's kind), where a
-local `auto f = src[0]` is a `var`.
-
-**Q20. An `auto` from a mixed int/float ternary.** C++ gives `c ? 1 : 2.5` the type `double`; the checker gives it
-no single static type.
-```
-bool c = true; auto m = c ? 1 : 2.5; m = "s";
-```
-Today: accepted (`m` is a `var`, with a warning that says so).
-
-**Q21. A range-for `auto` over a `var` container.** The rule names `auto x = e`; a loop variable takes each element.
-```
-var a = [1, 2]; for (auto x : a) { x = "s"; }
-```
-Today: each `x` locks to the element's kind (`Cannot assign string to 'x' (declared int)`).
+Dev ruled on every open question on 2026-09-28; section 9 pins each ruling on both backends.
 
 **Rows marked contradicted in the ledger.** Registered tests pin the other reading of these claims; each row
-names the tests: C-044, C-326, D-164, D-221, S-207, S-218, S-283, R33, PD-2, PD-26, PD-40, PD-49, PD-50,
+names the tests: C-326, D-164, D-221, S-207, S-218, S-283, R33, PD-2, PD-26, PD-40, PD-49, PD-50,
 G02-035, G02-038, G03-013b, G03-024a, G03-028, G06-024, G09-178, G09-189, G10-063, G12-002, G13-111, RF-022,
 RF-043, GR-087, GR-089, GR-090.
 
@@ -370,7 +198,7 @@ Source codes: CL = `Source/JaiScript/CLAUDE.md`, IS = `docs/integer_semantics.md
 | C-041 | Ternary `?:` | CL Operators | language/operator_tests.hpp:ternary_operator; language/operator_tests.hpp:a_ternary_initializer_lands_each_arm_in_the_declaration | yes | pinned |
 | C-042 | `++`/`--` on identifiers: postfix yields the old value, prefix the new | CL Operators | language/operator_tests.hpp:increment_decrement | yes | pinned |
 | C-043 | Arithmetic compound assigns `+= -= *= /= %=` | CL Operators | language/operator_tests.hpp:compound_assignments; semantics/strong_types_tests.cpp:compound_modulo_scalar_targets | yes | pinned |
-| C-044 | Bitwise compound assigns `&= \|= ^= <<= >>=` (covered by "and compound assigns") | CL Operators | semantics/spec_conformance_tests.cpp:bitwise_compound_assignment_forms_are_not_in_the_grammar (pins `x &= 3` as a parse error, following docs/grammar.md assignmentOperator, which omits the bitwise compound forms deliberately; CLAUDE.md's operator list reads them as supported, so the docs disagree) | no | contradicted |
+| C-044 | Bitwise compound assigns `&= \|= ^= <<= >>=` (covered by "and compound assigns") | CL Operators | semantics/spec_conformance_tests.cpp:bitwise_compound_assignments_are_x_op_equals_y_with_x_evaluated_once | no | pinned |
 | C-045 | if/else, while, C-style for, break/continue | CL Control flow | language/control_flow_tests.cpp:if_else_branches; language/control_flow_tests.cpp:while_loop_with_break; language/control_flow_tests.cpp:for_loop_with_continue | yes | pinned |
 | C-046 | `switch` is break-by-default: a matched case never runs the next | CL Control flow | semantics/spec_conformance_tests.cpp:catch_variables_inside_switch_cases_with_fallthrough; language/switch_statement_tests.cpp:basic_integer_switch; language/switch_statement_tests.cpp:switch_with_strings | yes | pinned |
 | C-047 | `fallthrough;` falls into the next case, through to default | CL Control flow | semantics/spec_conformance_tests.cpp:catch_variables_inside_switch_cases_with_fallthrough; language/switch_statement_tests.cpp:switch_with_fallthrough | yes | pinned |
@@ -1716,7 +1544,7 @@ Source codes: pd = `docs/parallel_design.md`, ps = `docs/parallel_prove_or_seria
 | TA-2 | Stage 0: `var a=["s"]; array<int> b=a` raises; mixed raises; floats truncate; ints widen; the source is unchanged. | ta Stage-0 | semantics/strong_types_tests.cpp:typed_array_decl_validates_elements; semantics/strong_types_tests.cpp:typed_array_assign_validates_elements; semantics/strong_types_tests.cpp:typed_array_field_validates_elements | partial | pinned |
 | TA-3 | Typed literal initializers convert (`array<float> a=[1,2,3]`, `array<int> a=[1.5]`). | ta Stage-0 | semantics/strong_types_tests.cpp:typed_array_literal_init_converts_elements | partial | pinned |
 | TA-4 | Map analog: string values into `map<string,int>` raise; values convert. | ta Stage-0 | semantics/strong_types_tests.cpp:typed_map_decl_validates_values | no | pinned |
-| TA-5 | Demote on stamp: `var v = typed; v.push("s")` works; the source is kept. | ta soundness | semantics/strong_types_tests.cpp:typed_storage_value_semantics_and_laundering; semantics/strong_types_tests.cpp:typed_storage_engages_raw_buffers; semantics/strong_types_tests.cpp:object_buffer_behaviour | partial | pinned |
+| TA-5 | A `var` copy keeps a typed array typed: `var v = typed; v.push("s")` raises like the source, `v = "s"` rebinds, the source is kept. | ta soundness; ruling 2026-09-28 | semantics/strong_types_tests.cpp:typed_storage_value_semantics_and_laundering; semantics/strong_types_tests.cpp:typed_storage_engages_raw_buffers; semantics/strong_types_tests.cpp:object_buffer_behaviour; semantics/spec_conformance_tests.cpp:a_var_holding_a_copy_of_a_typed_array_keeps_the_typed_representation | no | pinned |
 | TA-6 | `var&` keeps the tag, so stores through the alias are enforced. | ta soundness | semantics/strong_types_tests.cpp:typed_array_var_ref_keeps_enforcement; semantics/strong_types_tests.cpp:typed_storage_value_semantics_and_laundering | no | pinned |
 | TA-7 | Element lvalues: increments and compounds through a reference commit; `int&` through an element converts. | ta Element lvalues | semantics/strong_types_tests.cpp:typed_storage_iteration_and_refs; semantics/strong_types_tests.cpp:compound_typed_element_and_ref_targets | partial | pinned |
 | TA-8 | Out of bounds is a hard error; no grow-on-write; per-touch re-check ("removed array element"). | ta Element lvalues | vm/spec_attack_tests.cpp:a_callee_shrinks_the_array_the_loop_indexes; vm/spec_attack_tests.cpp:an_element_alias_whose_element_a_callee_removed_raises_the_removed_element_text; semantics/strong_types_tests.cpp:typed_storage_errors_match_plain | partial | pinned |
@@ -2992,10 +2820,46 @@ now pin the ruling.
 | RL-09 | An error in the right side comes before the target's errors (a null receiver, a missing namespace member) | ruling; diag | spec:a_right_side_error_comes_before_the_targets; language/review_regression_tests.cpp:member_compound_order_pinned | no | pinned |
 | RL-10 | `a[j] op= e` and `a[j] = e` evaluate `e` before `a` and `j` (arrays and maps; a right side that writes the element or the index variable) | ruling; diag; inv 12 | spec:a_subscript_compound_evaluates_its_right_side_before_the_container_and_index | partial | pinned |
 | RL-11 | An error in the right side comes before the subscript's errors (a null container, an index out of bounds) | ruling; diag | spec:a_right_side_error_comes_before_the_subscripts | no | pinned |
-| RL-12 | `auto x = e` whose static type is `var` or unknown makes `x` a `var`: an `array<var>` element, a `var` local, a `var`-returning call, a mixed-branch ternary, in every check mode | ruling; sc; inv 14; 02 | spec:an_auto_from_a_var_or_unknown_static_type_is_a_var | no | pinned |
+| RL-12 | `auto x = e` whose static type is `var` or unknown makes `x` a `var`: an `array<var>` element, a `var` local, a `var`-returning call, a mixed-branch ternary other than int with float, in every check mode | ruling; sc; inv 14; 02 | spec:an_auto_from_a_var_or_unknown_static_type_is_a_var | no | pinned |
 | RL-13 | `auto x = e` whose static type is known locks to it (`auto n = 5; n = 1.5` is 1; a typed element; a class) | ruling; sc; 02 | spec:an_auto_from_a_known_static_type_keeps_that_type; semantics/strong_types_tests.cpp:auto_int_truncates_float | no | pinned |
 | RL-14 | The same holds inside counted loops on every lane (a typed element keeps the lock, a `var` element does not) | ruling; inv 14 | spec:an_auto_in_a_counted_loop_follows_the_static_type_on_every_lane | no | pinned |
 | RL-15 | A `.jaibite` keeps the `auto` spelling and the loaded unit decides again, with the same result | inv 14 | spec:a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load | no | pinned |
-| RL-16 | An `auto` from a mixed-branch ternary warns that it is a `var`, naming both branch types | sc Precision | semantics/static_check_tests.cpp:warn_auto_from_mixed_branch_ternary | no | pinned |
+| RL-16 | An `auto` from a mixed-branch ternary (other than int with float) warns that it is a `var`, naming both branch types | sc Precision | semantics/static_check_tests.cpp:warn_auto_from_mixed_branch_ternary | no | pinned |
 | RL-17 | A by-value argument takes its value when it is evaluated: a later argument that writes the element, map entry or nested element it read does not change what the callee receives (untyped and typed parameters, a method, a constructor, inside a counted loop) | ruling; inv 13; 04 | spec:by_value_arguments_capture_their_values_left_to_right; the suite `Call Argument Capture` | partial | pinned |
 | RL-18 | A bound host setter, getter, method or operator that throws raises the catchable runtime error with its text where it is called (top-level `try`, a function's own `try`, a compound store, an operand the operator cannot take), and the store leaves the member unchanged | exc addendum; 05 | spec:a_bound_accessor_method_or_operator_that_throws_is_catchable_where_it_is_called | no | pinned |
+
+## 9. The rulings of 2026-09-28
+
+Source codes: ruling Qn = Dev's ruling on open question n (2026-09-28), gr = `docs/grammar.md`, cc = `docs/closures_and_captures.md`,
+diag = `docs/diagnostics.md`, exc = `docs/EXCEPTION_DESIGN.md`, ref = `docs/reference_model.md`, ns = `docs/namespaces.md`,
+gs = `docs/global_shadowing.md`, sc = `docs/static_checking.md`, ta = `docs/typed_array_design.md`, embedding 08 = the serialization
+chapter, 02/04/05/07/09 = guide chapters. Pins are relative to `Source/JaiScript/source/tests`; `spec:` is
+`semantics/spec_conformance_tests.cpp`. Every row runs on the interpreter and the VM, with type proofs on and off.
+
+| ID | Claim | Source | Pinned by | Fuzzer | Verdict |
+|---|---|---|---|---|---|
+| RL2-01 | `&= \|= ^= <<= >>=` on every lvalue (a local, a field, this's field, a static, a namespace variable, an element, a map entry): `x op= y` is `x = x op y` with `x` evaluated once, the stored value is the expression's value, a non-integer operand raises the compound's text, the strict checker rejects a known one | ruling Q1; gr; 04 | spec:bitwise_compound_assignments_are_x_op_equals_y_with_x_evaluated_once | no | pinned |
+| RL2-02 | `[this]` captures the instance by reference: a write through the lambda is the object's | ruling Q2; cc; 07 | spec:a_this_capture_is_the_instance_itself | no | pinned |
+| RL2-03 | `contains`, `index_of` and `has` compare with the language's `==` (memberwise, a user `operator==`) | ruling Q3; 09 | spec:contains_index_of_and_has_use_the_languages_equality | no | pinned |
+| RL2-04 | The `to_string(x)` builtin speaks with the class's own `to_string()`; its error or throw is the call's | ruling Q4 | spec:the_to_string_builtin_uses_a_classs_own_to_string | no | pinned |
+| RL2-05 | A script callback behind a host `std::function` propagates its error or throw to the host, and back to the script as the host call's error | ruling Q5; exc | spec:a_script_callback_behind_a_host_function_propagates_its_error; spec:a_host_calling_a_script_callback_sees_the_error_as_an_exception | no | pinned |
+| RL2-06 | `from_json` constructs a known `_type_` as `Name()` would; a raising constructor fails the load with its error | ruling Q6; embedding 08 | spec:from_json_propagates_a_raising_constructor | no | pinned |
+| RL2-07 | JSON carries a `char` as `{"$char": n}` and a map whose keys are not all strings as `{"$map": [[k, v], ...]}`; `from_json` reads both back, any other shape stays a map | ruling Q7; embedding 08 | spec:a_json_round_trip_keeps_chars_and_non_string_map_keys; containers/map_tests.cpp:map_key_immutable_battery | no | pinned |
+| RL2-08 | A bare `throw;` with no active exception raises the catchable `Bare throw with no active exception thrown.` | ruling Q8; diag | spec:a_bare_throw_with_nothing_active_is_a_catchable_runtime_error | no | pinned |
+| RL2-09 | A compound assignment's operand error has one text at every destination (`Cannot apply 'op=' to X and Y`) | ruling Q9; diag | spec:a_compound_operand_error_has_one_text_at_every_destination | no | pinned |
+| RL2-10 | A derived value in a base-typed slot keeps its class (a declaration, a copy, a by-value parameter, an `array<B>` element, `cast<B>`): the deliberate deviation from C++ slicing | ruling Q10; 07 | spec:a_derived_value_in_a_base_typed_slot_keeps_its_class | no | pinned |
+| RL2-11 | `0.0` and `-0.0` are one map key; NaN keeps its total order; `==`, `<=>` and `map_key_hash` agree | ruling Q11; CL | spec:zero_and_negative_zero_are_one_map_key | no | pinned |
+| RL2-12 | A `var` holding a copy of a typed array keeps the typed representation; the variable stays a `var` | ruling Q12; ta; 09 | spec:a_var_holding_a_copy_of_a_typed_array_keeps_the_typed_representation; semantics/strong_types_tests.cpp:typed_storage_value_semantics_and_laundering | no | pinned |
+| RL2-13 | A store through a `var&` (or any reference to a plain variable) obeys the variable's declared type | ruling Q13; ref | spec:a_store_through_a_reference_obeys_the_variables_declared_type; semantics/strict_gaps_pending_tests.cpp:rules_456_warn_regions_and_unchecked_runtime | no | pinned |
+| RL2-14 | A compound on a missing key of a typed-value map inserts the value type's default first; a wrong key type raises the key text | ruling Q14; C++ operator[] | spec:a_compound_on_a_missing_key_starts_from_the_value_types_default | no | pinned |
+| RL2-15 | `slice` of a typed array has the receiver's element type | ruling Q15; 09 | spec:a_slice_of_a_typed_array_keeps_its_element_type | no | pinned |
+| RL2-16 | A `switch` case matches when the language's `==` holds (`switch (1)` matches `case 1.0`, a user `operator==`) | ruling Q16; gr; 05 | spec:a_switch_case_matches_when_the_languages_equality_holds | no | pinned |
+| RL2-17 | A class without a constructor called with arguments raises `No constructor of 'X' takes (types)` on both backends and in the checker | ruling Q17; diag | spec:a_constructorless_class_called_with_arguments_has_one_text | no | pinned |
+| RL2-18 | A `T&` parameter binds only a `T` (a class: `T` or a subclass); the strict checker reports a known mismatch | ruling Q18; ref | spec:a_typed_reference_parameter_binds_only_its_own_type | no | pinned |
+| RL2-19 | An `auto` class field takes its initializer's static type (ruling 4 for fields) | ruling Q19; sc; 02 | spec:an_auto_field_takes_its_initializers_static_type | no | pinned |
+| RL2-20 | An `auto` from an int/float ternary is `float`; every other mixed ternary stays a `var` | ruling Q20; sc; 02 | spec:an_auto_initialized_from_an_int_float_ternary_is_float; semantics/static_check_tests.cpp:warn_auto_from_mixed_branch_ternary | no | pinned |
+| RL2-21 | An `auto` range-for variable over elements without a static type is a `var` | ruling Q21; 05 | spec:a_typed_range_for_variable_takes_each_element_as_its_declaration_would | no | pinned |
+| RL2-22 | A typed range-for variable takes each element as its declaration would: by value through the assignment table (an unconvertible element raises the declaration's text), by reference only an element that holds a `T` | ruling; gr; 05 | spec:a_typed_range_for_variable_takes_each_element_as_its_declaration_would; vm/pilot_cells_tests.cpp:a_range_for_over_an_array_is_a_block | no | pinned |
+| RL2-23 | A native exception raised inside a non-call instruction is caught by the running function's own `try` | ruling; exc | spec:a_native_exception_is_caught_by_the_running_functions_own_try | no | pinned |
+| RL2-24 | A function called from inside a block sees the binding of the scope it was declared in (a `{}`, `if`, `for`, range-for or `catch` body); one declared inside the block keeps the block's names | ruling; gs | spec:a_callee_of_a_top_level_block_sees_the_outer_binding | no | pinned |
+| RL2-25 | A static member or a namespace variable binds a reference parameter and a reference declaration (`S::s`, `ns::x` are lvalues) | C++; ref; ns | spec:a_static_member_and_a_namespace_variable_bind_a_reference_parameter; foundry/suite_namespaces.cpp:namespace_variable_binds_a_reference_by_its_qualified_name | no | pinned |

@@ -2174,6 +2174,25 @@ private:
 				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::off);
 		});
 		ruling_switch_equality();
+		ruling_membership_equality();
+	}
+
+	void ruling_membership_equality() {
+		test("contains_index_of_and_has_use_the_languages_equality", [this]() {
+			expect("membership ==", R"(
+				class E { int v = 0; E(int x) { v = x; } bool operator==(E o) { return v == o.v; } }
+				class P { int a = 1; int b = 2; }
+				class B { bool operator==(B o) { throw "cmp"; return true; } }
+				var es = [E(1), E(2)];
+				var ps = [P()];
+				var nums = [1, 2.5, "x", [1, 2]];
+				array<int> ints = [3, 4];
+				string r = "" + es.contains(E(2)) + es.index_of(E(2)) + es.has(E(3)) + "|" + ps.contains(P()) + "|" +
+				           nums.index_of(2.5) + nums.contains(1.0) + nums.index_of([1, 2]) + ints.index_of(4.0) + ints.contains(5);
+				string t = "none"; try { [B()].contains(B()); } catch (e) { t = "raised:" + e; }
+				r + "|" + t;
+			)", "true1false|true|1true31false|raised:cmp", check_mode::warn);
+		});
 	}
 
 	void ruling_switch_equality() {

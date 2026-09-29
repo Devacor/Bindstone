@@ -231,39 +231,30 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "index_of() takes exactly one argument");
         }
-        const script_array* node = self.unchecked_array_node();
-        for (size_t i = 0; i < node->size(); ++i) {
-            if (node->get(i, ctx.get_engine()) == args[0]) {
-                return ctx.make_value(static_cast<script_int>(i));
-            }
-        }
-        return ctx.make_value(static_cast<script_int>(-1));
+        auto found = detail::array_index_of_equal(ctx, self, args[0]);   // the language's ==
+        if (!found) { return found.error_value(); }
+        if (!found.value()) { return ctx.make_value(); }
+        return ctx.make_value(*found.value());
     }},
 
         {symbolizer->intern("has"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "has() takes exactly one argument");
         }
-        const script_array* node = self.unchecked_array_node();
-        for (size_t i = 0; i < node->size(); ++i) {
-            if (node->get(i, ctx.get_engine()) == args[0]) {
-                return ctx.make_value(true);
-            }
-        }
-        return ctx.make_value(false);
+        auto found = detail::array_index_of_equal(ctx, self, args[0]);   // the language's ==
+        if (!found) { return found.error_value(); }
+        if (!found.value()) { return ctx.make_value(); }
+        return ctx.make_value(*found.value() >= 0);
     }},
 
         {symbolizer->intern("contains"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "contains() takes exactly one argument");
         }
-        const script_array* node = self.unchecked_array_node();
-        for (size_t i = 0; i < node->size(); ++i) {
-            if (node->get(i, ctx.get_engine()) == args[0]) {
-                return ctx.make_value(true);
-            }
-        }
-        return ctx.make_value(false);
+        auto found = detail::array_index_of_equal(ctx, self, args[0]);   // the language's ==
+        if (!found) { return found.error_value(); }
+        if (!found.value()) { return ctx.make_value(); }
+        return ctx.make_value(*found.value() >= 0);
     }},
 
         {symbolizer->intern("first"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -6904,7 +6895,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     // (KEEP BYTE-PARALLEL with vm_backend::exec_call_method)
                     script_value& var_ref = recv_cell->deref();
                     detail::deref_builtin_args_in_place(arguments);
-                    auto result = methodIt->second(builtin_method_context{engine_, string_symbolizer_}, var_ref, arguments);
+                    auto result = methodIt->second(builtin_ctx(), var_ref, arguments);
                     if (!result) {
                         return result.error_value();
                     }
@@ -7640,7 +7631,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         detail::string_mutator_binding binding = detail::bind_string_mutator_receiver(objectValue, expr->object.get(),
             detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
             environment_.get(), engine_, string_symbolizer_);
-        script_function boundMethod = [this, ctx = builtin_method_context{engine_, string_symbolizer_}, method,
+        script_function boundMethod = [this, ctx = builtin_ctx(), method,
                                        binding = std::move(binding), copy = std::move(copy)]
                                       (const std::vector<script_value>& args) mutable -> checked_result<script_value> {
             script_value* root_cell = binding.root_ident ? string_receiver_cell(binding.root_ident) : nullptr;
@@ -7792,7 +7783,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the string value by moving it
-            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                 std::vector<script_value> scratch;
                 return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
@@ -7823,7 +7814,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the array value by moving it
-            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                 std::vector<script_value> scratch;
                 return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
@@ -7850,7 +7841,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the map value by moving it
-            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                 std::vector<script_value> scratch;
                 return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
@@ -7882,7 +7873,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the weak_ptr value by moving it
-            script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+            script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                 std::vector<script_value> scratch;
                 return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
             };
@@ -7916,7 +7907,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 const builtin_method& method = methodIt->second;
 
                 // Create a wrapper function that captures the shared_ptr value by moving it
-                script_function boundMethod = [ctx = builtin_method_context{engine_, string_symbolizer_}, capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
+                script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
                     std::vector<script_value> scratch;
                     return method(ctx, capturedValue, detail::deref_builtin_args(args, scratch));
                 };

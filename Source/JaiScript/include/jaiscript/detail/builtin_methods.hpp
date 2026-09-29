@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <vector>
 #include <array>
+#include <optional>
 #include <string_view>
 
 namespace jai {
@@ -49,9 +50,18 @@ namespace jai {
     struct builtin_method_context {
         engine* engine_ref = nullptr;
         string_symbolizer* symbolizer = nullptr;
+        // the calling backend's language == and its unwinding flag (a user operator== may throw)
+        checked_result<bool> (*equal_fn)(void*, const script_value&, const script_value&) = nullptr;
+        bool (*unwinding_fn)(void*) = nullptr;
+        void* backend_self = nullptr;
 
         engine* get_engine() const { return engine_ref; }
         string_symbolizer* get_string_symbolizer() const { return symbolizer; }
+        checked_result<bool> language_equal(const script_value& a, const script_value& b) const {
+            if (!equal_fn) { return a == b; }   // a host-built context without a backend: identity
+            return equal_fn(backend_self, a, b);
+        }
+        bool unwinding() const { return unwinding_fn && unwinding_fn(backend_self); }
 
         script_value make_value() const { return script_value(std::monostate{}, engine_ref); }
         script_value make_value(script_int v) const { return script_value(v, engine_ref); }
@@ -63,6 +73,37 @@ namespace jai {
     };
 
     using builtin_method = std::function<checked_result<script_value>(const builtin_method_context&, script_value&, const std::vector<script_value>&)>;
+
+    namespace detail {
+        // Same-kind scalars answer without the backend; everything else is the language's == (a user operator==, memberwise)
+        inline std::optional<bool> quick_language_equal(const script_value& a, const script_value& b) {
+            const size_t ka = a.raw_storage_index(), kb = b.raw_storage_index();
+            if (ka == script_value::TYPEID_INT && kb == script_value::TYPEID_INT) { return a.unchecked_as_int() == b.unchecked_as_int(); }
+            if (ka == script_value::TYPEID_STRING && kb == script_value::TYPEID_STRING) { return a.unchecked_as_string() == b.unchecked_as_string(); }
+            if (ka == script_value::TYPEID_FLOAT && kb == script_value::TYPEID_FLOAT) { return a.unchecked_as_float() == b.unchecked_as_float(); }
+            if (ka == script_value::TYPEID_BOOL && kb == script_value::TYPEID_BOOL) { return a.unchecked_as_bool() == b.unchecked_as_bool(); }
+            return std::nullopt;
+        }
+        // The first index whose element == probe (the language's ==), -1 when none; nullopt when a user operator== threw
+        inline checked_result<std::optional<script_int>> array_index_of_equal(const builtin_method_context& ctx, const script_value& self, const script_value& probe_in) {
+            const script_array* node = self.unchecked_array_node();
+            const script_value& probe = probe_in.deref();
+            for (size_t i = 0; i < node->size(); ++i) {
+                const script_value elem = node->get(i, ctx.get_engine());
+                const script_value& e = elem.deref();
+                bool equal = false;
+                if (auto quick = quick_language_equal(e, probe)) { equal = *quick; }
+                else {
+                    auto r = ctx.language_equal(e, probe);
+                    if (!r) { return r.error_value(); }
+                    if (ctx.unwinding()) { return std::optional<script_int>{}; }
+                    equal = r.value();
+                }
+                if (equal) { return std::optional<script_int>{static_cast<script_int>(i)}; }
+            }
+            return std::optional<script_int>{script_int(-1)};
+        }
+    }
 
     struct builtin_method_registries {
         std::unordered_map<uint64_t, builtin_method> array_methods;

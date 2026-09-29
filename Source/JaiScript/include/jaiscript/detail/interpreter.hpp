@@ -1340,6 +1340,8 @@ namespace jai {
         }
         
     public:
+        checked_result<std::string> text_of(const script_value& v) { return value_to_string_with_method(v.deref()); }
+
         // Set the subscript resolver callback
         void set_subscript_resolver(subscript_resolver resolver) {
             subscriptResolver_ = std::move(resolver);

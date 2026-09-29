@@ -344,11 +344,15 @@ namespace stdlib {
         });
         
         // Register as variadic to bypass type matching issues
-        eng_ref.add_variadic_function("to_string", [eng](const std::vector<script_value>& args) -> script_value {
+        // a class's own to_string() speaks for its instances, as in string + value
+        eng_ref.add_variadic_function("to_string", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 throw runtime_error("to_string expects exactly 1 argument, got " + std::to_string(args.size()));
             }
-            return script_value(args[0].to_string(), eng);
+            auto text = eng->text_of(args[0]);
+            if (!text) { return text.error_value(); }
+            if (eng->backend_unwinding()) { return script_value(std::monostate{}, eng); }
+            return script_value(std::move(text.value()), eng);
         });
 
         // §13 (ruled 2026-07): opaque host pointers (make_value(T*) on an UNREGISTERED

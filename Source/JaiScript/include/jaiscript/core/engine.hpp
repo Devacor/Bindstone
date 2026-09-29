@@ -876,6 +876,8 @@ namespace jai {
         std::string get_backend_name() const;
         execution_backend* get_execution_backend() const;
         bool backend_unwinding() const;
+        // A value's text as string + value spells it (a class's own to_string() runs; its error is the result)
+        checked_result<std::string> text_of(const script_value& v) const;
 
         // Engine-owned script namespace registry (namespace_id -> data); survives across backends
         std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();

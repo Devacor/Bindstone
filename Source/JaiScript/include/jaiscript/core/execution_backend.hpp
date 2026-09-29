@@ -236,6 +236,8 @@ public:
 
     // Optional: Get backend name for debugging/logging
     virtual std::string get_backend_name() const = 0;
+    // A value's text as string + value spells it: a class's own to_string() when it declares one
+    virtual checked_result<std::string> text_of(const script_value& v) { return v.to_string(); }
 };
 
 using execution_backend_ptr = std::unique_ptr<execution_backend>;

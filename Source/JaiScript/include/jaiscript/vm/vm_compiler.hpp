@@ -147,6 +147,7 @@ namespace jai::vm {
         bool lift_partners_ok(const binary_expr* b);
         int lift_fusible_nodes(const expression* e);
         bool binary_lands_fused(binary_expr* b);
+        bool numeric_value_binary(expression* e);
         bool reference_slot_operand(const expression* e);
         void materialize_operand_temp(const expression_ptr& e, fused_operand& out);
         void guard_container_temp(const expression_ptr& e, fused_operand& container, uint32_t& guard, bool always);

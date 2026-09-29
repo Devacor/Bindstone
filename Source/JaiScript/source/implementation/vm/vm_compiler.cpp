@@ -5229,6 +5229,15 @@ int vm_compiler::lift_fusible_nodes(const expression* e) {
 
 // A value binary compile_binary emits as one fused binary last (the flat pre-step, the flat fuse or the lift), so
 // a fresh temp can take its result: the same decisions, made without emitting
+// a value binary the checker proved numeric (int or float operands) that lands by the fused binary
+bool vm_compiler::numeric_value_binary(expression* e) {
+	if (!e || e->get_type() != node_type::binary_expr) return false;
+	auto* b = static_cast<binary_expr*>(e);
+	const uint8_t cls = b->static_operand_class;
+	if (cls != operand_class_int_int && cls != operand_class_float_float && cls != operand_class_int_float && cls != operand_class_float_int) return false;
+	return binary_lands_fused(b);
+}
+
 bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	if (!typed_lowering_ || !temps_active_ || !chunk_->is_function_body) return false;
 	if (b->op.type == token_type::left_bracket || b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) return false;
@@ -5238,7 +5247,7 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	const bool lsub = (hoists(b->left.get()) && (quiet_partner(b->right.get()) || env_identifier(b->right.get()))) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get(), b->left.get()));
 	const bool rsub = (hoists(b->right.get()) && (quiet_partner(b->left.get()) || env_identifier(b->left.get()))) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));   // an environment name on the left of a hoisted read reads into a temp first
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
-	if (!lsub && call_temp_operand(b->right.get()) && b->left->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(b->left.get()))) return true;   // a value binary ahead of a call lands in a temp first
+	if (!lsub && call_temp_operand(b->right.get()) && numeric_value_binary(b->left.get())) return true;   // a value binary ahead of a call lands in a temp first
 	if (binary_shape(b) != binary_shape_none) return true;
 	const int ln = lift_fusible_nodes(b->left.get());
 	const int rn = ln >= 0 ? lift_fusible_nodes(b->right.get()) : -1;
@@ -5333,8 +5342,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
 		const bool lsub = (hoists(expr->left.get()) && (quiet_partner(expr->right.get()) || env_identifier(expr->right.get()))) || (call_temp_operand(expr->left.get()) && call_partner_ok(expr->right.get(), expr->left.get()));
 		const bool rsub = (hoists(expr->right.get()) && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get()))) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get()));
-		// a value binary ahead of a call on its right: the binary into a temp first, as the stack form evaluates it, then the call into a temp
-		const bool lbin = !lsub && call_temp_operand(expr->right.get()) && expr->left->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(expr->left.get()));
+		// a numeric value binary ahead of a call on its right: the binary into a temp first, as the stack form evaluates it, then the call into a
+		// temp (a string stays on the stack form, which moves the left value into the result where a temp would copy it)
+		const bool lbin = !lsub && call_temp_operand(expr->right.get()) && numeric_value_binary(expr->left.get());
 		if ((lsub && (rsub || plain(expr->right.get()))) || (rsub && (lsub || plain(expr->left.get()))) || lbin) {
 			const size_t temp_mark = temp_next_;
 			// the binary's class when the checker proved the pair, else the read's own proven element kind

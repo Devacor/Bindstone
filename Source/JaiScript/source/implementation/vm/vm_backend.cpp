@@ -1562,6 +1562,12 @@ std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<envir
 	return std::make_shared<environment>(std::move(parent), env_symbolizer_);
 }
 
+std::shared_ptr<environment> vm_backend::acquire_block_env(std::shared_ptr<environment> parent) {
+	auto env = acquire_scope_env(std::move(parent));
+	env->set_block_scope(true);
+	return env;
+}
+
 std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_env_births_[1];
@@ -11704,8 +11710,13 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
-	if (rec.env_lazy && !function.closure_env) {
+	if (rec.env_lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope())) {
 		rec.env_untouched = true;
+	} else if (rec.env_lazy && !function.closure_env) {
+		// the caller stands in a block scope: the callee reads past it (KEEP BYTE-PARALLEL with the interpreter's call_function)
+		rec.env_untouched = false;
+		rec.prev_env = std::move(environment_);
+		environment_ = environment::call_parent(rec.prev_env, false);
 	} else {
 		rec.env_untouched = false;
 		rec.prev_env = std::move(environment_);
@@ -11731,7 +11742,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	// entry_env doubles as the lexical-context marker: null ONLY for env-untouched
 	// frames (plain non-closure functions are lexically top-level - no class context,
 	// no closure chain); closure-lazy frames carry their closure env (chain is correct)
-	rec.f.entry_env = rec.env_untouched ? nullptr : environment_;
+	rec.f.entry_env = rec.env_untouched || (rec.env_lazy && !function.closure_env) ? nullptr : environment_;
 	rec.f.window_backed = true;
 	rec.f.window_base = args_base;
 	rec.f.window_live = static_cast<uint32_t>(argc);
@@ -12248,6 +12259,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	script_callable payload;
 	payload.kind = script_callable::kind_type::function;
 	proto.fn->unit = current_unit();
+	proto.fn->block_defined = environment_ && environment_->block_scope();
 	payload.fn = proto.fn;
 	script_value functionValue = script_value::make_function(
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
@@ -16617,7 +16629,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			if (handler.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
 				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {
-				JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
+				JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
 				environment_->define(handler.catch_var, std::move(caught));
 				try_records_[handler_index].catch_env_pushed = true;
 			}
@@ -16700,7 +16712,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	iter_state state;
 	state.env_pushed = proto.slot == SIZE_MAX || !f.locals || f.top_level;
 	if (state.env_pushed) {
-		JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
+		JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
 	} else if (proto.is_reference) {
 		state.slot = proto.slot;
 		state.owner = &f;
@@ -18804,7 +18816,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			}
 
 			case opcode::op_scope_push:
-				JAI_ENV_CENSUS(1); environment_ = acquire_scope_env(environment_);
+				JAI_ENV_CENSUS(1); environment_ = acquire_block_env(environment_);
 				break;
 
 			case opcode::op_scope_pop:
@@ -19132,10 +19144,15 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
-	if (rec.env_lazy && !function.closure_env) {
+	if (rec.env_lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope())) {
 		// Stage 3: the callee runs in the caller's env and the env stack does not move
 		// AT ALL — nothing saved (prev_env stays null), nothing restored at pop
 		rec.env_untouched = true;
+	} else if (rec.env_lazy && !function.closure_env) {
+		// the caller stands in a block scope: the callee reads past it (KEEP BYTE-PARALLEL with the interpreter's call_function)
+		rec.env_untouched = false;
+		rec.prev_env = std::move(environment_);
+		environment_ = environment::call_parent(rec.prev_env, false);
 	} else {
 		rec.env_untouched = false;
 		// Moved, not copied: both branches below overwrite environment_; the catch
@@ -19162,7 +19179,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	// entry_env doubles as the lexical-context marker: null ONLY for env-untouched
 	// frames (plain non-closure functions are lexically top-level - no class context,
 	// no closure chain); closure-lazy frames carry their closure env (chain is correct)
-	rec.f.entry_env = rec.env_untouched ? nullptr : environment_;
+	rec.f.entry_env = rec.env_untouched || (rec.env_lazy && !function.closure_env) ? nullptr : environment_;
 	// Frame window (stage 2): zero-copy callers' args ARE slots 0..argc-1 in place;
 	// pooled-vector callers build the window at the stack top during binding. stack_base
 	// is the callee slot (zero-copy) / the window base (pooled), so every pop/unwind
@@ -19982,7 +19999,7 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 			JAI_ENV_CENSUS(2); environment_ = acquire_scope_env(function.closure_env);
 		}
 	} else {
-		JAI_ENV_CENSUS(3); environment_ = acquire_scope_env(prev_env);
+		JAI_ENV_CENSUS(3); environment_ = acquire_scope_env(environment::call_parent(prev_env, function.block_defined));   // past the caller's block scopes (KEEP BYTE-PARALLEL with the interpreter's call_function)
 	}
 }
 

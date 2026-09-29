@@ -2610,7 +2610,7 @@ void interpreter::prepare_for_execution() {
 }
 
 void interpreter::push_scope() {
-    environment_ = get_pooled_environment(environment_);  // Use pool instead of make_shared!
+    environment_ = get_block_environment(environment_);
 }
 
 void interpreter::pop_scope() {
@@ -5930,7 +5930,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     if (!resuming) {
         // Create a new child scope for the block
         // With lazy caching, this is O(1) - no flat_lookup_ copy needed
-        environment_ = get_pooled_environment(environment_);
+        environment_ = get_block_environment(environment_);
     }
 
     try {
@@ -9805,7 +9805,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
                             // Setup environment once (from pool)
                             auto previous = environment_;
-                            auto loop_env = get_pooled_environment(previous);
+                            auto loop_env = get_block_environment(previous);
                             environment_ = loop_env;
 
                             // Create value preserving declared type (var = any_type, auto = nullptr, int = int_type)
@@ -9873,7 +9873,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                 ? static_cast<block_stmt*>(stmt->body.get()) : nullptr;
                             std::shared_ptr<environment> body_env = nullptr;
                             if (body_block) {
-                                body_env = get_pooled_environment(loop_env);
+                                body_env = get_block_environment(loop_env);
                             }
 
                             while (true) {
@@ -10078,7 +10078,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
 
     if (!resuming_loop) {
         // Create new scope for the for loop (initialization variables should be scoped)
-        auto loop_env = get_pooled_environment(environment_);
+        auto loop_env = get_block_environment(environment_);
         environment_ = loop_env;
         owns_scope = true;
 
@@ -11187,7 +11187,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 // re-enters the scope its suspension parked
                 auto previous = environment_;
                 auto case_env = (resuming_body && case_idx == resume_case && resumed_case_env)
-                    ? resumed_case_env : get_pooled_environment(environment_);  // Use pool!
+                    ? resumed_case_env : get_block_environment(environment_);
                 environment_ = case_env;
 
                 try {
@@ -11248,7 +11248,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
             // Create a new scope for the default body
             auto previous = environment_;
             auto default_env = (resume_phase == rp_default_body && resumed_case_env)
-                ? resumed_case_env : get_pooled_environment(environment_);  // Use pool!
+                ? resumed_case_env : get_block_environment(environment_);
             environment_ = default_env;
 
             try {
@@ -11459,6 +11459,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         );
     }
     scriptFunc->unit = decl_unit;
+    scriptFunc->block_defined = environment_->block_scope();
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
@@ -13703,9 +13704,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
         }
     } else {
-        // Regular function - use current environment for closures
-        call_stack_[frame_index].closure_env = previousEnv;
-        environment_ = get_pooled_environment(previousEnv);
+        // Regular function: the caller's chain past its block scopes (C++: a callee never sees a block's declarations)
+        auto parent = environment::call_parent(previousEnv, function.block_defined);
+        call_stack_[frame_index].closure_env = parent;
+        environment_ = get_pooled_environment(std::move(parent));
     }
 
     // Mirror the member scope onto the frame: the shared ref-lvalue kernel
@@ -14492,6 +14494,12 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 }
 
 // Function call optimization helpers
+std::shared_ptr<environment> interpreter::get_block_environment(std::shared_ptr<environment> parent) {
+    auto env = get_pooled_environment(std::move(parent));
+    env->set_block_scope(true);
+    return env;
+}
+
 std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr<environment> parent) {
     if (environment_pool_index_ < environment_pool_.size()) {
         // Reuse existing environment from pool

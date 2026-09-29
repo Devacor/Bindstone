@@ -2797,6 +2797,11 @@ execution_backend* engine::get_execution_backend() const {
     return impl ? backend() : nullptr;
 }
 
+bool engine::backend_unwinding() const {
+    auto* be = get_execution_backend();
+    return be && be->is_unwinding();
+}
+
 std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::script_namespaces() {
     return impl->script_namespaces_;
 }

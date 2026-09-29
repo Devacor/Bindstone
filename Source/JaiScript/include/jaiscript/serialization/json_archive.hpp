@@ -321,7 +321,7 @@ public:
                                         }
                                         continue;   // a host property that cannot read stays out of the payload
                                     }
-                                    if (auto* backend = eng->get_execution_backend(); backend && backend->is_unwinding()) {
+                                    if (eng->backend_unwinding()) {
                                         return;   // the getter threw: the in-flight exception leaves to_json
                                     }
                                     if (!first) oss_ << ',';

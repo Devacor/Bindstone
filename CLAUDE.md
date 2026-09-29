@@ -25,6 +25,20 @@ Use `/t:Rebuild` for a clean build. MSBuild auto-resolves project-to-project ref
 This lets Claude verify JaiScript↔Bindstone integration without a round-trip through the IDE.
 (Visual Studio still works too; Dev can build/run there as usual.)
 
+**Configurations (x64):**
+- `Release` is the edit loop. `BindstoneFastIteration` (`<repo>\Directory.Build.props`, default `true`) builds it
+  without `/GL`, `/LTCG` and `/OPT:REF,ICF` and links incrementally: a one-file edit takes ~7-27 s instead of
+  ~65-70 s, and the client runs ~5-8% slower than Shipping (arena sim). `/p:BindstoneFastIteration=false` puts
+  LTCG back into Release (the `/GL` flip recompiles everything).
+- `Shipping` is the full-LTCG build (`/GL`, `/LTCG`, `/OPT:REF,ICF`, non-incremental link; output
+  `Builds\Windows\x64\Shipping\`). It is what ships, and Bindstone performance numbers (arena sim, pathfinding
+  bench, frame timing) are measured on it. The JaiScript CMake configurations, Release BENCHMARKS included,
+  are separate and unaffected.
+- MutedVision compiles JaiScript's `Source\JaiScript\source\implementation\**\*.cpp` as separate translation
+  units through one wildcard item, so a JaiScript edit recompiles one file. `source\jaiscript.cpp` is the
+  one-file build for other hosts and is not part of the Windows build; JaiScript's CMake configure fails when
+  it, the files on disk and `JAISCRIPT_SOURCES` disagree.
+
 When fixing integration issues between JaiScript and Bindstone:
 1. Claude modifies the necessary files
 2. Build via the command above (or Dev builds in VS) to verify

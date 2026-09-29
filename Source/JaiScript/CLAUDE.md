@@ -143,10 +143,25 @@ throws *before* the native stack overflows (1024 was too deep for a 1 MB Debug s
 
 ## Compile-time notes (consumers care about this)
 
-Measured on MV (Release, `/MP`): per-TU cost is **~99% front-end header parsing, ~0% codegen**;
-JaiScript is **~10%** of a typical MV TU (the rest is Cereal/ChaiScript/SDL, being migrated out).
-Under `/MP` the clean-build wall-clock is set by the slowest TU + link, so per-header trims and
-PCH additions barely move it — the big win is the Cereal/ChaiScript removal.
+Measured on Bindstone (x64, `/MP`, 24 cores):
+- **Binding instantiations dominate, not header parsing.** Every `dynamic_binder<T>` instantiates
+  its method/property thunks, their `std::function` wrappers and ~20 container conversions of `T`
+  (vector, map, bound array and bound map of `T` and `shared_ptr<T>`); `bind_signal_type<Sig>` does
+  the same for `signal<Sig>` and `signal_emitter<Sig>`. In a registrar TU (`collider.obj`) binding code
+  is ~85% of the symbol-name bytes (signal binders 20%, `dynamic_binder<T>` thunks 21%, container
+  conversions 14%, and 29% for the schema-driven primitive property binders, which therefore live out of
+  line in `schema_binding.cpp` instead of in every registrar). A Game registrar TU's front end is ~3.7 s
+  of headers and ~9.5 s of instantiation.
+- **Under LTCG a small edit is mostly link.** A one-file edit regenerates a handful of functions, yet
+  `/LTCG:incremental` still loads and copies the whole program's IL (~55-80 s for ~400k functions), so
+  link time scales with the program's instantiation count, not with the edit. Bindstone's Release
+  therefore builds without LTCG (root `CLAUDE.md`); Shipping keeps it.
+- **x64 Debug objects run 60-300 MB per registrar TU** (mangled binder names repeated per COMDAT);
+  `mutedvision.lib` must stay under lib.exe's 4 GB archive limit (`LNK1248`).
+- **MutedVision compiles `source/implementation/**/*.cpp` as separate TUs** (one wildcard item): a
+  JaiScript edit recompiles one file (~5 s) at ~5x the clean-build CPU of the unity. `source/jaiscript.cpp`
+  is the single-file build for other hosts; `source/CMakeLists.txt` fails configuration when
+  `JAISCRIPT_SOURCES`, the unity's includes and the files on disk disagree.
 
 Header-hygiene rules that DO matter (keep them this way):
 - **`signals/signal.hpp` does NOT include `signal_impl.hpp`** (which pulls the whole

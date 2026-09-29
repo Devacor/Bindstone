@@ -229,6 +229,7 @@ int net_client_open(string host, int port) {
 	NCS_SLOT.push(-1);
 	NCS_SEED.push(0);
 	NCS_DROP.push("");
+	NCS_TX.push(0);
 	int k = s;
 	ch.on_packet.connect("gq", [k](string bytes) { NCS_INBOX[k].push(bytes); });
 	ch.on_disconnect.connect("gq", [k](string reason) { NCS_DROP[k] = reason; });
@@ -236,8 +237,13 @@ int net_client_open(string host, int port) {
 	return s;
 }
 
+void ncs_send(int s, string msg) {
+	NCS_CH[s].send(msg);
+	NCS_TX[s] = NCS_TX[s] + msg.size();
+}
+
 void net_client_hello(int s, string name, int hue) {
-	NCS_CH[s].send(`HELLO|${NET_PROTO}|${clean_text(name)}|${hue}`);
+	ncs_send(s, `HELLO|${NET_PROTO}|${clean_text(name)}|${hue}`);
 	if (NCS_STATUS[s] == "connecting") { NCS_STATUS[s] = "hello"; }
 }
 
@@ -246,7 +252,7 @@ bool net_session_live(int s) { return s >= 0 && s < NCS_CH.size() && !NCS_STATUS
 void net_session_send(int s, string msg) {
 	if (!net_session_live(s)) { return; }
 	if (!net_sim_on()) {
-		NCS_CH[s].send(msg);
+		ncs_send(s, msg);
 		return;
 	}
 	int due = imax(NCS_OUT_LAST[s], NOW_MS + net_sim_delay());
@@ -259,7 +265,7 @@ void net_session_send(int s, string msg) {
 void net_session_pump(int s) {
 	if (s < 0 || s >= NCS_CH.size()) { return; }
 	while (NCS_OUT_DUE[s].size() > 0 && NCS_OUT_DUE[s][0] <= NOW_MS) {
-		if (net_session_live(s)) { NCS_CH[s].send(NCS_OUT_MSG[s][0]); }
+		if (net_session_live(s)) { ncs_send(s, NCS_OUT_MSG[s][0]); }
 		NCS_OUT_DUE[s].remove(0);
 		NCS_OUT_MSG[s].remove(0);
 	}
@@ -308,7 +314,7 @@ void net_session_pump(int s) {
 
 void net_session_bye(int s) {
 	if (!net_session_live(s)) { return; }
-	NCS_CH[s].send("BYE");
+	ncs_send(s, "BYE");
 	NCS_CH[s].pump();
 	NCS_CH[s].close();
 	NCS_STATUS[s] = "closed: logged out";

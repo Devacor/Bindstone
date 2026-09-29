@@ -105,7 +105,8 @@ array<string> NCS_STATUS;      // connecting, hello, joined, refused: why, close
 array<int> NCS_SLOT;
 array<int> NCS_SEED;
 array<string> NCS_DROP;
-int NET_SESSION;               // the session the interactive client plays through
+array<int> NCS_TX;             // bytes the session has written to its socket
+int NET_SESSION;              // the session the interactive client plays through
 int NET_CLOSE_F;               // frames left before a closed client session quits
 
 // ---- the network simulator (off by default): added round trip, jitter and TCP-style loss

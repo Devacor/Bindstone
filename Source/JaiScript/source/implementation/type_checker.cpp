@@ -2214,12 +2214,28 @@ private:
         return out;
     }
 
+    // A T& parameter's argument: a primitive of exactly that kind, a class T or a subclass; unknown and var& / auto& pass
+    bool reference_parameter_binds(const parameter& p, const ctype& arg) {
+        if (!p.type || arg.is_unknown()) { return true; }
+        switch (p.type->base_type) {
+            case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
+            case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+            case script_value_type::jai_object_type:
+                return reference_type_compatible(arg, ctype_from_type_info(p.type.get()));
+            default:
+                return true;
+        }
+    }
+
     bool script_fn_viable(const function_decl* fn, const std::vector<ctype>& args) {
         auto [min_a, max_a] = arity_range(fn);
         if (args.size() < min_a || args.size() > max_a) { return false; }
         for (size_t i = 0; i < args.size(); ++i) {
             const parameter& p = fn->parameters[i];
-            if (p.is_reference) { continue; }   // ref binding rules are lvalue-shaped: lenient
+            if (p.is_reference) {   // a T& binds a T (a class: T or a subclass); var& and auto& bind any
+                if (!reference_parameter_binds(p, args[i])) { return false; }
+                continue;
+            }
             if (!assignable(args[i], ctype_from_type_info(p.type.get()))) {
                 return false;
             }
@@ -2244,7 +2260,14 @@ private:
 			}
 			for (size_t i = 0; i < args.size(); ++i) {
 				const parameter& p = fn->parameters[i];
-				if (p.is_reference) { continue; }
+				if (p.is_reference) {
+					if (!reference_parameter_binds(p, args[i])) {
+						diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" + std::string(fname) + "': cannot bind '" +
+							 ctype_name(args[i]) + "' to '" + p.name + "' declared '" + p.type->canonical_name() + "&'", rl, rc);
+						return;
+					}
+					continue;
+				}
 				ctype pt = ctype_from_type_info(p.type.get());
 				if (!assignable(args[i], pt)) {
 					diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" +

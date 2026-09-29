@@ -1463,7 +1463,7 @@ private:
 				{"typed array into float array", "array<int> a = [1]; array<float> c = a;", 0},
 				{"containers and callables into a class slot", "class C { int v = 0; } C a = [1]; C b = {\"k\": 1}; C d = [](){ return 1; };", 3},
 				{"auto from null stays dynamic", "auto x = null; x = 1; x = \"s\";", 0},
-				{"reference parameters are lenient", "function f(int& r) { } string s = \"x\"; f(s);", 0},
+				{"a typed reference parameter binds only its type", "function f(int& r) { } string s = \"x\"; f(s);", 1},
 				{"itrunc is int", "char c = math::itrunc(1.5);", 1},
 				{"sin is float", "char c = math::sin(1.0);", 1},
 				{"sin into int converts", "int i = math::sin(1.0);", 0},
@@ -2183,6 +2183,27 @@ private:
 		ruling_typed_slice();
 		ruling_missing_key_compound();
 		ruling_constructorless_call_text();
+		ruling_typed_reference_parameters();
+	}
+
+	void ruling_typed_reference_parameters() {
+		test("a_typed_reference_parameter_binds_only_its_own_type", [this]() {
+			expect("int& binding", R"(
+				class A { int v = 1; } class B : A { }
+				function set(int& a) { a = 7; }
+				function seta(A& r) { r.v = 9; }
+				function any(var& r) { r = "s"; }
+				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				var vi = 1; var vf = 1.5;
+				t([]() { set(vf); return vf; }) + "|" + t([]() { set(vi); return vi; }) + "|" + t([]() { B b = B(); seta(b); return b.v; }) + "|" +
+				t([]() { var x = 5; any(x); return x; }) + "|" + t([]() { var s = "x"; seta(s); return 1; });
+			)", "Cannot pass float to parameter 'a' of 'set' (declared int)|7|9|s|Cannot pass string to parameter 'r' of 'seta' (declared A)", check_mode::warn);
+			every_config("checker", "1|0", [](engine& e) {
+				auto bad = e.check("function set(int& a) { a = 7; } float u = 1.5; set(u);");
+				auto ok = e.check("function set(int& a) { a = 7; } int n = 1; set(n); var v = 2.5; set(v);");
+				return std::to_string(bad.error_count()) + "|" + std::to_string(ok.error_count());
+			});
+		});
 	}
 
 	void ruling_constructorless_call_text() {

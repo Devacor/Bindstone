@@ -3245,6 +3245,12 @@ public:
 			// contention here; the three recovery shapes must keep every survivor registered.
 			std::atomic<bool> stop{false};
 			std::vector<std::thread> burners;
+			// stops and joins on every exit: a failed check unwinding past a joinable std::thread terminates the run
+			struct join_burners {
+				std::atomic<bool>& stop;
+				std::vector<std::thread>& threads;
+				~join_burners() { stop.store(true); for (auto& t : threads) { t.join(); } }
+			} joiner{ stop, burners };
 			const unsigned burner_count = std::max(2u, std::thread::hardware_concurrency()) - 1;
 			for (unsigned i = 0; i < burner_count; ++i) {
 				burners.emplace_back([&stop] { volatile uint64_t spin = 0; while (!stop.load(std::memory_order_relaxed)) { spin = spin + 1; } });
@@ -3254,8 +3260,6 @@ public:
 				check_pending_recovery(true, true, true);
 				check_pending_recovery(false, false, false, true);
 			}
-			stop.store(true);
-			for (auto& t : burners) { t.join(); }
 		});
 		test("failed_reload_retry_preserves_old_constructor_and_method", [this]() {
 			check_pending_recovery(false, false, false, true);

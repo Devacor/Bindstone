@@ -43,6 +43,7 @@ namespace jai::detail {
         wrap_add_, wrap_sub_, wrap_mul_,
         // The native math types' constructors (math::vec3(1, 2, 3); detail/math_values.hpp construct)
         vec2_, vec3_, ivec2_, ivec3_, vec4_,
+        round_, remap_,
         count,
         none = count
     };
@@ -100,6 +101,8 @@ namespace jai::detail {
                 if (name == "random") return math_fn::random_;   // arity picks range form
                 if (name == "random_seed") return math_fn::random_seed;
                 if (name == "radians_to_degrees") return math_fn::radians_to_degrees;
+                if (name == "round") return math_fn::round_;
+                if (name == "remap") return math_fn::remap_;
                 return math_fn::none;
             case 's':
                 if (name == "sin") return math_fn::sin_;
@@ -183,6 +186,158 @@ namespace jai::detail {
         }
     }
 
+    // The eased mix/unmix formulas (verbatim from the stdlib registrations), one definition for the scalar rows and the
+    // vector rows
+    inline script_float eased_value(math_fn fn, script_float start, script_float end, script_float percent, script_float strength) noexcept {
+        switch (fn) {
+            case math_fn::mix_in_:
+                return std::pow(percent, strength) * (end - start) + start;
+            case math_fn::mix_out_:
+                return (1.0 - std::pow(1.0 - percent, strength)) * (end - start) + start;
+            case math_fn::mix_in_out_: {
+                const script_float half_range = (end - start) / 2.0 + start;
+                return percent < 0.5
+                    ? std::pow(percent * 2.0, strength) * (half_range - start) + start
+                    : (1.0 - std::pow(1.0 - (percent - 0.5) * 2.0, strength)) * (end - half_range) + half_range;
+            }
+            case math_fn::mix_out_in_: {
+                const script_float half_range = (end - start) / 2.0 + start;
+                return percent < 0.5
+                    ? (1.0 - std::pow(1.0 - percent * 2.0, strength)) * (half_range - start) + start
+                    : std::pow((percent - 0.5) * 2.0, strength) * (end - half_range) + half_range;
+            }
+            case math_fn::unmix_in_:
+                return (end == start) ? end : std::pow((percent - start) / (end - start), 1.0 / strength);
+            case math_fn::unmix_out_:
+                return 1.0 - std::pow(1.0 - ((percent - start) / (end - start)), 1.0 / strength);
+            case math_fn::unmix_in_out_: {
+                const script_float half_range = (end - start) / 2.0 + start;
+                return percent < half_range
+                    ? std::pow((percent - start) / (half_range - start), 1.0 / strength) / 2.0
+                    : (1.0 - std::pow(1.0 - ((percent - half_range) / (end - half_range)), 1.0 / strength)) / 2.0 + 0.5;
+            }
+            default: {   // unmix_out_in_
+                const script_float half_range = (end - start) / 2.0 + start;
+                return percent < half_range
+                    ? (1.0 - std::pow(1.0 - ((percent - start) / (half_range - start)), 1.0 / strength)) / 2.0
+                    : std::pow((percent - half_range) / (end - half_range), 1.0 / strength) / 2.0 + 0.5;
+            }
+        }
+    }
+    inline script_float remap_value(script_float v, script_float in_lo, script_float in_hi, script_float out_lo, script_float out_hi) noexcept {
+        return in_hi == in_lo ? out_lo : out_lo + (v - in_lo) * (out_hi - out_lo) / (in_hi - in_lo);
+    }
+    inline const char* dims_mismatch_text(math_fn fn) noexcept {
+        switch (fn) {
+            case math_fn::min_: return "math::min expects vectors of the same dimensions";
+            case math_fn::max_: return "math::max expects vectors of the same dimensions";
+            case math_fn::clamp_: return "math::clamp expects vectors of the same dimensions";
+            case math_fn::lerp_: return "math::lerp expects vectors of the same dimensions";
+            case math_fn::mix_: return "math::mix expects vectors of the same dimensions";
+            case math_fn::unmix_: return "math::unmix expects vectors of the same dimensions";
+            case math_fn::remap_: return "math::remap expects vectors of the same dimensions";
+            case math_fn::mix_in_: return "math::mix_in expects vectors of the same dimensions";
+            case math_fn::mix_out_: return "math::mix_out expects vectors of the same dimensions";
+            case math_fn::mix_in_out_: return "math::mix_in_out expects vectors of the same dimensions";
+            case math_fn::mix_out_in_: return "math::mix_out_in expects vectors of the same dimensions";
+            case math_fn::unmix_in_: return "math::unmix_in expects vectors of the same dimensions";
+            case math_fn::unmix_out_: return "math::unmix_out expects vectors of the same dimensions";
+            case math_fn::unmix_in_out_: return "math::unmix_in_out expects vectors of the same dimensions";
+            default: return "math::unmix_out_in expects vectors of the same dimensions";
+        }
+    }
+
+    // The vector rows of the component-wise family (floor, ceil, round, abs, min, max, clamp, lerp, mix, unmix, remap and
+    // the eased mixes): reached only when a scalar row found an operand that is not a number. Every vector operand has the
+    // same dimensions; a scalar operand applies to every component (a vector t gives each component its own). Each component
+    // runs the scalar formula in binary64 on the widened components and lands as binary32, so a result is a vec of the
+    // operands' dimensions, and an ivec operand never truncates silently. abs, min, max and clamp keep ivec exact when every
+    // operand is integral (a scalar outside int32 follows the integer policy). Anything else is the scalar row's text.
+    JAI_MATH_COLD inline checked_result<script_value> eval_vec_math(math_fn fn, const script_value* const* args, size_t argc,
+                                                                    engine* eng, const char* type_text) {
+        struct operand {
+            bool vec = false;
+            bool integral = false;
+            size_t dims = 0;
+            script_float f[math::k_max_dims] = {0, 0, 0, 0};
+            script_int i[math::k_max_dims] = {0, 0, 0, 0};
+        };
+        auto type_error = [&] { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), type_text); };
+        constexpr size_t k_max_args = 5;
+        if (argc > k_max_args) { return type_error(); }
+        operand ops[k_max_args];
+        size_t dims = 0;
+        for (size_t a = 0; a < argc; ++a) {
+            script_value decoded(std::monostate{}, eng);
+            const script_value* v = args[a];
+            if (v->raw_storage_index() == script_value::TYPEID_CPP_BOUND) { decoded = v->bound_decoded_temp(); v = &decoded; }
+            const size_t raw = v->raw_storage_index();
+            operand& o = ops[a];
+            if (math::is_kind(raw)) {
+                const script_value_type k = v->unchecked_vec_kind();
+                o.vec = true;
+                o.integral = math::integral(k);
+                o.dims = math::dims(k);
+                if (dims != 0 && o.dims != dims) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), dims_mismatch_text(fn));
+                }
+                dims = o.dims;
+                for (size_t c = 0; c < o.dims; ++c) {
+                    if (o.integral) { o.i[c] = math::i32_at(*v, c); o.f[c] = static_cast<script_float>(o.i[c]); }
+                    else { o.f[c] = static_cast<script_float>(math::f32_at(*v, c)); }
+                }
+            } else if (raw == script_value::TYPEID_INT) {
+                o.integral = true;
+                for (size_t c = 0; c < math::k_max_dims; ++c) { o.i[c] = v->unchecked_as_int(); o.f[c] = static_cast<script_float>(o.i[c]); }
+            } else if (raw == script_value::TYPEID_FLOAT) {
+                for (size_t c = 0; c < math::k_max_dims; ++c) { o.f[c] = v->unchecked_as_float(); }
+            } else {
+                return type_error();
+            }
+        }
+        if (dims == 0) { return type_error(); }
+
+        const bool exact_family = fn == math_fn::abs_ || fn == math_fn::min_ || fn == math_fn::max_ || fn == math_fn::clamp_;
+        bool all_integral = true;
+        for (size_t a = 0; a < argc; ++a) { all_integral = all_integral && ops[a].integral; }
+        float f[math::k_max_dims] = {0, 0, 0, 0};
+        int32_t out[math::k_max_dims] = {0, 0, 0, 0};
+        if (exact_family && all_integral) {
+            for (size_t c = 0; c < dims; ++c) {
+                script_int r = 0;
+                switch (fn) {
+                    case math_fn::abs_: r = ops[0].i[c] < 0 ? -ops[0].i[c] : ops[0].i[c]; break;
+                    case math_fn::min_: r = ops[0].i[c] <= ops[1].i[c] ? ops[0].i[c] : ops[1].i[c]; break;
+                    case math_fn::max_: r = ops[0].i[c] >= ops[1].i[c] ? ops[0].i[c] : ops[1].i[c]; break;
+                    default: r = ops[0].i[c] < ops[1].i[c] ? ops[1].i[c] : (ops[0].i[c] > ops[2].i[c] ? ops[2].i[c] : ops[0].i[c]); break;
+                }
+                auto narrowed = math::to_i32(r);
+                if (!narrowed) { return narrowed.error_value(); }
+                out[c] = narrowed.value();
+            }
+            return math::make(math::family_kind(true, dims), f, out, eng);
+        }
+        for (size_t c = 0; c < dims; ++c) {
+            const script_float a = ops[0].f[c];
+            script_float r = 0.0;
+            switch (fn) {
+                case math_fn::floor_: r = std::floor(a); break;
+                case math_fn::ceil_: r = std::ceil(a); break;
+                case math_fn::round_: r = std::round(a); break;
+                case math_fn::abs_: r = std::fabs(a); break;
+                case math_fn::min_: r = a <= ops[1].f[c] ? a : ops[1].f[c]; break;
+                case math_fn::max_: r = a >= ops[1].f[c] ? a : ops[1].f[c]; break;
+                case math_fn::clamp_: r = a < ops[1].f[c] ? ops[1].f[c] : (a > ops[2].f[c] ? ops[2].f[c] : a); break;
+                case math_fn::lerp_: case math_fn::mix_: r = (ops[2].f[c] * (ops[1].f[c] - a)) + a; break;
+                case math_fn::unmix_: r = (ops[1].f[c] == a) ? 0.0 : (ops[2].f[c] - a) / (ops[1].f[c] - a); break;
+                case math_fn::remap_: r = remap_value(a, ops[1].f[c], ops[2].f[c], ops[3].f[c], ops[4].f[c]); break;
+                default: r = eased_value(fn, a, ops[1].f[c], ops[2].f[c], ops[3].f[c]); break;
+            }
+            f[c] = math::to_f32(r);
+        }
+        return math::make(math::family_kind(false, dims), f, out, eng);
+    }
+
     // math::vec2(...) ... math::ivec3(...): out of line, so the constructor's temporaries stay off the scalar kernel's frame
     JAI_MATH_COLD inline checked_result<script_value> eval_vec_constructor(math_fn fn, const script_value* const* args, size_t argc, engine* eng) {
         const script_value_type kind = fn == math_fn::vec2_ ? script_value_type::jai_vec2_type
@@ -250,13 +405,13 @@ namespace jai::detail {
             case math_fn::floor_: {
                 if (argc != 1) return bad_arity("math::floor expects 1 argument");
                 const num a = read(*args[0]);
-                if (!a.ok) return bad_type("math::floor expects a numeric argument");
+                if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::floor expects a numeric argument");
                 return checked_result<script_value>(script_value(std::floor(a.d()), eng));
             }
             case math_fn::ceil_: {
                 if (argc != 1) return bad_arity("math::ceil expects 1 argument");
                 const num a = read(*args[0]);
-                if (!a.ok) return bad_type("math::ceil expects a numeric argument");
+                if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::ceil expects a numeric argument");
                 return checked_result<script_value>(script_value(std::ceil(a.d()), eng));
             }
             case math_fn::itrunc: {
@@ -292,7 +447,7 @@ namespace jai::detail {
             case math_fn::abs_: {
                 if (argc != 1) return bad_arity("math::abs expects 1 argument");
                 const num a = read(*args[0]);
-                if (!a.ok) return bad_type("math::abs expects a numeric argument");
+                if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::abs expects a numeric argument");
                 if (a.is_int) {
                     // |INT64_MIN| overflows; surface the overflow policy's catchable error
                     if (a.i == INT64_MIN) {
@@ -307,7 +462,7 @@ namespace jai::detail {
             case math_fn::max_: {
                 if (argc != 2) return bad_arity(fn == math_fn::min_ ? "math::min expects 2 arguments" : "math::max expects 2 arguments");
                 const num a = read(*args[0]), b = read(*args[1]);
-                if (!a.ok || !b.ok) return bad_type(fn == math_fn::min_ ? "math::min expects numeric arguments" : "math::max expects numeric arguments");
+                if (!a.ok || !b.ok) return eval_vec_math(fn, args, argc, eng, fn == math_fn::min_ ? "math::min expects numeric arguments" : "math::max expects numeric arguments");
 				// Integer pairs stay exact above 2^53; mixed pairs keep double promotion.
 				const bool pick_a = a.is_int && b.is_int
 					? (fn == math_fn::min_ ? a.i <= b.i : a.i >= b.i)
@@ -319,7 +474,7 @@ namespace jai::detail {
             case math_fn::clamp_: {
                 if (argc != 3) return bad_arity("math::clamp expects 3 arguments (value, lo, hi)");
                 const num v = read(*args[0]), lo = read(*args[1]), hi = read(*args[2]);
-                if (!v.ok || !lo.ok || !hi.ok) return bad_type("math::clamp expects numeric arguments");
+                if (!v.ok || !lo.ok || !hi.ok) return eval_vec_math(fn, args, argc, eng, "math::clamp expects numeric arguments");
 				const bool below = v.is_int && lo.is_int ? v.i < lo.i : v.d() < lo.d();
 				const num& p = below ? lo : ((v.is_int && hi.is_int ? v.i > hi.i : v.d() > hi.d()) ? hi : v);
                 if (p.is_int) return checked_result<script_value>(script_value(p.i, eng));
@@ -439,14 +594,14 @@ namespace jai::detail {
                 if (argc != 3) return bad_arity(fn == math_fn::lerp_ ? "math::lerp expects 3 arguments (start, end, percent)"
                                                                      : "math::mix expects 3 arguments (start, end, percent)");
                 const num s = read(*args[0]), e = read(*args[1]), t = read(*args[2]);
-                if (!s.ok || !e.ok || !t.ok) return bad_type(fn == math_fn::lerp_ ? "math::lerp expects numeric arguments"
-                                                                                  : "math::mix expects numeric arguments");
+                if (!s.ok || !e.ok || !t.ok) return eval_vec_math(fn, args, argc, eng, fn == math_fn::lerp_ ? "math::lerp expects numeric arguments"
+                                                                                                             : "math::mix expects numeric arguments");
                 return checked_result<script_value>(script_value((t.d() * (e.d() - s.d())) + s.d(), eng));
             }
             case math_fn::unmix_: {
                 if (argc != 3) return bad_arity("math::unmix expects 3 arguments (start, end, value)");
                 const num s = read(*args[0]), e = read(*args[1]), v = read(*args[2]);
-                if (!s.ok || !e.ok || !v.ok) return bad_type("math::unmix expects numeric arguments");
+                if (!s.ok || !e.ok || !v.ok) return eval_vec_math(fn, args, argc, eng, "math::unmix expects numeric arguments");
                 return checked_result<script_value>(script_value(
                     (e.d() == s.d()) ? 0.0 : (v.d() - s.d()) / (e.d() - s.d()), eng));
             }
@@ -460,51 +615,8 @@ namespace jai::detail {
             case math_fn::unmix_out_in_: {
                 if (argc != 4) return bad_arity("math:: eased mix/unmix expects 4 arguments (start, end, percent_or_value, strength)");
                 const num s_ = read(*args[0]), e_ = read(*args[1]), p_ = read(*args[2]), k_ = read(*args[3]);
-                if (!s_.ok || !e_.ok || !p_.ok || !k_.ok) return bad_type("math:: eased mix/unmix expects numeric arguments");
-                const script_float start = s_.d(), end = e_.d(), percent = p_.d(), strength = k_.d();
-                script_float r = 0.0;
-                switch (fn) {
-                    case math_fn::mix_in_:
-                        r = std::pow(percent, strength) * (end - start) + start;
-                        break;
-                    case math_fn::mix_out_:
-                        r = (1.0 - std::pow(1.0 - percent, strength)) * (end - start) + start;
-                        break;
-                    case math_fn::mix_in_out_: {
-                        const script_float half_range = (end - start) / 2.0 + start;
-                        r = percent < 0.5
-                            ? std::pow(percent * 2.0, strength) * (half_range - start) + start
-                            : (1.0 - std::pow(1.0 - (percent - 0.5) * 2.0, strength)) * (end - half_range) + half_range;
-                        break;
-                    }
-                    case math_fn::mix_out_in_: {
-                        const script_float half_range = (end - start) / 2.0 + start;
-                        r = percent < 0.5
-                            ? (1.0 - std::pow(1.0 - percent * 2.0, strength)) * (half_range - start) + start
-                            : std::pow((percent - 0.5) * 2.0, strength) * (end - half_range) + half_range;
-                        break;
-                    }
-                    case math_fn::unmix_in_:
-                        r = (end == start) ? end : std::pow((percent - start) / (end - start), 1.0 / strength);
-                        break;
-                    case math_fn::unmix_out_:
-                        r = 1.0 - std::pow(1.0 - ((percent - start) / (end - start)), 1.0 / strength);
-                        break;
-                    case math_fn::unmix_in_out_: {
-                        const script_float half_range = (end - start) / 2.0 + start;
-                        r = percent < half_range
-                            ? std::pow((percent - start) / (half_range - start), 1.0 / strength) / 2.0
-                            : (1.0 - std::pow(1.0 - ((percent - half_range) / (end - half_range)), 1.0 / strength)) / 2.0 + 0.5;
-                        break;
-                    }
-                    default: {   // unmix_out_in_
-                        const script_float half_range = (end - start) / 2.0 + start;
-                        r = percent < half_range
-                            ? (1.0 - std::pow(1.0 - ((percent - start) / (half_range - start)), 1.0 / strength)) / 2.0
-                            : std::pow((percent - half_range) / (end - half_range), 1.0 / strength) / 2.0 + 0.5;
-                        break;
-                    }
-                }
+                if (!s_.ok || !e_.ok || !p_.ok || !k_.ok) return eval_vec_math(fn, args, argc, eng, "math:: eased mix/unmix expects numeric arguments");
+                const script_float r = eased_value(fn, s_.d(), e_.d(), p_.d(), k_.d());
                 return checked_result<script_value>(script_value(r, eng));
             }
 
@@ -514,6 +626,19 @@ namespace jai::detail {
             case math_fn::ivec2_:
             case math_fn::ivec3_:
                 return eval_vec_constructor(fn, args, argc, eng);
+
+            case math_fn::round_: {
+                if (argc != 1) return bad_arity("math::round expects 1 argument");
+                const num a = read(*args[0]);
+                if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::round expects a numeric argument");
+                return checked_result<script_value>(script_value(std::round(a.d()), eng));
+            }
+            case math_fn::remap_: {
+                if (argc != 5) return bad_arity("math::remap expects 5 arguments (value, in_lo, in_hi, out_lo, out_hi)");
+                const num v = read(*args[0]), il = read(*args[1]), ih = read(*args[2]), ol = read(*args[3]), oh = read(*args[4]);
+                if (!v.ok || !il.ok || !ih.ok || !ol.ok || !oh.ok) return eval_vec_math(fn, args, argc, eng, "math::remap expects numeric arguments");
+                return checked_result<script_value>(script_value(remap_value(v.d(), il.d(), ih.d(), ol.d(), oh.d()), eng));
+            }
 
             default:
                 return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),

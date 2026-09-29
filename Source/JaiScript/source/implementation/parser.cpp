@@ -261,12 +261,19 @@ namespace {
             }
             const detail::math_fn fn = detail::math_intrinsic_for_call(m);
             const size_t argc = c->arguments.size();
+            // the component-wise family takes vectors too (a vector result), so it classifies float only over numeric arguments
+            auto numeric_args = [&]() {
+                for (const auto& a : c->arguments) { if (static_numeric_class(a.get()) == cls_unknown) { return false; } }
+                return true;
+            };
             switch (fn) {
                 case detail::math_fn::itrunc:
                 case detail::math_fn::ifloor:
                     return argc == 1 ? cls_int : cls_unknown;
                 case detail::math_fn::floor_:
                 case detail::math_fn::ceil_:
+                case detail::math_fn::round_:
+                    return argc == 1 && numeric_args() ? cls_float : cls_unknown;
                 case detail::math_fn::sqrt_:
                 case detail::math_fn::sin_:
                 case detail::math_fn::cos_:
@@ -280,9 +287,12 @@ namespace {
                 case detail::math_fn::lerp_:
                 case detail::math_fn::mix_:
                 case detail::math_fn::unmix_:
-                    return argc == 3 ? cls_float : cls_unknown;
+                    return argc == 3 && numeric_args() ? cls_float : cls_unknown;
+                case detail::math_fn::remap_:
+                    return argc == 5 && numeric_args() ? cls_float : cls_unknown;
                 case detail::math_fn::distance:
                 case detail::math_fn::distance_squared:
+                    return argc == 4 ? cls_float : cls_unknown;
                 case detail::math_fn::mix_in_:
                 case detail::math_fn::mix_out_:
                 case detail::math_fn::mix_in_out_:
@@ -291,7 +301,7 @@ namespace {
                 case detail::math_fn::unmix_out_:
                 case detail::math_fn::unmix_in_out_:
                 case detail::math_fn::unmix_out_in_:
-                    return argc == 4 ? cls_float : cls_unknown;
+                    return argc == 4 && numeric_args() ? cls_float : cls_unknown;
                 case detail::math_fn::abs_:
                     return argc == 1 ? static_numeric_class(c->arguments[0].get()) : cls_unknown;
                 case detail::math_fn::min_:

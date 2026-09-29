@@ -2554,6 +2554,12 @@ public:
             check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + ch; } s", "hi", "char buffer range-for");
             check_quad("array<bool> f = [true]; f.push(1); f.push(0); to_json(f)", "[true,true,false]", "bool buffer converts an int (Dev ruling 2026-09-09)");
             check_quad_error("array<char> c = ['a']; c[0] = \"s\"", "char buffer rejects string");
+            // fuzz seed 201467 (element band, 2026-09-29): an int written into a bool element through a reference reached the
+            // buffer unconverted and crashed both backends; a reference store takes the direct store's rows
+            check_quad("array<bool> f = [false, true]; for (auto& x : f) { x = 5; } to_json(f)", "[true,true]", "bool buffer store through a range-for reference converts an int");
+            check_quad("function z(int& p) { p = 0; } array<bool> f = [true]; z(f[0]); to_json(f)", "[false]", "bool buffer store through an int& parameter converts");
+            check_quad("array<bool> f = [false]; auto& r = f[0]; r = 3; to_json(f)", "[true]", "bool buffer store through a reference local");
+            check_quad("array<int> a = [1]; for (auto& x : a) { x = true; } to_json(a)", "[1]", "int buffer store through a reference converts a bool");
             // string handles: reads, stores, push, sort, join, copy, in-place mutator through an element, json
             check_quad("array<string> s = [\"b\", \"a\"]; s.push(\"c\"); s.sort(); s.join(\"-\")", "a-b-c", "string buffer push/sort/join");
             check_quad("array<string> s = [\"x\"]; s[0] = \"y\"; s[0] + to_string(s.size())", "y1", "string buffer store/read");

@@ -685,9 +685,12 @@ namespace jai::detail {
 		}
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
+		// an element takes the direct store's rows: the class copy and tag, int/float/bool conversions, the byte range (a bool
+		// buffer handed an int through a reference read the int as a bool payload)
 		if (!is_field && ((target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) ||
-		                  element_type->is_byte_element())) {
-			return convert_container_element(eng, actual_element, element_type);   // the direct store's copy and class tag, the byte range
+		                  target_type == script_value_type::jai_int_type || target_type == script_value_type::jai_float_type ||
+		                  target_type == script_value_type::jai_bool_type)) {
+			return convert_container_element(eng, actual_element, element_type);
 		}
 		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
 			auto converted = checked_float_to_integer(actual_element.unchecked_as_float());   // the scalar slot's kernel

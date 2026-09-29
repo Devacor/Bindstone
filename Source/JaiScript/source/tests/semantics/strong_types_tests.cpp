@@ -2668,7 +2668,7 @@ public:
             check_eq((size_t)1000, bytes.size(), "std::vector<uint8_t> extraction");
             check_eq((int)255, (int)bytes[255], "extraction keeps each byte");
             // the host boundary: a std::vector<uint8_t> parameter takes the buffer, a bound_array writes it in place under
-            // the range, a std::vector<uint8_t> result is an array of ints like std::vector<int>
+            // the range, a std::vector<uint8_t> result is an array<uint8>
             for (bool use_vm : {false, true}) {
                 auto h = jai::engine::make();
                 if (use_vm) { h->set_backend(jai::backend_type::vm); }
@@ -2684,9 +2684,7 @@ public:
                          h->execute("array<uint8> b = [1]; var out = \"none\"; try { host_push(b, 300); } catch (e) { out = e; } out + \" \" + to_json(b)").to_string(),
                          std::string("a bound_array write keeps the byte range") + tag);
                 check_eq(std::string("[1,2,255] int"), h->execute("var b = host_bytes(); to_json(b) + \" \" + type_of(b[2])").to_string(), std::string("a std::vector<uint8_t> result") + tag);
-                h->add_function("host_ints", []() -> std::vector<int> { return {1, 2}; });
-                check(h->execute("host_bytes()").unchecked_array_node()->kind() == h->execute("host_ints()").unchecked_array_node()->kind(),
-                      std::string("a std::vector<uint8_t> result takes std::vector<int>'s form") + tag);
+                check(h->execute("host_bytes()").unchecked_array_node()->kind() == jai::script_array::kind_t::u8, std::string("a std::vector<uint8_t> result is an array<uint8>") + tag);
             }
         });
 

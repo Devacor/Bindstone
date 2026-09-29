@@ -123,7 +123,7 @@ function wipe_rnd(int n) -> int {
 
 function wipe_begin() -> void {
 	WIPE_OLD = PIX;
-	WIPE_SEED = (clock_ms() & 65535) | 1;
+	WIPE_SEED = (time::unix_ms() & 65535) | 1;
 	WIPE_COL = [];
 	WIPE_COL.push(0 - wipe_rnd(16));
 	for (int x = 1; x < VW; ++x) {

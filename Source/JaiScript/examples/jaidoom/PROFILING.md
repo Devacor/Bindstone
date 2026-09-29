@@ -56,7 +56,7 @@ Reports ms/tic with sim/render/blit split, realtime multiple, worst tic, and a S
 4. **Attribution before optimization.** The Profile-build runner prints `[vm-profile]` opcode
    self-time histograms and consumer tables on exit — run the tape under it (short it with a
    truncated tics array if 70s is too slow there) to see WHICH opcodes/paths dominate. For
-   script-level attribution, add temporary clock_ms stage counters inside render stages
+   script-level attribution, add temporary time::stopwatch stage counters inside render stages
    (draw_seg wall loop vs flats vs sprites vs masked) — remove them after measuring.
 5. Known context: worst-tic spikes ≈ lazy sprite composites (first sight of each monster
    type); frame strings ~68KB at 120x78; PERF_BASELINE.md's ledger lists the unpulled levers

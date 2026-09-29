@@ -1,7 +1,6 @@
 // Conformance-only reference host: executes the original JaiDOOM scripts.
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -21,7 +20,6 @@ int main(int argc,char**argv){
 		uint64_t frame_hash=14695981039346656037ull;
 		auto e=jai::engine::make();e->set_backend(std::string(argv[3])=="vm"?jai::backend_type::vm:jai::backend_type::interpreter);
 		e->execution_budget(0);e->jaibite_cache(false);jai::stdlib::register_all(*e);
-		e->add_function("clock_ms",[]()->jai::script_int{return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();});
 		e->add_function("read_file",[](const std::string& path){return read(path);});
 		e->add_function("file_exists",[](const std::string& path){return std::filesystem::exists(path);});
 		e->add_function("dir_exists",[](const std::string& path){return std::filesystem::is_directory(path);});

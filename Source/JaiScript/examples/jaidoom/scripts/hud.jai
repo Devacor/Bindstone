@@ -265,9 +265,9 @@ function msg_draw() -> void {
 // frame-time EMA -> FPS in the top-right corner
 float FPS_EMA = 0.0;
 
-function fps_note(int dtms) -> void {
+function fps_note(float dtms) -> void {
 	if (dtms < 1) { dtms = 1; }
-	if (FPS_EMA <= 0.0) { FPS_EMA = dtms * 1.0; }
+	if (FPS_EMA <= 0.0) { FPS_EMA = dtms; }
 	else { FPS_EMA = FPS_EMA * 0.9 + dtms * 0.1; }
 }
 

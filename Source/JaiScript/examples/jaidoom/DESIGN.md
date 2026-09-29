@@ -10,9 +10,9 @@ freely distributable, md5-verified) and Freedoom 0.13 (BSD) — both gitignored.
 
 - **Pure JaiScript first.** Everything that CAN be script IS script. The only C++ we accept
   (when P4 needs interactivity) is a small generic console block in `tools/jaiscript/main.cpp`:
-  `read_key()/key_down(name)/clock_ms()/sleep_ms(n)/term_size()` — capabilities a script cannot
-  express, useful to any terminal game, no engine changes. Until then every phase gate runs
-  batch (fixed-dt autopilot frames, files or stdout).
+  `read_key()/key_down(name)/term_size()` — capabilities a script cannot express, useful to
+  any terminal game, no engine changes (clocks and sleeps are the stdlib's `time::`). Until
+  then every phase gate runs batch (fixed-dt autopilot frames, files or stdout).
 - **GLOOM discipline throughout** (it is the proven architecture): flat typed `array<int>`/
   `array<float>` globals for all hot state, `var&` for every hot array argument, free functions
   on the hot path, palette-index framebuffer + interned escape strings, one frame = one string,

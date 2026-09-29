@@ -2,8 +2,8 @@
 // time goes. The profiling workhorse: deterministic real gameplay, no sleep,
 // no terminal writes (the frame string is built but never printed — stdout
 // would dominate). Faithful to play()'s per-frame work: sim tic, full render
-// with weapon overlay, hud, blit. clock_ms is 1ms-granular, so the split is
-// aggregate-accurate; per-tic max only resolves spikes >= 1ms.
+// with weapon overlay, hud, blit; a time::stopwatch laps each stage of every
+// tic, so the split and the worst tic are exact.
 //
 //   jaiscript p10_timedemo.jai                       (../demo.json or demo.json)
 //   jaiscript p10_timedemo.jai -- mytape.json 200x140
@@ -76,18 +76,18 @@ function main() -> int {
 	int ntics = DEMO_TICS.size() / 6;
 	print(`timedemo: ${tape}  map ${DEMO_MAP} skill ${DEMO_SKILL}${DEMO_NM ? " NIGHTMARE" : ""}  ${ntics} tics  vid ${bw}x${bh}${simonly ? " SIMONLY" : ""}`);
 
-	int sim_ms = 0;
-	int rend_ms = 0;
-	int blit_ms = 0;
-	int worst = 0;
+	float sim_s = 0.0;
+	float rend_s = 0.0;
+	float blit_s = 0.0;
+	float worst = 0.0;
 	int frame_bytes = 0;
-	int t_start = clock_ms();
+	time::stopwatch run;
+	time::stopwatch tic;
+	run.start();
 	while (demo_feed()) {
-		int t0 = clock_ms();
+		tic.start();
 		game_tic();
-		int t1 = clock_ms();
-		int t2 = t1;
-		int t3 = t1;
+		sim_s += tic.delta();
 		if (!simonly) {
 			EYE_Z = P_VIEWZ;
 			EXTRA_LIGHT = FLASH_TICS > 0 ? 1 : 0;
@@ -98,18 +98,16 @@ function main() -> int {
 				if (FLASH_TICS > 0) { draw_weapon_flash(w.flash, "A"); }
 			}
 			hud_draw();
-			t2 = clock_ms();
+			rend_s += tic.delta();
 			var frame = blit_half();
 			frame_bytes = frame.size();
-			t3 = clock_ms();
+			blit_s += tic.delta();
 		}
-		sim_ms = sim_ms + (t1 - t0);
-		rend_ms = rend_ms + (t2 - t1);
-		blit_ms = blit_ms + (t3 - t2);
-		if (t3 - t0 > worst) { worst = t3 - t0; }
+		float spent = tic.elapsed();
+		if (spent > worst) { worst = spent; }
 		if (LEVEL_DONE) { break; }
 	}
-	int wall = clock_ms() - t_start;
+	int wall = run.elapsed() * 1000;
 	if (wall < 1) { wall = 1; }
 	int played = GAME_TIC;
 	float mspt = 1.0 * wall / imax(1, played);
@@ -117,7 +115,7 @@ function main() -> int {
 	float speedup = realtime * 1000.0 / wall;
 
 	print(`played ${played} tics in ${wall} ms  =  ${mspt:.2} ms/tic  (${speedup:.1}x realtime, ${math::itrunc(played * 1000.0 / wall)} tics/sec)`);
-	print(`split: sim ${1.0 * sim_ms / imax(1, played):.2}  render ${1.0 * rend_ms / imax(1, played):.2}  blit ${1.0 * blit_ms / imax(1, played):.2}  (ms/tic, aggregate)  worst tic ${worst} ms  frame ${frame_bytes} bytes`);
+	print(`split: sim ${sim_s * 1000 / imax(1, played):.2}  render ${rend_s * 1000 / imax(1, played):.2}  blit ${blit_s * 1000 / imax(1, played):.2}  (ms/tic, aggregate)  worst tic ${worst * 1000:.1} ms  frame ${frame_bytes} bytes`);
 	print(`STATE_HASH: ${demo_state_hash()}  (run twice: identical hash = uncapped replay is deterministic)`);
 	return 0;
 }

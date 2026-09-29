@@ -45,7 +45,7 @@ function pump2(int times) -> void {
 	for (int i = 0; i < times; ++i) {
 		np_frame();
 		if (FH != null) { FH.pump(); }
-		sleep_ms(3);
+		time::sleep_ms(3);
 	}
 }
 
@@ -73,7 +73,7 @@ function pump_all(int times) -> void {
 		if (FA != null) { FA.pump(); }
 		if (FB != null) { FB.pump(); }
 		if (FC != null) { FC.pump(); }
-		sleep_ms(3);
+		time::sleep_ms(3);
 	}
 }
 
@@ -551,11 +551,11 @@ function main() -> int {
 	check(np_host_can_start(), "fresh recount agrees");
 	NP_READY_SET = {};                                   // the 10s grace path, isolated
 	NP_ALL_READY = false;
-	NP_WI_T0 = clock_ms();
+	NP_WI_T0 = time::now();
 	check(!np_host_can_start(), "cleared votes hold the start again");
-	NP_WI_T0 = clock_ms() - 11000;
+	NP_WI_T0 = time::now() - 11.0;
 	check(np_host_can_start(), "the 10s grace unlocks the start");
-	NP_WI_T0 = 0;
+	NP_WI_T0 = null;
 	FA.send(to_json({"t": "READY", "s": 1}));
 	FB.send(to_json({"t": "READY", "s": 2}));
 	pump_all(15);
@@ -626,11 +626,11 @@ function main() -> int {
 	check(GAME_MAP == "E1M1" && !NP_WI_PEND, "no self-advance: the host owns NEXT");
 
 	// NEXT arrives ~150ms late; the client keeps ticking E1M1 until it lands
-	int due = clock_ms() + 150;
+	float due = time::now() + 0.15;
 	bool nsent = false;
 	int spin = 0;
 	while (spin < 400 && !NP_WI_PEND) {
-		if (!nsent && clock_ms() >= due) {
+		if (!nsent && time::now() >= due) {
 			FH.send(FH_CID, to_json({"t": "NEXT", "s": 0, "mapname": "E1M1", "next": "E1M2",
 				"k": 80, "i": 60, "s2": 33, "secs": 90}));
 			nsent = true;
@@ -638,7 +638,7 @@ function main() -> int {
 		game_tic();
 		np_frame();
 		FH.pump();
-		sleep_ms(3);
+		time::sleep_ms(3);
 		spin = spin + 1;
 	}
 	check(NP_WI_PEND && NP_WI_NEXT == "E1M2" && NP_WI_K == 80, "late NEXT set the intermission pending flags");

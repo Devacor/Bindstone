@@ -849,6 +849,8 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 		const expression* a = call->arguments[i].get();
 		if (p.slot_index == SIZE_MAX || p.slot_index >= fn->local_count || p.default_value) return "a parameter with a default or without a slot";
 		if (p.is_reference) {
+			// an element is aliased where its bind cannot fail - the call binds after every argument and refuses a non-lvalue there (a
+			// string's character, a missing map key), which the alias would refuse in the argument's place
 			const bool typed_to_name = a->get_type() == node_type::identifier_expr;   // a typed one bound to a caller's local is that local: the declared type is the checker's (no bind or store checks it)
 			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get()) || typed_to_name) || p.ref_escaping) return "a reference parameter that is not a var&";   // `var& p` (the parser keeps the referent's type and the reference flag apart)
 			if (a->get_type() == node_type::identifier_expr) {
@@ -856,7 +858,16 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 				if (static_cast<const identifier_expr*>(a)->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
 				continue;
 			}
-			if (a->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(a)->op.type == token_type::left_bracket) continue;
+			if (a->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(a)->op.type == token_type::left_bracket) {
+				// an element of a private local declared an array: its typed slot holds an array at every point, so the element is an lvalue
+				auto* base = static_cast<const binary_expr*>(a)->left.get();
+				if (frame || base->get_type() != node_type::identifier_expr) return "a reference argument that may not be an lvalue";
+				auto* id = static_cast<const identifier_expr*>(base);
+				if (id->global_qualified || !id->names_value_decl || id->slot_index == SIZE_MAX || callable_.escaping.count(static_cast<uint32_t>(id->slot_index))) return "a reference argument that may not be an lvalue";
+				const auto declared = callable_.slot_types.find(static_cast<uint32_t>(id->slot_index));
+				if (declared == callable_.slot_types.end() || !declared->second || declared->second->is_reference() || declared->second->base_type != script_value_type::jai_array_type) return "a reference argument that may not be an lvalue";
+				continue;
+			}
 			return "a reference argument that is not a name or an element";
 		}
 		if (p.ref_escaping) return "a parameter that escapes";
@@ -983,11 +994,17 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 				else if (!alias_pins_.count(ce) && !callee_probes_.count(ce)) { pre.push_back(ce->callee); }
 			}
 			else { out.why = "an argument of a computed callee"; return false; }
+			// a callee other than a math intrinsic or a stdlib alias may bind an argument by reference (whatever the name binds by then):
+			// it binds the argument itself after every argument, so a spilled copy in an earlier argument's place would bind a temp (the
+			// graft's own result stands as a value there, which a reference parameter refuses as the original's value would be refused)
+			const bool by_value = math_call(ce) || std::find(alias_pins.begin(), alias_pins.end(), ce) != alias_pins.end() || alias_pins_.count(ce) || alias_call(ce, engine_);
 			const auto outer = math_call(ce) ? std::shared_ptr<const function_decl>() : ce->proven_callee_decl.lock();
 			for (size_t ai = 0; ai < ce->arguments.size() && ce->arguments[ai].get() != x; ++ai) {
-				pre.push_back(ce->arguments[ai]);
+				const expression_ptr& arg = ce->arguments[ai];
+				if (!by_value && arg->get_type() != node_type::literal_expr && !(private_local(arg.get()) && !args_call)) { out.why = "an argument before the call a reference parameter may bind"; return false; }   // a private local stays in place: bound or read as the call would, the graft cannot write it
+				pre.push_back(arg);
 				const bool scalar_param = outer && ai < outer->parameters.size() && !outer->parameters[ai].is_reference && scalar_type(outer->parameters[ai].type.get());
-				if (!math_call(ce) && !scalar_param) { copied_args.push_back(ce->arguments[ai].get()); }
+				if (!math_call(ce) && !scalar_param) { copied_args.push_back(arg.get()); }
 			}
 			break;
 		}

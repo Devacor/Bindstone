@@ -118,6 +118,7 @@ namespace jai::vm {
         bool private_local(const expression* e);       // a frame slot no user code can rebind: a value declaration, not escaping
         bool slot_argument_in(const expression* e, uint32_t slot);   // a call in the subtree takes the slot as a direct argument or receiver (a reference parameter reaches it)
         bool read_ahead_of(const expression* operand, const expression* later);   // an identifier operand read in its op must be taken before `later` runs
+        bool graft_value(const expression* e) const;   // a graft's result or spilled operand in a statement's clone (an rvalue to a reference parameter)
         bool primitive_local(const expression* e);     // a private local declared int, float or bool
         bool quiet_read(const expression* e);          // a hoisted read that cannot run user code (a private container of proven element class over a quiet index; a unary or an intrinsic over a quiet operand)
         bool quiet_index(const expression* e);         // a literal, a private local or a quiet read (never a binary: a custom numeric operator is user code)

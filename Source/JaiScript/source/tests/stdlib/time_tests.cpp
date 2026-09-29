@@ -352,8 +352,8 @@ public:
 
         test("date_operators_take_dates", [expect, expect_error]() {
             expect(R"(var d = time::utc_date(2024, 1, 1); var five = 5; "" + (d == five) + " " + (d != five) + " " + (d == null) + " " + (d != null);)", "false true false true", "equality with a non-date");
-            expect_error(R"(var d = time::utc_date(2024, 1, 1); var five = 5; try { var r = d < five; } catch (e) { return e; } return "no-error";)", "Invalid operands for < operator", "ordering needs two dates");
-            expect_error(R"(var d = time::utc_date(2024, 1, 1); var s = "x"; try { var r = d - s; } catch (e) { return e; } return "no-error";)", "Invalid operands for - operator", "subtraction needs two dates");
+            expect_error(R"(var d = time::utc_date(2024, 1, 1); var five = 5; try { var r = d < five; } catch (e) { return e; } return "no-error";)", "time::date: '<' needs two dates, got int", "ordering needs two dates");
+            expect_error(R"(var d = time::utc_date(2024, 1, 1); var s = "x"; try { var r = d - s; } catch (e) { return e; } return "no-error";)", "time::date: '-' needs two dates, got string", "subtraction needs two dates");
             expect_error(R"(var z = time::utc_date(2024, 1, 1); try { z.hour = 1.5; } catch (e) { return e; } return "no-error";)", "time::date: hour takes an int, got float", "a field takes an int");
         });
 

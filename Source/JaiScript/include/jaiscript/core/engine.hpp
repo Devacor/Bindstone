@@ -15,6 +15,7 @@
 #include "jaibite.hpp"
 #include "privilege.hpp"
 #include <jaiscript/detail/type_checker.hpp>
+#include <jaiscript/detail/first_type.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>
 #include <functional>
 #include <memory>

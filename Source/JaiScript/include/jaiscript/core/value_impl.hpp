@@ -41,7 +41,7 @@ namespace jai {
                 val.type_info_ = cpp_bound_type_info(eng, encoding::semantic_index);
                 val.storage_ = make_strong<cpp_bound_holder>(boundPtr, sizeAndSign, encoding::semantic_index);
             } else if constexpr (std::is_class_v<T>) {
-                if (auto bound_def = eng->get_class_definition_by_type(std::type_index(typeid(T)))) {
+                if (std::shared_ptr<detail::first_type_t<class_definition, T>> bound_def = eng->get_class_definition_by_type(std::type_index(typeid(T)))) {
                     // This enables non-owning reference semantics for T& returns
                     auto holder = make_strong<object_holder>();
                     holder->type_name = bound_def->interned_name();   // interned once per class

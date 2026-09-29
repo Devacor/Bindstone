@@ -1508,11 +1508,28 @@ private:
 				r;
 			)", "Cannot initialize 'x' (declared int) with null|raised|Array index 5 out of bounds for array of size 1");
 		});
-		test("bitwise_compound_assignment_forms_are_not_in_the_grammar", [this]() {
-			// docs/grammar.md assignmentOperator: the bitwise compound forms (|= &= ^= <<= >>=) are deliberately omitted
-			every_config("bitwise compound", "parse error", [](engine& e) {
-				try { e.execute("int x = 6; x &= 3;"); return std::string("accepted"); }
-				catch (const std::exception& ex) { return std::string(std::string(ex.what()).find("Parse error") != std::string::npos ? "parse error" : ex.what()); }
+		test("bitwise_compound_assignments_are_x_op_equals_y_with_x_evaluated_once", [this]() {
+			// Dev ruling 2026-09-28: &= |= ^= <<= >>= on every lvalue (a local, a field, this's field, a static, a namespace
+			// variable, an element, a map entry), the stored value as the expression's value, the operand text
+			expect("bitwise compound", R"(
+				class Flags { int f = 1; static int s = 1; void bump() { f |= 8; } }
+				namespace ns { int m = 12; }
+				int calls = 0;
+				function at() -> int { calls += 1; return 0; }
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { int x = 6; x &= 3; x |= 8; x ^= 1; x <<= 2; x >>= 1; return x; }) + "|" +
+				t([]() { Flags o; o.f |= 6; o.bump(); Flags::s <<= 4; ns::m &= 4; return "" + o.f + " " + Flags::s + " " + ns::m; }) + "|" +
+				t([]() { array<int> a = [5, 3]; var v = [12]; map<string, int> m; a[at()] &= 4; v[0] >>= 2; m["k"] |= 3; return "" + a[0] + " " + v[0] + " " + m["k"] + " " + calls; }) + "|" +
+				t([]() { int x = 5; int y = (x ^= 3); return y; }) + "|" +
+				t([]() { var s = 1.5; s &= 1; return s; }) + "|" +
+				t([]() { int x = 1; x <<= 64; return x; }) + "|" +
+				t([]() { var w = [1.5]; w[0] |= 1; return w[0]; });
+			)", "22|15 16 4|4 3 3 1|6|Cannot apply '&=' to float and int|Shift amount must be between 0 and 63|Cannot apply '|=' to float and int",
+			   check_mode::warn);
+			every_config("checker", "1|0", [](engine& e) {
+				auto bad = e.check("float f = 1.5; f &= 1;");
+				auto ok = e.check("int x = 6; x &= 3; char c = 'a'; int y = 1; y |= c;");
+				return std::to_string(bad.error_count()) + "|" + std::to_string(ok.error_count());
 			});
 		});
 	}

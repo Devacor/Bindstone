@@ -170,7 +170,9 @@ token lexer::next_token() {
             if (match('.')) return make_token(token_type::question_dot);
             return make_token(token_type::question);
         case '~': return make_token(token_type::tilde);
-        case '^': return make_token(token_type::caret);
+        case '^':
+            if (match('=')) return make_token(token_type::caret_equal);
+            return make_token(token_type::caret);
         
         // Handle #include and #import (# is optional/ignored)
         case '#':
@@ -224,10 +226,12 @@ token lexer::next_token() {
             
         case '&':
             if (match('&')) return make_token(token_type::ampersand_ampersand);
+            if (match('=')) return make_token(token_type::ampersand_equal);
             return make_token(token_type::ampersand);
             
         case '|':
             if (match('|')) return make_token(token_type::pipe_pipe);
+            if (match('=')) return make_token(token_type::pipe_equal);
             return make_token(token_type::pipe);
             
         case '!':
@@ -243,12 +247,18 @@ token lexer::next_token() {
                 if (match('>')) return make_token(token_type::spaceship); // <=>
                 return make_token(token_type::less_equal); // <=
             }
-            if (match('<')) return make_token(token_type::left_shift); // <<
+            if (match('<')) {
+                if (match('=')) return make_token(token_type::left_shift_equal); // <<=
+                return make_token(token_type::left_shift); // <<
+            }
             return make_token(token_type::less);
             
         case '>':
             if (match('=')) return make_token(token_type::greater_equal);
-            if (match('>')) return make_token(token_type::right_shift); // >>
+            if (match('>')) {
+                if (match('=')) return make_token(token_type::right_shift_equal); // >>=
+                return make_token(token_type::right_shift); // >>
+            }
             return make_token(token_type::greater);
             
         case '.':
@@ -381,6 +391,11 @@ token lexer::make_token(token_type type) {
         case token_type::spaceship: lexeme = "<=>"; break;
         case token_type::left_shift: lexeme = "<<"; break;
         case token_type::right_shift: lexeme = ">>"; break;
+        case token_type::ampersand_equal: lexeme = "&="; break;
+        case token_type::pipe_equal: lexeme = "|="; break;
+        case token_type::caret_equal: lexeme = "^="; break;
+        case token_type::left_shift_equal: lexeme = "<<="; break;
+        case token_type::right_shift_equal: lexeme = ">>="; break;
 
         default:
             // For other tokens like EOF, just leave empty
@@ -896,7 +911,8 @@ bool token::is_keyword() const {
 bool token::is_operator() const {
     return (type >= token_type::plus && type <= token_type::tilde) ||
            type == token_type::left_shift || type == token_type::right_shift ||
-           type == token_type::spaceship;
+           type == token_type::spaceship ||
+           (type >= token_type::ampersand_equal && type <= token_type::right_shift_equal);
 }
 
 bool token::is_literal() const {

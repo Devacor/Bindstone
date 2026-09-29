@@ -458,16 +458,7 @@ namespace {
 		return true;
 	}
 
-	inline uint32_t compound_kind_for(token_type op) {
-		switch (op) {
-		case token_type::plus_equal: return compound_plus;
-		case token_type::minus_equal: return compound_minus;
-		case token_type::star_equal: return compound_star;
-		case token_type::slash_equal: return compound_slash;
-		case token_type::percent_equal: return compound_percent;
-		default: return compound_plus;
-		}
-	}
+	inline uint32_t compound_kind_for(token_type op) { return compound_kind_for_token(op); }
 
 } // namespace
 
@@ -521,7 +512,7 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 	// ::name targets stay on the plain op (compound_fused's fast path resolves its
 	// target through the frame/env ladder; the global-only door lives in
 	// exec_compound_store and this path is cold by definition)
-	if (!code.empty() && rhs && !(kind_flags & compound_flag_global_only)) {
+	if (!code.empty() && rhs && !(kind_flags & compound_flag_global_only) && !compound_kind_bitwise(kind_flags)) {   // &= |= ^= <<= >>= take the plain op
 		compound_fused_proto cp;
 		bool fuse = false;
 		switch (rhs->get_type()) {
@@ -1858,7 +1849,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				compile_ternary_store(ident, assign, std::static_pointer_cast<ternary_expr>(assign->value));
 				return true;
 			}
-			if (assign->op.type != token_type::equal && !loops_.empty() && typed_lowering_ && temps_active_ && chunk_->is_function_body &&
+			if (assign->op.type != token_type::equal && !compound_kind_bitwise(compound_kind_for(assign->op.type)) && !loops_.empty() && typed_lowering_ && temps_active_ && chunk_->is_function_body &&
 			    !ident->global_qualified && assign->value->get_type() != node_type::member_expr &&
 			    assign->static_operand_class >= operand_class_int_int && assign->static_operand_class <= operand_class_float_int && value_temp_operand(assign->value.get())) {
 				// `x op= a[i];` (or a unary or math operand) inside a loop: the operand lands in a temp and the compound reads it, as
@@ -5744,15 +5735,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			const size_t store_ip = emit(opcode::op_store, add_symbol(ident->symbol_id), identifier_slot_operand(ident), flags);
 			note_ident_node(store_ip, expr->target);
 		} else {
-			uint32_t kind;
-			switch (expr->op.type) {
-			case token_type::plus_equal: kind = compound_plus; break;
-			case token_type::minus_equal: kind = compound_minus; break;
-			case token_type::star_equal: kind = compound_star; break;
-			case token_type::slash_equal: kind = compound_slash; break;
-			case token_type::percent_equal: kind = compound_percent; break;
-			default: kind = compound_plus; break;
-			}
+			uint32_t kind = compound_kind_for_token(expr->op.type);
 			if (!as_statement) kind |= compound_flag_result_needed;
 			if (ident->global_qualified) kind |= compound_flag_global_only;
 			emit_compound_store(add_symbol(ident->symbol_id), identifier_slot_operand(ident), kind, expr->value.get(), expr->static_operand_class);
@@ -5782,15 +5765,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			compile_expression(sub->left);
 			compile_expression(sub->right);
 			if (!value_first) { compile_expression(expr->value); }
-			uint32_t kind;
-			switch (expr->op.type) {
-			case token_type::plus_equal: kind = compound_plus; break;
-			case token_type::minus_equal: kind = compound_minus; break;
-			case token_type::star_equal: kind = compound_star; break;
-			case token_type::slash_equal: kind = compound_slash; break;
-			case token_type::percent_equal: kind = compound_percent; break;
-			default: kind = compound_plus; break;
-			}
+			uint32_t kind = compound_kind_for_token(expr->op.type);
 			if (expr->postfix_old_result) kind |= compound_flag_old_result;
 			if (expr->incdec_desugar) kind |= compound_flag_incdec;
 			if (value_first) kind |= compound_flag_value_first;
@@ -5825,15 +5800,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				emit(opcode::op_get_member, add_node(member));
 			}
 			if (!value_first) { compile_expression(expr->value); }
-			uint32_t kind;
-			switch (expr->op.type) {
-			case token_type::plus_equal: kind = compound_plus; break;
-			case token_type::minus_equal: kind = compound_minus; break;
-			case token_type::star_equal: kind = compound_star; break;
-			case token_type::slash_equal: kind = compound_slash; break;
-			case token_type::percent_equal: kind = compound_percent; break;
-			default: kind = compound_plus; break;
-			}
+			uint32_t kind = compound_kind_for_token(expr->op.type);
 			if (expr->postfix_old_result) kind |= compound_flag_old_result;
 			if (expr->incdec_desugar) kind |= compound_flag_incdec;
 			if (value_first) kind |= compound_flag_value_first;

@@ -241,6 +241,11 @@ token_type compound_base_op(token_type op) {
         case token_type::star_equal: return token_type::star;
         case token_type::slash_equal: return token_type::slash;
         case token_type::percent_equal: return token_type::percent;
+        case token_type::ampersand_equal: return token_type::ampersand;
+        case token_type::pipe_equal: return token_type::pipe;
+        case token_type::caret_equal: return token_type::caret;
+        case token_type::left_shift_equal: return token_type::left_shift;
+        case token_type::right_shift_equal: return token_type::right_shift;
         default: return token_type::equal;
     }
 }
@@ -3100,6 +3105,16 @@ private:
 			// a string target appends text only (a char is text; string += int raises, unlike binary +)
 			diag(diag_level::error, loc, "cannot apply '+=' to 'string' and '" + ctype_name(rhs) + "'", decl_line, decl_col);
 			return;
+		}
+		if (compound && !rhs.is_unknown()) {
+			const char* bitwise = base_op == token_type::ampersand ? "&=" : base_op == token_type::pipe ? "|=" : base_op == token_type::caret ? "^="
+			                    : base_op == token_type::left_shift ? "<<=" : base_op == token_type::right_shift ? ">>=" : nullptr;
+			const auto integral = [](const ctype& t) { return t.kind == ctype::int_k || t.kind == ctype::char_k; };
+			if (bitwise && (!integral(target) || !integral(rhs))) {
+				diag(diag_level::error, loc, std::string("cannot apply '") + bitwise + "' to '" + ctype_name(target) + "' and '" + ctype_name(rhs) + "'",
+				     decl_line, decl_col);
+				return;
+			}
 		}
 		ctype stored = compound ? binary_result(target, base_op, rhs) : rhs;
 		if (assignable(stored, target)) { return; }

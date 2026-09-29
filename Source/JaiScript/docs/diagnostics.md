@@ -171,7 +171,7 @@ A C++ `bound_array<T>` write into a byte buffer throws the same text. A char ele
 
 ## Compound assignment (`type_mismatch`, kernel `class_definition.hpp` `detail::compound_mismatch`)
 
-`Cannot apply '+=' to {0} and {1}` (likewise `'-='`, `'*='`, `'/='`, `'%='`)
+`Cannot apply '+=' to {0} and {1}` (likewise `'-='`, `'*='`, `'/='`, `'%='`, `'&='`, `'|='`, `'^='`, `'<<='`, `'>>='`; a bitwise form takes int or char operands)
 
 `{0}` is the target's type and `{1}` the operand's, spelled like family D's source (the
 payload's own type: a class name for an object, `null`, `array`, `map`, the primitives). Every

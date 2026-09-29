@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <jaiscript/detail/lexer.hpp>
 
 namespace jai::vm {
 
@@ -328,19 +329,55 @@ namespace jai::vm {
                                                          // (frozen at compile; exec skips enforcement only behind
                                                          // detail::same_type_payload, so a stale bit costs the skip)
 
-    // op_compound_store c layout: low 3 bits = kind, upper bits = flags
-    inline constexpr uint32_t compound_kind_mask = 0x7;
+    // op_compound_store c layout: low 4 bits = kind, upper bits = flags
+    inline constexpr uint32_t compound_kind_mask = 0xF;
     inline constexpr uint32_t compound_plus = 0;
     inline constexpr uint32_t compound_minus = 1;
     inline constexpr uint32_t compound_star = 2;
     inline constexpr uint32_t compound_slash = 3;
     inline constexpr uint32_t compound_percent = 4;
-    inline constexpr uint32_t compound_flag_result_needed = 0x8;
-    inline constexpr uint32_t compound_flag_no_result = 0x10; // statement position: nothing pushed
-    inline constexpr uint32_t compound_flag_global_only = 0x20; // ::name target (global env only)
-    inline constexpr uint32_t compound_flag_old_result = 0x40;  // postfix x++ on an element/member target: push the OLD value
-    inline constexpr uint32_t compound_flag_incdec = 0x80;      // ++/-- desugar: the target must be numeric (identifier-path gate)
-    inline constexpr uint32_t compound_flag_value_first = 0x100; // C++17 order: the right-hand side was evaluated before the target (it sits under the target's operands)
+    inline constexpr uint32_t compound_and = 5;
+    inline constexpr uint32_t compound_or = 6;
+    inline constexpr uint32_t compound_xor = 7;
+    inline constexpr uint32_t compound_shl = 8;
+    inline constexpr uint32_t compound_shr = 9;
+    inline constexpr uint32_t compound_flag_result_needed = 0x10;
+    inline constexpr uint32_t compound_flag_no_result = 0x20; // statement position: nothing pushed
+    inline constexpr uint32_t compound_flag_global_only = 0x40; // ::name target (global env only)
+    inline constexpr uint32_t compound_flag_old_result = 0x80;  // postfix x++ on an element/member target: push the OLD value
+    inline constexpr uint32_t compound_flag_incdec = 0x100;     // ++/-- desugar: the target must be numeric (identifier-path gate)
+    inline constexpr uint32_t compound_flag_value_first = 0x200; // C++17 order: the right-hand side was evaluated before the target (it sits under the target's operands)
+
+    // a compound kind's binary operator, and back
+    inline token_type compound_kind_token(uint32_t kind) noexcept {
+        switch (kind & compound_kind_mask) {
+            case compound_minus: return token_type::minus;
+            case compound_star: return token_type::star;
+            case compound_slash: return token_type::slash;
+            case compound_percent: return token_type::percent;
+            case compound_and: return token_type::ampersand;
+            case compound_or: return token_type::pipe;
+            case compound_xor: return token_type::caret;
+            case compound_shl: return token_type::left_shift;
+            case compound_shr: return token_type::right_shift;
+            default: return token_type::plus;
+        }
+    }
+    inline uint32_t compound_kind_for_token(token_type assign_op) noexcept {
+        switch (assign_op) {
+            case token_type::minus_equal: return compound_minus;
+            case token_type::star_equal: return compound_star;
+            case token_type::slash_equal: return compound_slash;
+            case token_type::percent_equal: return compound_percent;
+            case token_type::ampersand_equal: return compound_and;
+            case token_type::pipe_equal: return compound_or;
+            case token_type::caret_equal: return compound_xor;
+            case token_type::left_shift_equal: return compound_shl;
+            case token_type::right_shift_equal: return compound_shr;
+            default: return compound_plus;
+        }
+    }
+    inline bool compound_kind_bitwise(uint32_t kind) noexcept { return (kind & compound_kind_mask) >= compound_and; }
 
     // op_incdec c flags
     inline constexpr uint32_t incdec_flag_postfix = 1;

@@ -2978,6 +2978,14 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 		return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
 		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right, compound);
 
+	// &= |= ^= <<= >>=: the binary operator's kernel; an operand that is not an integer (a char promotes) takes the
+	// compound's text (KEEP BYTE-PARALLEL with interpreter::evaluate_arithmetic)
+	if (detail::bitwise_token(op)) [[unlikely]] {
+		const auto integral = [](size_t idx) { return idx == script_value::TYPEID_INT || idx == script_value::TYPEID_CHAR; };
+		if (compound >= 0 && (!integral(li) || !integral(ri))) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+		return handle_binary_op(op, left, right);
+	}
+
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
 	if (detail::utf8_operands(li, ri)) [[unlikely]]
 		return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_), compound), engine_);
@@ -4018,15 +4026,8 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		if (varPtr->is_reference()) {
 			const auto* refHolder = varPtr->get_reference_holder();
 			if (refHolder && (refHolder->container_element_type || refHolder->property_ref())) {
-				token_type op;
-				const char* opName;
-				switch (kind) {
-					case compound_minus: op = token_type::minus; opName = "-"; break;
-					case compound_star: op = token_type::star; opName = "*"; break;
-					case compound_slash: op = token_type::slash; opName = "/"; break;
-					case compound_percent: op = token_type::percent; opName = "%"; break;
-					default: op = token_type::plus; opName = "+"; break;
-				}
+				const token_type op = compound_kind_token(kind);
+				const char* opName = detail::binary_op_name(op);
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
 					operator_table_, engine_, symbolizer_,
 					[this](const script_value& l, token_type o, const script_value& r) {
@@ -4061,7 +4062,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				case compound_plus: op_slot = detail::op_slot::plus; break;
 				case compound_minus: op_slot = detail::op_slot::minus; break;
 				case compound_star: op_slot = detail::op_slot::star; break;
-				default: break;
+				default: if (compound_kind_bitwise(kind)) { op_slot = detail::binary_op_slot(compound_kind_token(kind)); } break;
 			}
 			if (operator_table_) {
 				if (const script_value* opFunc = operator_table_->entry(op_slot)) {
@@ -4079,15 +4080,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		}
 
 		if (leftType == script_value_type::jai_object_type) {
-			uint64_t op_symbol_id = 0;
-			switch (kind) {
-				case compound_plus: op_symbol_id = op_plus_id_; break;
-				case compound_minus: op_symbol_id = op_minus_id_; break;
-				case compound_star: op_symbol_id = op_star_id_; break;
-				case compound_slash: op_symbol_id = op_slash_id_; break;
-				case compound_percent: op_symbol_id = op_percent_id_; break;
-				default: break;
-			}
+			const uint64_t op_symbol_id = compound_kind_symbol(kind);
 			if (op_symbol_id != 0) {
 				auto custom_outcome = object_arithmetic_via_method(target, rightValue, op_symbol_id);
 				if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
@@ -4099,6 +4092,17 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 					return {};
 				}
 			}
+		}
+
+		// &= |= ^= <<= >>=: the binary operator's kernel, stored back through the slot's own table
+		// (KEEP BYTE-PARALLEL with the interpreter's identifier compound)
+		if (compound_kind_bitwise(kind)) [[unlikely]] {
+			const token_type baseOp = compound_kind_token(kind);
+			VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
+			if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) { target.assign_through(std::move(promoted)); }
+			else { VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym))); }
+			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
+			return {};
 		}
 
 		// §12.1 write-through: compound on a bound VARIABLE reads the live value, computes,
@@ -4369,15 +4373,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	}
 
 	if (currentValue.is_object()) {
-		uint64_t op_symbol_id = 0;
-		switch (kind) {
-			case compound_plus: op_symbol_id = op_plus_id_; break;
-			case compound_minus: op_symbol_id = op_minus_id_; break;
-			case compound_star: op_symbol_id = op_star_id_; break;
-			case compound_slash: op_symbol_id = op_slash_id_; break;
-			case compound_percent: op_symbol_id = op_percent_id_; break;
-			default: break;
-		}
+		const uint64_t op_symbol_id = compound_kind_symbol(kind);
 		if (op_symbol_id != 0) {
 			auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
@@ -4479,7 +4475,9 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 			break;
 		}
 		default:
-			return raise_(make_error_code(runtime_error_code::unknown_operator));
+			if (!compound_kind_bitwise(kind)) { return raise_(make_error_code(runtime_error_code::unknown_operator)); }
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, compound_kind_token(kind), rightValue, detail::compound_index(compound_kind_token(kind))));
+			break;
 	}
 
 	// Store the enforced (declared-type converted) value; the expression result stays the
@@ -6306,15 +6304,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 		}
 	}
 
-	token_type op;
-	switch (ins.a & compound_kind_mask) {
-		case compound_plus: op = token_type::plus; break;
-		case compound_minus: op = token_type::minus; break;
-		case compound_star: op = token_type::star; break;
-		case compound_slash: op = token_type::slash; break;
-		case compound_percent: op = token_type::percent; break;
-		default: op = token_type::plus; break;
-	}
+	const token_type op = compound_kind_token(ins.a);
 
 	script_value resultValue = make_null();
 	// Custom operator consult through the flat table (was a per-store string-keyed
@@ -6367,8 +6357,8 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 				break;
 			}
 			default:
-				return raise_(make_error_code(runtime_error_code::unsupported_operation),
-					"Unknown compound assignment operator");
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, op, rightValue, detail::compound_index(op)));   // & | ^ << >>
+				break;
 		}
 	}
 
@@ -10495,15 +10485,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 			// enforcing path
 			if (storage && (storage->kind() == script_array::kind_t::i64 || storage->kind() == script_array::kind_t::f64) &&
 			    index >= 0 && index < static_cast<script_int>(storage->size())) {
-				token_type op;
-				switch (ins.a & compound_kind_mask) {
-					case compound_plus: op = token_type::plus; break;
-					case compound_minus: op = token_type::minus; break;
-					case compound_star: op = token_type::star; break;
-					case compound_slash: op = token_type::slash; break;
-					case compound_percent: op = token_type::percent; break;
-					default: op = token_type::plus; break;
-				}
+				const token_type op = compound_kind_token(ins.a);
 				// Zero pre-checks keep INDEX_COMPOUND's exact error codes/texts
 				if (op == token_type::slash &&
 				    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
@@ -10530,15 +10512,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 				script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
 				const size_t elem_idx = target_ptr->raw_storage_index();
 				if (elem_idx == script_value::TYPEID_INT || elem_idx == script_value::TYPEID_FLOAT) {
-					token_type op;
-					switch (ins.a & compound_kind_mask) {
-						case compound_plus: op = token_type::plus; break;
-						case compound_minus: op = token_type::minus; break;
-						case compound_star: op = token_type::star; break;
-						case compound_slash: op = token_type::slash; break;
-						case compound_percent: op = token_type::percent; break;
-						default: op = token_type::plus; break;
-					}
+					const token_type op = compound_kind_token(ins.a);
 					// Zero pre-checks keep INDEX_COMPOUND's exact error codes/texts
 					if (op == token_type::slash &&
 					    ((rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) ||
@@ -13712,15 +13686,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	}
 
 	if (currentValue.is_object()) {
-		uint64_t op_symbol_id = 0;
-		switch (kind) {
-			case compound_plus: op_symbol_id = op_plus_id_; break;
-			case compound_minus: op_symbol_id = op_minus_id_; break;
-			case compound_star: op_symbol_id = op_star_id_; break;
-			case compound_slash: op_symbol_id = op_slash_id_; break;
-			case compound_percent: op_symbol_id = op_percent_id_; break;
-			default: break;
-		}
+		const uint64_t op_symbol_id = compound_kind_symbol(kind);
 		if (op_symbol_id != 0) {
 			auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
@@ -13843,8 +13809,12 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 			break;
 		}
 		default:
-			return raise_(make_error_code(runtime_error_code::unsupported_operation),
-				"Unsupported compound assignment operator");
+			if (!compound_kind_bitwise(kind)) {
+				return raise_(make_error_code(runtime_error_code::unsupported_operation),
+					"Unsupported compound assignment operator");
+			}
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, compound_kind_token(kind), rightValue, detail::compound_index(compound_kind_token(kind))));
+			break;
 	}
 
 	if (member->is_static) {

@@ -958,6 +958,22 @@ namespace jai::vm {
         uint64_t op_less_id_ = 0, op_less_equal_id_ = 0, op_greater_id_ = 0, op_greater_equal_id_ = 0;
         uint64_t op_equal_equal_id_ = 0, op_bang_equal_id_ = 0, op_spaceship_id_ = 0;
         uint64_t op_ampersand_id_ = 0, op_pipe_id_ = 0, op_caret_id_ = 0, op_left_shift_id_ = 0, op_right_shift_id_ = 0;
+
+        // a compound kind's operator method (compound_and -> operator&)
+        uint64_t compound_kind_symbol(uint32_t kind) const noexcept {
+            switch (kind & compound_kind_mask) {
+                case compound_minus: return op_minus_id_;
+                case compound_star: return op_star_id_;
+                case compound_slash: return op_slash_id_;
+                case compound_percent: return op_percent_id_;
+                case compound_and: return op_ampersand_id_;
+                case compound_or: return op_pipe_id_;
+                case compound_xor: return op_caret_id_;
+                case compound_shl: return op_left_shift_id_;
+                case compound_shr: return op_right_shift_id_;
+                default: return op_plus_id_;
+            }
+        }
         uint64_t this_id_ = 0;
         uint64_t subscript_op_id_ = 0;
         uint64_t assign_operator_id_ = 0;

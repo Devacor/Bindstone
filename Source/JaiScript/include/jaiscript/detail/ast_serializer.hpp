@@ -839,7 +839,7 @@ namespace jai::detail {
 
         token tok() {
             uint8_t tt = u8();
-            if (tt > uint8_t(token_type::error)) jaibite_fail("corrupt token type");
+            if (tt > uint8_t(token_type::right_shift_equal)) jaibite_fail("corrupt token type");
             token t;
             t.type = static_cast<token_type>(tt);
             t.lexeme = view();

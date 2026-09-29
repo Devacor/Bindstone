@@ -1781,7 +1781,9 @@ checked_result<expression_ptr> parser::assignment() {
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, ternary());
 
     if (match({token_type::equal, token_type::plus_equal, token_type::minus_equal,
-               token_type::star_equal, token_type::slash_equal, token_type::percent_equal})) {
+               token_type::star_equal, token_type::slash_equal, token_type::percent_equal,
+               token_type::ampersand_equal, token_type::pipe_equal, token_type::caret_equal,
+               token_type::left_shift_equal, token_type::right_shift_equal})) {
         token op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, assignment());
         return std::make_shared<assignment_expr>(op.location, expr, op, right);

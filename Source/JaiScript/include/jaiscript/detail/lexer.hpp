@@ -51,7 +51,9 @@ namespace jai {
         semicolon, comma,
 
         eof,
-        error
+        error,
+
+        ampersand_equal, pipe_equal, caret_equal, left_shift_equal, right_shift_equal   // appended: .jaibite stores token numbers
     };
     
     class string_symbolizer;

@@ -25,14 +25,58 @@ namespace jai::detail {
         none = count
     };
 
-    // the compound index of an arithmetic operator (+ - * / % -> 0..4, the order of detail::compound_mismatch)
+    // the compound index of a binary operator (+ - * / % & | ^ << >> -> 0..9, the order of detail::compound_mismatch)
     inline int compound_index(token_type op) noexcept {
         switch (op) {
             case token_type::minus: return 1;
             case token_type::star: return 2;
             case token_type::slash: return 3;
             case token_type::percent: return 4;
+            case token_type::ampersand: return 5;
+            case token_type::pipe: return 6;
+            case token_type::caret: return 7;
+            case token_type::left_shift: return 8;
+            case token_type::right_shift: return 9;
             default: return 0;
+        }
+    }
+
+    // a compound assignment's binary operator (`&=` -> `&`); token_type::equal for any other token
+    inline token_type compound_base(token_type op) noexcept {
+        switch (op) {
+            case token_type::plus_equal: return token_type::plus;
+            case token_type::minus_equal: return token_type::minus;
+            case token_type::star_equal: return token_type::star;
+            case token_type::slash_equal: return token_type::slash;
+            case token_type::percent_equal: return token_type::percent;
+            case token_type::ampersand_equal: return token_type::ampersand;
+            case token_type::pipe_equal: return token_type::pipe;
+            case token_type::caret_equal: return token_type::caret;
+            case token_type::left_shift_equal: return token_type::left_shift;
+            case token_type::right_shift_equal: return token_type::right_shift;
+            default: return token_type::equal;
+        }
+    }
+
+    inline bool bitwise_token(token_type op) noexcept {
+        return op == token_type::ampersand || op == token_type::pipe || op == token_type::caret ||
+               op == token_type::left_shift || op == token_type::right_shift;
+    }
+
+    inline bool compound_is_bitwise(token_type op) noexcept { return bitwise_token(compound_base(op)); }
+
+    inline const char* binary_op_name(token_type op) noexcept {
+        switch (op) {
+            case token_type::minus: return "-";
+            case token_type::star: return "*";
+            case token_type::slash: return "/";
+            case token_type::percent: return "%";
+            case token_type::ampersand: return "&";
+            case token_type::pipe: return "|";
+            case token_type::caret: return "^";
+            case token_type::left_shift: return "<<";
+            case token_type::right_shift: return ">>";
+            default: return "+";
         }
     }
 

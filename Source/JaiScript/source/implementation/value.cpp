@@ -1604,8 +1604,10 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             // code mapped every NaN comparison to `less`, which made NaN < NaN
             // true — an irreflexivity violation that is undefined behavior when a
             // float (or NaN) is used as a std::map key. std::strong_order makes
-            // all NaNs compare equal to each other and orders them deterministically.
-            return std::strong_order(unchecked_as_float(), other.unchecked_as_float());
+            // all NaNs compare equal to each other and orders them deterministically. 0.0 and -0.0 are one key (they are ==,
+            // and map_key_hash hashes them alike; Dev ruling 2026-09-28)
+            return std::strong_order(unchecked_as_float() == 0.0 ? 0.0 : unchecked_as_float(),
+                                     other.unchecked_as_float() == 0.0 ? 0.0 : other.unchecked_as_float());
         case script_value_type::jai_string_type:
             return unchecked_as_string() <=> other.unchecked_as_string();
         case script_value_type::jai_utf8_string_type:

@@ -2179,6 +2179,19 @@ private:
 		ruling_this_capture();
 		ruling_to_string_builtin();
 		ruling_host_callbacks();
+		ruling_signed_zero_keys();
+	}
+
+	void ruling_signed_zero_keys() {
+		test("zero_and_negative_zero_are_one_map_key", [this]() {
+			expect("signed zero", R"(
+				var m = {}; m[0.0] = 1; m[-0.0] = 2;
+				map<float, int> t = {}; t[-0.0] = 5; t[0.0] += 1;
+				float nan = INF - INF; var n = {}; n[nan] = 1; n[nan] = 2;
+				var pz = {}; pz[0.0] = 1; var nz = {}; nz[-0.0] = 1;
+				"" + m.size() + m[0.0] + m[-0.0] + "|" + t.size() + t[0.0] + "|" + n.size() + "|" + m.has(-0.0) + (pz == nz);
+			)", "122|16|1|truetrue", check_mode::warn);
+		});
 	}
 
 	void ruling_to_string_builtin() {

@@ -1,11 +1,10 @@
-// Minimal JaiScript host for the kernel suite: the runner's stdlib + clock_ms, plus add_one for
-// the interop kernel.   jai_kernel_host [--backend=vm|interp] file.jai
+// Minimal JaiScript host for the kernel suite: the runner's stdlib (time:: included), plus add_one
+// for the interop kernel.   jai_kernel_host [--backend=vm|interp] file.jai
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/signals/signal_impl.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 
-#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -28,10 +27,6 @@ int main(int argc, char** argv) {
 	eng->set_backend(backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
 	eng->execution_budget(0);
 	jai::stdlib::register_all(eng);
-	eng->add_function("clock_ms", []() -> jai::script_int {
-		return std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now().time_since_epoch()).count();
-	});
 	eng->add_function("add_one", [](jai::script_int x) -> jai::script_int { return x + 1; });
 
 	std::filesystem::path abs = std::filesystem::absolute(script);

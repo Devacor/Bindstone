@@ -96,7 +96,7 @@ struct console_state {
 		DWORD pids[4];
 		solo_console = GetConsoleProcessList(pids, 4) == 1;
 		SetConsoleCtrlHandler(ctrl_handler, TRUE);
-		timeBeginPeriod(1);   // 1ms Sleep granularity for sleep_ms-paced game loops
+		timeBeginPeriod(1);   // 1ms Sleep granularity for time::sleep-paced game loops
 #else
 		out_tty = in_tty = vt = true;
 #endif
@@ -231,7 +231,7 @@ void print_usage() {
 		"  (the file import would load for that name), app_data_dir(name) / app_cache_dir(name),\n"
 		"  working_dir(), parent_dir(p), file_name(p) - a script dropped onto the executable runs\n"
 		"  from any working directory when its paths start from one of these; and console-game IO:\n"
-		"  key_down(name), read_key(), clock_ms(), sleep_ms(n), term_cols(), term_rows(),\n"
+		"  key_down(name), read_key(), term_cols(), term_rows() (clocks and sleeps are time::),\n"
 		"  play_wav(path) (async, one voice), play_midi(path)/stop_midi()/midi_status()\n"
 		"  (MCI sequencer; audio is a no-op off Windows). POSIX terminals synthesize\n"
 		"  key_down from auto-repeat; there are no key-up events. Networking: NetChannel\n"
@@ -312,8 +312,8 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 }
 
 // --------------------------------------------------------- console game IO ---
-// The four capabilities a real-time terminal script cannot express (input,
-// clock, sleep, terminal size), same shapes as the crawler/gloom hosts.
+// The capabilities a real-time terminal script cannot express (input and terminal
+// size; clocks and sleeps are the stdlib's time::), same shapes as the crawler/gloom hosts.
 // Windows-first; elsewhere the input pair reports nothing, like those hosts.
 
 #ifdef _WIN32
@@ -506,12 +506,6 @@ void posix_pump_input() {
 #endif
 
 void register_console_game_io(jai::engine& eng) {
-	eng.add_function("clock_ms", [&eng]() -> jai::script_int {
-		return std::chrono::duration_cast<std::chrono::milliseconds>(eng.monotonic_now()).count();
-	});
-	eng.add_function("sleep_ms", [&eng](jai::script_int ms) {
-		if (ms > 0) { eng.sleep_for(std::chrono::milliseconds(ms)); }
-	});
 	// held-key state from console events, cross-checked against the physical
 	// key so a release delivered to another window (alt-tab mid-press) unsticks
 	eng.add_function("key_down", [](const std::string& name) -> bool {

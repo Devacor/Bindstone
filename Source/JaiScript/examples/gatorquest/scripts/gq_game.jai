@@ -299,9 +299,9 @@ void local_host_tick() {
 
 int MAX_FRAMES;             // demo/test: stop after this many frames (0 = play until quit)
 int STAT_FRAMES;
-int STAT_RENDER_MS;
-int STAT_COMPOSE_MS;
-int STAT_SIM_MS;
+float STAT_RENDER_MS;
+float STAT_COMPOSE_MS;
+float STAT_SIM_MS;
 string PLAY_EXIT;           // how the last session ended: "title" or "quit"
 
 // ------------------------------------------------------------ sessions ---
@@ -393,14 +393,15 @@ void session_end() {
 void play_loop() {
 	print(ESC + "[2J", skip_newline);
 	layout(screen_cols(), screen_rows());
-	int last = clock_ms();
+	int last = time::now() * 1000;
 	int acc = 0;
 	int size_check = 0;
+	time::stopwatch split;
 	UI_MODE = "play";
 	QUIT = false;
 	while (!QUIT) {
 		if (MAX_FRAMES > 0 && STAT_FRAMES >= MAX_FRAMES) { QUIT = true; break; }
-		NOW_MS = clock_ms();
+		NOW_MS = time::now() * 1000;
 		int dt = NOW_MS - last;
 		last = NOW_MS;
 		if (dt > 250) { dt = 250; }
@@ -424,7 +425,7 @@ void play_loop() {
 			}
 		}
 		// the world
-		int t_sim = clock_ms();
+		split.start();
 		if (NET_CLIENT) {
 			net_client_pump();
 			CV.status = NET_CLOSE_F > 0 ? "disconnected" : "online";
@@ -436,7 +437,7 @@ void play_loop() {
 			}
 			if (net_hosting()) { CV.status = `hosting :${NET_PORT}, ${net_player_count()} joined`; }
 		}
-		STAT_SIM_MS = STAT_SIM_MS + clock_ms() - t_sim;
+		STAT_SIM_MS = STAT_SIM_MS + split.delta() * 1000;
 		pred_reconcile(CV, NOW_MS);
 		pred_frame(CV, NOW_MS);
 		check_dialog(CV);
@@ -453,18 +454,16 @@ void play_loop() {
 				print(ESC + "[2J", skip_newline);
 			}
 		}
-		int t_render = clock_ms();
+		split.start();
 		render_frame(CV);
-		int t_compose = clock_ms();
+		STAT_RENDER_MS = STAT_RENDER_MS + split.delta() * 1000;
 		string frame = compose_frame(CV);
-		int t_done = clock_ms();
+		STAT_COMPOSE_MS = STAT_COMPOSE_MS + split.delta() * 1000;
 		print(HOME + frame, skip_newline);
-		STAT_RENDER_MS = STAT_RENDER_MS + t_compose - t_render;
-		STAT_COMPOSE_MS = STAT_COMPOSE_MS + t_done - t_compose;
 		STAT_FRAMES = STAT_FRAMES + 1;
 		FRAME = FRAME + 1;
-		int spent = clock_ms() - NOW_MS;
-		if (spent < 33) { sleep_ms(33 - spent); }
+		int spent = time::now() * 1000 - NOW_MS;
+		if (spent < 33) { time::sleep_ms(33 - spent); }
 	}
 }
 

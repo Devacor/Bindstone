@@ -37,12 +37,12 @@ void pt_frame_input(int held) {
 void pt_frame_world() {
 	net_session_pump(PT_S);
 	while (NOW_MS >= PT_NEXT_TICK) {
-		sleep_ms(1);
+		time::sleep_ms(1);
 		sim_tick();
 		net_host_pump();
 		host_after_tick();
 		PT_NEXT_TICK = PT_NEXT_TICK + TICK_MS;
-		sleep_ms(1);
+		time::sleep_ms(1);
 	}
 	net_session_pump(PT_S);
 	pred_reconcile(CV, NOW_MS);
@@ -86,7 +86,7 @@ bool pt_setup(int port, int lag, int jitter, int loss) {
 	NET_SIM_SEED = 777 + lag;
 	if (!net_host_start(port)) { return false; }
 	PT_S = net_client_open("127.0.0.1", port);
-	for (int i = 0; i < 200 && !NCS_CH[PT_S].connected(); ++i) { NET_SRV.pump(); NCS_CH[PT_S].pump(); sleep_ms(1); }
+	for (int i = 0; i < 200 && !NCS_CH[PT_S].connected(); ++i) { NET_SRV.pump(); NCS_CH[PT_S].pump(); time::sleep_ms(1); }
 	NET_SIM_LAG = lag;
 	NET_SIM_JITTER = jitter;
 	NET_SIM_LOSS = loss;

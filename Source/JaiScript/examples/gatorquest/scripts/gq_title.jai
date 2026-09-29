@@ -423,7 +423,7 @@ array<string> saved_gators() {
 string title_screen(bool has_save, int auto_frames) {
 	CV = new ClientView();
 	CV.slot = -1;
-	int last = clock_ms();
+	int last = time::now() * 1000;
 	int acc = 0;
 	float ang = 0.0;
 	int cx = W_ARRIVE_X[0];
@@ -431,7 +431,7 @@ string title_screen(bool has_save, int auto_frames) {
 	music_play(-1);
 	int frames = 0;
 	while (true) {
-		NOW_MS = clock_ms();
+		NOW_MS = time::now() * 1000;
 		int dt = imin(250, NOW_MS - last);
 		last = NOW_MS;
 		acc = acc + dt;
@@ -471,8 +471,8 @@ string title_screen(bool has_save, int auto_frames) {
 		string out = title_frame(has_save);
 		print(HOME + out, skip_newline);
 		FRAME = FRAME + 1;
-		int spent = clock_ms() - NOW_MS;
-		if (spent < 33) { sleep_ms(33 - spent); }
+		int spent = time::now() * 1000 - NOW_MS;
+		if (spent < 33) { time::sleep_ms(33 - spent); }
 	}
 	return "";
 }

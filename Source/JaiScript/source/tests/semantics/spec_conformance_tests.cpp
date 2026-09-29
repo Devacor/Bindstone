@@ -2177,6 +2177,21 @@ private:
 		ruling_membership_equality();
 		ruling_compound_operand_text();
 		ruling_this_capture();
+		ruling_to_string_builtin();
+	}
+
+	void ruling_to_string_builtin() {
+		test("the_to_string_builtin_uses_a_classs_own_to_string", [this]() {
+			expect("to_string(x)", R"(
+				class T { int n = 3; string to_string() { return "t" + n; } }
+				class U { int n = 1; }
+				class Bad { string to_string() { int z = 0; return "" + (1 / z); } }
+				class Thrower { string to_string() { throw "nope"; return ""; } }
+				function t(function f) -> string { string r = "none"; try { r = f(); } catch (e) { r = "raised:" + e; } return r; }
+				to_string(T()) + "|" + (to_string(T()) == ("" + T()) ? "same" : "differs") + "|" + t([]() { return to_string(Bad()); }) + "|" +
+				t([]() { return to_string(Thrower()); }) + "|" + to_string(5) + to_string("s");
+			)", "t3|same|raised:Division by zero in integer operation|raised:nope|5s", check_mode::warn);
+		});
 	}
 
 	void ruling_this_capture() {

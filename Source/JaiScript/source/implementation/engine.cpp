@@ -2871,6 +2871,11 @@ bool engine::backend_unwinding() const {
     return be && be->is_unwinding();
 }
 
+checked_result<std::string> engine::text_of(const script_value& v) const {
+    auto* be = get_execution_backend();
+    return be ? be->text_of(v) : checked_result<std::string>(v.deref().to_string());
+}
+
 std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::script_namespaces() {
     return impl->script_namespaces_;
 }

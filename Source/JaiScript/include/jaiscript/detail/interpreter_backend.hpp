@@ -158,6 +158,8 @@ public:
         return interpreter_->resume_coroutine(handle);
     }
 
+    checked_result<std::string> text_of(const script_value& v) override { return interpreter_->text_of(v); }
+
     std::string get_backend_name() const override {
         return "interpreter";
     }

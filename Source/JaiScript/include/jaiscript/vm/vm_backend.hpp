@@ -332,6 +332,7 @@ namespace jai::vm {
         checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;
 
         std::string get_backend_name() const override { return "vm"; }
+        checked_result<std::string> text_of(const script_value& v) override { return value_to_string_with_method(v.deref()); }
 
         // Compiles without executing (disassembler/tests)
         std::shared_ptr<chunk> compile_only(const std::vector<declaration_ptr>& declarations);

@@ -2178,6 +2178,7 @@ private:
 		ruling_compound_operand_text();
 		ruling_this_capture();
 		ruling_to_string_builtin();
+		ruling_host_callbacks();
 	}
 
 	void ruling_to_string_builtin() {
@@ -2191,6 +2192,27 @@ private:
 				to_string(T()) + "|" + (to_string(T()) == ("" + T()) ? "same" : "differs") + "|" + t([]() { return to_string(Bad()); }) + "|" +
 				t([]() { return to_string(Thrower()); }) + "|" + to_string(5) + to_string("s");
 			)", "t3|same|raised:Division by zero in integer operation|raised:nope|5s", check_mode::warn);
+		});
+	}
+
+	void ruling_host_callbacks() {
+		test("a_script_callback_behind_a_host_function_propagates_its_error", [this]() {
+			every_config("host callback", "raised:Division by zero in integer operation|raised:boom|7", [](engine& e) {
+				e.add_function("apply", [](script_value cb) -> script_int { return convert_script_function<script_int(script_int)>(cb)(3); });
+				return spec::render(e.execute(R"(
+					function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
+					t([]() { return apply([](int x) { int z = 0; return x / z; }); }) + "|" +
+					t([]() { return apply([](int x) { throw "boom"; return x; }); }) + "|" + apply([](int x) { return x + 4; });
+				)"));
+			}, check_mode::warn);
+		});
+		test("a_host_calling_a_script_callback_sees_the_error_as_an_exception", [this]() {
+			every_config("host sees", "threw:Division by zero in integer operation", [](engine& e) {
+				e.execute("var cb = [](int x) { int z = 0; return x / z; };");
+				auto f = convert_script_function<int(int)>(e.get_variable("cb"));
+				try { (void)f(3); return std::string("no throw"); }
+				catch (const std::exception& ex) { return std::string("threw:") + ex.what(); }
+			}, check_mode::warn);
 		});
 	}
 

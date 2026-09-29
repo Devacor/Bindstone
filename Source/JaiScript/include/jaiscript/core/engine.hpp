@@ -876,6 +876,7 @@ namespace jai {
         std::string get_backend_name() const;
         execution_backend* get_execution_backend() const;
         bool backend_unwinding() const;
+        std::string backend_exception_text() const;   // the text of the exception the backend is unwinding with
         // A value's text as string + value spells it (a class's own to_string() runs; its error is the result)
         checked_result<std::string> text_of(const script_value& v) const;
 

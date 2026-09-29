@@ -287,7 +287,8 @@ engine stays usable", not by `check_throws`.
   (`detail::convert_byte_buffer`, range-checked, no boxing), `array<var> v = bytes` is the dynamic copy. `uint8`/`int8`
   parse only as an array's element type (a scalar is a parse error: a byte is an int). Lanes test the kind (vm index
   stores, op_t_load, typed index stores, cell loads/stores/pushes, push append); `bound_array<uint8_t>` writes range-check,
-  `std::vector<uint8_t>` extracts with one memcpy. `.jaibite` version 24.
+  `std::vector<uint8_t>` extracts with one memcpy, and a host `std::vector<uint8_t>` result is an `array<uint8>` (one
+  copy). `.jaibite` version 24.
 - **Class-typed arrays admit subclasses** (Dev ruling 2026-09-02): `array<Base>` holds `Base`
   or any subclass (exact id first, parent walk on a name mismatch); each slot keeps its own
   class tag; `array<Derived>` converts to `array<Base>` by value; unrelated classes raise.

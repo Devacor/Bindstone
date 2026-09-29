@@ -252,6 +252,12 @@ script_value engine::make_value(T&& value) {
 
 template<typename T>
 script_value conversions::convert_vector_to_script_array(const std::vector<T>& vec, engine* eng) {
+    if constexpr (std::is_same_v<T, uint8_t>) {
+        // a host byte buffer is an array<uint8>: one copy
+        script_value bytes = script_value::make_array(eng->get_type_info_uint8(), eng);
+        bytes.unchecked_get_array_storage()->bytes().assign(vec.begin(), vec.end());
+        return bytes;
+    }
     type_info_ptr element_type;
     if constexpr (std::is_arithmetic_v<T> ||
                    std::is_same_v<T, std::string> || std::is_same_v<T, script_value> ||

@@ -188,7 +188,7 @@ private:
 					int s = 0; int last = -1; string err = "";
 					try { for (int i = 0; i < 6; i++) { s += leaf(i); last = i; } } catch (e) { err = e; }
 					int t = 0; var code = null;
-					try { for (int i = 0; i < 6; i++) { t += tleaf(i); } } catch (e) { code = e; }
+					try { for (int i = 0; i < 6; i++) { t += tleaf(i); } } catch (e) { code = e.value; }
 					return "" + s + "|" + last + "|" + err + "|" + t + "|" + code + type_of(code);
 				}
 				run();
@@ -198,7 +198,7 @@ private:
 			expect("try in loop", R"(
 				function run() -> string {
 					int caught = 0; int s = 0;
-					for (int i = 0; i < 10; i++) { try { if (i % 3 == 0) { throw i; } s += i; } catch (e) { caught += e; } }
+					for (int i = 0; i < 10; i++) { try { if (i % 3 == 0) { throw i; } s += i; } catch (e) { caught += e.value; } }
 					return "" + s + "|" + caught;
 				}
 				run();

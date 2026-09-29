@@ -831,10 +831,11 @@ for (int i = 0; i < 10; i++) {
 try {
     throw "Something went wrong!";
 } catch (e) {
-    print("Caught: {}", e);       // e is the THROWN VALUE with its type preserved
+    print("Caught: {}", e);       // e reads as the message: Something went wrong!
 }
 
-try { throw 42; } catch (e) { /* e is the int 42, not a string */ }
+try { throw 42; } catch (e) { int code = e.value; }   // e.value is the thrown value with its type (int 42)
+// e.message, e.file, e.line, e.column, e.stack ("file:line", innermost first); e.value is null for a run-time error
 
 // Catch without variable
 try {

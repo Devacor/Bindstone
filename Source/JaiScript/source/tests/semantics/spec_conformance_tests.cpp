@@ -2181,6 +2181,7 @@ private:
 		ruling_host_callbacks();
 		ruling_signed_zero_keys();
 		ruling_typed_slice();
+		ruling_missing_key_compound();
 	}
 
 	void ruling_typed_slice() {
@@ -2193,6 +2194,21 @@ private:
 				t([]() { a.slice(0, 2).push("x"); return 1; }) + "|" + t([]() { array<int> sl = a.slice(1, 3); return sl.size(); }) + "|" +
 				t([]() { s.slice(0, 1).push(5); return 1; }) + "|" + t([]() { var sl = v.slice(0, 2); sl.push("ok"); return sl.size(); });
 			)", "raised:Cannot push 'string' to array<int>|2|raised:Cannot push 'int' to array<string>|3", check_mode::warn);
+		});
+	}
+
+	void ruling_missing_key_compound() {
+		test("a_compound_on_a_missing_key_starts_from_the_value_types_default", [this]() {
+			// C++ operator[] value-initializes the entry; a var-valued map has no default, so its entry meets null
+			expect("missing key compound", R"(
+				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
+				map<string, int> mi = {}; mi["k"] += 5; mi["j"]++; mi["q"] -= 2;
+				map<string, float> mf = {}; mf["k"] += 1.5;
+				map<string, string> ms = {}; ms["k"] += "s";
+				map<int, int> counts = {}; for (int x : [3, 1, 3, 3]) { counts[x] += 1; }
+				"" + mi["k"] + mi["j"] + mi["q"] + mi.size() + "|" + mf["k"] + "|" + ms["k"] + "|" + counts[3] + counts[1] + counts.size() + "|" +
+				t([]() { var m = {}; m["k"] += 1; return m.size(); }) + "|" + t([]() { map<string, int> m = {}; m[5] += 1; return m.size(); });
+			)", "51-23|1.5|s|312|raised:Cannot apply '+=' to null and int|raised:Cannot use 'int' as a key of type 'string'", check_mode::warn);
 		});
 	}
 

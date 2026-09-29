@@ -3411,7 +3411,20 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
                     // of m[k][i] / m[k].field): return a reference to the EXISTING
                     // entry so nested in-place mutation still works, but NEVER
-                    // insert a missing key — reading must not grow the map.
+                    // insert a missing key — reading must not grow the map. A compound's
+                    // own target on a typed-value map inserts the value type's default first
+                    // (C++ operator[]; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound_fused)
+                    if (expr == compound_map_target_) {
+                        auto map_tag = left.get_type_info();
+                        type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
+                        if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
+                            uint64_t got_id = string_symbolizer_->intern(get_value_type_name(right.deref()));
+                            uint64_t want_id = string_symbolizer_->intern(get_type_info_name(key_type));
+                            return checked_result<void>(make_error_code(runtime_error_code::map_key_type_mismatch),
+                                "Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+                        }
+                        (void)detail::map_compound_insert_default(left, right, engine_);
+                    }
                     auto it = map.find(right);
                     if (it != map.end()) {
                         script_value& value_ref = const_cast<script_value&>(it->second);
@@ -4932,7 +4945,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             }
             string_target_context_ = expr->target->get_type() == node_type::binary_expr &&
                                      static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket;
+            compound_map_target_ = expr->target.get();   // a missing key of a typed-value map takes its default (visit_binary)
             auto target_read = eval_child<Replaying>(expr->target.get(), rs, 1);
+            compound_map_target_ = nullptr;
             string_target_context_ = false;
             JAISCRIPT_TRY_OPERAND(std::move(target_read), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
             script_value currentValue = pop_value();

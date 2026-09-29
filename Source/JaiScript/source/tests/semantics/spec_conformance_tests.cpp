@@ -2293,7 +2293,7 @@ private:
 
 	void static_members_bind_references() {
 		test("a_static_member_and_a_namespace_variable_bind_a_reference_parameter", [this]() {
-			// C++: S::s and ns::x are lvalues; a reference parameter binds their storage
+			// C++: S::s and ns::x are lvalues; a reference parameter or a reference declaration binds their storage
 			expect("static ref", R"(
 				class S { static int s = 1; static string name = "a"; }
 				namespace ns { int x = 1; }
@@ -2302,8 +2302,10 @@ private:
 				function run() -> string { bump(S::s); bump(ns::x); rename(S::name); bump(S::s); return "" + S::s + " " + ns::x + " " + S::name; }
 				string first = run();
 				S::s = 5; ns::x = 6; bump(S::s); bump(ns::x);
-				first + "|" + S::s + " " + ns::x;
-			)", "21 11 ab|15 16", check_mode::warn);
+				string second = "" + S::s + " " + ns::x;
+				function decls() -> string { var& a = S::s; int& b = ns::x; a = 40; b = 41; return "" + S::s + " " + ns::x; }
+				first + "|" + second + "|" + decls();
+			)", "21 11 ab|15 16|40 41", check_mode::warn);
 		});
 	}
 

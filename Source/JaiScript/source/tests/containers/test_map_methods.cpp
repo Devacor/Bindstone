@@ -258,7 +258,7 @@ public:
                 }
                 run();
             )");
-            check_eq(std::string("6,1,2,3,4,true,false"), r.as<std::string>());
+            check_eq(std::string("5,2,2,3,4,true,false"), r.as<std::string>());   // 0.0 and -0.0 are one key (Dev ruling 2026-09-28)
         });
 
         test("scalar_map_lanes_keep_the_general_semantics", [this]() {

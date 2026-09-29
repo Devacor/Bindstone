@@ -25,6 +25,40 @@
 
 namespace jai::detail {
 
+	// The value a compound assignment on a missing key of a typed-value map starts from (C++ operator[] value-initializes):
+	// a primitive's zero, "", an empty typed container. A var value type (and a class) has none: the compound meets null
+	inline std::optional<script_value> map_value_default(const script_value& map_value, engine* eng) {
+		auto tag = map_value.get_type_info();
+		type_info_ptr vt = tag && tag->base_type == script_value_type::jai_map_type ? tag->value_type() : nullptr;
+		if (!vt) { return std::nullopt; }
+		switch (vt->base_type) {
+			case script_value_type::jai_int_type: return script_value(script_int(0), eng);
+			case script_value_type::jai_float_type: return script_value(script_float(0.0), eng);
+			case script_value_type::jai_bool_type: return script_value(false, eng);
+			case script_value_type::jai_char_type: return script_value(script_char(0), eng);
+			case script_value_type::jai_string_type: return script_value(script_string(), eng);
+			case script_value_type::jai_utf8_string_type: return script_value::make_utf8(std::string(), eng);
+			case script_value_type::jai_array_type: return script_value::make_array(vt->element_type(), eng);
+			case script_value_type::jai_map_type: return script_value::make_map(vt->key_type(), vt->value_type(), eng);
+			default: return std::nullopt;
+		}
+	}
+
+	// A compound target m[k] on a missing key: insert the value type's default so the compound applies to it; false when the
+	// map has no default for its value type (the compound then meets null as before)
+	inline bool map_compound_insert_default(script_value& map_value, const script_value& key, engine* eng) {
+		auto& map = const_cast<script_map&>(map_value.as_map());
+		if (map.find(key) != map.end()) { return true; }
+		auto def = map_value_default(map_value, eng);
+		if (!def) { return false; }
+		script_value k = key;
+		if (!k.has_valid_engine()) { k.set_engine(eng); }
+		auto tag = map_value.get_type_info();
+		def->set_type_info(tag->value_type());
+		map[k] = std::move(*def);
+		return true;
+	}
+
 	inline std::string container_base_type_name(script_value_type type) {
 		switch (type) {
 			case script_value_type::jai_null_type: return "null";

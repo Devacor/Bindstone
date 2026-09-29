@@ -10460,6 +10460,23 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 		// [rhs, container, index] -> [container, index, rhs]
 		std::rotate(&stack_[stack_.size() - 3], &stack_[stack_.size() - 2], &stack_[stack_.size() - 1] + 1);
 	}
+	// a missing key of a typed-value map takes the value type's default first (C++ operator[]; KEEP BYTE-PARALLEL with the
+	// interpreter's general compound)
+	if (stack_.size() >= 3) {
+		script_value& container = stack_[stack_.size() - 3].deref();
+		if (container.raw_storage_index() == script_value::TYPEID_MAP) {
+			const script_value& key = stack_[stack_.size() - 2].deref();
+			auto tag = container.get_type_info();
+			type_info_ptr key_type = tag ? tag->key_type() : nullptr;
+			if (key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
+				uint64_t got_id = symbolizer_->intern(vm_value_type_name(key));
+				uint64_t want_id = symbolizer_->intern(vm_type_info_name(key_type));
+				return raise_(make_error_code(runtime_error_code::map_key_type_mismatch),
+					"Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+			}
+			(void)detail::map_compound_insert_default(container, key, engine_);
+		}
+	}
 	// stack: [container, index, rhs]. Numeric fast path: all peeks are read-only and
 	// evaluate_arithmetic on raw int/float runs no user code, so in-place refs are safe.
 	if ((ins.b & index_flag_lvalue_shape) != 0 && stack_.size() >= 3 &&

@@ -2120,9 +2120,9 @@ public:
             )", "II|Cannot assign int to a string character (it takes a char or a string)||axbc",
                 "a string subscript compound runs the index once", check_mode::strict);
         });
-        test("map_compound_missing_key_concat_raises", [this, expect_order]() {
-            // Pinned alignment (interpreter -> vm): the interpreter's fallback silently
-            // inserted "nulls" with the key expression run twice
+        test("map_compound_missing_key_starts_from_the_default", [this, expect_order]() {
+            // Dev ruling 2026-09-28: a typed-value map's missing key takes the value type's default before the compound (C++
+            // operator[]); a var-valued map has none and raises; the key expression runs once either way
             expect_order(R"(
                 var log = "";
                 string key() { log += "K"; return "k"; }
@@ -2134,8 +2134,8 @@ public:
                 try { ms[key()] += "s"; } catch (e) { c2 = e; }
                 try { mi[key()] += 1; } catch (e) { c3 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + m.size()) + ("" + ms.size()) + ("" + mi.size());
-            )", "KKK|Cannot assign to rvalue expression|Cannot assign to rvalue expression|Cannot apply '+=' to null and int|000",
-                "a compound on a missing map key inserts nothing and runs the key once", check_mode::strict);
+            )", "KKK|Cannot assign to rvalue expression|||011",
+                "a typed-value map's missing key starts from the default; a var-valued map's compound raises", check_mode::strict);
             expect_order(R"(
                 var log = "";
                 string key() { log += "K"; return "k"; }

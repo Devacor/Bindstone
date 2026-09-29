@@ -644,6 +644,7 @@ namespace jai {
         checked_result<script_value> handle_greater_equal(const script_value& left, const script_value& right);
         checked_result<script_value> handle_equal(const script_value& left, const script_value& right);
         checked_result<bool> language_equal(const script_value& left, const script_value& right);
+        const expression* compound_map_target_ = nullptr;   // the subscript a general compound is reading as its target
         builtin_method_context builtin_ctx() {
             return builtin_method_context{engine_, string_symbolizer_,
                 [](void* self, const script_value& a, const script_value& b) { return static_cast<interpreter*>(self)->language_equal(a, b); },

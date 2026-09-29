@@ -3952,12 +3952,12 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- call kept find line 2: a return inside a loop") != std::string::npos, "the call stays with its rule: " + l);
 		});
 		test("a_typed_reference_parameter_grafts_as_the_callers_variable", [this]() {
-			// row 159: a reference parameter's declared type binds nothing and converts nothing at run time (a store through it follows the
-			// referent), so an int& bound to a float local is that local: 3.7 lands as a float on both backends, grafted or not
+			// row 159: an int& parameter bound to an int local is that local (Dev ruling 2026-09-28: an int& binds only an int): 3.7
+			// stores as the local's int, grafted or not
 			const std::string prelude =
 				"void set37(int& a) { a = 3.7; }\n"
-				"float run() { float u = 1.5; for (int k = 0; k < 2; ++k) { set37(u); } return u; }\n";
-			both(prelude + "to_string(run());", "3.7", "a store through a typed reference parameter");
+				"int run() { int u = 1; for (int k = 0; k < 2; ++k) { set37(u); } return u; }\n";
+			both(prelude + "to_string(run());", "3", "a store through a typed reference parameter");
 			const std::string l = listing_run(prelude + "run();");
 			check_true(l.find("-- inlined set37") != std::string::npos, "the typed reference parameter grafts: " + l);
 		});

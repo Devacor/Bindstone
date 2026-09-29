@@ -20547,6 +20547,17 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			}
 		}
 	}
+	// A T& parameter binds a T, judged on the bound lvalue so a non-lvalue argument keeps its own text (KEEP BYTE-PARALLEL with
+	// the interpreter's call_function)
+	for (size_t i = 0; i < parameters.size() && i < argc; ++i) {
+		const parameter& param = parameters[i];
+		if (!param.is_reference || !param.type) { continue; }
+		const script_value* bound = frame_slot(callee, param.slot_index);
+		if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
+			return raise_from(detail::typed_slot_rejection(bound->deref(), *param.type,
+				detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name}, engine_));
+		}
+	}
 	return {};
 }
 

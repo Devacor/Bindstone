@@ -1,6 +1,7 @@
 #include "../../include/jaiscript/detail/lexer.hpp"
 #include "../../include/jaiscript/detail/string_symbolizer.hpp"
 #include "../../include/jaiscript/detail/format_spec.hpp"
+#include "../../include/jaiscript/detail/float_text.hpp"
 #include <cctype>
 #include <sstream>
 
@@ -470,7 +471,11 @@ token lexer::scan_number() {
 
     try {
         if (is_float) {
-            tok.float_value = std::stod(lexeme_str);
+            const auto parsed = detail::parse_float_text(lexeme_str.c_str());
+            if (parsed.out_of_range) {
+                return error_token("Number literal out of range: '" + lexeme_str + "'");
+            }
+            tok.float_value = parsed.value;
         } else if (is_hex) {
             tok.int_value = std::stoll(lexeme_str, nullptr, 16);
         } else if (is_binary) {

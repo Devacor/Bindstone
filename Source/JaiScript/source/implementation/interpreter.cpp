@@ -25,6 +25,7 @@
 #include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (vm parity)
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (vm parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (vm parity)
+#include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
 #include <sstream>
@@ -1439,19 +1440,18 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             const auto& str = self.unchecked_text();
-            try {
-                size_t pos = 0;
-                double val = std::stod(str, &pos);
-                // Check if entire string was consumed (ignoring trailing whitespace).
-                // isspace requires an unsigned-char value; a negative char is UB.
-                while (pos < str.size() && std::isspace(static_cast<unsigned char>(str[pos]))) ++pos;
-                if (pos != str.size()) {
-                    return default_val;
-                }
-                return ctx.make_value(val);
-            } catch (...) {
+            const auto parsed = detail::parse_float_text(str.c_str());
+            if (parsed.end == str.c_str() || parsed.out_of_range) {
                 return default_val;
             }
+            size_t pos = static_cast<size_t>(parsed.end - str.c_str());
+            // Check if entire string was consumed (ignoring trailing whitespace).
+            // isspace requires an unsigned-char value; a negative char is UB.
+            while (pos < str.size() && std::isspace(static_cast<unsigned char>(str[pos]))) ++pos;
+            if (pos != str.size()) {
+                return default_val;
+            }
+            return ctx.make_value(parsed.value);
         }},
 
         // ============================================================

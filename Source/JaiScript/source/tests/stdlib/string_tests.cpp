@@ -930,6 +930,16 @@ public:
             check_eq(true, eb("array<float> v = [0.1, 0.1 + 0.2, 1.0 / 3.0, 2.0, 1e20, 1e-300, 5e-324, 1.7976931348623157e308]; bool ok = true; "
                               "for (int i = 0; i < v.size(); ++i) { float x = v[i]; float t = to_string(x).to_float(); var j = from_json(to_json([x])); float y = j[0]; if (t != x || y != x) { ok = false; } } ok;"));
         });
+
+        test("subnormals_parse_and_only_zero_or_infinite_results_are_out_of_range", [this, es, eb]() {
+            // glibc and MinGW's CRT flag every subnormal strtod result ERANGE (MSVC's does not): the verdict is the value's
+            check_eq(true, eb("1e-310 > 0.0 && 5e-324 > 0.0 && 5e-324 < 1e-323;"));
+            check_eq(std::string("5e-324|1e-310|-1.0|-1.0|-1.0"), es(
+                "to_string(\"4.9e-324\".to_float(-1.0)) + \"|\" + to_string(\" 1e-310 \".to_float(-1.0)) + \"|\" + "
+                "to_string(\"1e-400\".to_float(-1.0)) + \"|\" + to_string(\"1e999\".to_float(-1.0)) + \"|\" + to_string(\"x\".to_float(-1.0));"));
+            check_throws([this]() { auto engine = make_engine(); engine->execute("float f = 1e999;"); });
+            check_throws([this]() { auto engine = make_engine(); engine->execute("float f = 1e-400;"); });
+        });
     }
 };
 

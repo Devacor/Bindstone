@@ -195,10 +195,12 @@ else()
         # and the parser depth budget exceed the 1 MB default under Clang/GCC Debug
         # frame sizes too (LINKER: translates per driver - lld-link takes /STACK,
         # MinGW ld takes --stack)
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        if(MINGW)
             target_link_options(jaiscript_tests PRIVATE "LINKER:--stack,134217728")
-            # COFF's /bigobj twin: Debug template-heavy test TUs overflow the section limit
-            target_compile_options(jaiscript_tests PRIVATE -Wa,-mbig-obj)
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+                # COFF's /bigobj twin: Debug template-heavy test TUs overflow the section limit
+                target_compile_options(jaiscript_tests PRIVATE -Wa,-mbig-obj)
+            endif()
         else()
             target_link_options(jaiscript_tests PRIVATE "LINKER:/STACK:134217728")
         endif()

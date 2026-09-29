@@ -2136,18 +2136,6 @@ private:
 
 	void known_bugs() {
 		known_bugs_simplification_audit();
-		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
-			// docs/global_shadowing.md: a function called from inside the block still sees the outer binding
-			expect("top block", R"(
-				var G = 1;
-				function g() { return G; }
-				var rb = 0; var ri = 0; var rf = 0;
-				{ var G = 5; rb = g(); }
-				if (true) { var G = 9; ri = g(); }
-				for (int i = 0; i < 1; i++) { var G = 11; rf = g(); }
-				"" + rb + ri + rf + G;
-			)", "1111");
-		});
 	}
 
 	// Dev's rulings of 2026-09-28 (docs/spec_conformance.md section 9)
@@ -2193,6 +2181,28 @@ private:
 		ruling_from_json_constructor_errors();
 		ruling_json_tagged_values();
 		ruling_base_slots_keep_the_class();
+		ruling_block_callees();
+	}
+
+	void ruling_block_callees() {
+		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
+			// docs/global_shadowing.md: a function called from inside a block sees the binding of the scope it was declared in
+			// (a {} block, an if body, a for body, a range-for body, a catch body, a nested block); a function declared inside
+			// the block keeps the block's names
+			expect("top block", R"(
+				var G = 1;
+				function g() { return G; }
+				var rb = 0; var ri = 0; var rf = 0; var rr = 0; var rc = 0; var rn = 0; var rd = 0;
+				{ var G = 5; rb = g(); }
+				if (true) { var G = 9; ri = g(); }
+				for (int i = 0; i < 1; i++) { var G = 11; rf = g(); }
+				for (auto v : [1]) { var G = 12; rr = g(); }
+				try { throw 1; } catch (e) { var G = 13; rc = g(); }
+				{ var G = 14; { var G = 15; rn = g(); } }
+				{ var H = 3; function h() { return H; } rd = h(); }
+				"" + rb + ri + rf + rr + rc + rn + " " + rd + " " + G;
+			)", "111111 3 1");
+		});
 	}
 
 	void ruling_base_slots_keep_the_class() {

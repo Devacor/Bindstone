@@ -182,6 +182,19 @@ namespace jai {
         }
         environment* parent_raw() const noexcept { return parent_.get(); }
 
+        // A { } block's (or a loop's, a branch's) scope: a free function called from inside it sees the scope it was defined
+        // in, never the block's declarations (C++ scoping; a function defined inside the block keeps its caller's chain)
+        bool block_scope() const noexcept { return block_scope_; }
+        void set_block_scope(bool block) noexcept { block_scope_ = block; }
+        // The environment a free function's call is parented on: the caller's, past the block scopes it stands in when
+        // the function was declared outside every block
+        static std::shared_ptr<environment> call_parent(std::shared_ptr<environment> caller, bool block_defined) {
+            if (!block_defined) {
+                while (caller && caller->block_scope_ && caller->parent_) { caller = caller->parent_; }
+            }
+            return caller;
+        }
+
         // Static method environment accessors (only valid when kind == static_method)
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
 
@@ -309,6 +322,7 @@ namespace jai {
         class_definition* access_context_ = nullptr;
         uint64_t local_epoch_ = 0;   // generation serial; 0 = never cache (see local_epoch())
         bool vm_pinned_scope_ = false;   // see vm_pinned_scope(); reset paths clear it
+        bool block_scope_ = false;       // see block_scope(); reset paths clear it
 
         // Storage for bound methods (used by method and static_method kinds)
         mutable script_value bound_method_storage_;
@@ -552,6 +566,7 @@ namespace jai {
         mutable uint64_t alias_proof_epoch = 0;
         mutable uint32_t alias_proof_mask = 0;
         unit_stamp unit{};   // the unit and the execution that declared it (docs/global_shadowing.md)
+        bool block_defined = false;   // declared inside a block scope (an include in a { }): a call keeps the caller's chain
         std::shared_ptr<const function_decl> decl;   // the vm's mint pins its declaration, so the inliner's stamps on it resolve while the function lives (the interpreter's decl already owns its mint)
 
         const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }

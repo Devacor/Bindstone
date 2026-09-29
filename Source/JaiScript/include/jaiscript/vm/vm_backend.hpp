@@ -1252,6 +1252,7 @@ namespace jai::vm {
         // (closure env, coroutine snapshot, reference source) keeps its identity.
         std::vector<std::shared_ptr<environment>> scope_env_pool_;
         std::shared_ptr<environment> acquire_scope_env(std::shared_ptr<environment> parent);
+        std::shared_ptr<environment> acquire_block_env(std::shared_ptr<environment> parent);   // a { } / loop / catch scope
         std::shared_ptr<environment> acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx = nullptr);
         std::shared_ptr<environment> acquire_static_scope_env(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def);
         void release_scope_env(std::shared_ptr<environment> env);

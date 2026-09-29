@@ -35,7 +35,8 @@ declaration) binds the name for the declaring unit:
 
 Inside a unit, a `{ }` block is a scope of its own, as in C++: a declaration inside a block (a bare
 block, an `if`, a loop body, a `try`) shadows an outer declaration of the name for the block's extent
-and vanishes at its end; a function called from inside the block still sees the outer binding; and a
+and vanishes at its end; a function called from inside the block still sees the binding of the scope it was
+declared in (a function declared inside the block, an included one among them, sees the block's names); and a
 block's declaration is not the unit's declaration of the name (it neither versions a global nor
 writes one in place). Only a declaration at the unit's own top level binds the name for the unit.
 

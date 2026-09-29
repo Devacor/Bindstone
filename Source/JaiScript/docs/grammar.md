@@ -818,6 +818,8 @@ for (auto item : items) { process(item); }
 for (auto& x : nums) { x *= 2; }             // mutate in place
 for (const auto& row : grid) { render(row); }
 for (auto c : "abc") { out += c; }           // each char, like s[i]; auto& over a string raises
+for (int v : values) { total += v; }         // each element as int v = element; would take it
+for (Enemy& e : mobs) { e.hp -= 1; }         // binds elements that hold an Enemy (or a subclass)
 
 // Traditional for
 for (int i = 0; i < 10; i++) {

@@ -247,7 +247,7 @@ private:
 			}
 			auto eng = make_engine();
 			eng->static_checking(check_mode::off);
-			check_eq(script_int{1}, eng->execute("string s = \"s\"; int& r = s; r = 1; s;").as_int());
+			check_eq(std::string("1"), eng->execute("string s = \"s\"; int& r = s; r = 1; s;").as_string());   // the store runs s's own table
 			check_eq(script_int{42}, eng->execute("function f = 42; f;").as_int());
 			check_eq(script_int{1}, eng->execute(
 				"class A {} class B {} shared_ptr<B> owner = new B(); weak_ptr<B> wb = owner; weak_ptr<A> wa = wb; 1;").as_int());

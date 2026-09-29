@@ -170,6 +170,25 @@ namespace jai::detail {
 	}
 
 	inline constexpr const char* container_boundary_mismatch_text = "Cannot store {0} in {1}";
+	inline constexpr const char* uint8_range_text = "Cannot store {0} in array<uint8> (0..255)";
+	inline constexpr const char* int8_range_text = "Cannot store {0} in array<int8> (-128..127)";
+	// a parallel worker cannot intern the value: the same text without it
+	inline constexpr const char* uint8_range_text_slotless = "Cannot store a value outside 0..255 in array<uint8>";
+	inline constexpr const char* int8_range_text_slotless = "Cannot store a value outside -128..127 in array<int8>";
+
+	inline bool byte_element_fits(bool is_signed, script_int v) noexcept {
+		return is_signed ? (v >= -128 && v <= 127) : (v >= 0 && v <= 255);
+	}
+
+	// The byte range kernel's verdict (array<uint8> / array<int8> elements), the one text every store path raises
+	inline error_propagator byte_range_error(engine* eng, bool is_signed, script_int v) {
+		auto* sym = eng ? eng->get_symbolizer() : nullptr;
+		const auto code = make_error_code(runtime_error_code::array_element_type_mismatch);
+		if (!sym || sym->frozen()) {
+			return error_propagator{ code, is_signed ? int8_range_text_slotless : uint8_range_text_slotless, 0, 0 };
+		}
+		return error_propagator{ code, is_signed ? int8_range_text : uint8_range_text, sym->intern(std::to_string(v)), 0 };
+	}
 
 	struct container_boundary_outcome {
 		std::optional<script_value> value;      // engaged on success
@@ -223,6 +242,23 @@ namespace jai::detail {
 			return rebuilt ? std::move(*inner.value) : inner.value->clone_element();
 		}
 
+		if (target_type == script_value_type::jai_int_type && element_type->is_byte_element()) {
+			// the int rows, then the kind's range
+			script_int v = 0;
+			if (elem_type == script_value_type::jai_int_type) {
+				v = actual_element.unchecked_as_int();
+			} else if (elem_type == script_value_type::jai_float_type) {
+				auto converted = checked_float_to_integer(actual_element.unchecked_as_float());
+				if (!converted) { return converted.error_value(); }
+				v = converted.value();
+			} else if (elem_type == script_value_type::jai_bool_type) {
+				v = actual_element.unchecked_as_bool() ? 1 : 0;
+			} else {
+				return container_mismatch_error(eng, container_value_type_name(actual_element), "array<" + element_type->canonical_name() + ">");
+			}
+			if (!byte_element_fits(element_type->is_signed, v)) { return byte_range_error(eng, element_type->is_signed, v); }
+			return script_value(v, eng);
+		}
 		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
 			auto converted = checked_float_to_integer(actual_element.unchecked_as_float());
 			if (!converted) { return converted.error_value(); }
@@ -256,10 +292,15 @@ namespace jai::detail {
 	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02)
 	bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
 
+	inline bool byte_kind(script_array::kind_t k) noexcept {
+		return k == script_array::kind_t::u8 || k == script_array::kind_t::i8;
+	}
+
 	// Kind <-> primitive element type (the representation rule's one table)
-	inline script_array::kind_t kind_for_element_base(script_value_type base) {
-		switch (base) {
-			case script_value_type::jai_int_type: return script_array::kind_t::i64;
+	inline script_array::kind_t kind_for_element(const type_info& element) {
+		switch (element.base_type) {
+			case script_value_type::jai_int_type:
+				return !element.is_byte_element() ? script_array::kind_t::i64 : element.is_signed ? script_array::kind_t::i8 : script_array::kind_t::u8;
 			case script_value_type::jai_float_type: return script_array::kind_t::f64;
 			case script_value_type::jai_bool_type: return script_array::kind_t::b8;
 			case script_value_type::jai_char_type: return script_array::kind_t::c8;
@@ -270,7 +311,9 @@ namespace jai::detail {
 	}
 	inline script_value_type typed_kind_element_base(script_array::kind_t kind) {
 		switch (kind) {
-			case script_array::kind_t::i64: return script_value_type::jai_int_type;
+			case script_array::kind_t::i64:
+			case script_array::kind_t::u8:
+			case script_array::kind_t::i8: return script_value_type::jai_int_type;
 			case script_array::kind_t::f64: return script_value_type::jai_float_type;
 			case script_array::kind_t::b8: return script_value_type::jai_bool_type;
 			case script_array::kind_t::c8: return script_value_type::jai_char_type;
@@ -293,6 +336,8 @@ namespace jai::detail {
 			case script_array::kind_t::f64: return eng->get_type_info_float();
 			case script_array::kind_t::b8: return eng->get_type_info_bool();
 			case script_array::kind_t::c8: return eng->get_type_info_char();
+			case script_array::kind_t::u8: return eng->get_type_info_uint8();
+			case script_array::kind_t::i8: return eng->get_type_info_int8();
 			default: return eng->get_type_info_string();
 		}
 	}
@@ -414,6 +459,55 @@ namespace jai::detail {
 
 	// The one message both backends raise at a failed boundary (byte-identical errors).
 
+	// A byte buffer on either side of an int, float or byte buffer: the element rows (int into a byte range-checked,
+	// float through the checked float kernel first, a byte widening into int or float) on the raw payloads; any other
+	// pair is the boxed loop's
+	inline std::optional<container_boundary_outcome> convert_byte_buffer(const script_array& src, script_array::kind_t expected,
+	                                                                    const type_info_ptr& element_type, const type_info_ptr& target_type, engine* eng) {
+		using k = script_array::kind_t;
+		const k sk = src.kind();
+		const bool numeric_src = sk == k::i64 || sk == k::f64 || byte_kind(sk);
+		const bool numeric_dst = expected == k::i64 || expected == k::f64 || byte_kind(expected);
+		if (!numeric_src || !numeric_dst || sk == expected) { return std::nullopt; }
+		const size_t count = src.size();
+		container_boundary_outcome out;
+		script_value rebuilt = script_value::make_array(element_type, eng);
+		script_array& dest = *rebuilt.get_array_storage();
+		auto byte_at = [&](size_t i) -> script_int {
+			return sk == k::u8 ? static_cast<script_int>(src.bytes()[i]) : static_cast<script_int>(static_cast<int8_t>(src.bytes()[i]));
+		};
+		if (byte_kind(expected)) {
+			const bool is_signed = expected == k::i8;
+			auto& bytes = dest.bytes();
+			bytes.resize(count);
+			for (size_t i = 0; i < count; ++i) {
+				script_int v = 0;
+				if (sk == k::i64) {
+					v = src.ints()[i];
+				} else if (sk == k::f64) {
+					auto converted = checked_float_to_integer(src.floats()[i]);
+					if (!converted) { out.error = converted.error_value(); return out; }
+					v = converted.value();
+				} else {
+					v = byte_at(i);
+				}
+				if (!byte_element_fits(is_signed, v)) { out.error = byte_range_error(eng, is_signed, v); return out; }
+				bytes[i] = static_cast<uint8_t>(v);
+			}
+		} else if (expected == k::i64) {
+			auto& ints = dest.ints();
+			ints.resize(count);
+			for (size_t i = 0; i < count; ++i) { ints[i] = byte_at(i); }
+		} else {
+			auto& floats = dest.floats();
+			floats.resize(count);
+			for (size_t i = 0; i < count; ++i) { floats[i] = static_cast<script_float>(byte_at(i)); }
+		}
+		rebuilt.set_type_info(target_type);
+		out.value = std::move(rebuilt);
+		return out;
+	}
+
 	inline container_boundary_outcome enforce_container_boundary(script_value value, const type_info_ptr& target_type, engine* eng) {
 		container_boundary_outcome out;
 		if (!target_type) {
@@ -450,7 +544,7 @@ namespace jai::detail {
 
 			// The node kind this binding wants: raw buffers for the primitive element
 			// types (the boundary kernel is THE typed-node producer)
-			const script_array::kind_t expected_kind = kind_for_element_base(target_elem_base);
+			const script_array::kind_t expected_kind = kind_for_element(*element_type);
 
 			// Proof by kind: a same-kind typed node cannot hold a mismatched element
 			// (object buffers also need the same class: the kind alone says "objects")
@@ -459,6 +553,10 @@ namespace jai::detail {
 				value.set_type_info(target_type);
 				out.value = std::move(value);
 				return out;
+			}
+
+			if (byte_kind(expected_kind) || byte_kind(src->kind())) {
+				if (auto direct = convert_byte_buffer(*src, expected_kind, element_type, target_type, eng)) { return std::move(*direct); }
 			}
 
 			bool needs_conversion = src->is_typed() || src->kind() != expected_kind;

@@ -253,9 +253,7 @@ script_value engine::make_value(T&& value) {
 template<typename T>
 script_value conversions::convert_vector_to_script_array(const std::vector<T>& vec, engine* eng) {
     type_info_ptr element_type;
-    if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||
-                   std::is_same_v<T, float> || std::is_same_v<T, double> ||
-                   std::is_same_v<T, bool> || std::is_same_v<T, char> ||
+    if constexpr (std::is_arithmetic_v<T> ||
                    std::is_same_v<T, std::string> || std::is_same_v<T, script_value> ||
                    is_specialization_v<T, std::shared_ptr> ||
                    is_specialization_v<T, std::vector> || is_script_map_like_v<T> ||
@@ -278,6 +276,10 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
                            std::is_same_v<T, bool> || std::is_same_v<T, char> ||
                            std::is_same_v<T, std::string>) {
             arr.push(script_value(item, eng));
+        } else if constexpr (std::is_integral_v<T>) {
+            arr.push(script_value(static_cast<script_int>(item), eng));   // every other integer width is a script int, like int
+        } else if constexpr (std::is_floating_point_v<T>) {
+            arr.push(script_value(static_cast<script_float>(item), eng));
         } else if constexpr (is_specialization_v<T, std::shared_ptr>) {
             // The element IS a handle: share identity via make_object<U>. Wrapping the
             // handle in another shared_ptr registered as "std::shared_ptr<U>" throws.

@@ -278,6 +278,16 @@ engine stays usable", not by `check_throws`.
   `bound_array<int64_t>&` mutates the buffer in place, `std::vector<script_int>` extracts
   unboxed. Typed map STORAGE is the open campaign (`docs/typed_array_design.md` stage 6,
   `docs/PERF_PASS_2026-09-02.md`).
+- **Byte arrays** (Dev ruling 2026-09-28): `array<uint8>` (0..255) and `array<int8>` (-128..127) are raw one-byte
+  buffers, kinds `u8` / `i8` sharing the byte buffer with `b8`/`c8` (the kind carries the sign); the element type is an
+  int type_info named `uint8`/`int8` with `native_size` 1 (`type_info::is_byte_element()`, interned apart from `int`;
+  a host's `uint8_t` stays a plain int). Reads yield int; every store runs the range kernel after the int rows
+  (`detail::byte_range_error`: `Cannot store 256 in array<uint8> (0..255)`, a slot-less form for parallel workers);
+  int/float/bool convert in, char needs a cast; `array<int> x = bytes` / `array<uint8> b = ints` convert by value
+  (`detail::convert_byte_buffer`, range-checked, no boxing), `array<var> v = bytes` is the dynamic copy. `uint8`/`int8`
+  parse only as an array's element type (a scalar is a parse error: a byte is an int). Lanes test the kind (vm index
+  stores, op_t_load, typed index stores, cell loads/stores/pushes, push append); `bound_array<uint8_t>` writes range-check,
+  `std::vector<uint8_t>` extracts with one memcpy. `.jaibite` version 24.
 - **Class-typed arrays admit subclasses** (Dev ruling 2026-09-02): `array<Base>` holds `Base`
   or any subclass (exact id first, parent walk on a name mismatch); each slot keeps its own
   class tag; `array<Derived>` converts to `array<Base>` by value; unrelated classes raise.
@@ -547,8 +557,9 @@ engine stays usable", not by `check_throws`.
   marking pass flags it). time:: calls are a parallel-body wall (all modes); the checker types them through
   `script_namespace_data::signatures`.
 - **Binary data** (Dev rulings 2026-09-27, guide ch. 9 "Binary data", `detail/binary_data.hpp`): `string` is binary-safe
-  bytes, `utf8_string` is text. `s.to_bytes([offset], [count])` -> `array<int>` (range-checked, one native copy),
-  `string::from_bytes(array<int> | array<char>)` (0..255 or a catchable error naming element and value). The engine-core
+  bytes, `utf8_string` is text. `s.to_bytes([offset], [count])` -> `array<uint8>` (range-checked, one native copy),
+  `string::from_bytes(array<uint8> | array<char> | array<int> | array<var>)` (a byte buffer copies; other elements
+  0..255 or a catchable error naming element and value). `r.bytes(n)` and a layout's `bytes(n)` are `array<uint8>`. The engine-core
   `binary::` library: `s.reader()` / `binary::reader(s)` (cursor over a copy-on-write snapshot, little-endian until
   `big_endian()`; `int8..int64`, `uint8..uint32` (no uint64: ints are int64), `float32` widens, `float64`, `text(n)` (an n-byte
   text field: n bytes, the text before the first NUL), `text()` (a C string; the scan stops at the data end and the host-only

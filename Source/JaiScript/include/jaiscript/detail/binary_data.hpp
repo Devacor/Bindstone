@@ -191,7 +191,14 @@ namespace jai::binary {
 		std::memset(p + s.size(), 0, n - s.size());
 	}
 
-	// the raw bytes a bytes() write takes: a string as it is, or an array of ints / chars 0..255; "" and ok, or why not
+	// n bytes as an array<uint8>, one copy
+	inline script_value byte_array(engine* eng, const unsigned char* p, size_t n) {
+		script_value out = script_value::make_array(eng->get_type_info_uint8(), eng);
+		out.unchecked_get_array_storage()->bytes().assign(p, p + n);
+		return out;
+	}
+
+	// the raw bytes a bytes() write takes: a string as it is, or an array of uint8s, ints or chars 0..255; "" and ok, or why not
 	inline bool raw_bytes_of(const script_value& value, std::string& out, std::string& why) {
 		const script_value& v = value.deref();
 		if (const std::string* s = v.text_bytes()) { out = *s; return true; }
@@ -200,6 +207,7 @@ namespace jai::binary {
 		const size_t n = node ? node->size() : 0;
 		out.assign(n, '\0');
 		if (n == 0) { return true; }
+		if (node->kind() == script_array::kind_t::u8 || node->kind() == script_array::kind_t::c8) { std::memcpy(out.data(), node->bytes().data(), n); return true; }
 		if (node->kind() == script_array::kind_t::i64) {
 			const auto& ints = node->ints();
 			for (size_t i = 0; i < n; ++i) {
@@ -208,7 +216,6 @@ namespace jai::binary {
 			}
 			return true;
 		}
-		if (node->kind() == script_array::kind_t::c8) { std::memcpy(out.data(), node->bytes().data(), n); return true; }
 		size_t i = 0;
 		bool ok = true;
 		node->for_each(v.get_engine(), [&](const script_value& el) {
@@ -344,21 +351,14 @@ namespace jai::binary {
 		script_value bytes(script_int n) {
 			const size_t c = count_arg(n, "bytes");
 			const unsigned char* p = take_counted(c, "bytes", n);
-			engine* eng = get_engine();
-			script_value out = script_value::make_array(eng->get_type_info_int(), eng);
-			out.unchecked_get_array_storage()->ints().assign(p, p + c);
-			return out;
+			return byte_array(get_engine(), p, c);
 		}
 
 		script_value read_field(const field& f) {
 			const unsigned char* p = take_field(f);
 			engine* eng = get_engine();
 			if (f.w.k == kind::text) { return script_value(load_text(p, f.w.length), eng); }
-			if (f.w.k == kind::bytes) {
-				script_value out = script_value::make_array(eng->get_type_info_int(), eng);
-				out.unchecked_get_array_storage()->ints().assign(p, p + f.w.length);
-				return out;
-			}
+			if (f.w.k == kind::bytes) { return byte_array(eng, p, f.w.length); }
 			if (f.w.is_float()) { return script_value(load_float(f.w.k, p, big_), eng); }
 			return script_value(load_integer(f.w.k, p, big_), eng);
 		}
@@ -701,14 +701,14 @@ namespace jai::binary {
 			if (!e->execution_limits().memory_charge(n)) [[unlikely]] { return jai::detail::raise_memory_cap(e->execution_limits()); }
 			std::string out(n, '\0');
 			if (n == 0) { return script_value(std::move(out), e); }
-			if (node->kind() == script_array::kind_t::i64) {
+			if (node->kind() == script_array::kind_t::u8 || node->kind() == script_array::kind_t::c8) {
+				std::memcpy(out.data(), node->bytes().data(), n);
+			} else if (node->kind() == script_array::kind_t::i64) {
 				const auto& ints = node->ints();
 				for (size_t i = 0; i < n; ++i) {
 					if (ints[i] < 0 || ints[i] > 255) { bad(i, std::to_string(ints[i])); }
 					out[i] = static_cast<char>(ints[i]);
 				}
-			} else if (node->kind() == script_array::kind_t::c8) {
-				std::memcpy(out.data(), node->bytes().data(), n);
 			} else {
 				size_t i = 0;
 				node->for_each(e, [&](const script_value& el) {
@@ -860,13 +860,10 @@ namespace jai::detail {
 					symbols->intern(range), symbols->intern(std::to_string(size)));
 			}
 			engine* eng = ctx.get_engine();
-			if (!eng->execution_limits().memory_charge(static_cast<size_t>(count) * sizeof(script_int))) [[unlikely]] {
+			if (!eng->execution_limits().memory_charge(static_cast<size_t>(count))) [[unlikely]] {
 				return raise_memory_cap(eng->execution_limits());
 			}
-			script_value out = script_value::make_array(eng->get_type_info_int(), eng);
-			const unsigned char* p = reinterpret_cast<const unsigned char*>(s.data()) + offset;
-			out.unchecked_get_array_storage()->ints().assign(p, p + count);
-			return out;
+			return binary::byte_array(eng, reinterpret_cast<const unsigned char*>(s.data()) + offset, static_cast<size_t>(count));
 		};
 		m[sym->intern("reader")] = [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
 			if (!args.empty()) return R(make_error_code(runtime_error_code::argument_count_mismatch), "reader() takes no arguments");

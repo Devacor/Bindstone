@@ -1477,6 +1477,12 @@ namespace jai {
                         result.insert(result.end(), node->floats().begin(), node->floats().end());
                         return checked_result<T>(std::move(result));
                     }
+                } else if constexpr (std::is_same_v<element_type, uint8_t> || std::is_same_v<element_type, int8_t>) {
+                    if (node->kind() == (std::is_same_v<element_type, uint8_t> ? script_array::kind_t::u8 : script_array::kind_t::i8)) {
+                        result.resize(node->bytes().size());
+                        if (!result.empty()) { std::memcpy(result.data(), node->bytes().data(), result.size()); }
+                        return checked_result<T>(std::move(result));
+                    }
                 }
                 bool failed = false;
                 error_propagator failure;
@@ -2608,6 +2614,8 @@ namespace jai {
             case kind_t::i64: return ints_.size();
             case kind_t::f64: return floats_.size();
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: return bytes_.size();
             case kind_t::str: return strs_.size();
             case kind_t::obj: return objs_.size();
@@ -2620,6 +2628,8 @@ namespace jai {
             case kind_t::i64: ints_.reserve(n); break;
             case kind_t::f64: floats_.reserve(n); break;
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: bytes_.reserve(n); break;
             case kind_t::str: strs_.reserve(n); break;
             case kind_t::obj: objs_.reserve(n); break;
@@ -2631,6 +2641,8 @@ namespace jai {
             case kind_t::i64: ints_ = other.ints_; break;
             case kind_t::f64: floats_ = other.floats_; break;
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: bytes_ = other.bytes_; break;
             case kind_t::str: strs_ = other.strs_; break;   // handles share objects, like boxed copies
             case kind_t::obj: objs_ = other.objs_; break;   // handle copies; clone() deep-copies per slot (value.cpp)
@@ -2658,6 +2670,8 @@ namespace jai {
             case kind_t::f64: return script_value(floats_[i], eng);
             case kind_t::b8: return script_value(static_cast<script_bool>(bytes_[i] != 0), eng);
             case kind_t::c8: return script_value(static_cast<script_char>(bytes_[i]), eng);
+            case kind_t::u8: return script_value(static_cast<script_int>(bytes_[i]), eng);
+            case kind_t::i8: return script_value(static_cast<script_int>(static_cast<int8_t>(bytes_[i])), eng);
             case kind_t::str: return script_value(strs_[i], eng);
             case kind_t::obj: return script_value(objs_[i].handle, objs_[i].tag, eng);
             default: return values_[i];
@@ -2679,6 +2693,10 @@ namespace jai {
                 break;
             case kind_t::c8:
                 bytes_[i] = static_cast<uint8_t>(v.unchecked_as_char());   // pre-converted: exactly a char
+                break;
+            case kind_t::u8:
+            case kind_t::i8:
+                bytes_[i] = static_cast<uint8_t>(v.unchecked_as_int());   // pre-converted: an int in the kind's range
                 break;
             case kind_t::str:
                 strs_[i] = v.unchecked_string_handle();   // pre-converted: exactly a string
@@ -2709,6 +2727,10 @@ namespace jai {
             case kind_t::c8:
                 bytes_.push_back(static_cast<uint8_t>(pre_converted.unchecked_as_char()));
                 break;
+            case kind_t::u8:
+            case kind_t::i8:
+                bytes_.push_back(static_cast<uint8_t>(pre_converted.unchecked_as_int()));
+                break;
             case kind_t::str:
                 strs_.push_back(pre_converted.unchecked_string_handle());
                 break;
@@ -2727,6 +2749,8 @@ namespace jai {
             case kind_t::i64: return ints_.capacity();
             case kind_t::f64: return floats_.capacity();
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: return bytes_.capacity();
             case kind_t::str: return strs_.capacity();
             case kind_t::obj: return objs_.capacity();
@@ -2739,6 +2763,8 @@ namespace jai {
             case kind_t::i64: if (n < ints_.size()) { ints_.resize(n); } break;
             case kind_t::f64: if (n < floats_.size()) { floats_.resize(n); } break;
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: if (n < bytes_.size()) { bytes_.resize(n); } break;
             case kind_t::str: if (n < strs_.size()) { strs_.erase(strs_.begin() + static_cast<std::ptrdiff_t>(n), strs_.end()); } break;
             case kind_t::obj: if (n < objs_.size()) { objs_.erase(objs_.begin() + static_cast<std::ptrdiff_t>(n), objs_.end()); } break;
@@ -2751,6 +2777,8 @@ namespace jai {
             case kind_t::i64: ints_.pop_back(); break;
             case kind_t::f64: floats_.pop_back(); break;
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: bytes_.pop_back(); break;
             case kind_t::str: strs_.pop_back(); break;
             case kind_t::obj: objs_.pop_back(); break;
@@ -2763,6 +2791,8 @@ namespace jai {
             case kind_t::i64: ints_.erase(ints_.begin() + i); break;
             case kind_t::f64: floats_.erase(floats_.begin() + i); break;
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: bytes_.erase(bytes_.begin() + i); break;
             case kind_t::str: strs_.erase(strs_.begin() + i); break;
             case kind_t::obj: objs_.erase(objs_.begin() + i); break;
@@ -2775,6 +2805,8 @@ namespace jai {
             case kind_t::i64: std::reverse(ints_.begin(), ints_.end()); break;
             case kind_t::f64: std::reverse(floats_.begin(), floats_.end()); break;
             case kind_t::b8:
+            case kind_t::u8:
+            case kind_t::i8:
             case kind_t::c8: std::reverse(bytes_.begin(), bytes_.end()); break;
             case kind_t::str: std::reverse(strs_.begin(), strs_.end()); break;
             case kind_t::obj: std::reverse(objs_.begin(), objs_.end()); break;
@@ -2789,6 +2821,8 @@ namespace jai {
             case kind_t::f64: for (script_float d : floats_) { f(script_value(d, eng)); } break;
             case kind_t::b8: for (uint8_t b : bytes_) { f(script_value(static_cast<script_bool>(b != 0), eng)); } break;
             case kind_t::c8: for (uint8_t c : bytes_) { f(script_value(static_cast<script_char>(c), eng)); } break;
+            case kind_t::u8: for (uint8_t b : bytes_) { f(script_value(static_cast<script_int>(b), eng)); } break;
+            case kind_t::i8: for (uint8_t b : bytes_) { f(script_value(static_cast<script_int>(static_cast<int8_t>(b)), eng)); } break;
             case kind_t::str: for (const auto& h : strs_) { f(script_value(h, eng)); } break;
             case kind_t::obj: for (const auto& s : objs_) { f(script_value(s.handle, s.tag, eng)); } break;
             default: for (const script_value& v : values_) { f(v); } break;
@@ -2826,6 +2860,15 @@ namespace jai {
             case kind_t::c8:
                 values_.reserve(bytes_.size());
                 for (uint8_t c : bytes_) { values_.emplace_back(static_cast<script_char>(c), eng); }
+                bytes_.clear();
+                bytes_.shrink_to_fit();
+                break;
+            case kind_t::u8:
+            case kind_t::i8:
+                values_.reserve(bytes_.size());
+                for (uint8_t b : bytes_) {
+                    values_.emplace_back(kind_ == kind_t::u8 ? static_cast<script_int>(b) : static_cast<script_int>(static_cast<int8_t>(b)), eng);
+                }
                 bytes_.clear();
                 bytes_.shrink_to_fit();
                 break;

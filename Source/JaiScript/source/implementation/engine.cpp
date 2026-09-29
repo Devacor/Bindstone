@@ -588,6 +588,8 @@ struct engine::implementation {
     type_info* type_info_utf8_string_ = nullptr;
     type_info* type_info_bool_ = nullptr;
     type_info* type_info_char_ = nullptr;
+    type_info* type_info_uint8_ = nullptr;
+    type_info* type_info_int8_ = nullptr;
     type_info* type_info_void_ = nullptr;
     type_info* type_info_invalid_ = nullptr;
     type_info* type_info_any_ = nullptr;
@@ -1446,6 +1448,13 @@ engine::implementation::implementation()
     type_info char_info = type_info::make_char(string_symbolizer_);
     type_info_char_ = &type_infos_.emplace(type_key{script_value_type::jai_char_type, 0, 0}, char_info).first->second;
     type_id_index_[type_info_char_->id] = type_info_char_;
+
+    type_info uint8_info = type_info::make_uint8(string_symbolizer_);
+    type_info_uint8_ = &type_infos_.emplace(type_key{script_value_type::jai_int_type, uint8_info.id, 0}, uint8_info).first->second;
+    type_id_index_[type_info_uint8_->id] = type_info_uint8_;
+    type_info int8_info = type_info::make_int8(string_symbolizer_);
+    type_info_int8_ = &type_infos_.emplace(type_key{script_value_type::jai_int_type, int8_info.id, 0}, int8_info).first->second;
+    type_id_index_[type_info_int8_->id] = type_info_int8_;
 
     type_info void_info = type_info::make_void(string_symbolizer_);
     type_info_void_ = &type_infos_.emplace(type_key{script_value_type::jai_null_type, 0, 0}, void_info).first->second;
@@ -2885,6 +2894,14 @@ type_info* engine::get_type_info_char() {
     return impl->type_info_char_;
 }
 
+type_info* engine::get_type_info_uint8() {
+    return impl->type_info_uint8_;
+}
+
+type_info* engine::get_type_info_int8() {
+    return impl->type_info_int8_;
+}
+
 type_info* engine::get_type_info_void() {
     return impl->type_info_void_;
 }
@@ -3122,6 +3139,9 @@ type_info* engine::get_type_info(const type_info& temp) {
         case script_value_type::jai_function_type:
             // Object and function types: use temp.id which encodes full signature
             param1_id = temp.id;
+            break;
+        case script_value_type::jai_int_type:
+            if (temp.is_byte_element()) { param1_id = temp.id; }
             break;
         default:
             // Primitive types have no parameters

@@ -71,6 +71,10 @@ namespace jai {
         bool is_function() const { return base_type == script_value_type::jai_function_type; }
         bool is_reference() const { return base_type == script_value_type::jai_reference_type; }
         bool is_weak_ptr() const { return base_type == script_value_type::jai_weak_ptr_type; }
+        // uint8 / int8: the one-byte element types of array<uint8> / array<int8> (a host's uint8_t stays a plain int)
+        bool is_byte_element() const {
+            return base_type == script_value_type::jai_int_type && native_size == 1 && (type_name == "uint8" || type_name == "int8");
+        }
 
         // Get type parameters
         type_info_ptr element_type() const {  // For Array<T>, weak_ptr<T>, etc.
@@ -102,7 +106,7 @@ namespace jai {
         // Examples: "int", "array<int>", "array<>", "map<string,int>", "map<,>"
         std::string canonical_name() const {
             switch (base_type) {
-                case script_value_type::jai_int_type: return "int";
+                case script_value_type::jai_int_type: return is_byte_element() ? type_name : "int";
                 case script_value_type::jai_float_type: return "float";
                 case script_value_type::jai_string_type: return "string";
                 case script_value_type::jai_utf8_string_type: return "utf8_string";

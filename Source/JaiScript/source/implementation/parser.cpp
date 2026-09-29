@@ -1617,7 +1617,12 @@ checked_result<type_info_ptr> parser::parse_type() {
         JAISCRIPT_TRY(consume(token_type::less,
             "Expected '<' after 'array' - 'array' is the built-in array type keyword (array<T>); "
             "if this was meant as a variable, rename it"));
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr element_type, parse_type());
+        type_info_ptr element_type;
+        if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
+            element_type = store_type_info(advance().lexeme == "uint8" ? type_info::make_uint8(*symbolizer_) : type_info::make_int8(*symbolizer_));
+        } else {
+            JAISCRIPT_TRY_ASSIGN(element_type, parse_type());
+        }
         consume_greater_in_generic("Expected '>' after array element type");
         return store_type_info(type_info::make_array(*symbolizer_, element_type));
     }
@@ -1667,6 +1672,12 @@ checked_result<type_info_ptr> parser::parse_type() {
     if (check(token_type::identifier) && peek().lexeme == "utf8_string") {
         advance();
         return store_type_info(type_info::make_utf8_string(*symbolizer_));
+    }
+
+    if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
+        report_error(std::string("'") + std::string(peek().lexeme) + "' is an array element type only (array<" + std::string(peek().lexeme) +
+                     ">, one byte per element); a single byte is an int", peek());
+        return make_error_code(parse_error_code::unexpected_token);
     }
 
     // Handle "double" as an alias for float (since we only have float_keyword)

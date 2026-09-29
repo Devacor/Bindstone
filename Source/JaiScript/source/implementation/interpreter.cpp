@@ -619,11 +619,16 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                         return static_cast<script_char>(a) < static_cast<script_char>(b);
                     });
                     break;
+                case script_array::kind_t::i8:
+                    std::sort(node.bytes().begin(), node.bytes().end(), [](uint8_t a, uint8_t b) {
+                        return static_cast<int8_t>(a) < static_cast<int8_t>(b);
+                    });
+                    break;
                 case script_array::kind_t::str:
                     std::sort(node.strs().begin(), node.strs().end(),
                               [](const strong_ptr<script_string>& a, const strong_ptr<script_string>& b) { return *a < *b; });
                     break;
-                default: std::sort(node.bytes().begin(), node.bytes().end()); break;   // b8: false < true
+                default: std::sort(node.bytes().begin(), node.bytes().end()); break;   // b8: false < true; u8: 0..255
             }
             return ctx.make_value();
         }

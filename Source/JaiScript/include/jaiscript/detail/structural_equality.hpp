@@ -45,7 +45,9 @@ namespace jai::detail {
                 return script_value(true, eng);
             }
             case script_array::kind_t::b8:
-            case script_array::kind_t::c8: return script_value(a->bytes() == b->bytes(), eng);
+            case script_array::kind_t::c8:
+            case script_array::kind_t::u8:
+            case script_array::kind_t::i8: return script_value(a->bytes() == b->bytes(), eng);
             case script_array::kind_t::str: {
                 const auto& x = a->strs(); const auto& y = b->strs();
                 for (size_t i = 0; i < n; ++i) {

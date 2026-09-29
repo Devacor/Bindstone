@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/core/bound_array.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <array>
 #include <string>
@@ -2574,6 +2575,113 @@ public:
             check_quad_error("array<string> t = [\"a\"]; array<int> v = [1]; v.push(t[0])", "push of a string-buffer element into array<int> names the referent");
             check_quad_error("array<var> t = [\"a\"]; array<int> v = [1]; v.push(t[0])", "push of a dynamic-table element into array<int> names the referent");
             check_quad("array<string> t = [\"a\"]; array<string> v = []; v.push(t[0]); v[0]", "a", "push of a string-buffer element into array<string>");
+        });
+
+        test("byte_buffers_uint8_int8", [this]() {
+            // array<uint8> / array<int8>: one raw byte per element, element reads are ints, every store runs the range kernel;
+            // both backends, proofs on and off, byte-identical outputs and error texts
+            auto run = [](const std::string& src, bool use_vm, bool proofs) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->type_proofs(proofs);
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { return e->execute(src).to_string(); }
+                catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+            };
+            auto expect = [this, run](const std::string& src, const std::string& expected, const char* what) {
+                for (bool proofs : {true, false}) {
+                    for (bool use_vm : {false, true}) {
+                        check_eq(expected, run(src, use_vm, proofs), std::string(what) + (use_vm ? " (vm" : " (interpreter") + (proofs ? ")" : ", proofs off)"));
+                    }
+                }
+            };
+            auto caught = [](const std::string& body) { return "var out = \"none\"; try { " + body + "; } catch (e) { out = e; } out"; };
+
+            expect("array<uint8> b = [0, 1, 255]; to_string(b[0]) + \",\" + to_string(b[2]) + \",\" + type_of(b[2]) + \",\" + to_string(b.size())", "0,255,int,3", "uint8 reads are ints");
+            expect("array<int8> b = [-128, 127]; to_string(b[0]) + \",\" + to_string(b[1]) + \",\" + to_string(b[0] + b[1])", "-128,127,-1", "int8 reads are signed ints");
+            expect("array<uint8> b = [0]; b[0] = 200; int i = 0; b[i] = 201; to_json(b)", "[201]", "a store inside the range");
+            expect(caught("array<uint8> b = [0]; int v = 256; b[0] = v"), "Cannot store 256 in array<uint8> (0..255)", "a store above the range");
+            expect(caught("array<uint8> b = [0]; int v = -1; b[0] = v"), "Cannot store -1 in array<uint8> (0..255)", "a negative store");
+            expect(caught("array<int8> b = [0]; int v = 128; b[0] = v"), "Cannot store 128 in array<int8> (-128..127)", "int8 above");
+            expect(caught("array<int8> b = [0]; int v = -129; b[0] = v"), "Cannot store -129 in array<int8> (-128..127)", "int8 below");
+            expect(caught("array<int8> b = []; int v = 128; b.push(v)"), "Cannot store 128 in array<int8> (-128..127)", "push above the range");
+            expect("array<uint8> b = []; for (int i = 0; i < 10; i++) { b.push(i * 25); } int s = 0; for (int i = 0; i < b.size(); i++) { s += b[i]; } to_string(s) + \" \" + to_string(b[9])", "1125 225", "push and read in counted loops");
+            expect("array<uint8> b = [0, 0, 0]; b[0] = 7.9; b[1] = true; b[2] = false; to_json(b)", "[7,1,0]", "float and bool convert");
+            expect(caught("array<uint8> b = [0]; float f = 300.5; b[0] = f"), "Cannot store 300 in array<uint8> (0..255)", "a float converts then meets the range");
+            expect(caught("array<uint8> b = [0]; float f = 1e300; b[0] = f"), "Cannot convert float to integer: non-finite or out of range", "a float outside int");
+            expect("array<uint8> b = [250]; b[0] += 5; to_string(b[0])", "255", "a compound inside the range");
+            expect(caught("array<uint8> b = [255]; b[0] += 1"), "Cannot store 256 in array<uint8> (0..255)", "a compound past the range");
+            expect(caught("array<uint8> b = [255]; b[0]++"), "Cannot store 256 in array<uint8> (0..255)", "++ past the range");
+            expect(caught("array<int8> b = [-128]; b[0]--"), "Cannot store -129 in array<int8> (-128..127)", "-- past the range");
+            expect("array<uint8> b = [1, 2]; for (auto& x : b) { x = x * 100; } to_json(b)", "[100,200]", "range-for by reference");
+            expect(caught("array<uint8> b = [1, 3]; for (auto& x : b) { x = x * 100; } b.size()"), "Cannot store 300 in array<uint8> (0..255)", "range-for by reference past the range");
+            expect("array<uint8> b = [9]; auto& r = b[0]; r = 10; to_string(b[0])", "10", "an element reference");
+            expect(caught("array<uint8> b = [9]; auto& r = b[0]; int v = 999; r = v"), "Cannot store 999 in array<uint8> (0..255)", "an element reference past the range");
+            // element conversions: int <-> uint8/int8 by value both ways, uint8 <-> int8 through the range, array<var> explicitly
+            expect("array<uint8> b = [1, 2]; array<int> x = b; x[0] = 1000; to_json(x) + \" \" + to_json(b)", "[1000,2] [1,2]", "array<int> from array<uint8> copies");
+            expect("array<int8> b = [-1, 2]; array<float> f = b; to_json(f)", "[-1.0,2.0]", "array<float> from array<int8>");
+            expect("array<int> x = [1, 255]; array<uint8> b = x; b[0] = 9; to_json(b) + \" \" + to_json(x)", "[9,255] [1,255]", "array<uint8> from array<int> copies");
+            expect(caught("array<int> x = [1, 300]; array<uint8> b = x"), "Cannot store 300 in array<uint8> (0..255)", "array<uint8> from an int past the range");
+            expect(caught("array<int8> s = [-1]; array<uint8> b = s"), "Cannot store -1 in array<uint8> (0..255)", "array<uint8> from array<int8>");
+            expect("array<uint8> u = [127]; array<int8> s = u; to_json(s)", "[127]", "array<int8> from array<uint8> in range");
+            expect("array<float> f = [1.9, 2.1]; array<uint8> b = f; to_json(b)", "[1,2]", "array<uint8> from array<float>");
+            expect("array<uint8> b = [5]; array<var> v = b; v.push(\"s\"); to_json(v) + \" \" + to_json(b)", "[5,\"s\"] [5]", "array<var> from array<uint8>");
+            expect("var v = [1, 2, 3]; array<uint8> b = v; to_json(b)", "[1,2,3]", "array<uint8> from an untyped array");
+            expect(caught("array<char> c = ['a']; var cv = c; array<uint8> b = cv"), "Cannot store char in array<uint8>", "a char does not convert");
+            check(run("array<char> c = ['a']; array<uint8> b = c;", false, true).find("expected 'uint8', got 'char'") != std::string::npos, "the checker refuses a char buffer");
+            expect(caught("array<uint8> b = [0]; var s = \"x\"; b[0] = s"), "Cannot assign 'string' to element of type 'uint8'", "a string element store");
+            expect(caught("array<uint8> b = []; var s = \"x\"; b.push(s)"), "Cannot push 'string' to array<uint8>", "a string push");
+            // the builtins
+            expect("array<int8> s = [5, -3, 0]; s.sort(); array<uint8> u = [200, 3, 100]; u.sort(); to_json(s) + to_json(u)", "[-3,0,5][3,100,200]", "sort by value");
+            expect("array<uint8> u = [1, 2, 3]; u.reverse(); var p = u.pop(); u.push(9); to_json(u) + to_string(p) + to_string(u.index_of(9)) + to_string(u.contains(3))", "[3,2,9]12true", "reverse, pop, push, index_of, contains");
+            expect("array<uint8> u = [1, 2, 3, 4]; u.remove(0); to_json(u) + \" \" + to_json(u.slice(1, 3)) + \" \" + u.join(\"-\")", "[2,3,4] [3,4] 2-3-4", "remove, slice, join");
+            expect("array<uint8> u = [4, 5, 6]; u.remove_if([](int x) -> bool { return x == 5; }); to_json(u) + to_json(u.filter([](int x) -> bool { return x > 4; }))", "[4,6][6]", "remove_if, filter");
+            expect("array<uint8> u = [3, 1]; u.sort([](int a, int b) -> bool { return a > b; }); to_json(u)", "[3,1]", "comparator sort");
+            expect("array<uint8> a = [1, 2]; array<uint8> b = a; b[0] = 9; array<uint8> c = [1, 2]; array<int> d = [1, 2]; to_string(a[0]) + to_string(a == c) + to_string(a == b) + to_string(a == d)", "1truefalsetrue", "copies copy, == is memberwise");
+            expect("array<array<uint8>> g = [[1, 2], [3]]; g[1].push(255); to_json(g)", "[[1,2],[3,255]]", "nested byte buffers");
+            expect(caught("array<array<uint8>> g = [[1]]; int v = 256; g[0].push(v)"), "Cannot store 256 in array<uint8> (0..255)", "a nested byte buffer keeps its range");
+            expect("class P { array<uint8> data; } P p; p.data.push(7); p.data.push(200); P q = from_json(to_json(p)); int v = 256; string r = \"none\"; try { q.data.push(v); } catch (e) { r = e; } to_json(q.data) + \" \" + r",
+                   "[7,200] Cannot store 256 in array<uint8> (0..255)", "json round trip keeps the declared kind");
+            expect("class P { array<int8> data; } P p; p.data.push(-5); P q = from_binary(to_binary(p)); to_json(q.data)", "[-5]", "binary archive round trip");
+            expect("array<uint8> b = [1, 2, 3, 4]; parallel_for (auto& x : b) { x = x * 2; } to_json(b)", "[2,4,6,8]", "parallel_for writes a byte buffer in place");
+            // a scalar byte is an int; the checker reads literals against the range
+            check(run("uint8 x = 5; x", false, true).find("is an array element type only") != std::string::npos, "a scalar uint8 is a parse error");
+            check(run("function f(int8 v) { return v; } f(1)", true, true).find("is an array element type only") != std::string::npos, "an int8 parameter is a parse error");
+            check(run("map<string, uint8> m = {}; m.size()", false, true).find("is an array element type only") != std::string::npos, "a uint8 map value is a parse error");
+            check(run("array<uint8> b = [300];", false, true).find("300 is outside uint8 (0..255)") != std::string::npos, "the checker reads a literal element");
+            check(run("array<int8> b = [0]; b[0] = -200;", true, true).find("-200 is outside int8 (-128..127)") != std::string::npos, "the checker reads a literal store");
+            // one byte per element in the node
+            auto e = jai::engine::make();
+            auto v = e->execute("array<uint8> b = []; for (int i = 0; i < 1000; i++) { b.push(i % 256); } b");
+            const jai::script_array* node = v.unchecked_array_node();
+            check(node->kind() == jai::script_array::kind_t::u8, "array<uint8> holds the u8 byte buffer");
+            check_eq((size_t)1000, node->bytes().size(), "one byte per element");
+            check(e->execute("array<int8> b = [1]; b").unchecked_array_node()->kind() == jai::script_array::kind_t::i8, "array<int8> holds the i8 byte buffer");
+            auto bytes = v.as<std::vector<uint8_t>>();
+            check_eq((size_t)1000, bytes.size(), "std::vector<uint8_t> extraction");
+            check_eq((int)255, (int)bytes[255], "extraction keeps each byte");
+            // the host boundary: a std::vector<uint8_t> parameter takes the buffer, a bound_array writes it in place under
+            // the range, a std::vector<uint8_t> result is an array of ints like std::vector<int>
+            for (bool use_vm : {false, true}) {
+                auto h = jai::engine::make();
+                if (use_vm) { h->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(h);
+                h->add_function("host_sum", [](std::vector<uint8_t> b) -> script_int { script_int s = 0; for (uint8_t x : b) { s += x; } return s; });
+                h->add_function("host_fill", [](jai::bound_array<uint8_t>& b) -> script_int { b[0] = 9; b.push_back(200); return static_cast<script_int>(b.size()); });
+                h->add_function("host_push", [](jai::bound_array<script_int>& b, script_int v) -> script_int { b.push_back(v); return static_cast<script_int>(b.size()); });
+                h->add_function("host_bytes", []() -> std::vector<uint8_t> { return {1, 2, 255}; });
+                const char* tag = use_vm ? " (vm)" : " (interpreter)";
+                check_eq(std::string("195"), h->execute("to_string(host_sum(\"ab\".to_bytes()))").to_string(), std::string("a std::vector<uint8_t> parameter") + tag);
+                check_eq(std::string("3 [9,2,200]"), h->execute("array<uint8> b = [1, 2]; var n = host_fill(b); to_string(n) + \" \" + to_json(b)").to_string(), std::string("a bound_array<uint8_t>& parameter") + tag);
+                check_eq(std::string("Cannot store 300 in array<uint8> (0..255) [1]"),
+                         h->execute("array<uint8> b = [1]; var out = \"none\"; try { host_push(b, 300); } catch (e) { out = e; } out + \" \" + to_json(b)").to_string(),
+                         std::string("a bound_array write keeps the byte range") + tag);
+                check_eq(std::string("[1,2,255] int"), h->execute("var b = host_bytes(); to_json(b) + \" \" + type_of(b[2])").to_string(), std::string("a std::vector<uint8_t> result") + tag);
+                h->add_function("host_ints", []() -> std::vector<int> { return {1, 2}; });
+                check(h->execute("host_bytes()").unchecked_array_node()->kind() == h->execute("host_ints()").unchecked_array_node()->kind(),
+                      std::string("a std::vector<uint8_t> result takes std::vector<int>'s form") + tag);
+            }
         });
 
         test("typed_storage_errors_match_plain", [check_quad_error]() {

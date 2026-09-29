@@ -400,6 +400,11 @@ namespace stdlib {
                     return val.is_object() ? object_type_name(val) : "object";
                 case script_value_type::jai_reference_type: return "reference";
                 case script_value_type::jai_weak_ptr_type: return "weak_ptr";
+                case script_value_type::jai_vec2_type:
+                case script_value_type::jai_vec3_type:
+                case script_value_type::jai_vec4_type:
+                case script_value_type::jai_ivec2_type:
+                case script_value_type::jai_ivec3_type: return math_type_name(val.type());
                 default: return "unknown";
             }
         });

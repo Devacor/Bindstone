@@ -91,7 +91,8 @@ struct ctype {
         array_k, map_k, function_k, object_k, weak_k,
         class_ref_k,   // a class used as a value (Class::static access, constructor callee)
         enum_ref_k,    // an enum name (member access checks its values)
-        utf8_k
+        utf8_k,
+        math_k         // a native math kind; cls names it ("math::vec3")
     };
     kind_t kind = unknown;
     std::string_view cls{};   // object_k / class_ref_k / enum_ref_k
@@ -133,8 +134,13 @@ std::string ctype_name(const ctype& t) {
 		case ctype::object_k: return t.cls.empty() ? "object" : std::string(t.cls);
 		case ctype::class_ref_k: return "class " + std::string(t.cls);
 		case ctype::enum_ref_k: return "enum " + std::string(t.cls);
+		case ctype::math_k: return std::string(t.cls);
 		default: return "unknown";
 	}
+}
+
+ctype math_ctype(script_value_type kind) {
+	return ctype{ctype::math_k, math_type_name(kind)};
 }
 
 ctype ctype_from_type_info(const type_info* ti) {
@@ -164,6 +170,13 @@ ctype ctype_from_type_info(const type_info* ti) {
 			break;
 		case script_value_type::jai_reference_type:
 			return ctype_from_type_info(ti->type_params.empty() ? nullptr : ti->type_params[0].get());
+		case script_value_type::jai_vec2_type:
+		case script_value_type::jai_vec3_type:
+		case script_value_type::jai_vec4_type:
+		case script_value_type::jai_ivec2_type:
+		case script_value_type::jai_ivec3_type:
+			t = math_ctype(ti->base_type);
+			break;
 		default:
 			return {};   // cpp_bound, invalid: lenient
 	}
@@ -1682,6 +1695,11 @@ private:
 			case ctype::function_k: return src.kind == ctype::function_k || src.kind == ctype::null_k;
 			case ctype::weak_k: return weak_initializer_compatible(src, dst);
 			case ctype::null_k: return src.kind == ctype::null_k;   // void returns
+			case ctype::math_k: {
+				// the same kind, or the other precision of the same dimensions (the typed-slot table's row)
+				if (src.kind != ctype::math_k) { return false; }
+				return detail::math::dims(math_type_from_name(src.cls)) == detail::math::dims(math_type_from_name(dst.cls));
+			}
 			case ctype::object_k: {
 				if (src.kind == ctype::null_k) { return true; }
 				if (src.kind == ctype::object_k) {
@@ -1778,6 +1796,11 @@ private:
                 return ctype::make(ctype::float_k);
             case math_fn::random_seed:
                 return {};
+            case math_fn::vec2_: return math_ctype(script_value_type::jai_vec2_type);
+            case math_fn::vec3_: return math_ctype(script_value_type::jai_vec3_type);
+            case math_fn::ivec2_: return math_ctype(script_value_type::jai_ivec2_type);
+            case math_fn::ivec3_: return math_ctype(script_value_type::jai_ivec3_type);
+            case math_fn::vec4_: return math_ctype(script_value_type::jai_vec4_type);
             default:
                 return ctype::make(ctype::float_k);
         }
@@ -2657,6 +2680,18 @@ private:
 		if (m->is_static && namespace_path_receiver(m)) { return {}; }
 		ctype recv = infer(m->object.get());
 		if (recv_out) { *recv_out = recv; }
+		if (recv.kind == ctype::math_k) {
+			// a component (x / width, y / height, z / depth): an int or a float for diagnostics, never a proof source (the
+			// VM's component rows are a later phase); anything else is the runtime's no-member text, statically
+			const script_value_type kind = math_type_from_name(recv.cls);
+			if (detail::math::component_of(kind, m->member) < 0) {
+				diag(diag_level::error, m->location, std::string(recv.cls) + " has no member '" + std::string(m->member) + "'");
+				return {};
+			}
+			ctype c = ctype::make(detail::math::integral(kind) ? ctype::int_k : ctype::float_k);
+			c.tentative = true;
+			return c;
+		}
 		if (recv.is_unknown() || recv.kind == ctype::map_k || recv.kind == ctype::array_k ||
 			recv.kind == ctype::string_k || recv.kind == ctype::utf8_k || recv.kind == ctype::function_k || recv.kind == ctype::weak_k || recv.kind == ctype::null_k ||
 			recv.kind == ctype::int_k || recv.kind == ctype::float_k || recv.kind == ctype::char_k ||

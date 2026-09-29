@@ -52,6 +52,7 @@ inline std::string semantic_type_name(const script_value& val, engine* eng) {
     if (d.is_char()) { return "char"; }
     if (d.is_string()) { return "string"; }
     if (d.is_utf8_string()) { return "utf8_string"; }
+    if (d.is_math()) { return math_type_name(d.current_type()); }
     if (d.is_function()) { return "function"; }
     if (d.is_weak_ptr()) { return "weak_ptr"; }
     (void)eng;

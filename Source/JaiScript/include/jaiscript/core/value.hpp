@@ -16,6 +16,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <jaiscript/math/types.hpp>
 #include <limits>
 #include <type_traits>
 #include <cmath>
@@ -143,6 +144,13 @@ namespace detail { struct argument_capture_storage; }
         script_value(const char* s, engine* eng);
         script_value(script_char c, engine* eng);
         script_value(script_bool b, engine* eng);
+        script_value(const vec2& v, engine* eng);
+        script_value(const vec3& v, engine* eng);
+        script_value(const vec4& v, engine* eng);
+        script_value(const ivec2& v, engine* eng);
+        script_value(const ivec3& v, engine* eng);
+        // A vec of `kind` (jai_vec2_type ... jai_ivec3_type) from its component words (binary32 or int32 bits)
+        static script_value make_vec(script_value_type kind, const uint32_t* words, engine* eng);
         
         // Template constructors for all numeric types - ALL require engine references
         // NOTE: Implementations are in value_impl.hpp (include after engine.hpp)
@@ -206,6 +214,11 @@ namespace detail { struct argument_capture_storage; }
                 case TYPEID_UTF8_STRING:
                 case TYPEID_CHAR:
                 case TYPEID_BOOL:
+                case TYPEID_VEC2:
+                case TYPEID_IVEC2:
+                case TYPEID_VEC3:
+                case TYPEID_IVEC3:
+                case TYPEID_VEC4:
                     return *this;
                 default:
                     if (type_info_ && type_info_->base_type == script_value_type::jai_shared_ptr_type) {
@@ -376,6 +389,11 @@ namespace detail { struct argument_capture_storage; }
                 }
                 case 15: return script_value_type::jai_invalid_type;    // parallel borrow: region-internal, never a script-visible type
                 case 16: return script_value_type::jai_utf8_string_type;   // utf8_string
+                case 17: return script_value_type::jai_vec2_type;
+                case 18: return script_value_type::jai_ivec2_type;
+                case 19: return script_value_type::jai_vec3_type;
+                case 20: return script_value_type::jai_ivec3_type;
+                case 21: return script_value_type::jai_vec4_type;
                 default: return script_value_type::jai_invalid_type;
             }
         }
@@ -736,6 +754,13 @@ namespace detail { struct argument_capture_storage; }
             return *node;
         }
         script_string& unshare_string_node();   // value.cpp: the fresh node, memory-cap charged deferred
+        template <typename M> M vec_payload() const noexcept {
+            static_assert(sizeof(M) <= sizeof(script_vec_node::words) && std::is_trivially_copyable_v<M>);
+            M out;
+            std::memcpy(&out, unchecked_vec_node().words, sizeof(M));
+            return out;
+        }
+        void unshare_vec_node();
 
         inline script_char unchecked_as_char() const noexcept {
             if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
@@ -2105,6 +2130,19 @@ namespace detail { struct argument_capture_storage; }
         static constexpr size_t TYPEID_CPP_BOUND = 14;
         static constexpr size_t TYPEID_PARALLEL_BORROW = 15;
         static constexpr size_t TYPEID_UTF8_STRING = 16;
+        // math::vec2 / vec3 / vec4 / ivec2 / ivec3 (docs/math_types_design.md): one pooled copy-on-write node type,
+        // script_vec_node (component count, element type, components), under one storage index per kind, so the index
+        // names the kind and current_type() stays a constant per row
+        static constexpr size_t TYPEID_VEC2 = 17;
+        static constexpr size_t TYPEID_IVEC2 = 18;
+        static constexpr size_t TYPEID_VEC3 = 19;
+        static constexpr size_t TYPEID_IVEC3 = 20;
+        static constexpr size_t TYPEID_VEC4 = 21;
+        static constexpr bool is_math_index(size_t idx) noexcept { return idx >= TYPEID_VEC2 && idx <= TYPEID_VEC4; }
+        static constexpr uint8_t vec_index_of(uint8_t count, uint8_t integral) noexcept {
+            if (integral) { return static_cast<uint8_t>(count == 2 ? TYPEID_IVEC2 : TYPEID_IVEC3); }
+            return static_cast<uint8_t>(count == 2 ? TYPEID_VEC2 : count == 3 ? TYPEID_VEC3 : TYPEID_VEC4);
+        }
 
         // The cpp_bound box encoding of a C++ type - make_cpp_bound and the binder's
         // member-address accessors share it so the two cannot drift. `capable` is false for
@@ -2158,6 +2196,10 @@ namespace detail { struct argument_capture_storage; }
             storage(jai::weaker_ptr<object_holder> v) noexcept : index_(TYPEID_WEAK_PTR) { new (&p_.w) jai::weaker_ptr<object_holder>(std::move(v)); }
             storage(strong_ptr<cpp_bound_holder> v) noexcept : index_(TYPEID_CPP_BOUND) { new (&p_.cb) strong_ptr<cpp_bound_holder>(std::move(v)); }
             storage(strong_ptr<script_utf8> v) noexcept : index_(TYPEID_UTF8_STRING) { new (&p_.u) strong_ptr<script_utf8>(std::move(v)); }
+            // precondition: a live node (its count and element type name the index)
+            storage(strong_ptr<script_vec_node> v) noexcept : index_(vec_index_of(v->count, v->integral)) { new (&p_.vn) strong_ptr<script_vec_node>(std::move(v)); }
+            JAI_FORCEINLINE strong_ptr<script_vec_node>& vec_node() noexcept { return p_.vn; }
+            JAI_FORCEINLINE const strong_ptr<script_vec_node>& vec_node() const noexcept { return p_.vn; }
 
             storage(const storage& o) noexcept : index_(o.index_) {
                 switch (index_) {
@@ -2171,6 +2213,7 @@ namespace detail { struct argument_capture_storage; }
                     case TYPEID_WEAK_PTR: new (&p_.w) jai::weaker_ptr<object_holder>(o.p_.w); break;
                     case TYPEID_CPP_BOUND: new (&p_.cb) strong_ptr<cpp_bound_holder>(o.p_.cb); break;
                     case TYPEID_UTF8_STRING: new (&p_.u) strong_ptr<script_utf8>(o.p_.u); break;
+                    case TYPEID_VEC2: case TYPEID_IVEC2: case TYPEID_VEC3: case TYPEID_IVEC3: case TYPEID_VEC4: new (&p_.vn) strong_ptr<script_vec_node>(o.p_.vn); break;
                     default: std::memcpy(&p_, &o.p_, sizeof(p_)); break;   // trivial payloads
                 }
             }
@@ -2230,7 +2273,9 @@ namespace detail { struct argument_capture_storage; }
                 script_char, script_bool, strong_ptr<script_array>, strong_ptr<script_map>,
                 strong_ptr<object_holder>, strong_ptr<script_function>, strong_ptr<reference_holder>,
                 strong_ptr<shared_value_holder>, jai::weaker_ptr<object_holder>, invalid_tag,
-                strong_ptr<cpp_bound_holder>, parallel_borrow_tag, strong_ptr<script_utf8>>>;
+                strong_ptr<cpp_bound_holder>, parallel_borrow_tag, strong_ptr<script_utf8>,
+                strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>,
+                strong_ptr<script_vec_node>>>;
 
             template <size_t I> JAI_FORCEINLINE alt_t<I>* get_if() noexcept {
                 return index_ == I ? &alt<I>() : nullptr;
@@ -2269,12 +2314,14 @@ namespace detail { struct argument_capture_storage; }
                 strong_ptr<cpp_bound_holder> cb;
                 parallel_borrow_tag pb;              // tagged raw pointer, trivially copyable
                 strong_ptr<script_utf8> u;
+                strong_ptr<script_vec_node> vn;
             };
 
             static constexpr uint32_t k_trivial_mask =
                 (1u << TYPEID_NULL) | (1u << TYPEID_INT) | (1u << TYPEID_FLOAT) |
                 (1u << TYPEID_CHAR) | (1u << TYPEID_BOOL) | (1u << TYPEID_INVALID) |
                 (1u << TYPEID_PARALLEL_BORROW);
+            static_assert(TYPEID_VEC4 < 32, "k_trivial_mask is one bit per storage index");
 
             JAI_FORCEINLINE void destroy() noexcept {
                 if ((k_trivial_mask >> index_) & 1u) {
@@ -2291,6 +2338,7 @@ namespace detail { struct argument_capture_storage; }
                     case TYPEID_WEAK_PTR: p_.w.~weaker_ptr(); break;
                     case TYPEID_CPP_BOUND: p_.cb.~strong_ptr(); break;
                     case TYPEID_UTF8_STRING: p_.u.~strong_ptr(); break;
+                    case TYPEID_VEC2: case TYPEID_IVEC2: case TYPEID_VEC3: case TYPEID_IVEC3: case TYPEID_VEC4: p_.vn.~strong_ptr(); break;
                     default: break;
                 }
             }
@@ -2316,6 +2364,7 @@ namespace detail { struct argument_capture_storage; }
                 else if constexpr (I == TYPEID_INVALID) { return invalid_alt_; }
                 else if constexpr (I == TYPEID_CPP_BOUND) { return p_.cb; }
                 else if constexpr (I == TYPEID_UTF8_STRING) { return p_.u; }
+                else if constexpr (I >= TYPEID_VEC2 && I <= TYPEID_VEC4) { return p_.vn; }
                 else { return p_.pb; }
             }
             template <size_t I> JAI_FORCEINLINE const auto& alt() const noexcept {
@@ -2366,6 +2415,27 @@ namespace detail { struct argument_capture_storage; }
         void unchecked_set_int_payload(script_int v) noexcept { storage_.get<script_int>() = v; }
         void unchecked_set_float_payload(script_float v) noexcept { storage_.get<script_float>() = v; }
         void unchecked_set_bool_payload(script_bool v) noexcept { storage_.get<script_bool>() = v; }
+
+        // A vec (caller proved the index): its node, its kind, its components read out, and one component written in place
+        // (binary32 bits for vec kinds, int32 for ivec kinds; a node shared with another value is unshared first, so a copy
+        // never sees the write); tag, engine and stamp stay untouched
+        const script_vec_node& unchecked_vec_node() const noexcept { return *storage_.vec_node(); }
+        script_value_type unchecked_vec_kind() const noexcept { return current_type(); }
+        vec2 unchecked_as_vec2() const noexcept { return vec_payload<vec2>(); }
+        vec3 unchecked_as_vec3() const noexcept { return vec_payload<vec3>(); }
+        vec4 unchecked_as_vec4() const noexcept { return vec_payload<vec4>(); }
+        ivec2 unchecked_as_ivec2() const noexcept { return vec_payload<ivec2>(); }
+        ivec3 unchecked_as_ivec3() const noexcept { return vec_payload<ivec3>(); }
+        void unchecked_set_vec_word(size_t i, uint32_t bits) {
+            strong_ptr<script_vec_node>& node = storage_.vec_node();
+            if (!node.unique()) [[unlikely]] { unshare_vec_node(); }
+            node->words[i] = bits;
+        }
+        bool is_math() const { return is_math_index(deref().raw_storage_index()); }
+        // A vec's truthiness (caller proved the index): not all zero, the numeric rule (NaN is nonzero, as for floats)
+        bool math_truthy() const noexcept;   // value.cpp, out of line: the truthiness switches stay small
+        // A fresh node from the engine's pool (a plain allocation without an engine or inside a parallel region)
+        static strong_ptr<script_vec_node> acquire_vec_node(engine* eng);
         
         // Extract object_holder for class_instance operations
         // Returns nullptr if not actually storing an object (uses current_type, not defined_type)

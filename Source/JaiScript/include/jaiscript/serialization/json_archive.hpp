@@ -2,6 +2,7 @@
 
 #include "archive_impl.hpp"
 #include <jaiscript/core/class_definition.hpp>
+#include <jaiscript/detail/math_values.hpp>
 #include <stack>
 #include <sstream>
 #include <iomanip>
@@ -458,7 +459,32 @@ private:
             case script_value_type::jai_utf8_string_type:
                 oss << '"' << escape_json_string_local(val.deref().unchecked_as_utf8().bytes) << '"';
                 break;
-                
+
+            case script_value_type::jai_vec2_type:
+            case script_value_type::jai_vec3_type:
+            case script_value_type::jai_vec4_type:
+            case script_value_type::jai_ivec2_type:
+            case script_value_type::jai_ivec3_type: {
+                // {"$type": "math::K", "$val": {canonical components}}: binary32 in the shortest round-tripping text
+                const script_value& m = val.deref();
+                const script_value_type kind = m.unchecked_vec_kind();
+                static constexpr const char* names[4] = {"x", "y", "z", "w"};
+                std::string body = std::string("{\"$type\":\"") + detail::math::kind_name(kind) + "\",\"$val\":{";
+                for (size_t k = 0; k < detail::math::dims(kind); ++k) {
+                    if (k) body += ',';
+                    body += '"'; body += names[k]; body += "\":";
+                    if (detail::math::integral(kind)) {
+                        body += std::to_string(detail::math::i32_at(m, k));
+                    } else {
+                        const float c = detail::math::f32_at(m, k);
+                        if (std::isfinite(c)) { detail::math::append_f32(body, c); } else { body += "null"; }
+                    }
+                }
+                body += "}}";
+                oss << body;
+                break;
+            }
+
             case script_value_type::jai_char_type:
                 oss << "{\"$char\":" << static_cast<int>(static_cast<unsigned char>(val.as_char())) << '}';
                 break;
@@ -870,6 +896,50 @@ private:
         }
     }
 
+    // A math value's JSON (docs/math_types_design.md 8.6): exactly {"$type": "math::K", "$val": {"x": .., "y": .. [, "z": ..]}}
+    // with numeric components; any other object is a map. A malformed math payload is an error, never a silent map.
+    bool materialize_math(const JNode& node, engine* eng, script_value& out) {
+        if (node.u.agg.count != 2) { return false; }
+        uint32_t type_node = 0, val_node = 0;
+        bool has_type = false, has_val = false;
+        for (uint32_t m = 0; m < 2; ++m) {
+            const JNode& k = nodes_[node.u.agg.first + 2 * m];
+            std::string_view key(chars_.data() + k.u.str.off, k.u.str.len);
+            if (key == "$type") { type_node = node.u.agg.first + 2 * m + 1; has_type = true; }
+            else if (key == "$val") { val_node = node.u.agg.first + 2 * m + 1; has_val = true; }
+        }
+        if (!has_type || !has_val || nodes_[type_node].tag != JTag::Str) { return false; }
+        const JNode& t = nodes_[type_node];
+        const script_value_type kind = math_type_from_name(std::string_view(chars_.data() + t.u.str.off, t.u.str.len));
+        if (kind == script_value_type::jai_null_type) { return false; }
+        const JNode& val = nodes_[val_node];
+        const size_t dims = detail::math::dims(kind);
+        if (val.tag != JTag::Obj || val.u.agg.count != dims) {
+            throw serialization_error(std::string("Malformed ") + math_type_name(kind) + " in JSON: expected " + std::to_string(dims) + " components");
+        }
+        float f[4] = {0, 0, 0, 0};
+        int32_t i[4] = {0, 0, 0, 0};
+        bool seen[4] = {false, false, false, false};
+        for (uint32_t m = 0; m < val.u.agg.count; ++m) {
+            const JNode& k = nodes_[val.u.agg.first + 2 * m];
+            const JNode& c = nodes_[val.u.agg.first + 2 * m + 1];
+            const int comp = detail::math::component_of(kind, std::string_view(chars_.data() + k.u.str.off, k.u.str.len));
+            if (comp < 0 || seen[comp] || (c.tag != JTag::Int && c.tag != JTag::Double)) {
+                throw serialization_error(std::string("Malformed ") + math_type_name(kind) + " component in JSON");
+            }
+            seen[comp] = true;
+            if (detail::math::integral(kind)) {
+                auto narrowed = c.tag == JTag::Int ? detail::math::to_i32(static_cast<script_int>(c.u.i)) : detail::math::to_i32(c.u.d);
+                if (!narrowed) { throw serialization_error(std::string("Out-of-range ") + math_type_name(kind) + " component in JSON"); }
+                i[comp] = narrowed.value();
+            } else {
+                f[comp] = c.tag == JTag::Int ? detail::math::to_f32(static_cast<script_int>(c.u.i)) : detail::math::to_f32(c.u.d);
+            }
+        }
+        out = detail::math::make(kind, f, i, eng);
+        return true;
+    }
+
     // Recursively builds a full script_value subtree from a flat node — only used when a raw
     // composite is actually requested (stdlib from_json / a weak_ptr's $weak_ptr_data).
     // Keys are ENGINE-CARRYING string values: ordering and map.find(script_value("_type_"/...))
@@ -881,6 +951,10 @@ private:
         engine* eng = engine_ref_;
         const JNode& node = nodes_[idx];
         if (node.tag == JTag::Obj) {
+            script_value math_value(std::monostate{}, eng);
+            if (materialize_math(node, eng, math_value)) {
+                return math_value;
+            }
             script_value mv = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
             auto& map = const_cast<script_map&>(mv.as_map());
             for (uint32_t m = 0; m < node.u.agg.count; ++m) {

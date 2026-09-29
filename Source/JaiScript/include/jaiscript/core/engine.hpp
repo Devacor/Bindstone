@@ -1018,6 +1018,7 @@ namespace jai {
         type_info* get_type_info_float();
         type_info* get_type_info_string();
         type_info* get_type_info_utf8_string();
+        type_info* get_type_info_math(script_value_type kind);   // the canonical stamp of math::vec2/vec3/ivec2/ivec3
         type_info* get_type_info_bool();
         type_info* get_type_info_char();
         type_info* get_type_info_uint8();   // array<uint8>'s element type
@@ -1072,6 +1073,9 @@ namespace jai {
         // pool into the slot and registers the teardown; the engine dtor invokes it.
         void*& reference_holder_pool_slot();
         void set_reference_holder_pool_teardown(void (*teardown)(void*));
+        // The same for the math vector node pool
+        void*& vec_node_pool_slot();
+        void set_vec_node_pool_teardown(void (*teardown)(void*));
         // True while a parallel region's workers run (main thread parked). Worker-side
         // mints must not touch the single-threaded pool.
         bool parallel_region_active() const;

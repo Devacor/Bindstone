@@ -8,6 +8,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
+#include <jaiscript/detail/math_values.hpp>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -40,6 +41,8 @@ namespace jai::detail {
         // and wrap overflow builds) - the sanctioned spelling for hash folds and RNG steps
         // that would otherwise hand-roll limb products around the checked-overflow error.
         wrap_add_, wrap_sub_, wrap_mul_,
+        // The native math types' constructors (math::vec3(1, 2, 3); detail/math_values.hpp construct)
+        vec2_, vec3_, ivec2_, ivec3_, vec4_,
         count,
         none = count
     };
@@ -65,6 +68,13 @@ namespace jai::detail {
             case 'i':
                 if (name == "itrunc") return math_fn::itrunc;
                 if (name == "ifloor") return math_fn::ifloor;
+                if (name == "ivec2") return math_fn::ivec2_;
+                if (name == "ivec3") return math_fn::ivec3_;
+                return math_fn::none;
+            case 'v':
+                if (name == "vec2") return math_fn::vec2_;
+                if (name == "vec3") return math_fn::vec3_;
+                if (name == "vec4") return math_fn::vec4_;
                 return math_fn::none;
             case 'l':
                 return name == "lerp" ? math_fn::lerp_ : math_fn::none;
@@ -171,6 +181,30 @@ namespace jai::detail {
         case math_fn::radians_to_degrees: return x * (180.0 / 3.14159265358979323846);
         default: return x * (3.14159265358979323846 / 180.0);
         }
+    }
+
+    // math::vec2(...) ... math::ivec3(...): out of line, so the constructor's temporaries stay off the scalar kernel's frame
+    JAI_MATH_COLD inline checked_result<script_value> eval_vec_constructor(math_fn fn, const script_value* const* args, size_t argc, engine* eng) {
+        const script_value_type kind = fn == math_fn::vec2_ ? script_value_type::jai_vec2_type
+                                     : fn == math_fn::vec3_ ? script_value_type::jai_vec3_type
+                                     : fn == math_fn::vec4_ ? script_value_type::jai_vec4_type
+                                     : fn == math_fn::ivec2_ ? script_value_type::jai_ivec2_type : script_value_type::jai_ivec3_type;
+        if (argc > math::k_max_dims) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), math::ctor_arity_text(kind));
+        }
+        // S8: a bound argument decodes once (a host variable reads its current value)
+        script_value decoded[math::k_max_dims] = {script_value(std::monostate{}, eng), script_value(std::monostate{}, eng),
+                                                 script_value(std::monostate{}, eng), script_value(std::monostate{}, eng)};
+        const script_value* view[math::k_max_dims] = {nullptr, nullptr, nullptr, nullptr};
+        for (size_t k = 0; k < argc; ++k) {
+            if (args[k]->raw_storage_index() == script_value::TYPEID_CPP_BOUND) {
+                decoded[k] = args[k]->bound_decoded_temp();
+                view[k] = &decoded[k];
+            } else {
+                view[k] = args[k];
+            }
+        }
+        return math::construct(kind, view, argc, eng);
     }
 
     // The ONE evaluation kernel, used verbatim by both backends. Args arrive as an
@@ -473,6 +507,13 @@ namespace jai::detail {
                 }
                 return checked_result<script_value>(script_value(r, eng));
             }
+
+            case math_fn::vec2_:
+            case math_fn::vec3_:
+            case math_fn::vec4_:
+            case math_fn::ivec2_:
+            case math_fn::ivec3_:
+                return eval_vec_constructor(fn, args, argc, eng);
 
             default:
                 return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),

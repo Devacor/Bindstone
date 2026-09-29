@@ -17,6 +17,12 @@ std::string type_info::to_string() const {
             return "string";
         case script_value_type::jai_utf8_string_type:
             return "utf8_string";
+        case script_value_type::jai_vec2_type:
+        case script_value_type::jai_vec3_type:
+        case script_value_type::jai_vec4_type:
+        case script_value_type::jai_ivec2_type:
+        case script_value_type::jai_ivec3_type:
+            return math_type_name(base_type);
         case script_value_type::jai_char_type:
             return "char";
         case script_value_type::jai_bool_type:

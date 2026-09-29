@@ -21,6 +21,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/utf8_text.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/math_component_store.hpp>   // math-value component stores (interp parity)
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/scalar_ops.hpp>
@@ -1383,6 +1384,7 @@ bool vm_backend::is_truthy(const script_value& value) {
 		case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0;
 		case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty();
 		case script_value::TYPEID_UTF8_STRING: return !value.unchecked_as_utf8().bytes.empty();
+		case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: return value.math_truthy();
 		case script_value::TYPEID_CHAR: return true;
 		case script_value::TYPEID_ARRAY: {
 			auto& arr = const_cast<script_value&>(value).get_array_storage();
@@ -2040,6 +2042,8 @@ checked_result<script_value> vm_backend::handle_add(const script_value& left, co
 			}
 			return script_value(std::move(joined.value()), engine_);
 		}
+		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::binary(detail::math::bop::add, left, right, engine_);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for + operator");
 	}
 
@@ -2108,6 +2112,8 @@ checked_result<script_value> vm_backend::handle_subtract(const script_value& lef
 			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
 			return script_value(lf - rf, engine_);
 		}
+		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::binary(detail::math::bop::sub, left, right, engine_);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for - operator");
 	}
 
@@ -2166,6 +2172,8 @@ checked_result<script_value> vm_backend::handle_multiply(const script_value& lef
 			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
 			return script_value(lf * rf, engine_);
 		}
+		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::binary(detail::math::bop::mul, left, right, engine_);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for * operator");
 	}
 
@@ -2230,6 +2238,8 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			return script_value(lf / rf, engine_);
 		}
+		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::binary(detail::math::bop::div, left, right, engine_);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for / operator");
 	}
 
@@ -2298,6 +2308,8 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			return script_value(std::fmod(lf, rf), engine_);
 		}
+		if (detail::math::owns_arithmetic(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::binary(detail::math::bop::mod, left, right, engine_);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for % operator");
 	}
 
@@ -2360,6 +2372,8 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() < right.unchecked_as_string(), engine_);
 		}
+		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
 	}
 
@@ -2423,6 +2437,8 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() <= right.unchecked_as_string(), engine_);
 		}
+		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
 	}
 
@@ -2486,6 +2502,8 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() > right.unchecked_as_string(), engine_);
 		}
+		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
 	}
 
@@ -2549,6 +2567,8 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() >= right.unchecked_as_string(), engine_);
 		}
+		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
 	}
 
@@ -2629,6 +2649,8 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 		return script_value(unwrapped_left.is_null() && unwrapped_right.is_null(), engine_);
 	}
 
+	if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+		return script_value(detail::math::equal(left, right), engine_);
 	if (unwrapped_left.type() != unwrapped_right.type()) {
 		return script_value(false, engine_);
 	}
@@ -2738,6 +2760,8 @@ checked_result<script_value> vm_backend::handle_spaceship(const script_value& le
 		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
 	}
 
+	if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
+		return detail::math::ordering_error(left, right);
 	if (auto custom = object_arithmetic_via_method(left, right, op_spaceship_id_)) { return *custom; }
 	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <=> operator");
 }
@@ -3094,6 +3118,8 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	} else if (li == script_value::TYPEID_FLOAT) {
 		leftNum = left.unchecked_as_float();
 	} else {
+		if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
+			return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
 		if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Left operand must be numeric");
 	}
@@ -3102,6 +3128,8 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	} else if (ri == script_value::TYPEID_FLOAT) {
 		rightNum = right.unchecked_as_float();
 	} else {
+		if (detail::math::owns_arithmetic(li, ri)) [[unlikely]]
+			return detail::math::binary(detail::math::bop_of(op), left, right, engine_);
 		if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Right operand must be numeric");
 	}
@@ -4273,7 +4301,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		// Integral promotion (char_promotion.hpp): a char operand leaves the in-place
 		// ladder and takes the general arithmetic path as int64 0..255, storing back
 		// like the %= case does. KEEP BYTE-PARALLEL with the interpreter's in-place switch.
-		if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx)) [[unlikely]] {
+		if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx)) [[unlikely]] {
 			token_type baseOp = token_type::plus;
 			switch (kind) {
 				case compound_plus: baseOp = token_type::plus; break;
@@ -4731,6 +4759,12 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 				stack_.push_back(script_value(neg, engine_));
 			} else if (oi == script_value::TYPEID_FLOAT) {
 				stack_.push_back(script_value(-operand.unchecked_as_float(), engine_));
+			} else if (detail::math::is_kind(oi)) {   // KEEP BYTE-PARALLEL with the interpreter's unary minus
+				auto negated = detail::math::negate(operand, engine_);
+				if (!negated) {
+					return raise_from(negated);
+				}
+				stack_.push_back(std::move(negated.value()));
 			} else {
 				if (auto landed = user_unary(token_type::minus)) { return *landed; }
 				return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
@@ -11465,6 +11499,14 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	}
 
 	// member_access_value's precedence, lookup only (KEEP the texts BYTE-PARALLEL with it)
+	if (detail::math::is_kind(objectValue.raw_storage_index())) {
+		const script_value_type kind = objectValue.unchecked_vec_kind();
+		const int component = detail::math::component_of(kind, member->member);
+		if (component < 0) {
+			return raise_(make_error_code(runtime_error_code::member_not_found), detail::math::no_member_text(kind), member_id);
+		}
+		return callable(detail::math::component_value(objectValue, static_cast<size_t>(component), engine_));
+	}
 	if (objectValue.is_string()) {
 		const bool known = f.code->builtin_indexed
 			? site.bi_string != builtin_method_registries::k_no_builtin
@@ -12808,6 +12850,17 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 	}
 
+	// A vector's component (KEEP BYTE-PARALLEL with interpreter::member_read_on)
+	if (detail::math::is_kind(objectValue.raw_storage_index())) {
+		const script_value_type kind = objectValue.unchecked_vec_kind();
+		const int component = detail::math::component_of(kind, expr->member);
+		if (component < 0) {
+			return raise_(make_error_code(runtime_error_code::member_not_found), detail::math::no_member_text(kind), expr->member_id);
+		}
+		out = detail::math::component_value(objectValue, static_cast<size_t>(component), engine_);
+		return {};
+	}
+
 	if (objectValue.is_string() || objectValue.is_utf8_string()) {
 		if (!as_callee) {   // a caught error's own members and a thrown object's fields before the string methods (KEEP BYTE-PARALLEL with interpreter::member_read_on)
 			if (auto error_member = engine_->caught_error_member(objectValue, expr->member_id)) {
@@ -13541,6 +13594,25 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), ins.a, ins.b, std::move(objectValue), std::move(value), true);
 }
 
+// `base.x = v` on a math value: the store lands in the storage the base names (detail/math_component_store.hpp; KEEP
+// BYTE-PARALLEL with interpreter::assign_math_component). An identifier base resolves through the slot the compiler
+// recorded for this member node (chunk::component_base_slots), else the member scope and the environment.
+op_status vm_backend::assign_math_component(frame& f, uint32_t node, script_value& base, member_expr* member, const script_value& value, script_value& out) {
+	auto ident_cell = [&](const identifier_expr* id) -> script_value* {
+		if (id->global_qualified) { return engine_->get_global_environment()->get_value_ptr(id->symbol_id); }
+		return resolve_local_or_env(f, f.code->component_base_slot(node), id->symbol_id);
+	};
+	auto static_cell = [&](const member_expr* m) {
+		return detail::math::static_component_cell(m, *engine_, *environment_, *symbolizer_, frame_access_context(f));
+	};
+	auto stored = detail::math::assign_component(base, member, value, ident_cell, static_cell, caller_view(&f), environment_.get(), engine_, symbolizer_);
+	if (!stored) {
+		return raise_from(stored);
+	}
+	out = std::move(stored.value());
+	return {};
+}
+
 // SET_MEMBER's kernel with the operands in hand: the proven or cached field write, else the ladder (accessors, C++ properties,
 // the texts); the statement form (want_result false) pushes nothing and reads nothing back, the expression form pushes the
 // destination's value as the assignment's value
@@ -13548,6 +13620,12 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 	auto* member = static_cast<member_expr*>(f.code->nodes[node].get());
 	script_value dereferenced = objectValue.deref();
 	if (!dereferenced.is_object()) {
+		if (detail::math::is_kind(dereferenced.raw_storage_index())) {
+			script_value stored = make_null();
+			VM_TRY(assign_math_component(f, node, objectValue, member, value, stored));
+			if (want_result) { stack_.push_back(assignment_result_used(f) ? std::move(stored) : std::move(value)); }
+			return {};
+		}
 		raise_script_exception("Cannot assign to member of non-object type", member->location);
 		if (want_result) { stack_.push_back(make_null()); }
 		return {};
@@ -13829,6 +13907,15 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	if (text_pair == detail::compound_text::mismatch) { return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_)); }
 	if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
 		VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+	} else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with the interpreter's member compound)
+		const detail::math::bop op = kind == compound_minus ? detail::math::bop::sub : kind == compound_star ? detail::math::bop::mul
+		                           : kind == compound_slash ? detail::math::bop::div : kind == compound_percent ? detail::math::bop::mod
+		                           : detail::math::bop::add;
+		auto math_result = detail::math::binary(op, currentValue, rightValue, engine_);
+		if (!math_result) {
+			return raise_from(math_result);
+		}
+		resultValue = std::move(math_result.value());
 	} else
 	switch (kind) {
 		case compound_plus: {
@@ -13918,6 +14005,12 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 
 	const script_value& objectValue = objectValueRaw.deref();
 	if (!objectValue.is_object()) {
+		if (detail::math::is_kind(objectValue.raw_storage_index())) {   // KEEP BYTE-PARALLEL with the interpreter's member compound
+			script_value stored = make_null();
+			VM_TRY(assign_math_component(f, ins.a, objectValueRaw, member, resultValue, stored));
+			stack_.push_back(old_result ? std::move(postfix_old) : result_needed ? std::move(stored) : std::move(resultValue));
+			return {};
+		}
 		raise_script_exception("Cannot assign to member of non-object type", member->location);
 		stack_.push_back(make_null());
 		return {};

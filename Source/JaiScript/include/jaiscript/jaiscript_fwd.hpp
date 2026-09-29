@@ -53,7 +53,12 @@ namespace jai {
         jai_shared_ptr_type,     // shared_ptr<T>
         jai_cpp_bound_type,      // C++ bound value
         jai_invalid_type,        // Invalid/non-existent value (used as sentinel)
-        jai_utf8_string_type     // utf8_string: the same bytes as a string, character semantics
+        jai_utf8_string_type,    // utf8_string: the same bytes as a string, character semantics
+        jai_vec2_type,           // math::vec2 (2 x f32)
+        jai_vec3_type,           // math::vec3 (3 x f32)
+        jai_ivec2_type,          // math::ivec2 (2 x i32)
+        jai_ivec3_type,          // math::ivec3 (3 x i32)
+        jai_vec4_type            // math::vec4 (4 x f32)
     };
     
     // The unit whose code is running and the execution that compiled it (docs/global_shadowing.md):

@@ -14,6 +14,28 @@
 
 namespace jai {
 
+    // The script spelling of a math kind (the type name, type_of, diagnostics); null for any other type
+    constexpr const char* math_type_name(script_value_type kind) noexcept {
+        switch (kind) {
+            case script_value_type::jai_vec2_type: return "math::vec2";
+            case script_value_type::jai_vec3_type: return "math::vec3";
+            case script_value_type::jai_vec4_type: return "math::vec4";
+            case script_value_type::jai_ivec2_type: return "math::ivec2";
+            case script_value_type::jai_ivec3_type: return "math::ivec3";
+            default: return nullptr;
+        }
+    }
+    constexpr bool is_math_type(script_value_type kind) noexcept { return math_type_name(kind) != nullptr; }
+    // The math kind a fused type token names ("math::vec3", lexer.cpp); jai_null_type for any other spelling
+    constexpr script_value_type math_type_from_name(std::string_view name) noexcept {
+        if (name == "math::vec2") return script_value_type::jai_vec2_type;
+        if (name == "math::vec3") return script_value_type::jai_vec3_type;
+        if (name == "math::vec4") return script_value_type::jai_vec4_type;
+        if (name == "math::ivec2") return script_value_type::jai_ivec2_type;
+        if (name == "math::ivec3") return script_value_type::jai_ivec3_type;
+        return script_value_type::jai_null_type;
+    }
+
     // Forward declarations
     class type_info;
 
@@ -115,6 +137,11 @@ namespace jai {
                 case script_value_type::jai_float_type: return "float";
                 case script_value_type::jai_string_type: return "string";
                 case script_value_type::jai_utf8_string_type: return "utf8_string";
+                case script_value_type::jai_vec2_type: return "math::vec2";
+                case script_value_type::jai_vec3_type: return "math::vec3";
+                case script_value_type::jai_vec4_type: return "math::vec4";
+                case script_value_type::jai_ivec2_type: return "math::ivec2";
+                case script_value_type::jai_ivec3_type: return "math::ivec3";
                 case script_value_type::jai_bool_type: return "bool";
                 case script_value_type::jai_char_type: return "char";
                 case script_value_type::jai_null_type: return "void";
@@ -193,6 +220,13 @@ namespace jai {
         static type_info make_utf8_string(string_symbolizer& symbolizer) {
             type_info info(script_value_type::jai_utf8_string_type);
             info.type_name = "utf8_string";
+            info.id = symbolizer.intern(info.canonical_name());
+            return info;
+        }
+
+        static type_info make_math(string_symbolizer& symbolizer, script_value_type kind) {
+            type_info info(kind);
+            info.type_name = math_type_name(kind);
             info.id = symbolizer.intern(info.canonical_name());
             return info;
         }

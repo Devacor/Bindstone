@@ -1234,6 +1234,8 @@ namespace jai {
         // setters (including on cpp_bound receivers) take precedence over instance fields.
         // Raises a script exception (is_unwinding_) for non-existent members.
         checked_result<void> assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value);
+        // `base.x = v` on a math value: the store lands in the storage the base names (detail/math_component_store.hpp)
+        checked_result<script_value> assign_math_component(script_value& base, member_expr* memberExpr, const script_value& value);
         // The member read on an already-evaluated receiver (visit_member_expr's tail; the
         // compound-member store evaluates the receiver once and reads through this)
         checked_result<void> member_read_on(member_expr* expr, script_value objectValue, bool as_callee);
@@ -1254,6 +1256,7 @@ namespace jai {
                 case script_value::TYPEID_FLOAT: return value.unchecked_as_float() != 0.0; // float
                 case script_value::TYPEID_STRING: return !value.unchecked_as_string().empty(); // string
                 case script_value::TYPEID_UTF8_STRING: return !value.unchecked_as_utf8().bytes.empty();
+                case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3: case script_value::TYPEID_VEC4: return value.math_truthy();   // not all zero
                 case script_value::TYPEID_CHAR: return true;                          // char - any char is truthy
                 case script_value::TYPEID_ARRAY: {
                     // array - empty is falsy (const_cast required, get_array_storage is non-const)

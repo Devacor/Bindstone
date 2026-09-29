@@ -55,6 +55,11 @@ inline constexpr std::string_view base_type_spelling(script_value_type type) {
         case script_value_type::jai_float_type: return "float";
         case script_value_type::jai_string_type: return "string";
         case script_value_type::jai_utf8_string_type: return "utf8_string";
+        case script_value_type::jai_vec2_type: return "math::vec2";
+        case script_value_type::jai_vec3_type: return "math::vec3";
+        case script_value_type::jai_vec4_type: return "math::vec4";
+        case script_value_type::jai_ivec2_type: return "math::ivec2";
+        case script_value_type::jai_ivec3_type: return "math::ivec3";
         case script_value_type::jai_char_type: return "char";
         case script_value_type::jai_bool_type: return "bool";
         case script_value_type::jai_array_type: return "array";

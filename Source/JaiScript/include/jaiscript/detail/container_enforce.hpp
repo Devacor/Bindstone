@@ -9,6 +9,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
+#include <jaiscript/detail/math_values.hpp>
 
 // Typed-container enforcement kernel, shared VERBATIM by both backends and the field
 // kernel (parity by construction — stage 0 of docs/typed_array_design.md). Two layers:
@@ -66,6 +67,11 @@ namespace jai::detail {
 			case script_value_type::jai_float_type: return "float";
 			case script_value_type::jai_string_type: return "string";
 			case script_value_type::jai_utf8_string_type: return "utf8_string";
+			case script_value_type::jai_vec2_type: return "math::vec2";
+			case script_value_type::jai_vec3_type: return "math::vec3";
+			case script_value_type::jai_vec4_type: return "math::vec4";
+			case script_value_type::jai_ivec2_type: return "math::ivec2";
+			case script_value_type::jai_ivec3_type: return "math::ivec3";
 			case script_value_type::jai_char_type: return "char";
 			case script_value_type::jai_bool_type: return "bool";
 			case script_value_type::jai_array_type: return "array";
@@ -163,6 +169,10 @@ namespace jai::detail {
 		if ((target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_bool_type) ||
 		    (target_type == script_value_type::jai_bool_type && elem_type == script_value_type::jai_int_type)) {
 			return true;
+		}
+		// math kinds: the other precision of the same dimensions converts, as at a typed slot
+		if (is_math_type(target_type) && is_math_type(elem_type)) {
+			return math::dims(target_type) == math::dims(elem_type);
 		}
 
 		// A shared_ptr-tagged instance stores into an object-typed element slot exactly
@@ -315,6 +325,13 @@ namespace jai::detail {
 		}
 		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
 			return actual_element;   // the handle rows' store: the object travels as the handle, its own tag
+		}
+		if (is_math_type(target_type) && is_math_type(elem_type)) {
+			auto converted = math::convert(actual_element, target_type, eng);
+			if (!converted) { return converted.error_value(); }
+			script_value out = std::move(converted.value());
+			out.set_type_info(element_type);
+			return out;
 		}
 		if (target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) {
 			// the stored copy carries its class, not the var tag it arrived under
@@ -630,7 +647,7 @@ namespace jai::detail {
 					if (actual.type() != target_elem_base &&
 					    (target_elem_base == script_value_type::jai_int_type ||
 					     target_elem_base == script_value_type::jai_float_type ||
-					     target_elem_base == script_value_type::jai_bool_type)) {
+					     target_elem_base == script_value_type::jai_bool_type || is_math_type(target_elem_base))) {
 						needs_conversion = true;
 					}
 					if (target_elem_base == script_value_type::jai_array_type || target_elem_base == script_value_type::jai_map_type) {
@@ -700,7 +717,7 @@ namespace jai::detail {
 					if (actual.type() != value_base &&
 					    (value_base == script_value_type::jai_int_type ||
 					     value_base == script_value_type::jai_float_type ||
-					     value_base == script_value_type::jai_bool_type)) {
+					     value_base == script_value_type::jai_bool_type || is_math_type(value_base))) {
 						needs_conversion = true;
 					}
 					if ((value_base == script_value_type::jai_array_type || value_base == script_value_type::jai_map_type) &&

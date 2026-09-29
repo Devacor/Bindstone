@@ -21,11 +21,14 @@
 #include <jaiscript/detail/char_promotion.hpp>
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
+#include <jaiscript/detail/math_values.hpp>
 #include <cmath>
 #include <compare>
 #include <optional>
 
 namespace jai::detail {
+
+	static_assert(math::k_checked_overflow == kCheckedOverflow, "math_values.hpp restates the integer policy");
 
 	enum class arith_op : uint8_t { add, sub, mul, div, mod };
 	enum class order_op : uint8_t { less, less_equal, greater, greater_equal };
@@ -105,6 +108,7 @@ namespace jai::detail {
 		if constexpr (Op == arith_op::add) {
 			if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) { return h.concat(l, r); }
 		}
+		if (math::owns_arithmetic(li, ri)) [[unlikely]] { return math::binary(static_cast<math::bop>(Op), l, r, h.engine()); }
 		return std::nullopt;
 	}
 
@@ -175,6 +179,7 @@ namespace jai::detail {
 		}
 		if (!object_storage(li) && !object_storage(ri)) {
 			if (auto result = ordering_on_values<Op>(h, left, right, li, ri)) { return std::move(*result); }
+			if (math::owns_comparison(li, ri)) [[unlikely]] { return math::ordering_error(left, right); }
 			return type_mismatch_error(order_invalid_text<Op>());
 		}
 		const script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
@@ -223,6 +228,7 @@ namespace jai::detail {
 		}
 		// null-ness is a storage property: a typed-but-uninitialized slot compares like null
 		if (unwrapped_left.is_null() || unwrapped_right.is_null()) { return h.make_bool(unwrapped_left.is_null() && unwrapped_right.is_null()); }
+		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return h.make_bool(math::equal(left, right)); }
 		if (unwrapped_left.type() != unwrapped_right.type()) { return h.make_bool(false); }
 		if (unwrapped_left.is_string() && unwrapped_right.is_string()) { return h.make_bool(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string()); }
 		if (unwrapped_left.is_bool() && unwrapped_right.is_bool()) { return h.make_bool(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool()); }
@@ -281,6 +287,7 @@ namespace jai::detail {
 			return sign(lf <=> rf);
 		}
 		if (left.is_string() && right.is_string()) { return sign(left.unchecked_as_string().compare(right.unchecked_as_string())); }
+		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return math::ordering_error(left, right); }
 		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
 		return type_mismatch_error("Invalid operands for <=> operator");
 	}

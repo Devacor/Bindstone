@@ -1919,6 +1919,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			if (base_slot != k_invalid_u32 && base_slot < k_typed_slot_mask) {
 				const expression_ptr& value = assign->value;
 				member_store_proto mp; mp.node = add_node(assign->target); mp.proof = assign->static_store_proof; mp.base = base_slot;
+				note_component_base(mp.node, member);
 				bool value_operand = false;
 				if (value->get_type() == node_type::literal_expr || (value->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(value.get())) != k_invalid_u32)) {
 					mp.value = make_fused_operand(value); value_operand = true;
@@ -4855,6 +4856,18 @@ uint8_t vm_compiler::operand_expect(const binary_expr* node) {
 // A member read or store whose base is a frame-slot identifier (`p.x`, `p` a local or a parameter; never `::name`, a static, a
 // null-safe access or an environment name): the base's slot, so the read lands in a compiler temp and the store reads the
 // base from the slot. Function bodies with the typed lowering only, like the other temps.
+// A store to a math component name on an identifier base records the identifier's slot operand for the member node, so a
+// component store on a math value resolves the variable it names (chunk::component_base_slots)
+void vm_compiler::note_component_base(uint32_t node, const member_expr* m) {
+	if (m->is_static || !m->object || m->object->get_type() != node_type::identifier_expr || detail::math::component_slot(m->member) < 0) return;
+	auto* id = static_cast<identifier_expr*>(m->object.get());
+	const uint32_t slot = id->global_qualified ? k_invalid_u32 : identifier_slot_operand(id);
+	for (auto& entry : chunk_->component_base_slots) {
+		if (entry.first == node) { entry.second = slot; return; }
+	}
+	chunk_->component_base_slots.emplace_back(node, slot);
+}
+
 uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return k_invalid_u32;
 	if (!e || e->get_type() != node_type::member_expr) return k_invalid_u32;
@@ -5781,8 +5794,16 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				emit(opcode::op_set_static, add_node(member));
 			} else {
 				const uint32_t base_slot = member_base_slot(member.get());
-				if (base_slot != k_invalid_u32) { emit(opcode::op_set_member_fused, add_node(member), expr->static_store_proof, base_slot); }   // the base from its slot: no LOAD dispatch
-				else { compile_expression(member->object); emit(opcode::op_set_member, add_node(member), expr->static_store_proof); }
+				if (base_slot != k_invalid_u32) {
+					const uint32_t node = add_node(member);
+					note_component_base(node, member.get());
+					emit(opcode::op_set_member_fused, node, expr->static_store_proof, base_slot);   // the base from its slot: no LOAD dispatch
+				} else {
+					compile_expression(member->object);
+					const uint32_t node = add_node(member);
+					note_component_base(node, member.get());
+					emit(opcode::op_set_member, node, expr->static_store_proof);
+				}
 			}
 		} else {
 			// C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27); a literal right side
@@ -5803,7 +5824,9 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			if (expr->postfix_old_result) kind |= compound_flag_old_result;
 			if (expr->incdec_desugar) kind |= compound_flag_incdec;
 			if (value_first) kind |= compound_flag_value_first;
-			emit(opcode::op_member_compound, add_node(member), expr->static_store_proof, kind);
+			const uint32_t node = add_node(member);
+			note_component_base(node, member.get());
+			emit(opcode::op_member_compound, node, expr->static_store_proof, kind);
 		}
 		return;
 	}

@@ -109,6 +109,7 @@ namespace jai::vm {
         bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
         bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
         uint32_t member_base_slot(const expression* e) const;   // a member read or store whose base is a frame-slot identifier: the base's slot, else invalid
+        void note_component_base(uint32_t node, const member_expr* m);   // chunk::component_base_slots for a math component store
         bool member_temp_operand(const expression* e) const;
         void compile_member_into_temp(const expression_ptr& e, fused_operand& out);
         bool call_temp_operand(const expression* e) const;   // a call an expression consumes as an operand: a plain-name callee, its result into a compiler temp

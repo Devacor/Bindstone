@@ -1271,6 +1271,17 @@ checked_result<expression_ptr> parser::primary() {
         return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
     }
 
+    // A math type (one fused token, lexer.cpp) in expression position is the static member math::K the math::
+    // intrinsics resolve, so math::vec3(1, 2, 3) calls the constructor intrinsic
+    if (check(token_type::identifier) && math_type_from_name(peek().lexeme) != script_value_type::jai_null_type) {
+        token typeToken = advance();
+        auto [math_id, math_view] = symbolizer_->intern_with_view("math");
+        auto math_ident = std::make_shared<identifier_expr>(typeToken.location, math_view, math_id);
+        math_ident->slot_index = lookup_slot(math_id);
+        auto [kind_id, kind_view] = symbolizer_->intern_with_view(typeToken.lexeme.substr(6));
+        return std::make_shared<member_expr>(typeToken.location, math_ident, kind_view, kind_id, false, true);
+    }
+
     // Global-qualified identifier (C++ ::name): reach a global deliberately shadowed by
     // a class member. The identifier resolves GLOBAL-ENV-ONLY; the ordinary postfix loop
     // then applies, so ::f(1), ::hp = 5, and ::arr[i] compose naturally. Only the
@@ -1689,6 +1700,13 @@ checked_result<type_info_ptr> parser::parse_type() {
         report_error(std::string("'") + std::string(peek().lexeme) + "' is an array element type only (array<" + std::string(peek().lexeme) +
                      ">, one byte per element); a single byte is an int", peek());
         return make_error_code(parse_error_code::unexpected_token);
+    }
+    if (check(token_type::identifier)) {
+        const script_value_type math_kind = math_type_from_name(peek().lexeme);
+        if (math_kind != script_value_type::jai_null_type) {
+            advance();
+            return store_type_info(type_info::make_math(*symbolizer_, math_kind));
+        }
     }
 
     // Handle "double" as an alias for float (since we only have float_keyword)
@@ -4552,12 +4570,28 @@ expression_ptr parser::default_initializer(const type_info_ptr& type, const sour
     case script_value_type::jai_object_type:
         if (!type->type_name.empty()) return std::make_shared<new_expr>(loc, type, std::vector<expression_ptr>());
         return nullptr;
+    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
+    case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type:
+        return math_constructor_call(type->base_type, {}, loc);
     default: return nullptr;
     }
 }
 
+// math::K(args): the constructor intrinsic a math type's declaration initializes through
+expression_ptr parser::math_constructor_call(script_value_type kind, std::vector<expression_ptr> arguments, const source_location& loc) {
+    auto [math_id, math_view] = symbolizer_->intern_with_view("math");
+    auto math_ident = std::make_shared<identifier_expr>(loc, math_view, math_id);
+    math_ident->slot_index = lookup_slot(math_id);
+    auto [kind_id, kind_view] = symbolizer_->intern_with_view(std::string_view(math_type_name(kind)).substr(6));
+    auto callee = std::make_shared<member_expr>(loc, math_ident, kind_view, kind_id, false, true);
+    return std::make_shared<call_expr>(loc, callee, std::move(arguments));
+}
+
 checked_result<expression_ptr> parser::initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, const source_location& loc) {
     switch (type ? type->base_type : script_value_type::jai_any_type) {
+    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
+    case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type:
+        return math_constructor_call(type->base_type, std::move(arguments), loc);
     case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
     case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
         // a primitive: () and {} are its zero, one argument is its value

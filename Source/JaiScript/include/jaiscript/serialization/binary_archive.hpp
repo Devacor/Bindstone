@@ -1,6 +1,7 @@
 #pragma once
 
 #include "archive_impl.hpp"
+#include <jaiscript/detail/math_values.hpp>
 #include <vector>
 #include <cstring>
 #include <algorithm>
@@ -202,7 +203,28 @@ public:
             case script_value_type::jai_utf8_string_type:
                 write_string(value.deref().unchecked_as_utf8().bytes);
                 break;
-                
+
+            case script_value_type::jai_vec2_type:
+            case script_value_type::jai_vec3_type:
+            case script_value_type::jai_vec4_type:
+            case script_value_type::jai_ivec2_type:
+            case script_value_type::jai_ivec3_type: {
+                // the components' raw little-endian bits, binary32 or int32 (exact round trip)
+                const script_value& v = value.deref();
+                const script_value_type kind = v.unchecked_vec_kind();
+                for (size_t k = 0; k < detail::math::dims(kind); ++k) {
+                    uint32_t bits = 0;
+                    if (detail::math::integral(kind)) {
+                        bits = static_cast<uint32_t>(detail::math::i32_at(v, k));
+                    } else {
+                        const float c = detail::math::f32_at(v, k);
+                        std::memcpy(&bits, &c, sizeof(bits));
+                    }
+                    write_uint32(bits);
+                }
+                break;
+            }
+
             case script_value_type::jai_char_type:
                 write_uint8(static_cast<uint8_t>(value.as<script_char>()));
                 break;
@@ -864,6 +886,22 @@ private:
 
             case script_value_type::jai_utf8_string_type:
                 return script_value::make_utf8(read_string_raw(), eng);
+
+            case script_value_type::jai_vec2_type:
+            case script_value_type::jai_vec3_type:
+            case script_value_type::jai_vec4_type:
+            case script_value_type::jai_ivec2_type:
+            case script_value_type::jai_ivec3_type: {
+                const script_value_type kind = vtype;
+                float f[4] = {0, 0, 0, 0};
+                int32_t i[4] = {0, 0, 0, 0};
+                for (size_t k = 0; k < detail::math::dims(kind); ++k) {
+                    const uint32_t bits = read_little_endian<uint32_t>();
+                    if (detail::math::integral(kind)) { i[k] = static_cast<int32_t>(bits); }
+                    else { std::memcpy(&f[k], &bits, sizeof(bits)); }
+                }
+                return detail::math::make(kind, f, i, eng);
+            }
 
             case script_value_type::jai_char_type:
                 return script_value(static_cast<script_char>(read_uint8_raw()), eng);

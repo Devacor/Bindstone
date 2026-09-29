@@ -151,6 +151,11 @@ const char* spec_value_type_name(const script_value& v) {
         case script_value_type::jai_shared_ptr_type: return "object";
         case script_value_type::jai_reference_type: return "reference";
         case script_value_type::jai_weak_ptr_type: return "weak_ptr";
+        case script_value_type::jai_vec2_type:
+        case script_value_type::jai_vec3_type:
+        case script_value_type::jai_vec4_type:
+        case script_value_type::jai_ivec2_type:
+        case script_value_type::jai_ivec3_type: return math_type_name(v.type());
         default: return "unknown";
     }
 }
@@ -1464,6 +1469,11 @@ struct engine::implementation {
         std::unordered_map<uint64_t, uint64_t> slots;
     };
     std::unique_ptr<custom_privilege_state> custom_privileges_;
+
+    // The math vectors' canonical stamps and node pool, last for the same reason (the pool's teardown orphans it while
+    // any vector is still out, so its place in the destruction order does not matter)
+    type_info* type_info_math_[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};   // vec2, vec3, ivec2, ivec3, vec4
+    ref_holder_pool_slot_holder vec_node_pool_;
 };
 
 engine::implementation::implementation()
@@ -1520,6 +1530,16 @@ engine::implementation::implementation()
     type_info_any_ = &type_infos_.emplace(type_key{script_value_type::jai_any_type, 0, 0}, any_info).first->second;
     type_id_index_[type_info_any_->id] = type_info_any_;
 
+    // after the older canonical types, so their interned ids stay put
+    const script_value_type math_kinds[5] = {script_value_type::jai_vec2_type, script_value_type::jai_vec3_type,
+                                             script_value_type::jai_ivec2_type, script_value_type::jai_ivec3_type,
+                                             script_value_type::jai_vec4_type};
+    for (size_t k = 0; k < 5; ++k) {
+        type_info math_info = type_info::make_math(string_symbolizer_, math_kinds[k]);
+        type_info_math_[k] = &type_infos_.emplace(type_key{math_kinds[k], 0, 0}, math_info).first->second;
+        type_id_index_[type_info_math_[k]->id] = type_info_math_[k];
+    }
+
     // Register standard C++ implicit conversions
     // NOTE: These conversions can't use engine reference yet because the engine isn't fully constructed
     // They will be updated to use proper engine references in initialize_engine_reference()
@@ -1534,6 +1554,14 @@ void*& engine::reference_holder_pool_slot() {
 
 void engine::set_reference_holder_pool_teardown(void (*teardown)(void*)) {
     impl->ref_holder_pool_.teardown = teardown;
+}
+
+void*& engine::vec_node_pool_slot() {
+    return impl->vec_node_pool_.pool;
+}
+
+void engine::set_vec_node_pool_teardown(void (*teardown)(void*)) {
+    impl->vec_node_pool_.teardown = teardown;
 }
 
 bool engine::parallel_region_active() const {
@@ -2945,6 +2973,17 @@ type_info* engine::get_type_info_float() {
 
 type_info* engine::get_type_info_string() {
     return impl->type_info_string_;
+}
+
+type_info* engine::get_type_info_math(script_value_type kind) {
+    switch (kind) {
+        case script_value_type::jai_vec2_type: return impl->type_info_math_[0];
+        case script_value_type::jai_vec3_type: return impl->type_info_math_[1];
+        case script_value_type::jai_ivec2_type: return impl->type_info_math_[2];
+        case script_value_type::jai_ivec3_type: return impl->type_info_math_[3];
+        case script_value_type::jai_vec4_type: return impl->type_info_math_[4];
+        default: return nullptr;
+    }
 }
 
 type_info* engine::get_type_info_utf8_string() {

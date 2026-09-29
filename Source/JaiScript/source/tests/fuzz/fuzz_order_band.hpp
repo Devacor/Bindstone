@@ -841,6 +841,7 @@ namespace jai::fuzz::order {
 			int ivar_n = 0;
 		};
 
+		// draws never share an unsequenced expression (call arguments, + operands) so every compiler generates the same program per seed; a split draws the right operand first, the order GCC and MSVC used, so seeds keep their programs
 		fuzz_rng rng_;
 		bool args_;
 		bool block_ = false;   // the program keeps to what the vm closes into cell blocks and regions: typed scalars and arrays, grafted leaves
@@ -1097,7 +1098,13 @@ namespace jai::fuzz::order {
 			case 0: return bin_e("+", r, w.e);
 			case 1: return bin_e("+", w.e, r);
 			case 2: return bin_e("+", bin_e("+", r, lit_e(string_literal())), w.e);
-			case 3: return bin_e("+", r, tern_e(bin_e(rng_.chance(50) ? "==" : "!=", w.e, lit_e(string_literal())), lit_e(string_literal()), lit_e(string_literal())));
+			case 3: {
+				const eptr no = lit_e(string_literal());
+				const eptr yes = lit_e(string_literal());
+				const eptr probe = lit_e(string_literal());
+				const char* op = rng_.chance(50) ? "==" : "!=";
+				return bin_e("+", r, tern_e(bin_e(op, w.e, probe), yes, no));
+			}
 			default: return bin_e("+", bin_e("+", r, w.e), string_read(w));
 			}
 		}
@@ -1106,7 +1113,8 @@ namespace jai::fuzz::order {
 			switch (rng_.below(5)) {
 			case 0: case 1: {
 				const std::string n = fresh("r");
-				b.push_back(decl_s(rng_.chance(70) ? ty::s : ty::v, n, hazard_str(), !in_function));
+				const eptr init = hazard_str();
+				b.push_back(decl_s(rng_.chance(70) ? ty::s : ty::v, n, init, !in_function));
 				if (in_function) { b.push_back(assign_s(var_p("as", false), bin_e("+", read_e(var_p("as", false)), read_e(var_p(n, false))))); }
 				else { printed_.push_back(n); }
 				return;
@@ -1125,7 +1133,8 @@ namespace jai::fuzz::order {
 			default: {
 				if (!string_writer_call(false, w)) { string_statement_decl(b, in_function); return; }
 				const std::string n = fresh("r");
-				b.push_back(decl_s(ty::b, n, bin_e(rng_.chance(50) ? "==" : "!=", string_read(w), w.e), !in_function));
+				const eptr read = string_read(w);
+				b.push_back(decl_s(ty::b, n, bin_e(rng_.chance(50) ? "==" : "!=", read, w.e), !in_function));
 				if (in_function) accumulate(b, n, ty::b); else printed_.push_back(n);
 				return;
 			}
@@ -1159,7 +1168,11 @@ namespace jai::fuzz::order {
 				switch (rng_.below(3)) {
 				case 0: init = numeric_param ? read_e(var_p(c.params[0].name, false)) : lit_e(literal_of(c.local_t == ty::f ? ty::i : ty::f)); break;
 				case 1: init = !reads.empty() ? read_e(reads[0].p) : lit_e(small_int()); break;
-				default: init = bin_e("+", numeric_param ? read_e(var_p(c.params[0].name, false)) : lit_e(small_int()), lit_e(literal_of(rng_.chance(50) ? ty::i : ty::f))); break;
+				default: {
+					const eptr rhs = lit_e(literal_of(rng_.chance(50) ? ty::i : ty::f));
+					init = bin_e("+", numeric_param ? read_e(var_p(c.params[0].name, false)) : lit_e(small_int()), rhs);
+					break;
+				}
 				}
 				c.body.push_back(decl_s(c.local_t, c.local, init, false));
 			}
@@ -1200,14 +1213,19 @@ namespace jai::fuzz::order {
 			const placed& t = targets[rng_.below(static_cast<uint32_t>(targets.size()))];
 			if (c.result == ty::b) {
 				if (t.t == ty::b) return read_e(t.p);
-				return bin_e(rng_.chance(50) ? ">" : "<=", read_e(t.p), lit_e(literal_of(t.t == ty::f ? ty::f : ty::i)));
+				const eptr bound = lit_e(literal_of(t.t == ty::f ? ty::f : ty::i));
+				return bin_e(rng_.chance(50) ? ">" : "<=", read_e(t.p), bound);
 			}
 			if (!c.local.empty() && rng_.chance(35)) { return rng_.chance(50) ? read_e(var_p(c.local, false)) : bin_e("*", read_e(var_p(c.local, false)), lit_e(mi(2))); }
 			switch (pick({30, 35, 15, 20})) {
 			case 0: return lit_e(literal_of(c.result == ty::f ? ty::f : ty::i));
 			case 1: if (t.t != ty::b) return read_e(t.p); return lit_e(small_int());
 			case 2: if (!c.params.empty() && !c.params[0].ref && c.params[0].t != ty::b) return bin_e("*", read_e(var_p(c.params[0].name, false)), lit_e(mi(2))); return lit_e(small_int());
-			default: return tern_e(t.t == ty::b ? read_e(t.p) : bin_e(">", read_e(t.p), lit_e(mi(2))), lit_e(mi(rng_.range(0, 5))), lit_e(mi(rng_.range(0, 5))));
+			default: {
+				const eptr no = lit_e(mi(rng_.range(0, 5)));
+				const eptr yes = lit_e(mi(rng_.range(0, 5)));
+				return tern_e(t.t == ty::b ? read_e(t.p) : bin_e(">", read_e(t.p), lit_e(mi(2))), yes, no);
+			}
 			}
 		}
 		std::vector<placed> global_targets(int n) {
@@ -1545,7 +1563,10 @@ namespace jai::fuzz::order {
 				case 0: {
 					if (!writer_call(false, false, w)) return filler_value(true);
 					const placed r = read_for(w, false);
-					return rng_.chance(50) ? bin_e(cmp_op(), read_of(r, false), w.e) : bin_e(cmp_op(), w.e, read_of(r, false));
+					const bool read_left = rng_.chance(50);
+					const eptr rd = read_of(r, false);
+					const char* op = cmp_op();
+					return read_left ? bin_e(op, rd, w.e) : bin_e(op, w.e, rd);
 				}
 				case 1: {
 					if (!writer_call(true, false, w)) return filler_value(true);
@@ -1556,7 +1577,9 @@ namespace jai::fuzz::order {
 				default: {
 					if (!writer_call(false, false, w)) return filler_value(true);
 					const placed r = read_for(w, false);
-					return bin_e(cmp_op(), bin_e("+", read_of(r, false), w.e), read_of(r, false));
+					const eptr right = read_of(r, false);
+					const eptr left = read_of(r, false);
+					return bin_e(cmp_op(), bin_e("+", left, w.e), right);
 				}
 				}
 			}
@@ -1566,22 +1589,42 @@ namespace jai::fuzz::order {
 			}
 			const placed r = read_for(w, false);
 			const eptr R = read_of(r, false);
-			const eptr W = w.result == ty::b ? tern_e(w.e, lit_e(mi(rng_.range(1, 4))), lit_e(mi(rng_.range(5, 9)))) : w.e;
+			eptr W = w.e;
+			if (w.result == ty::b) {
+				const eptr no = lit_e(mi(rng_.range(5, 9)));
+				const eptr yes = lit_e(mi(rng_.range(1, 4)));
+				W = tern_e(w.e, yes, no);
+			}
 			switch (pick({16, 12, 12, 8, 10, 8, 6, 8, 5, 6, 5, 4})) {
 			case 0: return bin_e(arith_op(), R, W);
 			case 1: return bin_e(arith_op(), W, R);
-			case 2: return bin_e(arith_op(), R, bin_e(arith_op(), bin_e("*", read_of(r, false), lit_e(mi(2))), W));
-			case 3: return bin_e(arith_op(), bin_e(arith_op(), R, W), read_of(r, false));
+			case 2: {
+				const eptr twice = bin_e("*", read_of(r, false), lit_e(mi(2)));
+				const eptr inner = bin_e(arith_op(), twice, W);
+				return bin_e(arith_op(), R, inner);
+			}
+			case 3: {
+				const eptr right = read_of(r, false);
+				const eptr inner = bin_e(arith_op(), R, W);
+				return bin_e(arith_op(), inner, right);
+			}
 			case 4: {
 				eptr cond = w.result == ty::b ? w.e : bin_e(">", w.e, lit_e(mi(rng_.range(0, 4))));
-				eptr t = tern_e(cond, lit_e(literal_of(r.t == ty::f ? ty::f : ty::i)), lit_e(literal_of(r.t == ty::f ? ty::f : ty::i)));
-				if (rng_.chance(40)) return bin_e(arith_op(), R, bin_e(arith_op(), bin_e("*", read_of(r, false), lit_e(mi(2))), t));
+				const eptr no = lit_e(literal_of(r.t == ty::f ? ty::f : ty::i));
+				const eptr yes = lit_e(literal_of(r.t == ty::f ? ty::f : ty::i));
+				eptr t = tern_e(cond, yes, no);
+				if (rng_.chance(40)) {
+					const eptr twice = bin_e("*", read_of(r, false), lit_e(mi(2)));
+					const eptr inner = bin_e(arith_op(), twice, t);
+					return bin_e(arith_op(), R, inner);
+				}
 				return rng_.chance(50) ? bin_e(arith_op(), R, t) : bin_e(arith_op(), t, R);
 			}
 			case 5: {
 				auto opts = readable(true);
 				eptr c = opts.empty() ? bin_e(">", read_of(r, false), lit_e(mi(2))) : read_e(opts[rng_.below(static_cast<uint32_t>(opts.size()))].p);
-				return bin_e(arith_op(), R, tern_e(c, W, lit_e(small_int())));
+				const eptr no = lit_e(small_int());
+				return bin_e(arith_op(), R, tern_e(c, W, no));
 			}
 			case 6: return bin_e(arith_op(), R, un_e(ek::neg, W));
 			case 7: {
@@ -1589,14 +1632,21 @@ namespace jai::fuzz::order {
 				case 0: return bin_e(arith_op(), math_e(ek::math, "abs", {R}), W);
 				case 1: return bin_e(arith_op(), R, math_e(ek::math, "abs", {W}));
 				case 2: return bin_e(arith_op(), math_e(ek::alias, "sqrt", {math_e(ek::math, "abs", {R})}), W);
-				case 3: return bin_e(arith_op(), math_e(ek::alias, rng_.chance(50) ? "abs" : "floor", {R}), W);
-				default: return bin_e(arith_op(), R, math_e(ek::math, rng_.chance(50) ? "itrunc" : "ifloor", {bin_e("*", W, lit_e(mf(0.5)))}));
+				case 3: {
+					const eptr rounded = math_e(ek::alias, rng_.chance(50) ? "abs" : "floor", {R});
+					return bin_e(arith_op(), rounded, W);
+				}
+				default: {
+					const eptr truncated = math_e(ek::math, rng_.chance(50) ? "itrunc" : "ifloor", {bin_e("*", W, lit_e(mf(0.5)))});
+					return bin_e(arith_op(), R, truncated);
+				}
 				}
 			}
 			case 8: {
 				wcall w2;
 				if (!writer_call(false, false, w2)) return bin_e(arith_op(), R, W);
-				return bin_e(arith_op(), bin_e(arith_op(), R, W), w2.e);
+				const eptr inner = bin_e(arith_op(), R, W);
+				return bin_e(arith_op(), inner, w2.e);
 			}
 			case 9: {
 				if (pures_.empty()) return bin_e(arith_op(), W, R);
@@ -1610,7 +1660,9 @@ namespace jai::fuzz::order {
 				auto opts = readable(false);
 				if (opts.empty()) return bin_e(arith_op(), R, W);
 				const placed r2 = opts[rng_.below(static_cast<uint32_t>(opts.size()))];
-				return bin_e(arith_op(), bin_e(arith_op(), R, read_of(r2, false)), W);
+				const eptr right = read_of(r2, false);
+				const eptr inner = bin_e(arith_op(), R, right);
+				return bin_e(arith_op(), inner, W);
 			}
 			default: {
 				if (!args_) return bin_e(arith_op(), R, W);
@@ -1647,11 +1699,16 @@ namespace jai::fuzz::order {
 			if (want_bool) {
 				auto nums = readable(false);
 				if (nums.empty() || rng_.chance(30)) return leaf();
-				return bin_e(cmp_op(), read_e(nums[rng_.below(static_cast<uint32_t>(nums.size()))].p), lit_e(small_int()));
+				const eptr bound = lit_e(small_int());
+				const eptr num = read_e(nums[rng_.below(static_cast<uint32_t>(nums.size()))].p);
+				return bin_e(cmp_op(), num, bound);
 			}
 			eptr e = leaf();
 			const int n = static_cast<int>(rng_.range(0, 2));
-			for (int k = 0; k < n; ++k) { e = bin_e(arith_op(), e, leaf()); }
+			for (int k = 0; k < n; ++k) {
+				const eptr next = leaf();
+				e = bin_e(arith_op(), e, next);
+			}
 			if (rng_.chance(15)) e = math_e(ek::math, "abs", {e});
 			return e;
 		}
@@ -1713,7 +1770,8 @@ namespace jai::fuzz::order {
 				if (!writer_call(false, false, w)) { hazard_statement_decl(b, in_function); return; }
 				const placed r = read_for(w, false);
 				if (r.p.name.empty() || (r.p.kind == pk::var && is_index_var(r.p.name))) { hazard_statement_decl(b, in_function); return; }
-				b.push_back(compound_s(r.p, rng_.chance(70) ? "+" : "-", rng_.chance(70) ? w.e : bin_e("+", w.e, read_e(r.p))));
+				const eptr rhs = rng_.chance(70) ? w.e : bin_e("+", w.e, read_e(r.p));
+				b.push_back(compound_s(r.p, rng_.chance(70) ? "+" : "-", rhs));
 				return;
 			}
 			case 3: {
@@ -1789,7 +1847,8 @@ namespace jai::fuzz::order {
 				for (const auto& v : local_->scalars) { if (v.t != ty::b && !v.index_var) nums.push_back(&v); }
 				if (!nums.empty()) {
 					const store_info* v = nums[rng_.below(static_cast<uint32_t>(nums.size()))];
-					b.push_back(assign_s(var_p(v->name, false), bin_e(rng_.chance(50) ? "+" : "-", read_e(var_p(v->name, false)), lit_e(v->t == ty::f ? small_float() : mi(rng_.range(1, 4))))));
+					const eptr step = lit_e(v->t == ty::f ? small_float() : mi(rng_.range(1, 4)));
+					b.push_back(assign_s(var_p(v->name, false), bin_e(rng_.chance(50) ? "+" : "-", read_e(var_p(v->name, false)), step)));
 					return;
 				}
 			}

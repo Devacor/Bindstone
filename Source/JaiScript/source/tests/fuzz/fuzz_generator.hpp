@@ -414,6 +414,7 @@ namespace jai::fuzz {
 		}
 
 	private:
+		// draws never share an unsequenced expression (call arguments, + operands) so every compiler generates the same program per seed; a split draws the right operand first, the order GCC and MSVC used, so seeds keep their programs
 		fuzz_rng rng_;
 		int max_depth_;
 		uint64_t seed_;
@@ -555,7 +556,12 @@ namespace jai::fuzz {
 					std::string rhs = (op[0] == '<' || op[0] == '>') ? std::to_string(rng_.range(0, 8)) : int_expr(depth - 1);
 					return "(" + int_expr(depth - 1) + " " + op + " " + rhs + ")";
 				}
-				case 4: return "(" + bool_expr(depth - 1) + " ? " + int_expr(depth - 1) + " : " + int_expr(depth - 1) + ")";
+				case 4: {
+					const std::string no = int_expr(depth - 1);
+					const std::string yes = int_expr(depth - 1);
+					const std::string cond = bool_expr(depth - 1);
+					return "(" + cond + " ? " + yes + " : " + no + ")";
+				}
 				case 5: { // container/string size
 					if (const var_info* a = random_var(vt::arr)) return a->name + (rng_.chance(50) ? ".size()" : ".length()");
 					if (const var_info* s = random_var(vt::s)) return s->name + ".size()";
@@ -576,9 +582,11 @@ namespace jai::fuzz {
 						if (rng_.chance(30)) {
 							if (const var_info* iv = random_var(vt::i)) {
 								static constexpr const char* const iops[] = {"+", "-", "*", "%", "/"};
-								std::string idx = iv->name + " " + iops[rng_.below(5)] + " " + std::to_string(rng_.range(1, 2));
+								const int by = static_cast<int>(rng_.range(1, 2));
+								std::string idx = iv->name + " " + iops[rng_.below(5)] + " " + std::to_string(by);
 								if (rng_.chance(30)) {   // left-spine chain (fused-INDEX chain shape)
-									idx += std::string(" ") + iops[rng_.below(5)] + " " + std::to_string(rng_.range(1, 2));
+									const int by2 = static_cast<int>(rng_.range(1, 2));
+									idx += std::string(" ") + iops[rng_.below(5)] + " " + std::to_string(by2);
 								}
 								return a->name + "[" + idx + "]";
 							}
@@ -607,7 +615,10 @@ namespace jai::fuzz {
 							return ci.name + "::" + ci.statics[rng_.below(static_cast<uint32_t>(ci.statics.size()))];
 					return int_leaf_or_var();
 				}
-				case 10: return "(" + int_expr(depth - 1) + " <=> " + int_expr(depth - 1) + ")";
+				case 10: {
+					const std::string rhs = int_expr(depth - 1);
+					return "(" + int_expr(depth - 1) + " <=> " + rhs + ")";
+				}
 				case 11: { // string method returning int
 					if (const var_info* s = random_var(vt::s)) {
 						switch (rng_.below(3)) {
@@ -638,11 +649,21 @@ namespace jai::fuzz {
 			switch (pick_weighted({35, 20, 15, 12, 10, 8})) {
 				case 0: {
 					static constexpr const char* const ops[] = {"+", "-", "*", "/"};
-					return "(" + float_expr(depth - 1) + " " + ops[rng_.below(4)] + " " + float_expr(depth - 1) + ")";
+					const std::string rhs = float_expr(depth - 1);
+					const char* op = ops[rng_.below(4)];
+					return "(" + float_expr(depth - 1) + " " + op + " " + rhs + ")";
 				}
 				case 1: { const var_info* v = random_var(vt::f); return v ? v->name : float_literal(); }
-				case 2: return "(" + int_expr(depth - 1) + " * " + float_literal() + ")"; // int/float mixing
-				case 3: return "(" + bool_expr(depth - 1) + " ? " + float_expr(depth - 1) + " : " + float_expr(depth - 1) + ")";
+				case 2: { // int/float mixing
+					const std::string scale = float_literal();
+					return "(" + int_expr(depth - 1) + " * " + scale + ")";
+				}
+				case 3: {
+					const std::string no = float_expr(depth - 1);
+					const std::string yes = float_expr(depth - 1);
+					const std::string cond = bool_expr(depth - 1);
+					return "(" + cond + " ? " + yes + " : " + no + ")";
+				}
 				case 4: return "(-(" + float_expr(depth - 1) + "))";
 				default: {
 					std::string c = call_returning(vt::f);
@@ -661,20 +682,28 @@ namespace jai::fuzz {
 			switch (pick_weighted({30, 18, 12, 10, 10, 8, 6, 6})) {
 				case 0: {
 					static constexpr const char* const ops[] = {"<", ">", "<=", ">=", "==", "!="};
-					return "(" + int_expr(depth - 1) + " " + ops[rng_.below(6)] + " " + int_expr(depth - 1) + ")";
+					const std::string rhs = int_expr(depth - 1);
+					const char* op = ops[rng_.below(6)];
+					return "(" + int_expr(depth - 1) + " " + op + " " + rhs + ")";
 				}
 				case 1: {
 					static constexpr const char* const ops[] = {"&&", "||"};
-					return "(" + bool_expr(depth - 1) + " " + ops[rng_.below(2)] + " " + bool_expr(depth - 1) + ")";
+					const std::string rhs = bool_expr(depth - 1);
+					const char* op = ops[rng_.below(2)];
+					return "(" + bool_expr(depth - 1) + " " + op + " " + rhs + ")";
 				}
 				case 2: return "(!" + bool_expr(depth - 1) + ")";
 				case 3: {
 					static constexpr const char* const ops[] = {"==", "!=", "<"};
-					return "(" + string_expr(depth - 1) + " " + ops[rng_.below(3)] + " " + string_expr(depth - 1) + ")";
+					const std::string rhs = string_expr(depth - 1);
+					const char* op = ops[rng_.below(3)];
+					return "(" + string_expr(depth - 1) + " " + op + " " + rhs + ")";
 				}
 				case 4: {
 					static constexpr const char* const ops[] = {"<", ">", "==", "!="};
-					return "(" + float_expr(depth - 1) + " " + ops[rng_.below(4)] + " " + float_expr(depth - 1) + ")";
+					const std::string rhs = float_expr(depth - 1);
+					const char* op = ops[rng_.below(4)];
+					return "(" + float_expr(depth - 1) + " " + op + " " + rhs + ")";
 				}
 				case 5: { // container predicates
 					if (const var_info* a = random_var(vt::arr)) {
@@ -724,8 +753,14 @@ namespace jai::fuzz {
 				return string_literal();
 			}
 			switch (pick_weighted({30, 20, 15, 15, 12, 8})) {
-				case 0: return "(" + string_expr(depth - 1) + " + " + string_expr(depth - 1) + ")";
-				case 1: return "(" + string_expr(depth - 1) + " + to_string(" + int_expr(depth - 1) + "))";
+				case 0: {
+					const std::string rhs = string_expr(depth - 1);
+					return "(" + string_expr(depth - 1) + " + " + rhs + ")";
+				}
+				case 1: {
+					const std::string n = int_expr(depth - 1);
+					return "(" + string_expr(depth - 1) + " + to_string(" + n + "))";
+				}
 				case 2: { const var_info* v = random_var(vt::s); return v ? v->name : string_literal(); }
 				case 3: { // builtin string methods
 					std::string base = random_var(vt::s) ? random_var(vt::s)->name : string_literal();
@@ -736,7 +771,10 @@ namespace jai::fuzz {
 						case 3: return base + ".reverse()";
 						case 4: return base + ".substr(0, " + std::to_string(rng_.range(0, 3)) + ")";
 						case 5: return base + ".repeat(" + std::to_string(rng_.range(0, 3)) + ")";
-						case 6: return base + ".replace_all(" + string_literal() + ", " + string_literal() + ")";
+						case 6: {
+							const std::string to = string_literal();
+							return base + ".replace_all(" + string_literal() + ", " + to + ")";
+						}
 						default: return base + ".pad_left(" + std::to_string(rng_.range(0, 6)) + ", \"*\")";
 					}
 				}
@@ -948,11 +986,15 @@ namespace jai::fuzz {
 						lines_.push_back("var " + fname + " = " + std::to_string(rng_.range(0, 9)) + ";");
 						ci.fields.push_back({fname, vt::i});
 						break;
-					case 3: // array field: member-base subscripts read/store through it
-						lines_.push_back("var " + fname + " = [" + std::to_string(rng_.range(0, 9)) + ", " +
-						                 std::to_string(rng_.range(0, 9)) + ", " + std::to_string(rng_.range(0, 9)) + "];");
+					case 3: { // array field: member-base subscripts read/store through it
+						const auto third = rng_.range(0, 9);
+						const auto second = rng_.range(0, 9);
+						const auto first = rng_.range(0, 9);
+						lines_.push_back("var " + fname + " = [" + std::to_string(first) + ", " +
+						                 std::to_string(second) + ", " + std::to_string(third) + "];");
 						ci.fields.push_back({fname, vt::arr});
 						break;
+					}
 					default:
 						lines_.push_back("auto " + fname + " = " + float_literal() + ";");
 						ci.fields.push_back({fname, vt::f});
@@ -1543,7 +1585,8 @@ namespace jai::fuzz {
 				scopes_.pop_back();
 				lines_.push_back("}");
 			} else {
-				lines_.push_back("while (" + bool_expr(2) + " && " + g + " < " + std::to_string(rng_.range(2, 7)) + ") {");
+				const auto limit = rng_.range(2, 7);
+				lines_.push_back("while (" + bool_expr(2) + " && " + g + " < " + std::to_string(limit) + ") {");
 				scopes_.push_back({});
 				++loop_depth_;
 				lines_.push_back(g + " = " + g + " + 1;");
@@ -1562,9 +1605,11 @@ namespace jai::fuzz {
 					emit_stmt(nesting + 1);
 					lines_.push_back("throw " + (rng_.chance(60) ? string_literal() : int_literal()) + ";");
 					break;
-				case 1: // overflow edge inside try
-					lines_.push_back("int " + fresh("ov") + " = 9223372036854775807 + " + int_expr(1) + ";");
+				case 1: { // overflow edge inside try
+					const std::string add = int_expr(1);
+					lines_.push_back("int " + fresh("ov") + " = 9223372036854775807 + " + add + ";");
 					break;
+				}
 				case 2: // INT64_MIN / -1
 					lines_.push_back("int " + fresh("dv") + " = (-9223372036854775807 - 1) / (-1);");
 					break;
@@ -1677,7 +1722,11 @@ namespace jai::fuzz {
 				switch (rng_.below(5)) {
 					case 0: lines_.push_back(a->name + ".push(" + int_expr(1) + ");"); break;
 					case 1: lines_.push_back(a->name + ".pop();"); break;
-					case 2: lines_.push_back(a->name + "[" + std::to_string(rng_.range(0, 2)) + "] = " + int_expr(1) + ";"); break;
+					case 2: {
+						const std::string value = int_expr(1);
+						lines_.push_back(a->name + "[" + std::to_string(rng_.range(0, 2)) + "] = " + value + ";");
+						break;
+					}
 					case 3: lines_.push_back(a->name + ".sort();"); break;
 					default: lines_.push_back("print(" + a->name + ".join(\",\"));"); break;
 				}
@@ -1685,7 +1734,11 @@ namespace jai::fuzz {
 			}
 			if (const var_info* m = random_var(vt::map)) {
 				switch (rng_.below(3)) {
-					case 0: lines_.push_back(m->name + "[" + string_literal() + "] = " + expr(vt::any, 1) + ";"); break;
+					case 0: {
+						const std::string value = expr(vt::any, 1);
+						lines_.push_back(m->name + "[" + string_literal() + "] = " + value + ";");
+						break;
+					}
 					case 1: lines_.push_back(m->name + ".erase(" + string_literal() + ");"); break;
 					default: lines_.push_back("print(" + m->name + ".size());"); break;
 				}

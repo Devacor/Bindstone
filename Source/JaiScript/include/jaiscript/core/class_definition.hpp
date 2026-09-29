@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
+#include <atomic>
 
 namespace jai {
 
@@ -291,8 +292,9 @@ private:
     bool seeded_from_plan_ = false;   // create_instance landed every default through the class plan
     uint32_t live_field_refs_ = 0;
     // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
-    // swap-removes in O(1) instead of scanning and locking the whole list
-    size_t registry_slot_ = SIZE_MAX;
+    // swap-removes in O(1) instead of scanning and locking the whole list. Atomic because a
+    // swap-remove re-points it under the registry lock while its dying owner reads it unlocked.
+    std::atomic<size_t> registry_slot_{SIZE_MAX};
     friend class class_definition;
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value invalid_value_;
@@ -327,9 +329,9 @@ public:
     // can keep one alive past the engine.
     void detach_for_teardown() noexcept {
         for (auto& entry : instances_) {
-            if (auto live = entry.lock()) {
+            if (auto live = entry.weak.lock()) {
                 live->class_def_ = nullptr;
-                live->registry_slot_ = SIZE_MAX;
+                live->registry_slot_.store(SIZE_MAX, std::memory_order_relaxed);
             }
         }
         instances_.clear();
@@ -1521,8 +1523,8 @@ public:
         type_id_ = type_id;
     }
     bool has_live_instances() const {
-        for (const auto& weak_instance : instances_) {
-            if (!weak_instance.expired()) { return true; }
+        for (const auto& entry : instances_) {
+            if (!entry.weak.expired()) { return true; }
         }
         return false;
     }
@@ -1598,8 +1600,8 @@ public:
     std::vector<std::shared_ptr<class_instance>> live_instances() const {
         std::vector<std::shared_ptr<class_instance>> live;
         live.reserve(instances_.size());
-        for (const auto& weak_instance : instances_) {
-            if (auto locked = weak_instance.lock()) { live.push_back(std::move(locked)); }
+        for (const auto& entry : instances_) {
+            if (auto locked = entry.weak.lock()) { live.push_back(std::move(locked)); }
         }
         return live;
     }
@@ -1894,8 +1896,8 @@ public:
         // longer matches the new non-null default means the type changed. migrate_fields then
         // resets exactly those fields.
         if (!fields_changed) {
-            for (const auto& weak_instance : instances_) {
-                auto instance = weak_instance.lock();
+            for (const auto& entry : instances_) {
+                auto instance = entry.weak.lock();
                 if (!instance) continue;
                 for (const auto& [id, new_default] : new_field_defaults) {
                     if (new_default.is_null() || !instance->has_field_value(id)) continue;
@@ -1943,7 +1945,9 @@ public:
         // iterating the live vector would migrate those too (re-invoking the hook) and loop
         // unboundedly. Snapshotted instances built against the new definition need no
         // migration, so skipping them is also correct.
-        std::vector<std::weak_ptr<class_instance>> to_migrate = instances_;
+        std::vector<std::weak_ptr<class_instance>> to_migrate;
+        to_migrate.reserve(instances_.size());
+        for (const auto& entry : instances_) { to_migrate.push_back(entry.weak); }
         for (auto& weak_instance : to_migrate) {
             auto instance = weak_instance.lock();
             if (!instance) {
@@ -1985,7 +1989,7 @@ public:
         // Drop dead weak refs; keep live ones plus any registered during migration.
         instances_.erase(
             std::remove_if(instances_.begin(), instances_.end(),
-                [](const std::weak_ptr<class_instance>& w) { return w.expired(); }),
+                [](const registry_entry& e) { return e.weak.expired(); }),
             instances_.end());
         reindex_instances();
 
@@ -2015,8 +2019,8 @@ public:
         // type changed against its new non-null default — so a base reload that retypes an
         // inherited field resets it on derived instances, while a base field still carrying a
         // null placeholder (never reloaded) leaves derived runtime data untouched.
-        for (auto& weak_instance : instances_) {
-            if (auto instance = weak_instance.lock()) {
+        for (auto& entry : instances_) {
+            if (auto instance = entry.weak.lock()) {
                 instance->migrate_fields(dummy_old_fields, all_fields);
                 if (engine_) { engine_->count_hot_reload_field_migration(); }
             }
@@ -2055,11 +2059,14 @@ public:
                                         const detail::fault_injection* faults = nullptr, class_instance* live_hint = nullptr) {
         const size_t index = instances_.size();
         if (faults) { faults->checkpoint("registry.instance_append", index); }
-        instances_.push_back(std::move(instance));
+        class_instance* live = live_hint;
+        if (!live) {
+            if (auto owner = instance.lock()) { live = owner.get(); }   // the caller owns it
+        }
+        instances_.push_back({std::move(instance), live});
         // Publish the index only after the vector owns the entry. A failed append
         // must leave the instance unregistered, not pointing at a later survivor.
-        if (live_hint) { live_hint->registry_slot_ = index; }   // the caller owns it: no lock round trip
-        else if (auto live = instances_.back().lock()) { live->registry_slot_ = index; }
+        if (live) { live->registry_slot_.store(index, std::memory_order_relaxed); }
     }
 
     // O(1) swap-remove by the instance's remembered index. Called from ~class_instance.
@@ -2067,35 +2074,36 @@ public:
     // a region runs, another instance dying under the lock may have swap-removed across it,
     // moving the expired entry or popping it and letting a fresh registration refill the
     // index. So the entry is removed only when it is this instance's own (control-block
-    // identity survives expiry), and expired tails come off first so whatever moves into the
-    // hole is live and re-points; a mismatch means the entry already went or lingers elsewhere
-    // as an expired weak, which every reader skips. Never-registered instances skip.
+    // identity survives expiry), and expired tails come off first; a mismatch means the entry
+    // already went or lingers elsewhere as an expired weak, which every reader skips.
+    // The entry moved into the hole is re-pointed through its pointer, never lock()ed: locking takes
+    // a moment's ownership of another thread's instance (moving its destruction here), and on a
+    // libstdc++ built without atomic-word builtins (WinLibs MinGW) lock()'s CAS races that thread's
+    // mutex-guarded count updates and loses one. A live entry's instance cannot finish dying while
+    // this lock is held (its unregister waits on it); an expired one keeps its stale slot.
+    // Never-registered instances skip.
     void unregister_instance(class_instance* instance) {
-        if (instance->registry_slot_ == SIZE_MAX) { return; }   // pending or never registered: nothing to remove, no lock
-        std::shared_ptr<class_instance> moved;   // may be the last owner (a worker's copy dying concurrently): released outside the lock
-        {
-            auto lock = registry_lock();
-            const size_t i = instance->registry_slot_;
-            instance->registry_slot_ = SIZE_MAX;
-            if (i >= instances_.size()) { return; }
-            const std::weak_ptr<class_instance> self = instance->weak_from_this();
-            const auto& entry = instances_[i];
-            if (entry.owner_before(self) || self.owner_before(entry)) { return; }   // not this instance's entry
-            while (instances_.size() - 1 > i && instances_.back().expired()) { instances_.pop_back(); }
-            const size_t last = instances_.size() - 1;
-            if (i != last) {
-                instances_[i] = std::move(instances_[last]);
-                moved = instances_[i].lock();
-                if (moved) { moved->registry_slot_ = i; }
-            }
-            instances_.pop_back();
+        if (instance->registry_slot_.load(std::memory_order_relaxed) == SIZE_MAX) { return; }   // pending or never registered: nothing to remove, no lock
+        auto lock = registry_lock();
+        const size_t i = instance->registry_slot_.load(std::memory_order_relaxed);
+        instance->registry_slot_.store(SIZE_MAX, std::memory_order_relaxed);
+        if (i >= instances_.size()) { return; }
+        const std::weak_ptr<class_instance> self = instance->weak_from_this();
+        const auto& entry = instances_[i].weak;
+        if (entry.owner_before(self) || self.owner_before(entry)) { return; }   // not this instance's entry
+        while (instances_.size() - 1 > i && instances_.back().weak.expired()) { instances_.pop_back(); }
+        const size_t last = instances_.size() - 1;
+        if (i != last) {
+            instances_[i] = std::move(instances_[last]);
+            if (!instances_[i].weak.expired()) { instances_[i].instance->registry_slot_.store(i, std::memory_order_relaxed); }
         }
+        instances_.pop_back();
     }
 
     // After a compaction the surviving entries' indexes must be reassigned
     void reindex_instances() {
         for (size_t k = 0; k < instances_.size(); ++k) {
-            if (auto live = instances_[k].lock()) { live->registry_slot_ = k; }
+            if (auto live = instances_[k].weak.lock()) { live->registry_slot_.store(k, std::memory_order_relaxed); }
         }
     }
 
@@ -2218,7 +2226,12 @@ private:
 
     std::unordered_map<uint64_t, method_metadata> method_metadata_;
 
-    std::vector<std::weak_ptr<class_instance>> instances_;
+    // The pointer names the instance without owning it (see unregister_instance)
+    struct registry_entry {
+        std::weak_ptr<class_instance> weak;
+        class_instance* instance = nullptr;
+    };
+    std::vector<registry_entry> instances_;
 
     std::vector<std::weak_ptr<class_definition>> derived_classes_;
 
@@ -2401,7 +2414,7 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
         }
     }
     rehome_overflow_fields();
-    class_def_->register_instance(weak_from_this());
+    class_def_->register_instance(weak_from_this(), this);
 }
 
 template <typename F>
@@ -3317,7 +3330,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
             }
             new_instance->flat_fields_[slot] = new_instance->make_cell(cell->clone_element());
         }
-        class_def_->register_instance(std::weak_ptr<class_instance>(new_instance));
+        class_def_->register_instance(std::weak_ptr<class_instance>(new_instance), new_instance.get());
         return new_instance;
     }
     for_each_field([&](uint64_t id, const script_value& value) {
@@ -3356,7 +3369,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     }
 
     if (class_def_) {
-        class_def_->register_instance(std::weak_ptr<class_instance>(new_instance));
+        class_def_->register_instance(std::weak_ptr<class_instance>(new_instance), new_instance.get());
     }
 
     return new_instance;

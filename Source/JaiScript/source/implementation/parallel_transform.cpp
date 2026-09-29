@@ -223,7 +223,7 @@ namespace {
 				auto& weak = pending[consumed];
 				if (auto live = weak.lock()) {
 					state.faults.checkpoint("region.instance_register");
-					live->get_class_definition()->register_instance_after_region(weak, &state.faults);
+					live->get_class_definition()->register_instance_after_region(weak, &state.faults, live.get());
 				}
 			}
 		} catch (...) {

@@ -13270,6 +13270,15 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     enter_unit(caller_unit);
     call_frame* caller_locals = frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr;
 
+    // C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
+    if (argExpr && argExpr->get_type() == node_type::member_expr && caller_env) {
+        if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(argExpr), *caller_env, *string_symbolizer_,
+                                                     caller_env->find_access_context())) {
+            if (!*cell) { return cell->error_value(); }
+            return bind_reference_to_storage(*cell->value(), frame_index, param.slot_index);
+        }
+    }
+
     if (argExpr && argExpr->get_type() == node_type::identifier_expr) {
         auto* identExpr = static_cast<const identifier_expr*>(argExpr);
         uint64_t symbol_id = identExpr->symbol_id;

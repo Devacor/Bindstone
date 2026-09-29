@@ -1925,7 +1925,7 @@ private:
 	void auto_static_type() {
 		test("an_auto_from_a_var_or_unknown_static_type_is_a_var", [this]() {
 			// Dev ruling 2026-09-27: `auto x = e` takes e's static type; a var element, a var local, a var-returning call and a
-			// mixed-branch ternary have none, so x is a var (a later store of another type lands as is)
+			// mixed-branch ternary other than int with float have none, so x is a var (a later store of another type lands as is)
 			const char* src = R"(
 				var arr = [1, 2];
 				array<var> av = [1];
@@ -1936,10 +1936,10 @@ private:
 				auto y = av[0]; y = 2.5;
 				auto z = v; z = "t";
 				auto w = f(); w = 1.5;
-				auto m = c ? 1 : 2.5; m = "u";
+				auto m = c ? 1 : "q"; m = 2.5;
 				type_of(x) + ":" + x + "|" + type_of(y) + ":" + y + "|" + type_of(z) + ":" + z + "|" + type_of(w) + ":" + w + "|" + type_of(m) + ":" + m;
 			)";
-			const std::string want = "string:s|float:2.5|string:t|float:1.5|string:u";
+			const std::string want = "string:s|float:2.5|string:t|float:1.5|float:2.5";
 			expect("auto from var", src, want, check_mode::warn);
 			expect("auto from var (strict)", src, want, check_mode::strict);
 			expect("auto from var (checks off)", src, want, check_mode::off);
@@ -2171,6 +2171,27 @@ private:
 		static_members_bind_references();
 		ruling_reference_store_types();
 		ruling_typed_range_for();
+		ruling_numeric_ternary_auto();
+	}
+
+	void ruling_numeric_ternary_auto() {
+		test("an_auto_initialized_from_an_int_float_ternary_is_float", [this]() {
+			// C++'s common type of int and float is float: the chosen arm converts; any other mixed ternary has no static type
+			expect("numeric ternary", R"(
+				var FLAG = true;
+				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { auto x = FLAG ? 1 : 2.5; return type_of(x) + ":" + x; }) + "|" +
+				t([]() { auto x = FLAG ? 2.5 : 1; x = 3; return type_of(x) + ":" + x; }) + "|" +
+				t([]() { auto x = FLAG ? 1 : 2.5; var s = "s"; x = s; return x; }) + "|" +
+				t([]() { auto y = FLAG ? 1 : "s"; y = 2.5; return type_of(y); });
+			)", "float:1.0|float:3.0|Cannot assign string to 'x' (declared float)|float", check_mode::warn);
+			every_config("no warning for the numeric pair", "0|1", [](engine& e) {
+				auto numeric = e.check("var F = true; auto x = F ? 1 : 2.5;");
+				auto mixed = e.check("var F = true; auto y = F ? 1 : \"s\";");
+				auto ternary = [](const auto& r) { size_t n = 0; for (const auto& d : r.diagnostics) { if (d.message.find("ternary") != std::string::npos) { ++n; } } return std::to_string(n); };
+				return ternary(numeric) + "|" + ternary(mixed);
+			});
+		});
 	}
 
 	void ruling_typed_range_for() {

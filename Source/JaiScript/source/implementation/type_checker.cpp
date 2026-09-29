@@ -3666,9 +3666,11 @@ private:
 				auto* f = static_cast<variable_decl*>(m.declaration.get());
 				warn_member_shadows_global(f->is_static ? "static field" : "field",
 										   f->name, cd->name, f->location);
+				if (!f->type && !f->function_spelling) { f->auto_spelled = true; }
 				if (f->initializer) {
 					ctype init = infer(f->initializer.get());
-					if (f->type || f->function_spelling) {
+					if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type (Dev ruling 2026-09-28)
+					if ((f->type && !f->auto_spelled) || f->function_spelling) {
 						ctype ft = declared_variable_type(f);
 						if (!ft.is_unknown() && !assignable(init, ft)) {
 							diag(diag_level::error, f->location, "cannot initialize field '" +

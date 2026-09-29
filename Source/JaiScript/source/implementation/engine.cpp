@@ -4029,14 +4029,27 @@ bool engine::import_skips(const import_site& site) noexcept {
            impl->import_behavior != import_behavior::always && (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) != 0;
 }
 
-bool engine::import_skips(const import_site& site, const std::vector<std::string>& paths) noexcept {
+bool engine::import_skips(const import_site& site, const script_value* const* args, size_t count) {
     detail::execution_limits& limits = impl->limits_;
     if ((++impl->import_reach_count_ & 15u) == 0) { limits.coarse_now = std::chrono::steady_clock::now().time_since_epoch().count(); }
     if (limits.import_pass_open || site.seen_paths_generation != impl->import_generation_ || limits.coarse_now >= limits.import_window_until ||
         impl->import_behavior == import_behavior::always || (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) == 0) {
         return false;
     }
-    for (const auto& p : paths) { if (!import_hash_seen(site.seen_paths, import_path_hash(p))) { return false; } }
+    for (size_t i = 0; i < count; ++i) {   // the paths hash straight off the argument values: a skip copies nothing
+        const script_value& v = args[i]->deref();
+        if (const std::string* text = v.text_bytes()) {
+            if (!import_hash_seen(site.seen_paths, import_path_hash(*text))) { return false; }
+            continue;
+        }
+        if (!v.is_array()) { return false; }
+        bool seen = true;
+        v.unchecked_array_node()->for_each(this, [&](const script_value& element) {
+            const std::string* text = seen ? element.deref().text_bytes() : nullptr;
+            seen = text && import_hash_seen(site.seen_paths, import_path_hash(*text));
+        });
+        if (!seen) { return false; }
+    }
     return true;
 }
 

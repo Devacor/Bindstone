@@ -512,7 +512,7 @@ namespace jai {
         checked_result<void> visit_include_decl(include_decl* decl) override;
         checked_result<void> visit_include_expr(include_expr* expr);
         checked_result<void> visit_import_expr(import_expr* expr);
-        checked_result<void> import_step(import_site& site, const std::vector<std::string>& literal,
+        checked_result<void> import_step(import_site& site, const std::vector<std::string>* literal, const std::string* single,
                                          const std::vector<expression_ptr>& computed, bool force, bool yields);
         checked_result<void> include_into_value_stack(expression* path_expr_node, const std::string& literal_path);
         checked_result<void> visit_import_decl(import_decl* decl) override;

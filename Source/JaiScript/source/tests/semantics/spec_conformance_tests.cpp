@@ -2182,6 +2182,27 @@ private:
 		ruling_json_tagged_values();
 		ruling_base_slots_keep_the_class();
 		ruling_block_callees();
+		ruling_var_typed_arrays();
+	}
+
+	void ruling_var_typed_arrays() {
+		test("a_var_holding_a_copy_of_a_typed_array_keeps_the_typed_representation", [this]() {
+			// the array keeps its element type (every element boundary), the variable stays a var ('=' takes any value)
+			expect("var typed array", R"(
+				array<int> a = [1];
+				var G = a;
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { var v = a; v.push("s"); return v.size(); }) + "|" +
+				t([]() { var v = a; v.push(2); v[0] = 2.9; return "" + v.size() + " " + a.size() + " " + type_of(v[0]) + ":" + v[0]; }) + "|" +
+				t([]() { var v = a; v = "hello"; v = 5; return type_of(v) + ":" + v; }) + "|" +
+				t([]() { var v = 1; v = a; v.push("s"); return 1; }) + "|" +
+				t([]() { G.push("s"); return 1; }) + "|" +
+				t([]() { G = "g"; G = a; array<int> c = G; c.push(3); return "" + c.size() + " " + G.size(); }) + "|" +
+				t([]() { var e = []; e.push("x"); e.push(1); return e.size(); }) + "|" +
+				t([]() { var v = a; var& r = v; r = "via ref"; return r; });
+			)", "Cannot push 'string' to array<int>|2 1 int:2|int:5|Cannot push 'string' to array<int>|Cannot push 'string' to array<int>|2 1|2|via ref",
+			   check_mode::warn);
+		});
 	}
 
 	void ruling_block_callees() {

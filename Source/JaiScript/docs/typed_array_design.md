@@ -56,12 +56,15 @@ The store-enforced element type is what makes raw buffers sound. Scouted facts i
    :4997-5011, vm_backend.cpp:3007-3013) operates on a UNIQUE node (fresh clone or moved
    temporary). Shallow-sharing views (`var&` refs, subscript-read copies, pushed-element
    reads) all PRESERVE the tag.
-3. Therefore **demote-on-stamp**: when a stamp site writes `any` over an array value, it
-   also demotes the (unique) node to hetero. After that, a typed node is reachable ONLY
-   through views whose tag still says `array<T>` — write paths on typed nodes never need
+3. **A `var` keeps a typed array typed** (Dev ruling 2026-09-28): a var slot stamps a typed
+   array with the `dynamic_slot` twin of its own tag (`engine::get_type_info_array_dynamic`,
+   `detail::var_stamp`): same name, id and element type, so every element boundary still
+   reads `array<T>` (`var v = ints; v.push("s")` raises like `ints.push("s")`), while every
+   store path reads the twin as a var slot (`detail::var_slot`), so `v = "hello"` rebinds. A
+   typed or `auto` declaration from the var takes the plain spelling again. **Demote-on-stamp**
+   remains the net for `any` and open-element (`array<var>`) tags: a typed node is reachable
+   ONLY through views whose tag names its element type — write paths on typed nodes never need
    promotion machinery; incompatible writes are exactly today's `array_element_type_mismatch`.
-   (Cost: laundering a typed array into by-value `var` reboxes O(n) — it already paid a
-   deep clone there; `var&` stays free and tag-safe.)
 
 **Lane rule (as built, 2026-09-02, fuzz seed 129):** a fast lane that touches a buffer raw tests the
 *kind* it was written for (`kind() == i64 || kind() == f64`), never `is_typed()`. `is_typed()` only says
@@ -340,10 +343,9 @@ the same shape as `d320732c`'s array stage 0 and the same gates apply.
 
 1. **Scratch write-back loss** (mutable deref on typed elements) — silent. Caught by:
    caller audit + Debug assert + ref-mutation suites (++ through ref, compound through ref).
-2. **Stamp site missed** (an any-tagged view over a live typed node) — writes would error
-   where today they succeed. Caught by: enumerating `set_type_info` call sites on array
-   values (grep-audit in stage 2), laundering tests (`var a = typed; a.push("s")` must
-   still succeed via demote), fuzz.
+2. **Stamp site missed** (an any-tagged view over a live typed node, or a var slot read as
+   locked) — caught by: enumerating `set_type_info` call sites on array values, the var
+   battery (`var a = typed; a.push("s")` raises, `a = "s"` rebinds), fuzz.
 3. **Node identity drift** (borrow tags / `<=>` / parallel node-alias keys) — the node
    pointer must never change meaning; demote mutates IN PLACE (same allocation). Caught
    by: parallel suite + borrow identity tests.

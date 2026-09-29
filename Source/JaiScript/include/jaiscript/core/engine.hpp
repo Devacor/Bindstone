@@ -1034,6 +1034,8 @@ namespace jai {
         // var-held-handle twin of get_type_info_shared_ptr: identical shape/name/id but
         // dynamic_pointee=true, so '=' with a handle rhs rebinds unchecked (Dev ruling 2026-07)
         type_info* get_type_info_shared_ptr_dynamic(type_info* pointee_type);
+        // A var slot's twin of a typed array's tag: dynamic_slot=true (Dev ruling 2026-09-28)
+        type_info* get_type_info_array_dynamic(type_info* array_type);
         type_info* get_type_info_reference(type_info* referenced_type);
         type_info* get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types);
 

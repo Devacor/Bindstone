@@ -754,7 +754,13 @@ namespace jai::detail {
 			// a store through a reference to a typed variable obeys the variable's declared type: the assignment table and its
 			// text (Dev ruling 2026-09-28; the reference names no slot, so the text is the slot-less shape)
 			type_info_ptr tag = holder->cell()->get_type_info();
-			if (tag && tag->base_type != script_value_type::jai_any_type && tag->base_type != script_value_type::jai_reference_type) {
+			if (tag && var_slot(tag.get())) {   // a var stays a var (a typed array keeps its element type)
+				script_value v = clone_for_assignment(value);
+				if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { var_stamp(v, tag, eng); }
+				ref_write_through(refLocal, std::move(v));
+				return {};
+			}
+			if (tag && tag->base_type != script_value_type::jai_reference_type) {
 				auto stored = typed_store_convert(value, tag, eng, []() { return slot_site{slot_kind::assignment, {}, {}}; });
 				if (!stored) { return stored.error_value(); }
 				script_value v = std::move(stored.value());

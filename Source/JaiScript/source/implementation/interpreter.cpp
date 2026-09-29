@@ -13116,10 +13116,10 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
 checked_result<script_value> interpreter::construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                       const std::vector<script_value>& args) {
 
-    // Default constructor shouldn't have arguments
+    // a class without a constructor takes no arguments: family C's constructor text, the checker's too
     if (!args.empty()) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-            "Default constructor takes no arguments");
+        return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+            class_def->get_type_id(), args.data(), args.size(), engine_, true);
     }
 
     if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {

@@ -16429,9 +16429,9 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 
 checked_result<script_value> vm_backend::construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                     const std::vector<script_value>& args) {
-	if (!args.empty()) {
-		return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-			"Default constructor takes no arguments");
+	if (!args.empty()) {   // family C's constructor text, the checker's too (KEEP BYTE-PARALLEL with the interpreter)
+		return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+			class_def->get_type_id(), args.data(), args.size(), engine_, true);
 	}
 
 	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {

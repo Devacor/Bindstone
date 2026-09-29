@@ -726,11 +726,11 @@ public:
         // slot. Typed decls absorb the join and var stays dynamic.
         test("warn_auto_from_mixed_branch_ternary", [this]() {
             auto e = make_engine();
-            auto r = e->check("bool c = true; auto x = c ? 0 : 1.5;");
+            auto r = e->check("bool c = true; auto x = c ? 0 : \"s\";");
             check_eq((size_t)0, error_count(r));
             check_eq((size_t)1, warning_count(r));
             check_true(r.diagnostics[0].message.find("'int'") != std::string::npos &&
-                       r.diagnostics[0].message.find("'float'") != std::string::npos);
+                       r.diagnostics[0].message.find("'string'") != std::string::npos);
             check_true(r.diagnostics[0].message.find("so 'x' is a var") != std::string::npos);
 
             // container/class-shaped mixes warn too, naming both shapes
@@ -741,6 +741,7 @@ public:
 
             // silent: matched branches, typed decl, var decl, non-ternary initializer
             check_eq((size_t)0, e->check("bool c = true; auto x = c ? 1 : 2;").diagnostics.size());
+            check_eq((size_t)0, e->check("bool c = true; auto x = c ? 0 : 1.5;").diagnostics.size());   // int with float: float
             check_eq((size_t)0, e->check("bool c = true; float x = c ? 0 : 1.5;").diagnostics.size());
             check_eq((size_t)0, e->check("bool c = true; var x = c ? 0 : 1.5;").diagnostics.size());
             check_eq((size_t)0, e->check("auto x = 1.5;").diagnostics.size());

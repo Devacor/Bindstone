@@ -3443,7 +3443,20 @@ private:
 		if (init.is_unknown()) {
 			decl->type = eng_.get_type_info_any();
 			decl->decl_fast_flags = variable_decl::classify_decl_fast(decl->type);
+		} else if (init.kind == ctype::float_k && decl->initializer && decl->initializer->get_type() == node_type::ternary_expr &&
+		           last_mixed_ternary_.node == decl->initializer.get()) {
+			decl->type = eng_.get_type_info_float();   // an int/float ternary is float (C++ common type): the chosen arm converts
+			decl->decl_fast_flags = variable_decl::classify_decl_fast(decl->type);
 		}
+	}
+
+	// An auto initializer's static type: a ternary whose arms are int and float has C++'s common type, float (Dev ruling
+	// 2026-09-28); every other mixed ternary has none
+	ctype numeric_ternary_type(const expression* init_expr, const ctype& init) {
+		if (!init.is_unknown() || last_mixed_ternary_.node != init_expr) { return init; }
+		const auto a = last_mixed_ternary_.then_type.kind, b = last_mixed_ternary_.else_type.kind;
+		if ((a == ctype::int_k && b == ctype::float_k) || (a == ctype::float_k && b == ctype::int_k)) { return ctype::make(ctype::float_k); }
+		return init;
 	}
 
 	void walk_variable_decl(variable_decl* decl) {
@@ -3542,6 +3555,7 @@ private:
 			// auto with initializer: the initializer's static type, then enforced as that type; a var or unknown
 			// static type makes the slot a var. null carries no type: the runtime locks at the first non-null
 			// store, so a null init stays dynamic.
+			init = numeric_ternary_type(decl->initializer.get(), init);
 			entry.type = init;
 			entry.dynamic = init.is_unknown() || init.kind == ctype::null_k;
 			entry.display = ctype_name(init);

@@ -5142,10 +5142,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             value = std::move(enforced.value());
                             // var slots keep a shared_ptr-tagged rhs's marker (decl
                             // parity; flattening to 'any' would detach at the copy)
-                            if (slot_type->base_type == script_value_type::jai_any_type &&
+                            if (detail::var_slot(slot_type.get()) &&
                                 (!value.get_type_info() ||
                                  value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-                                value.set_type_info(slot_type);
+                                detail::var_stamp(value, slot_type, engine_);
                             }
                         }
                         // Direct assignment to call frame local (or its cell); the
@@ -5382,9 +5382,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         // marker so the variable stays dynamic for the next '='.
                         script_value rebound = clone_for_assignment(value);
                         if (engine_) {
-                            if (auto* any_ti = engine_->get_type_info_any()) {
-                                rebound.set_type_info(any_ti);
-                            }
+                            detail::var_stamp(rebound, nullptr, engine_);
                         }
                         JAISCRIPT_TRY(store_back(std::move(rebound)));
                     } else {
@@ -5483,12 +5481,12 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     // (mirrors the decl path, Dev ruling 2026-07): a shared_ptr-tagged
                     // rhs keeps its marker - flattening to 'any' would silently detach
                     // the handle at the copy below
-                    else if (target_type->base_type == script_value_type::jai_any_type &&
+                    else if (detail::var_slot(target_type.get()) &&
                              (!value.get_type_info() ||
                               value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-                        value.set_type_info(target_type);  // Keep any_type marker
+                        detail::var_stamp(value, target_type, engine_);   // the var marker (a typed array keeps its element type)
                     }
-                    else if (target_type->base_type == script_value_type::jai_any_type &&
+                    else if (detail::var_slot(target_type.get()) &&
                              engine_ && value.get_type_info()->element_type() &&
                              !value.get_type_info()->dynamic_pointee) {
                         // var target adopting a handle: mark it rebindable (Dev ruling 2026-07)
@@ -6467,7 +6465,10 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // keeps a shared_ptr-tagged initializer's marker — `var p = new P()` IS
             // `shared_ptr<P> p = P()` (Dev ruling 2026-07), so the reference-semantics
             // tag must survive the decl instead of flattening to 'any'
-            if (effective_decl_type->base_type != script_value_type::jai_any_type ||
+            if (effective_decl_type->base_type == script_value_type::jai_any_type &&
+                (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
+                detail::var_stamp(value, effective_decl_type, engine_);   // a typed array keeps its element type (Dev ruling 2026-09-28)
+            } else if (effective_decl_type->base_type != script_value_type::jai_any_type ||
                 !value.get_type_info() ||
                 value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
                 value.set_type_info(effective_decl_type);
@@ -6489,6 +6490,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 value.set_type_info(engine_->get_type_info_shared_ptr(
                     value.get_type_info()->element_type().get()));
             }
+            detail::drop_var_slot(value, engine_);   // nor does a var-held array's
         }
         // else: auto without initializer - type_info remains nullptr (uninitialized)
         // First assignment will lock the type
@@ -6537,9 +6539,9 @@ checked_result<script_value> interpreter::store_namespace_cell(const detail::nam
             return enforced.error_value();
         }
         incoming = std::move(enforced.value());
-        if (slot_type->base_type == script_value_type::jai_any_type &&
+        if (detail::var_slot(slot_type.get()) &&
             (!incoming.get_type_info() || incoming.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-            incoming.set_type_info(slot_type);
+            detail::var_stamp(incoming, slot_type, engine_);
         }
     }
     *storage = std::move(incoming);
@@ -6553,7 +6555,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
     detail::slot_kind kind
 ) {
     // nullptr target (auto x;) locks to the source type; any (var x) takes anything
-    if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
+    if (!target_type || detail::var_slot(target_type.get())) {
         return std::move(value);
     }
     {   // same-storage scalars are the table's identity row
@@ -6610,7 +6612,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
 // KEEP BYTE-PARALLEL with vm_backend::compound_typed_store_back.
 checked_result<void> interpreter::compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name) {
     type_info_ptr tag = target.get_type_info();
-    if (tag && tag->base_type != script_value_type::jai_any_type) {
+    if (tag && !detail::var_slot(tag.get())) {
         auto enforced = enforce_type_compatibility(std::move(promoted), tag, var_name);
         if (!enforced) {
             return enforced.error_value();
@@ -6618,7 +6620,7 @@ checked_result<void> interpreter::compound_typed_store_back(script_value& target
         promoted = std::move(enforced.value());
         promoted.set_type_info(tag);
     } else if (tag) {
-        promoted.set_type_info(tag);
+        detail::var_stamp(promoted, tag, engine_);
     }
     target = std::move(promoted);
     return {};

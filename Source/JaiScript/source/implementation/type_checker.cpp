@@ -870,8 +870,8 @@ private:
         auto result = env->get(name);
         if (!result) { return {}; }
         const script_value& v = result.value();
-        if (v.is_cpp_bound() || v.is_reference()) {
-            return {};   // write-through bindings convert on their own terms
+        if (v.is_cpp_bound() || v.is_reference() || (v.get_type_info() && v.get_type_info()->dynamic_slot)) {
+            return {};   // write-through bindings convert on their own terms; a var holding a typed array is a var
         }
         ctype t = ctype_from_type_info(v.get_type_info());
         t.tentative = true;   // value-tag derived (a later redeclaration retags): never a proof source

@@ -54,6 +54,11 @@ namespace jai {
         // via engine::get_type_info_shared_ptr_dynamic. Excluded from equals().
         bool dynamic_pointee = false;
 
+        // A typed array held by a var slot (Dev ruling 2026-09-28): the array keeps its element type (every element
+        // boundary reads it), the slot stays dynamic ('=' takes any value). Same name/id/element as the plain spelling;
+        // interned as a twin via engine::get_type_info_array_dynamic. Excluded from equals().
+        bool dynamic_slot = false;
+
         // Engine-interned "T&" twin cache (engine::get_type_info_reference fast path -
         // elides the intern-map lookup on every reference mint). Only meaningful on the
         // INTERNED instance; pre-intern copies carry a discarded value. Excluded from

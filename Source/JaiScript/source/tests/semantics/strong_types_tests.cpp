@@ -2107,7 +2107,7 @@ public:
             check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "9,9", "copying an array keeps a shared element shared (C++ copy semantics)");
             check_quad(q("array<K> ks = [K(1), K(2), K(3)]; to_string(ks.filter([](K k) { return k.a > 1; }).size())").c_str(), "2", "filter");
             check_quad(q("array<K> ks = [K(1)]; ks.clear(); ks.push(K(4)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:4", "clear then push");
-            check_quad(q("array<K> ks = [K(1)]; var v = ks; v.push(5); to_string(v.size()) + \":\" + type_of(v)").c_str(), "2:array", "var laundering demotes (then anything goes)");
+            check_quad(q("array<K> ks = [K(1)]; var v = ks; string r = \"\"; try { v.push(5); } catch (e) { r = e; } v.push(K(2)); v = 5; r + \"|\" + type_of(v)").c_str(), "Cannot push 'int' to array<K>|int", "a var copy keeps array<K>, the var stays a var");
             check_quad(q("var v = [K(1), K(2)]; array<K> ks = v; v[0].a = 50; to_string(ks[0].a) + \",\" + to_string(ks.size())").c_str(), "1,2", "array<K> from a dynamic array copies");
             check_quad(q("function total(array<K> xs) -> int { int s = 0; for (auto x : xs) { s += x.a; } xs[0].a = 100; return s; } array<K> ks = [K(1), K(2)]; to_string(total(ks)) + \",\" + to_string(ks[0].a)").c_str(), "3,1", "by-value parameter");
             check_quad(q("function bump(array<K>& xs) { xs[0].a = 100; xs.push(K(9)); } array<K> ks = [K(1)]; bump(ks); to_string(ks[0].a) + \",\" + to_string(ks.size())").c_str(), "100,2", "by-reference parameter");
@@ -2731,8 +2731,8 @@ public:
         test("typed_storage_value_semantics_and_laundering", [check_quad]() {
             // decl copy is a deep copy (kind-preserving buffer copy)
             check_quad("array<int> a = [1,2]; array<int> b = a; b[0] = 9; to_string(a[0]) + to_string(b[0])", "19", "typed->typed copy");
-            // var laundering demotes the (fresh) node: heterogeneous writes then work
-            check_quad("array<int> a = [1,2]; var v = a; v.push(\"s\"); to_string(v.size()) + type_of(v[2]) + to_string(a.size())", "3string2", "laundered var accepts strings");
+            // a var copy keeps the typed array (Dev ruling 2026-09-28): the element type holds, the variable stays a var
+            check_quad("array<int> a = [1,2]; var v = a; string r = \"\"; try { v.push(\"s\"); } catch (e) { r = \"raised\"; } v.push(3); r + to_string(v.size()) + to_string(a.size())", "raised32", "a var copy keeps array<int>");
             // var& preserves the tag: still enforced
             check_quad("array<int> a = [1]; var& r = a; r.push(2); to_string(a.size())", "2", "var& push int");
             // shrink-under-ref errors identically
@@ -2903,13 +2903,13 @@ public:
             auto as = e->execute("auto words = [\"x\", \"y\"]; words");
             check(as.unchecked_array_node()->kind() == jai::script_array::kind_t::str, "auto string literal infers the handle buffer");
             auto d = e->execute("array<int> c = [1]; var laundered = c; laundered");
-            check(d.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "var laundering demotes the node");
+            check(d.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "a var copy keeps the raw buffer");
             auto o = e->execute("class K { int a = 1; } array<K> ks = [K(), K()]; ks");
             check(o.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "array<K> holds an object slot buffer");
             auto oe = e->execute("class K2 { int a = 1; } array<K2> none = []; none");
             check(oe.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "an empty array<K> is an object slot buffer");
             auto ol = e->execute("class K3 { int a = 1; } array<K3> k3 = [K3()]; var laundered3 = k3; laundered3");
-            check(ol.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "var laundering demotes an object buffer");
+            check(ol.unchecked_array_node()->kind() == jai::script_array::kind_t::obj, "a var copy keeps the object slot buffer");
             auto oa = e->execute("class K4 { int a = 1; } auto inferred4 = [K4(), K4()]; inferred4");
             check(oa.unchecked_array_node()->kind() == jai::script_array::kind_t::hetero, "an auto object literal stays dynamic");
             auto os = e->execute("class K5 { int a = 1; } shared_ptr<K5> sp = K5(); array<K5> ks5 = [sp]; ks5");

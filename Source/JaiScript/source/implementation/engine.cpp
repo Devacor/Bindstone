@@ -3123,6 +3123,26 @@ type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
     return ptr;
 }
 
+type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
+    // var-held typed array twin (param2=1 keys it apart from the plain spelling): same name/id/element, so every element
+    // boundary reads the element type; dynamic_slot keeps the slot a var
+    if (!array_type || array_type->dynamic_slot) { return array_type; }
+    const type_info_ptr element = array_type->element_type();
+    implementation::type_key key{script_value_type::jai_array_type, element ? element->id : 0, 1};
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        return &it->second;
+    }
+    impl->deny_type_intern_in_region();
+    type_info temp = *array_type;
+    temp.dynamic_slot = true;
+    temp.cached_reference_type = nullptr;
+    auto result = impl->type_infos_.emplace(key, temp);
+    type_info* ptr = &result.first->second;
+    impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
+    return ptr;
+}
+
 type_info* engine::get_type_info_reference(type_info* referenced_type) {
     // Hot mint path: the interned "T&" twin is cached on the referenced type itself
     // (and on the engine for T == null), so repeat mints skip the intern-map lookup

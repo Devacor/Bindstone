@@ -1,7 +1,9 @@
 // Gator Quest - the prediction test: the real host and a real client session over
 // loopback, on a virtual clock (a minute of play in well under a minute), with the
 // network simulator adding latency, jitter and loss. The client walks a route by
-// "holding keys" through the same pred_input the keyboard uses.
+// "holding keys" through the same pred_input the keyboard uses. Every byte either
+// side writes reaches the other before it next reads (the loopback takes no virtual
+// time), so a run's outcome depends on the seeds alone, never on the machine's load.
 //
 //   jaiscript gatorquest.jai -- predtest            the sweep: 0, 60, 150, 300 ms round trip
 //   jaiscript gatorquest.jai -- predtest lag 120 jitter 20 loss 2
@@ -12,8 +14,23 @@ int PT_S;
 int PT_NEXT_TICK;
 int PT_SAME_FRAME_CHECKS;
 int PT_SAME_FRAME_MISSES;
+int PT_HOST_RX;                 // bytes the host has read from the test client
+int PT_CLIENT_RX;               // bytes the test client has read from the host
+int PT_HOST_TX0;                // NET_BYTES_OUT when this round's host started
+bool PT_STALLED;                // a delivery did not complete within five seconds
 
 int pt_mob() { return CHARS[NCS_SLOT[PT_S]].mob; }
+
+bool pt_delivered() { return PT_HOST_RX >= NCS_TX[PT_S] && PT_CLIENT_RX >= NET_BYTES_OUT - PT_HOST_TX0; }
+
+void pt_deliver() {
+	for (int i = 0; i < 5000 && !pt_delivered(); ++i) {
+		NET_SRV.pump();
+		NCS_CH[PT_S].pump();
+		if (!pt_delivered()) { time::sleep_ms(1); }
+	}
+	if (!pt_delivered()) { PT_STALLED = true; }
+}
 
 // one client frame (33 ms); the host ticks at 10 Hz in between
 void pt_frame(int held) {
@@ -37,12 +54,12 @@ void pt_frame_input(int held) {
 void pt_frame_world() {
 	net_session_pump(PT_S);
 	while (NOW_MS >= PT_NEXT_TICK) {
-		time::sleep_ms(1);
+		pt_deliver();
 		sim_tick();
 		net_host_pump();
 		host_after_tick();
 		PT_NEXT_TICK = PT_NEXT_TICK + TICK_MS;
-		time::sleep_ms(1);
+		pt_deliver();
 	}
 	net_session_pump(PT_S);
 	pred_reconcile(CV, NOW_MS);
@@ -85,7 +102,13 @@ bool pt_setup(int port, int lag, int jitter, int loss) {
 	NET_SIM_LOSS = 0;
 	NET_SIM_SEED = 777 + lag;
 	if (!net_host_start(port)) { return false; }
+	PT_HOST_TX0 = NET_BYTES_OUT;
+	PT_HOST_RX = 0;
+	PT_CLIENT_RX = 0;
+	PT_STALLED = false;
+	NET_SRV.on_client_packet.connect("pt", [](int id, string bytes) { PT_HOST_RX = PT_HOST_RX + bytes.size(); });
 	PT_S = net_client_open("127.0.0.1", port);
+	NCS_CH[PT_S].on_packet.connect("pt", [](string bytes) { PT_CLIENT_RX = PT_CLIENT_RX + bytes.size(); });
 	for (int i = 0; i < 200 && !NCS_CH[PT_S].connected(); ++i) { NET_SRV.pump(); NCS_CH[PT_S].pump(); time::sleep_ms(1); }
 	NET_SIM_LAG = lag;
 	NET_SIM_JITTER = jitter;
@@ -230,6 +253,7 @@ int run_predtest() {
 				print("  FAIL  the rejected move should correct once, by one tile, gliding");
 			}
 		}
+		if (PT_STALLED) { fails = fails + 1; print("  FAIL  the loopback stalled: a delivery did not complete within five seconds"); }
 		pt_teardown();
 	}
 	print(fails == 0 ? "predtest: all checks passed" : `predtest: ${fails} problems`);

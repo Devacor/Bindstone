@@ -5409,6 +5409,11 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const size_t fbeg = l.find("== run ");
 			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
 			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("open loop") == std::string::npos && fl.find("PROBE_MEMBER") == std::string::npos, "the loop of computed pushes closes: " + fl);
+			// a string binary ahead of a call keeps the stack form, which moves the left value into the result (a temp would copy it)
+			const std::string str = listing_run("function look(string a, string b, int r) -> int { string key = a + b + to_string(r + 1); return key.size(); }\nlook(\"TROO\", \"A\", 3);");
+			const size_t sbeg = str.find("== look ");
+			const std::string sl = sbeg == std::string::npos ? str : str.substr(sbeg, str.find("\n== ", sbeg + 1) - sbeg);
+			check_true(sl.find("BINARY_FUSED_TEMP") == std::string::npos && sl.find("CALL_TEMP") == std::string::npos, "the string concatenation stays on the stack form: " + sl);
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {

@@ -8665,9 +8665,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     }
                     captureEnv->define(this_id, share_boxed_env_storage(*targetPtr, engine_));
                 } else {
+                    // [this] captures the instance itself, as C++ captures the this pointer (KEEP BYTE-PARALLEL with vm_backend::exec_closure)
                     auto capture_result = environment_->get(this_id);
                     if (!capture_result) return capture_result.error_value();
-                    captureEnv->define(this_id, detail::clone_for_capture(capture_result.value(), string_symbolizer_));
+                    captureEnv->define(this_id, script_value(capture_result.value().deref()));
                 }
                 continue;
             }

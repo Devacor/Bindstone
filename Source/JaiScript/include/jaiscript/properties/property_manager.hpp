@@ -10,18 +10,11 @@
 #include <jaiscript/core/engine_bindable.hpp>
 #include <jaiscript/core/script_extensible.hpp>
 #include <jaiscript/signals/receiver_owner.hpp>
+#include <jaiscript/detail/first_type.hpp>
 
 namespace jai {
 	// Forward declarations
 	class engine;
-
-	namespace detail {
-		template<typename First, typename...>
-		struct first_type { using type = First; };
-
-		template<typename... Ts>
-		using first_type_t = typename first_type<Ts...>::type;
-	}
 
 	namespace serialization {
 		class any_archive_writer;
@@ -290,7 +283,7 @@ namespace jai {
 		template<typename Archive>
 		void load_with_hook(Archive& ar) {
 			load_owned_properties(ar);
-			serialization::any_archive_reader type_erased(ar);
+			detail::first_type_t<serialization::any_archive_reader, Archive> type_erased(ar);
 			post_load(type_erased);
 		}
 
@@ -335,7 +328,7 @@ namespace jai {
 		// (already-open, flat) object.
 		template<typename Archive>
 		void save_owned_properties(Archive& ar) const {
-			serialization::any_archive_writer type_erased(ar);
+			detail::first_type_t<serialization::any_archive_writer, Archive> type_erased(ar);
 			visit_owned_properties([&type_erased](const std::string&, property_base* prop) {
 				if (prop->allow_save()) {
 					prop->serialize(type_erased);

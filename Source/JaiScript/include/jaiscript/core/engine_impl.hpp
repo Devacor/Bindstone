@@ -53,7 +53,7 @@ std::function<Sig> convert_script_function(const script_value& fn) {
 
 template<typename T>
 std::string engine::get_registered_name() const {
-    auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));
+    std::shared_ptr<detail::first_type_t<class_definition, T>> class_def = get_class_definition_by_type(std::type_index(typeid(T)));
     if (class_def) {
         return class_def->get_name();
     }
@@ -79,14 +79,14 @@ script_value engine::make_object(std::shared_ptr<T> data) {
         }
     } else if constexpr (std::is_polymorphic_v<T>) {
         if (data) {
-            if (auto layer = script_layer_of(dynamic_cast<void*>(data.get()))) {
+            if (std::shared_ptr<detail::first_type_t<class_instance, T>> layer = script_layer_of(dynamic_cast<void*>(data.get()))) {
                 return script_value::make_object(layer->get_class_definition()->get_name(), layer, this);
             }
         }
     }
     if constexpr (std::is_polymorphic_v<T>) {
         if (data && std::type_index(typeid(*data)) != std::type_index(typeid(T))) {
-            if (auto dynamic_def = get_class_definition_by_type(std::type_index(typeid(*data)))) {
+            if (std::shared_ptr<detail::first_type_t<class_definition, T>> dynamic_def = get_class_definition_by_type(std::type_index(typeid(*data)))) {
                 auto instance = dynamic_def->create_instance();
                 uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
                 std::shared_ptr<void> complete_object(data, dynamic_cast<void*>(data.get()));
@@ -100,7 +100,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
     std::string type_name = get_registered_name<T>();
 
     try {
-        auto class_def = get_class_definition_by_type(std::type_index(typeid(T)));
+        std::shared_ptr<detail::first_type_t<class_definition, T>> class_def = get_class_definition_by_type(std::type_index(typeid(T)));
         if (class_def) {
             auto instance = class_def->create_instance();
 

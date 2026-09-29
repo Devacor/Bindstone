@@ -1158,7 +1158,7 @@ namespace jai {
         // import_modules: the reach the pass lets through - resolve, stat, parse and check every changed module before any
         // runs, run them in order; true = a module (re)ran. Throws what a load or a run raises.
         bool import_skips(const import_site& site) noexcept;
-        bool import_skips(const import_site& site, const std::vector<std::string>& paths) noexcept;
+        bool import_skips(const import_site& site, const script_value* const* args, size_t count);
         checked_result<bool> import_modules(import_site& site, const std::vector<std::string>& paths, bool force);
         // Filesystem queries the import step has made (resolution, stamps): the counter the throttle's tests read
         uint64_t import_stat_count() const noexcept;

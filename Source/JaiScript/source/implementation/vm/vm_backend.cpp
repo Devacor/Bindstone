@@ -16967,8 +16967,8 @@ op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 	const bool yields = ins.c != 0;
 	import_site* site = nullptr;
 	const std::vector<std::string>* literal = nullptr;
+	const std::string* single = nullptr;
 	bool force = false;
-	std::vector<std::string> paths;
 	if (node->get_type() == node_type::import_expr) {
 		auto* call = static_cast<const import_expr*>(node);
 		site = &call->site;
@@ -16977,10 +16977,21 @@ op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 	} else {
 		auto* decl = static_cast<const import_decl*>(node);
 		site = &decl->site;
-		if (!ins.b) { paths.push_back(decl->path); }
+		single = &decl->path;
 	}
+	std::vector<std::string> paths;
 	if (ins.b) {
-		const size_t base = stack_.size() - ins.b;
+		const size_t n = ins.b;
+		const size_t base = stack_.size() - n;
+		const script_value* args[8];
+		if (!force && n <= 8) {
+			for (size_t i = 0; i < n; ++i) { args[i] = &stack_[base + i]; }
+			if (engine_->import_skips(*site, args, n)) {   // the paths hash off the stack values: a skip copies nothing
+				while (stack_.size() > base) { stack_.pop_back(); }
+				if (yields) { stack_.push_back(script_value(false, engine_)); }
+				return {};
+			}
+		}
 		for (size_t i = base; i < stack_.size(); ++i) {
 			auto added = detail::append_import_paths(stack_[i], paths, engine_);
 			if (!added) {
@@ -16989,16 +17000,12 @@ op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
 			}
 		}
 		while (stack_.size() > base) { stack_.pop_back(); }
-		if (!force && engine_->import_skips(*site, paths)) {
-			if (yields) { stack_.push_back(script_value(false, engine_)); }
-			return {};
-		}
 	} else {
 		if (!force && engine_->import_skips(*site)) {
 			if (yields) { stack_.push_back(script_value(false, engine_)); }
 			return {};
 		}
-		if (literal) { paths = *literal; }
+		if (literal) { paths = *literal; } else { paths.push_back(*single); }   // built past the skip: an idle reach allocates nothing
 	}
 	nested_failure_.parked = false;
 	try {

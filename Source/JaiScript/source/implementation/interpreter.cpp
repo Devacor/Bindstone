@@ -12898,28 +12898,41 @@ checked_result<void> interpreter::visit_include_expr(include_expr* expr) {
 
 // The import step both forms take (KEEP BYTE-PARALLEL with vm_backend::exec_import): the engine's check pass decides
 // whether this reach looks at the disk; the value is whether a module (re)ran (the statement form's is null)
-checked_result<void> interpreter::import_step(import_site& site, const std::vector<std::string>& literal,
+checked_result<void> interpreter::import_step(import_site& site, const std::vector<std::string>* literal, const std::string* single,
                                               const std::vector<expression_ptr>& computed, bool force, bool yields) {
     if (!engine_) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
     std::vector<std::string> paths;
     if (!computed.empty()) {
-        for (const auto& arg : computed) {
-            JAISCRIPT_TRY(dispatch_expr(arg.get()));
-            script_value value = pop_value();
-            JAISCRIPT_TRY(detail::append_import_paths(value, paths, engine_));
+        const size_t n = computed.size();
+        for (size_t i = 0; i < n; ++i) {   // every argument evaluates before any is read (the vm's order)
+            JAISCRIPT_TRY(dispatch_expr(computed[i].get()));
+            if (is_unwinding_) {
+                for (size_t k = 0; k <= i; ++k) { valueStack_.discard(); }
+                push_value(make_value());
+                return {};
+            }
         }
-        if (!force && engine_->import_skips(site, paths)) {
-            push_value(yields ? make_value(false) : make_value());
-            return {};
+        const script_value* args[8];
+        if (!force && n <= 8) {
+            for (size_t i = 0; i < n; ++i) { args[i] = &valueStack_.peek(n - 1 - i); }
+            if (engine_->import_skips(site, args, n)) {
+                for (size_t i = 0; i < n; ++i) { valueStack_.discard(); }
+                push_value(yields ? make_value(false) : make_value());
+                return {};
+            }
         }
+        checked_result<void> added;
+        for (size_t i = 0; i < n && added; ++i) { added = detail::append_import_paths(valueStack_.peek(n - 1 - i), paths, engine_); }
+        for (size_t i = 0; i < n; ++i) { valueStack_.discard(); }
+        if (!added) { return added; }
     } else {
         if (!force && engine_->import_skips(site)) {
             push_value(yields ? make_value(false) : make_value());
             return {};
         }
-        paths = literal;
+        if (literal) { paths = *literal; } else { paths.push_back(*single); }   // built past the skip: an idle reach allocates nothing
     }
     nested_failure_.parked = false;
     try {
@@ -12934,13 +12947,13 @@ checked_result<void> interpreter::import_step(import_site& site, const std::vect
 
 checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
     if (decl->path_expr) {
-        return import_step(decl->site, {}, std::vector<expression_ptr>{decl->path_expr}, false, false);
+        return import_step(decl->site, nullptr, nullptr, std::vector<expression_ptr>{decl->path_expr}, false, false);
     }
-    return import_step(decl->site, std::vector<std::string>{decl->path}, {}, false, false);
+    return import_step(decl->site, nullptr, &decl->path, {}, false, false);
 }
 
 checked_result<void> interpreter::visit_import_expr(import_expr* expr) {
-    return import_step(expr->site, expr->paths, expr->path_exprs, expr->force, true);
+    return import_step(expr->site, &expr->paths, nullptr, expr->path_exprs, expr->force, true);
 }
 
 // Execute a method AST with a given environment

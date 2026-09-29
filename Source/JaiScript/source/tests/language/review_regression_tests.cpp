@@ -976,9 +976,9 @@ public:
             check_eq(std::string("-0.0"), e->execute("to_string(0.0 * -1.0)").as_string());
         });
         test("fuzz_neg_zero_map_key_ordering", [this]() {
-            // strong_order keys: -0.0 and +0.0 stay DISTINCT map keys on both backends
+            // Dev ruling 2026-09-28: -0.0 and +0.0 are one map key (they are ==) on both backends
             auto e = make_engine();
-            check_eq((int64_t)2, e->execute(R"(
+            check_eq((int64_t)1, e->execute(R"(
                 double z = 0.0;
                 var m = {};
                 m[-z] = "neg";

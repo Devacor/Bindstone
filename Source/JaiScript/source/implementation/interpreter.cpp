@@ -15260,8 +15260,8 @@ void interpreter::capture_stack_trace() {
     trace_captured_ = true;
 }
 
-void interpreter::note_coarse_clock(std::chrono::steady_clock::time_point now) {
-    if (engine_ && !engine_->parallel_region_active()) { engine_->execution_limits().coarse_now = now.time_since_epoch().count(); }
+void interpreter::note_clock_sample(std::chrono::steady_clock::time_point now) {
+    if (engine_ && !parallel_worker_ && !engine_->parallel_region_active()) { engine_->execution_limits().note_clock_sample(now); }
 }
 
 // KEEP BYTE-PARALLEL with vm_backend::park_nested_failure / absorb_nested_trace

@@ -5,6 +5,7 @@
 
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 
@@ -35,12 +36,18 @@ namespace jai::detail {
 
 		// The longest NUL scan one binary::reader read runs (engine::binary_scan_limit); only the host sets it
 		size_t binary_scan_limit = size_t(1) << 20;
-		// A coarse steady_clock reading (ticks): refreshed at every execute entry and at the budget's periodic samples, both
-		// of which read the clock anyway, and by the import step every 16 import reaches. Readers accept it as stale by that
-		// much (engine::import_recheck_interval)
-		int64_t coarse_now = 0;
+		// The engine's clock sample: a real steady_clock reading (ticks) written where the engine reads that clock anyway -
+		// every host entry (the reading the budget deadline starts from), the budget check's periodic samples (every 1024
+		// ticks, budget or not) and a time:: read of the system clock; never by a host time_source. The import window reads
+		// it instead of the clock; clock_samples counts the writes
+		int64_t sampled_now = 0;
+		uint64_t clock_samples = 0;
+		void note_clock_sample(std::chrono::steady_clock::time_point now) noexcept {
+			sampled_now = now.time_since_epoch().count();
+			++clock_samples;
+		}
 		// The engine-wide import check pass (engine::import_skips): open while every import reached stats its modules; no
-		// new pass opens before import_window_until (coarse ticks). A top-level execute or resume closes it.
+		// new pass opens while sampled_now is before import_window_until. A top-level execute or resume closes it.
 		bool import_pass_open = false;
 		int64_t import_window_until = 0;
 

@@ -483,9 +483,13 @@ engine stays usable", not by `check_throws`.
   (`execution_limits::import_pass_open`), every import reached in it stats its modules once (`import_record::checked_pass`),
   and the pass closes when a site reaches a path it already checked in this pass (the frame loop came around; a nested
   import inside a re-running module never closes it) or at the next top-level execute/resume (`reset_for_execute`); between
-  passes an import is a counter, a compare against the coarse clock and a branch (`engine::import_skips`; a computed site
-  also hashes its paths against the ones it ran), so a frame checks every import or none. A module that never ran loads
-  on first reach, pass or not. The call form `import(...)` is an EXPRESSION (`import_expr`, `.jaibite` 26): true when a
+  passes an import reads no clock and queries no file: a compare against the engine's CLOCK SAMPLE and a branch
+  (`engine::import_skips`; a computed site also hashes its paths against the ones it ran), so a frame checks every import
+  or none. The sample (`execution_limits::sampled_now`, Dev direction 2026-09-29) is the real steady clock as read at the
+  host entry (the one reading the budget deadline, and `time::execute_elapsed` on the system source, start from), at the
+  budget check's samples (every 1024 ticks, budget or not) and by a time:: read of the system clock; its staleness is
+  bounded by those, and a window opening late by that much is fine for reloading. A module that never ran loads on first
+  reach, pass or not. The call form `import(...)` is an EXPRESSION (`import_expr`, `.jaibite` 26): true when a
   module (re)ran; its arguments are paths or arrays of paths (one = the plain load; more, or an array, = a GROUP: one
   decision, every changed module parsed + checked with the others' names published before any runs, one catchable error
   applies nothing, a module that failed at its current stamp holds the group quietly until it changes, then the changed
@@ -576,8 +580,10 @@ engine stays usable", not by `check_throws`.
   qualified names; `ns::Type` parses as a type name wherever a class name does). Every call reads the engine's
   replaceable time source once (`engine::time_source(monotonic, wall, sleep)`); outside time:: calls the engine reads the
   monotonic clock only at a host entry, and only after a loaded program names `time::execute_elapsed` (the parse-tail
-  marking pass flags it). time:: calls are a parallel-body wall (all modes); the checker types them through
-  `script_namespace_data::signatures`.
+  marking pass flags it). The execution budget and the import window run on the REAL steady clock whatever the source
+  (a host clock can neither stall nor trip them); while monotonic is the system clock, a time:: read (and a sleep's wake)
+  refreshes the engine's clock sample, a host provider never does. time:: calls are a parallel-body wall (all modes);
+  the checker types them through `script_namespace_data::signatures`.
 - **Binary data** (Dev rulings 2026-09-27, guide ch. 9 "Binary data", `detail/binary_data.hpp`): `string` is binary-safe
   bytes, `utf8_string` is text. `s.to_bytes([offset], [count])` -> `array<uint8>` (range-checked, one native copy),
   `string::from_bytes(array<uint8> | array<char> | array<int> | array<var>)` (a byte buffer copies; other elements

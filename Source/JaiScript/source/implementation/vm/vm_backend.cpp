@@ -468,11 +468,11 @@ detail::caller_frame_view vm_backend::caller_view(frame* f) const {
 void vm_backend::arm_execution_deadline() {
 	budget_tick_ = 0;
 	budget_active_ = execution_budget_.count() > 0;
-	const auto now = std::chrono::steady_clock::now();   // one read serves the deadline and the coarse clock
+	const auto now = std::chrono::steady_clock::now();   // one read serves the deadline and the engine's clock sample
 	if (budget_active_) {
 		execution_deadline_ = now + execution_budget_;
 	}
-	if (engine_ && !parallel_worker_ && !engine_->parallel_region_active()) { engine_->execution_limits().coarse_now = now.time_since_epoch().count(); }
+	if (engine_ && !parallel_worker_ && !engine_->parallel_region_active()) { engine_->execution_limits().note_clock_sample(now); }
 }
 
 bool vm_backend::execution_budget_exhausted() {
@@ -486,9 +486,9 @@ bool vm_backend::execution_budget_exhausted() {
 	}
 	// An armed debug session suspends the wall-clock deadline (a parked script must not
 	// be killed by the act of debugging); sync_debug_hook re-arms fresh on session end.
-	if (!budget_active_ || debug_hook_) { return false; }
 	const auto now = std::chrono::steady_clock::now();
-	limits_->coarse_now = now.time_since_epoch().count();
+	limits_->note_clock_sample(now);
+	if (!budget_active_ || debug_hook_) { return false; }
 	if (now < execution_deadline_) { return false; }
 	// Budget overruns are TERMINAL: no script catch may swallow a timeout
 	limits_->terminal_error = true;

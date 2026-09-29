@@ -682,7 +682,6 @@ struct engine::implementation {
     double import_recheck_seconds_ = 0.2;
     uint64_t import_generation_ = 1;
     uint64_t import_pass_id_ = 0;
-    uint32_t import_reach_count_ = 0;
     uint64_t import_stats_ = 0;
     std::string cwd_;   // the working directory resolution keys use, refreshed when a check pass opens
     // caught errors (engine::make_caught_error): the catch variable is its message as a string whose node keys the error's
@@ -3768,7 +3767,10 @@ void engine::time_source(clock_reading monotonic, clock_reading wall, clock_slee
 }
 
 std::chrono::nanoseconds engine::monotonic_now() {
-    return impl->monotonic_clock ? impl->monotonic_clock() : std::chrono::steady_clock::now().time_since_epoch();
+    if (impl->monotonic_clock) { return impl->monotonic_clock(); }
+    const auto now = std::chrono::steady_clock::now();
+    if (!parallel_region_active()) { impl->limits_.note_clock_sample(now); }
+    return now.time_since_epoch();
 }
 
 std::chrono::nanoseconds engine::wall_now() {
@@ -3777,8 +3779,9 @@ std::chrono::nanoseconds engine::wall_now() {
 }
 
 void engine::sleep_for(std::chrono::nanoseconds duration) {
-    if (impl->sleep_clock) { impl->sleep_clock(duration); return; }
-    if (duration.count() > 0) { std::this_thread::sleep_for(duration); }
+    if (impl->sleep_clock) { impl->sleep_clock(duration); }
+    else if (duration.count() > 0) { std::this_thread::sleep_for(duration); }
+    if (!impl->monotonic_clock && !parallel_region_active()) { impl->limits_.note_clock_sample(std::chrono::steady_clock::now()); }
 }
 
 double engine::engine_elapsed() {
@@ -4023,16 +4026,14 @@ namespace {
 }
 
 bool engine::import_skips(const import_site& site) noexcept {
-    detail::execution_limits& limits = impl->limits_;
-    if ((++impl->import_reach_count_ & 15u) == 0) { limits.coarse_now = std::chrono::steady_clock::now().time_since_epoch().count(); }
-    return !limits.import_pass_open && site.seen_generation == impl->import_generation_ && limits.coarse_now < limits.import_window_until &&
+    const detail::execution_limits& limits = impl->limits_;
+    return !limits.import_pass_open && site.seen_generation == impl->import_generation_ && limits.sampled_now < limits.import_window_until &&
            impl->import_behavior != import_behavior::always && (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) != 0;
 }
 
 bool engine::import_skips(const import_site& site, const script_value* const* args, size_t count) {
-    detail::execution_limits& limits = impl->limits_;
-    if ((++impl->import_reach_count_ & 15u) == 0) { limits.coarse_now = std::chrono::steady_clock::now().time_since_epoch().count(); }
-    if (limits.import_pass_open || site.seen_paths_generation != impl->import_generation_ || limits.coarse_now >= limits.import_window_until ||
+    const detail::execution_limits& limits = impl->limits_;
+    if (limits.import_pass_open || site.seen_paths_generation != impl->import_generation_ || limits.sampled_now >= limits.import_window_until ||
         impl->import_behavior == import_behavior::always || (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) == 0) {
         return false;
     }
@@ -4055,6 +4056,10 @@ bool engine::import_skips(const import_site& site, const script_value* const* ar
 
 uint64_t engine::import_stat_count() const noexcept {
     return impl->import_stats_;
+}
+
+uint64_t engine::clock_sample_count() const noexcept {
+    return impl->limits_.clock_samples;
 }
 
 script_value engine::make_caught_error(const script_value& thrown_in, bool by_throw, const source_location* throw_site,
@@ -4129,18 +4134,16 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     detail::execution_limits& limits = I.limits_;
     const bool always = I.import_behavior == import_behavior::always;
     const bool once = I.import_behavior == import_behavior::once;
-    const auto clock = [] { return std::chrono::steady_clock::now().time_since_epoch().count(); };
     const auto open_pass = [&] {
-        limits.coarse_now = clock();
         limits.import_pass_open = true;
-        limits.import_window_until = limits.coarse_now + I.import_recheck_ticks_;
+        limits.import_window_until = limits.sampled_now + I.import_recheck_ticks_;
         ++I.import_pass_id_;
         I.cwd_.clear();
     };
     const bool nested = !I.importing_.empty();
     if (!parallel_region_active()) {
         if (force) { open_pass(); }
-        else if (!limits.import_pass_open && clock() >= limits.import_window_until) { open_pass(); }
+        else if (!limits.import_pass_open && limits.sampled_now >= limits.import_window_until) { open_pass(); }
     }
 
     // an answer the ladder remembers from the asking folder itself stands unverified until the module's stamp query, which
@@ -4184,7 +4187,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         for (const auto& m : mods) { wrapped = wrapped || import_hash_seen(site.pass_paths, m.hash); }
         if (wrapped) {
             limits.import_pass_open = false;
-            if (clock() >= limits.import_window_until) { open_pass(); site.pass_id = I.import_pass_id_; }
+            if (limits.sampled_now >= limits.import_window_until) { open_pass(); site.pass_id = I.import_pass_id_; }
             site.pass_paths.clear();
         }
     }

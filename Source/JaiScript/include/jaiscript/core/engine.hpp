@@ -507,6 +507,9 @@ namespace jai {
         // (UTC), sleep blocks the script thread. An empty provider selects the system one (steady_clock,
         // system_clock, this_thread::sleep_for). A time:: call reads its provider once; otherwise the engine
         // reads monotonic only at a host entry, and only after a loaded program names time::execute_elapsed.
+        // The execution budget and the import window run on the real steady clock whatever the provider; a time::
+        // read of the system monotonic clock, and a sleep's wake while monotonic is the system one, also refresh the
+        // engine's clock sample.
         // engine_elapsed() counts from the system clock's reading at construction, or from zero on a host
         // monotonic provider.
         using clock_reading = std::function<std::chrono::nanoseconds()>;
@@ -1150,11 +1153,13 @@ namespace jai {
         // The engine-wide import check pass (guide ch. 10): at most once per `seconds` (default 0.2; 0 = every reach) the first
         // import reached opens a pass, every import reached during it stats its modules, and the pass closes when a module it
         // already checked is reached again or when the outermost execute()/resume() returns; between passes an import does
-        // nothing. A frame therefore checks every import it reaches or none.
+        // nothing. A frame therefore checks every import it reaches or none. The window runs on the engine's clock sample
+        // (the real steady clock as read at the host entry, at the budget check's samples and by a time:: read of the system
+        // clock), so an import reads no clock itself; a host time_source never moves it.
         void import_recheck_interval(double seconds);
         double import_recheck_interval() const;
         // Both backends' import step. import_skips: no pass is open, the window has not expired and the site has run its
-        // modules before (a counter, a compare against the coarse clock, a branch; a computed site also hashes its paths).
+        // modules before (compares against the clock sample and the site's memory; a computed site also hashes its paths).
         // import_modules: the reach the pass lets through - resolve, stat, parse and check every changed module before any
         // runs, run them in order; true = a module (re)ran. Throws what a load or a run raises.
         bool import_skips(const import_site& site) noexcept;
@@ -1162,6 +1167,8 @@ namespace jai {
         checked_result<bool> import_modules(import_site& site, const std::vector<std::string>& paths, bool force);
         // Filesystem queries the import step has made (resolution, stamps): the counter the throttle's tests read
         uint64_t import_stat_count() const noexcept;
+        // Writes of the engine's clock sample (host entries, budget-check samples, time:: reads of the system clock)
+        uint64_t clock_sample_count() const noexcept;
 
         // The catch variable's value, both backends at the catch: the error's message as a string (every string operation
         // reads it unchanged) that also answers e.message, e.file, e.line, e.column, e.stack (file:line per frame,

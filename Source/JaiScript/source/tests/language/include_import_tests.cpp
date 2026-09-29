@@ -1095,6 +1095,50 @@ public:
             for (const char* f : {"pp_one.jai", "pp_two.jai", "pp_nest.jai", "pp_late.jai"}) { cleanup_temp_file((dir / f).string()); }
         });
 
+        test("the_import_window_runs_on_the_engines_clock_sample", [=, this]() {
+            // the window compares the engine's clock sample (the host entry, the budget check's samples, a time:: read of the
+            // system clock), never the clock: an idle import reads no clock and queries no file, real time passing inside a run
+            // opens no pass until something samples, and a host time source moves neither the window nor the budget
+            const auto dir = jai::foundry::test_temp_directory();
+            { std::ofstream(dir / "cs_a.jai", std::ios::binary | std::ios::trunc) << "int CS_A = 1;\n"; }
+            std::string lines;
+            for (int i = 0; i < 40; ++i) { lines += "import \"cs_a.jai\";\n"; }
+            for (bool use_vm : {false, true}) {
+                for (bool host_clock : {false, true}) {
+                    auto eng = engine::make();
+                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                    jai::stdlib::register_all(*eng);
+                    eng->add_include_path(dir.string());
+                    auto fake = std::make_shared<std::chrono::nanoseconds>(std::chrono::seconds(100));
+                    if (host_clock) { eng->time_source([fake] { return *fake += std::chrono::seconds(1000); }, {}, {}); }
+                    engine* raw = eng.get();
+                    eng->add_function("stats", [raw]() { return static_cast<script_int>(raw->import_stat_count()); });
+                    eng->add_function("wait_ms", [](script_int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); });
+                    const std::string be = std::string(use_vm ? " (vm" : " (interpreter") + (host_clock ? ", host clock)" : ")");
+                    eng->import_recheck_interval(1.0e6);
+                    eng->execute("void poll() { import \"cs_a.jai\"; }\npoll();");
+                    eng->execute(lines);
+                    const uint64_t stats = eng->import_stat_count();
+                    const uint64_t before_empty = eng->clock_sample_count();
+                    eng->execute("0;");
+                    const uint64_t entry = eng->clock_sample_count() - before_empty;
+                    const uint64_t before_idle = eng->clock_sample_count();
+                    eng->execute(lines);
+                    check_eq(entry, eng->clock_sample_count() - before_idle, "40 idle imports read no clock beyond the host entry's" + be);
+                    check_eq(stats, eng->import_stat_count(), "and query no file" + be);
+                    eng->import_recheck_interval(0.001);
+                    check_eq(std::string(host_clock ? "1 0 0" : "1 0 1"), eng->execute(
+                        "int s0 = stats();\npoll();\nint s1 = stats();\nwait_ms(5);\npoll();\nint s2 = stats();\ntime::now();\npoll();\nint s3 = stats();\n"
+                        "to_string(s1 - s0) + \" \" + to_string(s2 - s1) + \" \" + to_string(s3 - s2);").to_string(),
+                        "the entry opens a pass; the frame coming around after the window opens none until a system-clock read samples" + be);
+                    eng->execution_budget(1.0);
+                    check_eq(std::string("5000"), eng->execute("int n = 0;\nfor (int i = 0; i < 5000; i++) { time::now(); n++; }\nn;").to_string(),
+                             "a host clock racing ahead never trips the budget" + be);
+                }
+            }
+            cleanup_temp_file((dir / "cs_a.jai").string());
+        });
+
         test("a_group_import_checks_every_changed_module_before_any_runs", [=, this]() {
             // import("a", "b", ...) / import(array): one throttle decision, every changed module parsed and checked (knowing each
             // other's names) before any runs, a failure anywhere is one error that applies nothing, the changes then wait until

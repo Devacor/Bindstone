@@ -198,13 +198,13 @@ namespace jai {
         void arm_execution_deadline() {
             budget_tick_ = 0;
             budget_active_ = execution_budget_.count() > 0;
-            const auto now = std::chrono::steady_clock::now();   // one read serves the deadline and the coarse clock
+            const auto now = std::chrono::steady_clock::now();   // one read serves the deadline and the engine's clock sample
             if (budget_active_) {
                 execution_deadline_ = now + execution_budget_;
             }
-            note_coarse_clock(now);
+            note_clock_sample(now);
         }
-        void note_coarse_clock(std::chrono::steady_clock::time_point now);
+        void note_clock_sample(std::chrono::steady_clock::time_point now);
 
 
         // Scope management for local variables
@@ -1102,9 +1102,9 @@ namespace jai {
             // An armed debug session suspends the wall-clock deadline (a paused script
             // must not be killed by the act of debugging); sync_debug_hook re-arms a
             // fresh deadline when the session ends.
-            if (!budget_active_ || debug_hook_) { return false; }
             const auto now = std::chrono::steady_clock::now();
-            limits_->coarse_now = now.time_since_epoch().count();
+            limits_->note_clock_sample(now);
+            if (!budget_active_ || debug_hook_) { return false; }
             if (now < execution_deadline_) { return false; }
             // Budget overruns are TERMINAL: no script catch may swallow a timeout
             limits_->terminal_error = true;

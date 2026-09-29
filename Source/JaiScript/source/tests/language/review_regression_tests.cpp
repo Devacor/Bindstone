@@ -4605,6 +4605,32 @@ public:
             check_eq(expected, v_out, std::string(what) + " (vm)");
         };
 
+		test("a_compound_target_cannot_change_the_rhs_value_already_read", [this]() {
+			const std::pair<const char*, script_int> rows[] = { {"+=", 13}, {"-=", 7}, {"*=", 30}, {"/=", 3}, {"%=", 1} };
+			for (bool vm : {false, true}) {
+				for (bool proofs : {true, false}) {
+					for (bool passes : {true, false}) {
+						for (const auto& [op, result] : rows) {
+							for (bool member : {false, true}) {
+								auto e = jai::engine::make();
+								if (vm) { e->set_backend(jai::backend_type::vm); }
+								e->type_proofs(proofs);
+								e->ir_passes(passes);
+								const std::string setup = member ? "class Box { int n = 10; } function f() -> int { array<Box> a = [Box()]; "
+								                                 : "function f() -> int { array<int> a = [10]; ";
+								const std::string field = member ? ".n" : "";
+								const std::string src = setup + "int v = 3; a[(v = 8) - 8]" + field + " " + op
+									+ " v; return a[0]" + field + " * 100 + v; } f();";
+								check_eq(result * 100 + 8, e->execute(src).as_int(),
+									std::string(member ? "member " : "element ") + op + (vm ? " VM" : " interpreter")
+									+ (proofs ? "" : " proofs off") + (passes ? "" : " passes off"));
+							}
+						}
+					}
+				}
+			}
+		});
+
         test("compound_reads_its_target_after_a_mutating_right_side", [expect]() {
             // a by-reference argument boxes the target into a cell while the right side runs; a compound reads its
             // target after the right side (the right operand before the left, C++17's order), so the callee's write is
@@ -5093,6 +5119,32 @@ public:
             expect("var GX = 3; function g(int i) -> int { return i & 1; } function add2(int a, int b) -> int { return a + b; }"
                    " function run() -> int { int acc = 0; for (int i = 0; i < 2; ++i) { acc = acc + add2(GX, g(i)); } return acc; } to_string(run())", "7", "a scalar parameter ahead of the call");
         });
+
+		test("a_graft_cannot_run_before_an_earlier_aggregate_argument_is_captured", [expect]() {
+			const std::string array =
+				"function read(array<int> a, int ignored) -> int { return a[0]; } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } ";
+			expect(array + "function run() -> int { array<int> a = [1]; return read(a, change(a)); } run();", "1",
+				"a private array copied before an inlined element write");
+			expect(array + "class Reader { int got = 0; Reader(array<int> a, int ignored) { got = a[0]; } } "
+				"function run() -> int { array<int> a = [1]; Reader r = Reader(a, change(a)); return r.got; } run();", "1",
+				"a constructor argument copied before an inlined element write");
+			expect("function read(map<int, int> a, int ignored) -> int { return a[0]; } "
+				"function change(map<int, int>& a) -> int { a[0] = 9; return 0; } "
+				"function run() -> int { map<int, int> a = {0: 1}; return read(a, change(a)); } run();", "1",
+				"a private map copied before an inlined entry write");
+			expect("class Box { int n = 1; } function read(Box a, int ignored) -> int { return a.n; } "
+				"function change(Box& a) -> int { a.n = 9; return 0; } "
+				"function run() -> int { Box a; return read(a, change(a)); } run();", "1",
+				"a private instance copied before an inlined field write");
+			expect("function read(array<int>& a, int ignored) -> int { return a[0]; } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } "
+				"function run() -> int { array<int> a = [1]; return read(a, change(a)); } run();", "9",
+				"a reference argument still sees the later write");
+			expect(array + "function run() -> int { array<int> a = [1]; int total = 0; "
+				"for (int i = 0; i < 3; ++i) { a[0] = i + 1; total += read(a, change(a)); } return total; } run();", "6",
+				"aggregate snapshots inside a loop");
+		});
 
         test("a_binding_conversion_runs_after_every_argument_is_taken", [expect]() {
             expect("var GK = [1, 2, 3]; class Conv { var v = 0; Conv(int x) { v = x; GK[1] = 900; } } function takes(Conv c, b) { return c.v + b; } to_string(takes(5, GK[1]))", "7", "a converting constructor");

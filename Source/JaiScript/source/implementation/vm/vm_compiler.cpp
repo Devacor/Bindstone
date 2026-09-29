@@ -5670,14 +5670,10 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	return true;
 }
 
-// A compound's right-hand side that can neither raise nor write: evaluating it before or after the target observes the same
+// Only a literal can move past an arbitrary target without an effect proof. A local read may observe a write performed by
+// the target's receiver, index or getter, even though the read itself cannot raise or write.
 bool vm_compiler::compound_rhs_inert(const expression* e) {
-	if (e->get_type() == node_type::literal_expr) { return true; }
-	if (e->get_type() == node_type::identifier_expr) {
-		const auto* id = static_cast<const identifier_expr*>(e);
-		return id->slot_index != SIZE_MAX && id->names_value_decl && !id->global_qualified;
-	}
-	return false;
+	return e->get_type() == node_type::literal_expr;
 }
 
 void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement) {
@@ -5781,8 +5777,8 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				else { compile_expression(member->object); emit(opcode::op_set_member, add_node(member), expr->static_store_proof); }
 			}
 		} else {
-			// C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27); a right side that can
-			// neither raise nor write (a literal, a value local) keeps the target-first shape, which observes the same
+			// C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27); a literal right side
+			// keeps the target-first shape, which observes the same
 			const bool value_first = !compound_rhs_inert(expr->value.get());
 			if (value_first) { compile_expression(expr->value); }
 			if (member->is_static) {

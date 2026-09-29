@@ -278,8 +278,9 @@ Every target follows the same order (2026-09-27): `obj.f op= e`, `this.f op= e`,
 `a[j] op= e` and `a[j] = e` evaluate `e` first, then the receiver, container and index, then the read (a user
 getter included), the arithmetic and the store, so an error in `e` comes before any error the target raises.
 The VM emits the value first and the executor rotates the operands into its own order
-(`compound_flag_value_first`); a right side that cannot observe or change anything (a literal, a slot local's
-value) keeps the target-first emission.
+(`compound_flag_value_first`); a literal right side keeps the target-first emission.
+A local read stays before the target: evaluating a receiver, index or getter can write that local, even though reading it
+cannot itself raise or write.
 So with `mutate(int& v) { v = 20; return 2; }`, `x + mutate(x)` and `x = x + mutate(x)` are 5 and `x += mutate(x)`
 is 22. The rule for an implementation: never carry a C++ reference to a slot's current representation across an
 evaluation that can run user code, because a by-reference argument boxes the variable into a cell in place and
@@ -312,7 +313,7 @@ box), so the value is taken explicitly, and only where a later argument may run 
   resume.
 - A VM graft rewrites the operands ahead of the grafted call into compiler temps (`plan_hoist`), and a temp holds a
   name's value only as a scalar: a name that an outer call's parameter copies or binds by reference (anything but a
-  proven by-value int, float or bool parameter, or a `math::` intrinsic operand) refuses the graft, so that call keeps
+  proven by-value int, float or bool parameter, or a `math::` intrinsic operand) refuses the graft even for a private local naming mutable aggregate storage, so that call keeps
   its capture and its reference binding on both paths (the graft and the guard's fallback).
 
 A new call form must stamp its arguments and capture on both backends; an operand held across a later operand's

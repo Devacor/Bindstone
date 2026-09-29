@@ -4414,6 +4414,11 @@ static bool primitive_declared_type(const type_info* t) {
 // a frame slot no user code can rebind: a value declaration (not a reference) that no reference or capture reaches; it may
 // stay an in-op operand ahead of any hoisted read (design_row118 section 3: an operand resolved inside its operation only
 // when nothing evaluated after it in the source can run user code)
+// a graft's result or a spilled operand standing in a statement's clone: a value, never an lvalue a reference parameter binds
+bool vm_compiler::graft_value(const expression* e) const {
+	return inline_symbol_ != 0 && e && e->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(e)->symbol_id == inline_symbol_;
+}
+
 bool vm_compiler::private_local(const expression* e) {
 	if (!e || e->get_type() != node_type::identifier_expr) return false;
 	auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
@@ -4710,7 +4715,7 @@ void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand&
 		call_site site;
 		site.call_node = add_node(e);
 		site.callee = make_fused_operand(call->callee);
-		if (arg->get_type() == node_type::identifier_expr) {
+		if (arg->get_type() == node_type::identifier_expr && !graft_value(arg.get())) {
 			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 			site.arg_symbols.push_back(arg_ident->symbol_id);
 			site.arg_slots.push_back(identifier_slot_operand(arg_ident));
@@ -6025,7 +6030,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 			for (size_t k = 0; k < expr->arguments.size(); ++k) {
 				const auto& arg = expr->arguments[k];
-				if (arg->get_type() == node_type::identifier_expr) {
+				if (arg->get_type() == node_type::identifier_expr && !graft_value(arg.get())) {
 					auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 					site.arg_symbols.push_back(arg_ident->symbol_id);
 					site.arg_slots.push_back(identifier_slot_operand(arg_ident));
@@ -6136,7 +6141,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 	for (size_t k = 0; k < expr->arguments.size(); ++k) {
 		const auto& arg = expr->arguments[k];
-		if (arg->get_type() == node_type::identifier_expr) {
+		if (arg->get_type() == node_type::identifier_expr && !graft_value(arg.get())) {
 			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
 			site.arg_symbols.push_back(arg_ident->symbol_id);
 			site.arg_slots.push_back(identifier_slot_operand(arg_ident));

@@ -5534,6 +5534,37 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(want, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a reference parameter bound to an element grafts only where its bind cannot fail (an element of a private local declared an array);
+		// any other element keeps the call, so a failing bind raises the call's text in the call's place, after every argument: a string's
+		// character, a missing map key, a var holding a string, and a computed property through a typed reference. A leaf grafted inside
+		// the arguments of a call that may bind by reference leaves the call its arguments: an element before it is not spilled as a copy
+		// (the stores reach the array) and its own result is not a temp the reference binds (the non-lvalue raises)
+		test("a_reference_bind_that_may_fail_keeps_the_call", [this]() {
+			const std::string bad = "[[warn_mode]]\nint G = 0;\n"
+				"class Acc { float hidden = 1.0; float _get_x() { return hidden * 2.0; } void _set_x(float v) { hidden = v; } }\n"
+				"function setv(var& a, float d) -> void { a = d; }\n"
+				"function bumpf(float& a, float d) -> void { a = a + d; }\n"
+				"function mark(int i) -> float { G = G + 1; return 0.5; }\n"
+				"function r1() -> string { try { string s = \"ab\"; for (int i = 0; i < 2; ++i) { setv(s[i], mark(i)); } return s; } catch (e) { return \"E1:\" + e; } }\n"
+				"function r2() -> string { try { map<string, int> m = {\"k\": 1}; for (int i = 0; i < 2; ++i) { setv(m[\"z\"], mark(i)); } return to_json(m); } catch (e) { return \"E2:\" + e; } }\n"
+				"function r3() -> string { try { Acc q = Acc(); for (int i = 0; i < 2; ++i) { bumpf(q.x, mark(i)); } return to_string(q.hidden); } catch (e) { return \"E3:\" + e; } }\n"
+				"function r4() -> string { try { var V = \"xy\"; for (int i = 0; i < 2; ++i) { setv(V[i], mark(i)); } return to_json(V); } catch (e) { return \"E4:\" + e; } }\n"
+				"r1() + \" | \" + r2() + \" | \" + r3() + \" | \" + r4() + \" | \" + to_string(G);";
+			const std::string bad_want = "E1:Cannot pass non-lvalue to reference parameter | E2:Cannot pass non-lvalue to reference parameter | "
+				"E3:Cannot pass non-lvalue to reference parameter | E4:Cannot pass non-lvalue to reference parameter | 4";
+			both(bad, bad_want, "binds that fail");
+			both(bad, bad_want, "binds that fail, proofs off", false);
+			const std::string args = "[[warn_mode]]\n"
+				"function setw(var& a, float d) -> void { for (int q = 0; q < 1; ++q) { if (q > 5) { return; } } a = d; }\n"
+				"function setr(var& a) -> void { for (int q = 0; q < 1; ++q) { if (q > 5) { return; } } a = 9; }\n"
+				"function pure(int i) -> float { return 0.5 + i; }\n"
+				"function run(int n) -> string { array<float> A = [0.0, 0.0]; var V = [0, 0]; for (int i = 0; i < n; ++i) { setw(A[i & 1], pure(i)); setw(V[i & 1], pure(i)); } return to_json(A) + to_json(V); }\n"
+				"function run2(int n) -> string { try { for (int i = 0; i < n; ++i) { setr(pure(i)); } return \"no error\"; } catch (e) { return \"E:\" + e; } }\n"
+				"run(3) + \" \" + run2(2);";
+			const std::string args_want = "[2.5,1.5][2.5,1.5] E:Cannot pass non-lvalue to reference parameter";
+			both(args, args_want, "leaves in the arguments of a reference callee");
+			both(args, args_want, "leaves in the arguments of a reference callee, proofs off", false);
+		});
 		// a miss inside a block's inner loop resumes with what the general form reads next: an inner counted loop's compare back to its body
 		// resumes at the generic path's loop back (the var already stepped, never stepped twice), and a compiler value live where the inner
 		// loop's body begins (a graft's parameter over the graft's own loop) is flushed anywhere in that loop, since its back edge reads it again

@@ -19,8 +19,8 @@ dasProfile's: a sample is one process that runs the kernel as many times as fit 
 call calibrates, each batch regrows the count 1.2x the projection, at most 100x) and reports the
 per-run time of the batch that met the budget. A cell is the median of five samples. Samples are
 interleaved round robin across implementations, and the shared timing lock is held per kernel.
-JaiScript times with the runner's `clock_ms()` (1 ms resolution over a >= 500 ms batch); Lua with a
-QueryPerformanceCounter clock (`profile_native.clock`), LuaJIT with the same through FFI.
+JaiScript times each batch with a `time::stopwatch` (the engine's steady clock, in ms over a >= 500 ms
+batch); Lua with a QueryPerformanceCounter clock (`profile_native.clock`), LuaJIT with the same through FFI.
 
 ## Algorithms
 

@@ -31,7 +31,7 @@ function pump_both(int times) -> void {
 	for (int i = 0; i < times; ++i) {
 		srv.pump();
 		cli.pump();
-		sleep_ms(5);
+		time::sleep_ms(5);
 	}
 }
 
@@ -72,7 +72,7 @@ function main() -> int {
 	lost.on_disconnect.connect("down", [](var reason) { LOSTMSG = reason; });
 	lost.connect("127.0.0.1", 28667);
 	// windows loopback refusal takes ~2.1s of SYN retries before the stack gives up
-	for (int i = 0; i < 700 && LOSTMSG == "" && lost.status() == "connecting"; ++i) { lost.pump(); sleep_ms(5); }
+	for (int i = 0; i < 700 && LOSTMSG == "" && lost.status() == "connecting"; ++i) { lost.pump(); time::sleep_ms(5); }
 	check(LOSTMSG != "" || lost.status() != "connecting", `dead-port connect resolves (${lost.status()})`);
 
 	net_server_section();
@@ -119,7 +119,7 @@ function net_server_section() -> void {
 	for (int i = 0; i < 200 && host.client_count() < 4; ++i) {
 		host.pump();
 		for (int p3 = 0; p3 < 4; ++p3) { peers[p3].pump(); }
-		sleep_ms(5);
+		time::sleep_ms(5);
 	}
 	check(host.client_count() == 4, `4 clients connected (${host.client_count()})`);
 	check(SRV2_JOINS.size() == 4 && SRV2_JOINS[0] == 1 && SRV2_JOINS[3] == 4, "ids assigned 1..4 in join order");
@@ -129,7 +129,7 @@ function net_server_section() -> void {
 	for (int i2 = 0; i2 < 20; ++i2) {
 		host.pump();
 		for (int p4 = 0; p4 < 4; ++p4) { peers[p4].pump(); }
-		sleep_ms(5);
+		time::sleep_ms(5);
 	}
 	check(PEER_B.size() == 1 && PEER_B[0] == "only-two", "send(id) reached client 2");
 	check(PEER_A.size() == 0 && PEER_C.size() == 0 && PEER_D.size() == 0, "send(id) reached ONLY client 2");
@@ -141,7 +141,7 @@ function net_server_section() -> void {
 	for (int i3 = 0; i3 < 20; ++i3) {
 		host.pump();
 		for (int p5 = 0; p5 < 4; ++p5) { peers[p5].pump(); }
-		sleep_ms(5);
+		time::sleep_ms(5);
 	}
 	check(PEER_A.has("all-hands") && PEER_B.has("all-hands") && PEER_C.has("all-hands")
 		&& PEER_D.has("all-hands"), "broadcast reached all 4");
@@ -155,7 +155,7 @@ function net_server_section() -> void {
 	for (int i4 = 0; i4 < 40; ++i4) {
 		host.pump();
 		for (int p7 = 0; p7 < 4; ++p7) { peers[p7].pump(); }
-		sleep_ms(5);
+		time::sleep_ms(5);
 	}
 	check(SRV2_DROPS.size() == 1 && SRV2_DROPS[0] == "2:kicked", `kick(2) dropped exactly client 2 (${SRV2_DROPS.size()})`);
 	check(host.client_count() == 3, `count after kick (${host.client_count()})`);
@@ -163,7 +163,7 @@ function net_server_section() -> void {
 	for (int i5 = 0; i5 < 20; ++i5) {
 		host.pump();
 		peers[3].pump();
-		sleep_ms(5);
+		time::sleep_ms(5);
 	}
 	check(SRV2_GOT.has("4:still-alive"), "survivors keep talking after a kick");
 
@@ -172,7 +172,7 @@ function net_server_section() -> void {
 	peers[0].close();
 	for (int i6 = 0; i6 < 40; ++i6) {
 		host.pump();
-		sleep_ms(5);
+		time::sleep_ms(5);
 	}
 	check(SRV2_GOT.has("1:last-words"), "frames sent with the close still delivered");
 	check(SRV2_DROPS.has("1:closed by peer"), "then the disconnect fired");

@@ -4,13 +4,14 @@ float PROFILE_BUDGET_MS = 500.0;
 
 function profile_it(string name, function fn) -> float {
 	int n = 1;
-	int total = 0;
+	float total = 0.0;
+	time::stopwatch batch;
 	while (true) {
-		int start = clock_ms();
+		batch.start();
 		for (int i = 0; i < n; ++i) { fn(); }
-		total = clock_ms() - start;
+		total = batch.elapsed() * 1000.0;
 		if (total >= PROFILE_BUDGET_MS || n >= 1000000000) { break; }
-		float per = max(cast<float>(total) / n, 0.000001);
+		float per = max(total / n, 0.000001);
 		int next = cast<int>(PROFILE_BUDGET_MS / per * 1.2);
 		next = min(next, 100 * n);
 		next = max(next, n + 1);

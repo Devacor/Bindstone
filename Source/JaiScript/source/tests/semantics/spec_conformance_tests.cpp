@@ -2185,6 +2185,21 @@ private:
 		ruling_constructorless_call_text();
 		ruling_typed_reference_parameters();
 		static_members_bind_references();
+		ruling_reference_store_types();
+	}
+
+	void ruling_reference_store_types() {
+		test("a_store_through_a_reference_obeys_the_variables_declared_type", [this]() {
+			expect("ref store", R"(
+				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function set37(int& a) { a = 3.7; }
+				t([]() { int x = 1; var& r = x; var s = "s"; r = s; return type_of(x); }) + "|" +
+				t([]() { int x = 1; var& r = x; r = 2.9; return type_of(x) + ":" + x; }) + "|" +
+				t([]() { string x = "a"; var& r = x; r = 5; return type_of(x) + ":" + x; }) + "|" +
+				t([]() { var x = 1; var& r = x; r = "free"; return type_of(x); }) + "|" +
+				t([]() { int u = 1; set37(u); return type_of(u) + ":" + u; });
+			)", "Cannot assign string to a variable declared int|int:2|string:5|string|int:3", check_mode::warn);
+		});
 	}
 
 	void static_members_bind_references() {

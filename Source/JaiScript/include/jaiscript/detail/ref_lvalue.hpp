@@ -685,8 +685,9 @@ namespace jai::detail {
 		}
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
-		if (!is_field && target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) {
-			return convert_container_element(eng, actual_element, element_type);   // the direct store's copy and class tag
+		if (!is_field && ((target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) ||
+		                  element_type->is_byte_element())) {
+			return convert_container_element(eng, actual_element, element_type);   // the direct store's copy and class tag, the byte range
 		}
 		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
 			auto converted = checked_float_to_integer(actual_element.unchecked_as_float());   // the scalar slot's kernel

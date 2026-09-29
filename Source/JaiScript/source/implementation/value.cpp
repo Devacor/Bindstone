@@ -330,7 +330,10 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     script_array::kind_t node_kind = script_array::kind_t::hetero;
     if (element_type) {
         switch (element_type->base_type) {
-            case script_value_type::jai_int_type: node_kind = script_array::kind_t::i64; break;
+            case script_value_type::jai_int_type:
+                node_kind = !element_type->is_byte_element() ? script_array::kind_t::i64
+                          : element_type->is_signed ? script_array::kind_t::i8 : script_array::kind_t::u8;
+                break;
             case script_value_type::jai_float_type: node_kind = script_array::kind_t::f64; break;
             case script_value_type::jai_bool_type: node_kind = script_array::kind_t::b8; break;
             case script_value_type::jai_char_type: node_kind = script_array::kind_t::c8; break;
@@ -541,7 +544,9 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
     type_info_ptr referent_tag;
     if (container->is_typed()) {
         switch (container->kind()) {
-            case script_array::kind_t::i64: referent_tag = eng->get_type_info_int(); break;
+            case script_array::kind_t::i64:
+            case script_array::kind_t::u8:
+            case script_array::kind_t::i8: referent_tag = eng->get_type_info_int(); break;
             case script_array::kind_t::f64: referent_tag = eng->get_type_info_float(); break;
             case script_array::kind_t::b8: referent_tag = eng->get_type_info_bool(); break;
             case script_array::kind_t::c8: referent_tag = eng->get_type_info_char(); break;

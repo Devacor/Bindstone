@@ -6380,6 +6380,20 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 			// NUMERIC raw store: an int/float buffer takes a numeric rhs with no script_value
 			// element traffic; every other shape (non-numeric rhs, byte/string kinds) takes
 			// the enforcing path for the exact mismatch error
+			if (storage && detail::byte_kind(storage->kind()) && index >= 0 && index < static_cast<script_int>(storage->size())) {
+				const script_value& rhs_peek = stack_[stack_.size() - 3].deref();
+				if (rhs_peek.raw_storage_index() == script_value::TYPEID_INT &&
+				    detail::byte_element_fits(storage->kind() == script_array::kind_t::i8, rhs_peek.unchecked_as_int())) {
+					stack_.pop_back();   // index (decoded above)
+					script_value container_local = std::move(stack_.back());
+					stack_.pop_back();
+					script_value value = std::move(stack_.back());
+					stack_.pop_back();
+					storage->bytes()[static_cast<size_t>(index)] = static_cast<uint8_t>(value.deref().unchecked_as_int());
+					stack_.push_back(assignment_result_used(f) ? storage->get(static_cast<size_t>(index), engine_) : std::move(value));
+					return {};
+				}
+			}
 			if (storage && (storage->kind() == script_array::kind_t::i64 || storage->kind() == script_array::kind_t::f64) &&
 			    index >= 0 && index < static_cast<script_int>(storage->size())) {
 				const script_value& rhs_peek = stack_[stack_.size() - 3].deref();
@@ -6936,6 +6950,8 @@ const script_array* vm_backend::lane_element_source(const script_value& v, bool&
 bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expect, type_info* stamp, const script_array& node, size_t at, bool borrowed) {
 	switch (node.kind()) {
 	case script_array::kind_t::i64: return typed_decl_land_int(f, dslot, expect, stamp, node.ints()[at]);
+	case script_array::kind_t::u8: return typed_decl_land_int(f, dslot, expect, stamp, static_cast<script_int>(node.bytes()[at]));
+	case script_array::kind_t::i8: return typed_decl_land_int(f, dslot, expect, stamp, static_cast<script_int>(static_cast<int8_t>(node.bytes()[at])));
 	case script_array::kind_t::f64: return typed_decl_land_float(f, dslot, expect, stamp, node.floats()[at]);
 	case script_array::kind_t::str: {
 		if (borrowed) return false;   // the kernel copies the bytes of a captured string
@@ -7016,7 +7032,9 @@ JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction&
 // when the temp already holds that kind); the raw buffers say their kind, a var element says its own
 type_info* vm_backend::temp_stamp_for(const script_array& node, size_t at) const {
 	switch (node.kind()) {
-	case script_array::kind_t::i64: return ti_int_;
+	case script_array::kind_t::i64:
+	case script_array::kind_t::u8:
+	case script_array::kind_t::i8: return ti_int_;
 	case script_array::kind_t::f64: return ti_float_;
 	case script_array::kind_t::hetero: {
 		const size_t ei = node.values()[at].raw_storage_index();
@@ -8886,6 +8904,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 		const size_t at = static_cast<size_t>(index);
 		switch (src->kind()) {
 		case script_array::kind_t::i64: form = src_form::raw_int; raw_int = static_cast<script_int>(src->ints()[at]); break;
+		case script_array::kind_t::u8: form = src_form::raw_int; raw_int = static_cast<script_int>(src->bytes()[at]); break;
+		case script_array::kind_t::i8: form = src_form::raw_int; raw_int = static_cast<script_int>(static_cast<int8_t>(src->bytes()[at])); break;
 		case script_array::kind_t::f64: form = src_form::raw_float; raw_float = src->floats()[at]; break;
 		case script_array::kind_t::str: form = src_form::raw_str; raw_str = &src->strs()[at]; break;
 		case script_array::kind_t::hetero:
@@ -8938,6 +8958,12 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 			if (vi != script_value::TYPEID_STRING || !limits_->memory_charge(sizeof(script_value) + v.unchecked_as_string().size())) return miss();
 			node->strs().push_back(v.unchecked_string_handle());
 			break;
+		case script_array::kind_t::u8:
+		case script_array::kind_t::i8:
+			if (vi != script_value::TYPEID_INT || !detail::byte_element_fits(node->kind() == script_array::kind_t::i8, v.unchecked_as_int()) ||
+			    !limits_->memory_charge(sizeof(script_value))) return miss();
+			node->bytes().push_back(static_cast<uint8_t>(v.unchecked_as_int()));
+			break;
 		default:
 			return miss();
 		}
@@ -8960,6 +8986,12 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 		++profile_cells_push_[1];
 #endif
 		node->floats().push_back(form == src_form::raw_float ? raw_float : static_cast<script_float>(raw_int));
+		break;
+	case script_array::kind_t::u8:
+	case script_array::kind_t::i8:
+		if (form != src_form::raw_int || !detail::byte_element_fits(node->kind() == script_array::kind_t::i8, raw_int) ||
+		    !limits_->memory_charge(sizeof(script_value))) return miss();
+		node->bytes().push_back(static_cast<uint8_t>(raw_int));
 		break;
 	case script_array::kind_t::str:
 		if (form != src_form::raw_str || !raw_str->get() || !limits_->memory_charge(sizeof(script_value) + raw_str->get()->size())) return miss();
@@ -9254,7 +9286,9 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 	if (expect == 0xFF) {
 		// an unclassed temp lands the element's own kind; its consumers check the kind as they do for every cell
 		switch (node->kind()) {
-		case script_array::kind_t::i64: expect = static_cast<uint8_t>(script_value::TYPEID_INT); break;
+		case script_array::kind_t::i64:
+		case script_array::kind_t::u8:
+		case script_array::kind_t::i8: expect = static_cast<uint8_t>(script_value::TYPEID_INT); break;
 		case script_array::kind_t::f64: expect = static_cast<uint8_t>(script_value::TYPEID_FLOAT); break;
 		case script_array::kind_t::str: if (!loop.cells[ins.a].string_borrow) return miss(); expect = static_cast<uint8_t>(script_value::TYPEID_STRING); break;
 		case script_array::kind_t::hetero: {
@@ -9272,6 +9306,14 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 		else if (site.cont_slot == chunk::k_iter_container) { return miss(); }   // a range-for variable binds the element as it is
 		else { bits = cell_bits_of_float(static_cast<script_float>(node->ints()[at])); }   // the decl's int -> float row
 		break;
+	case script_array::kind_t::u8:
+	case script_array::kind_t::i8: {
+		const script_int b = node->kind() == script_array::kind_t::u8 ? static_cast<script_int>(node->bytes()[at]) : static_cast<script_int>(static_cast<int8_t>(node->bytes()[at]));
+		if (expect == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = b; }
+		else if (site.cont_slot == chunk::k_iter_container) { return miss(); }
+		else { bits = cell_bits_of_float(static_cast<script_float>(b)); }
+		break;
+	}
 	case script_array::kind_t::f64:
 		if (expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();   // float -> int is the checked kernel's, not a raw landing
 		bits = cell_bits_of_float(node->floats()[at]);
@@ -9404,6 +9446,12 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 		break;
 	case script_array::kind_t::f64:
 		node->floats()[at] = vkind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<script_float>(static_cast<script_int>(vbits)) : cell_float_of_bits(vbits);
+		break;
+	case script_array::kind_t::u8:
+	case script_array::kind_t::i8:
+		// a float or an out-of-range int takes the general store's conversion and range verdict
+		if (vkind != static_cast<uint8_t>(script_value::TYPEID_INT) || !detail::byte_element_fits(node->kind() == script_array::kind_t::i8, static_cast<script_int>(vbits))) return miss();
+		node->bytes()[at] = static_cast<uint8_t>(vbits);
 		break;
 	case script_array::kind_t::hetero: {   // a typed var array was refused at entry
 		script_value& target = node->values()[at];
@@ -9814,6 +9862,12 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 	case script_array::kind_t::f64:
 		node->floats()[at] = vi == script_value::TYPEID_INT ? static_cast<script_float>(v.unchecked_as_int()) : v.unchecked_as_float();
 		break;
+	case script_array::kind_t::u8:
+	case script_array::kind_t::i8:
+		// a float or an out-of-range int runs the kernel's conversion and range text
+		if (vi != script_value::TYPEID_INT || !detail::byte_element_fits(node->kind() == script_array::kind_t::i8, v.unchecked_as_int())) return false;
+		node->bytes()[at] = static_cast<uint8_t>(v.unchecked_as_int());
+		break;
 	case script_array::kind_t::hetero: {
 		// the kernel's plain-scalar in-place row: no element type, same storage kind
 		const type_info* ti = cp->get_type_info().get();
@@ -10201,6 +10255,21 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 		// the buffer with set()'s exact casts — no handle copy, no value copy (the raw
 		// node stands in for the strong_ptr because no user code runs here); non-numeric
 		// rhs replays for the exact mismatch error.
+		if (node && detail::byte_kind(node->kind()) && index >= 0 && index < static_cast<script_int>(node->size())) {
+			const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
+			if (rhs_peek.raw_storage_index() == script_value::TYPEID_INT &&
+			    detail::byte_element_fits(node->kind() == script_array::kind_t::i8, rhs_peek.unchecked_as_int())) {
+				node->bytes()[static_cast<size_t>(index)] = static_cast<uint8_t>(rhs_peek.unchecked_as_int());
+				if (value_operand) {
+					if (!no_result) { stack_.push_back(assignment_result_used(f) ? node->get(static_cast<size_t>(index), engine_) : *value_ptr); }
+				} else {
+					script_value value = std::move(stack_.back());
+					stack_.pop_back();
+					if (!no_result) { stack_.push_back(assignment_result_used(f) ? node->get(static_cast<size_t>(index), engine_) : std::move(value)); }
+				}
+				return {};
+			}
+		}
 		if (node && (node->kind() == script_array::kind_t::i64 || node->kind() == script_array::kind_t::f64) &&
 		    index >= 0 && index < static_cast<script_int>(node->size())) {
 			const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
@@ -13737,6 +13806,12 @@ vm_backend::push_append vm_backend::typed_push_append(const script_value& objd, 
 		if (vi != script_value::TYPEID_STRING) return push_append::declined;
 		if (!charge(sizeof(script_value) + pv.unchecked_as_string().size())) [[unlikely]] { (void)raise_from(detail::raise_memory_cap(*limits_)); return push_append::failed; }
 		node->strs().push_back(pv.unchecked_string_handle());
+		return push_append::appended;
+	case script_array::kind_t::u8:
+	case script_array::kind_t::i8:
+		if (vi != script_value::TYPEID_INT || !detail::byte_element_fits(node->kind() == script_array::kind_t::i8, pv.unchecked_as_int())) return push_append::declined;
+		if (!charge(sizeof(script_value))) [[unlikely]] { (void)raise_from(detail::raise_memory_cap(*limits_)); return push_append::failed; }
+		node->bytes().push_back(static_cast<uint8_t>(pv.unchecked_as_int()));
 		return push_append::appended;
 	default:
 		return push_append::declined;

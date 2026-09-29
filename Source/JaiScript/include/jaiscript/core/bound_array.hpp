@@ -5,6 +5,7 @@
 
 #include "value.hpp"
 #include "types.hpp"
+#include <jaiscript/detail/numeric_conversion.hpp>
 #include <memory>
 #include <iterator>
 #include <algorithm>
@@ -64,6 +65,30 @@ private:
         }
     }
 
+    // A byte buffer (array<uint8> / array<int8>) takes an int inside its kind's range, the script store's rule
+    static script_value fit_node(const script_array& n, script_value v) {
+        if (n.kind() != script_array::kind_t::u8 && n.kind() != script_array::kind_t::i8) { return v; }
+        const bool is_signed = n.kind() == script_array::kind_t::i8;
+        script_int x = 0;
+        if (v.is_int()) {
+            x = v.unchecked_as_int();
+        } else if (v.is_float()) {
+            auto converted = detail::checked_float_to_integer(v.unchecked_as_float());
+            if (!converted) { throw runtime_error(std::string(detail::float_to_integer_error)); }
+            x = converted.value();
+        } else if (v.is_bool()) {
+            x = v.unchecked_as_bool() ? 1 : 0;
+        } else if (v.is_char()) {
+            x = static_cast<script_int>(static_cast<unsigned char>(v.unchecked_as_char()));
+        } else {
+            throw runtime_error(std::string("Cannot store a non-number in array<") + (is_signed ? "int8>" : "uint8>"));
+        }
+        if (is_signed ? (x < -128 || x > 127) : (x < 0 || x > 255)) {
+            throw runtime_error("Cannot store " + std::to_string(x) + (is_signed ? " in array<int8> (-128..127)" : " in array<uint8> (0..255)"));
+        }
+        return script_value(x, v.get_engine());
+    }
+
 public:
     static script_value make_script_value(const T& value, engine* eng) {
         if constexpr (std::is_same_v<T, int>) {
@@ -78,6 +103,8 @@ public:
             return script_value(value, eng);
         } else if constexpr (std::is_same_v<T, char>) {
             return script_value(value, eng);
+        } else if constexpr (std::is_integral_v<T>) {
+            return script_value(static_cast<script_int>(value), eng);
         } else if constexpr (std::is_same_v<T, std::string>) {
             return script_value(value, eng);
         } else if constexpr (std::is_same_v<T, script_value>) {
@@ -269,13 +296,13 @@ public:
     void push_back(const T& value) {
         script_array* n = node();
         if (!n) throw runtime_error("Cannot push_back to null bound_array");
-        n->push(make_script_value(value, get_engine()));
+        n->push(fit_node(*n, make_script_value(value, get_engine())));
     }
 
     void push_back(T&& value) {
         script_array* n = node();
         if (!n) throw runtime_error("Cannot push_back to null bound_array");
-        n->push(make_script_value(std::forward<T>(value), get_engine()));
+        n->push(fit_node(*n, make_script_value(std::forward<T>(value), get_engine())));
     }
 
     void pop_back() {
@@ -290,7 +317,7 @@ public:
         if (!n) throw runtime_error("Cannot resize null bound_array");
         if (count > n->size()) {
             while (n->size() < count) {
-                n->push(make_script_value(T{}, get_engine()));
+                n->push(fit_node(*n, make_script_value(T{}, get_engine())));
             }
         } else {
             n->truncate(count);
@@ -301,8 +328,9 @@ public:
         script_array* n = node();
         if (!n) throw runtime_error("Cannot resize null bound_array");
         if (count > n->size()) {
+            const script_value fitted = fit_node(*n, make_script_value(value, get_engine()));
             while (n->size() < count) {
-                n->push(make_script_value(value, get_engine()));
+                n->push(fitted);
             }
         } else {
             n->truncate(count);
@@ -370,24 +398,24 @@ public:
               nested_wrapper_storage_(std::move(other.nested_wrapper_storage_)) {}
 
         element_proxy& operator=(const T& value) {
-            node_.set(idx_, bound_array::make_script_value(value, engine_ref_));
+            node_.set(idx_, bound_array::fit_node(node_, bound_array::make_script_value(value, engine_ref_)));
             return *this;
         }
 
         element_proxy& operator=(T&& value) {
-            node_.set(idx_, bound_array::make_script_value(std::forward<T>(value), engine_ref_));
+            node_.set(idx_, bound_array::fit_node(node_, bound_array::make_script_value(std::forward<T>(value), engine_ref_)));
             return *this;
         }
 
         // Copy assignment from other element_proxy
         element_proxy& operator=(const element_proxy& other) {
-            node_.set(idx_, bound_array::make_script_value(other.get(), engine_ref_));
+            node_.set(idx_, bound_array::fit_node(node_, bound_array::make_script_value(other.get(), engine_ref_)));
             return *this;
         }
 
         // Move assignment from other element_proxy: the element value moves node to node
         element_proxy& operator=(element_proxy&& other) {
-            node_.set(idx_, other.node_.get(other.idx_, other.engine_ref_));
+            node_.set(idx_, bound_array::fit_node(node_, other.node_.get(other.idx_, other.engine_ref_)));
             return *this;
         }
 

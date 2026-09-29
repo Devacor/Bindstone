@@ -234,6 +234,14 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   kinds box through `get`/`set` in the INDEX family (raw lanes stay int/float — a
   `raw_bool` decl sink is the cheap next lane). The parallel all-primitive check excludes
   `str` (handles never borrow raw; `statically_all_primitive` already excluded strings).
+  - **byte kinds — BUILT (`kind_t::u8` / `kind_t::i8`, Dev ruling 2026-09-28).** `array<uint8>` / `array<int8>`
+    share the `b8`/`c8` byte buffer, the kind carrying the sign (1 byte per element against 8 for `i64`). The element
+    type is an int type_info named `uint8`/`int8` (`native_size` 1, `is_byte_element()`, interned apart from `int`);
+    `get` widens to int, `set`/`push` take a pre-converted in-range int, and the range kernel
+    (`detail::byte_range_error`) sits after the int rows of `convert_container_element`, so every store path meets it.
+    `convert_byte_buffer` converts byte <-> int/float buffers on the raw payloads. The raw lanes (vm index stores,
+    `op_t_load`, typed index stores, cell loads/stores/pushes, push append) take the kinds and miss on anything out of
+    range, which the enforcing path then raises.
   - **object kind — BUILT (`kind_t::obj`, 2026-09-02).** `array<UserType>` (script or
     bound C++ class) is a buffer of `obj_slot{strong_ptr<object_holder> handle, type_info_ptr tag}`
     (16 bytes vs 32 boxed). The per-slot tag reproduces the boxed value exactly on `get`

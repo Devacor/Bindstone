@@ -1469,6 +1469,23 @@ private:
 		return std::nullopt;
 	}
 
+	static std::optional<script_int> literal_int(const expression* expr) {
+		if (!expr || expr->get_type() != node_type::literal_expr) { return std::nullopt; }
+		const auto* lit = static_cast<const literal_expr*>(expr);
+		if (lit->value.is_int()) { return lit->value.unchecked_as_int(); }
+		return std::nullopt;
+	}
+
+	// an int literal outside a uint8 / int8 element's range: the store raises, so the checker says so at load
+	static std::string byte_literal_issue(const ctype& src, const type_info* target) {
+		if (!target || !target->is_byte_element() || src.kind != ctype::int_k) { return {}; }
+		const auto v = literal_int(src.origin);
+		if (!v) { return {}; }
+		const bool fits = target->is_signed ? (*v >= -128 && *v <= 127) : (*v >= 0 && *v <= 255);
+		if (fits) { return {}; }
+		return std::to_string(*v) + " is outside " + target->canonical_name() + " (" + (target->is_signed ? "-128..127" : "0..255") + ")";
+	}
+
 	static bool literal_int_overflow(const ctype& src, const ctype& dst) {
 		if (dst.kind != ctype::int_k || src.kind != ctype::float_k) { return false; }
 		const auto value = literal_float(src.origin);
@@ -1511,6 +1528,7 @@ private:
 		const ctype dst = ctype_from_type_info(target);
 		if (src.is_unknown() || dst.is_unknown() || depth > 512) { return {}; }
 		if (literal_int_overflow(src, dst)) { return "float literal is outside the int range"; }
+		if (auto issue = byte_literal_issue(src, target); !issue.empty()) { return issue; }
 		if (dst.kind == ctype::array_k || dst.kind == ctype::map_k) {
 			return container_issue(src, dst, depth + 1);
 		}
@@ -2030,7 +2048,7 @@ private:
     bool binary_member_call(const call_expr* c, const member_expr* m, const ctype& recv, const std::vector<ctype>& args, ctype& out) {
         if (m->is_static) { return false; }
         if ((recv.kind == ctype::string_k || recv.kind == ctype::utf8_k) && (!recv.tentative || recv.element_proof)) {
-            if (m->member == "to_bytes") { out = ctype_from_type_info(eng_.get_type_info_array(eng_.get_type_info_int())); return true; }
+            if (m->member == "to_bytes") { out = ctype_from_type_info(eng_.get_type_info_array(eng_.get_type_info_uint8())); return true; }
             if (m->member == "reader" && args.empty()) { out = object_of("binary::reader"); return true; }
             return false;
         }

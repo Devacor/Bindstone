@@ -788,7 +788,10 @@ namespace jai::fuzz {
 				return out + "];";
 			}
 			const uint32_t pick = rng_.below(10);
-			const char* elem_type = pick < 4 ? "int" : pick < 6 ? "float" : pick < 8 ? "string" : pick < 9 ? "bool" : "char";
+			// the one-byte slot splits three ways (char, uint8, int8) on a value derived from the seed and the name count, so
+			// the random stream, and with it every other seed's program, stays what it was before the byte buffers existed
+			const unsigned byte_slot = pick < 9 ? 0u : static_cast<unsigned>((((seed_ ^ 0x9E3779B97F4A7C15ull) * (names_ + 1)) >> 33) % 3);
+			const char* elem_type = pick < 4 ? "int" : pick < 6 ? "float" : pick < 8 ? "string" : pick < 9 ? "bool" : byte_slot == 0 ? "char" : byte_slot == 1 ? "uint8" : "int8";
 			int n = static_cast<int>(rng_.range(0, 4));
 			std::string out = std::string("array<") + elem_type + "> " + name + " = [";
 			for (int i = 0; i < n; ++i) {
@@ -798,7 +801,16 @@ namespace jai::fuzz {
 					case 1: out += float_literal(); break;
 					case 2: out += string_literal(); break;
 					case 3: out += rng_.chance(50) ? "true" : "false"; break;
-					default: out += std::string("'") + static_cast<char>('a' + rng_.below(5)) + "'"; break;
+					default: {
+						// one draw per element whatever the kind; a byte buffer's values sit on its edges, one past an edge
+						// now and then (error parity)
+						static const int uint8_values[] = {0, 7, 128, 255, 256};
+						static const int int8_values[] = {-128, -1, 0, 127, 128};
+						const uint32_t d = rng_.below(5);
+						if (byte_slot == 0) { out += std::string("'") + static_cast<char>('a' + d) + "'"; }
+						else { out += std::to_string(byte_slot == 1 ? uint8_values[d] : int8_values[d]); }
+						break;
+					}
 				}
 			}
 			return out + "];";

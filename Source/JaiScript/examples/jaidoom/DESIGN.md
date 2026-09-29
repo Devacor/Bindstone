@@ -29,7 +29,7 @@ at a lump's first byte; little-endian, the format's order): map lumps read recor
 16-byte directory entry is the `binary::layout` `LUMP_ENTRY` (its name a `binary::text(8)` field: lump
 names are NUL-padded and may fill all 8 bytes), PNAMES/TEXTURE1 and patch headers read with
 `int16`/`uint32`/`text(8)`. Bulk bytes (COLORMAP, PLAYPAL banks, flats, sound samples)
-come out as `array<int>` through `to_bytes`. The files the game writes (WAV, MIDI, BMP) are built
+come out of `to_bytes` as `array<uint8>` and land in the `array<int>` tables the renderer indexes (one widening copy per lump). The files the game writes (WAV, MIDI, BMP) are built
 with `binary::writer` (tags, samples and pixel rows through `bytes`, which writes them as they are). Post data inside patch columns is still walked byte by byte (`WAD[post] + 0`
 reads the unsigned byte). Texture compositing is a `parallel_transform` body, which admits no host
 method calls, so each patch's column table is decoded ahead of it (`tex_patches_prepare`) into

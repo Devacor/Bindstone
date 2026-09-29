@@ -10,7 +10,7 @@ std::string type_info::to_string() const {
         case script_value_type::jai_null_type:
             return "null";
         case script_value_type::jai_int_type:
-            return "int";
+            return is_byte_element() ? type_name : "int";
         case script_value_type::jai_float_type:
             return "float";
         case script_value_type::jai_string_type:

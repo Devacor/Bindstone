@@ -72,6 +72,12 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
             result.insert(result.end(), node->floats().begin(), node->floats().end());
             return result;
         }
+    } else if constexpr (std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>) {
+        if (!registry && node->kind() == (std::is_same_v<T, uint8_t> ? script_array::kind_t::u8 : script_array::kind_t::i8)) {
+            result.resize(node->bytes().size());
+            if (!result.empty()) { std::memcpy(result.data(), node->bytes().data(), result.size()); }
+            return result;
+        }
     }
     node->for_each(eng, [&](const script_value& elem) {
         if constexpr (std::is_same_v<T, script_value>) {

@@ -113,6 +113,8 @@ namespace jai::fuzz {
 			case script_array::kind_t::f64: return "float";
 			case script_array::kind_t::b8: return "bool";
 			case script_array::kind_t::c8: return "char";
+			case script_array::kind_t::u8: return "uint8";
+			case script_array::kind_t::i8: return "int8";
 			case script_array::kind_t::str: return "string";
 			case script_array::kind_t::obj: return "object";
 			default: return "typed";

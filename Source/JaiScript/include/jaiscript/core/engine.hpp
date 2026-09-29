@@ -1011,6 +1011,8 @@ namespace jai {
         type_info* get_type_info_utf8_string();
         type_info* get_type_info_bool();
         type_info* get_type_info_char();
+        type_info* get_type_info_uint8();   // array<uint8>'s element type
+        type_info* get_type_info_int8();    // array<int8>'s element type
         type_info* get_type_info_void();
         type_info* get_type_info_invalid();
         type_info* get_type_info_any();  // 'var' marker (dynamic); var-held values stay fully dynamic

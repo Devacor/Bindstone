@@ -45,7 +45,10 @@ public:
             expect("to_json(\"abc\".to_bytes(1, 0))", "[]", "a zero count");
             expect("to_json(\"\".to_bytes())", "[]", "an empty string");
             expect("to_json(\"a\\x00b\".to_bytes())", "[97,0,98]", "an embedded NUL");
-            expect("array<int> b = \"xyz\".to_bytes(); b.push(7); b.size()", "4", "the result is an array<int>");
+            expect("array<uint8> b = \"xyz\".to_bytes(); b.push(7); b.size()", "4", "the result is an array<uint8>");
+            expect(caught("auto b = \"xyz\".to_bytes(); int v = 256; b.push(v)"), "Cannot store 256 in array<uint8> (0..255)", "the result keeps the byte range");
+            expect("array<int> b = \"xyz\".to_bytes(); b.push(1000); to_json(b)", "[120,121,122,1000]", "an array<int> takes the bytes by value");
+            expect("var r = \"\x01\x02\".reader(); array<uint8> b = r.bytes(2); int v = 256; string e = \"\"; try { b.push(v); } catch (x) { e = x; } to_json(b) + \" \" + e", "[1,2] Cannot store 256 in array<uint8> (0..255)", "r.bytes(n) is an array<uint8>");
             expect(caught("\"abc\".to_bytes(4)"), "to_bytes(4) out of bounds for string of size 3", "an offset past the end");
             expect(caught("\"abc\".to_bytes(1, 3)"), "to_bytes(1, 3) out of bounds for string of size 3", "a count past the end");
             expect(caught("\"abc\".to_bytes(-1)"), "to_bytes(-1) out of bounds for string of size 3", "a negative offset");
@@ -63,6 +66,9 @@ public:
             expect("string::from_bytes([72, 105])", "Hi", "an untyped array");
             expect("array<int> b = [0, 65, 0]; var s = string::from_bytes(b); to_string(s.size()) + \" \" + to_json(s.to_bytes())", "3 [0,65,0]", "NULs survive");
             expect("array<char> c = ['o', 'k']; string::from_bytes(c)", "ok", "an array<char>");
+            expect("array<uint8> u = [104, 0, 255]; var s = string::from_bytes(u); to_string(s.size()) + \" \" + to_json(s.to_bytes())", "3 [104,0,255]", "an array<uint8>");
+            expect("array<var> v = [104, 105]; string::from_bytes(v)", "hi", "an array<var>");
+            expect(caught("array<int8> s = [104, -1]; string::from_bytes(s)"), "string::from_bytes expects bytes (0 to 255): element 1 is -1", "an array<int8> element below 0");
             expect("string::from_bytes([]).size()", "0", "an empty array");
             expect(all256 + "var s = string::from_bytes(ALL); to_string(s.size()) + \" \" + to_string(s.to_bytes() == ALL)", "256 true", "all 256 values round trip");
             expect(all256 + "var s = string::from_bytes(ALL); to_string(host_echo(s) == s) + \" \" + to_string(host_echo(s).size())", "true 256", "the host boundary keeps every byte");
@@ -327,7 +333,7 @@ public:
                 for (const auto& d : e->check(src).diagnostics) { if (d.message.find(text) != std::string::npos) { return true; } }
                 return false;
             };
-            check_eq((size_t)0, errors("binary::writer w; binary::reader r = w.to_string().reader(); int v = r.uint16(); string t = r.text(2); array<int> b = r.bytes(2);"), "a clean program");
+            check_eq((size_t)0, errors("binary::writer w; binary::reader r = w.to_string().reader(); int v = r.uint16(); string t = r.text(2); array<int> b = r.bytes(2); array<uint8> u = r.bytes(2);"), "a clean program");
             check_true(says("var L = binary::layout(\"a\", binary::int8, \"b\");", "binary::layout expects name, width pairs, got 3 arguments"), "an odd pairing");
             check_true(says("var L = binary::layout(\"a\", 3);", "binary::layout argument 2 must be a binary width"), "a non-width");
             check_eq((size_t)0, errors("class C { array<int> b; } var c = \"\".reader().read(C, binary::layout(\"b\", binary::bytes(8)));"), "a bytes token fills an array field");
@@ -346,7 +352,8 @@ public:
             check_true(says("binary::reader r = \"\".reader(); int n = r.text(3);", "cannot initialize 'n' declared 'int' with 'string'"), "a strict signature's result");
             check_eq((size_t)0, errors("var r = \"\".reader(); r.int8(5);"), "a var receiver stays dynamic");
             check_true(says("binary::writer w; w.pack(5, {});", "pack expects a binary::layout, got int"), "pack's layout");
-            check_true(says("array<string> a = \"x\".to_bytes();", "array<string>"), "to_bytes is an array<int>");
+            check_true(says("array<string> a = \"x\".to_bytes();", "with 'array<uint8>'"), "to_bytes is an array<uint8>");
+            check_eq((size_t)0, errors("array<uint8> a = \"x\".to_bytes(); array<int> b = \"x\".to_bytes();"), "to_bytes fills array<uint8> and array<int>");
         });
     }
 };

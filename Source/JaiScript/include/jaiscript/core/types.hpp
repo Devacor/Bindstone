@@ -65,10 +65,10 @@ namespace jai {
         // ~reference_holder). Zero lets a parallel fork prove exclusivity of a value-semantic
         // typed object array without walking the elements.
         uint32_t live_elem_refs = 0;
-        // b8/c8 share one byte buffer (bool and char payloads); the kind says how to box
+        // b8/c8/u8/i8 share one byte buffer (bool, char, uint8 and int8 payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
         // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)
-        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5, obj = 6 };
+        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5, obj = 6, u8 = 7, i8 = 8 };
 
         // Every body that instantiates a vector<script_value> member (including the
         // DEFAULTED special members - construction paths instantiate the vector dtor

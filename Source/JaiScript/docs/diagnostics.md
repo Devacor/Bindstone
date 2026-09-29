@@ -154,6 +154,20 @@ Hot-reload migration never raises (an unconvertible value falls back to the new 
 no text there. `value.cpp`'s two `Type mismatch in assignment` throws are unreachable defensive
 walls behind typed-buffer references and stay.
 
+## Byte array range (`array_element_type_mismatch`, kernel `container_enforce.hpp` `detail::byte_range_error`)
+
+`Cannot store 256 in array<uint8> (0..255)`, `Cannot store -129 in array<int8> (-128..127)`
+
+Every store into an `array<uint8>` / `array<int8>` element runs one range kernel after the int rows (a float
+converts through the checked float-to-integer kernel first, a bool is 0 or 1): `=`, compound assignment, `++`/`--`,
+`push`, an element reference, range-for by reference, and a whole-array conversion (`array<uint8> b = ints;`
+names the first value outside the range). A parallel worker, whose symbolizer is frozen, gets
+`Cannot store a value outside 0..255 in array<uint8>` / `Cannot store a value outside -128..127 in array<int8>`.
+A C++ `bound_array<T>` write into a byte buffer throws the same text. A char element is family D's
+`Cannot store char in array<uint8>`. The checker reads a literal element at load: `300 is outside uint8 (0..255)`.
+`uint8` or `int8` anywhere but an array's element type is the parse error
+`'uint8' is an array element type only (array<uint8>, one byte per element); a single byte is an int`.
+
 ## Compound assignment (`type_mismatch`, kernel `class_definition.hpp` `detail::compound_mismatch`)
 
 `Cannot apply '+=' to {0} and {1}` (likewise `'-='`, `'*='`, `'/='`, `'%='`)
@@ -305,7 +319,7 @@ bytes stay.
 | site | texts |
 |---|---|
 | `s.to_bytes(offset, count)` | `to_bytes(4) out of bounds for string of size 3`, `to_bytes(1, 3) out of bounds for string of size 3` (a negative offset or count too; a parallel worker, whose symbolizer is frozen, gets `to_bytes() range out of bounds`), `to_bytes() arguments must be integers`, `to_bytes() takes 0 to 2 arguments ([offset], [count])` |
-| `string::from_bytes(bytes)` | `string::from_bytes expects bytes (0 to 255): element 3 is 256` (the element's value, or its kind: `... element 1 is string`), `string::from_bytes expects an array of bytes, got int`, `string::from_bytes expects exactly 1 argument` |
+| `string::from_bytes(bytes)` (an `array<uint8>` or `array<char>` copies; `array<int>` / `array<var>` / `array<int8>` elements are checked) | `string::from_bytes expects bytes (0 to 255): element 3 is 256` (the element's value, or its kind: `... element 1 is string`), `string::from_bytes expects an array of bytes, got int`, `string::from_bytes expects exactly 1 argument` |
 | reader reads | `Cannot read int32 at position 10: 4 bytes wanted, 2 remain` (`1 remains` for one), `Cannot read text(5) at position 0: 5 bytes wanted, 3 remain`, `Cannot read bytes(-1): a count cannot be negative`; a layout field names itself: `Cannot read field 'pos' (int32) at position 4: 4 bytes wanted, 2 remain` |
 | C-string scans (`r.text()`) | `Cannot read null-terminated text at position 1: no NUL terminator in the remaining 2 bytes` (the end of the data), `Cannot read null-terminated text at position 0: no NUL terminator within 1048576 bytes (the engine's binary scan limit; raise it from C++ with engine->binary_scan_limit)` |
 | cursor | `Cannot seek to position 4: the data is 3 bytes`, `Cannot skip 2 bytes at position 2: the data is 3 bytes`; the writer: `Cannot seek to position 2: 1 byte written` |

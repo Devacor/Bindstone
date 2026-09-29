@@ -1,6 +1,6 @@
 // JaiDOOM wad.jai — WAD file access in pure JaiScript. The file's bytes are one string, read
 // through binary::reader (little-endian, the format's own order); the directory entry is a
-// binary::layout, and whole lumps come out as array<int> through to_bytes.
+// binary::layout, and whole lumps come out of to_bytes (an array<uint8>) into the array<int> tables the renderer indexes.
 
 string WAD = "";              // raw file bytes
 string WAD_ID = "";           // "IWAD" | "PWAD"

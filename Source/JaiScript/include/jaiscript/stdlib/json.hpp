@@ -466,7 +466,7 @@ namespace stdlib {
     //   * each property name is symbolized and assigned only if it names a declared member, via
     //     the same setter/field dispatch the interpreter uses — never built into a script string.
     // This also drops the old per-property parse+execute (an O(n) reparse) for a direct write.
-    // Returns null if `type_name` is unregistered or construction fails (caller returns the map).
+    // Returns null if `type_name` is unregistered (caller returns the map); a constructor's error fails the load.
     inline script_value reconstruct_typed_object(
             engine* eng,
             const script_map& map,
@@ -474,16 +474,19 @@ namespace stdlib {
             const std::function<script_value(const script_value&)>& transform) {
         if (!eng->get_class_definition(type_name)) return script_value(std::monostate{}, eng);
 
-        script_value instance(std::monostate{}, eng);
-        std::shared_ptr<class_instance> inst;
-        try {
-            instance = eng->execute(type_name + "()");
-            inst = instance.as<std::shared_ptr<class_instance>>();
-        } catch (...) {
-            return script_value(std::monostate{}, eng);  // construction failed -> raw map
+        // the class's constructor, called as Name() would call it; its error (or throw) is the load's (Dev ruling 2026-09-28)
+        script_value ctor = eng->get_variable(type_name);
+        if (!ctor.is_function()) return script_value(std::monostate{}, eng);
+        auto constructed = ctor.as_function()({});
+        if (!constructed) {
+            throw runtime_error(eng->format_error(constructed));
         }
+        if (eng->backend_unwinding()) {
+            throw runtime_error(eng->backend_exception_text());
+        }
+        script_value instance = std::move(constructed.value());
+        std::shared_ptr<class_instance> inst = instance.is_object() ? instance.get_class_instance() : nullptr;
         if (!inst) return script_value(std::monostate{}, eng);
-        auto* backend = eng->get_execution_backend();
         {
             for (const auto& [key, value] : map) {
                 if (!key.is_string()) continue;
@@ -509,7 +512,7 @@ namespace stdlib {
                                     stored.error() == make_error_code(runtime_error_code::cpp_exception))) {
                         throw runtime_error(eng->format_error(stored));
                     }
-                    if (backend && backend->is_unwinding()) { return instance; }
+                    if (eng->backend_unwinding()) { return instance; }
                 } else if (inst->has_field(member_id)) {
                     inst->set_field(member_id, v);
                 }

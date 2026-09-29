@@ -21,13 +21,14 @@ void check(bool ok, string what) {
 bool save_roundtrip(string dir) {
 	SAVE_DIR = dir;
 	int before = state_hash();
-	int t0 = clock_ms();
+	time::stopwatch lap;
+	lap.start();
 	string msg = save_world_and_chars();
-	int t1 = clock_ms();
+	int save_ms = lap.delta() * 1000;
 	string back = load_world_and_chars();
-	int t2 = clock_ms();
+	int load_ms = lap.delta() * 1000;
 	int after = state_hash();
-	print(`  save: ${msg} (${t1 - t0} ms, ${read_file(world_path()).size()} bytes)  load: ${back} (${t2 - t1} ms)  hash ${before} -> ${after}`);
+	print(`  save: ${msg} (${save_ms} ms, ${read_file(world_path()).size()} bytes)  load: ${back} (${load_ms} ms)  hash ${before} -> ${after}`);
 	return before == after;
 }
 
@@ -131,7 +132,7 @@ void nt_round() {
 	sim_tick();
 	net_host_pump();
 	host_after_tick();
-	sleep_ms(2);
+	time::sleep_ms(2);
 	for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
 }
 
@@ -277,14 +278,15 @@ int run_nettest(string base_dir, int port) {
 		if (NCS_STATUS[crowd[k]] == "joined") { joined = joined + 1; }
 	}
 	check(joined == 14 && net_player_count() == 16, `sixteen gators online (${net_player_count()})`);
-	int t0 = clock_ms();
+	time::stopwatch lap;
+	lap.start();
 	int bytes0 = NET_BYTES_OUT;
 	nt_rounds(20);
-	int per_tick_us = (clock_ms() - t0) * 1000 / 20;
+	int per_tick_us = lap.delta() * 1000000 / 20;
 	int per_tick_bytes = (NET_BYTES_OUT - bytes0) / 20;
-	int t1 = clock_ms();
+	lap.start();
 	for (int i = 0; i < 20; ++i) { host_after_tick(); }
-	int snap_us = (clock_ms() - t1) * 1000 / 20;
+	int snap_us = lap.delta() * 1000000 / 20;
 	for (int i = 0; i < 20; ++i) {
 		for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
 	}
@@ -297,7 +299,7 @@ int run_nettest(string base_dir, int port) {
 	for (int i = 0; i < 20; ++i) {
 		NOW_MS = NOW_MS + TICK_MS;
 		for (int s = 0; s < NCS_CH.size(); ++s) { net_session_pump(s); }
-		sleep_ms(2);
+		time::sleep_ms(2);
 	}
 	int told = 0;
 	for (int k = 0; k < crowd.size(); ++k) {

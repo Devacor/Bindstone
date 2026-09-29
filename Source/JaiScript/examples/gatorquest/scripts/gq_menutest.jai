@@ -30,13 +30,13 @@ void mt_clear_field(int n) {
 string mt_connect(int proto_sent) {
 	string choice = "";
 	for (int i = 0; i < 1500 && TM_PAGE == "connecting" && choice == ""; ++i) {
-		NOW_MS = clock_ms();
+		NOW_MS = time::now() * 1000;
 		int proto = NET_PROTO;
 		NET_PROTO = proto_sent;
 		choice = title_update();
 		NET_PROTO = proto;
 		net_host_pump();
-		sleep_ms(2);
+		time::sleep_ms(2);
 	}
 	return choice != "" ? choice : TM_PAGE;
 }
@@ -44,7 +44,7 @@ string mt_connect(int proto_sent) {
 void mt_host_rounds(int n) {
 	for (int i = 0; i < n; ++i) {
 		net_host_pump();
-		sleep_ms(2);
+		time::sleep_ms(2);
 	}
 }
 
@@ -59,7 +59,7 @@ void mt_join_page(string addr, string port, string name) {
 	title_key("down");
 	TM_NAME = "";
 	mt_type(name);
-	NOW_MS = clock_ms();
+	NOW_MS = time::now() * 1000;
 }
 
 int mt_menu_index(int arg) {
@@ -89,7 +89,7 @@ int run_menutest(string base_dir, int port) {
 	print("menus:");
 	sim_init(5);
 	BOTS = [];
-	NOW_MS = clock_ms();
+	NOW_MS = time::now() * 1000;
 	string ps = to_string(port);
 
 	// ---- hosting from the title: a busy port is reported on the page, then the real one opens
@@ -151,9 +151,10 @@ int run_menutest(string base_dir, int port) {
 
 	mt_join_page("127.0.0.1", to_string(port + 2), "Nobody");
 	title_key("enter");
-	int t0 = clock_ms();
+	time::stopwatch refusal;
+	refusal.start();
 	mt_connect(NET_PROTO);
-	check(TM_PAGE == "failed" && TM_FAIL_TITLE == "UNREACHABLE" && TM_FAIL.contains(`127.0.0.1:${port + 2}`), `a port nobody listens on is UNREACHABLE in ${clock_ms() - t0} ms (${TM_FAIL})`);
+	check(TM_PAGE == "failed" && TM_FAIL_TITLE == "UNREACHABLE" && TM_FAIL.contains(`127.0.0.1:${port + 2}`), `a port nobody listens on is UNREACHABLE in ${refusal.elapsed() * 1000:.0f} ms (${TM_FAIL})`);
 
 	mt_join_page("no-such-host.invalid", ps, "Lost");
 	title_key("enter");
@@ -237,9 +238,9 @@ int run_menutest(string base_dir, int port) {
 	net_host_stop("the host has left the swamp");
 	QUIT = false;
 	for (int i = 0; i < 400 && !QUIT; ++i) {
-		NOW_MS = clock_ms();
+		NOW_MS = time::now() * 1000;
 		net_client_pump();
-		sleep_ms(1);
+		time::sleep_ms(1);
 	}
 	check(QUIT && PLAY_EXIT == "title" && NET_CLOSE_WHY.contains("the host has left the swamp"), `the client's session ends toward the title (${NET_CLOSE_WHY})`);
 	QUIT = false;

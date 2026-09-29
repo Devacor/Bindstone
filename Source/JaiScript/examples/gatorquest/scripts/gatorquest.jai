@@ -89,10 +89,11 @@ int run_smoke() {
 	int seed = arg_value("seed", "1").to_int(1);
 	int bots = arg_value("bots", "2").to_int(2);
 	bool verbose = arg_flag("verbose");
-	int t0 = clock_ms();
+	time::stopwatch lap;
+	lap.start();
 	sim_init(seed);
-	int t1 = clock_ms();
-	print(`world: seed ${seed}, ${TILES.size()} tiles in ${WORLD_COUNT} realms, ${MOB_LIVE} mobiles, ${SP_W.size()} spawners, ${GATE_W.size()} gates (gen ${t1 - t0} ms)`);
+	int gen_ms = lap.delta() * 1000;
+	print(`world: seed ${seed}, ${TILES.size()} tiles in ${WORLD_COUNT} realms, ${MOB_LIVE} mobiles, ${SP_W.size()} spawners, ${GATE_W.size()} gates (gen ${gen_ms} ms)`);
 	BOTS = [];
 	array<string> names = ["Chomps", "Snappy", "Gumbo", "Bayou Bill"];
 	for (int b = 0; b < bots; ++b) {
@@ -118,8 +119,8 @@ int run_smoke() {
 			}
 		}
 	}
-	int t2 = clock_ms();
-	print(`ran ${ticks} ticks in ${t2 - t1} ms (${(t2 - t1) * 1000 / imax(1, ticks)} us/tick), ${MOB_LIVE} mobiles alive, kills ${STAT_KILLS}, spawns ${STAT_SPAWNS}`);
+	int run_us = lap.delta() * 1000000;
+	print(`ran ${ticks} ticks in ${run_us / 1000} ms (${run_us / imax(1, ticks)} us/tick), ${MOB_LIVE} mobiles alive, kills ${STAT_KILLS}, spawns ${STAT_SPAWNS}`);
 	for (int b = 0; b < bots; ++b) {
 		print_char_summary(b);
 		print("  plan: " + BOTS[b].log);
@@ -176,7 +177,7 @@ int run_play() {
 	print("Thanks for playing Gator Quest! Your swamp awaits.");
 	if (MAX_FRAMES > 0) {
 		int n = imax(1, STAT_FRAMES);
-		print(`frames ${STAT_FRAMES}: sim ${STAT_SIM_MS * 1000 / n} us, render ${STAT_RENDER_MS * 1000 / n} us, compose ${STAT_COMPOSE_MS * 1000 / n} us per frame; tick ${TICK}; STATE_HASH ${state_hash()}`);
+		print(`frames ${STAT_FRAMES}: sim ${STAT_SIM_MS * 1000 / n:.0f} us, render ${STAT_RENDER_MS * 1000 / n:.0f} us, compose ${STAT_COMPOSE_MS * 1000 / n:.0f} us per frame; tick ${TICK}; STATE_HASH ${state_hash()}`);
 	}
 	return 0;
 }
@@ -230,7 +231,8 @@ int run_sheet() {
 
 // build the audio cache (every effect and every theme) so a fresh install starts without the wait
 int run_prepare() {
-	int t0 = clock_ms();
+	time::stopwatch took;
+	took.start();
 	string dir = data_root() + "/cache";
 	if (!audio_prepare(dir)) {
 		print("prepare: " + dir + " is not writable");
@@ -242,7 +244,7 @@ int run_prepare() {
 		if (!file_exists(p)) { write_file(p, midi_theme(theme)); }
 		if (file_exists(p)) { themes = themes + 1; }
 	}
-	print(`prepare: ${SFX_PATH.size()} sound effects and ${themes} music themes in ${dir} (${clock_ms() - t0} ms)`);
+	print(`prepare: ${SFX_PATH.size()} sound effects and ${themes} music themes in ${dir} (${took.elapsed() * 1000:.0f} ms)`);
 	return 0;
 }
 

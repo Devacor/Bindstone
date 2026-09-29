@@ -344,7 +344,7 @@ string net_join(string host, int port, string name, int hue, bool prepare_world)
 	int waited = 0;
 	bool said = false;
 	while (waited < 800) {
-		NOW_MS = clock_ms();
+		NOW_MS = time::now() * 1000;
 		net_session_pump(s);
 		string st = NCS_STATUS[s];
 		if (st == "joined") { break; }
@@ -353,7 +353,7 @@ string net_join(string host, int port, string name, int hue, bool prepare_world)
 			net_client_hello(s, name, hue);
 			said = true;
 		}
-		sleep_ms(10);
+		time::sleep_ms(10);
 		waited = waited + 1;
 	}
 	if (NCS_STATUS[s] != "joined") { return "no answer from " + host; }

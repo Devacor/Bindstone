@@ -23,29 +23,30 @@ int run_serve() {
 		player_create(b, "Bot " + to_string(b + 1), b);
 		bot_add(b);
 	}
-	int next = clock_ms();
+	int next = time::now() * 1000;
 	int players = net_player_count();
 	int peak = players;
 	int joins = 0;
 	int leaves = 0;
-	int t0 = clock_ms();
-	int work = 0;
+	time::stopwatch wall;
+	time::stopwatch work;
+	wall.start();
 	while (ticks == 0 || TICK < ticks) {
-		int now = clock_ms();
+		int now = time::now() * 1000;
 		if (now < next) {
 			NET_SRV.pump();
-			sleep_ms(imin(5, next - now));
+			time::sleep_ms(imin(5, next - now));
 			continue;
 		}
 		next = next + TICK_MS;
 		if (now - next > 1000) { next = now; }
-		int w0 = clock_ms();
+		work.resume();
 		bots_tick();
 		sim_tick();
 		net_host_pump();
 		autosave_tick();
 		host_after_tick();
-		work = work + clock_ms() - w0;
+		work.pause();
 		int n = net_player_count();
 		if (n > players) { joins = joins + n - players; }
 		if (n < players) { leaves = leaves + players - n; }
@@ -60,8 +61,8 @@ int run_serve() {
 	}
 	net_host_stop("the host is shutting down");
 	if (SAVES_ON) { print("serve: " + save_world_and_chars()); }
-	int elapsed = imax(1, clock_ms() - t0);
-	print(`serve: done after ${TICK} ticks: peak ${peak} players, ${joins} joins, ${leaves} leaves, ${NET_SNAPS_OUT} snapshots, ${NET_BYTES_OUT / 1024} KB sent, host work ${work * 100 / elapsed}% of wall time`);
+	int work_pct = work.elapsed() * 100 / math::max(wall.elapsed(), 0.001);
+	print(`serve: done after ${TICK} ticks: peak ${peak} players, ${joins} joins, ${leaves} leaves, ${NET_SNAPS_OUT} snapshots, ${NET_BYTES_OUT / 1024} KB sent, host work ${work_pct}% of wall time`);
 	return 0;
 }
 
@@ -86,7 +87,7 @@ int run_client() {
 	int max_players = 0;
 	array<string> others;
 	for (int f = 0; f < frames && net_session_live(s); ++f) {
-		NOW_MS = clock_ms();
+		NOW_MS = time::now() * 1000;
 		net_session_pump(s);
 		ClientView& v = NCS_VIEW[s];
 		int me = cv_me(v);
@@ -105,7 +106,7 @@ int run_client() {
 		if (f == 20) { net_session_send(s, "M|" + to_string(walk)); }
 		if (f == 35) { net_session_send(s, "M|-1"); }
 		if (f == 60 && say != "") { net_session_send(s, "A|:" + say); }
-		sleep_ms(33);
+		time::sleep_ms(33);
 	}
 	ClientView& v = NCS_VIEW[s];
 	// chat from the other players: "Name: text" lines whose name is a player we saw

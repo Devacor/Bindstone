@@ -244,6 +244,21 @@ public:
             
             case script_value_type::jai_map_type: {
                 const auto& map = value.as_map();
+                if (map_needs_tag(value)) {
+                    oss_ << "{\"$map\":[";
+                    bool first_pair = true;
+                    for (const auto& [k, v] : map) {
+                        if (!first_pair) oss_ << ',';
+                        first_pair = false;
+                        oss_ << '[';
+                        write_value(k);
+                        oss_ << ',';
+                        write_value(v);
+                        oss_ << ']';
+                    }
+                    oss_ << "]}";
+                    break;
+                }
                 oss_ << '{';
                 bool first = true;
                 for (const auto& [k, v] : map) {
@@ -384,6 +399,21 @@ private:
         return out;
     }
     
+    // A map whose keys are not all strings (or an empty one declared with such a key type) is written as {"$map": [[k, v], ...]}
+    // so its keys keep their kind; from_json reads the tag back
+    static bool map_needs_tag(const script_value& value) {
+        const auto& map = value.as_map();
+        auto string_like = [](script_value_type t) { return t == script_value_type::jai_string_type || t == script_value_type::jai_utf8_string_type; };
+        for (const auto& [k, v] : map) {
+            if (!string_like(k.type())) return true;
+        }
+        if (!map.empty()) return false;
+        const auto ti = value.get_type_info();
+        const auto kt = ti ? ti->key_type() : nullptr;
+        return kt && !string_like(kt->base_type) && kt->base_type != script_value_type::jai_any_type &&
+               kt->base_type != script_value_type::jai_null_type;
+    }
+
     // Scalars and non-instance objects; write_value handles containers, handles and instances
     std::string to_json_impl_fallback(const script_value& val) {
         std::ostringstream oss;
@@ -430,7 +460,7 @@ private:
                 break;
                 
             case script_value_type::jai_char_type:
-                oss << '"' << escape_json_string_local(std::string(1, val.as_char())) << '"';
+                oss << "{\"$char\":" << static_cast<int>(static_cast<unsigned char>(val.as_char())) << '}';
                 break;
                 
             default:

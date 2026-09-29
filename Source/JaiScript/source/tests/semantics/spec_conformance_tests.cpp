@@ -1626,7 +1626,7 @@ private:
 				var s = "Jai\x21"; var word = (s[0] + 0) | ((s[1] + 0) << 8);
 				var e = ""; try { var z = 10 / 0; } catch (x) { e = x; }
 				c + "|" + to_json(g) + "|" + to_json(anything) + "|" + "b".compare("a") + "|" + word + "|" + e + "|" + `[${"ab":^5}] [${7:*^4}]`;
-			)", "Cannot push 'string' to array<int>|[1,2,3]|{\"5\":1,\"five\":5}|1|24906|Division by zero in integer operation|[ ab  ] [*7**]");
+			)", "Cannot push 'string' to array<int>|[1,2,3]|{\"$map\":[[5,1],[\"five\",5]]}|1|24906|Division by zero in integer operation|[ ab  ] [*7**]");
 		});
 		test("guide_parallel_transform_rows", [this]() {
 			expect("transform", R"(
@@ -2174,6 +2174,22 @@ private:
 		ruling_auto_fields();
 		ruling_numeric_ternary_auto();
 		ruling_from_json_constructor_errors();
+		ruling_json_tagged_values();
+	}
+
+	void ruling_json_tagged_values() {
+		test("a_json_round_trip_keeps_chars_and_non_string_map_keys", [this]() {
+			// {"$char": n} and {"$map": [[k, v], ...]} carry what a JSON object cannot; any other shape of those keys stays a map
+			expect("json tags", R"(
+				class Inv { char grade = 'a'; map<int, string> slots; map<char, int> counts; map<int, string> none; var loose = {1: "x", "k": 2}; }
+				Inv a; a.grade = 'z'; a.slots[3] = "sword"; a.slots[10] = "bow"; a.counts['q'] = 2;
+				var b = from_json(to_json(a));
+				to_json('z') + "|" + to_json({1: "a", 2: "b"}) + "|" + to_json({"s": 'c'}) + "|" +
+				type_of(b.grade) + ":" + b.grade + "|" + b.slots[3] + "," + b.slots[10] + "|" + b.counts['q'] + "|" + b.none.size() + "|" +
+				b.loose[1] + b.loose["k"] + "|" + type_of(from_json("{\"$char\": 300}")) + "|" + type_of(from_json("{\"$map\": [1]}")) + "|" +
+				type_of(from_json("{\"$map\": [[1, 2]], \"x\": 1}"));
+			)", "{\"$char\":122}|{\"$map\":[[1,\"a\"],[2,\"b\"]]}|{\"s\":{\"$char\":99}}|char:z|sword,bow|2|0|x2|map|map|map", check_mode::warn);
+		});
 	}
 
 	void ruling_auto_fields() {

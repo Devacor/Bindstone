@@ -2755,7 +2755,7 @@ public:
 			check_quad("array<bool> bs = [true, false]; array<var> m = bs; m.push(\"x\"); to_json(m) + \"|\" + to_json(bs) + \"|\" + type_of(m[0])",
 					   "[true,false,\"x\"]|[true,false]|bool", "bool buffer -> array<var>");
 			check_quad("array<char> cs = ['a', 'b']; array<var> m = cs; m.push(\"x\"); to_json(m) + \"|\" + to_json(cs) + \"|\" + type_of(m[0])",
-					   "[\"a\",\"b\",\"x\"]|[\"a\",\"b\"]|char", "char buffer -> array<var>");
+					   "[{\"$char\":97},{\"$char\":98},\"x\"]|[{\"$char\":97},{\"$char\":98}]|char", "char buffer -> array<var>");
 			check_quad("array<string> ss = [\"a\", \"b\"]; array<var> m = ss; m.push(5); m[0] = \"z\"; to_json(m) + \"|\" + to_json(ss) + \"|\" + type_of(m[2])",
 					   "[\"z\",\"b\",5]|[\"a\",\"b\"]|int", "string buffer -> array<var>");
 			check_quad("class K { int a = 1; K(int v) { a = v; } } array<K> ks = [K(1), K(2)]; array<var> m = ks; m.push(\"x\"); m[0].a = 9; "

@@ -91,8 +91,12 @@ bool pt_converged() {
 	return PEND_SEQ.size() == 0 && PRED_X == MOB_X[m] && PRED_Y == MOB_Y[m] && PRED_W == MOB_WORLD[m];
 }
 
-// start a host and join it with one client under the given simulated link
+// start a host and join it with one client under the given simulated link; the gator starts fresh
+// (a character file saved by an earlier round or run would carry its place in)
 bool pt_setup(int port, int lag, int jitter, int loss) {
+	make_dirs(save_dir() + "/chars");
+	array<string> old = list_dir(save_dir() + "/chars");
+	for (int i = 0; i < old.size(); ++i) { delete_file(save_dir() + "/chars/" + old[i]); }
 	sim_init(9);
 	BOTS = [];
 	NOW_MS = 0;
@@ -173,18 +177,19 @@ array<int> pt_walk(int seconds) {
 array<int> pt_rejected_move() {
 	for (int i = 0; i < 40; ++i) { pt_frame(-1); }
 	int m = pt_mob();
+	int w = MOB_WORLD[m];
 	int dir = -1;
 	for (int d = 0; d < 8 && dir < 0; d += 2) {
 		int x = MOB_X[m] + DX[d];
 		int y = MOB_Y[m] + DY[d];
-		if (is_land(0, x, y) && mob_at(0, x, y) < 0 && pred_blocked(CV, PRED_X, PRED_Y, d) == 0) { dir = d; }
+		if (is_land(w, x, y) && mob_at(w, x, y) < 0 && pred_blocked(CV, PRED_X, PRED_Y, d) == 0) { dir = d; }
 	}
 	if (dir < 0) { return [-1, 0, 0, 0, 0, 0, -1]; }
 	int c0 = PRED_CORRECTIONS;
 	int s0 = PRED_SNAPS;
 	float max0 = PRED_CORR_MAX;
 	PRED_CORR_MAX = 0.0;
-	int rat = mob_spawn(mid("Swamp Rat"), 0, MOB_X[m] + DX[dir], MOB_Y[m] + DY[dir]);
+	int rat = mob_spawn(mid("Swamp Rat"), w, MOB_X[m] + DX[dir], MOB_Y[m] + DY[dir]);
 	MOB_NEXT[rat] = TICK + 600;
 	int start_x = MOB_X[m];
 	int start_y = MOB_Y[m];
@@ -217,7 +222,8 @@ array<int> pt_rejected_move() {
 	return [stepped ? 1 : 0, corrections, snaps, dist, math::itrunc(math::sqrt(jump) * 100.0), back ? 1 : 0, corrected_at];
 }
 
-int run_predtest() {
+int run_predtest(string base_dir) {
+	SAVE_DIR = base_dir + "/predtest";
 	array<int> rtts = [0, 60, 150, 300];
 	if (arg_value("lag", "") != "") { rtts = [NET_SIM_LAG]; }
 	int jitter_arg = NET_SIM_JITTER;

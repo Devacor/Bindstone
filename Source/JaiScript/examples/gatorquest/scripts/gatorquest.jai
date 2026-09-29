@@ -267,7 +267,7 @@ int main() {
 	if (arg_flag("prepare")) { return run_prepare(); }
 	if (arg_flag("endgame")) { return run_endgame(); }
 	if (arg_flag("tour")) { return run_tour(); }
-	if (arg_flag("predtest")) { return run_predtest(); }
+	if (arg_flag("predtest")) { return run_predtest(tests); }
 	if (arg_flag("menutest")) { return run_menutest(tests, arg_value("port", "28960").to_int(28960)); }
 	if (arg_flag("serve")) { return run_serve(); }
 	if (arg_flag("client")) { return run_client(); }

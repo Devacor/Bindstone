@@ -2175,7 +2175,7 @@ private:
 
 	void ruling_typed_range_for() {
 		test("a_typed_range_for_variable_takes_each_element_as_its_declaration_would", [this]() {
-			// by value: T x = element; by reference: an element that holds a T
+			// by value: T x = element; by reference: an element that holds a T; auto over elements without a static type is a var
 			expect("typed range-for", R"(
 				class A { int v = 1; } class B : A { }
 				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
@@ -2184,9 +2184,10 @@ private:
 				t([]() { var a = ["x"]; string s = ""; for (int v : a) { s += type_of(v); } return s; }) + "|" +
 				t([]() { var a = [1, 2.5]; int n = 0; for (int& v : a) { v = v + 1; n += 1; } return n; }) + "|" +
 				t([]() { var a = [B(), A()]; int n = 0; for (A& r : a) { r.v = 7; n += r.v; } return n; }) + "|" +
+				t([]() { var a = [1, 2]; string s = ""; for (auto x : a) { x = "s"; s += x; } return s; }) + "|" +
 				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = 2.9; s += type_of(x) + ":" + x; } return s; });
 			)", "int:1 int:2 |string:1 string:2 |Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
-			    "14|int:2", check_mode::warn);
+			    "14|ss|int:2", check_mode::warn);
 			every_config("checker", "1|0", [](engine& e) {
 				auto bad = e.check("array<float> a = [1.5]; for (int& v : a) { }");
 				auto ok = e.check("array<int> a = [1]; for (int& v : a) { } array<float> f = [1.5]; for (int v : f) { }");

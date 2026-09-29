@@ -389,7 +389,7 @@ namespace jai::detail {
                 }
                 case node_type::range_for_stmt: {
                     auto* s = static_cast<const range_for_stmt*>(n);
-                    type(s->element_type);
+                    type(s->auto_spelled ? type_info_ptr{} : s->element_type);   // auto stays auto: the checker re-types it at load
                     str(s->variable_name);
                     symbol(s->variable_name_id, UINT64_MAX);
                     slot(s->variable_slot_index);

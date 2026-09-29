@@ -3173,7 +3173,7 @@ private:
                 auto* f = static_cast<range_for_stmt*>(s);
                 const ctype container = infer(f->container.get());
                 // the elements' static type: an array's element type, a string's char; a var container, an array<var> or anything
-                // else has none
+                // else has none (Dev ruling 2026-09-28)
                 ctype elem{};
                 if (container.kind == ctype::array_k && container.ti && container.ti->element_type() &&
                     container.ti->element_type()->base_type != script_value_type::jai_any_type) {
@@ -3181,7 +3181,12 @@ private:
                 } else if (container.kind == ctype::string_k) {
                     elem = ctype::make(ctype::char_k);
                 }
-                const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type;
+                if (!f->element_type) { f->auto_spelled = true; }
+                if (f->auto_spelled && !f->auto_typed && semantic_walk() && container.kind != ctype::map_k) {
+                    f->auto_typed = true;   // an auto over elements without a static type is a var, decided once
+                    if (elem.is_unknown()) { f->element_type = eng_.get_type_info_any(); }
+                }
+                const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type && !f->auto_spelled;
                 stamp(f->element_conversion_free, !declared || (!elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
                 if (declared && f->is_reference && !elem.is_unknown() && !reference_type_compatible(elem, ctype_from_type_info(f->element_type.get()))) {
                     diag(diag_level::error, f->location, "cannot bind '" + ctype_name(elem) + "' to '" + std::string(f->variable_name) +

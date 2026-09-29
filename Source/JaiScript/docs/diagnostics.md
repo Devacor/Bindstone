@@ -176,7 +176,7 @@ A C++ `bound_array<T>` write into a byte buffer throws the same text. A char ele
 payload's own type: a class name for an object, `null`, `array`, `map`, the primitives). Every
 compound site raises it when the operator does not take the operands: a local or a global, a
 field through a receiver (`c.s += 5`) or bare in a method, a static (`C::i += "x"`), a bound C++
-variable. `string s; s += 5` is `Cannot apply '+=' to string and int` (a string target appends
+variable, an element (`a[0] -= "s"`) and a map entry (`m["k"] /= "s"`). `string s; s += 5` is `Cannot apply '+=' to string and int` (a string target appends
 text only - a string, a char, a utf8_string; `string += int` raises by design, unlike binary
 `+`), `float f; f += "x"` is `Cannot apply '+=' to float and string`. Catchable, identical on
 both backends; uncaught, `what()` appends `: Type mismatch`. `++`/`--` on a target that is not a

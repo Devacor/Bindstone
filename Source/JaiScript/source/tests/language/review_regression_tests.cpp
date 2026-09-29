@@ -2134,7 +2134,7 @@ public:
                 try { ms[key()] += "s"; } catch (e) { c2 = e; }
                 try { mi[key()] += 1; } catch (e) { c3 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + m.size()) + ("" + ms.size()) + ("" + mi.size());
-            )", "KKK|Cannot assign to rvalue expression|Cannot assign to rvalue expression|Left operand must be numeric|000",
+            )", "KKK|Cannot assign to rvalue expression|Cannot assign to rvalue expression|Cannot apply '+=' to null and int|000",
                 "a compound on a missing map key inserts nothing and runs the key once", check_mode::strict);
             expect_order(R"(
                 var log = "";

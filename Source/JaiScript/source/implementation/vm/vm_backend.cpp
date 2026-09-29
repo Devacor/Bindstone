@@ -2966,7 +2966,7 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 	return false;
 }
 
-checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in) {
+checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound) {
 	const script_value& left = left_in.deref();
 	const script_value& right = right_in.deref();
 
@@ -2976,13 +2976,13 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	// S8: bound operands normalize to detached temps (byte-parallel with interpreter::evaluate_arithmetic)
 	if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
-		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+		                           ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right, compound);
 
 	// Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
 	if (detail::utf8_operands(li, ri)) [[unlikely]]
-		return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_)), engine_);
+		return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_), compound), engine_);
 	if (detail::char_operands_promote(li, ri)) [[unlikely]]
-		return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
+		return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_), compound);
 
 	if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
 		auto joined = concat_text(left, right);
@@ -3030,6 +3030,7 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	} else if (li == script_value::TYPEID_FLOAT) {
 		leftNum = left.unchecked_as_float();
 	} else {
+		if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Left operand must be numeric");
 	}
 	if (ri == script_value::TYPEID_INT) {
@@ -3037,6 +3038,7 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	} else if (ri == script_value::TYPEID_FLOAT) {
 		rightNum = right.unchecked_as_float();
 	} else {
+		if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Right operand must be numeric");
 	}
 
@@ -4028,7 +4030,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
 					operator_table_, engine_, symbolizer_,
 					[this](const script_value& l, token_type o, const script_value& r) {
-						return evaluate_arithmetic(l, o, r);
+						return evaluate_arithmetic(l, o, r, detail::compound_index(o));
 					});
 				if (!result) {
 					return raise_from(result);
@@ -4220,7 +4222,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				case compound_percent: baseOp = token_type::percent; break;
 				default: return raise_(make_error_code(runtime_error_code::unknown_operator));
 			}
-			VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight));
+			VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
 			VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym)));
 			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 			return {};
@@ -4251,7 +4253,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 					// rhs keeps the Strong Types raise (string += int stays an
 					// error, unlike binary +, by pinned design). KEEP
 					// BYTE-PARALLEL with the interpreter's in-place switch.
-					VM_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight));
+					VM_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight, 0));
 					VM_TRY(compound_typed_store_back(target, std::move(joined), symbolizer_->get_string(sym)));
 				} else {
 					return raise_from(detail::compound_mismatch(0, target, derefRight, engine_));
@@ -4319,7 +4321,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
 					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 				}
-				VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight));
+				VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight, 4));
 				VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym)));
 				break;
 			}
@@ -4473,7 +4475,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
 				return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 			}
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
 			break;
 		}
 		default:
@@ -6336,16 +6338,16 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 				if ((currentValue.is_string() || rightValue.is_string()) && !currentValue.is_utf8_string() && !rightValue.is_utf8_string()) {
 					resultValue = script_value(currentValue.to_string() + rightValue.to_string(), engine_);
 				} else {
-					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue));
+					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
 				}
 				break;
 			}
 			case token_type::minus: {
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue, 1));
 				break;
 			}
 			case token_type::star: {
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue, 2));
 				break;
 			}
 			case token_type::slash: {
@@ -6354,14 +6356,14 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 				    (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0)) {
 					return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 				}
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
 				break;
 			}
 			case token_type::percent: {
 				if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
 					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 				}
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
 				break;
 			}
 			default:
@@ -10496,7 +10498,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 				}
 				const script_value current = storage->get(static_cast<size_t>(index), engine_);
 				script_value resultValue = make_null();
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(current, op, rhs));
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(current, op, rhs, detail::compound_index(op)));
 				if (storage->kind() == script_array::kind_t::i64 && resultValue.raw_storage_index() == script_value::TYPEID_FLOAT &&
 				    !detail::float_fits_script_int(resultValue.unchecked_as_float())) {
 					return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), detail::float_to_integer_error);
@@ -10530,7 +10532,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 						return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
 					}
 					script_value resultValue = make_null();
-					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs));
+					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));
 					auto container_type_info = container.get_type_info();
 					type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
 					if (element_type) {
@@ -13806,7 +13808,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 				return raise_(make_error_code(runtime_error_code::division_by_zero),
 					"Modulo by zero");
 			}
-			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
 			break;
 		}
 		default:

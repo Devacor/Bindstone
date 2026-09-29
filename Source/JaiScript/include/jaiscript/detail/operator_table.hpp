@@ -25,6 +25,17 @@ namespace jai::detail {
         none = count
     };
 
+    // the compound index of an arithmetic operator (+ - * / % -> 0..4, the order of detail::compound_mismatch)
+    inline int compound_index(token_type op) noexcept {
+        switch (op) {
+            case token_type::minus: return 1;
+            case token_type::star: return 2;
+            case token_type::slash: return 3;
+            case token_type::percent: return 4;
+            default: return 0;
+        }
+    }
+
     inline op_slot binary_op_slot(token_type t) noexcept {
         switch (t) {
             case token_type::plus: return op_slot::plus;

@@ -2175,6 +2175,24 @@ private:
 		});
 		ruling_switch_equality();
 		ruling_membership_equality();
+		ruling_compound_operand_text();
+	}
+
+	void ruling_compound_operand_text() {
+		test("a_compound_operand_error_has_one_text_at_every_destination", [this]() {
+			// docs/diagnostics.md compound assignment: Cannot apply 'op=' to <target> and <operand>, a variable, a field, a static,
+			// an element and a map entry alike
+			expect("compound text", R"(
+				class F { int n = 5; static int s = 5; }
+				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+				var s = "s";
+				t([]() { int x = 5; x -= s; }) + "|" + t([]() { F f = F(); f.n -= s; }) + "|" + t([]() { F::s *= s; }) + "|" +
+				t([]() { array<int> a = [5]; a[0] -= s; }) + "|" + t([]() { var a = [5]; a[0] %= s; }) + "|" +
+				t([]() { map<string, int> m = {"k": 1}; m["k"] /= s; }) + "|" + t([]() { var m = {"k": 1.5}; m["k"] -= s; });
+			)", "Cannot apply '-=' to int and string|Cannot apply '-=' to int and string|Cannot apply '*=' to int and string|"
+			    "Cannot apply '-=' to int and string|Cannot apply '%=' to int and string|Cannot apply '/=' to int and string|"
+			    "Cannot apply '-=' to float and string", check_mode::warn);
+		});
 	}
 
 	void ruling_membership_equality() {

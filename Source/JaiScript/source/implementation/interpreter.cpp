@@ -3934,7 +3934,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
                             operator_table_, engine_, string_symbolizer_,
                             [this](const script_value& l, token_type o, const script_value& r) {
-                                return evaluate_arithmetic(l, o, r);
+                                return evaluate_arithmetic(l, o, r, detail::compound_index(o));
                             });
                         if (!result) {
                             return result.error_value();
@@ -4275,7 +4275,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         case token_type::percent_equal: baseOp = token_type::percent; break;
                         default: return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
                     }
-                    JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight));
+                    JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
                     JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
                     push_value(expression_result_needed_ ? target.clone() : target);
                     return {};
@@ -4306,7 +4306,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             // rhs keeps the Strong Types raise (string += int stays an
                             // error, unlike binary +, by pinned design). KEEP
                             // BYTE-PARALLEL with the VM exec_compound_store.
-                            JAISCRIPT_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight));
+                            JAISCRIPT_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight, 0));
                             JAISCRIPT_TRY(compound_typed_store_back(target, std::move(joined), identifier->name));
                         } else {
                             return detail::compound_mismatch(0, target, derefRight, engine_);
@@ -4379,7 +4379,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
                         }
-                        JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight));
+                        JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight, 4));
                         JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
                         break;
                     }
@@ -4552,7 +4552,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
                         }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
                         break;
                     }
                     default:
@@ -4770,7 +4770,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                             "Modulo by zero");
                     }
-                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
                     break;
                 }
                 default:
@@ -4893,7 +4893,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                     default: op = token_type::plus; break;
                                 }
                                 script_value resultValue = make_value();
-                                JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs));
+                                JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));
                                 // Typed elements: only the identity case (same raw type) is
                                 // provably conversion-free; anything else bails
                                 auto array_type_info = array_val->get_type_info();
@@ -4982,16 +4982,16 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         if ((currentValue.is_string() || rightValue.is_string()) && !currentValue.is_utf8_string() && !rightValue.is_utf8_string()) {
                             resultValue = make_value(currentValue.to_string() + rightValue.to_string());
                         } else {
-                            JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue));
+                            JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
                         }
                         break;
                     }
                     case token_type::minus_equal: {
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue));
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue, 1));
                         break;
                     }
                     case token_type::star_equal: {
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue));
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue, 2));
                         break;
                     }
                     case token_type::slash_equal: {
@@ -5001,7 +5001,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                                 "Division by zero");
                         }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue));
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
                         break;
                     }
                     case token_type::percent_equal: {
@@ -5009,7 +5009,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
                                 "Modulo by zero");
                         }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue));
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
                         break;
                     }
                     default:
@@ -6636,7 +6636,7 @@ checked_result<script_value> interpreter::concat_with_methods(const script_value
 }
 
 // Binary operation helpers
-checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in) {
+checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound) {
     // References must be transparent here: compound assignment through a subscript
     // (m["k"] -= dt) evaluates its target to a reference value.
     const script_value& left = left_in.deref();
@@ -6649,13 +6649,13 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     // S8: bound operands normalize to detached temps (byte-parallel with vm_backend::evaluate_arithmetic)
     if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]]
         return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
-                                   ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+                                   ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right, compound);
 
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
     if (detail::utf8_operands(li, ri)) [[unlikely]]
-        return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_)), engine_);
+        return detail::utf8_rewrapped(evaluate_arithmetic(detail::utf8_unwrapped(left, engine_), op, detail::utf8_unwrapped(right, engine_), compound), engine_);
     if (detail::char_operands_promote(li, ri)) [[unlikely]]
-        return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_));
+        return evaluate_arithmetic(detail::char_promoted(left, engine_), op, detail::char_promoted(right, engine_), compound);
 
     // Special case for string concatenation (use move to avoid copying the temporary)
     // Check for to_string() method on objects before falling back to default
@@ -6710,6 +6710,7 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     } else if (li == script_value::TYPEID_FLOAT) {
         leftNum = left.unchecked_as_float();
     } else {
+        if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
             "Left operand must be numeric");
@@ -6720,6 +6721,7 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     } else if (ri == script_value::TYPEID_FLOAT) {
         rightNum = right.unchecked_as_float();
     } else {
+        if (compound >= 0) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
         return checked_result<script_value>(
             make_error_code(runtime_error_code::invalid_numeric_operand),
             "Right operand must be numeric");

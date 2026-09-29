@@ -35,22 +35,6 @@ one copy away. So the perf-leaning choice stands.
 every shipped script, so the bar is deliberately high — but "everyone gets bitten once"
 compounding into "everyone gets bitten repeatedly" would clear it.
 
-## Are bitwise compound assignments worth their weight?
-
-**The tension.** `f |= mask;` does not parse — and that is deliberate, not a gap. C++ muscle
-memory says the operator table should be complete; the counter-argument is that every
-compound form is permanent surface across the parser, two backends, the static checker, and
-the differential fuzzer, purchased to save four characters over `f = f | mask;`.
-
-**Current thinking.** Spell it out. The strongest evidence so far: JaiDOOM — a codebase made
-almost entirely of flag words, bit masks, and packed fields — was written without them and
-didn't miss them.
-
-**What would change our mind.** That same evidence pointing the other way: flag-heavy
-scripts in the wild where the long spelling measurably hurts readability, or a steady stream
-of users hitting the parse error and filing it as a bug. It's the cheapest entry in this
-file to reverse; it stays out because nothing yet has argued it in.
-
 ## How far should type annotations change memory layout?
 
 ```jaiscript

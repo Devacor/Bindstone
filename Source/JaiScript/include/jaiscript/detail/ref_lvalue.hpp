@@ -825,7 +825,9 @@ namespace jai::detail {
 					break;
 				}
 				case token_type::minus:
-				case token_type::star: {
+				case token_type::star:
+				case token_type::ampersand: case token_type::pipe: case token_type::caret:
+				case token_type::left_shift: case token_type::right_shift: {
 					auto r = arith(currentValue, op, rightValue);
 					if (!r) { return r; }
 					resultValue = std::move(r.value());

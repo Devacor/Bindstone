@@ -3938,15 +3938,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return {};
                         }
                         script_value rightValue = pop_value();
-                        token_type op;
-                        const char* opName;
-                        switch (expr->op.type) {
-                            case token_type::minus_equal: op = token_type::minus; opName = "-"; break;
-                            case token_type::star_equal: op = token_type::star; opName = "*"; break;
-                            case token_type::slash_equal: op = token_type::slash; opName = "/"; break;
-                            case token_type::percent_equal: op = token_type::percent; opName = "%"; break;
-                            default: op = token_type::plus; opName = "+"; break;
-                        }
+                        const token_type op = detail::compound_base(expr->op.type);
+                        const char* opName = detail::binary_op_name(op);
                         auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
                             operator_table_, engine_, string_symbolizer_,
                             [this](const script_value& l, token_type o, const script_value& r) {
@@ -4126,7 +4119,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         case token_type::plus_equal: op_slot = detail::op_slot::plus; break;
                         case token_type::minus_equal: op_slot = detail::op_slot::minus; break;
                         case token_type::star_equal: op_slot = detail::op_slot::star; break;
-                        default: break;
+                        default: if (detail::compound_is_bitwise(expr->op.type)) { op_slot = detail::binary_op_slot(detail::compound_base(expr->op.type)); } break;
                     }
                     if (operator_table_) {
                         if (const script_value* opFunc = operator_table_->entry(op_slot)) {
@@ -4146,14 +4139,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // Check for custom arithmetic operators on class instances
                 if (leftType == script_value_type::jai_object_type) {
                     uint64_t op_symbol_id = 0;
-                    switch (expr->op.type) {
-                        case token_type::plus_equal: op_symbol_id = op_plus_id_; break;
-                        case token_type::minus_equal: op_symbol_id = op_minus_id_; break;
-                        case token_type::star_equal: op_symbol_id = op_star_id_; break;
-                        case token_type::slash_equal: op_symbol_id = op_slash_id_; break;
-                        case token_type::percent_equal: op_symbol_id = op_percent_id_; break;
-                        default: break;
-                    }
+                    op_symbol_id = compound_op_symbol(expr->op.type);
                     if (op_symbol_id != 0) {
                         auto custom_outcome = object_arithmetic_via_method(target, rightValue, op_symbol_id);
                         if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
@@ -4165,6 +4151,17 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return {};
                         }
                     }
+                }
+
+                // &= |= ^= <<= >>=: the binary operator's kernel, stored back through the slot's own table
+                // (KEEP BYTE-PARALLEL with the VM exec_compound_store)
+                if (detail::compound_is_bitwise(expr->op.type)) [[unlikely]] {
+                    const token_type baseOp = detail::compound_base(expr->op.type);
+                    JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
+                    if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) { target.assign_through(std::move(promoted)); }
+                    else { JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name)); }
+                    push_value(expression_result_needed_ ? target.clone() : target);
+                    return {};
                 }
 
                 // §12.1 write-through: compound on a bound VARIABLE reads the live value, computes,
@@ -4467,15 +4464,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
                 // Check for custom arithmetic operators on class instances
                 if (currentValue.is_object()) {
-                    uint64_t op_symbol_id = 0;
-                    switch (expr->op.type) {
-                        case token_type::plus_equal: op_symbol_id = op_plus_id_; break;
-                        case token_type::minus_equal: op_symbol_id = op_minus_id_; break;
-                        case token_type::star_equal: op_symbol_id = op_star_id_; break;
-                        case token_type::slash_equal: op_symbol_id = op_slash_id_; break;
-                        case token_type::percent_equal: op_symbol_id = op_percent_id_; break;
-                        default: break;
-                    }
+                    const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
                     if (op_symbol_id != 0) {
                         auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
                         if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
@@ -4572,7 +4561,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         break;
                     }
                     default:
-                        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+                        if (!detail::compound_is_bitwise(expr->op.type)) { return checked_result<void>(make_error_code(runtime_error_code::unknown_operator)); }
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, detail::compound_base(expr->op.type), rightValue,
+                                                                              detail::compound_index(detail::compound_base(expr->op.type))));
+                        break;
                 }
 
                 // Store the enforced (declared-type converted) value; a consumed expression's
@@ -4658,15 +4650,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
             // Check for custom arithmetic operators on class instances
             if (currentValue.is_object()) {
-                uint64_t op_symbol_id = 0;
-                switch (expr->op.type) {
-                    case token_type::plus_equal: op_symbol_id = op_plus_id_; break;
-                    case token_type::minus_equal: op_symbol_id = op_minus_id_; break;
-                    case token_type::star_equal: op_symbol_id = op_star_id_; break;
-                    case token_type::slash_equal: op_symbol_id = op_slash_id_; break;
-                    case token_type::percent_equal: op_symbol_id = op_percent_id_; break;
-                    default: break;
-                }
+                const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
                 if (op_symbol_id != 0) {
                     auto custom_outcome = object_arithmetic_via_method(currentValue, rightValue, op_symbol_id);
                     if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
@@ -4790,8 +4774,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     break;
                 }
                 default:
-                    return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                        "Unsupported compound assignment operator");
+                    if (!detail::compound_is_bitwise(expr->op.type)) {
+                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                            "Unsupported compound assignment operator");
+                    }
+                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, detail::compound_base(expr->op.type), rightValue,
+                                                                          detail::compound_index(detail::compound_base(expr->op.type))));
+                    break;
             }
             
             if (memberExpr->is_static) {
@@ -4977,7 +4966,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 case token_type::star_equal: compound_slot = detail::op_slot::star; break;
                 case token_type::slash_equal: compound_slot = detail::op_slot::slash; break;
                 case token_type::percent_equal: compound_slot = detail::op_slot::percent; break;
-                default: break;
+                default: if (detail::compound_is_bitwise(expr->op.type)) { compound_slot = detail::binary_op_slot(detail::compound_base(expr->op.type)); } break;
             }
             const script_value* compound_op_fn = operator_table_ ? operator_table_->entry(compound_slot) : nullptr;
             if (compound_op_fn) {
@@ -5031,8 +5020,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         break;
                     }
                     default:
-                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                            "Unknown compound assignment operator");
+                        if (!detail::compound_is_bitwise(expr->op.type)) {
+                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+                                "Unknown compound assignment operator");
+                        }
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, detail::compound_base(expr->op.type), rightValue,
+                                                                              detail::compound_index(detail::compound_base(expr->op.type))));
+                        break;
                 }
             }
             
@@ -6684,6 +6678,20 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) [[unlikely]]
         return evaluate_arithmetic(li == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, op,
                                    ri == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right, compound);
+
+    // &= |= ^= <<= >>=: the binary operator's kernel; an operand that is not an integer (a char promotes) takes the
+    // compound's text (KEEP BYTE-PARALLEL with vm_backend::evaluate_arithmetic)
+    if (detail::bitwise_token(op)) [[unlikely]] {
+        const auto integral = [](size_t idx) { return idx == script_value::TYPEID_INT || idx == script_value::TYPEID_CHAR; };
+        if (compound >= 0 && (!integral(li) || !integral(ri))) { return detail::compound_mismatch(static_cast<size_t>(compound), left, right, engine_); }
+        switch (op) {
+            case token_type::ampersand: return handle_bitwise_and(left, right);
+            case token_type::pipe: return handle_bitwise_or(left, right);
+            case token_type::caret: return handle_bitwise_xor(left, right);
+            case token_type::left_shift: return handle_left_shift(left, right);
+            default: return handle_right_shift(left, right);
+        }
+    }
 
     // Integral promotion: char operands enter arithmetic as int64 0..255 (char_promotion.hpp)
     if (detail::utf8_operands(li, ri)) [[unlikely]]

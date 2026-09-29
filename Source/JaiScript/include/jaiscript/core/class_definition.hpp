@@ -2949,13 +2949,15 @@ inline error_propagator typed_slot_rejection(const script_value& source, const t
 
 // A compound assignment whose operator does not take its operands (docs/diagnostics.md, compound assignment): op 0..4 is
 // += -= *= /= %=, {0} = the target's type, {1} = the operand's. Every spelling is already interned (see above).
-inline constexpr std::string_view compound_mismatch_texts[5] = {
+inline constexpr std::string_view compound_mismatch_texts[10] = {
     "Cannot apply '+=' to {0} and {1}", "Cannot apply '-=' to {0} and {1}", "Cannot apply '*=' to {0} and {1}",
-    "Cannot apply '/=' to {0} and {1}", "Cannot apply '%=' to {0} and {1}"};
+    "Cannot apply '/=' to {0} and {1}", "Cannot apply '%=' to {0} and {1}", "Cannot apply '&=' to {0} and {1}",
+    "Cannot apply '|=' to {0} and {1}", "Cannot apply '^=' to {0} and {1}", "Cannot apply '<<=' to {0} and {1}",
+    "Cannot apply '>>=' to {0} and {1}"};
 
 inline error_propagator compound_mismatch(size_t op, const script_value& target, const script_value& operand, engine* eng) {
     const std::error_code ec = make_error_code(runtime_error_code::type_mismatch);
-    const std::string_view text = compound_mismatch_texts[op < 5 ? op : 0];
+    const std::string_view text = compound_mismatch_texts[op < 10 ? op : 0];
     string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
     if (!symbols) { return {ec, text}; }
     return {ec, text, symbols->intern(slot_source_type_name(target, eng)), symbols->intern(slot_source_type_name(operand, eng))};

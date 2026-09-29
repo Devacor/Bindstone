@@ -43,9 +43,9 @@ Notes:
 // Arithmetic
 + - * / %
 
-// Assignment (complete set — bitwise compound assignments (|= &= ^= <<= >>=) are
-// deliberately omitted; spell it out: x = x | y)
-= += -= *= /= %=
+// Assignment: x op= y is x = x op y with x evaluated once; the bitwise forms take integer
+// (or char) operands like their binary operators
+= += -= *= /= %= &= |= ^= <<= >>=
 
 // Comparison
 == != < > <= >= <=>
@@ -340,8 +340,7 @@ expression = assignmentExpression
 
 assignmentExpression = ternaryExpression (assignmentOperator assignmentExpression)?
 
-assignmentOperator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
-                   // bitwise compound forms (|= &= ^= <<= >>=) deliberately omitted
+assignmentOperator = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
 
 ternaryExpression = logicalOrExpression ("?" expression ":" ternaryExpression)?
 

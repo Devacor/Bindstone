@@ -940,6 +940,23 @@ namespace jai {
         uint64_t subscript_op_id_;  // "[]"
         uint64_t assign_operator_id_;  // "=" for class assignment operator overload
 
+        // a compound assignment's operator method (`&=` -> operator&); 0 for none
+        uint64_t compound_op_symbol(token_type assign_op) const noexcept {
+            switch (assign_op) {
+                case token_type::plus_equal: return op_plus_id_;
+                case token_type::minus_equal: return op_minus_id_;
+                case token_type::star_equal: return op_star_id_;
+                case token_type::slash_equal: return op_slash_id_;
+                case token_type::percent_equal: return op_percent_id_;
+                case token_type::ampersand_equal: return op_ampersand_id_;
+                case token_type::pipe_equal: return op_pipe_id_;
+                case token_type::caret_equal: return op_caret_id_;
+                case token_type::left_shift_equal: return op_left_shift_id_;
+                case token_type::right_shift_equal: return op_right_shift_id_;
+                default: return 0;
+            }
+        }
+
 		// Cached symbol IDs for common keywords (initialized in constructor)
 		uint64_t this_id_;
 		uint64_t super_id_;

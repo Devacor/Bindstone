@@ -3261,6 +3261,44 @@ public:
 				check_pending_recovery(false, false, false, true);
 			}
 		});
+		test("field_copies_stay_distinct_across_regions", [this]() {
+			// Every thread swap-removes the leaves its copies replace while main's chunk registers its own
+			// copies directly: no copy may end up shared by two nodes, none may drop out of the registry
+			auto eng = make_engine();
+			eng->execution_budget(0);
+			eng->parallel_thread_count(6);
+			eng->execute(R"(
+				class RegistryLeaf { int v = 0; RegistryLeaf() {} RegistryLeaf(int n) { v = n; } }
+				class RegistryNode {
+					RegistryLeaf a = RegistryLeaf(0);
+					RegistryLeaf b = RegistryLeaf(0);
+					RegistryNode() {}
+					RegistryNode(int n) { a = RegistryLeaf(n); b = RegistryLeaf(-1); }
+				}
+				array<RegistryNode> registry_nodes = [];
+				for (int i = 0; i < 256; i++) { registry_nodes.push(RegistryNode(i)); }
+				function registry_shared_leaves() {
+					for (int i = 0; i < 256; i++) { registry_nodes[i].b.v = 1000 + i; }
+					int shared = 0;
+					for (int i = 0; i < 256; i++) { if (registry_nodes[i].b.v != 1000 + i) { shared++; } }
+					for (int i = 0; i < 256; i++) { registry_nodes[i].b = RegistryLeaf(-1); }
+					return shared;
+				}
+			)");
+			auto region = eng->jaibite(R"(
+				parallel_for (auto& n : registry_nodes) { n.b = n.a; }
+				registry_shared_leaves();
+			)");
+			auto& state = eng->parallel_state();
+			auto def = eng->get_class_registry().find_script_class("RegistryLeaf");
+			check_not_null(def);
+			for (int round = 0; round < 40; ++round) {
+				state.worker_overhead_ns = 0.0;
+				for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
+				check_eq(script_int(0), eng->execute(region).as_int(), "a leaf copied into one node is shared by another");
+				check_eq(size_t(512), def->live_instances().size(), "the leaf registry lost or duplicated a live instance");
+			}
+		});
 		test("failed_reload_retry_preserves_old_constructor_and_method", [this]() {
 			check_pending_recovery(false, false, false, true);
 		});

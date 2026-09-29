@@ -1989,20 +1989,6 @@ private:
 		});
 	}
 
-	void known_bugs_range_for() {
-		test("a_typed_range_for_variable_converts_each_element_like_a_declaration", [this]() {
-			// CLAUDE.md "One conversion table for every typed slot" (a declaration); C++: for (int v : floats) converts each element.
-			// Today the loop binds the element unconverted (int v holds 1.5, string s holds 1) on both backends
-			expect("typed range-for", R"(
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
-				t([]() { var a = [1.5, 2.5]; string s = ""; for (int v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
-				t([]() { var a = [1, 2]; string s = ""; for (string v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
-				t([]() { var a = ["x"]; string s = ""; for (int v : a) { s += type_of(v); } return s; });
-			)", "int:1 int:2 |string:1 string:2 |Cannot initialize 'v' (declared int) with string", check_mode::warn);
-		});
-	}
-
-	// docs/SIMPLIFICATION_AUDIT.md F1-F8: each moves to its spec group in the change that fixes it
 	void known_bugs_simplification_audit() {
 		test("f2_a_weak_store_yields_the_stored_weak_handle", [this]() {
 			// the vm hands back the right-hand side (the shared handle) of a consumed store into a weak_ptr
@@ -2132,7 +2118,6 @@ private:
 	}
 
 	void known_bugs() {
-		known_bugs_range_for();
 		known_bugs_simplification_audit();
 		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
 			// docs/global_shadowing.md: a function called from inside the block still sees the outer binding
@@ -2148,7 +2133,6 @@ private:
 		});
 	}
 
-	// Dev ruling (being implemented by another change): a by-value argument is captured at the call site, left to right
 	// Dev's rulings of 2026-09-28 (docs/spec_conformance.md section 9)
 	void rulings_2026_09_28() {
 		test("a_bare_throw_with_nothing_active_is_a_catchable_runtime_error", [this]() {
@@ -2186,6 +2170,29 @@ private:
 		ruling_typed_reference_parameters();
 		static_members_bind_references();
 		ruling_reference_store_types();
+		ruling_typed_range_for();
+	}
+
+	void ruling_typed_range_for() {
+		test("a_typed_range_for_variable_takes_each_element_as_its_declaration_would", [this]() {
+			// by value: T x = element; by reference: an element that holds a T
+			expect("typed range-for", R"(
+				class A { int v = 1; } class B : A { }
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { var a = [1.5, 2.5]; string s = ""; for (int v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
+				t([]() { var a = [1, 2]; string s = ""; for (string v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
+				t([]() { var a = ["x"]; string s = ""; for (int v : a) { s += type_of(v); } return s; }) + "|" +
+				t([]() { var a = [1, 2.5]; int n = 0; for (int& v : a) { v = v + 1; n += 1; } return n; }) + "|" +
+				t([]() { var a = [B(), A()]; int n = 0; for (A& r : a) { r.v = 7; n += r.v; } return n; }) + "|" +
+				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = 2.9; s += type_of(x) + ":" + x; } return s; });
+			)", "int:1 int:2 |string:1 string:2 |Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
+			    "14|int:2", check_mode::warn);
+			every_config("checker", "1|0", [](engine& e) {
+				auto bad = e.check("array<float> a = [1.5]; for (int& v : a) { }");
+				auto ok = e.check("array<int> a = [1]; for (int& v : a) { } array<float> f = [1.5]; for (int v : f) { }");
+				return std::to_string(bad.error_count()) + "|" + std::to_string(ok.error_count());
+			});
+		});
 	}
 
 	void ruling_reference_store_types() {

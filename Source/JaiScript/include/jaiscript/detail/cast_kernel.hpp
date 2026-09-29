@@ -158,6 +158,27 @@ namespace jai::detail {
 		}
 	}
 
+	// A typed range-for variable's element (Dev ruling 2026-09-28): by value it takes the element as `T x = element;` would, by
+	// reference it binds an element that holds a T (a class: T or a subclass). auto and var bind the element as it is
+	inline bool range_for_declared(const type_info* declared) {
+		return declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != script_value_type::jai_null_type;
+	}
+	inline checked_result<script_value> range_for_bind(script_value element, const type_info_ptr& declared, bool by_ref, std::string_view name, engine* eng) {
+		if (!range_for_declared(declared.get())) { return element; }
+		const slot_site site{slot_kind::declaration, name, {}};
+		if (by_ref) {
+			if (!reference_binding_admits(declared.get(), element, eng)) {
+				return typed_slot_rejection(element.deref(), *declared, site, eng);
+			}
+			return element;
+		}
+		auto stored = typed_store_convert(element, declared, eng, [&]() { return site; });
+		if (!stored) { return stored.error_value(); }
+		script_value v = std::move(stored.value());
+		v.set_type_info(declared);
+		return v;
+	}
+
 	// Value and shared_ptr forms with a CLASS target: null passes tagged; an admitted object is
 	// tagged - the value form copies like a typed declaration (existing storage clones, a handle
 	// deep-copies into a value, a temporary moves), the shared_ptr form shares the instance.

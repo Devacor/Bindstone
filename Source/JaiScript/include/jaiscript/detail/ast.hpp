@@ -633,6 +633,9 @@ namespace jai {
         // Parser escape analysis (value-mode loop vars): per-iteration values are stored
         // through a cell so the variable can be bound by reference
         bool var_ref_escaping = false;
+        // The checker saw the container's elements already hold the declared type: the binding converts nothing (a cell head
+        // may land the element as it is)
+        bool element_conversion_free = false;
         expression_ptr container;      // The container to iterate over
         statement_ptr body;            // Loop body
 

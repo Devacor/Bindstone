@@ -249,7 +249,7 @@ function new_game(int mask, bool nightmare) -> void {
 	NIGHTMARE = nightmare;
 	FAST_MONSTERS = nightmare;
 	player_reset();
-	if (DEMO_ARM != "") { demo_rec_begin(START_MAP, mask, clock_ms() & 16777215); }   // seed before spawns
+	if (DEMO_ARM != "") { demo_rec_begin(START_MAP, mask, time::unix_ms() & 16777215); }   // seed before spawns
 	game_start_map(START_MAP);
 	MID_GAME = true;
 	AM_ON = false;
@@ -562,7 +562,8 @@ function play(string mapname) -> int {
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);   // alt screen, no cursor
 	var home = ESC + "[H";
 	float accum = 0.0;
-	int last = clock_ms();
+	time::stopwatch frame;
+	frame.start();
 	bool quit = false;
 	GSTATE = 0;
 	if (DEMO_QUEUE) { DEMO_QUEUE = false; demo_play_start(); }
@@ -573,10 +574,11 @@ function play(string mapname) -> int {
 		NP_QUEUE_MODE = "";
 	}
 	while (!quit) {
-		int now = clock_ms();
+		float dt = frame.elapsed() * 1000;
+		frame.start();
 		if (GSTATE == 2) {
-			fps_note(now - last);
-			accum = accum + (now - last);
+			fps_note(dt);
+			accum = accum + dt;
 			if (accum > 120.0) { accum = 120.0; }    // stall recovery, GLOOM-style
 			while (accum >= TICK_MS) {
 				IP_X = P_X; IP_Y = P_Y; IP_ANG = P_ANG; IP_Z = P_VIEWZ;
@@ -585,7 +587,6 @@ function play(string mapname) -> int {
 				accum = accum - TICK_MS;
 			}
 		} else { accum = 0.0; }
-		last = now;
 
 		var edge = read_key();                       // drain ALL pending edges each frame
 		while (edge != "") {
@@ -735,9 +736,8 @@ function play(string mapname) -> int {
 		}
 		print(home + blit_half(), skip_newline);
 
-		int spent = clock_ms() - now;
-		int rest = math::itrunc(TICK_MS) - spent;
-		if (rest > 0 && !UNCAPPED) { sleep_ms(rest); }
+		float rest = math::itrunc(TICK_MS) - frame.elapsed() * 1000;
+		if (rest > 0 && !UNCAPPED) { time::sleep_ms(rest); }
 	}
 	demo_finish();                                   // quitting mid-level still writes the tape
 	music_stop();

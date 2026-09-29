@@ -72,19 +72,20 @@ function main() -> int {
 	wake_nearest(6);
 
 	// scripted run through the start room: forward with a slow weave, firing bursts
-	int simms = 0;
-	int renderms = 0;
-	int blitms = 0;
-	int worst = 0;
+	float simms = 0.0;
+	float renderms = 0.0;
+	float blitms = 0.0;
+	float worst = 0.0;
+	time::stopwatch lap;
 	for (int f = 0; f < FRAMES; ++f) {
 		CMD_FWD = 50.0;
 		CMD_SIDE = 0.0;
 		CMD_TURN = f < 100 ? 0.0 : (((f / 50) & 1) == 0 ? 0.04 : -0.04);
 		CMD_FIRE = (f % 40) < 6;
 		CMD_USE = false;
-		int t0 = clock_ms();
+		lap.start();
 		game_tic();
-		int t1 = clock_ms();
+		simms += lap.delta() * 1000;
 		EYE_Z = P_VIEWZ;
 		EXTRA_LIGHT = FLASH_TICS > 0 ? 1 : 0;
 		render_view(P_X, P_Y, P_ANG);
@@ -92,21 +93,19 @@ function main() -> int {
 		if (FLASH_TICS > 0) { draw_weapon("PISF", "A"); }
 		hud_draw();
 		msg_draw();
-		int t2 = clock_ms();
+		renderms += lap.delta() * 1000;
 		blit_half();
-		int t3 = clock_ms();
-		simms = simms + (t1 - t0);
-		renderms = renderms + (t2 - t1);
-		blitms = blitms + (t3 - t2);
-		if (t3 - t0 > worst) { worst = t3 - t0; }
+		blitms += lap.delta() * 1000;
+		float spent = lap.elapsed() * 1000;
+		if (spent > worst) { worst = spent; }
 	}
-	int total = simms + renderms + blitms;
-	fps_note((total + FRAMES / 2) / FRAMES);
+	float total = simms + renderms + blitms;
+	float perframe = total / FRAMES;
+	fps_note(perframe);
 	fps_draw();
 	bmp_write("p7_view.bmp");
-	float perframe = total * 1.0 / FRAMES;
 	print(`P7 BENCH: ${perframe:.2} ms/frame over ${FRAMES} frames (budget 28.5)`);
-	print(`  sim ${simms * 1.0 / FRAMES:.2}  render ${renderms * 1.0 / FRAMES:.2}  blit ${blitms * 1.0 / FRAMES:.2}  worst ${worst}`);
+	print(`  sim ${simms / FRAMES:.2}  render ${renderms / FRAMES:.2}  blit ${blitms / FRAMES:.2}  worst ${worst:.1}`);
 	print(`  view ${VW}x${VIEWH}+${BAR_H} bar, sprites last frame ${SPRITES_DRAWN}, pos (${P_X:.0}, ${P_Y:.0})`);
 	check(perframe <= 28.5, "under the 35fps budget");
 

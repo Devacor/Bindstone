@@ -115,7 +115,7 @@ function boot_fetch(string label, string url, string dest) -> bool {
 			last_pct = pct;
 		}
 		boot_draw();
-		sleep_ms(16);
+		time::sleep_ms(16);
 	}
 	if (!d.success()) { boot_settle("FAILED  " + label + ": " + d.error()); return false; }
 	boot_settle("ok      " + label + " (" + to_string(d.received()) + " bytes)");
@@ -163,7 +163,7 @@ function boot_shareware(bool want) -> bool {
 		BOOT_ACTIVE = "Also fetch the DOOM shareware episode (doom1.wad)?   Y / N";
 		boot_draw();
 		string answer = "";
-		while (answer == "" && !BOOT_ABORT) { answer = boot_pump_keys(); boot_draw(); sleep_ms(16); }
+		while (answer == "" && !BOOT_ABORT) { answer = boot_pump_keys(); boot_draw(); time::sleep_ms(16); }
 		if (BOOT_ABORT) { return false; }
 		if (answer == "n") { boot_settle("--      DOOM shareware episode skipped"); return true; }
 	}
@@ -247,7 +247,7 @@ function boot_run(bool interactive, bool want_shareware, bool want_audio) -> boo
 		BOOT_ACTIVE = ok ? "ready - press a key" : "press a key to exit";
 		boot_draw();
 		string k = "";
-		while (k == "") { k = read_key(); sleep_ms(16); }
+		while (k == "") { k = read_key(); time::sleep_ms(16); }
 		print(ESC + "[?25h" + ESC + "[?1049l", skip_newline);
 	}
 	return ok;

@@ -32,7 +32,7 @@ var SESSION = null;
 // flow globals the rest of the game reads (game.jai declares NET_GAME/NP_COOP/
 // NP_IS_HOST/NP_FORWARD; these are netplay's own)
 var NP_LOBBY = "";            // "" | listening | connecting | joined | ready | failed: why
-var NP_LOBBY_T0 = 0;
+var NP_LOBBY_T0 = 0.0;
 var NET_FRAGS_MINE = 0;       // hud mirror (players[me].frags)
 var NP_WI_PEND = false;
 var NP_WI_MAP = "";
@@ -643,7 +643,7 @@ class HostSession : Session {
 		}
 		players[0] = new LocalPlayer(0, NP_NAME);
 		NP_LOBBY = "listening";
-		NP_LOBBY_T0 = clock_ms();
+		NP_LOBBY_T0 = time::now();
 		return true;
 	}
 
@@ -784,7 +784,7 @@ class ClientSession : Session {
 			return false;
 		}
 		NP_LOBBY = "connecting";
-		NP_LOBBY_T0 = clock_ms();
+		NP_LOBBY_T0 = time::now();
 		return true;
 	}
 
@@ -892,7 +892,7 @@ var NP_TAKE_PEND = {};
 var NP_READY_SET = {};
 var NP_NEXT_SENT = false;
 var NP_EXIT_SENT = false;
-var NP_WI_T0 = 0;             // host intermission entry (ms): the 10s-grace baseline
+var NP_WI_T0 = null;          // host intermission entry (time::now()): the 10s-grace baseline
 var NP_LAST_STATE = [];
 var NP_PROJ_NEXT = 0;         // monotonic net ids (never reset: stale packets can't collide)
 var NP_PROJ_MINE = {};        // my announced live projectiles: mobj idx -> net id
@@ -917,7 +917,7 @@ function np_coop_reset_state() -> void {
 	NP_READY_SET = {};
 	NP_NEXT_SENT = false;
 	NP_EXIT_SENT = false;
-	NP_WI_T0 = 0;
+	NP_WI_T0 = null;
 	NP_LAST_STATE = [];
 	for (int m = 0; m < MO_X.size(); ++m) { NP_LAST_STATE.push(-999999); }
 	NP_PROJ_MINE = {};
@@ -1196,7 +1196,7 @@ function np_lobby_join(string host, int port) -> bool {
 function np_lobby_frame() -> void {
 	if (SESSION == null) { return; }
 	SESSION.pump();
-	if (NP_LOBBY == "connecting" && clock_ms() - NP_LOBBY_T0 > 10000) {
+	if (NP_LOBBY == "connecting" && time::now() - NP_LOBBY_T0 > 10.0) {
 		NP_LOBBY = "failed: no answer";
 		np_cancel();
 	}
@@ -1364,11 +1364,11 @@ function np_host_can_start() -> bool {
 	if (SESSION == null) { return true; }
 	int need = np_ready_need();
 	if (need <= 0 || np_ready_have() >= need) { return true; }
-	return NP_WI_T0 > 0 && clock_ms() - NP_WI_T0 > 10000;
+	return NP_WI_T0 != null && time::now() - NP_WI_T0 > 10.0;
 }
 
 function np_wi_begin() -> void {
-	NP_WI_T0 = clock_ms();
+	NP_WI_T0 = time::now();
 }
 
 function np_next_map(string mapname) -> void {

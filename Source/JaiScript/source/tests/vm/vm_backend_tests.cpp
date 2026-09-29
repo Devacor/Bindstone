@@ -3053,7 +3053,8 @@ public:
 				out;
 			)";
 			auto [i_plain, v_plain] = run_both_backends(plain_store);
-			check_true(i_plain.find("outer:") == 0, "interp: plain ref store escapes to caller");
+			// docs/EXCEPTION_DESIGN.md: the native exception is the running function's own, so its try catches it
+			check_true(i_plain.find("inner:") == 0, "interp: plain ref store is caught by the function's own try");
 			check_true(i_plain.find("removed array element") != std::string::npos, "interp: plain ref store error text");
 			check_eq(i_plain, v_plain, "plain ref store catchability parity");
 

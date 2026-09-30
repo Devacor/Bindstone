@@ -2963,6 +2963,17 @@ inline error_propagator compound_mismatch(size_t op, const script_value& target,
     return {ec, text, symbols->intern(slot_source_type_name(target, eng)), symbols->intern(slot_source_type_name(operand, eng))};
 }
 
+// `+=` with a text side, one table for every destination (a local, a field, this's field, a static, an element, a map entry, a
+// reference): a string or utf8_string target appends a string, a char or a utf8_string; any other pairing with a text side is the
+// compound's operand error ('+=' never stringifies the way binary + does)
+enum class compound_text { none, append, mismatch };
+inline compound_text compound_plus_text(const script_value& target, const script_value& operand) {
+    const auto text = [](const script_value& v) { return v.is_string() || v.is_utf8_string(); };
+    if (!text(target) && !text(operand)) { return compound_text::none; }
+    if (text(target) && (text(operand) || operand.raw_storage_index() == script_value::TYPEID_CHAR)) { return compound_text::append; }
+    return compound_text::mismatch;
+}
+
 // ++/-- on a target that is not a number: {0} = the target's type
 inline error_propagator incdec_mismatch(bool increment, const script_value& target, engine* eng) {
     const std::error_code ec = make_error_code(runtime_error_code::invalid_numeric_operand);

@@ -2184,6 +2184,43 @@ private:
 		ruling_block_callees();
 		ruling_var_typed_arrays();
 		constructor_overloads_rank_like_calls();
+		compound_operators_have_one_table();
+	}
+
+	void compound_operators_have_one_table() {
+		test("a_compound_operator_has_one_table_at_every_destination", [this]() {
+			// the simplification audit's F9-F12 (Dev: one semantics per compound operator, one zero-divisor text per operator family):
+			// member '/=' divides like the local's, '+=' appends text only to a text target at every destination (a local, a field,
+			// this's field, an element, a map entry, a reference), '/' and '/=' raise 'Division by zero', '%' and '%=' 'Modulo by zero'
+			expect("one compound table", R"(
+				class T { string s = "a"; var n = 7; int big = 9007199254740993; float f = 1.0; void half() { n /= 2; } void addc() { s += 'c'; } }
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { T o; o.half(); return type_of(o.n) + ":" + o.n; }) + "|" +
+				t([]() { T o; o.n /= 2; return o.n; }) + "|" +
+				t([]() { T o; o.big /= 1; return o.big; }) + "|" +
+				t([]() { T o; o.s += 'c'; o.addc(); return o.s; }) + "|" +
+				t([]() { string gs = "a"; gs += 'c'; return gs; }) + "|" +
+				t([]() { map<string, string> m = {"k": "v"}; m["k"] += 'z'; return m["k"]; }) + "|" +
+				t([]() { array<string> as = ["x"]; as[0] += 5; return as[0]; }) + "|" +
+				t([]() { var vs = "x"; vs += 5; return vs; }) + "|" +
+				t([]() { T o; o.s += 5; return o.s; }) + "|" +
+				t([]() { var a = [5]; a[0] += "s"; return a[0]; }) + "|" +
+				t([]() { array<string> ss = ["a"]; auto& e1 = ss[0]; e1 += 5; return e1; }) + "|" +
+				t([]() { int x = 5; x %= 0; return x; }) + "|" +
+				t([]() { int x = 5; int z = 0; return x % z; }) + "|" +
+				t([]() { int x = 5; x /= 0; return x; }) + "|" +
+				t([]() { int x = 5; int z = 0; return x / z; }) + "|" +
+				t([]() { float x = 5.0; x %= 0.0; return x; }) + "|" +
+				t([]() { float x = 5.0; float z = 0.0; return x / z; }) + "|" +
+				t([]() { T o; o.f /= 0.0; return o.f; }) + "|" +
+				t([]() { array<int> a = [4]; a[0] %= 0; return 1; }) + "|" +
+				t([]() { array<int> ai = [3]; auto& e0 = ai[0]; e0 %= 0; return 1; });
+			)", "int:3|3|9007199254740993|acc|ac|vz|"
+			    "Cannot apply '+=' to string and int|Cannot apply '+=' to string and int|Cannot apply '+=' to string and int|"
+			    "Cannot apply '+=' to int and string|Cannot apply '+=' to string and int|"
+			    "Modulo by zero|Modulo by zero|Division by zero|Division by zero|Modulo by zero|Division by zero|Division by zero|"
+			    "Modulo by zero|Modulo by zero", check_mode::warn);
+		});
 	}
 
 	void constructor_overloads_rank_like_calls() {

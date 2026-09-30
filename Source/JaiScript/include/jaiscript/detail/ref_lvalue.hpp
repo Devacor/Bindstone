@@ -822,13 +822,13 @@ namespace jai::detail {
 		} else {
 			switch (op) {
 				case token_type::plus: {
-					if (currentValue.is_string() || rightValue.is_string()) {
-						resultValue = script_value(currentValue.to_string() + rightValue.to_string(), eng);
-					} else {
-						auto r = arith(currentValue, token_type::plus, rightValue);
-						if (!r) { return r; }
-						resultValue = std::move(r.value());
+					// one '+=' table for every destination: a text target appends text, a text operand never stringifies
+					if (compound_plus_text(currentValue.deref(), rightValue) == compound_text::mismatch) {
+						return compound_mismatch(0, currentValue.deref(), rightValue, eng);
 					}
+					auto r = arith(currentValue, token_type::plus, rightValue);
+					if (!r) { return r; }
+					resultValue = std::move(r.value());
 					break;
 				}
 				case token_type::minus:

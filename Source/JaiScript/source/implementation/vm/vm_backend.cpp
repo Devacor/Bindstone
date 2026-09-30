@@ -4217,6 +4217,9 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 
 		const size_t leftIdx = target.raw_storage_index();
 		const size_t rightIdx = derefRight.raw_storage_index();
+		if (kind == compound_plus && detail::compound_plus_text(target, derefRight) == detail::compound_text::mismatch) {
+			return raise_from(detail::compound_mismatch(0, target, derefRight, engine_));   // one '+=' table for every destination
+		}
 		// Integral promotion (char_promotion.hpp): a char operand leaves the in-place
 		// ladder and takes the general arithmetic path as int64 0..255, storing back
 		// like the %= case does. KEEP BYTE-PARALLEL with the interpreter's in-place switch.
@@ -4409,6 +4412,11 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	const size_t ci = currentValue.raw_storage_index();
 	const size_t ri = rightValue.raw_storage_index();
 	script_value resultValue = make_null();
+	const detail::compound_text text_pair = kind == compound_plus ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
+	if (text_pair == detail::compound_text::mismatch) { return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_)); }
+	if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
+		VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+	} else
 	switch (kind) {
 		case compound_plus:
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -6321,11 +6329,11 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 			rightValue = rightValue.bound_decoded_temp();
 		switch (op) {
 			case token_type::plus: {
-				if ((currentValue.is_string() || rightValue.is_string()) && !currentValue.is_utf8_string() && !rightValue.is_utf8_string()) {
-					resultValue = script_value(currentValue.to_string() + rightValue.to_string(), engine_);
-				} else {
-					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+				// one '+=' table for every destination: a text target appends text, a text operand never stringifies
+				if (detail::compound_plus_text(currentValue.deref(), rightValue.deref()) == detail::compound_text::mismatch) {
+					return raise_from(detail::compound_mismatch(0, currentValue.deref(), rightValue.deref(), engine_));
 				}
+				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
 				break;
 			}
 			case token_type::minus: {
@@ -13731,7 +13739,11 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 	const size_t ci = currentValue.raw_storage_index();
 	const size_t ri = rightValue.raw_storage_index();
 	script_value resultValue = make_null();
-
+	const detail::compound_text text_pair = kind == compound_plus ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
+	if (text_pair == detail::compound_text::mismatch) { return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_)); }
+	if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
+		VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+	} else
 	switch (kind) {
 		case compound_plus: {
 			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {

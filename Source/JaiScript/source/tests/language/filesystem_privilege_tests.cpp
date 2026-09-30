@@ -247,7 +247,7 @@ public:
             auto eng = make_engine();
             stdlib::register_reflection_functions(eng);
             bind_probe(*eng);
-            eng->execute("var probe = FilesystemProbe(); var saved_read = probe.read;");
+            eng->execute("var probe = FilesystemProbe(); var saved_read = reflect::bind(probe, \"read\");");
             check_eq(script_int(17), eng->execute("saved_read()").as_int());
             filesystem_enabled(*eng, false);
             for (const char* source : {"probe.read()", "probe.query()", "probe.lambda()", "saved_read()", "reflect::invoke(probe, \"read\")"}) {

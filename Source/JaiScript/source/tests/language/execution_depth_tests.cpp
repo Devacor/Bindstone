@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/reflection.hpp>
 #include <limits>
 
 namespace jai::foundry::tests {
@@ -120,9 +121,10 @@ public:
 			for (const std::string source : {
 				"class C { int f(int n) { if (n == 0) { return 0; } return f(n-1)+1; } } C().f(20);",
 				"class C { static int f(int n) { if (n == 0) { return 0; } return C::f(n-1)+1; } } C::f(20);",
-				"class C { int f(int n) { if (n == 0) { return 0; } return f(n-1)+1; } } auto c = C(); auto bound = c.f; bound(20);",
+				"class C { int f(int n) { if (n == 0) { return 0; } return f(n-1)+1; } } auto c = C(); auto bound = reflect::bind(c, \"f\"); bound(20);",
 				"class C { C(int n) { if (n > 0) { auto child = C(n-1); } } } C(20);"}) {
 				auto eng = make_engine();
+				jai::stdlib::register_reflection_functions(eng);
 				configure(*eng, eng->get_backend_type(), 8);
 				depth_error(*eng, source);
 			}

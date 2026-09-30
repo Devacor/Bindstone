@@ -28,9 +28,11 @@ inline bool arity_accepts(const std::vector<parameter>& params, size_t argc) {
     return argc >= required_parameter_count(params) && argc <= params.size();
 }
 
-// Shared script-overload scorer used by instance-method and static-method dispatch.
+// Shared script-overload scorer used by method, static-method and constructor dispatch.
 // Priority: 1) all typed + exact match, 2) all typed + conversions (fewest first)
-//           3) var/any parameters (fallback)
+//           3) var/any parameters (fallback; a typed parameter the argument does not
+//           match ranks the candidate below every one it matches, then fewer var
+//           parameters win: typed exact > conversion > var)
 // Same-score tie: the candidate using FEWER defaults wins (an exact-arity overload
 // beats one that must fill trailing defaults), then fewest conversions.
 // Returns nullptr when no overload is viable for these arguments.
@@ -41,6 +43,8 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
     const script_value* args, size_t argc) {
     const std::shared_ptr<function_decl>* best_ast = nullptr;
     int best_score = INT_MAX;  // Lower is better: 0=exact, 1-N=conversions, 1000=has_var
+    size_t best_mismatches = SIZE_MAX;
+    size_t best_var_count = SIZE_MAX;
     size_t best_defaults_used = SIZE_MAX;
     size_t best_conversion_count = SIZE_MAX;
 
@@ -55,6 +59,8 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
         bool all_convertible = true; // All typed parameters can be converted
         size_t conversion_count = 0; // Number of conversions needed
         bool has_var = false;        // Has any var/any parameters
+        size_t var_count = 0;        // var/any parameters
+        size_t mismatches = 0;       // typed parameters the argument matches neither exactly nor by conversion
 
         for (size_t i = 0; i < argc; ++i) {
             const auto& param = overload_ast->parameters[i];
@@ -89,17 +95,20 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
                             } else {
                                 all_exact = false;
                                 all_convertible = false;
+                                ++mismatches;
                             }
                         } else {
                             // Can't get class def, fall back to name comparison
                             if (instance->get_class_name() != param.type->type_name) {
                                 all_exact = false;
                                 all_convertible = false;
+                                ++mismatches;
                             }
                         }
                     } else {
                         all_exact = false;
                         all_convertible = false;
+                        ++mismatches;
                     }
                 } else {
                     // For primitives, check base type
@@ -114,6 +123,7 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
                             conversion_count++;
                         } else {
                             all_convertible = false;
+                            ++mismatches;
                         }
                     }
                 }
@@ -121,6 +131,7 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
                 // Parameter has no type (var/auto) - accepts anything
                 all_typed = false;
                 has_var = true;
+                ++var_count;
             }
         }
 
@@ -138,8 +149,12 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
         }
 
         bool better;
-        if (score != best_score) {
+        if (mismatches != best_mismatches) {
+            better = mismatches < best_mismatches;
+        } else if (score != best_score) {
             better = score < best_score;
+        } else if (var_count != best_var_count) {
+            better = var_count < best_var_count;
         } else if (defaults_used != best_defaults_used) {
             better = defaults_used < best_defaults_used;
         } else {
@@ -148,6 +163,8 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
         if (better) {
             best_ast = &overload_ast;
             best_score = score;
+            best_mismatches = mismatches;
+            best_var_count = var_count;
             best_defaults_used = defaults_used;
             best_conversion_count = conversion_count;
         }

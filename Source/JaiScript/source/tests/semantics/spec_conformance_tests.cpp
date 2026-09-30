@@ -2099,8 +2099,8 @@ private:
 				string out = t(g()) + " / " + t(k()) + " / " + u(m());
 				try { throw "outer"; } catch (e) { out += " / " + e; }
 				out;
-			)", "No exception to re-throw|Cannot resume a completed coroutine / boom|Cannot resume a completed coroutine / "
-			    "No exception to re-throw|Cannot resume a completed coroutine / outer", check_mode::warn);
+			)", "Bare throw with no active exception thrown.|Cannot resume a completed coroutine / boom|Cannot resume a completed coroutine / "
+			    "Bare throw with no active exception thrown.|Cannot resume a completed coroutine / outer", check_mode::warn);
 		});
 		test("f8_a_by_value_parameter_does_not_see_user_code_write_its_argument", [this]() {
 			// a by-value parameter holds a copy: user code the callee runs (a method on another local, a getter of the

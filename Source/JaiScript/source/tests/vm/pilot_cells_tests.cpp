@@ -5345,9 +5345,10 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function run4() -> string { int w = 1; addi(w, 0.5); return to_string(w) + \":\" + type_of(w); }\n"
 				"function run5() -> string { var v = 1; setv(v); return to_string(v) + \":\" + type_of(v); }\n"
 				"function run6(int n) -> string { float t = 0.0; for (int i = 0; i < n; ++i) { bumpf(t, i * 0.5); incf(t); } return to_string(t) + \":\" + type_of(t); }\n"
-				"function run7() -> string { int q = 3; bumpf(q, 0.25); return to_string(q) + \":\" + type_of(q); }\n"
+				"function run7() -> string { float q = 3.0; bumpf(q, 0.25); return to_string(q) + \":\" + type_of(q); }\n"
 				"run1() + \" \" + run2() + \" \" + run3() + \" \" + run4() + \" \" + run5() + \" \" + run6(10) + \" \" + run7();";
-			const std::string expected = "2.5:float 7:int 2.75:float 1:int 2.5:float 32.5:float 3.25:float";
+			// a store through a reference runs the variable's own table and a T& binds only a T (Dev rulings 2026-09-28)
+			const std::string expected = "2:int 7.0:float 2:int 1:int 2.5:float 32.5:float 3.25:float";
 			both(src, expected, "name references");
 			both(src, expected, "name references, proofs off", false);
 			const std::string l = listing_run(src);
@@ -5483,7 +5484,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"string out = run(6) + \" | \" + flip(5) + \" | \" + big(3) + \" | \" + zero(3);\n"
 				"A = function(var i, var j) { return 7; };\n"
 				"out + \" | \" + run(2);";
-			const std::string want = "7.5400642840316 91 12.0 10.5 156 | 37.24046996530398:float | E:Integer overflow in '*' | E:Division by zero in integer operation | 42.0 5 3.0 1.5 28";
+			// flip's setf(k) stores 2.5 into the int k through the reference: k's own table keeps it an int (Dev ruling 2026-09-28)
+			const std::string want = "7.5400642840316 91 12.0 10.5 156 | 30.54493464052287:int | E:Integer overflow in '*' | E:Division by zero in integer operation | 42.0 5 3.0 1.5 28";
 			both(src, want, "untyped leaves");
 			both(src, want, "untyped leaves, proofs off", false);
 			const std::string l = listing_run(src);

@@ -6,6 +6,7 @@
 #include "engine.hpp"
 #include "native_cast.hpp"
 #include <jaiscript/detail/fault_injection.hpp>
+#include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
@@ -1060,6 +1061,7 @@ public:
         }
 
         if (has_script_dtor_) {
+            if (engine_) { engine_->execution_limits().script_destructor_instances = true; }
             auto* raw_instance = new class_instance(class_instance::interned_name_t{}, interned_name(), engine_);
             auto class_def = shared_from_this();
 

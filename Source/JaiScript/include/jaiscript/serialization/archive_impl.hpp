@@ -155,6 +155,38 @@ protected:
         return {id, true};
     }
 
+    // The object a locked weak handle serializes as, the first time the archive sees it
+    template <class Holder>
+    script_value weak_target_value(const Holder& shared) const {
+        return script_value::make_object(std::string(shared->type_name), shared->type_id, shared->data, engine_ref_,
+                                         shared->is_class_instance_wrapper);
+    }
+
+    // Every property with a getter, in the class's order: C++ bound properties, script fields through their
+    // synthesized getters, hybrids (inherited C++ properties chain through the C++ base; _cpp_object has no getter).
+    // A script-declared accessor's error and a host exception leave the archive; a host property that cannot read
+    // stays out. False when a getter threw into the backend: the in-flight exception leaves the archive.
+    template <class ClassDef, class Emit>
+    bool for_each_serialized_property(const script_value& value, const ClassDef& class_def, engine* eng, Emit&& emit) {
+        for (const auto& prop_name : class_def->get_property_names()) {
+            uint64_t getter_id = eng->symbolize("_get_" + prop_name);
+            auto getter = class_def->get_method(getter_id);
+            if (getter.type() != script_value_type::jai_function_type) { continue; }
+            std::vector<script_value> args = {value};
+            auto result = getter.as_function()(args);
+            if (!result) {
+                if (class_def->script_declares_user_accessor(getter_id) ||
+                    result.error() == make_error_code(runtime_error_code::cpp_exception)) {
+                    throw runtime_error(eng->format_error(result));
+                }
+                continue;
+            }
+            if (eng->backend_unwinding()) { return false; }
+            emit(prop_name, std::move(result.value()));
+        }
+        return true;
+    }
+
     std::map<std::string, bool> property_enabled_;
     uint32_t version_ = 0;
 

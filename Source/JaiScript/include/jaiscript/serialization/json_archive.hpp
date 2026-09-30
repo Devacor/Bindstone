@@ -221,15 +221,7 @@ public:
                     // If this is the first time seeing this object, serialize it inline
                     if (is_new) {
                         oss_ << ", \"$weak_ptr_data\": ";
-                        // Create a script_value from the object_holder using factory method
-                        script_value shared_val = script_value::make_object(
-                            std::string(shared->type_name),
-                            shared->type_id,
-                            shared->data,
-                            engine_ref_,
-                            shared->is_class_instance_wrapper
-                        );
-                        write_value(shared_val);
+                        write_value(weak_target_value(shared));
                     }
 
                     oss_ << "}";
@@ -304,31 +296,14 @@ public:
                         first = false;
 
                         if (class_def) {
-                            // Getter walk (mirrors the binary writer): covers C++ bound
-                            // properties, script fields via their auto-getters, and hybrids —
-                            // inherited C++ properties chain through cpp_base_class_ and
-                            // _cpp_object has no getter so it never leaks into the payload.
-                            for (const auto& prop_name : class_def->get_property_names()) {
-                                uint64_t getter_id = eng->symbolize("_get_" + prop_name);
-                                auto getter = class_def->get_method(getter_id);
-                                if (getter.type() == script_value_type::jai_function_type) {
-                                    std::vector<script_value> args = {value};
-                                    auto result = getter.as_function()(args);
-                                    if (!result) {
-                                        if (class_def->script_declares_user_accessor(getter_id) ||
-                                            result.error() == make_error_code(runtime_error_code::cpp_exception)) {
-                                            throw runtime_error(eng->format_error(result));
-                                        }
-                                        continue;   // a host property that cannot read stays out of the payload
-                                    }
-                                    if (eng->backend_unwinding()) {
-                                        return;   // the getter threw: the in-flight exception leaves to_json
-                                    }
-                                    if (!first) oss_ << ',';
-                                    first = false;
-                                    oss_ << "\"" << escape_json_string_local(prop_name) << "\":";
-                                    write_value(std::move(result.value()));
-                                }
+                            const bool completed = for_each_serialized_property(value, class_def, eng, [&](const auto& prop_name, script_value&& prop_value) {
+                                if (!first) oss_ << ',';
+                                first = false;
+                                oss_ << "\"" << escape_json_string_local(prop_name) << "\":";
+                                write_value(std::move(prop_value));
+                            });
+                            if (!completed) {
+                                return;
                             }
                         } else {
                             // No class definition - serialize fields directly (slot order:
@@ -350,13 +325,12 @@ public:
                 }
 
                 // Fallback for other object types
-                oss_ << to_json_impl_fallback(value, 0, 0);
+                oss_ << to_json_impl_fallback(value);
                 break;
             }
 
             default: {
-                // Use the existing to_json implementation for other types
-                oss_ << to_json_impl_fallback(value, 0, 0);  // No indentation, we handle it ourselves
+                oss_ << to_json_impl_fallback(value);
                 break;
             }
         }
@@ -410,8 +384,8 @@ private:
         return out;
     }
     
-    std::string to_json_impl_fallback(const script_value& val, int indent, int current_depth) {
-        // Simple fallback for non-shared_ptr types
+    // Scalars and non-instance objects; write_value handles containers, handles and instances
+    std::string to_json_impl_fallback(const script_value& val) {
         std::ostringstream oss;
         
         switch (val.type()) {
@@ -459,40 +433,6 @@ private:
                 oss << '"' << escape_json_string_local(std::string(1, val.as_char())) << '"';
                 break;
                 
-            case script_value_type::jai_array_type: {
-                const script_array* node = val.unchecked_array_node();
-                if (!node) { throw runtime_error("script_value is not an array"); }
-                oss << '[';
-                size_t i = 0;
-                node->for_each(val.get_engine(), [&](const script_value& elem) {
-                    if (i++ > 0) oss << ',';
-                    oss << to_json_impl_fallback(elem, indent, current_depth + 1);
-                });
-                oss << ']';
-                break;
-            }
-            
-            case script_value_type::jai_map_type: {
-                const auto& map = val.as_map();
-                oss << '{';
-                bool first = true;
-                for (const auto& [k, v] : map) {
-                    if (!first) oss << ',';
-                    first = false;
-                    
-                    if (k.is_string()) {
-                        oss << '"' << escape_json_string_local(k.as_string()) << '"';
-                    } else {
-                        oss << '"' << escape_json_string_local(k.to_string()) << '"';
-                    }
-                    
-                    oss << ':';
-                    oss << to_json_impl_fallback(v, indent, current_depth + 1);
-                }
-                oss << '}';
-                break;
-            }
-            
             default:
                 oss << "null";
                 break;

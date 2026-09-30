@@ -150,14 +150,20 @@ Release pass.
 
 | Option | Default | What it does |
 |---|---|---|
-| `JAISCRIPT_BUILD_TESTS` | ON | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
-| `JAISCRIPT_BUILD_RUNNER` | ON | The standalone runner / REPL (`jaiscript`) |
-| `JAISCRIPT_BUILD_EXAMPLES` | ON | `jai_gloom`, `jai_crawler`, `jai_demoreel` |
+| `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
+| `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript`) |
+| `JAISCRIPT_BUILD_LSP` | top-level | The language server (`jaiscript_lsp`) |
+| `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel` |
+| `JAISCRIPT_INSTALL` | top-level | Install rules and the `find_package(JaiScript)` package |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | The DAP-over-TCP debug listener; turn it off for shipping builds |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Performance suites inside `jaiscript_tests` |
 | `JAISCRIPT_ENABLE_PROFILING` | OFF | Profiler-friendly codegen and link flags |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native`; faster, non-portable binaries |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
+
+"top-level" means ON when JaiScript is the top-level CMake project and OFF when another project
+pulls it in with `add_subdirectory`; [`docs/BUILD.md`](docs/BUILD.md) has every option and both
+consumption routes (`add_subdirectory` and `find_package(JaiScript)`).
 
 Nothing third-party ships in this repository. The cross-language comparison benchmarks compile
 only if you supply those sources yourself — see [`docs/BUILD.md`](docs/BUILD.md). Integer

@@ -12,13 +12,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Output directories
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+# PROJECT_IS_TOP_LEVEL needs CMake 3.21; this spelling works from 3.20
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    set(JAISCRIPT_IS_TOP_LEVEL ON)
+else()
+    set(JAISCRIPT_IS_TOP_LEVEL OFF)
+endif()
 
-# Options
-option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ON)
+# Output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+# Options. Tools, tests and examples build by default only when JaiScript is the top-level project.
+option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ${JAISCRIPT_IS_TOP_LEVEL})
+option(JAISCRIPT_INSTALL "Generate the install rules and the JaiScript CMake package" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_ENABLE_PROFILING "Enable profiling instrumentation" OFF)
 option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)
 option(JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES "Enable debugging environment cycles" OFF)
@@ -51,7 +59,7 @@ if(MSVC)
     message(STATUS "  Select 'Release' in Visual Studio dropdown for maximum performance")
 else()
     # Single-configuration generators (Ninja, Make, etc.)
-    if(NOT CMAKE_BUILD_TYPE)
+    if(NOT CMAKE_BUILD_TYPE AND JAISCRIPT_IS_TOP_LEVEL)
         set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
         set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
     endif()
@@ -87,7 +95,7 @@ if(JAISCRIPT_BUILD_TESTS)
 endif()
 
 # Examples (JaiScript-authored demo programs)
-option(JAISCRIPT_BUILD_EXAMPLES "Build JaiScript example programs" ON)
+option(JAISCRIPT_BUILD_EXAMPLES "Build JaiScript example programs" ${JAISCRIPT_IS_TOP_LEVEL})
 
 # --- jai_demoreel (examples/demoreel): demoscene tech-demo reel in JaiScript ---
 if(JAISCRIPT_BUILD_EXAMPLES)
@@ -108,15 +116,38 @@ endif()
 # --- end jai_gloom ---
 
 # --- jaiscript runner (tools/jaiscript): standalone file runner / REPL / --watch live-coding ---
-option(JAISCRIPT_BUILD_RUNNER "Build the standalone jaiscript runner/REPL executable" ON)
+option(JAISCRIPT_BUILD_RUNNER "Build the standalone jaiscript runner/REPL executable" ${JAISCRIPT_IS_TOP_LEVEL})
 if(JAISCRIPT_BUILD_RUNNER)
     add_subdirectory(tools/jaiscript)
 endif()
 # --- end jaiscript runner ---
 
 # --- jaiscript_lsp (tools/lsp): the language server (LSP over stdio) the VS Code extension launches ---
-option(JAISCRIPT_BUILD_LSP "Build the jaiscript_lsp language server" ON)
+option(JAISCRIPT_BUILD_LSP "Build the jaiscript_lsp language server" ${JAISCRIPT_IS_TOP_LEVEL})
 if(JAISCRIPT_BUILD_LSP)
     add_subdirectory(tools/lsp)
 endif()
 # --- end jaiscript_lsp ---
+
+# --- install + package: find_package(JaiScript) and JaiScript::jaiscript ---
+if(JAISCRIPT_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+    set(JAISCRIPT_CMAKE_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/JaiScript)
+    install(TARGETS jaiscript EXPORT JaiScriptTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(DIRECTORY include/jaiscript DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.hpp")
+    install(EXPORT JaiScriptTargets NAMESPACE JaiScript:: DESTINATION ${JAISCRIPT_CMAKE_DIR})
+    get_target_property(JAISCRIPT_PACKAGE_MSVC_RUNTIME jaiscript MSVC_RUNTIME_LIBRARY)
+    if(NOT JAISCRIPT_PACKAGE_MSVC_RUNTIME)
+        set(JAISCRIPT_PACKAGE_MSVC_RUNTIME "")
+    endif()
+    configure_package_config_file(cmake/JaiScriptConfig.cmake.in ${PROJECT_BINARY_DIR}/JaiScriptConfig.cmake
+        INSTALL_DESTINATION ${JAISCRIPT_CMAKE_DIR})
+    write_basic_package_version_file(${PROJECT_BINARY_DIR}/JaiScriptConfigVersion.cmake
+        VERSION ${PROJECT_VERSION} COMPATIBILITY SameMinorVersion)
+    install(FILES ${PROJECT_BINARY_DIR}/JaiScriptConfig.cmake ${PROJECT_BINARY_DIR}/JaiScriptConfigVersion.cmake
+        DESTINATION ${JAISCRIPT_CMAKE_DIR})
+endif()

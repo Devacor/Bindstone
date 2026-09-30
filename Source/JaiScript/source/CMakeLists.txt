@@ -48,6 +48,9 @@ endforeach()
 
 # Create the library
 add_library(jaiscript STATIC ${JAISCRIPT_SOURCES})
+add_library(JaiScript::jaiscript ALIAS jaiscript)
+# Debug and Release installs share one prefix
+set_target_properties(jaiscript PROPERTIES DEBUG_POSTFIX d)
 
 # Measurement-only control. Never disable stack cookies for the whole library.
 option(JAISCRIPT_EXPERIMENT_VM_NO_GS "Measure /GS- on vm_backend.cpp only (MSVC; security experiment)" OFF)
@@ -61,7 +64,7 @@ endif()
 # Include directories
 target_include_directories(jaiscript
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
 

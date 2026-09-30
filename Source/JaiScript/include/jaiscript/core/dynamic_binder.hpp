@@ -628,21 +628,25 @@ public:
         lane_call<Self, R, Method, Args...>(static_cast<Self*>(self), *static_cast<const lane_state<Method>*>(state), args, out, std::index_sequence_for<Args...>{});
         return true;
     }
+    // a callable method's lane calls the callable the ordinary call holds (one object: a stateful functor's state is shared)
+    template<typename Callable>
+    struct callable_lane_state { std::shared_ptr<Callable> callable; engine* eng; };
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
     static bool self_lane_call(const void* state, void* self, const script_value& receiver, script_value* args, script_value& out, std::index_sequence<Is...>) {
-        const lane_state<Callable>& st = *static_cast<const lane_state<Callable>*>(state);
+        const callable_lane_state<Callable>& st = *static_cast<const callable_lane_state<Callable>*>(state);
+        Callable& callable = *st.callable;
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(st.eng, &storage);
         T& obj = *static_cast<T*>(self);
         std::tuple<lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>...> held{ lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>(args[Is])... };
         if constexpr (std::is_void_v<R>) {
-            st.method(obj, std::get<Is>(held).get(st.eng)...);
+            callable(obj, std::get<Is>(held).get(st.eng)...);
             out = script_value(std::monostate{}, st.eng);
         } else if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
             out = receiver;   // before the call: the receiver is the caller's slot, which a callback may move
-            st.method(obj, std::get<Is>(held).get(st.eng)...);
+            callable(obj, std::get<Is>(held).get(st.eng)...);
         } else {
-            R result = st.method(obj, std::get<Is>(held).get(st.eng)...);
+            R result = callable(obj, std::get<Is>(held).get(st.eng)...);
             out = detail::value_converter<R>::to(result, st.eng);
         }
         return true;
@@ -759,17 +763,20 @@ public:
             (std::is_same_v<std::tuple_element_t<0, args_tuple>, T&> ||
              std::is_same_v<std::tuple_element_t<0, args_tuple>, const T&>);
         using CallableType = std::decay_t<Callable>;
-        std::shared_ptr<const lane_state<CallableType>> lane;
-        if constexpr (has_self_param && std::is_copy_constructible_v<CallableType>) {
+        // the one callable object the ordinary call and the direct lane both invoke
+        auto owned = std::make_shared<CallableType>(std::forward<Callable>(callable));
+        std::shared_ptr<const callable_lane_state<CallableType>> lane;
+        if constexpr (has_self_param) {
             using R = typename traits::return_type;
             if constexpr (self_lane_params<args_tuple>(std::make_index_sequence<traits::arity - 1>{}) &&
                           (lane_result<R>() || std::is_same_v<std::remove_reference_t<R>, T>)) {
-                if (lane_unguarded(required)) { lane = std::make_shared<const lane_state<CallableType>>(lane_state<CallableType>{ callable, &engine_ }); }
+                if (lane_unguarded(required)) { lane = std::make_shared<const callable_lane_state<CallableType>>(callable_lane_state<CallableType>{ owned, &engine_ }); }
             }
         }
 
         constexpr uint64_t writeback = detail::tuple_writeback_mask<args_tuple, has_self_param ? 1 : 0>::value;
-        auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
+        auto method_func = [owned, has_self_param, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
+            CallableType& callable = *owned;
             if (has_self_param) {
                 // Lambda expects T& as first parameter, we need to extract it from args[0]
                 // args[0] is the class_instance, remaining args are the actual parameters

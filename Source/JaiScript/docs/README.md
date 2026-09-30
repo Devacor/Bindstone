@@ -1,7 +1,7 @@
 # JaiScript documentation
 
-**Start here:** [`site/index.html`](site/index.html) — the documentation site. A 13-chapter
-language guide, a 13-chapter embedding guide, the examples, and a reference index. Open it in a
+**Start here:** [`site/index.html`](site/index.html) — the documentation site. A 14-chapter
+language guide, a 14-chapter embedding guide, the examples, and a reference index. Open it in a
 browser; every JaiScript sample on it is run on both backends under strict checking.
 
 The [project README](../README.md) has the pitch, the build commands, and a taste of the

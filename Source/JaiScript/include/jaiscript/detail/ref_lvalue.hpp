@@ -611,6 +611,29 @@ namespace jai::detail {
 		refLocal.deref() = std::move(v);
 	}
 
+	// A store into a variable's own storage (a cell's value, a frame slot) obeys the variable's declared type: the assignment
+	// table and its text (Dev ruling 2026-09-28; no slot is named, so the text is the slot-less shape)
+	inline checked_result<void> variable_store(script_value& storage, script_value& value, engine* eng) {
+		type_info_ptr tag = storage.get_type_info();
+		if (tag && var_slot(tag.get())) {   // a var stays a var (a typed array keeps its element type)
+			script_value v = clone_for_assignment(value);
+			if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { var_stamp(v, tag, eng); }
+			storage = std::move(v);
+			return {};
+		}
+		if (tag && tag->base_type != script_value_type::jai_reference_type) {
+			// the value copy first (value semantics: an array store never aliases its source), then the variable's table
+			auto stored = typed_store_convert(clone_for_assignment(value), tag, eng, []() { return slot_site{slot_kind::assignment, {}, {}}; });
+			if (!stored) { return stored.error_value(); }
+			script_value v = std::move(stored.value());
+			v.set_type_info(tag);
+			storage = std::move(v);
+			return {};
+		}
+		storage = clone_for_assignment(value);
+		return {};
+	}
+
 	// Identifier-assignment through a reference local: unconstrained refs keep today's
 	// exact clone-through-deref line; constrained element/field refs enforce like the
 	// subscript-assign paths do.
@@ -618,24 +641,7 @@ namespace jai::detail {
 	                                              engine* eng, string_symbolizer* symbolizer) {
 		const auto* holder = refLocal.get_reference_holder();
 		if (holder && holder->plain_cell() && !holder->container_element_type) {
-			// a store through a reference to a typed variable obeys the variable's declared type: the assignment table and its
-			// text (Dev ruling 2026-09-28; the reference names no slot, so the text is the slot-less shape)
-			type_info_ptr tag = holder->cell()->get_type_info();
-			if (tag && var_slot(tag.get())) {   // a var stays a var (a typed array keeps its element type)
-				script_value v = clone_for_assignment(value);
-				if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { var_stamp(v, tag, eng); }
-				ref_write_through(refLocal, std::move(v));
-				return {};
-			}
-			if (tag && tag->base_type != script_value_type::jai_reference_type) {
-				// the value copy first (value semantics: an array store never aliases its source), then the variable's table
-				auto stored = typed_store_convert(clone_for_assignment(value), tag, eng, []() { return slot_site{slot_kind::assignment, {}, {}}; });
-				if (!stored) { return stored.error_value(); }
-				script_value v = std::move(stored.value());
-				v.set_type_info(tag);
-				ref_write_through(refLocal, std::move(v));
-				return {};
-			}
+			return variable_store(refLocal.deref(), value, eng);
 		}
 		if (!holder || !holder->container_element_type) {
 			ref_write_through(refLocal, clone_for_assignment(value));

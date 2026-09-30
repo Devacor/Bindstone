@@ -284,7 +284,8 @@ namespace jai::vm {
         void begin_host_call() override;
         void pop_external_call_scope() override;
         checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                             int& component) override;
+                                                             int& component, host_slot& slot) override;
+        checked_result<void> host_slot_store(const host_slot& slot, script_value& value) override;
         bool has_variable(const std::string& name) const override;
 
         void push_scope() override;
@@ -1177,7 +1178,8 @@ namespace jai::vm {
         // variable predates its escape mark
         op_status reference_to_storage(script_value& storage, script_value& out, bool& bound);
         op_status bind_site_reference(size_t i, const call_site& site, frame* caller_frame, chunk* caller_code,
-                                      const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound);
+                                      const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound,
+                                      host_slot* slot_out = nullptr);
         // Kernel caller-view over a frame: window frames hand the resolver their raw
         // window span (lawful: resolve_ref_lvalue never runs script, so the stack
         // cannot grow mid-resolve); fiber/legacy frames keep the call_frame read.

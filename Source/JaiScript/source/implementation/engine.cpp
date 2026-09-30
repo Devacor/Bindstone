@@ -1660,9 +1660,15 @@ uint8_t engine::overload_dispatch::argument_binding(size_t i, size_t argc) const
     return bits ? bits : static_cast<uint8_t>(detail::arg_binding::opaque);
 }
 
-checked_result<script_value> execution_backend::host_reference_argument(const std::vector<script_value>&, size_t, size_t, int& component) {
+checked_result<script_value> execution_backend::host_reference_argument(const std::vector<script_value>&, size_t, size_t, int& component,
+                                                                        host_slot& slot) {
     component = -1;
+    slot = {};
     return script_value(std::monostate{}, nullptr);
+}
+
+checked_result<void> execution_backend::host_slot_store(const host_slot&, script_value&) {
+    return {};
 }
 
 namespace detail {
@@ -1674,9 +1680,15 @@ host_reference host_reference_argument(engine* eng, const std::vector<script_val
         return ref;   // parallel workers never write through a host reference
     }
     int component = -1;
-    auto resolved = backend->host_reference_argument(args, index, offset, component);
+    host_slot slot;
+    auto resolved = backend->host_reference_argument(args, index, offset, component, slot);
     if (!resolved) {
         throw runtime_error(format_error_message_numeric(resolved.message(), resolved.symbol_id(), resolved.symbol_id2()));
+    }
+    if (slot.frame) {
+        ref.value = std::move(resolved.value());
+        ref.slot = slot;
+        return ref;
     }
     script_value target = std::move(resolved.value());
     if (!target.is_reference()) {
@@ -1698,7 +1710,11 @@ host_reference host_reference_argument(engine* eng, const std::vector<script_val
     return ref;
 }
 
-checked_result<void> host_reference_store(engine* eng, script_value& target, int component, script_value&& value) {
+checked_result<void> host_reference_store(engine* eng, const host_slot& slot, script_value& target, int component, script_value&& value) {
+    if (slot.frame) {
+        execution_backend* backend = eng->get_execution_backend();
+        return backend ? backend->host_slot_store(slot, value) : checked_result<void>{};
+    }
     if (component < 0) {
         return ref_store_through(target, value, eng, eng->get_symbolizer());
     }

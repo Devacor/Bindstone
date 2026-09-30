@@ -13500,7 +13500,8 @@ std::optional<checked_result<script_value>> interpreter::bind_bare_cpp_property_
 // decides between an evaluated reference, a temporary and the non-lvalue error). KEEP BYTE-PARALLEL with
 // vm_backend::bind_site_reference.
 checked_result<bool> interpreter::bind_site_reference(const expression* argExpr, call_frame* caller_locals,
-                                                      const std::shared_ptr<environment>& caller_env, script_value& out) {
+                                                      const std::shared_ptr<environment>& caller_env, script_value& out,
+                                                      host_slot* slot_out, size_t caller_index) {
     // C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
     if (argExpr && argExpr->get_type() == node_type::member_expr && caller_env) {
         if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(argExpr), *caller_env, *string_symbolizer_,
@@ -13534,6 +13535,11 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
         // an unrelated same-named outer variable)
         if (identExpr->slot_index != SIZE_MAX && caller_locals) {
             if (script_value* slotPtr = caller_locals->get_local(identExpr->slot_index)) {
+                if (slot_out && !slotPtr->is_reference()) {   // an unboxed local: nothing else reaches it during a host call
+                    *slot_out = host_slot{ reinterpret_cast<const void*>(caller_index + 1), identExpr->slot_index };
+                    out = *slotPtr;
+                    return true;
+                }
                 return reference_to_storage(*slotPtr, out);
             }
         }
@@ -13696,8 +13702,9 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
 // A host callable's T& argument (execution_backend::host_reference_argument): the argument the call in flight passed, when
 // the callable received it (a callback a builtin makes with its own arguments did not), resolved as a T& parameter binds it
 checked_result<script_value> interpreter::host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                                  int& component) {
+                                                                  int& component, host_slot& slot) {
     component = -1;
+    slot = {};
     script_value none(std::monostate{}, engine_);
     const detail::call_site_context* ctx = pending_call_ctx_;
     if (!ctx || !ctx->values || !ctx->arg_exprs || ctx->values->size() != ctx->arg_exprs->size() ||
@@ -13711,7 +13718,7 @@ checked_result<script_value> interpreter::host_reference_argument(const std::vec
     const expression* argExpr = (*ctx->arg_exprs)[index].get();
     call_frame* caller_locals = call_stack_.empty() ? nullptr : &call_stack_.back();
     script_value bound(std::monostate{}, engine_);
-    auto site = bind_site_reference(argExpr, caller_locals, environment_, bound);
+    auto site = bind_site_reference(argExpr, caller_locals, environment_, bound, &slot, call_stack_.empty() ? 0 : call_stack_.size() - 1);
     if (!site) {
         return site.error_value();
     }
@@ -13735,6 +13742,15 @@ checked_result<script_value> interpreter::host_reference_argument(const std::vec
         return lvalue.is_reference() && lvalue.get_reference_holder() ? lvalue : none;
     }
     return passed.is_reference() && passed.get_reference_holder() ? passed : none;
+}
+
+checked_result<void> interpreter::host_slot_store(const host_slot& slot, script_value& value) {
+    const size_t frame_index = reinterpret_cast<size_t>(slot.frame) - 1;
+    script_value* storage = frame_index < call_stack_.size() ? call_stack_[frame_index].get_local(slot.slot) : nullptr;
+    if (!storage) {
+        return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+    }
+    return detail::variable_store(*storage, value, engine_);
 }
 
 // Function call implementation - returns checked_result for consistent error handling

@@ -600,15 +600,19 @@ namespace jai::vm {
                 std::memcpy(doomed, static_cast<const void*>(&s), sizeof(script_value));
                 std::launder(reinterpret_cast<script_value*>(doomed))->~script_value();
             }
+            static void destroy_slot(script_value& s) noexcept {
+                if (s.release_runs_no_code()) { s.~script_value(); }   // no destructor can re-enter: in place
+                else { destroy_relocated(s); }
+            }
             void pop_back() noexcept {
                 assert(count);
                 script_value& s = slots[--count];
-                if (!dtor_elidable(s)) { destroy_relocated(s); }
+                if (!dtor_elidable(s)) { destroy_slot(s); }
             }
             void truncate(size_t new_size) noexcept {
                 assert(new_size <= count);
                 for (size_t i = new_size; i < count; ++i) {
-                    if (!dtor_elidable(slots[i])) { destroy_relocated(slots[i]); }
+                    if (!dtor_elidable(slots[i])) { destroy_slot(slots[i]); }
                 }
                 count = new_size;
             }

@@ -51,6 +51,19 @@ reserve the full `local_count` up front, never reallocate mid-frame (the 2026-07
 finding-2 failure mode was silent wrong loop counts in Release). The interpreter's
 `call_stack_` frames keep the old rule unchanged.
 
+## 2c. A released value may run a script destructor that re-enters the VM
+
+Dropping the last handle to an instance runs its script destructor synchronously, and the
+destructor pushes onto the same execution stacks the release is shrinking. So a VM container never
+destroys an element while it still holds it: `iter_states_`, `try_records_` and `pending_callees_`
+shrink through `truncate_detached` / `pop_back_detached` (the tail moves into a local first; the
+tail is a noinline cold path so the hot frame pop keeps its inlining), and `value_stack::pop_back` /
+`truncate` destroy a slot in place only when `script_value::release_runs_no_code()` says the
+release cannot cascade, else they relocate it out (memcpy) first and re-read the buffer by index.
+A destructor that runs while a throw unwinds gets its own exception state (`execute_callable`
+parks the unwinding flag, exception, value and trace around it). Pinned by Spec Conformance
+`reentrant_destructors_and_operand_order` (the ASan build shows the heap-use-after-free when broken).
+
 ## 3. Reference cells (mode 1 is DELETED, 2026-07 stage C)
 
 The old ref-anchor rule is dead machinery: `reference_holder` no longer has a raw

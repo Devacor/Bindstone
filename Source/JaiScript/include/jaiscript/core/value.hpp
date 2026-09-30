@@ -744,9 +744,27 @@ namespace detail { struct argument_capture_storage; }
             return *storage_.get_if<TYPEID_CHAR>();
         }
 
-        static constexpr const char* typed_array_vector_view_message =
-            "array<int>/array<float> hold raw buffers: the script_value vector view exists only for array<var> "
-            "(iterate with script_array::for_each, extract as<std::vector<T>>, or assign to an array<var> first)";
+#define JAI_TYPED_ARRAY_VIEW_TEXT(script, cpp) \
+            "array<" script "> is a typed buffer: the script_value vector view exists only for array<var> " \
+            "(iterate with script_array::for_each, extract as<std::vector<" cpp ">>, or assign to an array<var> first)"
+        // The one error the array<var> view gives for a typed node, naming the node's element type
+        static constexpr const char* typed_array_vector_view_message(script_array::kind_t kind) noexcept {
+            switch (kind) {
+                case script_array::kind_t::i64: return JAI_TYPED_ARRAY_VIEW_TEXT("int", "int64_t");
+                case script_array::kind_t::f64: return JAI_TYPED_ARRAY_VIEW_TEXT("float", "double");
+                case script_array::kind_t::b8: return JAI_TYPED_ARRAY_VIEW_TEXT("bool", "bool");
+                case script_array::kind_t::c8: return JAI_TYPED_ARRAY_VIEW_TEXT("char", "char");
+                case script_array::kind_t::str: return JAI_TYPED_ARRAY_VIEW_TEXT("string", "std::string");
+                case script_array::kind_t::u8: return JAI_TYPED_ARRAY_VIEW_TEXT("uint8", "uint8_t");
+                case script_array::kind_t::i8: return JAI_TYPED_ARRAY_VIEW_TEXT("int8", "int8_t");
+                case script_array::kind_t::obj:
+                    return "an array of a class type is a typed buffer: the script_value vector view exists only for array<var> "
+                           "(iterate with script_array::for_each, or assign to an array<var> first)";
+                case script_array::kind_t::hetero: break;
+            }
+            return "";
+        }
+#undef JAI_TYPED_ARRAY_VIEW_TEXT
         // Unchecked array accessor - caller must verify is_array() AND that the node is
         // dynamic (array<var>) first: array<int>/array<float> are raw buffers by their
         // declared type and have no script_value vector (iterate with
@@ -807,7 +825,7 @@ namespace detail { struct argument_capture_storage; }
             if (node->is_typed()) {
                 // Consistent in every build: the vector view is array<var>-only; converting
                 // an array<int> to it is an explicit language step (array<var> x = ints)
-                throw runtime_error(typed_array_vector_view_message);
+                throw runtime_error(typed_array_vector_view_message(node->kind()));
             }
             return node->values();
         }
@@ -1016,7 +1034,7 @@ namespace detail { struct argument_capture_storage; }
             const auto& node = storage_.get<strong_ptr<script_array>>();
             if (node->is_typed()) {
                 return checked_result<const std::vector<script_value>*>(
-                    make_error_code(runtime_error_code::type_mismatch), typed_array_vector_view_message);
+                    make_error_code(runtime_error_code::type_mismatch), typed_array_vector_view_message(node->kind()));
             }
             return checked_result<const std::vector<script_value>*>(&node->values());
         }
@@ -1290,7 +1308,7 @@ namespace detail { struct argument_capture_storage; }
                             // A reference to the script_value vector exists only for array<var>
                             if (node->is_typed()) {
                                 return checked_result<T>(make_error_code(runtime_error_code::type_mismatch),
-                                                         typed_array_vector_view_message);
+                                                         typed_array_vector_view_message(node->kind()));
                             }
                             return checked_result<T>(const_cast<std::vector<script_value>&>(node->values()));
                         } else {

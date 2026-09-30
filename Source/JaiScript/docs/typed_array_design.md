@@ -200,7 +200,7 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   array tag (the net under the kernel). No path demotes silently (a demote is a full
   copy the type never asked for). Consequences at the C++ boundary, consistent in every build:
   - `as_array()` / `checked_as_array()` are the `array<var>` view; on a typed node they
-    return the one error (`typed_array_vector_view_message`) instead of asserting in
+    return the one error (`typed_array_vector_view_message(kind)`, naming the element type) instead of asserting in
     Debug and reading empty in Release. `unchecked_as_array()` keeps its precondition.
   - Readers iterate kind-generically: `script_array::for_each` (hetero by reference,
     typed as boxed temporaries) in the json/binary archive writers, stdlib to_json,

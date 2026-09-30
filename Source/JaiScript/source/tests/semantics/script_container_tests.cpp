@@ -394,6 +394,21 @@ public:
             check(typed.unchecked_array_node()->kind() == script_array::kind_t::i64, "buffer stays typed after C++ mutation");
         });
 
+        test("typed_buffer_vector_view_error_names_the_element_type", [this]() {
+            auto eng = make_engine();
+            auto view_error = [&](const char* script) {
+                try { (void)eng->execute(script).as_array(); } catch (const std::exception& e) { return std::string(e.what()); }
+                return std::string();
+            };
+            const std::string strings = view_error("array<string> s = [\"a\"]; s");
+            check_true(strings.find("array<string>") != std::string::npos, strings);
+            check_true(strings.find("std::vector<std::string>") != std::string::npos, strings);
+            check_true(view_error("array<float> f = [1.5]; f").find("array<float>") != std::string::npos);
+            check_true(view_error("array<uint8> b = [1]; b").find("array<uint8>") != std::string::npos);
+            check_true(view_error("array<int> i = [1]; i").find("std::vector<int64_t>") != std::string::npos);
+            check_eq(std::string(), view_error("array<var> v = [1]; v"));
+        });
+
         test("typed_buffer_extracts_to_cpp_vector", [this]() {
             auto eng = make_engine();
             eng->add_function("sum_ints", [](std::vector<int64_t> v) -> int64_t {

@@ -19,6 +19,7 @@
 #include <cassert>
 #include <chrono>
 #include <memory>
+#include <cstring>
 #include <new>
 #include <optional>
 #include <unordered_map>
@@ -590,17 +591,26 @@ namespace jai::vm {
             void relocate_to(size_t new_cap); // the ONE buffer move (grow_push + reserve)
             script_value& back() noexcept { assert(count); return slots[count - 1]; }
             const script_value& back() const noexcept { assert(count); return slots[count - 1]; }
-            // A heavy slot moves out before it dies: its destructor may run a script destructor that pushes onto (and
-            // grows) this stack, so the dying value never sits in the buffer and the loop re-reads the buffer by index
+            // A heavy slot relocates out (memcpy, like the buffer's own growth) before it dies: its destructor may run a
+            // script destructor that pushes onto (and grows) this stack, so the dying value never sits in the buffer and
+            // the loop re-reads the buffer by index. The slot left behind is dead storage: pop_back has already lowered
+            // count past it; truncate lowers count past every slot it relocated.
+            template <bool KeepSlotValid>
+            static void destroy_relocated(script_value& s) noexcept {
+                alignas(script_value) unsigned char doomed[sizeof(script_value)];
+                std::memcpy(doomed, static_cast<const void*>(&s), sizeof(script_value));
+                if constexpr (KeepSlotValid) { new (&s) script_value(std::monostate{}, nullptr); }   // still below count
+                std::launder(reinterpret_cast<script_value*>(doomed))->~script_value();
+            }
             void pop_back() noexcept {
                 assert(count);
                 script_value& s = slots[--count];
-                if (!dtor_elidable(s)) { script_value doomed(std::move(s)); }
+                if (!dtor_elidable(s)) { destroy_relocated<false>(s); }
             }
             void truncate(size_t new_size) noexcept {
                 assert(new_size <= count);
                 for (size_t i = new_size; i < count; ++i) {
-                    if (!dtor_elidable(slots[i])) { script_value doomed(std::move(slots[i])); }
+                    if (!dtor_elidable(slots[i])) { destroy_relocated<true>(slots[i]); }
                 }
                 count = new_size;
             }

@@ -2793,34 +2793,42 @@ checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion p
 
 // The pointee class a shared_ptr<T> slot judges a source by (R-q6, Dev ruling 2026-09-30): a typed handle's static pointee (a
 // C++ shared_ptr<U> converts to shared_ptr<T> only upward; a downcast needs cast<shared_ptr<T>>), else - a var-held handle, a plain
-// object - the class the object really has. Empty when neither is known (opaque host flows stay lenient).
-inline std::string shared_handle_judged_class(const script_value& v, engine* eng) {
+// object - the class the object really has. Null when neither is known (opaque host flows stay lenient).
+inline const std::string* shared_handle_judged_class_name(const script_value& v, engine* eng) {
     const type_info* tag = v.get_type_info().get();
     if (tag && tag->base_type == script_value_type::jai_shared_ptr_type && !tag->dynamic_pointee) {
-        auto pointee = tag->element_type();
+        const type_info* pointee = tag->element_type().get();
         if (pointee && !pointee->type_name.empty() && pointee->base_type != script_value_type::jai_any_type) {
-            return pointee->type_name;
+            return &pointee->type_name;
         }
     }
     auto view = resolve_slot_class(v, eng);
-    return view.instance && view.def ? view.def->get_name() : std::string();
+    return view.instance && view.def ? &view.def->get_name() : nullptr;
+}
+inline std::string shared_handle_judged_class(const script_value& v, engine* eng) {
+    const std::string* name = shared_handle_judged_class_name(v, eng);
+    return name ? *name : std::string();
 }
 
 // Does a shared_ptr<T> slot take this handle or object: its judged class is T or a subclass. A var-declared holder
 // (dynamic pointee) rebinds to anything, and an unresolvable class stays lenient.
 inline bool shared_handle_admits(const script_value& v, const type_info_ptr& declared, engine* eng) {
-    if (declared->dynamic_pointee) {
-        return true;
+    const type_info* tag = v.get_type_info().get();
+    if (tag == declared.get() || declared->dynamic_pointee) {
+        return true;   // the slot's own static type
     }
-    auto expected = declared->element_type();
+    const type_info* expected = declared->element_type().get();
     if (!expected || expected->type_name.empty() || expected->base_type == script_value_type::jai_any_type) {
         return true;
     }
-    const std::string judged = shared_handle_judged_class(v, eng);
-    if (judged.empty() || judged == expected->type_name) {
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type && !tag->dynamic_pointee && tag->element_type().get() == expected) {
+        return true;   // the same static pointee
+    }
+    const std::string* judged = shared_handle_judged_class_name(v, eng);
+    if (!judged || *judged == expected->type_name) {
         return true;
     }
-    auto judged_def = eng ? eng->get_class_definition(judged) : nullptr;
+    auto judged_def = eng ? eng->get_class_definition(*judged) : nullptr;
     return !judged_def || judged_def->is_subtype_of(expected->type_name);
 }
 

@@ -1210,6 +1210,7 @@ namespace jai {
         std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null
+        checked_result<void> method_value_error(const member_expr* expr, const script_value& object, bool bindable);   // obj.method without a call
 
         // One resolution for every shape a C++/script object reaches the interpreter in:
         // class_instance wrappers (make_object, script classes), cpp_bound non-owning

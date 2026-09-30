@@ -2273,25 +2273,47 @@ private:
 	}
 
 	void builtin_methods_as_values() {
-		test("a_builtin_method_taken_as_a_value_is_bound_to_its_receiver", [this]() {
-			// Dev ruling 2026-09-30 (R-q5): arr.push, m.clear, co.resume, s.size taken as values bind their receiver exactly as a user
-			// method taken as a value does: the bound value holds the receiver's object (an element's, a copy's), keeps it alive, and
-			// a later reassignment of the variable leaves the bound one on the object it was taken from
-			expect("builtin bound", R"(
-				class C { int n = 0; void bump() { n += 1; } }
-				C c; var b = c.bump; b(); b();
-				var a = [1, 2]; var f = a.push; f(3);
-				var copy = a; var fc = copy.push; fc(7);
-				map<string, int> m = {"x": 1}; var mc = m.clear; mc();
-				var inner = [[1], [2]]; var ip = inner[0].push; ip(9);
-				C c2; var b2 = c2.bump; c2 = C(); b2();
-				var a2 = [1]; var p = a2.push; a2 = [5, 6]; p(0);
-				coroutine gen() { yield 1; yield 2; }
-				var co = gen(); var r = co.resume; var dn = co.done;
-				string s = "abc"; var sz = s.size;
-				"" + c.n + " " + a.size() + " " + copy.size() + " " + m.size() + " " + inner[0].size() + " " + c2.n + " " + a2.size() + " " +
-				    r() + " " + dn() + " " + sz();
-			)", "2 3 4 0 2 0 2 1 false 3");
+		test("a_method_read_without_a_call_is_an_error", [this]() {
+			// Dev ruling 2026-09-30: obj.method without a call reads too easily as a call, so it is an error for user, builtin and
+			// host methods: a class instance, handle or host object binds with reflect::bind, a value type's methods take a lambda;
+			// a field holding a callable stays a value
+			expect("method values", R"(
+				class Player { int hp = 5; void heal() { hp += 1; } }
+				class Team { Player lead; }
+				class Q { void a() {} function get() { return this.a; } }
+				class H { var cb = null; }
+				coroutine gen() { yield 1; }
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				Player player; player.heal();
+				H hh; hh.cb = []() { return 5; }; var g = hh.cb;
+				var co = gen();
+				"" + player.hp + " " + g() + " " + co.resume() + "|" +
+				    t([]() { Player p; var f = p.heal; return 1; }) + "|" +
+				    t([]() { shared_ptr<Player> h = new Player(); var f = h.heal; return 1; }) + "|" +
+				    t([]() { Team team; var f = team.lead.heal; return 1; }) + "|" +
+				    t([]() { Q q; return q.get(); }) + "|" +
+				    t([]() { var a = [1]; var f = a.push; return 1; }) + "|" +
+				    t([]() { string s = "x"; var f = s.to_upper; return 1; }) + "|" +
+				    t([]() { map<string, int> m = {}; var f = m.clear; return 1; }) + "|" +
+				    t([]() { var c = gen(); var f = c.resume; return 1; });
+			)", "6 5 1|'heal' is a method of Player; call it with p.heal() or bind it with reflect::bind(p, \"heal\")|"
+			    "'heal' is a method of Player; call it with h.heal() or bind it with reflect::bind(h, \"heal\")|"
+			    "'heal' is a method of Player; call it with team.lead.heal() or bind it with reflect::bind(team.lead, \"heal\")|"
+			    "'a' is a method of Q; call it with this.a() or bind it with reflect::bind(this, \"a\")|"
+			    "'push' is a method of array; call it with a.push() or wrap the call in a lambda|"
+			    "'to_upper' is a method of string; call it with s.to_upper() or wrap the call in a lambda|"
+			    "'clear' is a method of map; call it with m.clear() or wrap the call in a lambda|"
+			    "'resume' is a method of coroutine; call it with c.resume() or wrap the call in a lambda", check_mode::off);
+			every_config("method value at load", "rejected", [&](engine& e) {
+				try {
+					e.execute("class Player { void heal() {} } Player player; var f = player.heal;");
+					return std::string("loaded");
+				} catch (const std::exception& ex) {
+					const std::string what = ex.what();
+					return what.find("'heal' is a method of Player; call it with player.heal() or bind it with reflect::bind(player, \"heal\")") != std::string::npos
+					    ? std::string("rejected") : what;
+				}
+			});
 		});
 	}
 

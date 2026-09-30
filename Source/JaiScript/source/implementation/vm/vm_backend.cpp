@@ -25,6 +25,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/math_component_store.hpp>   // math-value component stores (interp parity)
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/detail/scalar_ops.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
@@ -12957,6 +12958,28 @@ op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// obj.method without a call (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with interpreter::method_value_error
+op_status vm_backend::raise_method_value(const member_expr* expr, const script_value& object, bool bindable) {
+	if (parallel_worker_) [[unlikely]] {
+		return raise_(make_error_code(runtime_error_code::unsupported_operation), "'{0}' is a method: call it or bind it with reflect::bind", expr->member_id);
+	}
+	const script_value& v = object.deref();
+	std::string owner;
+	bool value_type = true;
+	if (v.is_utf8_string()) { owner = "utf8_string"; }
+	else if (v.is_string()) { owner = "string"; }
+	else if (v.is_array()) { owner = "array"; }
+	else if (v.is_map()) { owner = "map"; }
+	else if (v.is_object() && v.get_object_holder() && v.get_object_holder()->type_id == coroutine_handle_type_id_) { owner = "coroutine"; }
+	else {
+		value_type = false;
+		auto target = resolve_member_target(v);
+		owner = target.class_def ? target.class_def->get_name() : std::string(base_type_spelling(v.type()));
+	}
+	return raise_(make_error_code(runtime_error_code::unsupported_operation), "{0}",
+		symbolizer_->intern(detail::method_value_text(expr->member, owner, detail::method_value_receiver(expr), value_type || !bindable)));
+}
+
 op_status vm_backend::member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out,
                                           bool as_callee) {
 	script_value objectValue = raw_object.deref();
@@ -13020,6 +13043,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			return raise_(make_error_code(runtime_error_code::member_not_found),
 				"parent class {0} has no member '{1}'", parent_def->get_type_id(), expr->member_id);
 		}
+		if (!as_callee) { return raise_method_value(expr, objectValue, true); }
 		out = make_bound_method(objectValue, method);
 		return {};
 	}
@@ -13029,6 +13053,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
 			auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
 			if (expr->member_id == resume_id_) {
+				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 				auto captured_handle = handle;
 				auto* eng = engine_;
 				script_function resume_method = [captured_handle, eng](const std::vector<script_value>&) -> checked_result<script_value> {
@@ -13038,6 +13063,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				return {};
 			}
 			if (expr->member_id == done_id_) {
+				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 				auto captured_handle = handle;
 				auto* eng = engine_;
 				script_function done_method = [captured_handle, eng](const std::vector<script_value>&) -> checked_result<script_value> {
@@ -13076,6 +13102,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		const auto& table = objectValue.is_utf8_string() ? builtins_.utf8_methods : builtins_.string_methods;
 		auto methodIt = table.find(expr->member_id);
 		if (methodIt != table.end()) {
+			if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
 				std::vector<script_value> scratch;
@@ -13097,6 +13124,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	if (objectValue.is_array()) {
 		auto methodIt = builtins_.array_methods.find(expr->member_id);
 		if (methodIt != builtins_.array_methods.end()) {
+			if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
 				std::vector<script_value> scratch;
@@ -13114,6 +13142,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	if (objectValue.is_map()) {
 		auto methodIt = builtins_.map_methods.find(expr->member_id);
 		if (methodIt != builtins_.map_methods.end()) {
+			if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
 				std::vector<script_value> scratch;
@@ -13138,6 +13167,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	if (objectValue.is_weak_ptr()) {
 		auto methodIt = builtins_.weak_ptr_methods.find(expr->member_id);
 		if (methodIt != builtins_.weak_ptr_methods.end()) {
+			if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 			const builtin_method& method = methodIt->second;
 			script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
 				std::vector<script_value> scratch;
@@ -13163,6 +13193,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				}
 			}
 			if (!user_shadows) {
+				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 				const builtin_method& method = methodIt->second;
 				script_function boundMethod = [ctx = builtin_ctx(), capturedValue = std::move(objectValue), method](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
 					std::vector<script_value> scratch;
@@ -13175,6 +13206,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 	}
 
 	if (expr->member_id == same_as_id_) {
+		if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 		engine* eng = engine_;
 		script_function same_as_method = [eng, capturedValue = objectValue](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
 			if (args.size() != 1) {
@@ -13283,6 +13315,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 
 	script_value method = target.method(member_id);
 	if (!method.is_null() && !method.is_invalid()) {
+		if (!as_callee) { return raise_method_value(expr, objectValue, true); }
 		out = make_bound_method(objectValue, method);
 		return {};
 	}
@@ -13299,6 +13332,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				}
 				script_value unwrapped_method = unwrapped_target.method(member_id);
 				if (!unwrapped_method.is_null() && !unwrapped_method.is_invalid()) {
+					if (!as_callee) { return raise_method_value(expr, objectValue, true); }
 					out = make_bound_method(unwrapped, unwrapped_method);
 					return {};
 				}

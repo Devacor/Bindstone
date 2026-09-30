@@ -290,7 +290,7 @@ auto plus = make_adder(10)(5);
 print(&quot;plus() = {}&quot;, plus());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">plus() = 15</code></pre></div>
 <h2 id="functions-are-values-closures-outlive-their-frame">Functions are values; closures outlive their frame<a class="hlink" href="#functions-are-values-closures-outlive-their-frame" aria-label="link">&#8203;</a></h2>
-<p>Functions and lambdas can be stored in variables, arrays, and maps, passed as arguments, and returned. A by-reference capture keeps the captured local alive after the declaring function returns. The classic counter factory works:</p>
+<p>Functions and lambdas can be stored in variables, arrays, and maps, passed as arguments, and returned. A method is not read as a value by writing <code>obj.method</code>: that is an error, and <code>reflect::bind(obj, &quot;method&quot;)</code> or a lambda is the spelling (see <a href="07-classes.html#methods-as-values">Classes</a>). A by-reference capture keeps the captured local alive after the declaring function returns. The classic counter factory works:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function apply_twice(f, x) { return f(f(x)); }
 print(apply_twice([](v) { return v * 3; }, 2));
 

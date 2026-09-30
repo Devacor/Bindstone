@@ -11,6 +11,7 @@
 #include <jaiscript/detail/redeclaration.hpp>
 #include <jaiscript/detail/math_component_store.hpp>   // math-value component stores (vm parity)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
+#include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/import_paths.hpp>
@@ -7757,6 +7758,30 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
 
 // The member read on an already-evaluated receiver: the compound-member store evaluates the
 // receiver once and holds it across the read, the rhs and the store-back
+// obj.method without a call (Dev ruling 2026-09-30): a method is called or bound, never read bare. KEEP BYTE-PARALLEL with
+// vm_backend::raise_method_value
+checked_result<void> interpreter::method_value_error(const member_expr* expr, const script_value& object, bool bindable) {
+    if (parallel_worker_) [[unlikely]] {
+        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+            "'{0}' is a method: call it or bind it with reflect::bind", expr->member_id);
+    }
+    const script_value& v = object.deref();
+    std::string owner;
+    bool value_type = true;
+    if (v.is_utf8_string()) { owner = "utf8_string"; }
+    else if (v.is_string()) { owner = "string"; }
+    else if (v.is_array()) { owner = "array"; }
+    else if (v.is_map()) { owner = "map"; }
+    else if (v.is_object() && v.get_object_holder() && v.get_object_holder()->type_id == coroutine_handle_type_id_) { owner = "coroutine"; }
+    else {
+        value_type = false;
+        auto target = resolve_member_target(v);
+        owner = target.class_def ? target.class_def->get_name() : std::string(base_type_spelling(v.type()));
+    }
+    return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "{0}",
+        string_symbolizer_->intern(detail::method_value_text(expr->member, owner, detail::method_value_receiver(expr), value_type || !bindable)));
+}
+
 checked_result<void> interpreter::member_read_on(member_expr* expr, script_value objectValue, bool as_callee) {
     const bool is_super_access = expr->object->get_type() == node_type::super_expr;
 
@@ -7877,6 +7902,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
 
         // Return a bound method that calls the parent's implementation
+        if (!as_callee) { return method_value_error(expr, objectValue, true); }
         push_value(create_bound_method(objectValue, method));
         return {};
     }
@@ -7904,6 +7930,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         if (objHolder && objHolder->type_id == coroutine_handle_type_id_) {
             auto handle = std::static_pointer_cast<coroutine_handle>(objHolder->data);
             if (expr->member_id == resume_id_) {
+	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
                 // Return a bound "resume" method
                 auto captured_handle = handle;
                 auto* eng = engine_;
@@ -7914,6 +7941,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 return {};
             }
             if (expr->member_id == done_id_) {
+	            if (!as_callee) { return method_value_error(expr, objectValue, false); }
                 // Return a bound "done" method
                 auto captured_handle = handle;
                 auto* eng = engine_;
@@ -7940,6 +7968,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         auto methodIt = table.find(expr->member_id);
         if (methodIt != table.end()) {
             // Found the method in the registry
+            if (!as_callee) { return method_value_error(expr, objectValue, false); }
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the string value by moving it
@@ -7971,6 +8000,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         auto methodIt = array_methods_.find(expr->member_id);
         if (methodIt != array_methods_.end()) {
             // Found the method in the registry
+            if (!as_callee) { return method_value_error(expr, objectValue, false); }
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the array value by moving it
@@ -7998,6 +8028,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         auto methodIt = map_methods_.find(expr->member_id);
         if (methodIt != map_methods_.end()) {
             // Found the method in the registry
+            if (!as_callee) { return method_value_error(expr, objectValue, false); }
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the map value by moving it
@@ -8030,6 +8061,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         auto methodIt = weak_ptr_methods_.find(expr->member_id);
         if (methodIt != weak_ptr_methods_.end()) {
             // Found the method in the registry
+            if (!as_callee) { return method_value_error(expr, objectValue, false); }
             const builtin_method& method = methodIt->second;
 
             // Create a wrapper function that captures the weak_ptr value by moving it
@@ -8064,6 +8096,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             }
             if (!user_shadows) {
                 // Found the method in the registry (reset, use_count, unique)
+                if (!as_callee) { return method_value_error(expr, objectValue, false); }
                 const builtin_method& method = methodIt->second;
 
                 // Create a wrapper function that captures the shared_ptr value by moving it
@@ -8086,6 +8119,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     // same_as_id_ is a per-interpreter member (symbol ids are per-engine; a static here
     // cached the first engine's id and broke same_as on every later engine).
     if (expr->member_id == same_as_id_) {
+	    if (!as_callee) { return method_value_error(expr, objectValue, false); }
         // Create a bound same_as method for this value
         script_function same_as_method = [this, capturedValue = objectValue](const std::vector<script_value>& args) mutable -> checked_result<script_value> {
             if (args.size() != 1) {
@@ -8217,6 +8251,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     script_value method = target.method(member_id);
     if (!method.is_null() && !method.is_invalid()) {
         // Return a bound method (function that has 'this' pre-bound)
+        if (!as_callee) { return method_value_error(expr, objectValue, true); }
         push_value(create_bound_method(objectValue, method));
         return {};
     }
@@ -8236,6 +8271,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 }
                 script_value unwrapped_method = unwrapped_target.method(member_id);
                 if (!unwrapped_method.is_null() && !unwrapped_method.is_invalid()) {
+                    if (!as_callee) { return method_value_error(expr, objectValue, true); }
                     push_value(create_bound_method(unwrapped, unwrapped_method));
                     return {};
                 }

@@ -11,6 +11,7 @@
 
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -2797,7 +2798,12 @@ private:
 				m->object->get_type() != node_type::super_expr) {
 				fp = resolve_field_proof(cls, m->member, hit);
 			}
-			if (hit.methods) { return ctype::make(ctype::function_k); }
+			if (hit.methods) {
+				if (!writing && !want_static) {   // a method is called or bound, never read bare (Dev ruling 2026-09-30)
+					diag(diag_level::error, m->location, detail::method_value_text(m->member, cls, detail::method_value_receiver(m), false));
+				}
+				return ctype::make(ctype::function_k);
+			}
 			if (hit.field && (hit.field->type || hit.field->function_spelling)) { return member_type(hit); }
 			return {};
 		}

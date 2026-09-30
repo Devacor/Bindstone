@@ -2018,7 +2018,6 @@ public:
 				"try { f(b.v + 1); } catch (e) { msg = e; } msg;",
 				"try { f(arr.size()); } catch (e) { msg = e; } msg;",
 				"try { f(5); } catch (e) { msg = e; } msg;",
-				"try { f(arr.size); } catch (e) { msg = e; } msg;",
 				"try { f(b.area); } catch (e) { msg = e; } msg;",   // computed property: no backing field
 			};
 			for (bool use_vm : {false, true}) {
@@ -2029,6 +2028,13 @@ public:
 					auto msg = e->execute(std::string(setup) + c).as<std::string>();
 					check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
 						std::string("non-lvalue arg keeps the exact error: ") + c + " got: " + msg);
+				}
+				{   // a method passed as a value is the method-value error (Dev ruling 2026-09-30), ahead of the reference binding
+					auto e = jai::engine::make();
+					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					e->static_checking(jai::check_mode::warn);
+					auto msg = e->execute(std::string(setup) + "try { f(arr.size); } catch (e) { msg = e; } msg;").as<std::string>();
+					check_eq(std::string("'size' is a method of array; call it with arr.size() or wrap the call in a lambda"), msg);
 				}
 				// String subscript args evaluate to a CHAR rvalue (read-only string
 				// subscript, GLOOM item B) - the standard non-lvalue ref-bind error

@@ -323,6 +323,26 @@ whose type changed. The work is the accessor's single entry for every observer, 
 `array<math::vec3>` and the other vector kinds are typed buffers with a stride equal to the component count (5.6):
 `a[i].x += 1` is one element store, and `a[i]` read into a typed vector local unpacks without a box.
 
+- **Representation.** `script_array` has six vector kinds (`v2`, `iv2`, `v3`, `iv3`, `v4`, `rgba`; kind minus 8 is the
+  vector's storage index). They live on the byte buffer the one-byte kinds use: element i is its components' words
+  (binary32, or int32 for ivec) at offset `i * stride * 4`. The declared element type picks the kind (`make_array`,
+  `kind_for_element`), so the tag and the kind agree as for every typed array. `get` boxes an element, and `set`/`push`
+  take a value the element boundary already converted to the exact kind. Raw sort does not apply (vectors have no
+  ordering), and `==` compares elementwise through the element rows.
+- **Element references.** `var& r = a[i]` is a typed element reference: a component store through it writes the
+  reference's scratch and commits it back to the buffer, whether the store names the reference directly or the alias's
+  variable (`r.x = 7`).
+- **VM element lanes.** The checker stamps a subscript over a proven `array<math::K>` with `operand_class_vec_element`.
+  Over a frame-slot container with a frame-slot or literal index, `a[i].x` compiles to `op_velem_load` (the word straight
+  into a compiler temp), and `a[i].x = v;` / `a[i].x op= v;` in statement position compile to `op_velem_store` (the
+  component narrowed into the word, for rows that cannot raise: a number into a float component, an int that fits into an
+  int component, and `+ - *`). Any other case, including a container that is not a vector buffer at run time, an
+  out-of-range index, `/`, `%` and a narrowing that raises, replays the general form: the element as the subscript reads
+  it, the member read's ladder, the store or compound kernel, and their texts.
+- **Unpacking.** The lowering knows the local `array<math::K>` variables and parameters of a body. `a[i]` with an int
+  literal or int local index is a vector form of component reads, so `math::vec3 p = a[i];` becomes three component
+  loads with no box.
+
 ### 4.5 Invariant changes
 
 - Invariant 1 keeps its layout; the vectors are one pointer-sized, nothrow-move alternative.
@@ -434,7 +454,6 @@ stored value (read back as a float or int, per the 2026-09-08 ruling), and state
 
 - `array<math::vec3>` and the other vector kinds are typed buffers (4.4): components at the kind's stride in the
   existing byte buffer, an element store writes the buffer, and a read into a typed vector local unpacks without a box.
-  Until that step lands they are `script_value` buffers whose element boundary converts within a dimension count.
 - `array<var>` stays the only dynamic form, and nothing demotes silently (invariant 8).
 - A parallel body borrows the vector buffers raw like `i64` / `f64`: they hold no handles.
 - Map values of vector kinds are boxed values. Map keys are allowed (5.2); keys of different kinds are different keys.

@@ -402,6 +402,76 @@ public:
             expect("var s = 0.0; for (auto v : [math::vec2(1, 2), math::vec2(3, 4)]) { s += v.x + v.y; } to_string(s)", "10.0", "range-for");
         });
 
+        test("typed_vector_buffers", [expect, agree, raised, this]() {
+            expect("array<math::vec3> a = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)]; a.push(math::ivec3(7, 8, 9)); a.join(\" \") + to_string(a.size())",
+                   "(1.0, 2.0, 3.0) (4.0, 5.0, 6.0) (7.0, 8.0, 9.0)3", "literal, push and text");
+            expect("array<math::vec2> a; a.push(math::vec2(1, 2)); a.push(math::vec2(3, 4)); a.push(math::vec2(5, 6)); var p = a.pop(); a.reverse(); a.join(\" \") + to_string(p)",
+                   "(3.0, 4.0) (1.0, 2.0)(5.0, 6.0)", "pop and reverse");
+            expect("array<math::ivec3> a = [math::ivec3(1, 1, 1), math::ivec3(2, 2, 2), math::ivec3(3, 3, 3)]; a.remove(1); a.push(math::ivec3(9, 9, 9)); a.join(\" \")",
+                   "(1, 1, 1) (3, 3, 3) (9, 9, 9)", "remove");
+            expect("array<math::vec4> a = [math::vec4(1, 2, 3, 4)]; a[0] = math::vec4(5, 6, 7, 8); a[0].w += 1; to_string(a[0])", "(5.0, 6.0, 7.0, 9.0)", "an element store, then a component");
+            expect("array<math::color> a = [math::color(0.5, 0.25, 1, 1)]; a[0].g *= 2; a[0].a = 0.5; to_string(a[0])", "(0.5, 0.5, 1.0, 0.5)", "a color buffer");
+            expect("array<math::vec3> a = [math::vec3(), math::vec3()]; int i = 1; a[i].x += 1; a[i].x += 1; a[i - 1].y = 3; a[0].z++; ++a[1].z; a.join(\" \")",
+                   "(0.0, 3.0, 1.0) (2.0, 0.0, 1.0)", "component stores by index");
+            expect("array<math::ivec2> a = [math::ivec2(1, 2)]; var& r = a[0]; r.x = 7; r.y += 1; to_string(a[0])", "(7, 3)", "a component store through an element reference");
+            expect("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4)]; for (auto& v : a) { v.x *= 10; } a.join(\" \")", "(10.0, 2.0) (30.0, 4.0)", "a by-reference range-for");
+            expect("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4)]; for (auto v : a) { v.x = 0; } a.join(\" \")", "(1.0, 2.0) (3.0, 4.0)", "a by-value range-for copies");
+            expect("array<math::vec3> a = [math::vec3(1, 2, 3)]; math::vec3 v = a[0]; v.x = 9; var w = a[0]; w.y = 9; to_string(a[0]) + to_string(v) + to_string(w)",
+                   "(1.0, 2.0, 3.0)(9.0, 2.0, 3.0)(1.0, 9.0, 3.0)", "an element read is a copy");
+            expect("array<math::vec3> a = [math::vec3(1, 2, 3)]; array<math::vec3> b = a; b[0].x = 5; to_string(a[0]) + to_string(b[0])", "(1.0, 2.0, 3.0)(5.0, 2.0, 3.0)", "an array copy is a value");
+            expect("array<math::vec2> a = [math::vec2(1.5, -2.5)]; array<math::ivec2> b = a; array<var> c = a; c.push(1); b.join(\" \") + c.join(\" \") + type_of(c[0])",
+                   "(1, -2)(1.5, -2.5) 1math::vec2", "conversions by value");
+            expect("array<var> d = [math::ivec2(1, 2), math::vec2(3.5, 4)]; array<math::vec2> e = d; e.join(\" \")", "(1.0, 2.0) (3.5, 4.0)", "a dynamic array into a vector buffer");
+            expect("array<math::vec3> a = [math::vec3(1, 2, 3)]; array<math::vec3> b = [math::vec3(1, 2, 3)]; to_string(a == b) + to_string(a.contains(math::vec3(1, 2, 3))) + to_string(a.index_of(math::vec3(1, 2, 3)))",
+                   "truetrue0", "equality and search");
+            expect("array<math::vec2> a = [math::vec2(1, 2)]; array<math::vec2> b = [math::vec2(3, 4)]; var c = concatenate(a, b); c[1].x = 7; c.join(\" \") + b.join(\" \")",
+                   "(1.0, 2.0) (7.0, 4.0)(3.0, 4.0)", "concatenate");
+            expect("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4), math::vec2(5, 6)]; a.slice(1, 3).join(\" \")", "(3.0, 4.0) (5.0, 6.0)", "slice");
+            expect("array<math::vec2> a = [math::vec2(0.1, 1e30)]; var j = from_json(to_json(a)); var b = from_base64(to_base64(a)); j.join(\" \") + b.join(\" \")",
+                   "(0.1, 1e+30)(0.1, 1e+30)", "text and binary archives");
+            expect(raised("array<math::vec3> a; a.push(math::vec2(1, 2));"), "Cannot push 'math::vec2' to array<math::vec3>", "another dimension rejects");
+            expect(raised("array<math::vec3> a = [math::vec3()]; var five = 5; a[0] = five;"), "Cannot assign 'int' to element of type 'math::vec3'", "a scalar element store rejects");
+            expect(raised("array<math::ivec2> a = [math::ivec2()]; a[0].x = 3000000000;"), "Integer overflow: the value does not fit an int32 component", "an int32 component store narrows");
+            expect(raised("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4)]; a.sort();"), "math::vec2 has no ordering", "no ordering");
+            agree("function f() -> string { array<math::vec3> pts; for (int i = 0; i < 6; i++) { pts.push(math::vec3(i, i * 2, 1)); } float s = 0.0; "
+                  "for (int i = 0; i < pts.size(); i++) { pts[i].x += 1; pts[i].z *= 0.5; math::vec3 p = pts[i]; s += p.x + p.y + p.z; } "
+                  "for (auto& p : pts) { p.y = -p.y; } return pts.join(\" \") + to_string(s); } f()", "a typed loop over a vector buffer");
+            agree("function f() -> string { array<math::ivec2> cells = [math::ivec2(1, 2), math::ivec2(3, 4)]; math::ivec2 acc; for (int i = 0; i < cells.size(); i++) { acc += cells[i] * 2; cells[i].y -= acc.x; } "
+                  "return to_string(acc) + cells.join(\" \"); } f()", "ivec elements into a lowered accumulator");
+            agree("function f(array<math::vec2>& pts, array<math::ivec3> cells) -> string { int i = 1; float dy = 0.25; pts[i].x = 3; pts[i].y += dy; pts[0].x *= 2; pts[0].y -= 1; pts[i].x++; "
+                  "cells[i].z = 7; cells[0].x += 5; cells[0].y *= -3; cells[i].x /= 2; cells[i].y %= 3; cells[0].z--; float s = pts[i].x + pts[0].y + cells[i].z; "
+                  "return pts.join(\" \") + cells.join(\" \") + to_string(s); } array<math::vec2> p = [math::vec2(1, 2), math::vec2(3, 4)]; array<math::ivec3> c = [math::ivec3(1, 2, 3), math::ivec3(4, 5, 6)]; f(p, c) + p.join(\" \")",
+                  "element component stores and reads, by reference and by value");
+            agree("function f() -> string { array<math::vec2> pts = [math::vec2(1, 2)]; array<math::ivec2> cells = [math::ivec2(2147483647, 0)]; int i = 3; string m = \"\"; "
+                  "try { pts[i].x = 1; } catch (e) { m += e + \"|\"; } try { var q = pts[i].y; } catch (e) { m += e + \"|\"; } try { cells[0].x += 1; } catch (e) { m += e + \"|\"; } "
+                  "try { cells[0].y = 3000000000; } catch (e) { m += e + \"|\"; } try { cells[0].y = 1.5; } catch (e) { m += e + \"|\"; } try { pts[0].x /= 0; } catch (e) { m += e + \"|\"; } "
+                  "try { pts[0].x = \"a\"; } catch (e) { m += e + \"|\"; } return m + pts.join(\" \") + cells.join(\" \"); } f()", "element component texts");
+            agree("function f() -> string { array<math::color> cs = [math::color(0.5, 0.25, 1, 1)]; array<math::vec4> qs = [math::vec4(1, 2, 3, 4)]; int k = 0; cs[k].g *= 2; cs[k].a = 0.5; qs[k].w += cs[k].g; "
+                  "math::vec4 q = qs[k]; math::color c = cs[0]; q.x += c.r; return to_string(q) + to_string(c) + qs.join(\" \"); } f()", "colors and vec4 elements unpack into lowered locals");
+            agree("function f() -> string { array<math::vec3> a = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)]; math::vec3 v = math::vec3(0.5, 0.25, 2); float dt = 0.1; int i = 0; int j = 1; string m = \"\"; "
+                  "a[i] += v * dt; a[j] -= v; a[i] *= 2.0; a[j] = v + v; a[i] = math::vec3(a[i].y, a[i].x, a[j].z); a[j] += a[i]; a[i] = a[j] * 0.5; "
+                  "try { a[i] /= math::vec3(1, 0, 1); } catch (e) { m += e + \"|\"; } int k = 5; try { a[k] += v; } catch (e) { m += e + \"|\"; } "
+                  "array<math::ivec2> c = [math::ivec2(0, 1)]; math::ivec2 w = math::ivec2(1, 2147483647); try { c[0] += w; } catch (e) { m += e + \"|\"; } c[0] += math::ivec2(3, 4); c[0] %= math::ivec2(2, 3); "
+                  "try { c[0] /= math::ivec2(1, 0); } catch (e) { m += e + \"|\"; } return m + a.join(\" \") + c.join(\" \") + to_string(v); } f()", "whole element stores lower to component stores");
+            {
+                auto ve = jai::engine::make();
+                ve->set_backend(jai::backend_type::vm);
+                ve->execution_budget(0);
+                std::string listing;
+                ve->disassembly_sink([&](const std::string& l, const std::string&) { listing += l; });
+                ve->execute("function g() -> float { array<math::vec3> pts = [math::vec3(1, 2, 3), math::vec3()]; math::vec3 v = math::vec3(1, 1, 1); float s = 0.0; "
+                            "for (int i = 0; i < 2; i++) { pts[i].x += v.y; math::vec3 p = pts[i]; s += p.x + pts[i].z; } return s; } g();");
+                check(listing.find("VELEM_LOAD") != std::string::npos && listing.find("VELEM_STORE") != std::string::npos,
+                      "element components load and store straight from the buffer: " + listing.substr(0, 1500));
+            }
+            auto e = jai::engine::make();
+            jai::stdlib::register_all(e);
+            script_value arr = e->execute("array<math::vec3> a = [math::vec3(1, 2, 3)]; a");
+            const script_array* node = arr.unchecked_array_node();
+            check(node->kind() == script_array::kind_t::v3 && node->bytes().size() == 12, "array<math::vec3> is a 12-byte-stride buffer");
+            check(e->execute("array<math::color> c = [math::color()]; c").unchecked_array_node()->kind() == script_array::kind_t::rgba, "array<math::color> is a color buffer");
+        });
+
         test("json", [expect]() {
             expect("to_json(math::vec3(1, 0.5, -2))", "{\"$type\":\"math::vec3\",\"$val\":{\"x\":1.0,\"y\":0.5,\"z\":-2.0}}", "to_json");
             expect("to_string(from_json(to_json(math::ivec3(1, -2, 3))))", "(1, -2, 3)", "round trip ivec3");

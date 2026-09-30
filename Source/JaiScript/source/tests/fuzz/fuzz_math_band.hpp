@@ -359,6 +359,16 @@ namespace jai::fuzz {
 					main_.push_back("for (int " + iv + " = 0; " + iv + " < " + std::to_string(reps) + "; " + iv + "++) {");
 					for (int i = 0; i < body; ++i) main_.push_back("\t" + statement(iv));
 					if (rng_.chance(40)) main_.push_back("\t" + array_name_ + "[" + iv + " % " + std::to_string(array_size_) + "]." + component(array_kind_) + " += " + iv + ";");
+					if (rng_.chance(50)) {
+						// an element named by an int local: its components read, stored and unpacked into a typed local (the vm's
+						// element lanes, the lowering's unpack)
+						const std::string j = fresh("uj"), u = fresh("uu");
+						static constexpr const char* const ops[] = {" = ", " += ", " -= ", " *= "};
+						main_.push_back("\tint " + j + " = " + iv + " % " + std::to_string(array_size_) + ";");
+						main_.push_back("\t" + array_name_ + "[" + j + "]." + component(array_kind_) + ops[rng_.below(4)] + scalar(array_kind_, "") + ";");
+						main_.push_back("\t" + std::string(type_name(array_kind_)) + " " + u + " = " + array_name_ + "[" + j + "]; " + u + "." + component(array_kind_) +
+						                " += " + array_name_ + "[" + j + "]." + component(array_kind_) + "; uout = uout + " + u + " + \";\";");
+					}
 					main_.push_back("}");
 					return;
 				}

@@ -2740,6 +2740,12 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::c8: return bytes_.size();
             case kind_t::str: return strs_.size();
             case kind_t::obj: return objs_.size();
+            case kind_t::v2:
+            case kind_t::iv2: return bytes_.size() / 8;
+            case kind_t::v3:
+            case kind_t::iv3: return bytes_.size() / 12;
+            case kind_t::v4:
+            case kind_t::rgba: return bytes_.size() / 16;
             default: return values_.size();
         }
     }
@@ -2754,6 +2760,9 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::c8: bytes_.reserve(n); break;
             case kind_t::str: strs_.reserve(n); break;
             case kind_t::obj: objs_.reserve(n); break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba:
+                bytes_.reserve(n * vec_stride(kind_) * 4);
+                break;
             default: values_.reserve(n); break;
         }
     }
@@ -2764,7 +2773,8 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::b8:
             case kind_t::u8:
             case kind_t::i8:
-            case kind_t::c8: bytes_ = other.bytes_; break;
+            case kind_t::c8:
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: bytes_ = other.bytes_; break;
             case kind_t::str: strs_ = other.strs_; break;   // handles share objects, like boxed copies
             case kind_t::obj: objs_ = other.objs_; break;   // handle copies; clone() deep-copies per slot (value.cpp)
             default: values_ = other.values_; break;
@@ -2795,6 +2805,11 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::i8: return script_value(static_cast<script_int>(static_cast<int8_t>(bytes_[i])), eng);
             case kind_t::str: return script_value(strs_[i], eng);
             case kind_t::obj: return script_value(objs_[i].handle, objs_[i].tag, eng);
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
+                uint32_t words[4];
+                vec_words(i, words);
+                return script_value::make_vec(vec_value_type(kind_), words, eng);
+            }
             default: return values_[i];
         }
     }
@@ -2825,6 +2840,10 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::obj:
                 assert(v.raw_storage_index() == script_value::TYPEID_OBJECT && "object slot store: caller converts first");
                 objs_[i] = obj_slot{v.unchecked_object_handle(), v.get_type_info()};   // pre-converted: exactly an object
+                break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba:
+                assert(v.raw_storage_index() == vec_storage_index(kind_) && "vector slot store: caller converts first");
+                set_vec_words(i, v.unchecked_vec_node().words);
                 break;
             default:
                 values_[i] = std::move(v);
@@ -2859,6 +2878,10 @@ namespace detail { struct argument_capture_storage; }
                 assert(pre_converted.raw_storage_index() == script_value::TYPEID_OBJECT && "object slot push: caller converts first");
                 objs_.push_back(obj_slot{pre_converted.unchecked_object_handle(), pre_converted.get_type_info()});
                 break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba:
+                assert(pre_converted.raw_storage_index() == vec_storage_index(kind_) && "vector slot push: caller converts first");
+                push_vec_words(pre_converted.unchecked_vec_node().words);
+                break;
             default:
                 values_.push_back(std::move(pre_converted));
                 break;
@@ -2875,6 +2898,8 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::c8: return bytes_.capacity();
             case kind_t::str: return strs_.capacity();
             case kind_t::obj: return objs_.capacity();
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba:
+                return bytes_.capacity() / (vec_stride(kind_) * 4);
             default: return values_.capacity();
         }
     }
@@ -2889,6 +2914,11 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::c8: if (n < bytes_.size()) { bytes_.resize(n); } break;
             case kind_t::str: if (n < strs_.size()) { strs_.erase(strs_.begin() + static_cast<std::ptrdiff_t>(n), strs_.end()); } break;
             case kind_t::obj: if (n < objs_.size()) { objs_.erase(objs_.begin() + static_cast<std::ptrdiff_t>(n), objs_.end()); } break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
+                const size_t n_bytes = n * vec_stride(kind_) * 4;
+                if (n_bytes < bytes_.size()) { bytes_.resize(n_bytes); }
+                break;
+            }
             default: if (n < values_.size()) { values_.erase(values_.begin() + static_cast<std::ptrdiff_t>(n), values_.end()); } break;
         }
     }
@@ -2903,6 +2933,9 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::c8: bytes_.pop_back(); break;
             case kind_t::str: strs_.pop_back(); break;
             case kind_t::obj: objs_.pop_back(); break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba:
+                bytes_.resize(bytes_.size() - vec_stride(kind_) * 4);
+                break;
             default: values_.pop_back(); break;
         }
     }
@@ -2917,6 +2950,11 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::c8: bytes_.erase(bytes_.begin() + i); break;
             case kind_t::str: strs_.erase(strs_.begin() + i); break;
             case kind_t::obj: objs_.erase(objs_.begin() + i); break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
+                const size_t w = vec_stride(kind_) * 4;
+                bytes_.erase(bytes_.begin() + static_cast<std::ptrdiff_t>(i * w), bytes_.begin() + static_cast<std::ptrdiff_t>((i + 1) * w));
+                break;
+            }
             default: values_.erase(values_.begin() + i); break;
         }
     }
@@ -2931,6 +2969,17 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::c8: std::reverse(bytes_.begin(), bytes_.end()); break;
             case kind_t::str: std::reverse(strs_.begin(), strs_.end()); break;
             case kind_t::obj: std::reverse(objs_.begin(), objs_.end()); break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
+                const size_t n = size();
+                uint32_t a[4], b[4];
+                for (size_t lo = 0, hi = n; lo + 1 < hi; ++lo, --hi) {
+                    vec_words(lo, a);
+                    vec_words(hi - 1, b);
+                    set_vec_words(lo, b);
+                    set_vec_words(hi - 1, a);
+                }
+                break;
+            }
             default: std::reverse(values_.begin(), values_.end()); break;
         }
     }
@@ -2946,6 +2995,11 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::i8: for (uint8_t b : bytes_) { f(script_value(static_cast<script_int>(static_cast<int8_t>(b)), eng)); } break;
             case kind_t::str: for (const auto& h : strs_) { f(script_value(h, eng)); } break;
             case kind_t::obj: for (const auto& s : objs_) { f(script_value(s.handle, s.tag, eng)); } break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
+                const size_t n = size();
+                for (size_t i = 0; i < n; ++i) { f(get(i, eng)); }
+                break;
+            }
             default: for (const script_value& v : values_) { f(v); } break;
         }
     }
@@ -3005,6 +3059,14 @@ namespace detail { struct argument_capture_storage; }
                 objs_.clear();
                 objs_.shrink_to_fit();
                 break;
+            case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
+                const size_t n = size();
+                values_.reserve(n);
+                for (size_t i = 0; i < n; ++i) { values_.push_back(get(i, eng)); }
+                bytes_.clear();
+                bytes_.shrink_to_fit();
+                break;
+            }
             default:
                 break;
         }

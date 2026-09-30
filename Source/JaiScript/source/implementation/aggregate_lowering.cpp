@@ -47,6 +47,12 @@ uint8_t class_of_type(const type_info* t) {
 }
 
 bool math_kind_type(const type_info* t) { return t && math::is_vec_type(t->base_type); }
+// array<math::K>: K, else invalid
+vk vec_buffer_kind(const type_info* t) {
+	if (!t || t->base_type != vk::jai_array_type || !t->element_type()) return vk::jai_invalid_type;
+	const vk e = t->element_type()->base_type;
+	return math::is_vec_type(e) ? e : vk::jai_invalid_type;
+}
 
 struct candidate {
 	uint64_t symbol = UINT64_MAX;
@@ -73,16 +79,17 @@ struct analysis {
 	std::vector<candidate>& cands;
 	std::unordered_map<const identifier_expr*, int> resolved;
 	std::unordered_map<const identifier_expr*, uint8_t> local_class;
-	struct entry { uint64_t symbol; int cand; size_t slot; uint8_t cls; };
+	std::unordered_map<const identifier_expr*, vk> vec_buffer;   // an identifier naming a local array<math::K>: K
+	struct entry { uint64_t symbol; int cand; size_t slot; uint8_t cls; vk buffer; };
 	std::vector<std::vector<entry>> scopes;
 	int nested = 0;       // inside a nested function, lambda or parallel body
 	int loop_depth = 0;
 
 	explicit analysis(std::vector<candidate>& c) : cands(c) {}
 
-	void declare(uint64_t symbol, int cand, size_t slot, uint8_t cls) {
+	void declare(uint64_t symbol, int cand, size_t slot, uint8_t cls, vk buffer = vk::jai_invalid_type) {
 		if (scopes.empty()) scopes.emplace_back();
-		scopes.back().push_back({symbol, cand, slot, cls});
+		scopes.back().push_back({symbol, cand, slot, cls, buffer});
 	}
 	void escape(int cand) { if (cand >= 0) cands[static_cast<size_t>(cand)].escaped = true; }
 
@@ -95,7 +102,10 @@ struct analysis {
 					if (nested > 0 || id->slot_index != e->slot) { escape(e->cand); return -1; }
 					return e->cand;
 				}
-				if (nested == 0 && id->slot_index == e->slot) { local_class[id] = e->cls; }
+				if (nested == 0 && id->slot_index == e->slot) {
+					local_class[id] = e->cls;
+					if (e->buffer != vk::jai_invalid_type) vec_buffer[id] = e->buffer;
+				}
 				for (size_t c = 0; c < cands.size(); ++c) {   // the parser named a candidate this scope walk does not see
 					if (cands[c].symbol == id->symbol_id && cands[c].slot == id->slot_index && id->slot_index != SIZE_MAX) { cands[c].escaped = true; }
 				}
@@ -260,7 +270,7 @@ struct analysis {
 					cands.push_back(c);
 					cand = static_cast<int>(cands.size() - 1);
 				}
-				declare(v->name_id, cand, v->slot_index, class_of_type(v->type.get()));
+				declare(v->name_id, cand, v->slot_index, class_of_type(v->type.get()), vec_buffer_kind(v->type.get()));
 				break;
 			}
 			case node_type::expression_decl: stmt_expr(static_cast<const expression_decl*>(d)->expression.get()); break;
@@ -442,9 +452,10 @@ struct vform {
 	size_t n = 0;
 	expression_ptr c[4];
 	int sensitive = 0;           // nodes that may raise or run an effect
+	int element_reads = 0;       // of those, vector buffer element reads (an out-of-range index raises at the first component)
 	std::vector<int> reads;      // the lowered locals whose components it reads
 	void read(int cand) { if (std::find(reads.begin(), reads.end(), cand) == reads.end()) reads.push_back(cand); }
-	void merge(const vform& o) { sensitive += o.sensitive; for (int r : o.reads) read(r); }
+	void merge(const vform& o) { sensitive += o.sensitive; element_reads += o.element_reads; for (int r : o.reads) read(r); }
 };
 
 struct stmt_ctx {
@@ -767,7 +778,11 @@ private:
 				if (math::integral(f.kind)) ++f.sensitive;
 				return true;
 			}
-			case node_type::binary_expr: return vec_binary(static_cast<const binary_expr*>(e.get()), f, ctx);
+			case node_type::binary_expr: {
+				auto* b = static_cast<const binary_expr*>(e.get());
+				if (b->op.type == token_type::left_bracket) return vec_element(e, b, f);
+				return vec_binary(b, f, ctx);
+			}
 			case node_type::call_expr: return vec_call(static_cast<const call_expr*>(e.get()), f, ctx);
 			default: return false;
 		}
@@ -778,6 +793,28 @@ private:
 		cls = scalar_class(e.get());
 		if (cls == c_unknown || !pure_scalar(e.get())) return false;
 		out = scalar_expr(e);
+		return true;
+	}
+
+	// `a[i]` over a local vector buffer with an int literal or int local index: one component read per component (the reads name the
+	// same element; an out-of-range index raises at the first, before anything is stored)
+	bool vec_element(const expression_ptr& e, const binary_expr* b, vform& f) {
+		if (!b->left || !b->right || b->left->get_type() != node_type::identifier_expr) return false;
+		auto it = an_.vec_buffer.find(static_cast<const identifier_expr*>(b->left.get()));
+		if (it == an_.vec_buffer.end()) return false;
+		const expression* r = b->right.get();
+		const bool index_ok = (r->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(r)->value.raw_storage_index() == script_value::TYPEID_INT) ||
+		                      (r->get_type() == node_type::identifier_expr && scalar_class(r) == c_int);
+		if (!index_ok) return false;
+		f = vform{};
+		f.kind = it->second;
+		f.n = math::dims(f.kind);
+		f.sensitive = 1;
+		f.element_reads = 1;
+		for (size_t k = 0; k < f.n; ++k) {
+			auto [id, view] = sym_.intern_with_view(math::component_name(f.kind, k));
+			f.c[k] = std::make_shared<member_expr>(e->location, e, view, id, false, false);
+		}
 		return true;
 	}
 
@@ -1699,11 +1736,96 @@ private:
 		}
 	}
 
+	// whether e may name `symbol` (an identifier with that symbol anywhere; an unknown node may)
+	static bool mentions(const expression* e, uint64_t symbol) {
+		if (!e) return false;
+		switch (e->get_type()) {
+			case node_type::literal_expr: return false;
+			case node_type::identifier_expr: return static_cast<const identifier_expr*>(e)->symbol_id == symbol;
+			case node_type::binary_expr: return mentions(static_cast<const binary_expr*>(e)->left.get(), symbol) || mentions(static_cast<const binary_expr*>(e)->right.get(), symbol);
+			case node_type::unary_expr: return mentions(static_cast<const unary_expr*>(e)->operand.get(), symbol);
+			case node_type::member_expr: return mentions(static_cast<const member_expr*>(e)->object.get(), symbol);
+			case node_type::ternary_expr: {
+				auto* t = static_cast<const ternary_expr*>(e);
+				return mentions(t->condition.get(), symbol) || mentions(t->then_expression.get(), symbol) || mentions(t->else_expression.get(), symbol);
+			}
+			case node_type::call_expr: {
+				auto* c = static_cast<const call_expr*>(e);
+				if (mentions(c->callee.get(), symbol)) return true;
+				for (const auto& a : c->arguments) if (mentions(a.get(), symbol)) return true;
+				return false;
+			}
+			case node_type::cast_expr: return mentions(static_cast<const cast_expr*>(e)->operand.get(), symbol);
+			default: return true;
+		}
+	}
+
+	// `a[i] = e;` / `a[i] op= e;` over a local vector buffer: component stores into the element. A float row the right side
+	// cannot disturb (+ - *, no raise, no read of `a`) stores component by component; anything else computes every component
+	// into temporaries first - the right side's, then the result's - so it raises before anything is stored, as the boxed
+	// store does
+	bool lower_element_store(const assignment_expr* a, bool compound, token_type op, std::vector<declaration_ptr>& out) {
+		const source_location& loc = a->location;
+		auto* sub = static_cast<const binary_expr*>(a->target.get());
+		vform self;
+		if (!vec_element(a->target, sub, self)) return false;
+		if (has_store(a->value.get())) return false;
+		const token_type bop = compound ? base_op(op) : token_type::eof;
+		if (compound && bop == token_type::percent && !math::integral(self.kind)) return false;
+		std::vector<declaration_ptr> prelude;
+		stmt_ctx ctx;
+		if (pure_statement(a->value.get())) ctx.prelude = &prelude;
+		vform rhs;
+		const bool rv = vec_of(a->value, rhs, ctx);
+		if (!compound && !rv) return false;
+		if (rv && rhs.sensitive > 1) return false;
+		const size_t n = math::dims(self.kind);
+		const uint64_t array_symbol = static_cast<const identifier_expr*>(sub->left.get())->symbol_id;
+		auto component_target = [&](size_t k) -> expression_ptr {
+			auto [id, view] = sym_.intern_with_view(math::component_name(self.kind, k));
+			return std::make_shared<member_expr>(loc, a->target, view, id, false, false);
+		};
+		const bool direct = !math::integral(self.kind) && rv && rhs.sensitive == rhs.element_reads && rhs.kind == self.kind && !mentions(a->value.get(), array_symbol) &&
+		                    (!compound || bop == token_type::plus || bop == token_type::minus || bop == token_type::star);
+		if (direct) {
+			for (auto& p : prelude) out.push_back(std::move(p));
+			for (size_t k = 0; k < n; ++k) {
+				auto s = std::make_shared<assignment_expr>(loc, component_target(k), op_token(compound ? op : token_type::equal, loc), rhs.c[k]);
+				out.push_back(std::make_shared<expression_decl>(loc, s));
+			}
+			return true;
+		}
+		std::vector<declaration_ptr> staged;
+		if (rv) {
+			for (size_t k = 0; k < rhs.n; ++k) rhs.c[k] = temp(math::integral(rhs.kind), rhs.c[k], staged, loc);
+			rhs.sensitive = 0;
+		}
+		vform f;
+		if (compound) {
+			if (!vec_row(bop, &self, nullptr, rv ? &rhs : nullptr, rv ? nullptr : &a->value, loc, f, &ctx)) return false;
+		} else {
+			f = rhs;
+		}
+		vform conv;
+		if (!convert_into(f, self.kind, loc, conv)) return false;
+		conv.sensitive += f.sensitive;
+		if (conv.sensitive > 1) return false;   // the element read and one raising row at most, as a local's store takes
+		for (auto& p : prelude) out.push_back(std::move(p));
+		for (auto& d : staged) out.push_back(std::move(d));
+		expression_ptr t[4];
+		for (size_t k = 0; k < n; ++k) t[k] = temp(math::integral(self.kind), conv.c[k], out, loc);
+		for (size_t k = 0; k < n; ++k) out.push_back(store(component_target(k), t[k], loc, false));
+		return true;
+	}
+
 	bool lower_store(const assignment_expr* a, std::vector<declaration_ptr>& out) {
 		const source_location& loc = a->location;
 		const token_type op = a->op.type;
 		const bool compound = op != token_type::equal;
 		if (compound && base_op(op) == token_type::eof) return false;
+		if (a->target->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(a->target.get())->op.type == token_type::left_bracket) {
+			return lower_element_store(a, compound, op, out);
+		}
 		if (a->target->get_type() == node_type::identifier_expr) {
 			const int cand = cand_of(a->target.get());
 			if (cand < 0) return false;
@@ -1903,7 +2025,7 @@ bool lower_site(engine& eng, const site_input& in, lowered_site& out, size_t& ou
 			cands.push_back(c);
 			cand = static_cast<int>(cands.size() - 1);
 		}
-		an.declare(p.symbol_id, cand, p.slot_index, class_of_type(p.type.get()));
+		an.declare(p.symbol_id, cand, p.slot_index, class_of_type(p.type.get()), vec_buffer_kind(p.type.get()));
 	}
 	an.block_body(static_cast<const block_stmt*>(body.get())->declarations);
 	// a parameter unpacks at every call: worth it when the body stores it or reads it in a loop or often
@@ -1912,7 +2034,7 @@ bool lower_site(engine& eng, const site_input& in, lowered_site& out, size_t& ou
 	}
 	size_t lowered = 0;
 	for (const auto& c : cands) if (!c.escaped) ++lowered;
-	if (lowered == 0) return false;
+	if (lowered == 0 && an.vec_buffer.empty()) return false;   // a vector buffer's element statements lower without a lowered local
 
 	string_symbolizer& sym = *eng.get_symbolizer();
 	size_t next = locals;

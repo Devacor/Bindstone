@@ -513,7 +513,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
             case script_value_type::jai_char_type: node_kind = script_array::kind_t::c8; break;
             case script_value_type::jai_string_type: node_kind = script_array::kind_t::str; break;
             case script_value_type::jai_object_type: node_kind = script_array::kind_t::obj; break;
-            default: break;
+            default: node_kind = script_array::vec_kind_of(element_type->base_type); break;
         }
     }
 
@@ -725,6 +725,10 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
             case script_array::kind_t::b8: referent_tag = eng->get_type_info_bool(); break;
             case script_array::kind_t::c8: referent_tag = eng->get_type_info_char(); break;
             case script_array::kind_t::obj: referent_tag = container->objs()[index].tag; break;
+            case script_array::kind_t::v2: case script_array::kind_t::iv2: case script_array::kind_t::v3:
+            case script_array::kind_t::iv3: case script_array::kind_t::v4: case script_array::kind_t::rgba:
+                referent_tag = eng->get_type_info_math(script_array::vec_value_type(container->kind()));
+                break;
             default: referent_tag = eng->get_type_info_string(); break;
         }
     } else {

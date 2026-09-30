@@ -1851,6 +1851,9 @@ namespace jai::vm {
         op_status exec_c_load_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         op_status exec_c_arith_jump(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         bool cells_second_half_injected(frame& f, size_t& ip);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
+        script_array* velem_site(frame& f, const velem_proto& p, size_t& at, int& comp);   // a vector buffer's element and component for a velem site, else null
+        op_status exec_velem_load(frame& f, const vm_instruction& ins);
+        op_status exec_velem_store(frame& f, const vm_instruction& ins);
         op_status exec_set_member_value(frame& f, const vm_instruction& ins);   // `base.member = operand;` in statement position: the store kernel, no result
         op_status store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& object_value, script_value&& value, bool want_result);   // SET_MEMBER's kernel: the fast lane, the ladder, the result when asked
         op_status assign_math_component(frame& f, uint32_t node, script_value& base, member_expr* member, const script_value& value, script_value& out);   // `base.x = v` on a math value

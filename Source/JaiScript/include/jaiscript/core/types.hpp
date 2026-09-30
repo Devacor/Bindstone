@@ -7,6 +7,7 @@
 #include <jaiscript/core/checked_result.hpp>
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <map>
@@ -77,7 +78,36 @@ namespace jai {
         // b8/c8/u8/i8 share one byte buffer (bool, char, uint8 and int8 payloads); the kind says how to box
         // str holds shared string handles (the same handle a boxed element would carry)
         // obj holds {object handle, class tag} slots (array<UserType>; 16 bytes vs 32 boxed)
-        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5, obj = 6, u8 = 7, i8 = 8 };
+        // v2..rgba are the math vector kinds on the byte buffer too: each element is its components' words (binary32, or
+        // int32 for ivec) at the kind's stride; kind - 8 is the vector's storage index (TYPEID_VEC2 .. TYPEID_COLOR)
+        enum class kind_t : uint8_t { hetero = 0, i64 = 1, f64 = 2, b8 = 3, c8 = 4, str = 5, obj = 6, u8 = 7, i8 = 8,
+                                      v2 = 9, iv2 = 10, v3 = 11, iv3 = 12, v4 = 13, rgba = 14 };
+        static constexpr bool is_vec_kind(kind_t k) noexcept { return k >= kind_t::v2 && k <= kind_t::rgba; }
+        static constexpr size_t vec_stride(kind_t k) noexcept { return k <= kind_t::iv2 ? 2 : k <= kind_t::iv3 ? 3 : 4; }
+        static constexpr bool vec_integral(kind_t k) noexcept { return k == kind_t::iv2 || k == kind_t::iv3; }
+        static constexpr size_t vec_storage_index(kind_t k) noexcept { return static_cast<size_t>(k) + 8; }
+        static constexpr kind_t vec_kind_of_index(size_t storage_index) noexcept { return static_cast<kind_t>(storage_index - 8); }
+        static constexpr kind_t vec_kind_of(script_value_type t) noexcept {
+            switch (t) {
+                case script_value_type::jai_vec2_type: return kind_t::v2;
+                case script_value_type::jai_ivec2_type: return kind_t::iv2;
+                case script_value_type::jai_vec3_type: return kind_t::v3;
+                case script_value_type::jai_ivec3_type: return kind_t::iv3;
+                case script_value_type::jai_vec4_type: return kind_t::v4;
+                case script_value_type::jai_color_type: return kind_t::rgba;
+                default: return kind_t::hetero;
+            }
+        }
+        static constexpr script_value_type vec_value_type(kind_t k) noexcept {
+            switch (k) {
+                case kind_t::v2: return script_value_type::jai_vec2_type;
+                case kind_t::iv2: return script_value_type::jai_ivec2_type;
+                case kind_t::v3: return script_value_type::jai_vec3_type;
+                case kind_t::iv3: return script_value_type::jai_ivec3_type;
+                case kind_t::v4: return script_value_type::jai_vec4_type;
+                default: return script_value_type::jai_color_type;
+            }
+        }
 
         // Every body that instantiates a vector<script_value> member (including the
         // DEFAULTED special members - construction paths instantiate the vector dtor
@@ -113,6 +143,27 @@ namespace jai {
         const std::vector<strong_ptr<script_string>>& strs() const noexcept { return strs_; }
         std::vector<obj_slot>& objs() noexcept { return objs_; }
         const std::vector<obj_slot>& objs() const noexcept { return objs_; }
+        // A vector kind's element i: its component words (count = vec_stride) in and out of the byte buffer
+        void vec_words(size_t i, uint32_t* out) const noexcept {
+            const size_t n = vec_stride(kind_);
+            std::memcpy(out, bytes_.data() + i * n * 4, n * 4);
+        }
+        void set_vec_words(size_t i, const uint32_t* in) noexcept {
+            const size_t n = vec_stride(kind_);
+            std::memcpy(bytes_.data() + i * n * 4, in, n * 4);
+        }
+        uint32_t vec_word(size_t i, size_t c) const noexcept {
+            uint32_t w;
+            std::memcpy(&w, bytes_.data() + (i * vec_stride(kind_) + c) * 4, 4);
+            return w;
+        }
+        void set_vec_word(size_t i, size_t c, uint32_t w) noexcept { std::memcpy(bytes_.data() + (i * vec_stride(kind_) + c) * 4, &w, 4); }
+        void push_vec_words(const uint32_t* in) {
+            const size_t n = vec_stride(kind_) * 4;
+            const size_t at = bytes_.size();
+            bytes_.resize(at + n);
+            std::memcpy(bytes_.data() + at, in, n);
+        }
         // Same-kind buffer copy (clone / detach): one vector assignment whatever the kind
         inline void assign_buffer(const script_array& other);
 

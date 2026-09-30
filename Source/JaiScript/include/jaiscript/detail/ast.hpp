@@ -207,7 +207,8 @@ namespace jai {
     inline constexpr uint8_t proof_same_type = 1;
     inline constexpr uint8_t operand_class_unknown = 0, operand_class_int_int = 1, operand_class_float_float = 2,
         operand_class_int_float = 3, operand_class_float_int = 4, operand_class_string_string = 5, operand_class_bool_bool = 6,
-        operand_class_object_element = 7;   // a subscript whose container the checker proved an array of class instances
+        operand_class_object_element = 7,   // a subscript whose container the checker proved an array of class instances
+        operand_class_vec_element = 8;      // a subscript whose container the checker proved a math vector buffer (array<math::vec3>)
 
     // identifier expression
     class identifier_expr : public expression {

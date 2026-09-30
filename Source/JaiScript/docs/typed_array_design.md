@@ -245,6 +245,11 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
     `convert_byte_buffer` converts byte <-> int/float buffers on the raw payloads. The raw lanes (vm index stores,
     `op_t_load`, typed index stores, cell loads/stores/pushes, push append) take the kinds and miss on anything out of
     range, which the enforcing path then raises.
+  - **vector kinds — BUILT (`kind_t::v2` ... `kind_t::rgba`, docs/math_types_design.md 4.4).** `array<math::vec2>` through
+    `array<math::color>` also use the byte buffer: element i is its binary32 or int32 component words at stride
+    `dims * 4`. `get` boxes a vector, and `set`/`push` take a value already converted to the kind. The general raw lanes
+    decline these kinds; the VM has its own element-component lanes (`op_velem_load` / `op_velem_store`). A parallel body
+    borrows them raw like the scalar kinds.
   - **object kind — BUILT (`kind_t::obj`, 2026-09-02).** `array<UserType>` (script or
     bound C++ class) is a buffer of `obj_slot{strong_ptr<object_holder> handle, type_info_ptr tag}`
     (16 bytes vs 32 boxed). The per-slot tag reproduces the boxed value exactly on `get`

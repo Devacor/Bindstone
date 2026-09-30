@@ -357,7 +357,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         auto& node = *self.unchecked_get_array_storage();
-        if (node.is_typed() && args.empty() && node.kind() != script_array::kind_t::obj) {
+        if (node.is_typed() && args.empty() && node.kind() != script_array::kind_t::obj && !script_array::is_vec_kind(node.kind())) {
             // raw buffer sort: no comparator, so no user script can mutate mid-sort
             switch (node.kind()) {
                 case script_array::kind_t::i64: std::sort(node.ints().begin(), node.ints().end()); break;
@@ -415,6 +415,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     double av = a.is_int() ? static_cast<double>(a.unchecked_as_int()) : a.unchecked_as_float();
                     double bv = b.is_int() ? static_cast<double>(b.unchecked_as_int()) : b.unchecked_as_float();
                     return av < bv;
+                }
+                if (script_value::is_math_index(a.raw_storage_index()) || script_value::is_math_index(b.raw_storage_index())) {
+                    order_error = detail::math::ordering_error(a, b).error_value();   // math values have no script order (design 5.2)
+                    return false;
                 }
                 if (!unordered(a) && !unordered(b)) {
                     return a < b;  // total order via operator<=> (numerics have lowest type ids)
@@ -589,6 +593,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 result += elem.unchecked_as_char();
             } else if (elem.is_null()) {
                 result += "null";
+            } else if (script_value::is_math_index(elem.raw_storage_index())) {
+                result += elem.to_string();
             } else {
                 result += "[object]";
             }

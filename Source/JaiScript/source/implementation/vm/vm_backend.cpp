@@ -13931,6 +13931,131 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, p.proof, base ? script_value(*base) : make_null(), std::move(value), false);
 }
 
+// A vector buffer's element and component for a velem site: null when the container is not a vector buffer in a frame slot, the index
+// not an int in range or the member not a component of the buffer's kind (the general form then runs)
+script_array* vm_backend::velem_site(frame& f, const velem_proto& p, size_t& at, int& comp) {
+	script_value* cp = frame_slot(f, p.sub.slot);
+	if (!cp) return nullptr;
+	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+		if (!ref_plain_cell(*cp)) return nullptr;
+		cp = &cp->deref();
+	}
+	if (cp->raw_storage_index() != script_value::TYPEID_ARRAY) return nullptr;
+	script_array* node = cp->unchecked_get_array_storage().get();
+	if (!script_array::is_vec_kind(node->kind())) return nullptr;
+	const fused_subscript_index& level = p.sub.subscript_chain[0];
+	script_int index;
+	if (level.kind == fused_subscript_index::index_literal) {
+		index = static_cast<script_int>(level.literal);
+	} else {
+		const script_value* ip = frame_slot(f, level.slot);
+		if (!ip || ip->raw_storage_index() != script_value::TYPEID_INT) return nullptr;
+		index = ip->unchecked_as_int();
+	}
+	if (index < 0 || static_cast<size_t>(index) >= node->size()) return nullptr;
+	comp = p.comp[static_cast<size_t>(node->kind()) - static_cast<size_t>(script_array::kind_t::v2)];
+	if (comp < 0) return nullptr;
+	at = static_cast<size_t>(index);
+	return node;
+}
+
+// `a[i].x` into a temp: the word from the buffer, else the element as the subscript reads it and the member read's ladder and texts
+op_status vm_backend::exec_velem_load(frame& f, const vm_instruction& ins) {
+	const velem_proto& p = f.code->velem_protos[ins.a];
+	size_t at = 0;
+	int comp = -1;
+	if (const script_array* node = velem_site(f, p, at, comp)) {
+		const uint32_t w = node->vec_word(at, static_cast<size_t>(comp));
+		const uint32_t dst = ins.b | (k_typed_dst_temp << k_typed_dst_shift);
+		if (script_array::vec_integral(node->kind())) {
+			typed_land_int(f, dst, static_cast<script_int>(static_cast<int32_t>(w)));
+		} else {
+			float x;
+			std::memcpy(&x, &w, sizeof(x));
+			typed_land_float(f, dst, static_cast<script_float>(x));
+		}
+		return {};
+	}
+	std::optional<script_value> scratch;
+	const script_value* elem = fused_subscript_value(f, p.sub, scratch, f.ip * 3);
+	if (!elem) return op_status::failed;
+	script_value out = make_null();
+	VM_TRY(member_access_value(f, *elem, static_cast<member_expr*>(f.code->nodes[p.node].get()), out));
+	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element read across a frame switch"); }
+	frame_slot_set(f, ins.b, std::move(out));
+	return {};
+}
+
+// `a[i].x = v;` / `a[i].x op= v;`: the component narrowed straight into the buffer's word when the row cannot raise (a number into a
+// float component; an int in range into an int component; + - * over them), else the general store over the element in the general
+// form's order (the value, then the element, its member read and the compound kernel), its result dropped
+op_status vm_backend::exec_velem_store(frame& f, const vm_instruction& ins) {
+	const velem_proto& p = f.code->velem_protos[ins.a];
+	script_value value = make_null();
+	if (p.value.const_index != k_invalid_u32) {
+		push_constant(*f.code, p.value.const_index);
+		value = std::move(stack_.back()); stack_.pop_back();
+	} else {
+		const script_value* vp = fast_operand(f, p.value, f.ip * 3);
+		if (!vp) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element store: the value operand did not resolve"); }
+		value = *vp;
+	}
+	size_t at = 0;
+	int comp = -1;
+	if (script_array* node = velem_site(f, p, at, comp)) {
+		const script_value& v = value.deref();
+		const size_t vi = v.raw_storage_index();
+		const uint32_t op = p.kind & compound_kind_mask;
+		const bool row = !p.compound || op == compound_plus || op == compound_minus || op == compound_star;
+		if (row && !script_array::vec_integral(node->kind()) && (vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_INT)) {
+			script_float r = vi == script_value::TYPEID_FLOAT ? v.unchecked_as_float() : static_cast<script_float>(v.unchecked_as_int());
+			if (p.compound) {
+				const uint32_t w = node->vec_word(at, static_cast<size_t>(comp));
+				float cur;
+				std::memcpy(&cur, &w, sizeof(cur));
+				const script_float c = static_cast<script_float>(cur);
+				r = op == compound_plus ? c + r : op == compound_minus ? c - r : c * r;
+			}
+			const float x = detail::math::to_f32(r);
+			uint32_t bits;
+			std::memcpy(&bits, &x, sizeof(bits));
+			node->set_vec_word(at, static_cast<size_t>(comp), bits);
+			return {};
+		}
+		if (row && script_array::vec_integral(node->kind()) && vi == script_value::TYPEID_INT) {
+			script_int r = v.unchecked_as_int();
+			bool ok = true;
+			if (p.compound) {
+				const script_int c = static_cast<int32_t>(node->vec_word(at, static_cast<size_t>(comp)));
+				ok = op == compound_plus ? ints::try_add(c, r, r) : op == compound_minus ? ints::try_sub(c, r, r) : ints::try_mul(c, r, r);
+			}
+			if (ok && r >= INT32_MIN && r <= INT32_MAX) {
+				node->set_vec_word(at, static_cast<size_t>(comp), static_cast<uint32_t>(static_cast<int32_t>(r)));
+				return {};
+			}
+		}
+	}
+	std::optional<script_value> scratch;
+	const script_value* elem = fused_subscript_value(f, p.sub, scratch, f.ip * 3);
+	if (!elem) return op_status::failed;
+	script_value base = *elem;
+	auto* member = static_cast<member_expr*>(f.code->nodes[p.node].get());
+	const size_t ins_index = static_cast<size_t>(&ins - f.code->code.data());
+	if (!p.compound) {
+		return store_member(f, ins_index, p.node, p.proof, std::move(base), std::move(value), false);
+	}
+	const size_t depth = stack_.size();
+	script_value current = make_null();
+	VM_TRY(member_access_value(f, base, member, current));
+	stack_.push_back(std::move(base));
+	stack_.push_back(std::move(current));
+	stack_.push_back(std::move(value));
+	VM_TRY(exec_member_compound(f, vm_instruction{opcode::op_member_compound, p.node, p.proof, p.kind & ~compound_flag_value_first}));
+	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element store across a frame switch"); }
+	while (stack_.size() > depth) { stack_.pop_back(); }
+	return {};
+}
+
 op_status vm_backend::land_member_store_result(frame& f, const script_value& object, member_expr* member, script_value&& rhs) {
 	if (!assignment_result_used(f) ||
 	    !jai::detail::member_reads_back(object, member->member_id, symbolizer_->get_getter_id_with_view(member->member_id).first, engine_)) {
@@ -17692,6 +17817,8 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_get_member: return exec_get_member(f, ins);
 		case opcode::op_member_temp: return exec_member_temp(f, ins);
 		case opcode::op_size_temp: return exec_size_temp(f, ins);
+		case opcode::op_velem_load: return exec_velem_load(f, ins);
+		case opcode::op_velem_store: return exec_velem_store(f, ins);
 		case opcode::op_set_member_fused: return exec_set_member_fused(f, ins);
 		case opcode::op_set_member_value: return exec_set_member_value(f, ins);
 		case opcode::op_get_static: return exec_get_static(f, ins);
@@ -19033,6 +19160,12 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_set_member_value:
 				VM_TRY_OP_SHARED(exec_set_member_value(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_velem_load:
+				VM_TRY_OP_SHARED(exec_velem_load(f, ins));
+				break;
+			case opcode::op_velem_store:
+				VM_TRY_OP_SHARED(exec_velem_store(f, ins));
 				break;
 			case opcode::op_set_member:
 				VM_TRY_OP_SHARED(exec_set_member(f, ins));

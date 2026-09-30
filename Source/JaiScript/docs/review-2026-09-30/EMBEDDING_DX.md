@@ -191,3 +191,62 @@ from the host side) and several contradictions (6.5). Build integration is the w
 recipe fails in the first ten minutes with an error the docs do not explain, and MSVC consumers must copy flags from
 the in-tree examples. Fixing friction 1-3 (a one-line CMake change, an INTERFACE `/bigobj`, and one Quickstart
 section) would move the outsider experience to about 8.5.
+
+## Addendum, 2026-09-30: after the fixes
+
+Branch `embed-dx-fixes`, on top of the report. Each friction item has its own commit:
+
+| Friction | State now |
+|---|---|
+| 1. `add_subdirectory` did not compile | The include path is `PROJECT_SOURCE_DIR`-relative; tests, runner, LSP, examples and install rules default ON only when JaiScript is top-level. `install()` + `find_package(JaiScript)` export `JaiScript::jaiscript` (Debug library `jaiscriptd`, one prefix for both); the package records its MSVC runtime in `JaiScript_MSVC_RUNTIME_LIBRARY`. BUILD.md documents every option and both routes. |
+| 2. MSVC consumer flags | `/bigobj` (and MinGW `-Wa,-mbig-obj`) ride the target's interface; the MSVC runtime follows the parent project (static only as the in-tree default); the in-tree hosts dropped their copied flags; the `getenv` warning is gone. The six C4834 warnings in `vm_backend.cpp` remain (VM files were off-limits). |
+| 7. Release edits paid a whole-program link | `JAISCRIPT_LTCG`: ON when top-level (the measured numbers), OFF as a subproject. A one-file Release edit of the example drops from 66 s to 27 s, most of which is compiling the binder TU. |
+| 3, 9. Calling script, reading state | Quickstart sections: build it into your project (target, headers), running a file, calling script from C++ (`as_function`, the checked result, `format_error`, when `external_call_guard` matters, `convert_script_function`), reading state back (typed arrays, maps, `for_each`). The reference lists them. `embed_quickstart` makes each call. |
+| 4. Polymorphic saves | Documented: a plain class needs `jai::registrar<T, Ctx, jai::bases<Base>>`; `.base_class<B>()` alone is the script-side edge. Making `base_class` register the serialization identity would write the process-global registries from a per-engine binder at run time, so it stays a documented step; the error text now names `bases<>`. |
+| 5. Breakpoints missed silently | `execute_file` attributes the canonical path; `setBreakpoints` answers `verified: false` (with a message) until a parsed unit carries the path, then a `breakpoint` event verifies it. |
+| 6. Busy port | `debug_connector::listening()` and `error()` ("debugger cannot listen on 127.0.0.1:52472: bind failed (...)"); `listen()` still never throws, so hosts that probe ports keep working. |
+| 8. Import docs | The hot reload chapter, guide ch. 10 and the reference agree: passes and `import_recheck_interval`, check-then-apply, `import(...)` as an expression, groups, `jai::force`; the chapter shows the C++ reload loop. |
+| 9 (error text) | `as_array()` on a typed array names the element type and the matching extraction. |
+| 10. Error texts | `what()` drops a category its text already begins with (`Insufficient privilege: filesystem.`), keeps an informative one (`...: Type mismatch`), never touches a script throw; the anonymous unit is `<script>` in check listings, parse errors and traces. |
+
+Found while writing the docs: `as<std::map<std::string, int64_t>>()` (and `<string, string>`, `<int64_t, string>`)
+overflowed the stack in every build, because their registered converters called `as<>` again. They use the direct map
+kernel now, as `vector<int64_t>` already did; a test pins all three.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `embed_quickstart` via `add_subdirectory`, Debug and Release, interpreter and VM | all checks pass |
+| `embed_quickstart` via `find_package` (installed Debug + Release), both configs, both backends | all checks pass |
+| JaiScript Debug, interpreter / VM | 3561 tests each, green |
+| JaiScript Release, interpreter / VM | 3561 tests each, green |
+| Runner `--selftest`, Debug and Release | 113 passed |
+| GLOOM / GRUBWELL smoke, Debug and Release, both backends | STATE_HASH 319812559 / 1141793083, unchanged |
+| demoreel `--smoke --frames 40`, Debug and Release, both backends | frame hash 5d5e8be047b86b87, unchanged |
+| Site: `verify_site.py --no-samples`, `run_samples.py` with the new runner | ok; 216 samples, 0 failures |
+| Bindstone client, MSBuild Release | builds (2.5 min from clean); `-verifyassets` 76 passed, 0 failed |
+
+### Left for later
+
+- The VM names the outer frame of a host-called function `<script>:0`, the interpreter `<script>:1` (VM files were
+  off-limits).
+- `vm_backend.cpp` still prints six C4834 `[[nodiscard]]` warnings into a consumer's build.
+- An `extern` variable that no unit declares reads as a typed null placeholder, so `extern x; x + 1` raises
+  `Invalid operands for + operator`, not the `Undefined variable 'x'` that the reference's extern section and guide
+  ch. 10's escape valves promise. The quickstart now uses `extern function`, which does raise `Undefined variable`;
+  which behavior is the contract is a ruling.
+- The in-tree default target (`cmake --build` with no target) fails: `source/tests/test_string_static_method.cpp`
+  does not compile. The named targets are unaffected.
+- `engine.hpp` still interleaves internals with the public API, `jai::static_check_error` lives in a `detail/`
+  header, the DAP frame name is `script` rather than the function, and the JSON pretty-printer puts an array's first
+  element on the bracket line.
+
+### Rating now
+
+**8 / 10 for an outsider.** Build integration goes from 3.5 to 8: two CMake lines work as documented, either route,
+no copied flags, and a subproject Release edit links incrementally. The docs go from 6.5 to 8: the host's first hour
+(build, run a file, call in, read back, reload from the host loop) is on the page and every snippet runs in the
+example. The API stays at 8.5, with honest debugger answers and cleaner error text. What keeps it from 9: the public
+header still reads like an internal one, the extern contract needs a ruling, and a consumer's build still prints the
+library's own warnings.

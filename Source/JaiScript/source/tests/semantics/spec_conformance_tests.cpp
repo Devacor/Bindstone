@@ -2002,8 +2002,99 @@ private:
 		});
 	}
 
+	// docs/SIMPLIFICATION_AUDIT.md F1-F8: each moves to its spec group in the change that fixes it
+	void known_bugs_simplification_audit() {
+		test("f1_a_nested_assignment_yields_the_destinations_stored_value", [this]() {
+			// Dev ruling 2026-09-08: the value of an assignment is the destination's stored value, consumed anywhere
+			expect("nested stored value", R"(
+				class C { int n = 0; static int s = 0; }
+				function id(var v) { return v; }
+				C c = C(); array<int> a = [0];
+				var r1 = 0; r1 = (c.n = 3.9);
+				var r2 = 0; r2 = (a[0] = 3.9);
+				string r3 = to_string(a[0] = 4.9);
+				var r4 = id(C::s = 5.9);
+				type_of(r1) + ":" + r1 + " " + type_of(r2) + ":" + r2 + " " + r3 + " " + type_of(r4) + ":" + r4;
+			)", "int:3 int:3 4 int:5", check_mode::warn);
+		});
+		test("f2_a_handle_store_yields_the_stored_handle", [this]() {
+			expect("handle store value", R"(
+				class Foo { int v = 1; }
+				shared_ptr<Foo> sp = Foo();
+				weak_ptr<Foo> w = sp;
+				auto r1 = (w = null);
+				auto r2 = (w = sp);
+				"" + (r1 == null) + " " + (r2 != null);
+			)", "true true", check_mode::warn);
+		});
+		test("f3_a_store_takes_its_right_sides_value_before_the_target", [this]() {
+			// Dev ruling 2026-09-27 (C++17): the right operand of every assignment operator, its value included, before the target
+			expect("store value timing", R"(
+				array<int> a = [0, 0];
+				array<int> b = [1, 2];
+				function g() -> int { b[1] = 99; return 0; }
+				a[g()] = b[1];
+				string s = "" + a[0];
+				b[1] = 2; a[0] = 0;
+				a[g()] += b[1];
+				s + " " + a[0];
+			)", "2 2", check_mode::warn);
+		});
+		test("f4_a_container_literal_reads_its_elements_left_to_right", [this]() {
+			expect("literal order", R"(
+				var A = [1];
+				class O { int operator+(int x) { A[0] = 100; return 0; } }
+				var o = O();
+				function f() { var r = [A[0], o + 1]; return r[0]; }
+				"" + f();
+			)", "1", check_mode::warn);
+		});
+		test("f5_a_user_operator_assign_runs_at_every_store_into_a_bare_field", [this]() {
+			expect("operator= in a method loop", R"(
+				var assigns = 0;
+				class V { int v = 0; function operator=(int x) -> V { assigns = assigns + 1; v = x; return this; } }
+				class H { V f = V(); void set_many() { for (int i = 0; i < 4; i = i + 1) { f = i; } } }
+				var h = H();
+				h.set_many();
+				"" + assigns + " " + h.f.v;
+			)", "4 3", check_mode::warn);
+		});
+		test("f6_a_coroutine_whose_body_threw_is_completed", [this]() {
+			expect("coroutine after a throw", R"(
+				coroutine g() { throw; yield 1; }
+				coroutine k() { throw "boom"; yield 1; }
+				function t(var h) -> string { string r = ""; try { h.resume(); } catch (e) { r = e; } try { h.resume(); } catch (e) { r = r + "|" + e; } return r; }
+				t(g()) + " / " + t(k());
+			)", "No exception to re-throw|Cannot resume a completed coroutine / boom|Cannot resume a completed coroutine", check_mode::warn);
+		});
+		test("f7_an_argument_ahead_of_a_class_operator_takes_its_value_when_evaluated", [this]() {
+			// invariant 13: a later argument that runs user code does not change an earlier by-value argument
+			expect("capture ahead of operator", R"(
+				var G = [1, 2];
+				class O { int operator+(int x) { G.push(9); return 0; } }
+				var o = O();
+				function sz(var a, int b) { return a.size() + b; }
+				"" + sz(G, o + 1);
+			)", "2", check_mode::warn);
+		});
+		test("f8_a_by_value_parameter_does_not_see_a_write_through_another_local", [this]() {
+			expect("parameter alias proof", R"(
+				class Box { int n = 1; }
+				Box G = Box();
+				class P { void poke() { G.n = 5; } }
+				P GQ = P();
+				function f(Box p) -> int { var q = GQ; q.poke(); return p.n; }
+				function f2(Box p) -> int { P q = GQ; q.poke(); return p.n; }
+				string s = "" + f(G);
+				G.n = 1;
+				s + " " + f2(G);
+			)", "1 1", check_mode::warn);
+		});
+	}
+
 	void known_bugs() {
 		known_bugs_range_for();
+		known_bugs_simplification_audit();
 		test("a_callee_of_a_top_level_block_sees_the_outer_binding", [this]() {
 			// docs/global_shadowing.md: a function called from inside the block still sees the outer binding
 			expect("top block", R"(

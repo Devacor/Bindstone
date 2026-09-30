@@ -401,10 +401,14 @@ declares it. `inline T name;`, `inline name;` (a `var`) and `inline T name = ini
 program scope and in a namespace. The first declaration to run creates the variable (the
 initializer, else the type's default: `int` 0, `string` "", a class default-constructed, `var`
 null); every later one, in any unit or a re-run of the same unit, adopts the existing variable
-and runs no initializer; it adopts a variable a plain declaration or the host created the same way.
-The reverse is refused: a declaration without `inline` of a name an inline declaration created
-raises `'x' is already defined inline; declare it 'inline int x;' to share it` (the type as written; `var` spells `inline x;`), and the checker reports it
-at load when the unit or its closure shows the inline declaration. The checker treats it as a declared global of its type, like any declaration; it is
+and runs no initializer, and it adopts a host global (`add_global`, `add_global_ref`) the same way.
+Inline and plain declarations of one name never mix across units, whichever runs first: a plain
+declaration of a name an inline declaration created raises `'x' is already defined inline; declare it 'inline int x;' to share it` (the type as written;
+`var` spells `inline x;`), and an inline declaration of a name another unit's plain declaration
+created raises `'x' is already defined (not inline) in <file>; declare every definition 'inline' to share it` (a literal is `<script>`). A unit that switches its own declaration
+between the two on a re-run (a hot-reload edit) converts the variable in place: to inline it keeps
+its value, to plain it runs the initializer. The checker reports a mix across the closure once, at
+the plain declaration. The checker treats it as a declared global of its type, like any declaration; it is
 the spelling for a name a unit needs to exist whether or not the module that owns it runs.
 
 `[[warn_mode]]` and `[[strict_mode]]` set the checker's mode for a region of one unit. They

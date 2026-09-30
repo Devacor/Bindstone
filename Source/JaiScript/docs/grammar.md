@@ -270,8 +270,8 @@ externDeclaration = "extern" ("function" | type)? IDENTIFIER ";"
 
 // inline variables (program scope and namespace bodies only): one variable shared by every unit
 // that declares it; the first to run creates it (initializer, else the type's default), every
-// later one adopts it and runs no initializer; a plain declaration of the name raises. Bare: var.
-// Never a reference.
+// later one adopts it and runs no initializer; mixing inline and plain declarations of the name
+// across units raises in either order. Bare: var. Never a reference.
 inlineDeclaration = "inline" (variableDeclaration | IDENTIFIER ("=" expression)? ";")
 
 // check-mode attributes (static checker only; both backends run them as nothing). Before a

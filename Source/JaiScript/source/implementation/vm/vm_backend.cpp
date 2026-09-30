@@ -15993,7 +15993,7 @@ op_status vm_backend::exec_namespace_decl(frame& f, const vm_instruction& ins) {
 // every path: types, handles, references, the texts), as the interpreter's visit_variable_decl runs under the same
 // swap; the initializer sees the members declared before it. KEEP BYTE-PARALLEL with interpreter::visit_namespace_decl.
 op_status vm_backend::exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data) {
-	if (auto* var_decl = static_cast<const variable_decl*>(member_decl.get()); !var_decl->is_inline && detail::namespace_scope(*engine_, ns_data)->inline_cell(var_decl->name_id)) [[unlikely]] {
+	if (auto* var_decl = static_cast<const variable_decl*>(member_decl.get()); !var_decl->is_inline && !detail::namespace_scope(*engine_, ns_data)->plain_declare(var_decl->name_id)) [[unlikely]] {
 		return raise_from(detail::inline_redefinition(*symbolizer_, var_decl->name_id, var_decl));
 	}
 	std::shared_ptr<chunk> compiled;
@@ -17673,7 +17673,12 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_decl_keep: {
 			auto* decl = static_cast<const variable_decl*>(f.code->nodes[ins.a].get());
 			if (decl->is_inline) {
-				stack_.push_back(script_value(environment_->get_own_value_ptr(decl->name_id) != nullptr, engine_));
+				uint32_t owner = 0;
+				const auto verdict = environment_->inline_declare(decl->name_id, owner);
+				if (verdict == environment::inline_verdict::conflict) [[unlikely]] {
+					return raise_from(detail::inline_plain_conflict(*symbolizer_, decl->name_id, engine_->unit_label(owner)));
+				}
+				stack_.push_back(script_value(verdict == environment::inline_verdict::adopt, engine_));
 				return {};
 			}
 			const script_value* cell = environment_->get_parent() ? nullptr : environment_->same_unit_cell(decl->name_id);

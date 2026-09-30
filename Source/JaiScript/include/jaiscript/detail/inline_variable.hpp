@@ -28,4 +28,11 @@ inline checked_result<void> inline_redefinition(string_symbolizer& symbols, uint
 		symbols.intern(inline_spelling(decl, symbols.get_string(name_id))));
 }
 
+// The reverse: an inline declaration of a name a plain declaration of another unit defined (a file by its path, a
+// literal as <script>)
+inline checked_result<void> inline_plain_conflict(string_symbolizer& symbols, uint64_t name_id, std::string_view unit) {
+	return checked_result<void>(make_error_code(runtime_error_code::invalid_operation),
+		"'{0}' is already defined (not inline) in {1}; declare every definition 'inline' to share it", name_id, symbols.intern(unit));
+}
+
 }

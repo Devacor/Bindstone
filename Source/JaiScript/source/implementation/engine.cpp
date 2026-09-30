@@ -3385,6 +3385,13 @@ uint64_t engine::definition_epoch() const {
     return impl->definition_epoch_;
 }
 
+std::string engine::unit_label(uint32_t unit) const {
+    for (const auto& [key, id] : impl->unit_index_) {
+        if (id == unit) { return key.empty() || key.front() == '\n' ? std::string("<script>") : key; }
+    }
+    return "<host>";
+}
+
 void engine::bump_definition_epoch() {
     ++impl->definition_epoch_;
 }

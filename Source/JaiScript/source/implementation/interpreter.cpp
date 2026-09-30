@@ -6100,7 +6100,12 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
     // declaration adopts the variable it finds (the vm's op_decl_keep)
     if ((decl->default_initialized || decl->is_inline) && decl->slot_index == SIZE_MAX) [[unlikely]] {
         if (decl->is_inline) {
-            if (environment_->get_own_value_ptr(decl->name_id)) { return {}; }
+            uint32_t owner = 0;
+            const auto verdict = environment_->inline_declare(decl->name_id, owner);
+            if (verdict == environment::inline_verdict::conflict) {
+                return detail::inline_plain_conflict(*string_symbolizer_, decl->name_id, engine_->unit_label(owner));
+            }
+            if (verdict == environment::inline_verdict::adopt) { return {}; }
         } else if (!environment_->get_parent()) {
             if (const script_value* cell = environment_->same_unit_cell(decl->name_id); cell && detail::redeclaration_keeps_value(*decl, *cell)) { return {}; }
         }
@@ -12426,7 +12431,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // and its initializer sees the members declared before it. KEEP BYTE-PARALLEL with vm_backend::exec_namespace_variable.
             struct scope_swap { std::shared_ptr<environment>& slot; std::shared_ptr<environment> saved; ~scope_swap() { slot = std::move(saved); } } swap{environment_, environment_};
             environment_ = detail::namespace_scope(*engine_, *ns_data);
-            if (!var_decl->is_inline && environment_->inline_cell(var_decl->name_id)) [[unlikely]] {
+            if (!var_decl->is_inline && !environment_->plain_declare(var_decl->name_id)) [[unlikely]] {
                 return detail::inline_redefinition(*string_symbolizer_, var_decl->name_id, var_decl);
             }
             JAISCRIPT_TRY(visit_variable_decl(var_decl));

@@ -5218,6 +5218,51 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("a_loop_inside_a_graft_is_its_callers_statement", [this]() {
+			// Gator Quest's building(): fill_rect's two loops graft with set_tile grafted in the inner one; an exit inside the grafted body (set_tile's
+			// guarded store, in_world's return) flushes what the caller's whole statement defined ahead of it (the grafts' parameters and locals),
+			// so the statements of a graft stay the caller's statement for every loop inside it; both backends, proofs on and off
+			const std::string src = R"(
+				array<int> W_W = [12, 8];
+				array<int> W_H = [10, 8];
+				array<int> W_OFF = [0, 120];
+				array<int> TILES = [];
+				for (int i = 0; i < 184; ++i) { TILES.push(0); }
+				bool in_world(int w, int x, int y) { return x >= 0 && y >= 0 && x < W_W[w] && y < W_H[w]; }
+				void set_tile(int w, int x, int y, int t) {
+					if (in_world(w, x, y)) { TILES[W_OFF[w] + y * W_W[w] + x] = t; }
+				}
+				void fill_rect(int w, int x0, int y0, int x1, int y1, int t) {
+					for (int y = y0; y <= y1; ++y) {
+						for (int x = x0; x <= x1; ++x) { set_tile(w, x, y, t); }
+					}
+				}
+				array<int> building(int w, int x0, int y0, int bw, int bh, int wall, int floor) {
+					fill_rect(w, x0, y0, x0 + bw - 1, y0 + bh - 1, wall);
+					fill_rect(w, x0 + 1, y0 + 1, x0 + bw - 2, y0 + bh - 2, floor);
+					int dx = x0 + bw / 2;
+					int dy = y0 + bh - 1;
+					set_tile(w, dx, dy, 9);
+					set_tile(w, dx, dy + 1, 7);
+					return [dx, dy];
+				}
+				var d1 = building(0, 1, 1, 7, 5, 3, 4);
+				var d2 = building(0, 6, 4, 8, 6, 5, 6);
+				var d3 = building(1, 2, 2, 5, 4, 3, 4);
+				int sum = 0;
+				for (int i = 0; i < 184; ++i) { sum = sum * 7 + TILES[i]; sum = sum % 1000003; }
+				to_string(sum) + " " + to_string(d1[0]) + "," + to_string(d2[1]) + "," + to_string(d3[0]);
+			)";
+			both(src, "539827 4,9,4", "a loop inside a graft");
+			both(src, "539827 4,9,4", "a loop inside a graft, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("539827 4,9,4"), got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("boundary_operations_hand_the_general_form_what_it_changed", [this]() {
 			// the statement changes a cell's kind (a var taking a string): the block does not resume and the rest runs general; a statement that raises
 			// leaves the block closed for the handler, and the loop runs again afterwards; a boundary inside an inner loop; a range-for with an alias

@@ -2187,6 +2187,30 @@ private:
 		compound_operators_have_one_table();
 		script_class_operator_overloads();
 		builtin_methods_as_values();
+		field_reference_stores();
+	}
+
+	void field_reference_stores() {
+		test("a_store_through_a_field_reference_runs_the_fields_table", [this]() {
+			// Dev ruling 2026-09-30 (R-q7): auto& r = o.f; r = v stores exactly what o.f = v stores, plain and compound, and
+			// refuses with the direct store's text
+			expect("field reference", R"(
+				class O { int f = 0; float g = 0.0; bool b = false; string s = ""; }
+				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				O a; O d;
+				auto& rf = a.f; rf = true; d.f = true;
+				auto& rg = a.g; rg = 3; d.g = 3;
+				auto& rb = a.b; rb = 5; d.b = 5;
+				auto& rs = a.s; rs = "x"; d.s = "x";
+				string plain = ("" + d.f + " " + d.g + " " + d.b + " " + d.s) == ("" + a.f + " " + a.g + " " + a.b + " " + a.s) ? "match" : "differ";
+				rf += 2.7; d.f += 2.7;
+				rb = 0; d.b = 0;
+				string compound = ("" + d.f + " " + d.b) == ("" + a.f + " " + a.b) ? "match " + a.f : "differ " + a.f + " vs " + d.f;
+				string e1 = t([]() { O o; o.f = "x"; return 1; });
+				string e2 = t([]() { O o; auto& r = o.f; r = "x"; return 1; });
+				plain + "|" + compound + "|" + (e1 == e2 ? "same text" : e1 + " vs " + e2);
+			)", "match|match 3|same text", check_mode::warn);
+		});
 	}
 
 	void builtin_methods_as_values() {

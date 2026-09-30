@@ -319,7 +319,7 @@ public:
             check_eq(false, v[2].as<bool>());
             check_eq((int64_t)2, v[3].as_int(), "a size mismatch compares no element");
             check_eq(true, v[4].as<bool>());
-            check_eq((int64_t)2, v[5].as_int(), "the same node compares no element");
+            check_eq((int64_t)5, v[5].as_int(), "a container compared with itself compares its elements, as a C++ container does (a NaN element is unequal to itself)");
             check_eq(std::string("Cannot compare: the values nest deeper than 200 levels"), v[6].as<std::string>());
         });
 

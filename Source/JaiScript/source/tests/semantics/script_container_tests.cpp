@@ -409,6 +409,17 @@ public:
             check_eq(std::string(), view_error("array<var> v = [1]; v"));
         });
 
+        test("script_maps_extract_to_every_registered_std_map", [this]() {
+            auto eng = make_engine();
+            auto ints = eng->execute(R"(map<string, int> k = {"orc": 3, "troll": 1}; k)").as<std::map<std::string, int64_t>>();
+            check_eq(size_t(2), ints.size());
+            check_eq(int64_t(3), ints["orc"]);
+            auto names = eng->execute(R"(map<string, string> n = {"a": "x"}; n)").as<std::map<std::string, std::string>>();
+            check_eq(std::string("x"), names["a"]);
+            auto by_id = eng->execute(R"(map<int, string> b = {7: "seven"}; b)").as<std::map<int64_t, std::string>>();
+            check_eq(std::string("seven"), by_id[7]);
+        });
+
         test("typed_buffer_extracts_to_cpp_vector", [this]() {
             auto eng = make_engine();
             eng->add_function("sum_ints", [](std::vector<int64_t> v) -> int64_t {

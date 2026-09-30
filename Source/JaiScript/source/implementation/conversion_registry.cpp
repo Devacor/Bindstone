@@ -383,8 +383,9 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     
     // Map<string, int64_t> - direct mapping
     registry->register_conversion<std::map<std::string, int64_t>>(
-        [](const script_value& v) -> std::map<std::string, int64_t> {
-            return v.as<std::map<std::string, int64_t>>();
+        [registry](const script_value& v) -> std::map<std::string, int64_t> {
+            // Direct kernel, as for vector<int64_t>: as<std::map<...>>() consults this registry first
+            return conversions::convert_script_map_to_stdmap<std::string, int64_t>(v, registry->get_engine());
         },
         [registry](const std::map<std::string, int64_t>& map) -> script_value {
             auto eng = registry->get_engine();
@@ -483,8 +484,8 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     
     // Map<string, string>
     registry->register_conversion<std::map<std::string, std::string>>(
-        [](const script_value& v) -> std::map<std::string, std::string> {
-            return v.as<std::map<std::string, std::string>>();
+        [registry](const script_value& v) -> std::map<std::string, std::string> {
+            return conversions::convert_script_map_to_stdmap<std::string, std::string>(v, registry->get_engine());
         },
         [registry](const std::map<std::string, std::string>& map) -> script_value {
             auto eng = registry->get_engine();
@@ -586,8 +587,8 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     
     // Map<int64_t, string> - direct mapping
     registry->register_conversion<std::map<int64_t, std::string>>(
-        [](const script_value& v) -> std::map<int64_t, std::string> {
-            return v.as<std::map<int64_t, std::string>>();
+        [registry](const script_value& v) -> std::map<int64_t, std::string> {
+            return conversions::convert_script_map_to_stdmap<int64_t, std::string>(v, registry->get_engine());
         },
         [registry](const std::map<int64_t, std::string>& map) -> script_value {
             auto eng = registry->get_engine();

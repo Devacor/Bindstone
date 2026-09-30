@@ -378,12 +378,11 @@ engine stays usable", not by `check_throws`.
   function against `engine::definition_epoch()`; kill switch `engine::parameter_alias(false)`,
   gates `parameter_alias_differential_gate` + `jaiscript_fuzz --no-param-alias`.
 - **Operator overloading** (Dev ruling 2026-09-30): a script class declares C++'s overloadable set less `&& || , ->
-  new delete` - binary `+ - * / % & | ^ << >> < > <= >= == != <=>`, unary `- + ! ~` (told apart by the parameter count),
+  new delete` - binary `+ - * / % & | ^ << >> < > <= >= == != <=>`, unary `- + ~` (told apart by the parameter count),
   `=`, `[]`, `()`. An operator runs only when the (left) operand is a class instance whose chain declares it (unary:
   `declares_unary_operator`, `core/overload_resolution.hpp`; binary: `object_arithmetic_via_method`); every other operand
-  keeps the builtin meaning, text and fast lanes. A value instance's truthiness is `!operator!()` ahead of `to_bool()`
-  (the vm folds `!` in a condition onto a truthiness jump; the class memo `may_define_truthiness` keeps a class with
-  neither on the one-flag path); a handle's `!` stays its null test. `a op= b` is `a = a op b` through `operator op` (no `operator op=`).
+  keeps the builtin meaning, text and fast lanes. No `operator!` (Dev ruling 2026-09-30, C++'s operator bool): `!v` is
+  `!to_bool(v)` and `if (v)` is `to_bool(v)`, one contextual conversion; declaring `operator!` is a parse error. `a op= b` is `a = a op b` through `operator op` (no `operator op=`).
   `operator()` is looked up ONLY where a call would raise not callable (`call_operator_of`, both backends: the interpreter's
   generic call, the vm's `park_callee`, `exec_probe_member`, the stack and member call ops), so ordinary calls compile and
   run unchanged; a `function` slot still takes only a function or null (wrap an instance in a lambda). Unary `+` is the

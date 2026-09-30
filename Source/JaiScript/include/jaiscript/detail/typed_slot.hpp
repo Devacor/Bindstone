@@ -12,7 +12,6 @@
 // propagates its own error.
 
 #include <jaiscript/core/class_definition.hpp>
-#include <jaiscript/core/overload_resolution.hpp>
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
@@ -42,43 +41,10 @@ namespace jai::detail {
         const auto target = target_type->base_type;
         switch (pending.v) {
             case verdict::needs_to_bool: {
-                // KEEP BYTE-PARALLEL with the backends' object_to_bool_via_method (class truthiness memo)
+                // KEEP BYTE-PARALLEL with the backends' object_to_bool_via_method (class to_bool memo)
                 auto view = resolve_slot_class(v, eng);
                 bool truthy = true;
-                if (view.def && !((view.def->is_script_class() || !view.def->extended_ever()) && !view.def->may_define_truthiness())) {
-                    const uint64_t bang_id = eng->get_symbolizer()->intern("!");
-                    if (v.type() == script_value_type::jai_object_type && declares_unary_operator(view.def, bang_id)) {
-                        script_value bang = view.def->get_method(bang_id, false);
-                        if (bang.is_function()) {
-                            auto result = make_bound_method(v, bang).as_function()(std::vector<script_value>{});
-                            if (!result) { return result.error_value(); }
-                            // the instance is truthy when its operator! is not (the backends' is_truthy of the result)
-                            const script_value& r = result.value().deref();
-                            bool negated = true;
-                            switch (r.raw_storage_index()) {
-                                case script_value::TYPEID_BOOL: negated = r.unchecked_as_bool(); break;
-                                case script_value::TYPEID_NULL: negated = false; break;
-                                case script_value::TYPEID_INT: negated = r.unchecked_as_int() != 0; break;
-                                case script_value::TYPEID_FLOAT: negated = r.unchecked_as_float() != 0.0; break;
-                                case script_value::TYPEID_STRING: negated = !r.unchecked_as_string().empty(); break;
-                                case script_value::TYPEID_UTF8_STRING: negated = !r.unchecked_as_utf8().bytes.empty(); break;
-                                case script_value::TYPEID_ARRAY: { auto& a = const_cast<script_value&>(r).get_array_storage(); negated = a && !a->empty(); break; }
-                                case script_value::TYPEID_MAP: { auto& m = const_cast<script_value&>(r).get_map_storage(); negated = m && !m->empty(); break; }
-                                case script_value::TYPEID_OBJECT: {
-                                    auto inner = convert_typed_slot_script_rows_impl(slot_conversion::of(verdict::needs_to_bool), r, target_type, eng);
-                                    if (!inner) { return inner.error_value(); }
-                                    negated = inner.value().value && inner.value().value->is_bool() && inner.value().value->unchecked_as_bool();
-                                    break;
-                                }
-                                case script_value::TYPEID_CPP_BOUND:
-                                    negated = r.is_bool() ? r.unchecked_as_bool() : r.is_int() ? r.unchecked_as_int() != 0 : r.is_float() ? r.unchecked_as_float() != 0.0
-                                            : r.is_string() ? !r.unchecked_as_string().empty() : r.is_char() ? true : r.get_cpp_bound_ptr() != nullptr;
-                                    break;
-                                default: break;
-                            }
-                            return slot_conversion::converted_to(script_value(!negated, eng));
-                        }
-                    }
+                if (view.def && !((view.def->is_script_class() || !view.def->extended_ever()) && !view.def->may_define_to_bool())) {
                     script_value method = view.def->get_method(eng->get_symbolizer()->intern("to_bool"), false);
                     if (!method.is_null() && !method.is_invalid() && method.is_function()) {
                         script_value bound = make_bound_method(v, method);

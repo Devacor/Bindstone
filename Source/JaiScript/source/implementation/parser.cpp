@@ -4350,7 +4350,11 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
     if (check(token_type::equal_equal)) { advance(); return std::string("=="); }
     if (check(token_type::bang_equal)) { advance(); return std::string("!="); }
     // Dev ruling 2026-09-30: the rest of C++'s overloadable set (&&, ||, the comma, ->, new and delete stay out); unary or
-    // binary by the parameter count, like a C++ member operator
+    // binary by the parameter count, like a C++ member operator. ! goes through the one contextual conversion, to_bool()
+    if (check(token_type::bang)) {
+        report_error("operator! cannot be declared: !v is !to_bool(v); declare bool to_bool()", peek());
+        return std::nullopt;
+    }
     if (check(token_type::percent)) { advance(); return std::string("%"); }
     if (check(token_type::ampersand)) { advance(); return std::string("&"); }
     if (check(token_type::pipe)) { advance(); return std::string("|"); }
@@ -4358,7 +4362,6 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
     if (check(token_type::left_shift)) { advance(); return std::string("<<"); }
     if (check(token_type::right_shift)) { advance(); return std::string(">>"); }
     if (check(token_type::spaceship)) { advance(); return std::string("<=>"); }
-    if (check(token_type::bang)) { advance(); return std::string("!"); }
     if (check(token_type::tilde)) { advance(); return std::string("~"); }
     if (check(token_type::left_paren) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::right_paren) {
         advance(); advance();

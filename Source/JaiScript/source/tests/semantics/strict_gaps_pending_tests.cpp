@@ -213,7 +213,7 @@ private:
 				"var v = \"dynamic\"; weak_ptr<int> w = v;",
 				"function f = null; f = []() { return 1; };",
 				"int original() { return 1; } function f = original;",
-				"class C { int value() { return 1; } } C c = C(); function f = c.value;",
+				"class C { int value() { return 1; } } C c = C(); function f = []() { return c.value(); };",   // a method is bound, never read bare
 				"var v = 42; function f = v;",
 				"auto f = 42; f = 43;",
 				"function f; f = []() { return 1; };",

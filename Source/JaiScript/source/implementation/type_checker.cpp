@@ -2449,6 +2449,10 @@ private:
 			case node_type::unary_expr: {
 				auto* u = static_cast<unary_expr*>(e);
 				ctype operand = infer(u->operand.get());
+				if (operand.kind == ctype::object_k && (u->op.type == token_type::minus || u->op.type == token_type::plus ||
+				                                        u->op.type == token_type::tilde)) {
+					if (auto user = class_unary_operator(operand.cls, u->op.type)) { return *user; }
+				}
 				switch (u->op.type) {
 					case token_type::bang: return ctype::make(ctype::bool_k);
 					case token_type::minus:
@@ -3106,7 +3110,7 @@ private:
 			diag(diag_level::error, loc, "cannot apply '+=' to 'string' and '" + ctype_name(rhs) + "'", decl_line, decl_col);
 			return;
 		}
-		if (compound && !rhs.is_unknown()) {
+		if (compound && !rhs.is_unknown() && target.kind != ctype::object_k) {   // a class target's operator decides
 			const char* bitwise = base_op == token_type::ampersand ? "&=" : base_op == token_type::pipe ? "|=" : base_op == token_type::caret ? "^="
 			                    : base_op == token_type::left_shift ? "<<=" : base_op == token_type::right_shift ? ">>=" : nullptr;
 			const auto integral = [](const ctype& t) { return t.kind == ctype::int_k || t.kind == ctype::char_k; };
@@ -3142,6 +3146,22 @@ private:
             if (assign_operator_accepts(base, src, depth + 1)) { return true; }
         }
         return false;
+    }
+
+    // A class operand's unary - + ~ runs the chain's overload taking no argument (both backends): its declared result, or
+    // unknown; nullopt when the chain declares none (the builtin rule and its text apply)
+    std::optional<ctype> class_unary_operator(std::string_view cls, token_type op) {
+        const std::string_view name = op == token_type::minus ? "-" : op == token_type::plus ? "+" : "~";
+        member_hit hit = lookup_member(cls, name, /*want_static=*/false);
+        if (!hit.found) { return std::nullopt; }
+        if (hit.methods) {
+            for (const auto* fn : *hit.methods) {
+                if (fn->parameters.empty() || fn->parameters.front().default_value) {
+                    return fn->return_type && !fn->is_coroutine ? ctype_from_type_info(fn->return_type.get()) : ctype{};
+                }
+            }
+        }
+        return ctype{};
     }
 
     // -------------------------------------------------------------- statements

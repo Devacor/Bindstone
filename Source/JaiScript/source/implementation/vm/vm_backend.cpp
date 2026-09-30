@@ -373,6 +373,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		op_caret_id_ = symbolizer_->intern("^");
 		op_left_shift_id_ = symbolizer_->intern("<<");
 		op_right_shift_id_ = symbolizer_->intern(">>");
+		op_tilde_id_ = symbolizer_->intern("~");
 		builtin_push_id_ = symbolizer_->intern("push");   // interned HERE: symbolizer freezes during parallel regions
 		builtin_has_id_ = symbolizer_->intern("has");
 		this_id_ = symbolizer_->get_this_id();
@@ -1549,6 +1550,23 @@ std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_me
 	return std::nullopt;
 }
 
+// A class's unary operator (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with interpreter::object_unary_via_method
+std::optional<checked_result<script_value>> vm_backend::object_unary_via_method(const script_value& operand, token_type op) {
+	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+	const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
+	auto target = resolve_member_target(operand);
+	if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
+	script_value method_val = target.method(id);
+	if (!method_val.is_function()) { return std::nullopt; }
+	script_value bound = make_bound_method(operand, method_val);
+	auto result = bound.as_function()(std::vector<script_value>{});
+	if (!result) {
+		if (is_unwinding_) { return checked_result<script_value>(make_null()); }
+		return checked_result<script_value>(result.error_value());
+	}
+	return checked_result<script_value>(std::move(result.value()));
+}
+
 std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<environment> parent) {
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_env_births_[0];
@@ -2694,6 +2712,7 @@ checked_result<script_value> vm_backend::handle_spaceship(const script_value& le
 		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
 	}
 
+	if (auto custom = object_arithmetic_via_method(left, right, op_spaceship_id_)) { return *custom; }
 	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <=> operator");
 }
 
@@ -2731,21 +2750,25 @@ checked_result<script_value> vm_backend::handle_binary_op(token_type op, const s
 		case token_type::spaceship: return handle_spaceship(left, right);
 		case token_type::ampersand:
 			if (!left.is_int() || !right.is_int()) {
+				if (auto custom = object_arithmetic_via_method(left, right, op_ampersand_id_)) { return *custom; }
 				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise & requires integer operands");
 			}
 			return script_value(left.unchecked_as_int() & right.unchecked_as_int(), engine_);
 		case token_type::pipe:
 			if (!left.is_int() || !right.is_int()) {
+				if (auto custom = object_arithmetic_via_method(left, right, op_pipe_id_)) { return *custom; }
 				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise | requires integer operands");
 			}
 			return script_value(left.unchecked_as_int() | right.unchecked_as_int(), engine_);
 		case token_type::caret:
 			if (!left.is_int() || !right.is_int()) {
+				if (auto custom = object_arithmetic_via_method(left, right, op_caret_id_)) { return *custom; }
 				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Bitwise ^ requires integer operands");
 			}
 			return script_value(left.unchecked_as_int() ^ right.unchecked_as_int(), engine_);
 		case token_type::left_shift: {
 			if (!left.is_int() || !right.is_int()) {
+				if (auto custom = object_arithmetic_via_method(left, right, op_left_shift_id_)) { return *custom; }
 				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Left shift requires integer operands");
 			}
 			auto shift_amount = right.unchecked_as_int();
@@ -2756,6 +2779,7 @@ checked_result<script_value> vm_backend::handle_binary_op(token_type op, const s
 		}
 		case token_type::right_shift: {
 			if (!left.is_int() || !right.is_int()) {
+				if (auto custom = object_arithmetic_via_method(left, right, op_right_shift_id_)) { return *custom; }
 				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Right shift requires integer operands");
 			}
 			auto shift_amount = right.unchecked_as_int();
@@ -4645,6 +4669,15 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 		operand = std::move(derefed);
 	}
 
+	// a class instance's unary operator answers where the builtin rows miss (KEEP BYTE-PARALLEL with the interpreter's unary)
+	auto user_unary = [&](token_type uop) -> std::optional<op_status> {
+		auto user = object_unary_via_method(operand, uop);
+		if (!user) { return std::nullopt; }
+		if (!*user) { return raise_from(*user); }
+		stack_.push_back(std::move(user->value()));
+		return op_status{};
+	};
+
 	// `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
 	// full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
 	// 2026-07). Identical result for bound primitives. Byte-parallel with the interpreter.
@@ -4670,6 +4703,7 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 			} else if (oi == script_value::TYPEID_FLOAT) {
 				stack_.push_back(script_value(-operand.unchecked_as_float(), engine_));
 			} else {
+				if (auto landed = user_unary(token_type::minus)) { return *landed; }
 				return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
 			}
 			return {};
@@ -4677,8 +4711,15 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 		case token_type::bang:
 			stack_.push_back(script_value(!is_truthy(operand), engine_));
 			return {};
+		case token_type::plus:
+			// C++'s unary plus: a number is itself, a char promotes to its int
+			if (oi == script_value::TYPEID_INT || oi == script_value::TYPEID_FLOAT) { stack_.push_back(std::move(operand)); return {}; }
+			if (oi == script_value::TYPEID_CHAR) { stack_.push_back(detail::char_promoted(operand, engine_)); return {}; }
+			if (auto landed = user_unary(token_type::plus)) { return *landed; }
+			return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary plus requires numeric operand");
 		case token_type::tilde:
 			if (oi != script_value::TYPEID_INT) {
+				if (auto landed = user_unary(token_type::tilde)) { return *landed; }
 				return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), "Bitwise NOT requires integer operand");
 			}
 			stack_.push_back(script_value(~operand.unchecked_as_int(), engine_));
@@ -15325,7 +15366,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				class_def->add_constructor_from_ast(
 					std::static_pointer_cast<function_decl>(member.declaration)
 				);
-			} else if (method_name.size() > 0 && method_name[0] == '~') {
+			} else if (method_name.size() > 1 && method_name[0] == '~') {   // "~" alone is operator~
 				class_def->add_destructor_from_ast(
 					std::static_pointer_cast<function_decl>(member.declaration),
 					environment_

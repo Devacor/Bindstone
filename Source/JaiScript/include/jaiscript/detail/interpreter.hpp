@@ -937,6 +937,7 @@ namespace jai {
         uint64_t op_caret_id_;
         uint64_t op_left_shift_id_;
         uint64_t op_right_shift_id_;
+        uint64_t op_tilde_id_ = 0;   // "~" (a class's operator~)
         uint64_t subscript_op_id_;  // "[]"
         uint64_t assign_operator_id_;  // "=" for class assignment operator overload
 
@@ -1206,6 +1207,7 @@ namespace jai {
         std::optional<checked_result<bool>> object_equality_via_method(const script_value& left, const script_value& right);
         std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
 
         // One resolution for every shape a C++/script object reaches the interpreter in:
         // class_instance wrappers (make_object, script classes), cpp_bound non-owning

@@ -95,27 +95,27 @@ checked_result<script_value> interpreter::handle_not_equal(const script_value& l
 }
 checked_result<script_value> interpreter::handle_spaceship(const script_value& left, const script_value& right) {
     binary_host h{*this};
-    return detail::binary_spaceship(h, left, right);
+    return detail::binary_spaceship(h, op_spaceship_id_, left, right);
 }
 checked_result<script_value> interpreter::handle_bitwise_and(const script_value& left, const script_value& right) {
     binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::bit_and>(h, left, right);
+    return detail::binary_bitwise<detail::bit_op::bit_and>(h, op_ampersand_id_, left, right);
 }
 checked_result<script_value> interpreter::handle_bitwise_or(const script_value& left, const script_value& right) {
     binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::bit_or>(h, left, right);
+    return detail::binary_bitwise<detail::bit_op::bit_or>(h, op_pipe_id_, left, right);
 }
 checked_result<script_value> interpreter::handle_bitwise_xor(const script_value& left, const script_value& right) {
     binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::bit_xor>(h, left, right);
+    return detail::binary_bitwise<detail::bit_op::bit_xor>(h, op_caret_id_, left, right);
 }
 checked_result<script_value> interpreter::handle_left_shift(const script_value& left, const script_value& right) {
     binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::shift_left>(h, left, right);
+    return detail::binary_bitwise<detail::bit_op::shift_left>(h, op_left_shift_id_, left, right);
 }
 checked_result<script_value> interpreter::handle_right_shift(const script_value& left, const script_value& right) {
     binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::shift_right>(h, left, right);
+    return detail::binary_bitwise<detail::bit_op::shift_right>(h, op_right_shift_id_, left, right);
 }
 
 } // namespace jai

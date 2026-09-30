@@ -263,12 +263,12 @@ namespace jai::detail {
 	}
 
 	template <class Host>
-	checked_result<script_value> binary_spaceship(Host& h, const script_value& left, const script_value& right) {
+	checked_result<script_value> binary_spaceship(Host& h, uint64_t method_id, const script_value& left, const script_value& right) {
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return utf8_rewrapped(binary_spaceship(h, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
+			return utf8_rewrapped(binary_spaceship(h, method_id, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
 		}
 		if (char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return binary_spaceship(h, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
+			return binary_spaceship(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
 		}
 		auto sign = [&h](auto cmp) { return h.make_int(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0))); };
 		if (left.raw_storage_index() == script_value::TYPEID_INT && right.raw_storage_index() == script_value::TYPEID_INT) {
@@ -280,6 +280,7 @@ namespace jai::detail {
 			return sign(lf <=> rf);
 		}
 		if (left.is_string() && right.is_string()) { return sign(left.unchecked_as_string().compare(right.unchecked_as_string())); }
+		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
 		return type_mismatch_error("Invalid operands for <=> operator");
 	}
 
@@ -294,14 +295,17 @@ namespace jai::detail {
 
 	// Shifts wrap mod 2^64 by contract (docs/integer_semantics.md); the amount must be 0..63
 	template <bit_op Op, class Host>
-	checked_result<script_value> binary_bitwise(Host& h, const script_value& left, const script_value& right) {
+	checked_result<script_value> binary_bitwise(Host& h, uint64_t method_id, const script_value& left, const script_value& right) {
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return utf8_rewrapped(binary_bitwise<Op>(h, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
+			return utf8_rewrapped(binary_bitwise<Op>(h, method_id, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
 		}
 		if (char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return binary_bitwise<Op>(h, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
+			return binary_bitwise<Op>(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
 		}
-		if (!left.is_int() || !right.is_int()) { return type_mismatch_error(bit_invalid_text<Op>()); }
+		if (!left.is_int() || !right.is_int()) {
+			if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
+			return type_mismatch_error(bit_invalid_text<Op>());
+		}
 		const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
 		if constexpr (Op == bit_op::bit_and) { return h.make_int(a & b); }
 		else if constexpr (Op == bit_op::bit_or) { return h.make_int(a | b); }

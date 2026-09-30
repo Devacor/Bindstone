@@ -136,6 +136,17 @@ namespace jai::detail {
         }
     }
 
+    // The pending call-site context belongs to this call: the callee received what the site passed (null = a context
+    // armed without its arguments). A callback a builtin or a host makes with its own arguments does not match.
+    inline bool same_arguments(const std::vector<script_value>* passed, const std::vector<script_value>& received) {
+        if (!passed || passed == &received) return true;
+        if (passed->size() != received.size()) return false;
+        for (size_t i = 0; i < received.size(); ++i) {
+            if (!same_argument((*passed)[i], received[i])) return false;
+        }
+        return true;
+    }
+
     inline auto deferred_argument(const script_value& v) {
         const auto* holder = v.is_reference() ? v.get_reference_holder() : nullptr;
         return holder && holder->argument_source ? holder : nullptr;

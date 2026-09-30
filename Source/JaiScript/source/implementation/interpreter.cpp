@@ -52,6 +52,52 @@ namespace jai {
 namespace {
     using detail::capture_call_argument;
 
+    // The argument positions a builtin's callback binds by reference (a script T& parameter, a host T& that writes back):
+    // those take the builtin's elements as lvalues, as std::sort hands its comparator the elements it sorts
+    uint32_t callback_lvalue_positions(const script_value& callback, size_t argc) {
+        uint32_t positions = 0;
+        for (size_t i = 0; i < argc; ++i) {
+            if (static_cast<uint8_t>(detail::callee_binding(callback, i, false, argc)) & static_cast<uint8_t>(detail::arg_binding::reference)) {
+                positions |= 1u << i;
+            }
+        }
+        return positions;
+    }
+
+    // A callback call whose lvalue positions get a cell holding the element; the element takes the cell's value back
+    // after the call (the builtin works on its own copies of the container's elements)
+    checked_result<script_value> call_with_lvalues(const script_function& callback, uint32_t positions,
+                                                   std::initializer_list<script_value*> elements, engine* eng) {
+        std::vector<script_value> call_args;
+        call_args.reserve(elements.size());
+        size_t i = 0;
+        for (script_value* e : elements) {
+            call_args.push_back((positions >> i++) & 1 ? script_value::make_cell_reference(script_value(e->deref()), eng) : *e);
+        }
+        auto result = callback(call_args);
+        i = 0;
+        for (script_value* e : elements) {
+            if ((positions >> i) & 1) {
+                script_value taken = call_args[i].deref();
+                *e = std::move(taken);
+            }
+            ++i;
+        }
+        return result;
+    }
+
+    // A map callback (key, value): the value position aliases the entry (a map-entry reference, the map's value type as its
+    // constraint), the key position gets a copy (a map key is const, as std::map's is)
+    checked_result<script_value> call_map_entry(const script_function& callback, uint32_t positions, script_value& map_value,
+                                                const script_value& key, engine* eng) {
+        const auto map_type = map_value.get_type_info();
+        std::vector<script_value> call_args{
+            (positions & 1) ? script_value::make_cell_reference(script_value(key), eng) : key,
+            (positions & 2) ? script_value::make_map_entry_reference(map_value.unchecked_get_map_storage(), key, eng, map_type ? map_type->value_type() : nullptr)
+                            : map_value.unchecked_as_map().find(key)->second };
+        return callback(call_args);
+    }
+
     // Local helper: error result for an overflowing integer op in the inlined
     // fast paths below (mirrors interpreter_dispatch.cpp's handlers).
     inline checked_result<void> int_overflow_v(const char* msg) {
@@ -333,14 +379,15 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         // Snapshot first: func is user script that may mutate THIS array (shared
         // storage), reallocating the buffer and invalidating the iterator.
         const script_array* self_node = self.unchecked_array_node();
-        const std::vector<script_value> arr = self_node->is_typed()
+        std::vector<script_value> arr = self_node->is_typed()
             ? self_node->materialize_values(ctx.get_engine()) : self_node->values();
         const auto& func = args[0].unchecked_as_function();
+        const uint32_t lvalues = callback_lvalue_positions(args[0], 1);
         script_value result = script_value::make_array(nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_array_storage()->values();
 
-        for (const auto& elem : arr) {
-            auto call_result = func({elem});
+        for (auto& elem : arr) {
+            auto call_result = lvalues ? call_with_lvalues(func, lvalues, {&elem}, ctx.get_engine()) : func({elem});
             if (!call_result) {
                 return call_result.error_value();
             }
@@ -454,12 +501,15 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
             }
             const auto& comparator = args[0].unchecked_as_function();
+            const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
             auto* backend = ctx.get_engine()->get_execution_backend();
             std::optional<error_propagator> comparator_error;
             bool comparator_threw = false;
             std::sort(tmp.begin(), tmp.end(), [&](const script_value& a, const script_value& b) {
                 if (comparator_error || comparator_threw) return false;   // the first failure ends the calls; the array stays as it was
-                auto result = comparator({a, b});
+                // an lvalue comparator writes the elements the sort holds (not const: they are tmp's or the sort's own)
+                auto result = lvalues ? call_with_lvalues(comparator, lvalues, {const_cast<script_value*>(&a), const_cast<script_value*>(&b)}, ctx.get_engine())
+                                      : comparator({a, b});
                 if (!result) {
                     comparator_error = result.error_value();
                     return false;
@@ -523,6 +573,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         auto& node = *self.unchecked_get_array_storage();
         const auto& predicate = args[0].unchecked_as_function();
+        const uint32_t lvalues = callback_lvalue_positions(args[0], 1);
         script_int removed_count = 0;
 
         // Snapshot the elements before iterating: the predicate is user script that
@@ -534,7 +585,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         std::vector<script_value> kept;
         kept.reserve(snapshot.size());
         for (auto& elem : snapshot) {
-            auto call_result = predicate({elem});
+            auto call_result = lvalues ? call_with_lvalues(predicate, lvalues, {&elem}, ctx.get_engine()) : predicate({elem});
             if (!call_result) {
                 return call_result.error_value();
             }
@@ -724,10 +775,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         auto& mapPtr = self.unchecked_get_map_storage();
         const auto& predicate = args[0].unchecked_as_function();
+        const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
         script_int removed_count = 0;
 
         for (auto it = mapPtr->begin(); it != mapPtr->end(); ) {
-            auto call_result = predicate({it->first, it->second});
+            auto call_result = lvalues ? call_map_entry(predicate, lvalues, self, it->first, ctx.get_engine()) : predicate({it->first, it->second});
             if (!call_result) {
                 return call_result.error_value();
             }
@@ -752,11 +804,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         const auto& map = self.unchecked_as_map();
         const auto& predicate = args[0].unchecked_as_function();
+        const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
         script_value result = script_value::make_map(nullptr, nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_map_storage();
 
         for (const auto& [key, value] : map) {
-            auto call_result = predicate({key, value});
+            auto call_result = lvalues ? call_map_entry(predicate, lvalues, self, key, ctx.get_engine()) : predicate({key, value});
             if (!call_result) {
                 return call_result.error_value();
             }
@@ -7305,7 +7358,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         direct_ast->local_count);
                     script_func.unit = direct_ast->unit;
                     method_call_override mctx{&def_env, &objectValue, cls_pin.get()};
-                    detail::call_site_context ctx{&expr->arguments, expr};
+                    detail::call_site_context ctx{&expr->arguments, expr, &arguments};
                     const detail::call_site_context* saved_ctx = pending_call_ctx_;
                     pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
                     std::optional<checked_result<script_value>> callOutcome;
@@ -13809,6 +13862,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // nested calls set their own; external (C++) invocations arrive with none.
     const detail::call_site_context* call_ctx = pending_call_ctx_;
     pending_call_ctx_ = nullptr;
+    if (call_ctx && !detail::same_arguments(call_ctx->values, args)) {
+        call_ctx = nullptr;   // a callback a builtin or a host makes with its own arguments
+    }
 
     // Parse-time argument proofs belong to the ONE callee the site resolved to: body
     // identity is the callee check (docs/type_proofs_design.md I-C1)

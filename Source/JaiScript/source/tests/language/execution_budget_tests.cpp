@@ -11,9 +11,9 @@ public:
 	execution_budget_tests() : suite("Execution Budget") {}
 
 	void forge_tests() override {
-		test("default_budget_is_one_second", [this]() {
+		test("default_budget_is_five_seconds", [this]() {
 			auto e = make_engine();
-			check_near(1.0, e->execution_budget(), 1e-9);
+			check_near(5.0, e->execution_budget(), 1e-9);
 		});
 
 		test("budget_stops_infinite_while", [this]() {

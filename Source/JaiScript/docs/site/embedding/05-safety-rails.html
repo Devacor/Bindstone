@@ -72,7 +72,7 @@ print(reflect::is_enabled(jai::filesystem, &quot;savegame.write&quot;));</code><
 false</code></pre></div>
 <h2 id="1-execution-budget-terminal-uncatchable-by-script">1. Execution budget: terminal, uncatchable by script<a class="hlink" href="#1-execution-budget-terminal-uncatchable-by-script" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execution_budget(1.0 / 60);   // wall-clock seconds per execute()/resume()
-eng-&gt;execution_budget();           // read back; 0 disables; DEFAULT: 1.0 second</code></pre></div>
+eng-&gt;execution_budget();           // read back; 0 disables; DEFAULT: 5.0 seconds</code></pre></div>
 <p>A script exceeding the budget raises an <code>execution_budget_exceeded</code> error that is <strong>terminal</strong>: every script <code>catch</code> is skipped: plain try/catch, nested catches, catches inside functions, lambdas, coroutines, and even the outer script&#x27;s catch around a <em>reentrant</em> execute (host callback calling <code>execute()</code> mid-script). The failure always reaches the host; a script can never swallow its own timeout.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
 eng-&gt;execution_budget(0.05);

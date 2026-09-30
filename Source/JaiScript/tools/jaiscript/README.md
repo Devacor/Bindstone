@@ -87,7 +87,7 @@ world per save); because of that, the DAP listener is off in watch mode.
                       names fail the load; warn loads anyway and lists them on stderr;
                       off skips the walk's diagnostics)
 --budget=N            execution budget in seconds per execute (default 0 = unlimited;
-                      the embedded-engine default of 1.0s is deliberately lifted —
+                      the embedded-engine default of 5.0s is deliberately lifted —
                       long loops are the user's business in a runner)
 --time                print wall time for each run
 --no-debug            don't stand up the DAP debug listener

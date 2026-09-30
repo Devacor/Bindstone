@@ -2186,6 +2186,30 @@ private:
 		constructor_overloads_rank_like_calls();
 		compound_operators_have_one_table();
 		script_class_operator_overloads();
+		builtin_methods_as_values();
+	}
+
+	void builtin_methods_as_values() {
+		test("a_builtin_method_taken_as_a_value_is_bound_to_its_receiver", [this]() {
+			// Dev ruling 2026-09-30 (R-q5): arr.push, m.clear, co.resume, s.size taken as values bind their receiver exactly as a user
+			// method taken as a value does: the bound value holds the receiver's object (an element's, a copy's), keeps it alive, and
+			// a later reassignment of the variable leaves the bound one on the object it was taken from
+			expect("builtin bound", R"(
+				class C { int n = 0; void bump() { n += 1; } }
+				C c; var b = c.bump; b(); b();
+				var a = [1, 2]; var f = a.push; f(3);
+				var copy = a; var fc = copy.push; fc(7);
+				map<string, int> m = {"x": 1}; var mc = m.clear; mc();
+				var inner = [[1], [2]]; var ip = inner[0].push; ip(9);
+				C c2; var b2 = c2.bump; c2 = C(); b2();
+				var a2 = [1]; var p = a2.push; a2 = [5, 6]; p(0);
+				coroutine gen() { yield 1; yield 2; }
+				var co = gen(); var r = co.resume; var dn = co.done;
+				string s = "abc"; var sz = s.size;
+				"" + c.n + " " + a.size() + " " + copy.size() + " " + m.size() + " " + inner[0].size() + " " + c2.n + " " + a2.size() + " " +
+				    r() + " " + dn() + " " + sz();
+			)", "2 3 4 0 2 0 2 1 false 3");
+		});
 	}
 
 	void script_class_operator_overloads() {

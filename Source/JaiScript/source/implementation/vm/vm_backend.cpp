@@ -375,6 +375,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		op_right_shift_id_ = symbolizer_->intern(">>");
 		op_bang_id_ = symbolizer_->intern("!");
 		op_tilde_id_ = symbolizer_->intern("~");
+		op_call_id_ = symbolizer_->intern("()");
 		builtin_push_id_ = symbolizer_->intern("push");   // interned HERE: symbolizer freezes during parallel regions
 		builtin_has_id_ = symbolizer_->intern("has");
 		this_id_ = symbolizer_->get_this_id();
@@ -1559,6 +1560,17 @@ std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_me
 		return checked_result<script_value>(std::move(result.value()));
 	}
 	return std::nullopt;
+}
+
+// A callable object (Dev ruling 2026-09-30): only a call that would raise not callable asks for it, so ordinary calls never
+// pay for it. KEEP BYTE-PARALLEL with interpreter::call_operator_of
+script_value vm_backend::call_operator_of(const script_value& callee) {
+	const script_value& v = callee.deref();
+	if (parallel_worker_ || (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type)) { return make_null(); }
+	auto target = resolve_member_target(v);
+	if (!target) { return make_null(); }
+	script_value method_val = target.method(op_call_id_);
+	return method_val.is_function() ? make_bound_method(v, method_val) : make_null();
 }
 
 // A class's unary operator (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with interpreter::object_unary_via_method
@@ -11273,6 +11285,13 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 // a script function of matching arity, the value otherwise)
 op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, const script_value& calleeVal) {
 	if (!calleeVal.is_function()) {
+		if (script_value call_operator = call_operator_of(calleeVal); call_operator.is_function()) {
+			pending_callee pc;
+			pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
+			pc.value = std::move(call_operator);
+			pending_callees_.push_back(std::move(pc));
+			return {};
+		}
 		uint64_t name_id = site.callee.symbol != k_invalid_u32 ? f.code->symbols[site.callee.symbol] : 0;
 		if (name_id == 0 && site.call_node != k_invalid_u32) {
 			name_id = callee_name_symbol(static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get());
@@ -11361,6 +11380,10 @@ void vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	if (ins.b == 1) {
 		if (!stack_.back().is_function()) {
+			if (script_value call_operator = call_operator_of(stack_.back()); call_operator.is_function()) {
+				stack_.back() = std::move(call_operator);
+				return {};
+			}
 			return raise_not_callable(0, stack_.back());
 		}
 		return {};
@@ -11374,7 +11397,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	}
 	// The call op's callable check on a member that resolves to a plain value
 	auto callable = [&](const script_value& v) -> op_status {
-		if (v.is_function() || (v.is_null() && member->null_safe)) { return {}; }
+		if (v.is_function() || (v.is_null() && member->null_safe) || call_operator_of(v).is_function()) { return {}; }
 		return raise_not_callable(member_id, v);
 	};
 
@@ -12029,9 +12052,13 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 
 	if (!callee.is_function()) {
-		const uint64_t name_id = site.call_node != k_invalid_u32
-			? callee_name_symbol(static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get()) : 0;
-		return raise_not_callable(name_id, callee);
+		script_value call_operator = call_operator_of(callee);
+		if (!call_operator.is_function()) {
+			const uint64_t name_id = site.call_node != k_invalid_u32
+				? callee_name_symbol(static_cast<call_expr*>(f.code->nodes[site.call_node].get())->callee.get()) : 0;
+			return raise_not_callable(name_id, callee);
+		}
+		callee = std::move(call_operator);
 	}
 
 	// Inline the invoke tail: an extra callee frame per script call would blow the
@@ -14841,7 +14868,9 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 	if (!callee.is_function()) {
-		return raise_not_callable(member->member_id, callee);
+		script_value call_operator = call_operator_of(callee);
+		if (!call_operator.is_function()) { return raise_not_callable(member->member_id, callee); }
+		callee = std::move(call_operator);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	profile_call_method_paths_[5]++;

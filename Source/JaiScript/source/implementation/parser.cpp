@@ -4234,6 +4234,10 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
     if (check(token_type::spaceship)) { advance(); return std::string("<=>"); }
     if (check(token_type::bang)) { advance(); return std::string("!"); }
     if (check(token_type::tilde)) { advance(); return std::string("~"); }
+    if (check(token_type::left_paren) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::right_paren) {
+        advance(); advance();
+        return std::string("()");
+    }
     report_error("Expected operator symbol after 'operator' keyword", peek());
     return std::nullopt;
 }

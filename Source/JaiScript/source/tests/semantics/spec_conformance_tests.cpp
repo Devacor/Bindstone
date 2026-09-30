@@ -2266,6 +2266,61 @@ private:
 			every_config("operator! contexts", "ace false true 1 true false false 0T FT",
 				[&](engine& e) { return spec::render(e.execute(src)); }, check_mode::strict);
 		});
+		test("a_class_with_operator_call_is_callable_wherever_a_function_is_called", [this]() {
+			// Dev ruling 2026-09-30: a call whose callee holds a class instance runs its operator() (any arity, the usual
+			// overload scorer, the class chain), through a local, a global, a field, an element, a computed callee and a handle
+			const std::string src = R"(
+				class Adder {
+					int base = 0;
+					int calls = 0;
+					Adder(int b) { base = b; }
+					int operator()(int x) { calls += 1; return base + x; }
+					int operator()(int x, int y) { calls += 1; return base + x + y; }
+					string operator()(string s) { calls += 1; return s + "!"; }
+				}
+				class Twice : Adder { Twice() : super(1) {} }
+				class Holder { Adder f = Adder(100); }
+				Adder g = Adder(10);
+				function make() -> Adder { return Adder(1000); }
+				function run() -> string {
+					Adder a = Adder(5);
+					Holder h;
+					array<Adder> arr = [Adder(20)];
+					shared_ptr<Adder> sp = new Adder(7);
+					Twice t;
+					string r = "" + a(1) + " " + a(1, 2) + " " + a("hi") + " " + a.calls + " " + g(1) + " " + h.f(3) + " " + arr[0](2) + " " +
+					    (make())(4) + " " + sp(1) + " " + sp.calls + " " + t(1);
+					return r;
+				}
+				run();
+			)";
+			every_config("callable objects", "6 8 hi! 3 11 103 22 1004 8 1 2",
+				[&](engine& e) { return spec::render(e.execute(src)); }, check_mode::strict);
+		});
+		test("a_class_without_operator_call_keeps_the_not_callable_text", [this]() {
+			// a function slot takes a function or null (the one conversion table): a callable object passes through a lambda
+			expect("not callable", R"(
+				class Plain { int n = 1; }
+				class F { int operator()(int x) { return x * 2; } }
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function apply(function f, int x) -> int { return f(x); }
+				t([]() { Plain p; return p(1); }) + "|" + t([]() { F f; return apply([f](int x) { return f(x); }, 3); });
+			)", "Cannot call 'p': it is a Plain, not a function|6", check_mode::strict);
+			// the table's function row takes a function or null: the strict checker refuses an instance at a function declaration
+			every_config("function slot", "rejected", [&](engine& e) {
+				try {
+					e.execute(R"(
+						class F { int operator()(int x) { return x * 2; } }
+						F f;
+						function g = f;
+					)");
+					return std::string("loaded");
+				} catch (const std::exception& ex) {
+					const std::string what = ex.what();
+					return what.find("cannot initialize 'g' declared 'function' with 'F'") != std::string::npos ? std::string("rejected") : what;
+				}
+			}, check_mode::strict);
+		});
 	}
 
 	void compound_operators_have_one_table() {

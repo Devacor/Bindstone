@@ -53,7 +53,7 @@ going down
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 print(&quot;{}&quot;, Direction.zzz);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:23: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (declared at 1:6)
+&lt;script&gt;:2:23: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (declared at 1:6)
     print(&quot;{}&quot;, Direction.zzz);
                           ^</code></pre></div>
 <p>Members are reached with a dot (<code>Direction.east</code>); the <code>::</code> spelling is for namespaces and statics, and does not resolve an enum value.</p>

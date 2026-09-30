@@ -61,7 +61,7 @@ a=(3.0, 4.0) b.x=1.5 lives=3</code></pre></div>
 x = 12;          // fine, still an int
 x = &quot;oops&quot;;      // the checker sees a string landing in an int</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+&lt;script&gt;:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
     x = &quot;oops&quot;;      // the checker sees a string landing in an int
        ^</code></pre></div>
 <p>Nothing ran. The checker walks the whole program first, sees a string literal heading for an <code>int</code> variable, and fails the load. That is <strong>strict</strong> mode, and it is the default. In an embedded engine the same failure arrives as a thrown <code>jai::static_check_error</code> out of <code>execute()</code>.</p>
@@ -96,7 +96,7 @@ y = 2.0 (float)</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto x = 5;      // auto infers int, then enforces it
 x = &quot;hello&quot;;     // locked to int: string is not convertible</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:6)
+&lt;script&gt;:2:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:6)
     x = &quot;hello&quot;;     // locked to int: string is not convertible
        ^</code></pre></div>
 <p>&hellip;while a <code>var</code>-sourced value slips past the checker and raises where it lands:</p>

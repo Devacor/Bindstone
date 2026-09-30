@@ -78,7 +78,7 @@ namespace jai {
         //           ^
         // The offending source line + caret are included when `source` is provided
         // (a jaibite loaded from bytes has no source; the location prefix still prints).
-        std::string format(std::string_view source = {}, std::string_view script_name = "script") const;
+        std::string format(std::string_view source = {}, std::string_view script_name = "<script>") const;
     };
 
     // Strict-mode failure: thrown by execute()/jaibite creation/load before any code

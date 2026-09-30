@@ -141,7 +141,7 @@ print("{}", total);</code></pre></div>
 x = "hello";                  // typed to typed: the load fails, nothing runs
 print("never printed");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:4: error: cannot assign 'string' to 'x' declared 'int' (declared at 1:5)
+&lt;script&gt;:2:4: error: cannot assign 'string' to 'x' declared 'int' (declared at 1:5)
     x = "hello";                  // typed to typed: the load fails, nothing runs
        ^</code></pre></div>
 <p>The shape is <code>script:LINE:COL: error: MESSAGE</code>, then the source line, then a caret. The message is lowercase and names the declaration it conflicts with. Under strict mode the host sees one <code>jai::static_check_error</code> whose <code>what()</code> is the whole listing (sorted by location, deduplicated, capped at 100), and nothing has executed. A diagnostic from an imported unit is qualified by that unit&#x27;s resolved path instead of <code>script</code>. Warnings (shadowing, a copying cast) use the same shape with <code>warning:</code> and never stop the load. The runner lists them under <code>--check=warn</code>, and a host reads them from <code>last_check_diagnostics()</code> in strict or warn mode (<code>off</code> collects nothing). Common messages:</p>

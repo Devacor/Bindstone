@@ -2050,6 +2050,15 @@ public:
                 what_of(e, "throw \"Undefined variable 'q': Undefined variable\";"), "a script throw keeps its text exactly");
         });
 
+        test("anonymous_unit_is_spelled_script_in_every_listing", [this]() {
+            auto e = make_engine();
+            std::string checked, parsed;
+            try { e->execute("int x = undefined_thing + 1;"); } catch (const jai::static_check_error& ex) { checked = ex.what(); }
+            try { e->execute("var x = ;"); } catch (const jai::parse_error& ex) { parsed = ex.what(); }
+            check_true(checked.find("\n<script>:1:9: error:") != std::string::npos, checked);
+            check_true(parsed.find("<script>:1:") != std::string::npos, parsed);
+        });
+
         test("member_compound_order_pinned", [this, expect_order, recv_prelude]() {
             expect_order((std::string(recv_prelude) + R"(
                 int boom() { log += "R"; throw "boom"; }

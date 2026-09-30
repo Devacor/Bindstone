@@ -1182,7 +1182,7 @@ public:
         });
 
         test("a_root_file_lists_its_check_errors_under_its_path", [=, this]() {
-            // the root file's listing names the file like an included or imported one does; source text stays "script"
+            // the root file's listing names the file like an included or imported one does; source text stays "<script>"
             const std::string path = (jai::foundry::test_temp_directory() / "root_listing.jai").generic_string();
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
@@ -1191,8 +1191,8 @@ public:
                 try { eng->execute_file_source(path, "int x = \"s\";\n"); } catch (const std::exception& ex) { from_file = ex.what(); }
                 try { eng->execute("int y = \"s\";\n"); } catch (const std::exception& ex) { from_text = ex.what(); }
                 check_true(from_file.find(path + ":1:5: error: cannot initialize 'x'") != std::string::npos, from_file);
-                check_true(from_file.find("script:1:5") == std::string::npos, from_file);
-                check_true(from_text.find("script:1:5: error: cannot initialize 'y'") != std::string::npos, from_text);
+                check_true(from_file.find("<script>:1:5") == std::string::npos, from_file);
+                check_true(from_text.find("<script>:1:5: error: cannot initialize 'y'") != std::string::npos, from_text);
             }
         });
 
@@ -1428,7 +1428,7 @@ public:
                 const std::string checked = run(*eng, "int x = \"s\";\n").to_string();
                 check_true(checked.rfind("static check failed:\n", 0) == 0, checked);
                 check_true(checked.find("inc_err.jai:1:5: error: cannot initialize 'x' declared 'int' with 'string'\n    int x = \"s\";\n        ^\n") != std::string::npos, checked);
-                check_true(checked.find("script:1:5") == std::string::npos, checked);
+                check_true(checked.find("<script>:1:5") == std::string::npos, checked);
                 const std::string parsed = run(*eng, "void f(int var) {}\n").to_string();
                 check_true(parsed.rfind("Parse error: ", 0) == 0 && parsed.find("inc_err.jai:1:12:") != std::string::npos, parsed);
                 // from a function body, a computed path; the program goes on after every catch

@@ -1069,7 +1069,7 @@ struct engine::implementation {
     // The tail every checked execute shares: publish last_check_, gate with the root listing
     // followed by each closure unit's own. A unit that failed to parse fails a strict load as
     // the parse error itself (warn runs on, and the import raises it when it executes).
-    void gate_checked(const check_report& root, std::string_view source, std::string_view name = "script") {
+    void gate_checked(const check_report& root, std::string_view source, std::string_view name = "<script>") {
         last_check_ = program_report(root);
         if (static_check_mode_ == check_mode::strict && !program_parse_failures_.empty()) {
             throw parse_error(program_parse_failures_.substr(0, program_parse_failures_.size() - 1));
@@ -2026,7 +2026,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         const check_report& rep = impl->checked_report(*this, *cached, impl->static_check_mode_ != check_mode::off);
         if (impl->static_check_mode_ != check_mode::off) {
             // a unit from a file (the root file, an include, an import) lists under its path
-            const std::string_view listing_name = sourcePath.empty() || sourcePath == "<script>" ? std::string_view("script") : std::string_view(sourcePath);
+            const std::string_view listing_name = sourcePath.empty() ? std::string_view("<script>") : std::string_view(sourcePath);
             if (instanceVars.empty()) {
                 impl->gate_checked(rep, scriptContent, listing_name);
             } else {

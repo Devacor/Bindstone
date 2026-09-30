@@ -38,10 +38,10 @@ Tower t = Tower();
 t.rnage = 5;                      // a typo, caught before anything runs
 int shots = "many";               // typed to typed: also a load error</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">static check failed:
-script:3:3: error: no member 'rnage' in class 'Tower' (declared at 1:7)
+&lt;script&gt;:3:3: error: no member 'rnage' in class 'Tower' (declared at 1:7)
     t.rnage = 5;                      // a typo, caught before anything runs
       ^
-script:4:5: error: cannot initialize 'shots' declared 'int' with 'string'
+&lt;script&gt;:4:5: error: cannot initialize 'shots' declared 'int' with 'string'
     int shots = "many";               // typed to typed: also a load error
         ^</code></pre></div>
 <p>Nothing ran. <code>execute()</code> threw <code>jai::static_check_error</code> before the first statement,
@@ -90,10 +90,10 @@ the runtime's own conversion errors apply unchanged. This is the porting mode.</
 warn mode ran: 42 with 1 diagnostic(s) on record
 strict throw:
 static check failed:
-script:2:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+&lt;script&gt;:2:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
     x = &quot;hello&quot;;
        ^
-script:3:9: error: use of undeclared identifier &#x27;missing&#x27;
+&lt;script&gt;:3:9: error: use of undeclared identifier &#x27;missing&#x27;
     int y = missing + 1;
             ^
 
@@ -213,7 +213,7 @@ class Archer : Unit { int arrows = 20; }
 shared_ptr&lt;Unit&gt; u = new Archer();
 print(u.arrows);                  // error: Unit has no 'arrows'</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">static check failed:
-script:5:9: error: no member 'arrows' in class 'Unit' (declared at 1:7)
+&lt;script&gt;:5:9: error: no member 'arrows' in class 'Unit' (declared at 1:7)
     print(u.arrows);                  // error: Unit has no 'arrows'
             ^</code></pre></div>
 <p>The two fixes are the two you would reach for in C++: a cast, or a receiver that opts out of typing.</p>

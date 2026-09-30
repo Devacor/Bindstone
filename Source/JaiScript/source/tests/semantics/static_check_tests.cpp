@@ -494,7 +494,7 @@ public:
             check_gt(r.diagnostics[0].column, (size_t)0);
             // formatted output is compiler-style with source line + caret
             std::string formatted = r.format("var ok = 0;\nint b = \"x\";\nint c = \"y\";\nzzz_undefined();\n");
-            check_true(formatted.find("script:2:") != std::string::npos);
+            check_true(formatted.find("<script>:2:") != std::string::npos);
             check_true(formatted.find("error:") != std::string::npos);
             check_true(formatted.find("int b = \"x\";") != std::string::npos);
             check_true(formatted.find("^") != std::string::npos);

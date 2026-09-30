@@ -3732,7 +3732,7 @@ public:
             check_quad("class P { string _n = \"a\"; string _get_n() { return _n; } } var p = P(); p.n.to_upper(); p.n", "a", "a computed property is a temporary");
             check_quad("string s = \"abc\"; s.substr(1).to_upper(); s", "abc", "a call result is a temporary");
             check_quad("function mk() { return \"t\"; } mk().to_upper()", "T", "temporary mutation lands in the result");
-            check_quad("string q = \"hello\"; var f = q.to_upper; f(); q", "hello", "an escaped bound mutator mutates its own copy");
+            check_quad("string q = \"hello\"; var f = []() { q.to_upper(); }; f(); q", "HELLO", "a string method taken as a value is a lambda over the receiver");
             check_quad("string a = \"hello\"; string b = a; b.to_lower(); b.trim(); b.trim_left(); b.trim_right(); b.pad_left(6, ' '); b.pad_right(7, ' '); b.pad_center(9, '*'); b.replace_first(\"h\", \"j\"); b.replace_last(\"o\", \"y\"); b.replace_all(\"l\", \"L\"); b.insert(0, \">\"); b.erase(0, 1); b.remove_prefix(1); b.remove_suffix(1); b.reverse(); b.repeat(1); b.to_upper(); a + \"|\" + b",
                        "hello| YLLEJ ", "all seventeen mutators on a copy leave the source");
             check_quad("var arr = [\"hello\"]; string a = arr[0]; arr[0].to_lower(); arr[0].trim(); arr[0].trim_left(); arr[0].trim_right(); arr[0].pad_left(6, ' '); arr[0].pad_right(7, ' '); arr[0].pad_center(9, '*'); arr[0].replace_first(\"h\", \"j\"); arr[0].replace_last(\"o\", \"y\"); arr[0].replace_all(\"l\", \"L\"); arr[0].insert(0, \">\"); arr[0].erase(0, 1); arr[0].remove_prefix(1); arr[0].remove_suffix(1); arr[0].reverse(); arr[0].repeat(1); arr[0].to_upper(); a + \"|\" + arr[0]",

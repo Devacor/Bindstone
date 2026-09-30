@@ -120,6 +120,7 @@ public:
         });
 
         custom_test("methods_and_variadics_share_the_guard", [this](auto& eng) {
+            stdlib::register_reflection_functions(eng.shared_from_this());
             auto edit = permission(eng, "app.edit");
             dynamic_binder<custom_privilege_probe> binder(eng, "CustomProbe");
             binder.template constructor<>()
@@ -130,7 +131,7 @@ public:
             eng.add_variadic_function("custom_count", [&eng](const std::vector<script_value>& args) -> checked_result<script_value> {
                 return script_value(script_int(args.size()), &eng);
             }, {edit, "filesystem"});
-            eng.execute("var probe = CustomProbe(); var saved_read = probe.read;");
+            eng.execute("var probe = CustomProbe(); var saved_read = reflect::bind(probe, \"read\");");
             for (const char* code : {"probe.read()", "probe.query()", "probe.lambda()", "saved_read()", "custom_count(1, 2)"}) {
                 check_eq(denied(), failure([&]() { eng.execute(code); }));
             }

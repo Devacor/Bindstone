@@ -5244,7 +5244,7 @@ public:
 				"int read(array<int>& a, string tag) { int old = a[0]; a[0] = 42; return old; } } "
 				"function change(array<int>& a) -> int { a[0] = 9; return 0; } ";
 			expect(defs + "Reader r; array<int> a = [1]; r.read(a, change(a));", "1", "selected value overload");
-			expect(defs + "Reader r; var f = r.read; array<int> a = [1]; f(a, change(a));", "1", "bound method value overload");
+			expect(defs + "Reader r; var f = reflect::bind(r, \"read\"); array<int> a = [1]; f(a, change(a));", "1", "bound method value overload");
 			expect(defs + "Reader r; array<int> a = [1]; r.read(a, \"ref\"); a[0];", "42", "selected reference overload aliases");
 			expect(defs + "function tag(array<int>& a) { a[0] = 9; return \"ref\"; } "
 				"Reader r; array<int> a = [1]; int seen = r.read(a, tag(a)); seen * 100 + a[0];", "942",

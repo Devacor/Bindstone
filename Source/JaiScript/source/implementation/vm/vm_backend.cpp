@@ -7276,6 +7276,7 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 #endif
 namespace {
 	inline int64_t cell_bits_of_float(script_float d) { int64_t b; std::memcpy(&b, &d, sizeof b); return b; }
+	template <class Regs> JAI_FORCEINLINE void cell_put_float(const Regs& r, uint32_t dk, script_float v) { r.payload[dk] = cell_bits_of_float(v); r.kinds[dk] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); r.dirty->set(dk); }
 	inline script_float cell_float_of_bits(int64_t b) { script_float d; std::memcpy(&d, &b, sizeof d); return d; }
 }
 
@@ -8122,6 +8123,8 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
 	case opcode::op_c_ret:
+	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
+	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 		return true;
 	default:
 		return false;
@@ -8185,6 +8188,31 @@ next_frame:
 		case opcode::op_c_guard: f.ip = ip; st = exec_c_guard(f, ci, regs); ip = f.ip; break;
 		case opcode::op_c_arith_any: st = exec_c_arith_any(f, ip, ci, regs); break;
 		case opcode::op_c_mov: st = exec_c_mov(f, ip, ci, regs); break;
+		case opcode::op_c_add_ff: cell_put_float(regs, ci.a, cell_float_of_bits(regs.payload[ci.b]) + cell_float_of_bits(regs.payload[ci.c])); ++ip; break;
+		case opcode::op_c_sub_ff: cell_put_float(regs, ci.a, cell_float_of_bits(regs.payload[ci.b]) - cell_float_of_bits(regs.payload[ci.c])); ++ip; break;
+		case opcode::op_c_mul_ff: cell_put_float(regs, ci.a, cell_float_of_bits(regs.payload[ci.b]) * cell_float_of_bits(regs.payload[ci.c])); ++ip; break;
+		case opcode::op_c_add_ffk: cell_put_float(regs, ci.a, cell_float_of_bits(regs.payload[ci.b]) + regs.consts[ci.c].unchecked_as_float()); ++ip; break;
+		case opcode::op_c_sub_ffk: cell_put_float(regs, ci.a, cell_float_of_bits(regs.payload[ci.b]) - regs.consts[ci.c].unchecked_as_float()); ++ip; break;
+		case opcode::op_c_mul_ffk: cell_put_float(regs, ci.a, cell_float_of_bits(regs.payload[ci.b]) * regs.consts[ci.c].unchecked_as_float()); ++ip; break;
+		case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: {
+			const script_int a = static_cast<script_int>(regs.payload[ci.b]);
+			const bool konst = ci.op == opcode::op_c_add_iik || ci.op == opcode::op_c_sub_iik;
+			const script_int r2 = konst ? regs.consts[ci.c].unchecked_as_int() : static_cast<script_int>(regs.payload[ci.c]);
+			script_int r;
+			if (!(ci.op == opcode::op_c_add_ii || ci.op == opcode::op_c_add_iik ? ints::try_add(a, r2, r) : ints::try_sub(a, r2, r))) [[unlikely]] { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); break; }
+			regs.payload[ci.a] = static_cast<int64_t>(r); regs.kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_INT); regs.dirty->set(ci.a);
+			++ip;
+			break;
+		}
+		case opcode::op_c_mov_p: regs.payload[ci.a] = regs.payload[ci.b]; regs.kinds[ci.a] = regs.kinds[ci.b]; regs.dirty->set(ci.a); ++ip; break;
+		case opcode::op_c_mov_k: {
+			const script_value& rc = regs.consts[ci.b];
+			const uint8_t k = static_cast<uint8_t>(rc.raw_storage_index());
+			regs.payload[ci.a] = k == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<int64_t>(rc.unchecked_as_int()) : k == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_bits_of_float(rc.unchecked_as_float()) : (rc.unchecked_as_bool() ? 1 : 0);
+			regs.kinds[ci.a] = k; regs.dirty->set(ci.a);
+			++ip;
+			break;
+		}
 		case opcode::op_c_math: f.ip = ip; st = exec_c_math(f, ci, regs); ip = f.ip; break;
 		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ip, ci, regs); break;
 		case opcode::op_c_cmp_any: st = exec_c_cmp_any(f, ip, ci, regs, true); break;

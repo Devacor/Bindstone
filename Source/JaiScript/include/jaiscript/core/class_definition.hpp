@@ -3089,17 +3089,35 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     return checked_result<void>();
 }
 
-} // namespace detail
-
-inline checked_result<script_value> class_instance::enforce_field_write(uint64_t id, script_value value) const {
-    if (!class_def_) {
-        return std::move(value);
+// A value capture: C++-backed objects (make_object wrappers, raw cpp holders, a class instance wrapping a C++ object) and
+// shared_ptr handles are reference types in script, so the capture shares them; a pure script value deep-copies
+inline script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
+    auto type_info = value.get_type_info();
+    if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
+        return value;
     }
-    type_info_ptr declared = class_def_->get_field_declared_type(id);
+    if (value.is_object()) {
+        if (auto holder = const_cast<script_value&>(value).get_object_holder()) {
+            if (!holder->is_class_instance_wrapper) {
+                return value;
+            }
+            auto instance = std::static_pointer_cast<class_instance>(holder->data);
+            if (instance && symbolizer && instance->has_field(symbolizer->intern(class_constants::CPP_OBJECT_FIELD))) {
+                return value;
+            }
+        }
+    }
+    return value.clone();
+}
+
+// A store into a declared field or static: an auto slot takes the type its initialized value carries, then enforces it
+// like a local; a class slot runs its user operator=, else the one conversion table
+template <class CurrentSlot>
+inline checked_result<script_value> declared_slot_write(type_info_ptr declared, CurrentSlot&& current_slot, script_value value, engine* eng,
+                                                        uint64_t id, const class_definition* owner, bool is_static) {
     if (!declared) {
-        // auto fields: inferred from the initialized value's tag, then enforced like locals
-        const script_value* cur = find_field_value(id);
-        type_info_ptr tag = (cur && !cur->is_reference()) ? cur->get_type_info() : nullptr;
+        const script_value* current = current_slot();
+        type_info_ptr tag = (current && !current->is_reference()) ? current->get_type_info() : nullptr;
         if (!tag || tag->base_type == script_value_type::jai_any_type ||
             tag->base_type == script_value_type::jai_null_type) {
             return std::move(value);
@@ -3109,14 +3127,23 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
         return std::move(value);
     }
     if (declared->base_type == script_value_type::jai_object_type) {
-        if (const script_value* current = find_field_value(id)) {
-            if (auto assigned = detail::user_assign_operator(*current, value, engine_)) {
+        if (const script_value* current = current_slot()) {
+            if (auto assigned = user_assign_operator(*current, value, eng)) {
                 if (!*assigned) { return assigned->error_value(); }
                 return *current;   // the operator wrote the held instance: the store keeps it
             }
         }
     }
-    return detail::field_store_convert(value, declared, engine_, id, class_def_);
+    return field_store_convert(value, declared, eng, id, owner, is_static);
+}
+
+} // namespace detail
+
+inline checked_result<script_value> class_instance::enforce_field_write(uint64_t id, script_value value) const {
+    if (!class_def_) {
+        return std::move(value);
+    }
+    return detail::declared_slot_write(class_def_->get_field_declared_type(id), [&] { return find_field_value(id); }, std::move(value), engine_, id, class_def_, false);
 }
 
 inline checked_result<script_value> class_definition::enforce_static_write(uint64_t id, script_value value) const {
@@ -3124,27 +3151,7 @@ inline checked_result<script_value> class_definition::enforce_static_write(uint6
     if (it == static_declared_types_.end()) {
         return std::move(value);
     }
-    type_info_ptr declared = it->second;
-    if (!declared) {
-        const script_value* cur = get_static_field_ptr(id);
-        type_info_ptr tag = (cur && !cur->is_reference()) ? cur->get_type_info() : nullptr;
-        if (!tag || tag->base_type == script_value_type::jai_any_type ||
-            tag->base_type == script_value_type::jai_null_type) {
-            return std::move(value);
-        }
-        declared = tag;
-    } else if (declared->base_type == script_value_type::jai_any_type) {
-        return std::move(value);
-    }
-    if (declared->base_type == script_value_type::jai_object_type) {
-        if (const script_value* current = get_static_field_ptr(id)) {
-            if (auto assigned = detail::user_assign_operator(*current, value, engine_)) {
-                if (!*assigned) { return assigned->error_value(); }
-                return *current;   // the operator wrote the held instance: the store keeps it
-            }
-        }
-    }
-    return detail::field_store_convert(value, declared, engine_, id, this, true);
+    return detail::declared_slot_write(it->second, [&] { return get_static_field_ptr(id); }, std::move(value), engine_, id, this, true);
 }
 
 inline void class_instance::note_script_layer_owner(const script_value& value) {

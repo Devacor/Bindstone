@@ -8,6 +8,7 @@
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
+#include <jaiscript/detail/arity_diagnostic.hpp>
 
 // Typed-container enforcement kernel, shared VERBATIM by both backends and the field
 // kernel (parity by construction — stage 0 of docs/typed_array_design.md). Two layers:
@@ -68,6 +69,11 @@ namespace jai::detail {
 			return std::string(holder->type_name);
 		}
 		return container_base_type_name(v.current_type());
+	}
+
+	// The target spelling of every element, key and slot text: the declared type in full
+	inline std::string type_info_display_name(const type_info_ptr& info) {
+		return info ? info->canonical_name() : "unknown";
 	}
 
 	inline bool container_element_compatible(const script_value& element, const type_info_ptr& element_type, engine* eng = nullptr) {
@@ -694,6 +700,55 @@ namespace jai::detail {
 		// unchanged, exactly today's behavior
 		out.value = std::move(value);
 		return out;
+	}
+
+	template <class Symbolizer>
+	checked_result<void> validate_container_homogeneous(const script_value& container, const arity_count_symbols& counts, const Symbolizer& symbols);
+
+	// The entries of an auto container literal hold one kind (and one class) at every depth; a raw buffer is homogeneous
+	// by construction
+	template <bool Map, class Entries, class Symbolizer>
+	checked_result<void> homogeneous_entries(const Entries& entries, const arity_count_symbols& counts, const Symbolizer& symbols) {
+		const runtime_error_code code = Map ? runtime_error_code::map_value_type_mismatch : runtime_error_code::array_element_type_mismatch;
+		script_value_type kind = script_value_type::jai_null_type;
+		std::string class_name;
+		size_t index = 0;
+		for (const auto& entry : entries) {
+			const script_value* raw;
+			if constexpr (Map) { raw = &entry.second; } else { raw = &entry; }
+			const script_value& value = raw->is_reference() ? raw->deref() : *raw;
+			if (index == 0) {
+				kind = value.type();
+				if (kind == script_value_type::jai_object_type) {
+					if (auto info = value.get_type_info()) { class_name = info->type_name; }
+				}
+			} else {
+				if (value.type() != kind) {
+					return homogeneity_error(code, Map ? auto_map_values : auto_array_elements, Map ? auto_map_values_at : auto_array_elements_at, index, counts, symbols);
+				}
+				if (kind == script_value_type::jai_object_type && !class_name.empty()) {
+					auto info = value.get_type_info();
+					if ((info ? std::string(info->type_name) : std::string()) != class_name) {
+						return homogeneity_error(code, Map ? auto_map_classes : auto_array_classes, Map ? auto_map_classes_at : auto_array_classes_at, index, counts, symbols);
+					}
+				}
+			}
+			if (auto nested = validate_container_homogeneous(value, counts, symbols); !nested) { return nested; }
+			++index;
+		}
+		return {};
+	}
+
+	template <class Symbolizer>
+	checked_result<void> validate_container_homogeneous(const script_value& container, const arity_count_symbols& counts, const Symbolizer& symbols) {
+		if (container.is_array()) {
+			if (container.unchecked_array_node()->is_typed()) { return {}; }
+			return homogeneous_entries<false>(container.as_array(), counts, symbols);
+		}
+		if (container.is_map()) {
+			return homogeneous_entries<true>(container.as_map(), counts, symbols);
+		}
+		return {};
 	}
 
 } // namespace jai::detail

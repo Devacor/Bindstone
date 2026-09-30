@@ -3418,8 +3418,8 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         auto map_tag = left.get_type_info();
                         type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
                         if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
-                            uint64_t got_id = string_symbolizer_->intern(get_value_type_name(right.deref()));
-                            uint64_t want_id = string_symbolizer_->intern(get_type_info_name(key_type));
+                            uint64_t got_id = string_symbolizer_->intern(detail::container_value_type_name(right.deref()));
+                            uint64_t want_id = string_symbolizer_->intern(detail::type_info_display_name(key_type));
                             return checked_result<void>(make_error_code(runtime_error_code::map_key_type_mismatch),
                                 "Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
                         }

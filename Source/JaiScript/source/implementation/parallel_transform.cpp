@@ -1676,6 +1676,7 @@ namespace {
 		slot.limits.interpreter_call_depth_limit = outer.interpreter_call_depth_limit;
 		slot.limits.vm_call_depth_limit = outer.vm_call_depth_limit;
 		slot.limits.terminal_error = false;
+		slot.limits.script_destructor_instances = outer.script_destructor_instances;
 		slot.limits.memory_used = 0;
 		slot.limits.memory_raises = 0;
 		slot.limits.memory_cap = outer.memory_cap;

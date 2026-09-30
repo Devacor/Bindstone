@@ -604,15 +604,28 @@ namespace jai::vm {
                 if (s.release_runs_no_code()) { s.~script_value(); }   // no destructor can re-enter: in place
                 else { destroy_relocated(s); }
             }
+            // No instance with a script destructor has existed on this engine: no release can re-enter, pops destroy in place
+            bool releases_may_reenter() const noexcept;
             void pop_back() noexcept {
                 assert(count);
                 script_value& s = slots[--count];
-                if (!dtor_elidable(s)) { destroy_slot(s); }
+                if (!dtor_elidable(s)) {
+                    if (!releases_may_reenter()) [[likely]] { s.~script_value(); }
+                    else { destroy_slot(s); }
+                }
             }
             void truncate(size_t new_size) noexcept {
                 assert(new_size <= count);
-                for (size_t i = new_size; i < count; ++i) {
-                    if (!dtor_elidable(slots[i])) { destroy_slot(slots[i]); }
+                if (!releases_may_reenter()) [[likely]] {
+                    script_value* first = slots + new_size;
+                    script_value* const last = slots + count;
+                    for (; first != last; ++first) {
+                        if (!dtor_elidable(*first)) { first->~script_value(); }
+                    }
+                } else {
+                    for (size_t i = new_size; i < count; ++i) {
+                        if (!dtor_elidable(slots[i])) { destroy_slot(slots[i]); }
+                    }
                 }
                 count = new_size;
             }
@@ -2158,6 +2171,10 @@ namespace jai::vm {
         cell_counters cells_counters_{};   // entries, boundaries, resumes, misses (engine::cells_counters)
         void raw_epoch_advance() { raw_epoch_ += 2; }
     };
+
+    inline bool vm_backend::value_stack::releases_may_reenter() const noexcept {
+        return owner->limits_->script_destructor_instances;
+    }
 
 } // namespace jai::vm
 

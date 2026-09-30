@@ -58,8 +58,12 @@ destructor pushes onto the same execution stacks the release is shrinking. So a 
 destroys an element while it still holds it: `iter_states_`, `try_records_` and `pending_callees_`
 shrink through `truncate_detached` / `pop_back_detached` (the tail moves into a local first; the
 tail is a noinline cold path so the hot frame pop keeps its inlining), and `value_stack::pop_back` /
-`truncate` destroy a slot in place only when `script_value::release_runs_no_code()` says the
+`truncate` destroy in place while `execution_limits::script_destructor_instances` is clear (no
+instance of a class with a script destructor has been created on the engine, so no release can run
+script code; `class_definition::create_instance` sets it, parallel workers copy it at region entry);
+once set they destroy a slot in place only when `script_value::release_runs_no_code()` says the
 release cannot cascade, else they relocate it out (memcpy) first and re-read the buffer by index.
+A host C++ destructor that calls back into script is outside this guard.
 A destructor that runs while a throw unwinds gets its own exception state (`execute_callable`
 parks the unwinding flag, exception, value and trace around it). Pinned by Spec Conformance
 `reentrant_destructors_and_operand_order` (the ASan build shows the heap-use-after-free when broken).

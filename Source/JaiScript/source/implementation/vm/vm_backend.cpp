@@ -313,10 +313,13 @@ namespace {
 	// The tail's destructors may run script destructors that re-enter the VM and grow the vector: they run after the
 	// vector no longer holds it, in the order erase would run them
 	template <class V>
-	void truncate_detached(V& v, size_t n) {
-		if (v.size() <= n) { return; }
+	void truncate_detached_tail(V& v, size_t n) {
 		V doomed(std::make_move_iterator(v.begin() + static_cast<std::ptrdiff_t>(n)), std::make_move_iterator(v.end()));
 		v.erase(v.begin() + static_cast<std::ptrdiff_t>(n), v.end());
+	}
+	template <class V>
+	inline void truncate_detached(V& v, size_t n) {
+		if (v.size() > n) [[unlikely]] { truncate_detached_tail(v, n); }
 	}
 
 	template <class V>
@@ -326,8 +329,9 @@ namespace {
 	}
 
 	// a constructor that completed arms its instance's destructor (KEEP BYTE-PARALLEL with interpreter::construct_instance)
-	void construction_completed(script_value& instance_value) {
-		if (auto instance = instance_value.get_class_instance()) { instance->construction_pending(false); }
+	void construction_completed(const script_value& instance_value) {
+		const auto holder = instance_value.get_object_holder();
+		if (holder && holder->is_class_instance_wrapper && holder->data) { static_cast<class_instance*>(holder->data.get())->construction_pending(false); }
 	}
 
 } // namespace
@@ -3311,7 +3315,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 			    target_base_type == script_value_type::jai_shared_ptr_type &&
 			    detail::shared_handle_admits(derefed_arg, target_type, engine_)) {
 				// R-q6: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with the interpreter)
-				if (arg.is_reference()) { return arg; }
+				if (arg.is_reference() || source_type_info.get() == target_type.get()) { return arg; }
 				script_value bound = arg;
 				detail::keep_handle_slot_type(bound, target_type);
 				return bound;
@@ -3607,7 +3611,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			                  slot_type->base_type == script_value_type::jai_object_type ||
 			                  slot_type->base_type == script_value_type::jai_array_type ||
 			                  slot_type->base_type == script_value_type::jai_map_type ||
-			                  slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
+			                  (slot_type->base_type == script_value_type::jai_shared_ptr_type && value.get_type_info().get() != slot_type.get()))) {
 				auto enforced = enforce_type_compatibility(std::move(value), slot_type, symbolizer_->get_string(sym));
 				if (!enforced) {
 					return raise_from(enforced);
@@ -14041,7 +14045,7 @@ op_status vm_backend::store_namespace_cell(const detail::namespace_store_target&
 	                  slot_type->base_type == script_value_type::jai_object_type ||
 	                  slot_type->base_type == script_value_type::jai_array_type ||
 	                  slot_type->base_type == script_value_type::jai_map_type ||
-	                  slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
+	                  (slot_type->base_type == script_value_type::jai_shared_ptr_type && incoming.get_type_info().get() != slot_type.get()))) {
 		auto enforced = enforce_type_compatibility(std::move(incoming), slot_type, member->member);
 		if (!enforced) {
 			return raise_from(enforced);
@@ -19472,14 +19476,12 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 	// destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with interpreter::execute_callable)
 	struct unwind_park {
 		vm_backend* self;
-		bool active;
 		std::optional<script_exception> exception;
 		std::optional<script_value> value;
 		std::vector<stack_frame> trace;
 		bool trace_captured = false;
 		uint64_t catch_var = 0;
-		explicit unwind_park(vm_backend* vm) : self(vm), active(vm->is_unwinding_) {
-			if (!active) { return; }
+		explicit unwind_park(vm_backend* vm) : self(vm) {
 			exception = std::move(self->current_exception_);
 			self->current_exception_.reset();
 			value = std::move(self->active_exception_value_);
@@ -19493,7 +19495,6 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 			self->is_unwinding_ = false;
 		}
 		~unwind_park() {
-			if (!active) { return; }
 			self->current_exception_ = std::move(exception);
 			self->active_exception_value_ = std::move(value);
 			self->captured_trace_ = std::move(trace);
@@ -19501,7 +19502,9 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 			self->current_catch_var_id_ = catch_var;
 			self->is_unwinding_ = true;
 		}
-	} park{this};
+	};
+	std::optional<unwind_park> park;
+	if (is_unwinding_) [[unlikely]] { park.emplace(this); }
 	switch (payload.kind) {
 		case script_callable::kind_type::function:
 			return call_script_function(*payload.fn, args);

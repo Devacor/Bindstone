@@ -5218,7 +5218,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                           slot_type->base_type == script_value_type::jai_object_type ||
                                           slot_type->base_type == script_value_type::jai_array_type ||
                                           slot_type->base_type == script_value_type::jai_map_type ||
-                                          slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
+                                          (slot_type->base_type == script_value_type::jai_shared_ptr_type && value.get_type_info().get() != slot_type.get()))) {
                             auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
                             if (!enforced) {
                                 return enforced.error_value();
@@ -6615,7 +6615,7 @@ checked_result<script_value> interpreter::store_namespace_cell(const detail::nam
                       slot_type->base_type == script_value_type::jai_object_type ||
                       slot_type->base_type == script_value_type::jai_array_type ||
                       slot_type->base_type == script_value_type::jai_map_type ||
-                      slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
+                      (slot_type->base_type == script_value_type::jai_shared_ptr_type && incoming.get_type_info().get() != slot_type.get()))) {
         auto enforced = enforce_type_compatibility(std::move(incoming), slot_type, member->member);
         if (!enforced) {
             return enforced.error_value();
@@ -12789,14 +12789,12 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
     // destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with vm_backend::execute_callable)
     struct unwind_park {
         interpreter* self;
-        bool active;
         std::optional<script_exception> exception;
         std::optional<script_value> value;
         std::vector<stack_trace_entry> trace;
         bool trace_captured = false;
         uint64_t catch_var = 0;
-        explicit unwind_park(interpreter* in) : self(in), active(in->is_unwinding_) {
-            if (!active) { return; }
+        explicit unwind_park(interpreter* in) : self(in) {
             exception = std::move(self->current_exception_);
             self->current_exception_.reset();
             value = std::move(self->active_exception_value_);
@@ -12810,7 +12808,6 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             self->is_unwinding_ = false;
         }
         ~unwind_park() {
-            if (!active) { return; }
             self->current_exception_ = std::move(exception);
             self->active_exception_value_ = std::move(value);
             self->captured_trace_ = std::move(trace);
@@ -12818,7 +12815,9 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             self->current_catch_var_id_ = catch_var;
             self->is_unwinding_ = true;
         }
-    } park{this};
+    };
+    std::optional<unwind_park> park;
+    if (is_unwinding_) [[unlikely]] { park.emplace(this); }
     switch (payload.kind) {
         case script_callable::kind_type::function:
             return call_function(*payload.fn, args);
@@ -14340,7 +14339,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
                 target_base_type == script_value_type::jai_shared_ptr_type &&
                 detail::shared_handle_admits(derefed_arg, target_type, engine_)) {
                 // R-q6: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with vm_backend)
-                if (arg.is_reference()) { return arg; }
+                if (arg.is_reference() || source_type_info.get() == target_type.get()) { return arg; }
                 script_value bound = arg;
                 detail::keep_handle_slot_type(bound, target_type);
                 return bound;

@@ -9,7 +9,8 @@ set ROOT=%~dp0..\..\..
 set ENGINE_LIBDIR=%~1
 if "%ENGINE_LIBDIR%"=="" set ENGINE_LIBDIR=%ROOT%\Builds\Windows\x64\Release
 
-cl /nologo /O2 /std:c++20 /EHsc /MD /bigobj /DNDEBUG ^
+REM defines match the engine lib's (no NDEBUG, JAISCRIPT_ENABLE_DEBUGGER): JaiScript's header classes change layout with them
+cl /nologo /O2 /std:c++20 /EHsc /MD /bigobj /DJAISCRIPT_ENABLE_DEBUGGER ^
   /DASIO_STANDALONE /D_WIN32_WINNT=0x0602 /DNOMINMAX /DSDL_MAIN_HANDLED ^
   /I"%ROOT%\Source" /I"%ROOT%\External" /I"%ROOT%\External\glm" ^
   /I"%ROOT%\External\gl3w\include" /I"%ROOT%\External\asio\include" ^

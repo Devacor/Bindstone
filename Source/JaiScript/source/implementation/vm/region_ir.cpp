@@ -93,15 +93,23 @@ std::string listing(const region_ir& r) {
 
 std::vector<chunk::cell_mask> live_temps(const region_ir& r, const std::vector<chunk::cell_loop::cell>& cells,
                                          const std::vector<uint32_t>& slot_to_cell, const std::vector<std::pair<uint32_t, uint32_t>>& defs,
-                                         const std::vector<uint32_t>& copy_at, uint32_t copy_head, size_t copy_count, uint32_t held_below) {
+                                         const std::vector<uint32_t>& copy_at, uint32_t copy_head, size_t copy_count, uint32_t held_below,
+                                         const std::vector<uint32_t>* stmt_starts, uint32_t slot_limit) {
 	std::vector<chunk::cell_mask> live(copy_count, chunk::cell_mask{});
 	std::vector<uint32_t> cur = slot_to_cell;
 	std::vector<size_t> def_end(cells.size(), 0);   // per compiler value: the copy offset after its defining instruction(s)
 	size_t nd = 0;
+	std::vector<uint32_t> stmt_cells;   // what the current caller's statement defined so far, the latest per slot
+	uint32_t stmt_at = k_invalid_u32;
 	for (size_t k = 0; k < r.ops.size(); ++k) {
 		const ir_op& op = r.ops[k];
 		const size_t ip = r.first + k;
 		const size_t here_end = copy_at[ip + 1 - r.head] - copy_head;   // the copy offset after this operation's instructions
+		if (stmt_starts && k < stmt_starts->size()) {
+			if ((*stmt_starts)[k] != stmt_at) { stmt_cells.clear(); stmt_at = (*stmt_starts)[k]; }
+			const size_t here_begin = copy_at[ip - r.head] - copy_head;
+			for (const uint32_t cl : stmt_cells) { for (size_t m = here_begin; m < here_end && m < live.size(); ++m) { live[m].set(cl); } }
+		}
 		for (uint8_t x = 0; x < op.nreads; ++x) {
 			const uint32_t cl = op.reads[x] < cur.size() ? cur[op.reads[x]] : k_invalid_u32;
 			if (cl == k_invalid_u32 || !cells[cl].temp) continue;
@@ -115,7 +123,14 @@ std::vector<chunk::cell_mask> live_temps(const region_ir& r, const std::vector<c
 				for (size_t m = here_begin; m < here_end && m < live.size(); ++m) { live[m].set(cl); }
 			}
 		}
-		while (nd < defs.size() && defs[nd].first == ip) { cur[cells[defs[nd].second].slot] = defs[nd].second; def_end[defs[nd].second] = here_end; ++nd; }
+		while (nd < defs.size() && defs[nd].first == ip) {
+			const uint32_t dc = defs[nd].second;
+			cur[cells[dc].slot] = dc; def_end[dc] = here_end; ++nd;
+			if (stmt_starts && cells[dc].temp && cells[dc].env_operand == k_invalid_u32 && cells[dc].slot < slot_limit) {
+				std::erase_if(stmt_cells, [&](uint32_t h) { return cells[h].slot == cells[dc].slot; });
+				stmt_cells.push_back(dc);
+			}
+		}
 	}
 	// an inner loop's back edge (a backward jump, or an inner counted loop's compare back to its body) runs its body again: a compiler value
 	// live where the body begins (defined ahead of the loop and read inside it, a graft's parameter over the graft's own loop) stays live to

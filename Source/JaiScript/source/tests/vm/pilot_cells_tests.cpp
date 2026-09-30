@@ -5263,6 +5263,44 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(std::string("539827 4,9,4"), got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("a_miss_before_a_bailed_graft_resumes_its_statement_with_its_values", [this]() {
+			// Gator Quest's fill_rect as its own frame: set_tile and in_world graft into the loop and in_world's body bails; a miss between the grafts'
+			// parameters and the bail re-runs the statement's rest on the general form, which reads what the statement defined before the miss (master
+			// read in_world's w from a slot a later temp had reused: Array index 4992 out of bounds); both backends, every miss rate to 30
+			const std::string src = R"(
+				array<int> W_W = [40, 8];
+				array<int> W_H = [30, 8];
+				array<int> W_OFF = [0, 1200];
+				array<int> TILES = [];
+				for (int i = 0; i < 1264; ++i) { TILES.push(0); }
+				bool in_world(int w, int x, int y) { return x >= 0 && y >= 0 && x < W_W[w] && y < W_H[w]; }
+				void set_tile(int w, int x, int y, int t) {
+					if (in_world(w, x, y)) { TILES[W_OFF[w] + y * W_W[w] + x] = t; }
+				}
+				void fill_rect(int w, int x0, int y0, int x1, int y1, int t) {
+					for (int y = y0; y <= y1; ++y) {
+						for (int x = x0; x <= x1; ++x) { set_tile(w, x, y, t); }
+					}
+				}
+				var fill = fill_rect;
+				fill(0, 3, 2, 20, 15, 5);
+				fill(0, 10, 8, 38, 29, 6);
+				fill(1, 1, 1, 6, 6, 7);
+				fill(0, -2, -2, 4, 3, 8);
+				int sum = 0;
+				for (int i = 0; i < 1264; ++i) { sum = (sum * 7 + TILES[i]) % 1000003; }
+				to_string(sum);
+			)";
+			both(src, "337122", "a bailed graft in a loop");
+			both(src, "337122", "a bailed graft in a loop, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every = 1; every <= 30; ++every) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("337122"), got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_miss_inside_a_grafted_loop_resumes_the_graft_with_its_values", [this]() {
 			// Gator Quest's gen_overworld: a river walk (tile_at, set_tile and iclamp grafted, DX/DY element reads) and then fill_rect's grafted loops in
 			// one function; a miss anywhere in a block inside a graft's body resumes the graft's code, which reads the graft's parameters and locals the

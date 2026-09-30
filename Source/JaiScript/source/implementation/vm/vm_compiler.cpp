@@ -4357,8 +4357,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		bool inside_graft = false;   // a block inside a graft's body: the graft's code after a miss (the rest of the caller's statement) reads its values
 		for (const chunk::inline_site& s : c.inline_sites) { if (head > s.guard_ip && head < s.join_ip) { inside_graft = true; } }
+		std::vector<uint32_t> stmt_starts(region.ops.size(), 0);   // each operation's caller's statement, by the ip it begins at (a graft is its caller's statement)
+		for (size_t k = 0; k < region.ops.size(); ++k) {
+			const size_t ip = region.first + k;
+			stmt_starts[k] = static_cast<uint32_t>(k > 0 && caller_stmt_of(ip) == caller_stmt_of(ip - 1) ? stmt_starts[k - 1] : ip);
+		}
 		loop.live_temps = live_temps(region, cells, loop.slot_to_cell, defs, copy_at, loop.copy_head, loop.origin.size(),
-		                             inside_graft ? static_cast<uint32_t>(c.local_count) : 0u);   // liveness of compiler values per copy instruction (region_ir.hpp)
+		                             inside_graft ? static_cast<uint32_t>(c.local_count) : 0u, &stmt_starts, static_cast<uint32_t>(c.local_count));   // liveness of compiler values per copy instruction (region_ir.hpp)
 		// an alias is a local the general continuation may read anywhere after its declaration (a return inside the body, a bail, a
 		// miss), never a statement's value: live from its rebind to the end of the copy, so every flush after the rebind materializes it
 		for (const chunk::cell_loop::rebind& rb : loop.rebinds) { for (size_t m = rb.copy_ip - loop.copy_head; m < loop.live_temps.size(); ++m) { loop.live_temps[m].set(rb.cell); } }

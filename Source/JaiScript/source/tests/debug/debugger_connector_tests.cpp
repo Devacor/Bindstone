@@ -369,6 +369,22 @@ public:
             eng->debugger().set_enabled(false);
         });
 
+        test("listen_on_a_busy_port_reports_why", [this]() {
+            auto first_engine = jai::engine::make();
+            auto first = jai::debug::listen(*first_engine, 0);
+            check_true(first->listening());
+            check_true(first->error().empty());
+            const int port = first->port();
+            check_gt(port, 0);
+
+            auto second_engine = jai::engine::make();
+            auto second = jai::debug::listen(*second_engine, port);
+            check_false(second->listening(), "a second listener on a taken port must say it is not listening");
+            check_eq(0, second->port());
+            check_true(second->error().find("127.0.0.1:" + std::to_string(port)) != std::string::npos,
+                "the failure names the address: " + second->error());
+        });
+
         test("park_only_request_while_running_errors", [this]() {
             // A stackTrace sent before any stop must get an immediate "not stopped" error,
             // never a silently-queued closure that hangs the client.

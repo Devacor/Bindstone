@@ -60,6 +60,7 @@ auto conn = jai::debug::listen(*eng);                 // default port jai::debug
 //
 // listen() is exactly this, if you want to hold the pieces yourself:
 // eng-&gt;set_debug_connector(std::make_shared&lt;jai::debug::debug_connector&gt;(52472));</code></pre></div>
+<p>A taken port does not throw: <code>listen</code> hands back a connector that is not serving, <code>conn-&gt;listening()</code> answers <code>false</code>, <code>conn-&gt;port()</code> answers 0, and <code>conn-&gt;error()</code> says why (<code>debugger cannot listen on 127.0.0.1:52472: bind failed (...)</code>). A host that runs several engines tries the next port, as the runner does.</p>
 <p>It is compiled only when the <code>JAISCRIPT_ENABLE_DEBUGGER</code> CMake option is on (the default for desktop dev/editor builds; turn it <em>off</em> for shipping / mobile and no socket code is built at all). Then, in VS&nbsp;Code, add an <strong>attach</strong> configuration and press <kbd>F5</kbd> while the host is running:</p>
 <div class="codeblock cb-plain"><span class="cb-label">.vscode/launch.json</span><pre><code class="lang-plain">{
   "version": "0.2.0",

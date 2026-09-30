@@ -2878,12 +2878,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
 		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map
 		auto stmt_of = [&](size_t at) -> const ast_node* { return at < c.stmt_nodes.size() ? c.stmt_nodes[at] : nullptr; };
-		// a graft's statements are the caller's statement's: the outermost graft inside the loop (a loop inside a graft has the graft's own
-		// statements for its body)
-		auto caller_stmt_of = [&](size_t at) -> const ast_node* {
-			const chunk::inline_site* in = nullptr;
-			for (const chunk::inline_site& s : c.inline_sites) { if (s.guard_ip >= head && at > s.guard_ip && at < s.join_ip && (!in || s.guard_ip < in->guard_ip)) { in = &s; } }
-			return in ? in->call_stmt : stmt_of(at);
+		auto caller_stmt_of = [&](size_t at) -> const ast_node* {   // a graft's statements are the caller's statement's
+			for (const chunk::inline_site& s : c.inline_sites) { if (at > s.guard_ip && at < s.join_ip) return s.call_stmt; }
+			return stmt_of(at);
 		};
 		// the statement a compiler value's definition belongs to: inside a graft its own statement (the caller's temps reuse the graft's slots
 		// after the join), the graft itself for its parameters and its result (every return defines the result the join reads)
@@ -3828,8 +3825,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			if (end < back && code[end].op != opcode::op_cells_resume && !carried(code[end].op)) { ok = false; }
 			ok = ok && refusal_ip < end && last_ip < end;
-			for (const chunk::inline_site& s : c.inline_sites) {   // no graft inside the statements or around their ends (a graft holding the whole loop is its frame)
-				if (s.guard_ip < head) continue;
+			for (const chunk::inline_site& s : c.inline_sites) {   // no graft inside the statements or around their ends
 				if ((s.guard_ip >= snap_ip && s.guard_ip <= end) || (snap_ip > s.guard_ip && snap_ip < s.join_ip) || (end > s.guard_ip && end < s.join_ip)) { ok = false; }
 			}
 			for (size_t j = snap_ip; ok && j < end; ++j) {   // whole statements: their jumps stay inside, and they hold no loop or frame control

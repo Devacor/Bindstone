@@ -2188,6 +2188,40 @@ private:
 		script_class_operator_overloads();
 		builtin_methods_as_values();
 		field_reference_stores();
+		nan_comparisons();
+	}
+
+	void nan_comparisons() {
+		test("nan_compares_like_ieee_and_cannot_be_ordered_with_spaceship", [this]() {
+			// Dev ruling 2026-09-30 (R-q8): == != < <= > >= follow IEEE (a NaN operand compares false, and unequal) on every lane
+			// (typed, dynamic, mixed int/float, a negated condition, a typed loop head, container equality); <=> with a NaN operand
+			// raises; a map keeps its total key order (a NaN key is found again)
+			expect("nan", R"(
+				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				float n = NAN_VALUE; float one = 1.0; var vn = NAN_VALUE; int i = 1;
+				string typed = "" + (n == n) + (n != n) + (n < one) + (n <= one) + (n > one) + (n >= one) + (one < n) + (n == one);
+				string dyn = "" + (vn == vn) + (vn != vn) + (vn < 1) + (vn >= 1) + (1 > vn);
+				string mixed = "" + (n == i) + (i < n) + (n != i) + (i >= n);
+				string br = "";
+				if (n < one) { br += "a"; }
+				if (!(n < one)) { br += "b"; }
+				if (n >= one) { br += "c"; }
+				if (!(n >= one)) { br += "d"; }
+				if (!(n == n)) { br += "e"; }
+				while (n > one) { br += "w"; break; }
+				for (float x = 0.0; x < n; x += 1.0) { br += "L"; }
+				int k = 0;
+				for (float x = 0.0; !(x >= n) && k < 3; x += 1.0) { k += 1; }
+				br += to_string(k);
+				string sp = t([]() { float z = NAN_VALUE; return z <=> 1.0; }) + "/" + t([]() { var z = NAN_VALUE; return 1 <=> z; });
+				array<float> fa = [NAN_VALUE, 1.0]; array<float> fb = fa; var va = [NAN_VALUE];
+				string arr = "" + (fa == fb) + (fa != fb) + (va == va);
+				map<float, int> m = {}; m[NAN_VALUE] = 7; m[NAN_VALUE] = 8;
+				string mk = "" + m[NAN_VALUE] + " " + m.size();
+				typed + "|" + dyn + "|" + mixed + "|" + br + "|" + sp + "|" + arr + "|" + mk;
+			)", "falsetruefalsefalsefalsefalsefalsefalse|falsetruefalsefalsefalse|falsefalsetruefalse|bde3|"
+			    "Cannot order NaN with <=>/Cannot order NaN with <=>|falsetruefalse|8 1", check_mode::warn);
+		});
 	}
 
 	void field_reference_stores() {

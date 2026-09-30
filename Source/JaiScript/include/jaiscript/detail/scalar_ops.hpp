@@ -81,18 +81,18 @@ namespace jai::detail {
 		}
 	}
 
-	// The error a binary operator's fault raises; float_lane names which operands divided
+	// The error a binary operator's fault raises (one text per operator family, Dev ruling 2026-09-28)
 	template <class Result>
-	Result scalar_fault_error(token_type op, scalar_fault fault, bool float_lane) {
+	Result scalar_fault_error(token_type op, scalar_fault fault) {
 		switch (fault) {
 			case scalar_fault::overflow:
 				return Result(make_error_code(runtime_error_code::invalid_numeric_operand), int_overflow_text(op));
 			case scalar_fault::division_by_zero:
 				return Result(make_error_code(runtime_error_code::division_by_zero),
-				              float_lane ? "Division by zero in float operation" : "Division by zero in integer operation");
+				              "Division by zero");
 			default:
 				return Result(make_error_code(runtime_error_code::modulo_by_zero),
-				              float_lane ? "Modulo by zero in float operation" : "Modulo by zero in integer operation");
+				              "Modulo by zero");
 		}
 	}
 

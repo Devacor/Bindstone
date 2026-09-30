@@ -3055,7 +3055,7 @@ checked_result<bool> interpreter::scalar_lane(token_type op, const script_value&
         }
         script_int out;
         if (const auto fault = detail::int_arith(op, a, b, out); fault != detail::scalar_fault::none) [[unlikely]] {
-            return detail::scalar_fault_error<checked_result<bool>>(op, fault, false);
+            return detail::scalar_fault_error<checked_result<bool>>(op, fault);
         }
         push_value(make_int_fast(out));
         return true;
@@ -3068,7 +3068,7 @@ checked_result<bool> interpreter::scalar_lane(token_type op, const script_value&
         }
         script_float out;
         if (const auto fault = detail::float_arith(op, a, b, out); fault != detail::scalar_fault::none) [[unlikely]] {
-            return detail::scalar_fault_error<checked_result<bool>>(op, fault, true);
+            return detail::scalar_fault_error<checked_result<bool>>(op, fault);
         }
         push_value(make_float_fast(out));
         return true;
@@ -4390,7 +4390,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
                     case token_type::percent_equal: {
                         if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
                         }
                         JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight, 4));
                         JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
@@ -4540,22 +4540,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             return detail::compound_mismatch(2, currentValue, rightValue, engine_);
                         }
                         break;
-                    case token_type::slash_equal:
-                        if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-                        }
-                        if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                            (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                            script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                            script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                            resultValue = make_value(cf / rf);
-                        } else {
-                            return detail::compound_mismatch(3, currentValue, rightValue, engine_);
-                        }
+                    case token_type::slash_equal: {
+                        // the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
                         break;
+                    }
                     case token_type::percent_equal: {
                         if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
                         }
                         JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
                         break;
@@ -4748,26 +4740,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     break;
                 }
                 case token_type::slash_equal: {
-                    if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
-                            "Division by zero");
-                    } else if (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0) {
-                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
-                            "Division by zero");
-                    }
-                    if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                        (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                        script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                        script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                        resultValue = make_value(cf / rf);
-                    } else {
-                        return detail::compound_mismatch(3, currentValue, rightValue, engine_);
-                    }
+                    // the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
+                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
                     break;
                 }
                 case token_type::percent_equal: {
                     if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                        return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+                        return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero),
                             "Modulo by zero");
                     }
                     JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
@@ -5013,7 +4992,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     }
                     case token_type::percent_equal: {
                         if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
+                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero),
                                 "Modulo by zero");
                         }
                         JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
@@ -6736,7 +6715,7 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
                 if (rightInt == 0) {
                     return checked_result<script_value>(
                         make_error_code(runtime_error_code::modulo_by_zero),
-                        "Division by zero");
+                        "Modulo by zero");
                 }
                 return make_value(ints::mod(leftInt, rightInt));
             default:
@@ -6789,7 +6768,7 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
             if (rightNum == 0.0) {
                 return checked_result<script_value>(
                     make_error_code(runtime_error_code::modulo_by_zero),
-                    "Division by zero");
+                    "Modulo by zero");
             }
             return make_value(std::fmod(leftNum, rightNum));
         default:

@@ -1253,7 +1253,7 @@ private:
 				string r = "no error";
 				try { v.sort([](int a, int b) { inner(); return a < b; }); } catch (e) { r = "caught:" + e; }
 				r + "|calls=" + calls + "|" + v[0] + v[1] + v[2];
-			)", "caught:Division by zero in integer operation|calls=1|312");
+			)", "caught:Division by zero|calls=1|312");
 			expect("sort throw", R"(
 				array<int> v = [3, 1, 2];
 				string r = "no error";
@@ -1262,7 +1262,7 @@ private:
 			)", "caught:cmp|312");
 		});
 		test("an_uncaught_comparator_error_ends_the_program_with_the_callbacks_trace", [this]() {
-			every_config("sort uncaught", "Division by zero in integer operation|at inner|at <lambda>", [](engine& e) {
+			every_config("sort uncaught", "Division by zero|at inner|at <lambda>", [](engine& e) {
 				try {
 					e.execute(R"(
 						int calls = 0;
@@ -1273,7 +1273,7 @@ private:
 				} catch (const std::exception& ex) {
 					const std::string w = ex.what();
 					const std::string trace = e.format_stack_trace();
-					std::string out = w.find("Division by zero in integer operation") != std::string::npos ? "Division by zero in integer operation" : w;
+					std::string out = w.find("Division by zero") != std::string::npos ? "Division by zero" : w;
 					out += trace.find("at inner") != std::string::npos ? "|at inner" : "|no inner frame: " + trace;
 					out += trace.find("at <lambda>") != std::string::npos ? "|at <lambda>" : "|no lambda frame";
 					return out;
@@ -1293,7 +1293,7 @@ private:
 				K k = K(4);
 				K k2 = K(5);
 			)";
-			const char* div = "Division by zero in integer operation";
+			const char* div = "Division by zero";
 			const std::string KH = std::string(K) + "class H { K m = K(2); } H h = H();";
 			expect_texts({
 				{"operator+", K, "K k3 = k + 1;", div, check_mode::strict},
@@ -1312,7 +1312,7 @@ private:
 				auto q = Q();
 				auto ts = TS();
 			)";
-			const char* div = "Division by zero in integer operation";
+			const char* div = "Division by zero";
 			expect_texts({
 				{"if (q)", Q, "if (q) { int w = 1; }", div, check_mode::strict},
 				{"!q", Q, "bool b = !q;", div, check_mode::strict},
@@ -1325,8 +1325,8 @@ private:
 		test("a_user_operator_assign_error_propagates_with_its_own_text", [this]() {
 			const char* A2 = "class A2 { int v = 1; function operator=(int x) -> A2 { int z = 0; v = x / z; return this; } } A2 g = A2();";
 			expect_texts({
-				{"operator= on a global", A2, "g = 5;", "Division by zero in integer operation", check_mode::strict},
-				{"operator= on a local", A2, "function f() { A2 a = A2(); a = 5; } f();", "Division by zero in integer operation", check_mode::strict},
+				{"operator= on a global", A2, "g = 5;", "Division by zero", check_mode::strict},
+				{"operator= on a local", A2, "function f() { A2 a = A2(); a = 5; } f();", "Division by zero", check_mode::strict},
 			});
 		});
 		test("archive_hooks_the_script_declares_propagate_their_errors", [this]() {
@@ -1336,7 +1336,7 @@ private:
 				class L { int v = 1; void post_load(int version) { int z = 0; v = v / z; } }
 				class S { int v = 1; void _set_v(int x) { int z = 0; v = x / z; } }
 			)";
-			const char* div = "Division by zero in integer operation";
+			const char* div = "Division by zero";
 			expect_texts({
 				{"to_json getter", H, "string s = to_json(P());", div, check_mode::strict},
 				{"to_json getter throw", H, "string s = to_json(PT());", "getthrow", check_mode::strict},
@@ -1367,7 +1367,7 @@ private:
 			)", "123|123|Invalid operands for < operator|Invalid operands for < operator|[1.5,3,\"a\",true]", check_mode::warn);
 		});
 		test("predicate_and_parallel_body_errors_propagate", [this]() {
-			const char* div = "Division by zero in integer operation";
+			const char* div = "Division by zero";
 			expect_texts({
 				{"array filter", "", "var b = [1, 2].filter([](var x) { int z = 0; return x / z > 0; });", div, check_mode::warn},
 				{"array remove_if", "var a = [1, 2];", "a.remove_if([](var x) { int z = 0; return x / z > 0; });", div, check_mode::warn},
@@ -1643,7 +1643,7 @@ private:
 				var s = "Jai\x21"; var word = (s[0] + 0) | ((s[1] + 0) << 8);
 				var e = ""; try { var z = 10 / 0; } catch (x) { e = x; }
 				c + "|" + to_json(g) + "|" + to_json(anything) + "|" + "b".compare("a") + "|" + word + "|" + e + "|" + `[${"ab":^5}] [${7:*^4}]`;
-			)", "Cannot push 'string' to array<int>|[1,2,3]|{\"$map\":[[5,1],[\"five\",5]]}|1|24906|Division by zero in integer operation|[ ab  ] [*7**]");
+			)", "Cannot push 'string' to array<int>|[1,2,3]|{\"$map\":[[5,1],[\"five\",5]]}|1|24906|Division by zero|[ ab  ] [*7**]");
 		});
 		test("guide_parallel_transform_rows", [this]() {
 			expect("transform", R"(
@@ -2470,13 +2470,13 @@ private:
 				function t(function f) -> string { string r = "none"; try { r = f(); } catch (e) { r = "raised:" + e; } return r; }
 				to_string(T()) + "|" + (to_string(T()) == ("" + T()) ? "same" : "differs") + "|" + t([]() { return to_string(Bad()); }) + "|" +
 				t([]() { return to_string(Thrower()); }) + "|" + to_string(5) + to_string("s");
-			)", "t3|same|raised:Division by zero in integer operation|raised:nope|5s", check_mode::warn);
+			)", "t3|same|raised:Division by zero|raised:nope|5s", check_mode::warn);
 		});
 	}
 
 	void ruling_host_callbacks() {
 		test("a_script_callback_behind_a_host_function_propagates_its_error", [this]() {
-			every_config("host callback", "raised:Division by zero in integer operation|raised:boom|7", [](engine& e) {
+			every_config("host callback", "raised:Division by zero|raised:boom|7", [](engine& e) {
 				e.add_function("apply", [](script_value cb) -> script_int { return convert_script_function<script_int(script_int)>(cb)(3); });
 				return spec::render(e.execute(R"(
 					function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
@@ -2486,7 +2486,7 @@ private:
 			}, check_mode::warn);
 		});
 		test("a_host_calling_a_script_callback_sees_the_error_as_an_exception", [this]() {
-			every_config("host sees", "threw:Division by zero in integer operation", [](engine& e) {
+			every_config("host sees", "threw:Division by zero", [](engine& e) {
 				e.execute("var cb = [](int x) { int z = 0; return x / z; };");
 				auto f = convert_script_function<int(int)>(e.get_variable("cb"));
 				try { (void)f(3); return std::string("no throw"); }

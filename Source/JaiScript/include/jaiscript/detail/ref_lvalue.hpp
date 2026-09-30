@@ -853,7 +853,7 @@ namespace jai::detail {
 				}
 				case token_type::percent: {
 					if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+						return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 					}
 					auto r = arith(currentValue, token_type::percent, rightValue);
 					if (!r) { return r; }

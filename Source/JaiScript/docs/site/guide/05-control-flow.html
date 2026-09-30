@@ -148,7 +148,7 @@ var v = &quot;seven&quot;;
 try { int n = v; } catch (e) { print(&quot;caught: {}&quot;, e); }
 try { cast&lt;char&gt;(300); } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Array index 5 out of bounds for array of size 3
-caught: Division by zero in integer operation
+caught: Division by zero
 caught: Cannot initialize &#x27;n&#x27; (declared int) with string
 caught: Cannot cast &#x27;int&#x27; to &#x27;char&#x27;</code></pre></div>
 <p>Write the same mistake with a literal and no <code>catch</code> will ever see it. The checker (on by default, strict) reads the whole program before anything runs, so a string literal heading for an <code>int</code> is a <strong>load error</strong>: the program does not start, and the <code>try</code> around it is just text.</p>

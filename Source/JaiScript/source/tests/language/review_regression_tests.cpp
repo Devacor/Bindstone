@@ -1051,9 +1051,9 @@ public:
                 check_true(msg[0].find(needle) != std::string::npos,
                     what + " keeps the informative text (got: " + msg[0] + ")");
             };
-            expect_both("var z = 0.0; 0.5 / z;", "Division by zero in float operation", "literal/var float divide");
-            expect_both("var z = 0.0; 0.5 % z;", "Modulo by zero in float operation", "literal/var float modulo");
-            expect_both("var z = 0.5; z % 0.0;", "Modulo by zero in float operation", "var/literal float modulo");
+            expect_both("var z = 0.0; 0.5 / z;", "Division by zero", "literal/var float divide");
+            expect_both("var z = 0.0; 0.5 % z;", "Modulo by zero", "literal/var float modulo");
+            expect_both("var z = 0.5; z % 0.0;", "Modulo by zero", "var/literal float modulo");
         });
 
         // ---- fuzz FZ-RECURSION-MSG-TEXT (seed 137): interp hit the native-stack guard

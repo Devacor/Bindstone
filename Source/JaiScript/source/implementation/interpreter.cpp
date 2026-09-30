@@ -5217,12 +5217,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
                                           slot_type->base_type == script_value_type::jai_object_type ||
                                           slot_type->base_type == script_value_type::jai_array_type ||
-                                          slot_type->base_type == script_value_type::jai_map_type)) {
+                                          slot_type->base_type == script_value_type::jai_map_type ||
+                                          slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
                             auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
                             if (!enforced) {
                                 return enforced.error_value();
                             }
                             value = std::move(enforced.value());
+                            detail::keep_handle_slot_type(value, slot_type);
                             // var slots keep a shared_ptr-tagged rhs's marker (decl
                             // parity; flattening to 'any' would detach at the copy)
                             if (detail::var_slot(slot_type.get()) &&
@@ -5432,24 +5434,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             }
                             JAISCRIPT_TRY(store_back(std::move(value)));
                         } else {
-                            std::string actual_type_name = value_element ? value_element->type_name : "";
-
-                            // Check type compatibility (same type or derived)
-                            bool compatible = (actual_type_name == expected_type_name);
-                            if (!compatible && !actual_type_name.empty()) {
-                                if (auto eng = engine_) {
-                                    auto actual_class = eng->get_class_definition(actual_type_name);
-                                    if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
-                                        compatible = true;
-                                    }
-                                }
-                            }
-
-                            if (!compatible) {
-                                uint64_t actual_id = value_element ? value_element->id : 0;
+                            // R-q6: a typed source by its static pointee, a var-held one by its object's class
+                            // (KEEP BYTE-PARALLEL with vm_backend::store_popped_value's environment row)
+                            if (!detail::shared_handle_admits(value, ptr_type_info, engine_)) {
                                 uint64_t expected_id = expected_type ? expected_type->id : 0;
                                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                                    "Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
+                                    "Cannot assign shared_ptr<{0}> to shared_ptr<{1}>",
+                                    string_symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)), expected_id);
                             }
 
                             // Compatible - reassign pointer (keep target's type info for polymorphism)
@@ -6280,30 +6271,13 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     JAISCRIPT_TRY(define_variable(std::move(value)));
                     return {};
                 }
-                // Dev ruling (2026-07): typed shared_ptr declarations ENFORCE their
-                // pointee class (wrong-class init used to alias silently). Same class
-                // and derived->base (script chains + host upcasts) stay legal;
-                // unresolvable classes stay lenient (opaque host flows).
-                auto expected_type = decl->type->element_type();
-                if (expected_type && !expected_type->type_name.empty() &&
-                    expected_type->base_type != script_value_type::jai_any_type) {
-                    const std::string& expected_class = expected_type->type_name;
-                    std::string actual_class;
-                    if (auto instance = value.get_class_instance()) {
-                        actual_class = instance->get_class_name();
-                    }
-                    if (!actual_class.empty() && actual_class != expected_class) {
-                        bool is_subtype = false;
-                        if (auto eng = engine_) {
-                            auto actual_def = eng->get_class_definition(actual_class);
-                            is_subtype = actual_def && actual_def->is_subtype_of(expected_class);
-                        }
-                        if (!is_subtype) {
-                            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                                "Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
-                                expected_type->id, string_symbolizer_->intern(actual_class));
-                        }
-                    }
+                // Typed shared_ptr declarations enforce their pointee class (R-q6: a typed source by its
+                // static pointee, a var-held one by its object's class; detail::shared_handle_admits)
+                // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+                if (!detail::shared_handle_admits(value, decl->type, engine_)) {
+                    return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                        "Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
+                        decl->type->element_type()->id, string_symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)));
                 }
                 // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
                 // Mark the type as shared_ptr to ensure reference semantics
@@ -6640,12 +6614,14 @@ checked_result<script_value> interpreter::store_namespace_cell(const detail::nam
     if (slot_type && (slot_type->base_type != incoming.type() ||
                       slot_type->base_type == script_value_type::jai_object_type ||
                       slot_type->base_type == script_value_type::jai_array_type ||
-                      slot_type->base_type == script_value_type::jai_map_type)) {
+                      slot_type->base_type == script_value_type::jai_map_type ||
+                      slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
         auto enforced = enforce_type_compatibility(std::move(incoming), slot_type, member->member);
         if (!enforced) {
             return enforced.error_value();
         }
         incoming = std::move(enforced.value());
+        detail::keep_handle_slot_type(incoming, slot_type);
         if (detail::var_slot(slot_type.get()) &&
             (!incoming.get_type_info() || incoming.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
             detail::var_stamp(incoming, slot_type, engine_);
@@ -6700,9 +6676,10 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
                 sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
         }
         case verdict::handle_target:
-            // shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is; a shared handle
-            // downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
-            if (value.type() == target_type->base_type) {
+            // shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is when a shared handle's judged class is T or a
+            // subclass (R-q6); a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
+            if (value.type() == target_type->base_type &&
+                (target_type->base_type != script_value_type::jai_shared_ptr_type || detail::shared_handle_admits(value, target_type, engine_))) {
                 return std::move(value);
             }
             if (detail::weak_slot_takes_shared(value, target_type, engine_)) {
@@ -12808,6 +12785,40 @@ void interpreter::apply_field_initializers(const std::shared_ptr<class_instance>
 }
 
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
+    // A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
+    // destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with vm_backend::execute_callable)
+    struct unwind_park {
+        interpreter* self;
+        bool active;
+        std::optional<script_exception> exception;
+        std::optional<script_value> value;
+        std::vector<stack_trace_entry> trace;
+        bool trace_captured = false;
+        uint64_t catch_var = 0;
+        explicit unwind_park(interpreter* in) : self(in), active(in->is_unwinding_) {
+            if (!active) { return; }
+            exception = std::move(self->current_exception_);
+            self->current_exception_.reset();
+            value = std::move(self->active_exception_value_);
+            self->active_exception_value_.reset();
+            trace = std::move(self->captured_trace_);
+            self->captured_trace_.clear();
+            trace_captured = self->trace_captured_;
+            self->trace_captured_ = false;
+            catch_var = self->current_catch_var_id_;
+            self->current_catch_var_id_ = 0;
+            self->is_unwinding_ = false;
+        }
+        ~unwind_park() {
+            if (!active) { return; }
+            self->current_exception_ = std::move(exception);
+            self->active_exception_value_ = std::move(value);
+            self->captured_trace_ = std::move(trace);
+            self->trace_captured_ = trace_captured;
+            self->current_catch_var_id_ = catch_var;
+            self->is_unwinding_ = true;
+        }
+    } park{this};
     switch (payload.kind) {
         case script_callable::kind_type::function:
             return call_function(*payload.fn, args);
@@ -13269,7 +13280,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
 
     // Create instance
     auto instance = class_def->create_instance();
-    // Instance created
+    instance->construction_pending(true);   // KEEP BYTE-PARALLEL with vm_backend::construct_instance_pre_body
 
     // Create 'this' value using the class_def's registered name and type_id
     // This ensures we use the exact name/id that was registered (e.g., with namespace)
@@ -13296,6 +13307,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     initializer_depth.reset();
     auto result = execute_method_ast(matching_ctor, method_env.get(), captured.empty() ? args : captured);
     if (!result) { return result; }
+    if (!is_unwinding_) { instance->construction_pending(false); }
     return this_value;   // a constructor call yields its instance (a bare `return;` ends the body early)
 }
 
@@ -14325,19 +14337,13 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
             }
             auto source_type_info = derefed_arg.get_type_info();
             if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type &&
-                target_base_type == script_value_type::jai_shared_ptr_type) {
-                if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
-                    return arg;
-                }
-                auto resolved = resolve_member_target(derefed_arg);
-                if (resolved) {
-                    if (resolved.class_name() == target_type->type_name) {
-                        return arg;
-                    }
-                    if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-                        return arg;
-                    }
-                }
+                target_base_type == script_value_type::jai_shared_ptr_type &&
+                detail::shared_handle_admits(derefed_arg, target_type, engine_)) {
+                // R-q6: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with vm_backend)
+                if (arg.is_reference()) { return arg; }
+                script_value bound = arg;
+                detail::keep_handle_slot_type(bound, target_type);
+                return bound;
             }
             break;
         }

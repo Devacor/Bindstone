@@ -384,6 +384,7 @@ private:
     std::unordered_map<std::string_view, std::vector<const function_decl*>> functions_;
     std::unordered_map<std::string_view, const enum_decl*> enums_;
     std::unordered_set<std::string_view> namespaces_;
+    std::unordered_map<std::string, const variable_decl*> namespace_vars_;   // "path::name" -> its declaration (null: two spellings)
     // Every name declared ANYWHERE in the script (any depth). Flow-insensitive safety
     // net: execution order can make later declarations visible (nested functions,
     // conditional paths), so "undeclared" only fires for names absent from this set
@@ -703,8 +704,43 @@ private:
             : !static_cast<const import_decl*>(d)->path_expr;
     }
 
+    void collect_namespace_vars(const namespace_decl* n, const std::string& prefix) {
+        const std::string path = prefix.empty() ? std::string(n->name) : prefix + "::" + std::string(n->name);
+        for (const auto& d : n->declarations) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::variable_decl) {
+                auto* v = static_cast<const variable_decl*>(d.get());
+                auto [it, fresh] = namespace_vars_.try_emplace(path + "::" + std::string(v->name), v);
+                if (!fresh && it->second && it->second->type.get() != v->type.get()) { it->second = nullptr; }   // a reopening that retypes it: lenient
+            } else if (d->get_type() == node_type::namespace_decl) {
+                collect_namespace_vars(static_cast<const namespace_decl*>(d.get()), path);
+            }
+        }
+    }
+
+    // The declaration a qualified store `ns::x` names when the unit declares that namespace variable
+    const variable_decl* namespace_variable(const member_expr* m, std::string* qualified) const {
+        std::vector<std::string_view> segments;
+        const expression* e = m->object.get();
+        while (e && e->get_type() == node_type::member_expr) {
+            segments.push_back(static_cast<const member_expr*>(e)->member);
+            e = static_cast<const member_expr*>(e)->object.get();
+        }
+        if (!e || e->get_type() != node_type::identifier_expr) { return nullptr; }
+        std::string path(static_cast<const identifier_expr*>(e)->name);
+        for (size_t i = segments.size(); i-- > 0;) { path += "::"; path += segments[i]; }
+        if (!namespaces_.count(std::string_view(path))) { return nullptr; }
+        auto it = namespace_vars_.find(path + "::" + std::string(m->member));
+        if (it == namespace_vars_.end() || !it->second) { return nullptr; }
+        *qualified = it->first;
+        return it->second;
+    }
+
     void collect_top_level() {
         collect_scope_decls(decls_);
+        for (const auto& d : decls_) {
+            if (d && d->get_type() == node_type::namespace_decl) { collect_namespace_vars(static_cast<const namespace_decl*>(d.get()), ""); }
+        }
         for (const auto& d : decls_) {
             if (d && (d->get_type() == node_type::include_decl || d->get_type() == node_type::import_decl)) {
                 has_includes_ = true;
@@ -3190,6 +3226,18 @@ private:
 			}
 			ctype recv;
 			const ctype read_type = infer_member(m, /*writing=*/true, &typed_field, &recv, &hit, &fp);
+			// a shared_ptr<T> namespace variable admits a handle by R-q6 (Dev ruling 2026-09-30) at load; other namespace stores
+			// stay run-time checks under strict (spec: a_typed_namespace_store_is_checked_at_run_time_under_strict)
+			std::string qualified;
+			if (!typed_field && m->is_static) {
+				const variable_decl* nv = namespace_variable(m, &qualified);
+				if (nv && nv->type && nv->type->base_type == script_value_type::jai_shared_ptr_type) {
+					const ctype nt = program_global_type(nv);
+					check_store(rhs, compound, base_op, nt, declared_variable_type_name(nv), "'" + qualified + "'", a->location,
+								nv->location.line, nv->location.column);
+					if (!nt.is_unknown()) { return nt; }
+				}
+			}
 			// An assignment expression's value is the destination's stored value (Dev ruling
 			// 2026-09-08): the member's type when the checker knows it; for a member it cannot
 			// read (no field, no getter) the runtime hands back the rhs or the compound's result.

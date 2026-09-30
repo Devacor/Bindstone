@@ -590,17 +590,17 @@ namespace jai::vm {
             void relocate_to(size_t new_cap); // the ONE buffer move (grow_push + reserve)
             script_value& back() noexcept { assert(count); return slots[count - 1]; }
             const script_value& back() const noexcept { assert(count); return slots[count - 1]; }
+            // A heavy slot moves out before it dies: its destructor may run a script destructor that pushes onto (and
+            // grows) this stack, so the dying value never sits in the buffer and the loop re-reads the buffer by index
             void pop_back() noexcept {
                 assert(count);
                 script_value& s = slots[--count];
-                if (!dtor_elidable(s)) { s.~script_value(); }
+                if (!dtor_elidable(s)) { script_value doomed(std::move(s)); }
             }
             void truncate(size_t new_size) noexcept {
                 assert(new_size <= count);
-                script_value* first = slots + new_size;
-                script_value* const last = slots + count;
-                for (; first != last; ++first) {
-                    if (!dtor_elidable(*first)) { first->~script_value(); }
+                for (size_t i = new_size; i < count; ++i) {
+                    if (!dtor_elidable(slots[i])) { script_value doomed(std::move(slots[i])); }
                 }
                 count = new_size;
             }

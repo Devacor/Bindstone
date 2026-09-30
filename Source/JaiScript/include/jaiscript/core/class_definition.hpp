@@ -107,6 +107,10 @@ public:
     // A retired layer (engine::script_layer_detach, or a move to another engine) keeps
     // owning its object so old handles never dangle, but every C++ extraction through it
     // throws instead of reaching an object another layer now speaks for.
+    // Set while a script constructor has not completed: the half-built instance runs no destructor (Dev ruling 2026-09-26)
+    void construction_pending(bool pending) { construction_pending_ = pending; }
+    bool construction_pending() const { return construction_pending_; }
+
     void retire_script_layer() { script_layer_retired_ = true; }
     bool script_layer_retired() const { return script_layer_retired_; }
     // Live field references pinned on this instance (make_field_reference / ~reference_holder).
@@ -292,6 +296,7 @@ private:
     engine* engine_ = nullptr;
     bool script_layer_retired_ = false;
     bool seeded_from_plan_ = false;   // create_instance landed every default through the class plan
+    bool construction_pending_ = false;
     uint32_t live_field_refs_ = 0;
     // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
     // swap-removes in O(1) instead of scanning and locking the whole list. Atomic because a
@@ -1090,7 +1095,9 @@ public:
                             }
                         };
 
-                        call_destructors(class_def);
+                        if (!ptr->construction_pending()) {
+                            call_destructors(class_def);
+                        }
 
                         delete ptr;
                     }
@@ -2784,18 +2791,45 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
 // lives in typed_slot.hpp (defined out of line in environment.cpp).
 checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value, const type_info_ptr& target_type, engine* eng);
 
-// A shared handle's pointee against a shared_ptr<T> slot, by the class it holds: T or a subclass (the declaration's rule;
-// an unresolvable class stays lenient)
-inline bool shared_handle_pointee_admits(const script_value& v, const type_info_ptr& declared, engine* eng) {
+// The pointee class a shared_ptr<T> slot judges a source by (R-q6, Dev ruling 2026-09-30): a typed handle's static pointee (a
+// C++ shared_ptr<U> converts to shared_ptr<T> only upward; a downcast needs cast<shared_ptr<T>>), else - a var-held handle, a plain
+// object - the class the object really has. Empty when neither is known (opaque host flows stay lenient).
+inline std::string shared_handle_judged_class(const script_value& v, engine* eng) {
+    const type_info* tag = v.get_type_info().get();
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type && !tag->dynamic_pointee) {
+        auto pointee = tag->element_type();
+        if (pointee && !pointee->type_name.empty() && pointee->base_type != script_value_type::jai_any_type) {
+            return pointee->type_name;
+        }
+    }
+    auto view = resolve_slot_class(v, eng);
+    return view.instance && view.def ? view.def->get_name() : std::string();
+}
+
+// Does a shared_ptr<T> slot take this handle or object: its judged class is T or a subclass. A var-declared holder
+// (dynamic pointee) rebinds to anything, and an unresolvable class stays lenient.
+inline bool shared_handle_admits(const script_value& v, const type_info_ptr& declared, engine* eng) {
+    if (declared->dynamic_pointee) {
+        return true;
+    }
     auto expected = declared->element_type();
     if (!expected || expected->type_name.empty() || expected->base_type == script_value_type::jai_any_type) {
         return true;
     }
-    auto view = resolve_slot_class(v, eng);
-    if (!view.instance || !view.def || view.def->get_name() == expected->type_name) {
+    const std::string judged = shared_handle_judged_class(v, eng);
+    if (judged.empty() || judged == expected->type_name) {
         return true;
     }
-    return view.def->is_subtype_of(expected->type_name);
+    auto judged_def = eng ? eng->get_class_definition(judged) : nullptr;
+    return !judged_def || judged_def->is_subtype_of(expected->type_name);
+}
+
+// A typed shared_ptr<T> variable keeps its own static type whatever handle it takes (a var-declared holder keeps the source's)
+inline void keep_handle_slot_type(script_value& value, const type_info_ptr& slot_type) {
+    if (slot_type && slot_type->base_type == script_value_type::jai_shared_ptr_type && !slot_type->dynamic_pointee &&
+        value.get_type_info() && value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+        value.set_type_info(slot_type);
+    }
 }
 
 // Field-store rows for shared_ptr<T> / weak_ptr<T> declared fields (the handle_target
@@ -2805,8 +2839,13 @@ inline bool shared_handle_pointee_admits(const script_value& v, const type_info_
 inline std::optional<script_value> field_handle_rows(const script_value& v, const type_info_ptr& declared, engine* eng) {
     const auto target = declared->base_type;
     if (v.type() == target) {
-        if (target == script_value_type::jai_shared_ptr_type && !shared_handle_pointee_admits(v, declared, eng)) {
-            return std::nullopt;
+        if (target == script_value_type::jai_shared_ptr_type) {
+            if (!shared_handle_admits(v, declared, eng)) {
+                return std::nullopt;
+            }
+            script_value stored = v;   // the field's static type, not the source's
+            if (!declared->dynamic_pointee) { stored.set_type_info(declared); }
+            return stored;
         }
         return v;
     }

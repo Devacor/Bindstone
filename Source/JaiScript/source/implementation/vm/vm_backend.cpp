@@ -3406,7 +3406,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 				VM_TRY(detail::bare_member_access(member, sym, frame_access_context(f)));
 				if (member.what == detail::member_probe_hit::kind::method) {
 					if (member.instance && f.locals->scope_this) {
-						stack_.push_back(make_bound_method_thunk(*f.locals->scope_this, std::move(member.method_value)));
+						return raise_bare_method_value(sym, *f.locals->scope_this);   // an op_load is never a callee (identifier callees probe)
 					} else {
 						stack_.push_back(std::move(member.method_value));
 					}
@@ -4885,6 +4885,10 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 				}
 				if (member.what == detail::member_probe_hit::kind::method) {
 					if (member.instance && f.locals->scope_this) {
+						if (!probe_callee_resolving_) {
+							raise_bare_method_value(sym, *f.locals->scope_this);
+							return nullptr;
+						}
 						scratch.emplace(make_bound_method_thunk(*f.locals->scope_this, std::move(member.method_value)));
 					} else {
 						scratch.emplace(std::move(member.method_value));
@@ -5174,7 +5178,9 @@ int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, 
 		}
 	}
 	std::optional<script_value> scratch;
+	probe_callee_resolving_ = true;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, cache_slot);
+	probe_callee_resolving_ = false;
 	if (!resolved) return -1;
 	if (identity && resolved->raw_storage_index() == script_value::TYPEID_FUNCTION && &resolved->unchecked_as_function() == identity) return 1;
 	return park_callee(f, site, 1, *resolved) == op_status::failed ? -1 : 0;
@@ -11443,7 +11449,9 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 	}
 	if (site.mic_cd && park_sibling_method(f, site)) { JAI_PROBE_SECTION(0); JAI_PROBE_SECTION(1); return {}; }
 	std::optional<script_value> scratch;
+	probe_callee_resolving_ = true;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed);
+	probe_callee_resolving_ = false;
 	if (!resolved) return op_status::failed;
 	JAI_PROBE_SECTION(0);
 	if (scratch && &*scratch == resolved) { arm_sibling_method(f, site, *resolved); }
@@ -12957,6 +12965,18 @@ op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 		stack_.push_back(std::move(this_val));
 	}
 	return {};
+}
+
+// A bare method name read without a call inside a method (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with
+// interpreter::bare_method_value_error
+op_status vm_backend::raise_bare_method_value(uint64_t name_id, const script_value& self) {
+	if (parallel_worker_) [[unlikely]] {
+		return raise_(make_error_code(runtime_error_code::unsupported_operation), "'{0}' is a method: call it or bind it with reflect::bind", name_id);
+	}
+	auto target = resolve_member_target(self.deref());
+	const std::string owner = target.class_def ? target.class_def->get_name() : std::string("this");
+	return raise_(make_error_code(runtime_error_code::unsupported_operation), "{0}",
+		symbolizer_->intern(detail::bare_method_value_text(symbolizer_->get_string(name_id), owner)));
 }
 
 // obj.method without a call (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with interpreter::method_value_error

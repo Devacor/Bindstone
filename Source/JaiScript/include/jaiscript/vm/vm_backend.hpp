@@ -1246,6 +1246,8 @@ namespace jai::vm {
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null
         op_status raise_method_value(const member_expr* expr, const script_value& object, bool bindable);   // obj.method without a call
+        op_status raise_bare_method_value(uint64_t name_id, const script_value& self);   // a bare method name without a call
+        bool probe_callee_resolving_ = false;   // exec_probe_callee -> fused_ident_value: the bare name is being called
 
         struct member_target {
             std::shared_ptr<class_instance> instance;

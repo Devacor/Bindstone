@@ -392,7 +392,11 @@ engine stays usable", not by `check_throws`.
   "heal")`, a value type's method: `... or wrap the call in a lambda`), raised where a member read would mint a bound method
   (both backends' non-callee member reads) and reported at load by the strict checker for a script class's method.
   `reflect::bind(obj, "name")` is the spelling (class instance, handle, host object: holds the object, keeps it alive); a
-  string/array/map's methods take a lambda. A field holding a callable is a value.
+  string/array/map's methods take a lambda. A field holding a callable is a value. A BARE method name read without a call
+  inside a method is the same violation (`call it with heal() or bind it with reflect::bind(this, "heal")`): the interpreter's
+  `identifier_callee_lookup_` and the vm's `probe_callee_resolving_` mark callee resolution (an `op_load` is never a callee),
+  the checker reports an instance method it resolves in the enclosing class chain; locals and parameters still win, a static
+  method stays a function value.
 - **Stores through references** (Dev ruling 2026-09-30, R-q7): `auto& r = o.f; r = v` (and `r op= v`) runs the direct field
   store's table and text (`detail::field_store_convert` via `ref_field_store`); an element reference runs the direct subscript
   store's kernel. There is no second, narrower reference table.

@@ -2117,21 +2117,23 @@ public:
             check_eq((size_t)0, error_count(e->check("inline cfg;\nfunction h() { cfg = \"any\"; cfg = 1.5; }")));
         });
 
-        test("a_plain_declaration_of_an_inline_variable_is_a_load_error", [this]() {
-            const std::string text = "'frags' is already defined inline; declare it 'inline int frags;' to share it";
+        test("inline_and_plain_declarations_across_the_closure_are_load_errors", [this]() {
+            // either order across units is one load error, at the plain declaration; one unit's own mix converts at run time
             auto e = make_engine();
-            auto same = e->check("inline int frags;\nint frags = 1;");
-            check_eq((size_t)1, error_count(same));
-            check_true(same.diagnostics[0].message == text, same.diagnostics[0].message);
-            check_eq((size_t)0, error_count(e->check("int frags = 1;\ninline int frags;")), "an inline declaration adopts a plain one");
-            check_eq((size_t)1, error_count(e->check("namespace hud { inline int frags; }\nnamespace hud { int frags = 2; }")));
-            auto dir = closure_dir("inline_redefinition");
+            check_eq((size_t)0, error_count(e->check("inline int frags;\nint frags = 1;")));
+            check_eq((size_t)0, error_count(e->check("int frags = 1;\ninline int frags;")));
+            auto dir = closure_dir("inline_mix");
             write_unit(dir, "hud.jai", "inline int frags;\n");
-            auto p = program_engine(dir);
-            auto other = p->check("import \"hud.jai\";\nint frags = 3;\n");
-            check_eq((size_t)1, error_count(other));
-            check_true(other.diagnostics[0].message == text, other.diagnostics[0].message);
-            check_eq((size_t)0, error_count(p->check("import \"hud.jai\";\ninline int frags = 3;\n")));
+            write_unit(dir, "stats.jai", "int kills;\n");
+            auto plain = program_engine(dir)->check("import \"hud.jai\";\nint frags = 3;\n");
+            check_eq((size_t)1, error_count(plain));
+            check_true(plain.diagnostics[0].message == "'frags' is already defined inline; declare it 'inline int frags;' to share it", plain.diagnostics[0].message);
+            auto inl = program_engine(dir)->check("import \"stats.jai\";\ninline int kills;\n");
+            check_eq((size_t)1, error_count(inl));
+            const std::string m = inl.diagnostics[0].message;
+            check_true(m.find("stats.jai:1:5: 'kills' is already defined inline; declare it 'inline int kills;' to share it") != std::string::npos, m);
+            check_eq((size_t)0, error_count(program_engine(dir)->check("import \"hud.jai\";\ninline int frags = 3;\n")));
+            check_eq((size_t)0, error_count(program_engine(dir)->check("import \"stats.jai\";\nint kills = 2;\n")));
             std::filesystem::remove_all(dir);
         });
 

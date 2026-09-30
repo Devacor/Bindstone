@@ -114,12 +114,10 @@ public:
 		});
 		test("an_inline_declaration_shares_the_visible_global_or_creates_it_when_absent", [this]() {
 			// Dev (2026-09-30): an inline variable is one variable every inline declaration shares; the first to run creates it
-			// (unit 0) and a later one adopts it, as it adopts a plain unit's variable or a host global
-			every_backend("inline", "5 5|2 2|8 8|7 7 7", [](engine& e) {
+			// (unit 0) and a later one adopts it, as it adopts a host global
+			every_backend("inline", "5 5|8 8|7 7 7", [](engine& e) {
 				e.execute("inline var G; G = 5; function f() { return G; }");
 				std::string out = e.execute("inline var G; to_string(G) + \" \" + to_string(f())").as_string();
-				e.execute("int P = 2;");
-				out += "|" + e.execute("inline int P; function p() { return P; } to_string(P) + \" \" + to_string(p())").as_string();
 				e.add_global("Q", script_value(static_cast<int64_t>(8), &e));
 				out += "|" + e.execute("inline int Q = 1; function q() { return Q; } to_string(Q) + \" \" + to_string(q())").as_string();
 				e.execute("inline int H; H = 7;");
@@ -147,8 +145,8 @@ public:
 				return out;
 			});
 		});
-		test("a_plain_declaration_of_an_inline_variable_raises", [this]() {
-			// Dev (2026-09-30): a plain declaration never adopts what an inline declaration created; the text spells the fix
+		test("inline_and_plain_declarations_of_a_name_never_mix_across_units", [this]() {
+			// Dev (2026-09-30): in either order a mix of inline and plain declarations across units raises; the texts spell the fix
 			const std::string expected =
 				"'G' is already defined inline; declare it 'inline G;' to share it|"
 				"'N' is already defined inline; declare it 'inline int N;' to share it|"
@@ -156,7 +154,9 @@ public:
 				"'Z' is already defined inline; declare it 'inline auto Z;' to share it|"
 				"'Z' is already defined inline; declare it 'inline auto Z;' to share it|"
 				"'depth' is already defined inline; declare it 'inline int depth;' to share it|"
-				"5 3 0 1 3|6";
+				"'P' is already defined (not inline) in <script>; declare every definition 'inline' to share it|"
+				"'w' is already defined (not inline) in <script>; declare every definition 'inline' to share it|"
+				"no error|5 3 0 1 3 2 1 2|6";
 			every_backend("inline plain", expected, [](engine& e) {
 				auto raised = [&](const std::string& src) {
 					try { e.execute(src); } catch (const std::exception& ex) { std::string w = ex.what(); return w.substr(0, w.find(": Invalid operation")); }
@@ -165,12 +165,39 @@ public:
 				e.execute("inline var G = 5; inline int N = 3; inline array<int> A; inline Z; namespace cfg { inline int depth = 1; }");
 				std::string out = raised("var G = 9;") + "|" + raised("int N = 1;") + "|" + raised("array<int> A = [1];") + "|" + raised("auto Z = 2;")
 					+ "|" + raised("auto [Z, W] = [1, 2];") + "|" + raised("namespace cfg { int depth = 7; }");
-				out += "|" + e.execute("to_string(G) + \" \" + to_string(N) + \" \" + to_string(A.size()) + \" \" + to_string(cfg::depth) + \" \" + to_string(N)").as_string();
+				e.execute("int P = 2; namespace ns2 { int w = 1; }");
+				out += "|" + raised("inline int P = 4;") + "|" + raised("namespace ns2 { inline int w; }");
+				e.execute("int K = 1;");
+				out += "|" + raised("int K = 2;");
+				out += "|" + e.execute("to_string(G) + \" \" + to_string(N) + \" \" + to_string(A.size()) + \" \" + to_string(cfg::depth) + \" \" + to_string(N) + \" \" + to_string(P) + \" \" + to_string(ns2::w) + \" \" + to_string(K)").as_string();
 				const std::string rerun = "inline int R = 6; R";
 				e.execute(rerun);
 				out += "|" + e.execute(rerun).to_string();
 				return out;
 			});
+		});
+		test("a_same_unit_reload_flips_a_declaration_between_plain_and_inline", [this]() {
+			// the edit converts the cell in place: plain to inline keeps the value (an inline declaration adopts), inline to plain runs the
+			// initializer; another unit then sees the cell's current kind
+			const auto dir = jai::foundry::test_temp_directory() / "inline_flip";
+			std::filesystem::create_directories(dir);
+			const std::string file = (dir / "flip.jai").string();
+			every_backend("flip", "4 4 55 conflict flip.jai|1 1 3", [&](engine& e) {
+				auto run = [&](const std::string& text) { { std::ofstream(file, std::ios::trunc) << text; } return e.execute_file(file).to_string(); };
+				std::string out = run("int F = 4; F");
+				out += " " + run("inline int F = 9; F");
+				out += " " + run("int F = 55; F");
+				try { e.execute("inline int F;"); out += " no error"; }
+				catch (const std::exception& ex) {
+					const std::string w = ex.what();
+					out += w.rfind("'F' is already defined (not inline) in ", 0) == 0 && w.find("flip.jai; declare every definition 'inline' to share it") != std::string::npos ? " conflict flip.jai" : " " + w;
+				}
+				out += "|" + run("namespace fl { int G = 1; } fl::G");
+				out += " " + run("namespace fl { inline int G = 7; } fl::G");
+				out += " " + run("namespace fl { int G = 3; } fl::G");
+				return out;
+			});
+			std::filesystem::remove_all(dir);
 		});
 		test("a_plain_extern_declares_nothing_and_raises_until_something_defines_it", [this]() {
 			const std::string undefined = "'G' is declared extern but never defined (an 'inline' declaration creates it)";

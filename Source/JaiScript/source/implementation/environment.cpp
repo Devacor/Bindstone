@@ -7,6 +7,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/typed_slot.hpp>
+#include <algorithm>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -277,8 +278,38 @@ checked_result<script_value> environment::get(uint64_t id) const {
 
 void environment::share(uint64_t id) {
     if (local_ids_.count(id) == 0) { return; }
-    if (!parent_) { unit_of_.erase(id); }   // the cell belongs to unit 0
-    inline_cells_.insert(id);
+    unit_of_.erase(id);   // the cell belongs to unit 0
+    inline_cells_[id] = { symbolizer_->current_unit().id };
+}
+
+environment::inline_verdict environment::inline_declare(uint64_t id, uint32_t& owner) {
+    if (!get_own_value_ptr(id)) { return inline_verdict::create; }
+    const uint32_t unit = symbolizer_->current_unit().id;
+    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+        if (std::find(cell->second.begin(), cell->second.end(), unit) == cell->second.end()) { cell->second.push_back(unit); }
+        return inline_verdict::adopt;
+    }
+    auto plain = unit_of_.find(id);
+    if (plain != unit_of_.end()) {
+        auto versions = versions_.find(id);
+        if (plain->second.id != unit || versions != versions_.end()) {
+            owner = plain->second.id != unit ? plain->second.id : versions->second.front().unit.id;
+            return inline_verdict::conflict;
+        }
+        unit_of_.erase(plain);   // the running unit's own plain cell turns inline
+    }
+    inline_cells_[id] = { unit };
+    return inline_verdict::adopt;
+}
+
+bool environment::plain_declare(uint64_t id) {
+    const unit_stamp unit = symbolizer_->current_unit();
+    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+        if (cell->second.size() != 1 || cell->second.front() != unit.id) { return false; }
+        inline_cells_.erase(cell);
+    }
+    unit_of_[id] = unit;
+    return true;
 }
 
 void environment::note_extern(uint64_t id, bool function) {
@@ -315,7 +346,13 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
         unit_of_[id] = unit;
         return true;
     }
-    if (inline_cells_.count(id)) { return false; }
+    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+        if (cell->second.size() != 1 || cell->second.front() != unit.id) { return false; }
+        inline_cells_.erase(cell);
+        define(id, std::move(value));   // the running unit's own inline cell turns plain in place
+        unit_of_[id] = unit;
+        return true;
+    }
     auto owner = unit_of_.find(id);
     const unit_stamp flat_unit = owner == unit_of_.end() ? unit_stamp{} : owner->second;
     if (flat_unit.id == unit.id) {

@@ -462,10 +462,12 @@ engine stays usable", not by `check_throws`.
   env, so defined lookups pay nothing). `inline T x [= init];` / `inline x;` (program scope and
   namespaces; `variable_decl::is_inline`, `.jaibite` 28) is the C++17 inline variable: the first to run
   creates it (initializer or type default, a program-scope cell owned by no unit, `environment::share`),
-  later ones adopt it (or a plain/host variable) without running the initializer (vm `op_decl_keep` +
-  `op_decl_share`); a plain declaration of a name an inline declaration created raises `'x' is already defined
-  inline; declare it 'inline int x;' to share it` (`environment::define_variable` refuses, `detail/inline_variable.hpp`;
-  the checker at load when the closure shows it), Dev ruling 2026-09-30. `[[warn_mode]]` / `[[strict_mode]]`
+  later ones adopt it (or a host global) without running the initializer (vm `op_decl_keep` + `op_decl_share`,
+  `environment::inline_declare`). Inline and plain never mix across units, either order (Dev ruling 2026-09-30):
+  plain after inline raises `'x' is already defined inline; declare it 'inline int x;' to share it`, inline after
+  another unit's plain raises `'x' is already defined (not inline) in <file>; declare every definition 'inline' to
+  share it` (`detail/inline_variable.hpp`); a unit's own re-run switching kinds converts the cell in place; the checker
+  reports a closure mix once, at the plain declaration. `[[warn_mode]]` / `[[strict_mode]]`
   set the checker's mode for a unit (first declaration), a block (first statement) or one
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
   mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.

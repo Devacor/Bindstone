@@ -1007,6 +1007,8 @@ namespace jai {
         // every host registration). Cross-function proofs cache against it.
         uint64_t definition_epoch() const;
         void bump_definition_epoch();
+        // A program unit's name for diagnostics: its file's path, <script> for a literal, <host> for unit 0
+        std::string unit_label(uint32_t unit) const;
         // The shadowing unit whose code is running (0 = the host: a file by path or a literal by
         // content, numbered at first execution) and its execution number (docs/global_shadowing.md)
         unit_stamp current_unit() const;

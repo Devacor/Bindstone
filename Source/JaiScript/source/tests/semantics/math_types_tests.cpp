@@ -212,6 +212,15 @@ public:
                    "(1.0, 2.0, 4.0)", "typed slots take the library's vectors");
         });
 
+        test("library_arity", [expect]() {
+            // one table (math_arity_of): the lowered and boxed calls raise its text, the checker leaves the result untyped
+            expect("function f() -> string { math::vec3 p = math::vec3(1, 2, 3); for (int i = 0; i < 2; i++) { p.x += 1; } string m = \"\"; "
+                   "try { var r = math::min(p); m = to_string(r); } catch (e) { m = e; } try { var r = math::clamp(p, 1.0); m += \"|\" + to_string(r); } catch (e) { m += \"|\" + e; } "
+                   "try { var r = math::mix_in(p, p, 0.5); m += \"|\" + to_string(r); } catch (e) { m += \"|\" + e; } try { var r = math::normalize(p, p); m += \"|\" + to_string(r); } catch (e) { m += \"|\" + e; } var sp = p; return m + to_string(sp); } f()",
+                   "math::min expects 2 arguments|math::clamp expects 3 arguments (value, lo, hi)|math:: eased mix/unmix expects 4 arguments (start, end, percent_or_value, strength)|math::normalize expects 1 argument(3.0, 2.0, 3.0)",
+                   "a library call's arity");
+        });
+
         test("color", [expect, raised]() {
             expect("to_string(math::color()) + to_string(math::color(1, 0, 0)) + to_string(math::color(0.5, 0.25, 0, 0.5)) + type_of(math::color())",
                    "(1.0, 1.0, 1.0, 1.0)(1.0, 0.0, 0.0, 1.0)(0.5, 0.25, 0.0, 0.5)math::color", "construction: opaque white by default, alpha 1 when omitted");
@@ -278,7 +287,7 @@ public:
             expect("var r = math::rotate(math::vec3(1, 0, 0), math::vec3(0, 0, 2), 1.5707963267948966); var s = math::vec3(0, 1, 0).rotated(math::vec3(1, 0, 0), 3.141592653589793); "
                    "to_string(math::abs(r.x) < 1e-7 && math::abs(r.y - 1) < 1e-7 && math::abs(r.z) < 1e-7 && math::abs(s.y + 1) < 1e-7 && math::abs(s.z) < 1e-6)", "true", "rotate a vec3 about an axis (Rodrigues; the axis is normalized)");
             expect("to_string(math::rotate(math::vec3(1, 2, 3), math::vec3(), 1.0)) + type_of(math::rotate(math::ivec2(1, 0), 0.5))", "(1.0, 2.0, 3.0)math::vec2", "a zero axis leaves the vector; an ivec rotates into a vec");
-            expect("var f = math::vec3(3, 4, 0).length; to_string(f())", "5.0", "a method read is a function value");
+            expect("math::vec3 v = math::vec3(3, 4, 0); auto f = [v]() { return v.length(); }; to_string(f())", "5.0", "a method kept for later is a lambda");
             expect("function speed(math::vec3 v) -> float { return v.length(); } math::vec3 n = math::vec3(0, 3, 4).normalized(); float d = n.dot(math::vec3(0, 1, 0)); to_string(speed(math::vec3(0, 3, 4))) + to_string(d)",
                    "5.00.6000000238418579", "typed slots take the results");
             expect(raised("var q = math::dot(math::vec2(), math::vec3());"), "math::dot expects two vectors of the same dimensions", "dimensions must agree");
@@ -296,9 +305,11 @@ public:
         });
 
         // the boxed interpreter is the oracle: every other configuration prints the same text
-        auto agree = [this, run](const std::string& src, const char* what) {
+        // a row counts as lowering coverage only when it runs to a value (a row whose configurations all raise proves nothing)
+        // and the lowering rewrote its body; `lowers` false marks a row about what stays boxed
+        auto agree = [this, run](const std::string& src, const char* what, bool lowers = true) {
             const std::string oracle = run(src, false, true, false);
-            check(oracle.rfind("ERROR: static check", 0) != 0, std::string(what) + ": the program checks (" + oracle + ")");
+            check(oracle.rfind("ERROR: ", 0) != 0, std::string(what) + ": the program runs (" + oracle + ")");
             for (bool lowering : {true, false}) {
                 for (bool proofs : {true, false}) {
                     for (bool use_vm : {false, true}) {
@@ -306,16 +317,26 @@ public:
                     }
                 }
             }
+            auto e = jai::engine::make();
+            e->set_backend(jai::backend_type::vm);
+            e->aggregate_lowering(true);
+            e->execution_budget(0);
+            jai::stdlib::register_all(e);
+            try { e->execute(src); } catch (const std::exception&) {}
+            check_eq(lowers, e->aggregate_lowered_sites() > 0, std::string(what) + (lowers ? ": the lowering rewrites the row" : ": the row stays as parsed"));
         };
 
         test("lowering", [expect, agree, raised, this]() {
             // statements over typed locals in a function body
             agree("function f() -> string { math::vec3 p = math::vec3(1, 2, 3); math::vec3 v = math::vec3(0.5, 0.25, 2); float dt = 0.1; "
-                  "for (int i = 0; i < 5; i++) { p += v * dt; v *= 0.99; p.y -= 0.01; } return to_string(p) + to_string(v) + to_string(p.x + v.z); } f()", "an integrator");
-            agree("function f() -> string { math::vec2 p = math::vec2(1.5, -2); p = math::vec2(p.y, p.x); p = -p + p * 2; p /= 4; return to_string(p); } f()", "a value that reads its target");
-            agree("function f() -> string { math::ivec3 a = math::ivec3(7, -9, 4); a.x += 5; a.y *= -3; a.z /= 3; a = a % 4; a = a - math::ivec3(1, 1, 1); a = 2 * a; return to_string(a) + to_string(-a); } f()", "ivec rows");
+                  "for (int i = 0; i < 5; i++) { p += v * dt; v *= 0.99; p.y -= 0.01; } var sp = p; var sv = v; return to_string(sp) + to_string(sv) + to_string(p.x + v.z); } f()", "an integrator");
+            agree("function f() -> string { math::vec2 p = math::vec2(1.5, -2); p = math::vec2(p.y, p.x); p = -p + p * 2; p /= 4; var sp = p; return to_string(sp); } f()", "a value that reads its target");
+            agree("function f() -> string { math::vec2 p = math::vec2(1.5, -2); p *= p.x; math::vec2 q = math::vec2(3, 4); q += math::vec2(q.y, q.x); math::ivec2 r = math::ivec2(2, 3); r = math::ivec2(r.y, r.x) * r.x; "
+                  "math::vec3 w = math::vec3(1, 2, 3); w = math::vec3(w.z, w.x + w.y, w.x); var sp = p; var sq = q; var sr = r; var sw = w; return to_string(sp) + to_string(sq) + to_string(sr) + to_string(sw); } f()",
+                  "a store whose later components read earlier ones");
+            agree("function f() -> string { math::ivec3 a = math::ivec3(7, -9, 4); a.x += 5; a.y *= -3; a.z /= 3; a = a % 4; a = a - math::ivec3(1, 1, 1); a = 2 * a; var sa = a; var na = -a; return to_string(sa) + to_string(na); } f()", "ivec rows");
             agree("function f() -> string { math::vec3 v = math::vec3(1.9, -1.9, 1e10); math::ivec3 c = math::ivec3(v.x, v.y, 0); math::vec3 w = c; math::vec3 u = math::vec3(16777217, 0.1, true); return to_string(c) + to_string(w) + to_string(u); } f()", "conversions and narrowing");
-            agree("function f() -> string { math::vec4 q = math::vec4(math::vec3(1, 2, 3), 4); math::vec3 e = math::vec3(math::vec2(5, 6), 7); math::ivec2 g = math::ivec2(math::vec2(2.5, -3.5)); return to_string(q) + to_string(e) + to_string(g); } f()", "extension and conversion constructors");
+            agree("function f() -> string { math::vec4 q = math::vec4(math::vec3(1, 2, 3), 4); math::vec3 e = math::vec3(math::vec2(5, 6), 7); math::ivec2 g = math::ivec2(math::vec2(2.5, -3.5)); var sq = q; var se = e; var sg = g; return to_string(sq) + to_string(se) + to_string(sg); } f()", "extension and conversion constructors");
             agree("function f() -> string { math::vec2 a = math::vec2(0, 10); math::vec2 b = math::vec2(10, 20); math::vec2 m = math::mix(a, b, 0.25); math::vec2 l = math::lerp(a, b, math::vec2(0.5, 0.1)); "
                   "math::vec2 c = math::clamp(m, 1.0, 12.0); math::vec2 r = math::floor(l + 0.5); math::ivec2 i = math::min(math::ivec2(3, 9), math::ivec2(5, 2)); math::vec2 e = math::mix_in_out(a, b, 0.3, 2.0); "
                   "math::vec2 u = math::remap(m, 0.0, 10.0, a, b); return to_string(m) + to_string(l) + to_string(c) + to_string(r) + to_string(i) + to_string(e) + to_string(u) + to_string(math::abs(-m)); } f()", "the component-wise family");
@@ -329,12 +350,26 @@ public:
                   "return to_string(r) + to_string(j) + to_string(z) + to_string(q) + to_string(q2) + to_string(w) + to_string(w2) + to_string(w3) + to_string(a) + to_string(math::reflect(iv, n)); } f()", "reflect, project, rotate and angle_between");
             agree("function f() -> string { math::ivec3 big = math::ivec3(2000000000, 2000000000, 2000000000); math::vec3 n = big.normalized(); return to_string(big.length()) + to_string(n) + to_string(math::distance(big, -big)); } f()", "ivec components widen where the kernel reads doubles");
             agree("function f() -> string { math::color c = math::color(0.25, 0.5, 0.75, 0.5); c.g = 0.125; c.a *= 2; math::color m = math::mix(c, math::color(1, 0, 0), 0.5); math::color k = math::clamp(c * 3, 0.0, 1.0); "
-                  "math::color r = math::mix_rgb(c, m, 0.5); return to_string(c) + to_string(m) + to_string(k) + to_string(r) + to_string(c == m); } f()", "colors lowered, OKLab boxed");
+                  "math::color r = math::mix_rgb(c, m, 0.5); var sc = c; var sm = m; var sk = k; var sr = r; return to_string(sc) + to_string(sm) + to_string(sk) + to_string(sr) + to_string(c == m); } f()", "colors lowered, OKLab boxed");
             agree("function g(math::vec3 q) -> float { float s = 0.0; for (int i = 0; i < 4; i++) { q.x += 1; s += q.x; } return s + q.length(); } to_string(g(math::vec3(1, 2, 3)))", "a parameter unpacks at entry");
             agree("function f() -> string { math::vec2 p = math::vec2(1, 2); string s = \"\"; if (p.x > 0.5) p += math::vec2(1, 1); else p.x = 0; while (p.y < 10.0) { p.y *= 2; } "
-                  "switch (1) { case 1: math::vec2 k = p * 2; s += to_string(k); break; default: break; } if (p == math::vec2(2, 12)) { s += \"eq\"; } if (p != p) { s += \"ne\"; } if (p) { s += \"t\"; } return s + to_string(p); } f()", "statement forms");
-            agree("function f() -> string { math::vec3 p = math::vec3(1, 2, 3); var fn = p.length; auto t = [&]() { p.x = 7; }; t(); var arr = [p, p + p]; return to_string(fn()) + to_string(p) + to_string(arr[1]); } f()", "escapes stay boxed");
-            agree("function h(math::vec3& r) -> void { r.y = 9; } function f() -> string { math::vec3 p = math::vec3(1, 2, 3); h(p); math::vec3 q = p; q.z = 5; return to_string(p) + to_string(q); } f()", "a reference argument");
+                  "switch (1) { case 1: { math::vec2 k = p * 2; s += to_string(k.x) + to_string(k.y); break; } default: break; } if (p == math::vec2(2, 12)) { s += \"eq\"; } if (p != p) { s += \"ne\"; } if (p) { s += \"t\"; } var sp = p; return s + to_string(sp); } f()", "statement forms");
+            agree("function f() -> string { math::vec3 p = math::vec3(1, 2, 3); auto fn = [p]() { return p.length(); }; auto t = [&]() { p.x = 7; }; t(); var arr = [p, p + p]; return to_string(fn()) + to_string(p) + to_string(arr[1]); } f()", "escapes stay boxed", false);
+            agree("function h(math::vec3& r) -> void { r.y = 9; } function f() -> string { math::vec3 p = math::vec3(1, 2, 3); h(p); math::vec3 q = p; q.z = 5; return to_string(p) + to_string(q); } f()", "a reference argument", false);
+            // a call that is not the vector library takes the variable itself, whatever its name
+            agree("class Probe { function dot(math::vec3& v) -> float { v.x = 9; return 1.0; } } function f() -> string { math::vec3 p = math::vec3(1, 2, 3); Probe pr = Probe(); "
+                  "for (int i = 0; i < 3; i++) { p.y += 1; } pr.dot(p); p.z += 1; var sp = p; return to_string(sp); } f()", "a user method named like a vector method", false);   // the method takes p itself: p stays boxed
+            agree("class Probe { function length(math::vec3& v) -> float { v.x = 9; return 1.0; } } function f() -> string { math::vec3 p = math::vec3(1, 2, 3); var pr = Probe(); "
+                  "for (int i = 0; i < 3; i++) { p.y += 1; } float l = pr.length(p); p.z += l; var sp = p; return to_string(sp); } f()", "an untyped receiver's method named like a vector method", false);
+            agree("namespace math { function length(math::vec3& v) -> float { v.x = 9; return 2.0; } } function f() -> string { math::vec3 p = math::vec3(3, 4, 0); float l = 0.0; "
+                  "for (int i = 0; i < 2; i++) { l += math::length(p); } float px = p.x; return to_string(l) + \" \" + to_string(px); } f()", "a math:: name is the library's");
+            // every node kind that evaluates an expression sees the lowered components
+            agree("function f() -> string { math::vec3 p = math::vec3(1, 2, 3); for (int i = 0; i < 3; i++) { p.x += 1; } string m = \"\"; "
+                  "try { import(p.x > 2.0 ? \"lowering_missing_a.jai\" : \"lowering_missing_b.jai\"); } catch (e) { m = e; } float px = p.x; return m + to_string(px); } f()", "a computed import path");
+            agree("function f() -> string { math::vec3 p = math::vec3(1, 2, 3); for (int i = 0; i < 3; i++) { p.x += 1; } string m = \"\"; "
+                  "try { var r = include(p.x > 2.0 ? \"lowering_missing_a.jai\" : \"lowering_missing_b.jai\"); } catch (e) { m = e; } float px = p.x; return m + to_string(px); } f()", "a computed include path");
+            agree("function f() -> string { math::vec3 p = math::vec3(1, 2, 3); for (int i = 0; i < 3; i++) { p.x += 1; } auto l = [q = p.x, w = p]() { return q + w.y; }; p.x = 0; float px = p.x; return to_string(l()) + to_string(px); } f()",
+                  "an init-capture", false);   // a lambda's init-captures read the variable: it stays boxed
             agree("function f() -> string { math::vec2 a = math::vec2(1e30, 1); math::vec2 b = a * 1e30; math::vec2 z = math::vec2(0, 0) * -1.0; return to_string(b) + to_string(z) + to_string(b - b); } f()", "infinities, NaN and negative zero");
             // raising statements leave their target as it was, with the boxed texts
             expect("function f() -> string { math::ivec2 a = math::ivec2(2147483647, 5); string m = \"\"; try { a = a + math::ivec2(1, 0); } catch (e) { m = e; } return m + to_string(a); } f()",
@@ -448,17 +483,17 @@ public:
                   "for (int i = 0; i < pts.size(); i++) { pts[i].x += 1; pts[i].z *= 0.5; math::vec3 p = pts[i]; s += p.x + p.y + p.z; } "
                   "for (auto& p : pts) { p.y = -p.y; } return pts.join(\" \") + to_string(s); } f()", "a typed loop over a vector buffer");
             agree("function f() -> string { array<math::ivec2> cells = [math::ivec2(1, 2), math::ivec2(3, 4)]; math::ivec2 acc; for (int i = 0; i < cells.size(); i++) { acc += cells[i] * 2; cells[i].y -= acc.x; } "
-                  "return to_string(acc) + cells.join(\" \"); } f()", "ivec elements into a lowered accumulator");
+                  "var sa = acc; return to_string(sa) + cells.join(\" \"); } f()", "ivec elements into a lowered accumulator");
             agree("function f(array<math::vec2>& pts, array<math::ivec3> cells) -> string { int i = 1; float dy = 0.25; pts[i].x = 3; pts[i].y += dy; pts[0].x *= 2; pts[0].y -= 1; pts[i].x++; "
                   "cells[i].z = 7; cells[0].x += 5; cells[0].y *= -3; cells[i].x /= 2; cells[i].y %= 3; cells[0].z--; float s = pts[i].x + pts[0].y + cells[i].z; "
                   "return pts.join(\" \") + cells.join(\" \") + to_string(s); } array<math::vec2> p = [math::vec2(1, 2), math::vec2(3, 4)]; array<math::ivec3> c = [math::ivec3(1, 2, 3), math::ivec3(4, 5, 6)]; f(p, c) + p.join(\" \")",
-                  "element component stores and reads, by reference and by value");
+                  "element component stores and reads, by reference and by value", false);   // the vm's element lanes, no rewrite
             agree("function f() -> string { array<math::vec2> pts = [math::vec2(1, 2)]; array<math::ivec2> cells = [math::ivec2(2147483647, 0)]; int i = 3; string m = \"\"; "
                   "try { pts[i].x = 1; } catch (e) { m += e + \"|\"; } try { var q = pts[i].y; } catch (e) { m += e + \"|\"; } try { cells[0].x += 1; } catch (e) { m += e + \"|\"; } "
                   "try { cells[0].y = 3000000000; } catch (e) { m += e + \"|\"; } try { cells[0].y = 1.5; } catch (e) { m += e + \"|\"; } try { pts[0].x /= 0; } catch (e) { m += e + \"|\"; } "
                   "try { pts[0].x = \"a\"; } catch (e) { m += e + \"|\"; } return m + pts.join(\" \") + cells.join(\" \"); } f()", "element component texts");
             agree("function f() -> string { array<math::color> cs = [math::color(0.5, 0.25, 1, 1)]; array<math::vec4> qs = [math::vec4(1, 2, 3, 4)]; int k = 0; cs[k].g *= 2; cs[k].a = 0.5; qs[k].w += cs[k].g; "
-                  "math::vec4 q = qs[k]; math::color c = cs[0]; q.x += c.r; return to_string(q) + to_string(c) + qs.join(\" \"); } f()", "colors and vec4 elements unpack into lowered locals");
+                  "math::vec4 q = qs[k]; math::color c = cs[0]; q.x += c.r; var sq = q; var sc = c; return to_string(sq) + to_string(sc) + qs.join(\" \"); } f()", "colors and vec4 elements unpack into lowered locals");
             agree("function f() -> string { array<math::vec3> a = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)]; math::vec3 v = math::vec3(0.5, 0.25, 2); float dt = 0.1; int i = 0; int j = 1; string m = \"\"; "
                   "a[i] += v * dt; a[j] -= v; a[i] *= 2.0; a[j] = v + v; a[i] = math::vec3(a[i].y, a[i].x, a[j].z); a[j] += a[i]; a[i] = a[j] * 0.5; "
                   "try { a[i] /= math::vec3(1, 0, 1); } catch (e) { m += e + \"|\"; } int k = 5; try { a[k] += v; } catch (e) { m += e + \"|\"; } "
@@ -525,7 +560,10 @@ public:
                                              "math::vec2 r = math::ivec2(1, 0).rotated(0.5); float l = math::length(a) + a.distance_to(b) + math::angle_between(a, b); int k = math::dot(math::ivec3(), math::ivec3());"),
                      "the geometry library types its results");
             check_eq(std::string("math::vec3 has no member 'foo'|"), errors("math::vec3 v; var q = v.foo();"), "an unknown method");
-            check_eq(std::string("'dot' expects 1 argument|"), errors("math::vec3 v; var q = v.dot();"), "a method's arity");        });
+            check_eq(std::string("'dot' expects 1 argument|"), errors("math::vec3 v; var q = v.dot();"), "a method's arity");
+            check_eq(std::string(""), errors("math::vec3 p; math::vec3 a = math::min(p); float c = math::length(p, p);"),
+                     "a library call's count is the kernel's runtime error (docs/static_checking.md), its result untyped");
+        });
     }
 };
 

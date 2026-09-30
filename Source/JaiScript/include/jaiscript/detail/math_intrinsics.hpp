@@ -607,7 +607,7 @@ namespace jai::detail {
             return math::make(math::family_kind(false, dims), f, unused, eng);
         }
 
-        inline const char* arity_text(math_fn fn) noexcept {
+        constexpr const char* arity_text(math_fn fn) noexcept {
             switch (fn) {
                 case math_fn::dot_: return "math::dot expects 2 arguments";
                 case math_fn::cross_: return "math::cross expects 2 arguments";
@@ -639,6 +639,65 @@ namespace jai::detail {
                 default: return "math::distance_squared expects two vectors of the same dimensions";
             }
         }
+    }
+
+    // The argument counts a math:: library function takes and the text any other count raises: one table for the static
+    // checker (a load error), the aggregate lowering (an unmatched count keeps the boxed call) and the kernel both backends
+    // run. `low`..`high` are the counts; `also` one more count outside that range (0 = none). The constructors and the
+    // lowering's own steps check their arguments themselves (0..255).
+    struct math_arity { uint8_t low = 0; uint8_t high = 255; uint8_t also = 0; const char* text = nullptr; };
+    constexpr math_arity math_arity_of(math_fn fn) noexcept {
+        switch (fn) {
+            case math_fn::floor_: return {1, 1, 0, "math::floor expects 1 argument"};
+            case math_fn::ceil_: return {1, 1, 0, "math::ceil expects 1 argument"};
+            case math_fn::round_: return {1, 1, 0, "math::round expects 1 argument"};
+            case math_fn::itrunc: return {1, 1, 0, "math::itrunc expects 1 argument"};
+            case math_fn::ifloor: return {1, 1, 0, "math::ifloor expects 1 argument"};
+            case math_fn::sqrt_: return {1, 1, 0, "math::sqrt expects 1 argument"};
+            case math_fn::pow_: return {2, 2, 0, "math::pow expects 2 arguments"};
+            case math_fn::abs_: return {1, 1, 0, "math::abs expects 1 argument"};
+            case math_fn::min_: return {2, 2, 0, "math::min expects 2 arguments"};
+            case math_fn::max_: return {2, 2, 0, "math::max expects 2 arguments"};
+            case math_fn::clamp_: return {3, 3, 0, "math::clamp expects 3 arguments (value, lo, hi)"};
+            case math_fn::sin_: return {1, 1, 0, "math::sin expects 1 argument"};
+            case math_fn::cos_: return {1, 1, 0, "math::cos expects 1 argument"};
+            case math_fn::tan_: return {1, 1, 0, "math::tan expects 1 argument"};
+            case math_fn::atan2_: return {2, 2, 0, "math::atan2 expects 2 arguments (y, x)"};
+            case math_fn::distance: return {2, 2, 4, "math::distance expects 2 vectors or 4 arguments (x1, y1, x2, y2)"};
+            case math_fn::distance_squared: return {2, 2, 4, "math::distance_squared expects 2 vectors or 4 arguments (x1, y1, x2, y2)"};
+            case math_fn::radians_to_degrees: return {1, 1, 0, "math::radians_to_degrees expects 1 argument"};
+            case math_fn::degrees_to_radians: return {1, 1, 0, "math::degrees_to_radians expects 1 argument"};
+            case math_fn::random_: case math_fn::random_range: return {0, 0, 2, "math::random expects 0 or 2 arguments (min, max)"};
+            case math_fn::random_seed: return {1, 1, 0, "math::random_seed expects 1 argument"};
+            case math_fn::wrap_add_: return {2, 2, 0, "math::wrap_add expects 2 arguments"};
+            case math_fn::wrap_sub_: return {2, 2, 0, "math::wrap_sub expects 2 arguments"};
+            case math_fn::wrap_mul_: return {2, 2, 0, "math::wrap_mul expects 2 arguments"};
+            case math_fn::lerp_: return {3, 3, 0, "math::lerp expects 3 arguments (start, end, percent)"};
+            case math_fn::mix_: return {3, 3, 0, "math::mix expects 3 arguments (start, end, percent)"};
+            case math_fn::unmix_: return {3, 3, 0, "math::unmix expects 3 arguments (start, end, value)"};
+            case math_fn::mix_in_: case math_fn::mix_out_: case math_fn::mix_in_out_: case math_fn::mix_out_in_:
+            case math_fn::unmix_in_: case math_fn::unmix_out_: case math_fn::unmix_in_out_: case math_fn::unmix_out_in_:
+                return {4, 4, 0, "math:: eased mix/unmix expects 4 arguments (start, end, percent_or_value, strength)"};
+            case math_fn::remap_: return {5, 5, 0, "math::remap expects 5 arguments (value, in_lo, in_hi, out_lo, out_hi)"};
+            case math_fn::mix_rgb_: return {3, 3, 0, "math::mix_rgb expects (math::color, math::color, float)"};
+            case math_fn::mix_hsv_: return {3, 3, 0, "math::mix_hsv expects (math::color, math::color, float)"};
+            case math_fn::dot_: case math_fn::cross_: case math_fn::reflect_: case math_fn::project_: case math_fn::angle_between_:
+                return {2, 2, 0, geometry::arity_text(fn)};
+            case math_fn::length_: case math_fn::length_squared_: case math_fn::normalize_: case math_fn::perpendicular_:
+                return {1, 1, 0, geometry::arity_text(fn)};
+            case math_fn::rotate_: return {2, 3, 0, geometry::arity_text(fn)};
+            default: return {};
+        }
+    }
+    constexpr bool math_arity_accepts(const math_arity& a, size_t argc) noexcept {
+        return (argc >= a.low && argc <= a.high) || (a.also != 0 && argc == a.also);
+    }
+    constexpr bool math_arity_accepts(math_fn fn, size_t argc) noexcept { return math_arity_accepts(math_arity_of(fn), argc); }
+    // the kernel's per-case form: the counts fold to constants
+    template <math_fn F>
+    constexpr bool math_arity_ok(size_t argc) noexcept {
+        constexpr math_arity arity = math_arity_of(F);
+        return math_arity_accepts(arity, argc);
     }
 
     // dot, cross, length, length_squared, normalize, reflect, project, angle_between, perpendicular, rotate, and distance /
@@ -968,19 +1027,19 @@ namespace jai::detail {
 
         switch (fn) {
             case math_fn::floor_: {
-                if (argc != 1) return bad_arity("math::floor expects 1 argument");
+                if (!math_arity_ok<math_fn::floor_>(argc)) return bad_arity(math_arity_of(math_fn::floor_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::floor expects a numeric argument");
                 return checked_result<script_value>(script_value(std::floor(a.d()), eng));
             }
             case math_fn::ceil_: {
-                if (argc != 1) return bad_arity("math::ceil expects 1 argument");
+                if (!math_arity_ok<math_fn::ceil_>(argc)) return bad_arity(math_arity_of(math_fn::ceil_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::ceil expects a numeric argument");
                 return checked_result<script_value>(script_value(std::ceil(a.d()), eng));
             }
             case math_fn::itrunc: {
-                if (argc != 1) return bad_arity("math::itrunc expects 1 argument");
+                if (!math_arity_ok<math_fn::itrunc>(argc)) return bad_arity(math_arity_of(math_fn::itrunc).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::itrunc expects a numeric argument");
 				if (a.is_int) { return script_value(a.i, eng); }
@@ -989,7 +1048,7 @@ namespace jai::detail {
 				return script_value(result.value(), eng);
             }
             case math_fn::ifloor: {
-                if (argc != 1) return bad_arity("math::ifloor expects 1 argument");
+                if (!math_arity_ok<math_fn::ifloor>(argc)) return bad_arity(math_arity_of(math_fn::ifloor).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::ifloor expects a numeric argument");
 				if (a.is_int) { return script_value(a.i, eng); }
@@ -998,19 +1057,19 @@ namespace jai::detail {
 				return script_value(result.value(), eng);
             }
             case math_fn::sqrt_: {
-                if (argc != 1) return bad_arity("math::sqrt expects 1 argument");
+                if (!math_arity_ok<math_fn::sqrt_>(argc)) return bad_arity(math_arity_of(math_fn::sqrt_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::sqrt expects a numeric argument");
                 return checked_result<script_value>(script_value(std::sqrt(a.d()), eng));
             }
             case math_fn::pow_: {
-                if (argc != 2) return bad_arity("math::pow expects 2 arguments");
+                if (!math_arity_ok<math_fn::pow_>(argc)) return bad_arity(math_arity_of(math_fn::pow_).text);
                 const num a = read(*args[0]), b = read(*args[1]);
                 if (!a.ok || !b.ok) return bad_type("math::pow expects numeric arguments");
                 return checked_result<script_value>(script_value(std::pow(a.d(), b.d()), eng));
             }
             case math_fn::abs_: {
-                if (argc != 1) return bad_arity("math::abs expects 1 argument");
+                if (!math_arity_ok<math_fn::abs_>(argc)) return bad_arity(math_arity_of(math_fn::abs_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::abs expects a numeric argument");
                 if (a.is_int) {
@@ -1025,7 +1084,7 @@ namespace jai::detail {
             }
             case math_fn::min_:
             case math_fn::max_: {
-                if (argc != 2) return bad_arity(fn == math_fn::min_ ? "math::min expects 2 arguments" : "math::max expects 2 arguments");
+                if (!math_arity_ok<math_fn::min_>(argc)) return bad_arity(math_arity_of(fn).text);
                 const num a = read(*args[0]), b = read(*args[1]);
                 if (!a.ok || !b.ok) return eval_vec_math(fn, args, argc, eng, fn == math_fn::min_ ? "math::min expects numeric arguments" : "math::max expects numeric arguments");
 				// Integer pairs stay exact above 2^53; mixed pairs keep double promotion.
@@ -1037,7 +1096,7 @@ namespace jai::detail {
                 return checked_result<script_value>(script_value(p.f, eng));
             }
             case math_fn::clamp_: {
-                if (argc != 3) return bad_arity("math::clamp expects 3 arguments (value, lo, hi)");
+                if (!math_arity_ok<math_fn::clamp_>(argc)) return bad_arity(math_arity_of(math_fn::clamp_).text);
                 const num v = read(*args[0]), lo = read(*args[1]), hi = read(*args[2]);
                 if (!v.ok || !lo.ok || !hi.ok) return eval_vec_math(fn, args, argc, eng, "math::clamp expects numeric arguments");
 				const bool below = v.is_int && lo.is_int ? v.i < lo.i : v.d() < lo.d();
@@ -1046,25 +1105,25 @@ namespace jai::detail {
                 return checked_result<script_value>(script_value(p.f, eng));
             }
             case math_fn::sin_: {
-                if (argc != 1) return bad_arity("math::sin expects 1 argument");
+                if (!math_arity_ok<math_fn::sin_>(argc)) return bad_arity(math_arity_of(math_fn::sin_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::sin expects a numeric argument");
                 return checked_result<script_value>(script_value(std::sin(a.d()), eng));
             }
             case math_fn::cos_: {
-                if (argc != 1) return bad_arity("math::cos expects 1 argument");
+                if (!math_arity_ok<math_fn::cos_>(argc)) return bad_arity(math_arity_of(math_fn::cos_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::cos expects a numeric argument");
                 return checked_result<script_value>(script_value(std::cos(a.d()), eng));
             }
             case math_fn::tan_: {
-                if (argc != 1) return bad_arity("math::tan expects 1 argument");
+                if (!math_arity_ok<math_fn::tan_>(argc)) return bad_arity(math_arity_of(math_fn::tan_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::tan expects a numeric argument");
                 return checked_result<script_value>(script_value(std::tan(a.d()), eng));
             }
             case math_fn::atan2_: {
-                if (argc != 2) return bad_arity("math::atan2 expects 2 arguments (y, x)");
+                if (!math_arity_ok<math_fn::atan2_>(argc)) return bad_arity(math_arity_of(math_fn::atan2_).text);
                 const num y = read(*args[0]), x = read(*args[1]);
                 if (!y.ok || !x.ok) return bad_type("math::atan2 expects numeric arguments");
                 return checked_result<script_value>(script_value(std::atan2(y.d(), x.d()), eng));
@@ -1072,7 +1131,7 @@ namespace jai::detail {
             case math_fn::distance:
             case math_fn::distance_squared: {
                 if (argc == 2) { return eval_geometry(fn, args, argc, eng); }
-                if (argc != 4) { return bad_arity(geometry::arity_text(fn)); }
+                if (argc != 4) { return bad_arity(math_arity_of(fn).text); }
                 const num x1 = read(*args[0]), y1 = read(*args[1]), x2 = read(*args[2]), y2 = read(*args[3]);
                 if (!x1.ok || !y1.ok || !x2.ok || !y2.ok) {
                     return bad_type(fn == math_fn::distance ? "math::distance expects numeric arguments"
@@ -1084,13 +1143,13 @@ namespace jai::detail {
                 return checked_result<script_value>(script_value(fn == math_fn::distance ? std::sqrt(d2) : d2, eng));
             }
             case math_fn::radians_to_degrees: {
-                if (argc != 1) return bad_arity("math::radians_to_degrees expects 1 argument");
+                if (!math_arity_ok<math_fn::radians_to_degrees>(argc)) return bad_arity(math_arity_of(math_fn::radians_to_degrees).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::radians_to_degrees expects a numeric argument");
                 return checked_result<script_value>(script_value(a.d() * (180.0 / 3.14159265358979323846), eng));
             }
             case math_fn::degrees_to_radians: {
-                if (argc != 1) return bad_arity("math::degrees_to_radians expects 1 argument");
+                if (!math_arity_ok<math_fn::degrees_to_radians>(argc)) return bad_arity(math_arity_of(math_fn::degrees_to_radians).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::degrees_to_radians expects a numeric argument");
                 return checked_result<script_value>(script_value(a.d() * (3.14159265358979323846 / 180.0), eng));
@@ -1101,7 +1160,7 @@ namespace jai::detail {
                     // math::random(): uniform [0.0, 1.0] inclusive
                     return checked_result<script_value>(script_value(rng.next_unit_inclusive(), eng));
                 }
-                if (argc != 2) return bad_arity("math::random expects 0 or 2 arguments (min, max)");
+                if (!math_arity_ok<math_fn::random_>(argc)) return bad_arity(math_arity_of(math_fn::random_).text);
                 const num lo = read(*args[0]), hi = read(*args[1]);
                 if (!lo.ok || !hi.ok) return bad_type("math::random expects numeric arguments");
                 if (lo.is_int && hi.is_int) {
@@ -1116,7 +1175,7 @@ namespace jai::detail {
                 return checked_result<script_value>(script_value(lo.d() + rng.next_unit_inclusive() * (hi.d() - lo.d()), eng));
             }
             case math_fn::random_seed: {
-                if (argc != 1) return bad_arity("math::random_seed expects 1 argument");
+                if (!math_arity_ok<math_fn::random_seed>(argc)) return bad_arity(math_arity_of(math_fn::random_seed).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::random_seed expects a numeric argument");
 				if (a.is_int) {
@@ -1133,11 +1192,7 @@ namespace jai::detail {
             case math_fn::wrap_mul_: {
                 // Two's-complement wraparound computed in unsigned (UB-free), integer-only:
                 // silently truncating a float would defeat the point of explicit wrap math.
-                if (argc != 2) {
-                    return bad_arity(fn == math_fn::wrap_add_ ? "math::wrap_add expects 2 arguments"
-                                   : fn == math_fn::wrap_sub_ ? "math::wrap_sub expects 2 arguments"
-                                                              : "math::wrap_mul expects 2 arguments");
-                }
+                if (!math_arity_ok<math_fn::wrap_add_>(argc)) return bad_arity(math_arity_of(fn).text);
                 const num a = read(*args[0]), b = read(*args[1]);
                 if (!a.ok || !b.ok || !a.is_int || !b.is_int) {
                     return bad_type(fn == math_fn::wrap_add_ ? "math::wrap_add expects integer arguments"
@@ -1154,15 +1209,14 @@ namespace jai::detail {
             // ---- interpolation family (formulas verbatim from the stdlib registrations) ----
             case math_fn::lerp_:
             case math_fn::mix_: {
-                if (argc != 3) return bad_arity(fn == math_fn::lerp_ ? "math::lerp expects 3 arguments (start, end, percent)"
-                                                                     : "math::mix expects 3 arguments (start, end, percent)");
+                if (!math_arity_ok<math_fn::lerp_>(argc)) return bad_arity(math_arity_of(fn).text);
                 const num s = read(*args[0]), e = read(*args[1]), t = read(*args[2]);
                 if (!s.ok || !e.ok || !t.ok) return eval_vec_math(fn, args, argc, eng, fn == math_fn::lerp_ ? "math::lerp expects numeric arguments"
                                                                                                              : "math::mix expects numeric arguments");
                 return checked_result<script_value>(script_value((t.d() * (e.d() - s.d())) + s.d(), eng));
             }
             case math_fn::unmix_: {
-                if (argc != 3) return bad_arity("math::unmix expects 3 arguments (start, end, value)");
+                if (!math_arity_ok<math_fn::unmix_>(argc)) return bad_arity(math_arity_of(math_fn::unmix_).text);
                 const num s = read(*args[0]), e = read(*args[1]), v = read(*args[2]);
                 if (!s.ok || !e.ok || !v.ok) return eval_vec_math(fn, args, argc, eng, "math::unmix expects numeric arguments");
                 return checked_result<script_value>(script_value(
@@ -1176,7 +1230,7 @@ namespace jai::detail {
             case math_fn::unmix_out_:
             case math_fn::unmix_in_out_:
             case math_fn::unmix_out_in_: {
-                if (argc != 4) return bad_arity("math:: eased mix/unmix expects 4 arguments (start, end, percent_or_value, strength)");
+                if (!math_arity_ok<math_fn::mix_in_>(argc)) return bad_arity(math_arity_of(math_fn::mix_in_).text);
                 const num s_ = read(*args[0]), e_ = read(*args[1]), p_ = read(*args[2]), k_ = read(*args[3]);
                 if (!s_.ok || !e_.ok || !p_.ok || !k_.ok) return eval_vec_math(fn, args, argc, eng, "math:: eased mix/unmix expects numeric arguments");
                 const script_float r = eased_value(fn, s_.d(), e_.d(), p_.d(), k_.d());
@@ -1213,13 +1267,13 @@ namespace jai::detail {
                 return eval_lowering_step(fn, args, argc, eng);
 
             case math_fn::round_: {
-                if (argc != 1) return bad_arity("math::round expects 1 argument");
+                if (!math_arity_ok<math_fn::round_>(argc)) return bad_arity(math_arity_of(math_fn::round_).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return eval_vec_math(fn, args, argc, eng, "math::round expects a numeric argument");
                 return checked_result<script_value>(script_value(std::round(a.d()), eng));
             }
             case math_fn::remap_: {
-                if (argc != 5) return bad_arity("math::remap expects 5 arguments (value, in_lo, in_hi, out_lo, out_hi)");
+                if (!math_arity_ok<math_fn::remap_>(argc)) return bad_arity(math_arity_of(math_fn::remap_).text);
                 const num v = read(*args[0]), il = read(*args[1]), ih = read(*args[2]), ol = read(*args[3]), oh = read(*args[4]);
                 if (!v.ok || !il.ok || !ih.ok || !ol.ok || !oh.ok) return eval_vec_math(fn, args, argc, eng, "math::remap expects numeric arguments");
                 return checked_result<script_value>(script_value(remap_value(v.d(), il.d(), ih.d(), ol.d(), oh.d()), eng));

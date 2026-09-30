@@ -269,7 +269,10 @@ rewrites.
   `angle_between`, `perpendicular`, `rotate`), as a free function or a method, becomes component arithmetic in the kernel's
   order of operations, its shared values (a length, a dot, a sine and cosine, a normalized axis) in temporaries and its
   zero cases as conditionals; an ivec argument widens exactly wherever the kernel reads doubles, and `angle_between`'s last
-  step is `acos$` (the kernel's clamped acos). The OKLab mixes run boxed on rebuilt values.
+  step is `acos$` (the kernel's clamped acos). The OKLab mixes run boxed on rebuilt values. A library call's argument
+  count is checked against one table (`math_arity_of`, `detail/math_intrinsics.hpp`): the kernel raises the table's text on
+  both backends, the lowering keeps such a call boxed, and the checker leaves its result untyped (arity is the kernel's
+  runtime error, `docs/static_checking.md`).
 - **Constructors and conversions.** `math::K(...)`, the extension forms and the typed-slot conversions between kinds
   lower to their narrowed components.
 - **Values.** A vector the program needs as a value (a call argument of a lowered expression, a container element, a
@@ -281,8 +284,17 @@ rewrites.
   when the statement stores nothing, calls nothing but the math kernel and reads no object member.
 - **Escape.** A local stays boxed when its storage could be named: a call or constructor argument (a reference
   parameter could bind it), a component passed as an argument, a reference cast, a range-for container, an increment,
-  a store in expression position (a loop update included), an explicit capture or any use inside a nested lambda,
-  function or parallel body, a loop-head declaration. Coroutine bodies and parallel bodies are not lowered.
+  a store in expression position (a loop update included), an explicit capture, an init-capture or any use inside a
+  nested lambda, function or parallel body, a loop-head declaration. A method's arguments are the vector library's
+  by-value arguments only when its receiver is a vector (a lowered local, an element of a local vector buffer, a
+  `math::` call's result); any other receiver's method may take a reference whatever its name, so its arguments escape.
+  A `math::` name resolves to the library on both backends (the same name-based resolution the lowering uses), so a
+  script function declared in a `math` namespace under a library name never runs. Coroutine bodies and parallel bodies
+  are not lowered.
+- **Coverage of the tree.** Every walk that must see every expression (the analysis's default, the yield and site
+  scans, the store and slot-read tests) takes a node's children from one list, `detail/expr_children.hpp`, and the
+  rewrite copies every kind that evaluates an expression in the function's frame (import and include paths in either
+  position, a parallel loop's containers), so a lowered local is read through its components everywhere it is read.
 - **Fallback.** A store the inline forms cannot express (a value of unknown kind, a compound store whose right side
   stores first) goes through the source slot, which keeps its typed conversion and its texts, and the components
   unpack from it.
@@ -292,8 +304,10 @@ rewrites.
   before the first execute) forces either on both backends.
 - **Gates.** The default interpreter-against-VM run is itself the lowering's differential (boxed against lowered), on
   the whole fuzz and the math band; `jaiscript_fuzz --no-lowering` runs both boxed and `--lowered-interp` both lowered,
-  so lowered and boxed agree on both backends. Suite `Math Types` runs every row lowered and boxed on both backends.
-  `engine::aggregate_lowered_locals()` counts what was lowered, and the fuzz summary reports it.
+  so lowered and boxed agree on both backends. Suite `Math Types` runs every row lowered and boxed on both backends; a
+  lowering row counts only when it runs to a value and the lowering rewrote it (a row about what stays boxed says so).
+  `engine::aggregate_lowered_locals()` counts the locals lowered and `engine::aggregate_lowered_sites()` the bodies
+  rewritten, and the fuzz summary reports the first.
 - **Source view.** Each lowered site keeps its parsed body: the checker's diagnostics and the `.jaibite` writer see it,
   the proof pass and both backends the lowered one. The debugger's locals view folds `p$x`, `p$y`, `p$z` back into `p`
   and drops the rewrite's temporaries. Error texts never name a component slot: every lowered store is of the slot's

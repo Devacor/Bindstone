@@ -81,16 +81,27 @@ incremental link is seconds rather than minutes.
 
 ## Options
 
+The build targets (tests, runner, language server, examples) and the install rules default to
+ON when JaiScript is the top-level project and OFF when it is added to another project with
+`add_subdirectory`, so a consumer builds the library alone unless it asks for more.
+
 | Option | Default | What it does |
 |---|---|---|
-| `JAISCRIPT_BUILD_TESTS` | ON | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
-| `JAISCRIPT_BUILD_RUNNER` | ON | The standalone runner / REPL |
-| `JAISCRIPT_BUILD_EXAMPLES` | ON | `jai_gloom`, `jai_crawler`, `jai_demoreel` |
+| `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
+| `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript_runner`, binary `jaiscript`) |
+| `JAISCRIPT_BUILD_LSP` | top-level | The language server `jaiscript_lsp` the VS Code extension launches |
+| `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel` |
+| `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | Compiles the DAP-over-TCP debug listener. Turn it OFF for shipping or mobile builds and no socket code is compiled in at all |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Adds the performance suites to `jaiscript_tests` (see below) |
 | `JAISCRIPT_ENABLE_PROFILING` | OFF | Profiler-friendly codegen and link flags |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
+| `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` | OFF | Inert; nothing in the runtime reads it |
+| `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | Measurement only: `/GS-` on `vm_backend.cpp` (MSVC). Never ship with it |
+| `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |
+| `GLOOM_PORT_LUA`, `GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `GLOOM_PORT_LUA55`, `GLOOM_PORT_LUAJIT`, `JAIDOOM_PORT_LUA`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL` | OFF | The comparison ports of the examples (see Comparison benchmarks) |
+| `GLOOM_COMPARISON_PADDING_CONTROLS`, `DEMOREEL_PADDING_CONTROLS`, `JAIDOOM_PADDING_CONTROLS`, `JAIDOOM_PORT_TOOLS` | OFF (`JAIDOOM_PADDING_CONTROLS` ON) | Placement controls and tools for the comparison ports |
 
 ```bash
 cmake -S . -B build -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_ENABLE_DEBUGGER=OFF
@@ -185,24 +196,45 @@ JaiScript/
 
 ## Consuming it from another project
 
-The library target is `jaiscript`. From a superproject:
+The library target is `jaiscript`, also spelled `JaiScript::jaiscript`; link that name and the
+include path, the C++20 requirement and the platform libraries (`ws2_32` on Windows, for the
+debugger transport) come with it. There are two routes.
+
+**From source, as a subproject.** Nothing but the library builds by default:
 
 ```cmake
-set(JAISCRIPT_BUILD_TESTS    OFF CACHE BOOL "")
-set(JAISCRIPT_BUILD_EXAMPLES OFF CACHE BOOL "")
-set(JAISCRIPT_BUILD_RUNNER   OFF CACHE BOOL "")
 add_subdirectory(JaiScript)
-
-target_link_libraries(my_game PRIVATE jaiscript)
-target_include_directories(my_game PRIVATE JaiScript/include)
+target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
 ```
 
-The explicit `target_include_directories` is not redundant: the library's exported include path
-is written relative to the top-level source directory, so it only resolves on its own when
-JaiScript *is* the top-level project. Point at `JaiScript/include` yourself when it is not.
+`FetchContent` works the same way. Options set before the `add_subdirectory` (or with `-D`)
+turn the tools back on if you want them.
 
-On Windows the library links `ws2_32` for the debugger transport and carries that dependency
-on its own interface, so a consumer needs nothing extra. On MSVC it selects the static runtime
-(`/MT`, `/MTd`); a consumer built against the DLL runtime should set `MSVC_RUNTIME_LIBRARY`
-on the `jaiscript` target after `add_subdirectory`, or the linker will complain about
-mismatched runtimes.
+**Installed, through `find_package`.** Build and install the library once per configuration;
+Debug and Release share a prefix (the Debug library is `jaiscriptd`):
+
+```bash
+cmake -S JaiScript -B build-jai -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/jaiscript       -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_LSP=OFF
+cmake --build build-jai
+cmake --install build-jai
+```
+
+```cmake
+find_package(JaiScript 0.1 CONFIG REQUIRED)          # -DCMAKE_PREFIX_PATH=/opt/jaiscript
+target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
+```
+
+On MSVC the in-tree build selects the static runtime (`/MT`, `/MTd`) for the library; a consumer
+built against the DLL runtime sets `MSVC_RUNTIME_LIBRARY` on the `jaiscript` target after
+`add_subdirectory`, or the linker complains about mismatched runtimes. The installed package
+records the runtime its library was built with in `JaiScript_MSVC_RUNTIME_LIBRARY`:
+
+```cmake
+set_property(TARGET my_game PROPERTY MSVC_RUNTIME_LIBRARY "${JaiScript_MSVC_RUNTIME_LIBRARY}")
+```
+
+MSVC consumers also compile with `/bigobj`: the binder headers overflow the default section
+limit in a Debug translation unit.
+
+`examples/embed_quickstart/` is a complete consumer: `add_subdirectory` by default,
+`-DEMBED_QUICKSTART_FIND_PACKAGE=ON -DCMAKE_PREFIX_PATH=<prefix>` for the installed package.

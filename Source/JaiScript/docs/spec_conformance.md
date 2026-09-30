@@ -63,8 +63,8 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 | 6. Script the runtime calls, user operator=, error texts, throw expressions, sort, range-for (CB-) | 38 | 2 | 6 | 30 | 0 | 32 | 5 | 1 | 0 |
 | 7. Access control (AC-) | 14 | 3 | 2 | 7 | 2 | 13 | 1 | 0 | 0 |
 | 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions (RL-) | 18 | 3 | 1 | 11 | 3 | 18 | 0 | 0 | 0 |
-| 9. The rulings of 2026-09-28 (RL2-) | 25 | 0 | 0 | 24 | 1 | 25 | 0 | 0 | 0 |
-| **Total** | **2593** | **1955** | **283** | **320** | **35** | **2196** | **224** | **145** | **28** |
+| 9. The rulings of 2026-09-28 (RL2-) | 30 | 0 | 0 | 29 | 1 | 30 | 0 | 0 | 0 |
+| **Total** | **2598** | **1955** | **283** | **325** | **35** | **2201** | **224** | **145** | **28** |
 
 ## Script the runtime calls
 
@@ -2863,3 +2863,8 @@ chapter, 02/04/05/07/09 = guide chapters. Pins are relative to `Source/JaiScript
 | RL2-23 | A native exception raised inside a non-call instruction is caught by the running function's own `try` | ruling; exc | spec:a_native_exception_is_caught_by_the_running_functions_own_try | no | pinned |
 | RL2-24 | A function called from inside a block sees the binding of the scope it was declared in (a `{}`, `if`, `for`, range-for or `catch` body); one declared inside the block keeps the block's names | ruling; gs | spec:a_callee_of_a_top_level_block_sees_the_outer_binding | no | pinned |
 | RL2-25 | A static member or a namespace variable binds a reference parameter and a reference declaration (`S::s`, `ns::x` are lvalues) | C++; ref; ns | spec:a_static_member_and_a_namespace_variable_bind_a_reference_parameter; foundry/suite_namespaces.cpp:namespace_variable_binds_a_reference_by_its_qualified_name | no | pinned |
+| RL2-26 | A constructor overload set ranks like a call (a call, `: this(...)`, `: super(...)`): typed exact > conversion > var; a typed parameter the argument does not match ranks below every candidate it matches | Astra probe var-ctor-order-control; the one script-overload scorer | spec:a_constructor_overload_set_ranks_like_a_call | no | pinned |
+| RL2-27 | A store through a reference into a typed variable takes a copy, as the variable's own store does (no alias of the source's node) | ruling Q13; value semantics | spec:a_store_through_a_reference_copies_like_the_variables_own_store | no | pinned |
+| RL2-28 | A member or implicit-this `/=` divides like the local's (int / int as integers, no float detour) | simplification audit F9; Dev: one semantics per compound operator | spec:a_compound_operator_has_one_table_at_every_destination | no | pinned |
+| RL2-29 | `+=` has one table at every destination: a text target appends a string, a char or a utf8_string; any other pairing with a text side raises `Cannot apply '+=' to X and Y` (a local, a field, this's field, an element, a map entry, a string subscript, a reference) | simplification audit F10, F11's texts | spec:a_compound_operator_has_one_table_at_every_destination; language/review_regression_tests.cpp:subscript_compound_string_base_text | no | pinned |
+| RL2-30 | One zero-divisor text per operator family: `/` and `/=` raise `Division by zero` (code division_by_zero), `%` and `%=` raise `Modulo by zero` (code modulo_by_zero), on every kind and destination | simplification audit F12; Dev: one div-by-zero text | spec:a_compound_operator_has_one_table_at_every_destination | no | pinned |

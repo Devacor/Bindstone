@@ -2271,6 +2271,10 @@ bool engine::miss_injection_available() {
 #endif
 }
 
+cell_counters engine::cells_counters() const {
+    return impl && impl->backend ? impl->backend->cells_counters() : cell_counters{};
+}
+
 void engine::disassembly_sink(disassembly_sink_fn sink) {
     impl->disassembly_sink_ = std::move(sink);
 }

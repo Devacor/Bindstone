@@ -26,6 +26,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/string_element.hpp>
+#include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
@@ -467,9 +468,11 @@ detail::caller_frame_view vm_backend::caller_view(frame* f) const {
 void vm_backend::arm_execution_deadline() {
 	budget_tick_ = 0;
 	budget_active_ = execution_budget_.count() > 0;
+	const auto now = std::chrono::steady_clock::now();   // one read serves the deadline and the coarse clock
 	if (budget_active_) {
-		execution_deadline_ = std::chrono::steady_clock::now() + execution_budget_;
+		execution_deadline_ = now + execution_budget_;
 	}
+	if (engine_ && !parallel_worker_ && !engine_->parallel_region_active()) { engine_->execution_limits().coarse_now = now.time_since_epoch().count(); }
 }
 
 bool vm_backend::execution_budget_exhausted() {
@@ -484,7 +487,9 @@ bool vm_backend::execution_budget_exhausted() {
 	// An armed debug session suspends the wall-clock deadline (a parked script must not
 	// be killed by the act of debugging); sync_debug_hook re-arms fresh on session end.
 	if (!budget_active_ || debug_hook_) { return false; }
-	if (std::chrono::steady_clock::now() < execution_deadline_) { return false; }
+	const auto now = std::chrono::steady_clock::now();
+	limits_->coarse_now = now.time_since_epoch().count();
+	if (now < execution_deadline_) { return false; }
 	// Budget overruns are TERMINAL: no script catch may swallow a timeout
 	limits_->terminal_error = true;
 	return true;
@@ -16936,41 +16941,65 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// The import step (KEEP BYTE-PARALLEL with interpreter::import_step): a = the site node (import_decl or import_expr), b =
+// computed path values on the stack, c = 1 when the step yields whether a module (re)ran (the call form)
 op_status vm_backend::exec_import(frame& f, const vm_instruction& ins) {
-	std::string path;
-	if (ins.b) {
-		script_value path_value = std::move(stack_.back());
-		stack_.pop_back();
-		const script_value& resolved = path_value.deref();
-		if (resolved.type() != script_value_type::jai_string_type) {
-			return raise_(make_error_code(runtime_error_code::type_mismatch));
-		}
-		path = resolved.as<std::string>();
-	} else {
-		path = std::string(f.code->messages[ins.a]);
-	}
 	if (!engine_) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
-	if (engine_->import_is_idle(path)) {   // the stamp check alone (KEEP BYTE-PARALLEL with interpreter::visit_import_decl)
-		stack_.push_back(make_null());
-		return {};
+	const ast_node* node = f.code->nodes[ins.a].get();
+	const bool yields = ins.c != 0;
+	import_site* site = nullptr;
+	const std::vector<std::string>* literal = nullptr;
+	bool force = false;
+	std::vector<std::string> paths;
+	if (node->get_type() == node_type::import_expr) {
+		auto* call = static_cast<const import_expr*>(node);
+		site = &call->site;
+		literal = &call->paths;
+		force = call->force;
+	} else {
+		auto* decl = static_cast<const import_decl*>(node);
+		site = &decl->site;
+		if (!ins.b) { paths.push_back(decl->path); }
 	}
-
-	auto resolve_result = jai::resolve_include_path(path, engine_);
-	if (!resolve_result) {
-		return raise_from(resolve_result);
+	if (ins.b) {
+		const size_t base = stack_.size() - ins.b;
+		for (size_t i = base; i < stack_.size(); ++i) {
+			auto added = detail::append_import_paths(stack_[i], paths, engine_);
+			if (!added) {
+				while (stack_.size() > base) { stack_.pop_back(); }
+				return raise_from(added);
+			}
+		}
+		while (stack_.size() > base) { stack_.pop_back(); }
+		if (!force && engine_->import_skips(*site, paths)) {
+			if (yields) { stack_.push_back(script_value(false, engine_)); }
+			return {};
+		}
+	} else {
+		if (!force && engine_->import_skips(*site)) {
+			if (yields) { stack_.push_back(script_value(false, engine_)); }
+			return {};
+		}
+		if (literal) { paths = *literal; }
 	}
-	std::string resolved_path = std::move(resolve_result.value());
-
 	nested_failure_.parked = false;
 	try {
-		script_value result = engine_->execute_import(resolved_path);
-		stack_.push_back(std::move(result));
+		auto ran = engine_->import_modules(*site, paths, force);
+		if (!ran) { return raise_from(ran); }
+		if (yields) { stack_.push_back(script_value(ran.value(), engine_)); }
 	} catch (const std::exception& e) {
-		return raise_nested_failure(e);
+		return yields ? raise_nested_failure(e) : raise_nested_failure_statement(e);
 	}
 	return {};
+}
+
+// an import statement's failure: the include's re-raise without the result slot an expression would leave
+op_status vm_backend::raise_nested_failure_statement(const std::exception& e) {
+	const op_status status = raise_nested_failure(e);
+	if (status != op_status::failed && is_unwinding_ && !stack_.empty()) { stack_.pop_back(); }
+	return status;
 }
 
 // KEEP BYTE-PARALLEL with interpreter::raise_nested_failure

@@ -60,6 +60,7 @@ namespace jai {
         yield_expr,
         include_expr,   // include in expression position: evaluates to the file's result
         cast_expr,      // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e)
+        import_expr,    // import(...): the call form, true when a module (re)ran
 
         // Statements (20-39)
         expression_stmt = 20,
@@ -475,6 +476,29 @@ namespace jai {
 
         include_expr(const source_location& loc, expression_ptr expr)
             : expression(loc, node_type::include_expr), path(), path_expr(expr) {}    };
+
+    // An import site's memory for the engine-wide check pass (engine::import_skips): the sites that loaded their modules
+    // under the engine's import generation skip while no pass is open; a computed site remembers the paths it loaded
+    struct import_site {
+        uint64_t seen_generation = 0;
+        uint64_t seen_paths_generation = 0;
+        std::vector<uint64_t> seen_paths;
+        uint64_t pass_id = 0;               // the check pass this site last reached in
+        std::vector<uint64_t> pass_paths;   // the paths it checked in that pass: one reached again means the loop wrapped
+    };
+
+    // import(...): the call form. Each argument is a path or an array of paths (every argument a string literal: `paths`
+    // holds them, else `path_exprs` the arguments), an optional trailing jai::force. One throttle decision for the whole
+    // list, every changed module parsed and checked before any runs (engine::import_modules); true when a module (re)ran.
+    class import_expr : public expression {
+    public:
+        std::vector<std::string> paths;
+        std::vector<expression_ptr> path_exprs;
+        bool force = false;
+        mutable import_site site;
+
+        explicit import_expr(const source_location& loc) : expression(loc, node_type::import_expr) {}
+    };
 
     // Ternary expression
     class ternary_expr : public expression {
@@ -963,7 +987,10 @@ namespace jai {
 
         // Constructor for expression syntax: import(expr)
         import_decl(const source_location& loc, expression_ptr expr)
-            : declaration(loc, node_type::import_decl), path(), path_expr(expr) {}    };
+            : declaration(loc, node_type::import_decl), path(), path_expr(expr) {}
+
+        mutable import_site site;
+    };
 
     // Enum declaration
     class enum_decl : public declaration {

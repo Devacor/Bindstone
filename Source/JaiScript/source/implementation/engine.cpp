@@ -668,8 +668,23 @@ struct engine::implementation {
         // one second never re-imported under GCC builds)
         uint64_t mtime = 0;
         uint64_t size = 0;
+        uint64_t checked_pass = 0;   // the check pass that last looked at the stamp
+        // a check failure at this stamp: the module (and a group naming it) waits until the file changes again
+        bool failed = false;
+        uint64_t failed_mtime = 0;
+        uint64_t failed_size = 0;
     };
     std::unordered_map<std::string, import_record> import_cache;
+    // the engine-wide import check pass (engine::import_recheck_interval): the window in steady ticks, the generation every
+    // setting that changes what an import would do moves (a site that loaded under another generation resolves again), the
+    // pass counter, the reach counter that decides when the coarse clock is refreshed, the filesystem query counter
+    int64_t import_recheck_ticks_ = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::milliseconds(200)).count();
+    double import_recheck_seconds_ = 0.2;
+    uint64_t import_generation_ = 1;
+    uint64_t import_pass_id_ = 0;
+    uint32_t import_reach_count_ = 0;
+    uint64_t import_stats_ = 0;
+    std::string cwd_;   // the working directory resolution keys use, refreshed when a check pass opens
     struct resolution_entry {
         std::vector<std::string> misses;   // the earlier rungs' candidates, which held no file
         std::string candidate;             // the rung that answered
@@ -3411,6 +3426,7 @@ void engine::register_privilege_builtins() {
     auto& jai_namespace = script_namespaces()[symbolize("jai")];
     if (!jai_namespace) { jai_namespace = std::make_shared<script_namespace_data>(); }
     jai_namespace->variables[symbolize("filesystem")] = script_value(static_cast<script_int>(privilege::filesystem), this);
+    jai_namespace->variables[symbolize("force")] = script_value(std::string("jai::force"), this);   // the import directive (import("m.jai", jai::force)), visible as a value
     auto& reflect_namespace = script_namespaces()[symbolize("reflect")];
     if (!reflect_namespace) { reflect_namespace = std::make_shared<script_namespace_data>(); }
     reflect_namespace->variables[symbolize("is_enabled")] = script_value::make_function(
@@ -3872,6 +3888,20 @@ void engine::register_location_builtins() {
             m[script_value(std::string("is_directory"), this)] = script_value(st.is_directory, this);
             return data;
         }, privilege::filesystem), 1, {param_type_info(script_value_type::jai_string_type)});
+    // import_recheck_interval(seconds) sets the import re-check window, import_recheck_interval() reads it (not a file operation)
+    add_variadic_function("import_recheck_interval", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.empty()) { return script_value(import_recheck_interval(), this); }
+        const script_value& v = args[0].deref();
+        if (args.size() != 1 || !(v.is_int() || v.is_float())) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "import_recheck_interval() takes no argument or one number of seconds");
+        }
+        const double seconds = v.is_int() ? static_cast<double>(v.unchecked_as_int()) : v.unchecked_as_float();
+        if (!(seconds >= 0.0) || seconds > 1.0e9) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "import_recheck_interval() takes 0 to 1e9 seconds");
+        }
+        import_recheck_interval(seconds);
+        return script_value(std::monostate{}, this);
+    });
     add_function("app_data_dir", [this](const std::string& app) -> std::string { return app_data_dir(app); }, privilege::filesystem);
     add_function("app_cache_dir", [this](const std::string& app) -> std::string { return app_cache_dir(app); }, privilege::filesystem);
 }
@@ -3942,16 +3972,282 @@ conversions::conversion_manager engine::get_conversion_manager() {
 void engine::include_paths(const std::vector<std::string>& paths) {
     impl->include_paths = paths;
     impl->resolution_memo_.clear();
+    ++impl->import_generation_;
 }
 
 void engine::add_include_path(const std::string& path) {
     impl->include_paths.push_back(path);
     impl->resolution_memo_.clear();
+    ++impl->import_generation_;
 }
 
 void engine::clear_include_paths() {
     impl->include_paths.clear();
     impl->resolution_memo_.clear();
+    ++impl->import_generation_;
+}
+
+void engine::import_recheck_interval(double seconds) {
+    if (!(seconds >= 0.0) || seconds > 1.0e9) { throw runtime_error("import_recheck_interval must be between 0 and 1e9 seconds"); }
+    impl->import_recheck_seconds_ = seconds;
+    impl->import_recheck_ticks_ = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(seconds)).count();
+    impl->limits_.import_pass_open = false;   // the next import reached opens a pass under the new window
+    impl->limits_.import_window_until = 0;
+}
+
+double engine::import_recheck_interval() const {
+    return impl->import_recheck_seconds_;
+}
+
+namespace {
+    uint64_t import_path_hash(const std::string& path) noexcept {
+        uint64_t h = 1469598103934665603ull;
+        for (const unsigned char c : path) { h = (h ^ c) * 1099511628211ull; }
+        return h;
+    }
+    bool import_hash_seen(const std::vector<uint64_t>& seen, uint64_t h) noexcept {
+        for (const uint64_t s : seen) { if (s == h) { return true; } }
+        return false;
+    }
+}
+
+bool engine::import_skips(const import_site& site) noexcept {
+    detail::execution_limits& limits = impl->limits_;
+    if ((++impl->import_reach_count_ & 15u) == 0) { limits.coarse_now = std::chrono::steady_clock::now().time_since_epoch().count(); }
+    return !limits.import_pass_open && site.seen_generation == impl->import_generation_ && limits.coarse_now < limits.import_window_until &&
+           impl->import_behavior != import_behavior::always && (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) != 0;
+}
+
+bool engine::import_skips(const import_site& site, const std::vector<std::string>& paths) noexcept {
+    detail::execution_limits& limits = impl->limits_;
+    if ((++impl->import_reach_count_ & 15u) == 0) { limits.coarse_now = std::chrono::steady_clock::now().time_since_epoch().count(); }
+    if (limits.import_pass_open || site.seen_paths_generation != impl->import_generation_ || limits.coarse_now >= limits.import_window_until ||
+        impl->import_behavior == import_behavior::always || (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) == 0) {
+        return false;
+    }
+    for (const auto& p : paths) { if (!import_hash_seen(site.seen_paths, import_path_hash(p))) { return false; } }
+    return true;
+}
+
+uint64_t engine::import_stat_count() const noexcept {
+    return impl->import_stats_;
+}
+
+
+// The reach the pass lets through. A pass opens here when forced or when none is open and the window expired; a site that
+// reaches a path it already checked in the open pass (the frame loop came around) closes it, and a new one opens only once
+// the window expired. Outside a pass only modules that never ran load. Inside one every module is stat'd once per pass; the
+// changed ones (a module whose current stamp failed its check holds the whole list back) are read, parsed and checked
+// before any of them runs, then run in order.
+checked_result<bool> engine::import_modules(import_site& site, const std::vector<std::string>& paths, bool force) {
+    auto allowed = require_privilege(privilege::filesystem);
+    if (!allowed) { return allowed.error_value(); }
+    implementation& I = *impl;
+    detail::execution_limits& limits = I.limits_;
+    const bool always = I.import_behavior == import_behavior::always;
+    const bool once = I.import_behavior == import_behavior::once;
+    const auto clock = [] { return std::chrono::steady_clock::now().time_since_epoch().count(); };
+    const auto open_pass = [&] {
+        limits.coarse_now = clock();
+        limits.import_pass_open = true;
+        limits.import_window_until = limits.coarse_now + I.import_recheck_ticks_;
+        ++I.import_pass_id_;
+        I.cwd_.clear();
+    };
+    const bool nested = !I.importing_.empty();
+    if (!parallel_region_active()) {
+        if (force) { open_pass(); }
+        else if (!limits.import_pass_open && clock() >= limits.import_window_until) { open_pass(); }
+    }
+
+    // an answer the ladder remembers from the asking folder itself stands unverified until the module's stamp query, which
+    // verifies it (the file is gone: the full ladder); anything else takes the ladder now
+    struct import_unit { const std::string* path = nullptr; std::string resolved; uint64_t hash = 0; uint64_t mtime = 0, size = 0; bool stamped = false, remembered = false; };
+    std::vector<import_unit> mods;
+    mods.reserve(paths.size());
+    const std::string from = current_source_file();
+    for (const auto& path : paths) {
+        import_unit m;
+        m.path = &path;
+        m.hash = import_path_hash(path);
+        auto memo = I.resolution_memo_.find(resolution_key(path, from));
+        if (memo != I.resolution_memo_.end() && memo->second.misses.empty()) {
+            m.resolved = memo->second.resolved;
+            m.remembered = true;
+        } else {
+            ++I.import_stats_;
+            auto resolved = resolve_include_path(path, this, from);
+            if (!resolved) { return resolved.error_value(); }
+            m.resolved = std::move(resolved.value());
+        }
+        mods.push_back(std::move(m));
+    }
+    const auto stamp = [&](import_unit& m) -> checked_result<void> {
+        ++I.import_stats_;
+        m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
+        if (m.stamped || !m.remembered) { return {}; }
+        m.remembered = false;
+        ++I.import_stats_;
+        auto resolved = resolve_include_path(*m.path, this, from);
+        if (!resolved) { return resolved.error_value(); }
+        m.resolved = std::move(resolved.value());
+        m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
+        return {};
+    };
+
+    if (limits.import_pass_open && !nested && !force) {
+        if (site.pass_id != I.import_pass_id_) { site.pass_id = I.import_pass_id_; site.pass_paths.clear(); }
+        bool wrapped = false;
+        for (const auto& m : mods) { wrapped = wrapped || import_hash_seen(site.pass_paths, m.hash); }
+        if (wrapped) {
+            limits.import_pass_open = false;
+            if (clock() >= limits.import_window_until) { open_pass(); site.pass_id = I.import_pass_id_; }
+            site.pass_paths.clear();
+        }
+    }
+    const bool checking = limits.import_pass_open || always;
+    if (limits.import_pass_open && !nested) {
+        if (site.pass_id != I.import_pass_id_) { site.pass_id = I.import_pass_id_; site.pass_paths.clear(); }
+        for (const auto& m : mods) { if (!import_hash_seen(site.pass_paths, m.hash)) { site.pass_paths.push_back(m.hash); } }
+    }
+
+    std::vector<size_t> changed;
+    bool held = false;
+    for (size_t i = 0; i < mods.size(); ++i) {
+        import_unit& m = mods[i];
+        bool dup = false;
+        for (const size_t c : changed) { dup = dup || mods[c].resolved == m.resolved; }
+        if (dup || I.importing_.count(m.resolved)) { continue; }
+        auto rec = I.import_cache.find(m.resolved);
+        if (rec == I.import_cache.end()) {
+            auto stamped = stamp(m);
+            if (!stamped) { return stamped.error_value(); }
+            changed.push_back(i);
+            continue;
+        }
+        if (always) { changed.push_back(i); continue; }
+        if (once || !checking || rec->second.checked_pass == I.import_pass_id_) { continue; }
+        rec->second.checked_pass = I.import_pass_id_;
+        const std::string before = m.resolved;
+        auto stamped = stamp(m);
+        if (!stamped) { return stamped.error_value(); }
+        if (m.resolved != before) {   // the remembered answer moved: the module the ladder finds now
+            rec = I.import_cache.find(m.resolved);
+            if (rec == I.import_cache.end()) { changed.push_back(i); continue; }
+        }
+        if (!m.stamped) { changed.push_back(i); continue; }
+        if (m.mtime == rec->second.mtime && m.size == rec->second.size) { continue; }
+        if (rec->second.failed && m.mtime == rec->second.failed_mtime && m.size == rec->second.failed_size) { held = true; continue; }
+        changed.push_back(i);
+    }
+
+    const auto mark_seen = [&] {
+        bool all = true;
+        for (const auto& m : mods) { all = all && I.import_cache.count(m.resolved) != 0; }
+        if (all) { site.seen_generation = I.import_generation_; }
+        if (site.seen_paths_generation != I.import_generation_) { site.seen_paths.clear(); site.seen_paths_generation = I.import_generation_; }
+        for (size_t i = 0; i < mods.size() && i < paths.size(); ++i) {
+            if (I.import_cache.count(mods[i].resolved) && !import_hash_seen(site.seen_paths, mods[i].hash)) { site.seen_paths.push_back(mods[i].hash); }
+        }
+    };
+    if (changed.empty() || (held && mods.size() > 1)) { mark_seen(); return false; }
+
+    const auto read_module = [](const std::string& path) {
+        std::ifstream file(path);
+        if (!file.is_open()) { throw runtime_error("Failed to open import file: " + path); }
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    };
+    const auto record_failure = [&](const import_unit& m) {
+        auto rec = I.import_cache.find(m.resolved);
+        if (rec == I.import_cache.end()) { return; }
+        rec->second.failed = true;
+        rec->second.failed_mtime = m.mtime;
+        rec->second.failed_size = m.size;
+    };
+    std::vector<std::string> contents(changed.size());
+    for (size_t k = 0; k < changed.size(); ++k) { contents[k] = read_module(mods[changed[k]].resolved); }
+
+    // two or more: every one parsed and checked (the names they declare known to each other) before any runs
+    if (changed.size() > 1 && I.static_check_mode_ != check_mode::off) {
+        std::vector<std::shared_ptr<implementation::script_cache_entry>> entries(changed.size());
+        std::string failures;
+        size_t failed = 0;
+        std::exception_ptr first;
+        for (size_t k = 0; k < changed.size(); ++k) {
+            std::filesystem::path sibling;
+            bool fresh = false;
+            try {
+                entries[k] = I.acquire_entry(*this, contents[k], mods[changed[k]].resolved, sibling, fresh);
+            } catch (const std::exception& e) {
+                record_failure(mods[changed[k]]);
+                failures += std::string(failures.empty() ? "" : "\n") + e.what();
+                if (!failed++) { first = std::current_exception(); }
+            }
+        }
+        for (size_t k = 0; k < changed.size(); ++k) {
+            if (!entries[k]) { continue; }
+            detail::collect_unit_names(entries[k]->declarations, I.program_names_);
+            detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
+            detail::collect_unit_functions(entries[k]->declarations, mods[changed[k]].resolved, I.program_functions_);
+            detail::collect_unit_globals(entries[k]->declarations, mods[changed[k]].resolved, I.program_globals_);
+        }
+        for (size_t k = 0; k < changed.size(); ++k) {
+            if (!entries[k]) { continue; }
+            const std::string& path = mods[changed[k]].resolved;
+            I.importing_.insert(path);
+            try {
+                I.gate_checked(I.checked_report(*this, *entries[k], true), contents[k], path);
+            } catch (const std::exception& e) {
+                record_failure(mods[changed[k]]);
+                failures += std::string(failures.empty() ? "" : "\n") + e.what();
+                if (!failed++) { first = std::current_exception(); }
+            }
+            I.importing_.erase(path);
+        }
+        if (failed == 1) { std::rethrow_exception(first); }
+        if (failed > 1) { throw static_check_error(failures); }
+    }
+
+    for (size_t k = 0; k < changed.size(); ++k) {
+        const import_unit& m = mods[changed[k]];
+        auto rec = I.import_cache.find(m.resolved);
+        if (rec != I.import_cache.end()) {   // stamped before it runs: a module that fails waits for its next change
+            rec->second.mtime = m.mtime;
+            rec->second.size = m.size;
+            rec->second.checked_pass = I.import_pass_id_;
+        }
+        if (!I.importing_.insert(m.resolved).second) { continue; }
+        struct importing_scope {
+            std::unordered_set<std::string>& set;
+            const std::string& path;
+            ~importing_scope() { set.erase(path); }
+        } scope{I.importing_, m.resolved};
+        try {
+            execute_source(contents[k], instance_variables{}, m.resolved);
+        } catch (const static_check_error&) {
+            record_failure(m);
+            throw;
+        } catch (const parse_error&) {
+            record_failure(m);
+            throw;
+        }
+        I.restamp_deferred(*this);
+        if (rec == I.import_cache.end()) {
+            implementation::import_record record;
+            record.resolved_path = m.resolved;
+            record.mtime = m.mtime;
+            record.size = m.size;
+            record.checked_pass = I.import_pass_id_;
+            I.import_cache[m.resolved] = record;
+        } else {
+            rec = I.import_cache.find(m.resolved);
+            if (rec != I.import_cache.end()) { rec->second.failed = false; }
+        }
+    }
+    mark_seen();
+    return true;
 }
 
 const std::string* engine::remembered_resolution(const std::string& key) {
@@ -3979,21 +4275,13 @@ const std::unordered_set<uint64_t>& engine::builtin_method_ids(int kind) {
 }
 
 std::string engine::resolution_key(const std::string& path, const std::string& from_file) {
-    std::error_code ec;
+    if (impl->cwd_.empty()) {
+        std::error_code ec;
+        impl->cwd_ = std::filesystem::current_path(ec).string();
+    }
     const std::filesystem::path p(path);
     return path + '\n' + (p.is_absolute() || from_file == "<script>" ? std::string() : std::filesystem::path(from_file).parent_path().string()) +
-           '\n' + std::filesystem::current_path(ec).string();
-}
-
-bool engine::import_is_idle(const std::string& path) {
-    if (impl->import_behavior == import_behavior::always || !is_enabled(privilege::filesystem) || parallel_region_active()) { return false; }
-    auto memo = impl->resolution_memo_.find(resolution_key(path, current_source_file()));
-    if (memo == impl->resolution_memo_.end() || !memo->second.misses.empty()) { return false; }
-    auto record = impl->import_cache.find(memo->second.resolved);
-    if (record == impl->import_cache.end()) { return false; }
-    uint64_t mtime = 0, size = 0;
-    if (!implementation::stat_mtime_size(memo->second.resolved, mtime, size)) { return false; }
-    return impl->import_behavior == import_behavior::once || (mtime == record->second.mtime && size == record->second.size);
+           '\n' + impl->cwd_;
 }
 
 void engine::remember_resolution(const std::string& key, std::vector<std::string> misses, std::string candidate, std::string resolved) {
@@ -4009,6 +4297,7 @@ std::vector<std::string> engine::get_include_paths() const {
 // Import behavior configuration
 void engine::set_import_behavior(import_behavior behavior) {
     impl->import_behavior = behavior;
+    ++impl->import_generation_;
 }
 
 engine::import_behavior engine::get_import_behavior() const {
@@ -4046,10 +4335,12 @@ namespace detail {
 // Import management
 void engine::reset_imports() {
     impl->import_cache.clear();
+    ++impl->import_generation_;
 }
 
 void engine::reset_import(const std::string& path) {
     impl->import_cache.erase(path);
+    ++impl->import_generation_;
 }
 
 bool engine::is_imported(const std::string& path) const {

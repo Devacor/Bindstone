@@ -7,6 +7,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 
 using namespace jai;
@@ -358,7 +359,25 @@ public:
             // the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)24, (int)bytes[4], "jaibite format version");   // 24: array<uint8> / array<int8> element types; 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
+            check_eq((int)26, (int)bytes[4], "jaibite format version");   // 26: import(...) is an expression (import_expr); 24: array<uint8> / array<int8> element types; 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
+            {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
+                const auto dir = jai::foundry::test_temp_directory();
+                { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }
+                { std::ofstream(dir / "jb_imp_b.jai") << "int JB_B = 4;\n"; }
+                const std::string src = "array<string> MODS = [\"jb_imp_b.jai\"];\n"
+                                        "bool one = import(\"jb_imp_a.jai\");\nbool again = import(\"jb_imp_a.jai\", \"jb_imp_b.jai\", jai::force);\nbool more = import(MODS);\n"
+                                        "to_string(one) + \"|\" + to_string(again) + \"|\" + to_string(more) + \"|\" + to_string(JB_A + JB_B);";
+                for (bool use_vm : {false, true}) {
+                    const auto setup = [&](engine& e) { e.add_include_path(dir.string()); e.import_recheck_interval(0); };
+                    auto saved = fresh_engine(use_vm, setup)->jaibite(src).save_bytes();
+                    auto load_engine = fresh_engine(use_vm, setup);
+                    auto loaded = load_engine->jaibite_load_bytes(saved);
+                    check_true(loaded.valid());
+                    check_eq(std::string("true|true|false|7"), run_once(loaded).value, "a loaded bite's imports run as parsed");
+                }
+                std::filesystem::remove(dir / "jb_imp_a.jai");
+                std::filesystem::remove(dir / "jb_imp_b.jai");
+            }
             // a loaded bite carries the attributes: a warn region's errors stay warnings on the
             // loading engine's own check, and the runtime raises
             for (const char* src : {"[[warn_mode]];\nint x = \"s\";\nx",

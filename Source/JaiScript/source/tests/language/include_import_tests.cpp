@@ -994,6 +994,149 @@ public:
             std::filesystem::remove_all(base);
         });
 
+        test("an_import_says_whether_its_module_ran", [=, this]() {
+            // import(...) is an expression: true when a module (re)ran, false when it had nothing to do; the statement form
+            // yields nothing; a group is true when any of its modules ran
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 300;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            for (bool use_vm : {false, true}) {
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(*eng);
+                eng->import_recheck_interval(0);
+                eng->add_include_path(dir.string());
+                write_module("ir_a.jai", "int IR_A = 1;\n");
+                write_module("ir_b.jai", "int IR_B = 1;\n");
+                check_true(eng->execute("import(\"ir_a.jai\");").as_bool(), "the first reach runs the module");
+                check_false(eng->execute("import(\"ir_a.jai\");").as_bool(), "an unchanged module does not run");
+                write_module("ir_a.jai", "int IR_A = 2;\n");
+                check_eq(std::string("true|2"), eng->execute("bool ran = import(\"ir_a.jai\");\nto_string(ran) + \"|\" + to_string(IR_A);").to_string());
+                check_eq(std::string("true|false"), eng->execute("bool g1 = import(\"ir_a.jai\", \"ir_b.jai\");\nbool g2 = import([\"ir_a.jai\", \"ir_b.jai\"]);\nto_string(g1) + \"|\" + to_string(g2);").to_string(),
+                         "a group is true when any module ran (ir_b's first run), then false");
+                check_eq(std::string("skip"), eng->execute("string r = \"skip\";\nif (import(\"ir_b.jai\")) { r = \"ran\"; }\nr;").to_string());
+                std::string bad;
+                try { eng->execute("var p = 5;\nimport(p);"); } catch (const std::exception& ex) { bad = ex.what(); }
+                check_true(bad.find("import(...) takes paths: strings or arrays of strings") != std::string::npos, bad);
+                std::string unknown;
+                try { eng->execute("import(\"ir_a.jai\", jai::forse);"); } catch (const std::exception& ex) { unknown = ex.what(); }
+                check_true(unknown.find("Unknown import directive 'jai::forse' (the directive is jai::force)") != std::string::npos, unknown);
+            }
+            for (const char* f : {"ir_a.jai", "ir_b.jai"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
+        test("one_check_pass_covers_every_import_a_frame_reaches", [=, this]() {
+            // the engine-wide pass: the first import reached after the window opens a pass, every import reached in it stats its
+            // modules once, the pass closes when a site reaches a path it already checked (the frame loop came around) or at the
+            // next top-level execute, and between passes an import does no file work - a frame checks every import or none
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 500;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            for (bool use_vm : {false, true}) {
+                auto eng = engine::make();
+                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(*eng);
+                check_near(0.2, eng->import_recheck_interval(), 1e-12);
+                eng->add_include_path(dir.string());
+                std::map<std::string, int> runs;
+                eng->add_function("pass_ran", [&runs](std::string m) { ++runs[m]; });
+                eng->import_recheck_interval(1.0e6);   // nothing expires by itself: every pass below is opened on purpose
+                write_module("pp_one.jai", "pass_ran(\"one\");\n");
+                write_module("pp_two.jai", "pass_ran(\"two\");\n");
+                write_module("pp_nest.jai", "import \"pp_one.jai\";\npass_ran(\"nest\");\n");
+                eng->execute("void frame() { import \"pp_one.jai\"; import \"pp_nest.jai\"; import \"pp_two.jai\"; }\nframe();");
+                check_true(runs["one"] == 1 && runs["two"] == 1 && runs["nest"] == 1, "the first frame loads every module");
+                const uint64_t warm = eng->import_stat_count();
+                eng->execute("for (int i = 0; i < 100; i++) { frame(); }");
+                check_eq(warm, eng->import_stat_count(), "between passes an import does no file work (0 queries)");
+                write_module("pp_two.jai", "pass_ran(\"two\");\n");
+                write_module("pp_nest.jai", "import \"pp_one.jai\";\npass_ran(\"nest\");\n");
+                eng->execute("frame();");
+                check_eq(1, runs["two"], "a touch waits for the next pass");
+                eng->import_recheck_interval(1.0e6);   // the window starts over: the next import reached opens a pass
+                const uint64_t before = eng->import_stat_count();
+                eng->execute("for (int i = 0; i < 5; i++) { frame(); }");
+                check_true(runs["nest"] == 2 && runs["two"] == 2 && runs["one"] == 1, "one frame took both changes (the nested import did not end the pass)");
+                check_eq(before + 3, eng->import_stat_count(), "one query per module in the pass, none in the frames after it");
+                write_module("pp_one.jai", "pass_ran(\"one\");\n");
+                eng->execute("frame();");
+                check_eq(1, runs["one"], "still inside the window");
+                eng->execute("import(\"pp_one.jai\", jai::force);");
+                check_eq(2, runs["one"], "jai::force opens a pass now");
+                eng->execute("import(\"pp_one.jai\", jai::force);");
+                check_eq(2, runs["one"], "an unchanged module does not run on a forced check");
+                // a computed site remembers the paths it ran: a module it never ran loads at once, pass or not
+                write_module("pp_late.jai", "pass_ran(\"late\");\n");
+                eng->execute("array<string> MODS = [\"pp_one.jai\", \"pp_two.jai\"];\nvoid scan() { for (auto m : MODS) { import(m); } }\nscan();\nMODS.push(\"pp_late.jai\");\nscan();");
+                check_eq(1, runs["late"], "a new path in the list loads on its first reach");
+                const uint64_t steady = eng->import_stat_count();
+                eng->execute("for (int i = 0; i < 50; i++) { scan(); }");
+                check_eq(steady, eng->import_stat_count(), "the computed site skips between passes too");
+                // 0: every reach checks
+                eng->import_recheck_interval(0);
+                const uint64_t zero = eng->import_stat_count();
+                eng->execute("for (int i = 0; i < 4; i++) { import \"pp_one.jai\"; }");
+                check_eq(zero + 4, eng->import_stat_count(), "0 checks on every reach");
+                check_near(0.0, eng->execute("import_recheck_interval();").as_float(), 1e-12);
+                eng->disable(jai::filesystem);
+                check_eq(std::string("Insufficient privilege: filesystem."), eng->execute("var m = \"\";\ntry { frame(); } catch (e) { m = e; }\nm;").to_string(), "a disabled privilege is never skipped");
+                eng->enable(jai::filesystem);
+            }
+            for (const char* f : {"pp_one.jai", "pp_two.jai", "pp_nest.jai", "pp_late.jai"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
+        test("a_group_import_checks_every_changed_module_before_any_runs", [=, this]() {
+            // import("a", "b", ...) / import(array): one throttle decision, every changed module parsed and checked (knowing each
+            // other's names) before any runs, a failure anywhere is one error that applies nothing, the changes then wait until
+            // a failing file changes again, and the modules run in the listed order
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 700;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            for (bool use_vm : {false, true}) {
+                for (bool proofs : {true, false}) {
+                    auto eng = engine::make();
+                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(*eng);
+                    if (!proofs) { eng->type_proofs(false); }
+                    eng->add_include_path(dir.string());
+                    eng->import_recheck_interval(0);
+                    write_module("gi_a.jai", "int GA = 1;\nint ga_one() { return 1; }\n");
+                    write_module("gi_b.jai", "int GB = GA * 10 + ga_one();\n");
+                    check_eq(std::string("true|11"), eng->execute("array<string> MODS = [\"gi_a.jai\", \"gi_b.jai\"];\nbool r = import(MODS);\nto_string(r) + \"|\" + to_string(GB);").to_string());
+                    write_module("gi_a.jai", "int GA = 2;\nint ga_one() { return 1; }\nint ga_two() { return 2; }\n");
+                    write_module("gi_b.jai", "int GB = \"broken\";\n");
+                    std::string failed = eng->execute("string m = \"\";\ntry { import(MODS); } catch (e) { m = e; }\nm;").to_string();
+                    check_true(failed.find("gi_b.jai") != std::string::npos, "one catchable error names the failing module: " + failed);
+                    check_eq(std::string("1|11"), eng->execute("to_string(GA) + \"|\" + to_string(GB);").to_string(), "nothing applied: gi_a's good change waits");
+                    check_eq(std::string("false|1"), eng->execute("bool again = import(MODS);\nto_string(again) + \"|\" + to_string(GA);").to_string(), "the group waits quietly until the failing file changes");
+                    write_module("gi_b.jai", "int GB = GA * 10 + ga_two();\n");
+                    check_eq(std::string("true|2|22"), eng->execute("bool fixed = import(\"gi_a.jai\", \"gi_b.jai\");\nto_string(fixed) + \"|\" + to_string(GA) + \"|\" + to_string(GB);").to_string(),
+                             "the fix applies both in order, gi_b checked against gi_a's new function");
+                    write_module("gi_a.jai", "int GA = \"x\";\n");
+                    write_module("gi_b.jai", "int GB = \"y\";\n");
+                    std::string both = eng->execute("string m = \"\";\ntry { import(MODS); } catch (e) { m = e; }\nm;").to_string();
+                    check_true(both.find("gi_a.jai") != std::string::npos && both.find("gi_b.jai") != std::string::npos, "two failures, one error: " + both);
+                    check_eq(std::string("2|22"), eng->execute("to_string(GA) + \"|\" + to_string(GB);").to_string());
+                }
+            }
+            for (const char* f : {"gi_a.jai", "gi_b.jai"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
         test("a_module_rerun_keeps_a_variable_declared_without_an_initializer", [=, this]() {
             // Dev's ruling (2026-09-27): a same-unit re-run resets a variable only when its declaration assigns; `T x;` keeps the
             // value (the first run defaults it), unless its declared type changed, which resets it to the new type's default
@@ -1070,6 +1213,7 @@ public:
                 eng->add_function("cache_imp_bump", [&bumps]() { bumps++; });
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 eng->set_import_behavior(engine::import_behavior::file_timestamp);
+                eng->import_recheck_interval(0);   // the touch and the re-import happen within the default window
                 eng->execute("import \"cache_imp.jai\"");
                 eng->execute("import \"cache_imp.jai\"");
                 check_eq(1, bumps, "unchanged file: import runs once");

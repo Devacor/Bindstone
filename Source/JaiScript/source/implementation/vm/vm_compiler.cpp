@@ -1019,16 +1019,12 @@ void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_leve
 	}
 	case node_type::import_decl: {
 		auto* imp = static_cast<import_decl*>(decl.get());
-		uint32_t path_msg = k_invalid_u32;
-		uint32_t is_expr = 0;
+		uint32_t exprs = 0;
 		if (imp->path_expr) {
 			compile_expression(imp->path_expr);
-			is_expr = 1;
-		} else {
-			path_msg = add_message(imp->path);
+			exprs = 1;
 		}
-		emit(opcode::op_import, path_msg, is_expr);
-		emit(opcode::op_pop);
+		emit(opcode::op_import, add_node(decl), exprs, 0);   // a statement: pushes nothing
 		return;
 	}
 	default:
@@ -2068,6 +2064,12 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 			path_msg = add_message(inc->path);
 		}
 		emit(opcode::op_include, path_msg, is_expr);
+		return;
+	}
+	case node_type::import_expr: {
+		auto* call = static_cast<import_expr*>(expr.get());
+		for (const auto& arg : call->path_exprs) { compile_expression(arg); }
+		emit(opcode::op_import, add_node(expr), static_cast<uint32_t>(call->path_exprs.size()), 1);   // pushes whether a module (re)ran
 		return;
 	}
 	case node_type::this_expr:

@@ -39,7 +39,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 24;   // 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 26;   // 26: import(...) is an expression (import_expr: paths, a group, jai::force; 2026-09-28); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -534,6 +534,15 @@ namespace jai::detail {
                     auto* d = static_cast<const import_decl*>(n);
                     str(d->path);
                     node(d->path_expr.get());
+                    break;
+                }
+                case node_type::import_expr: {
+                    auto* e = static_cast<const import_expr*>(n);
+                    varint(e->paths.size());
+                    for (const auto& p : e->paths) str(p);
+                    varint(e->path_exprs.size());
+                    for (const auto& a : e->path_exprs) node(a.get());
+                    flag(e->force);
                     break;
                 }
                 case node_type::extern_decl: {
@@ -1391,6 +1400,16 @@ namespace jai::detail {
                     auto d = std::make_shared<import_decl>(loc, path);
                     d->path_expr = expr_opt();
                     result = d;
+                    break;
+                }
+                case node_type::import_expr: {
+                    auto e = std::make_shared<import_expr>(loc);
+                    const uint64_t n_paths = varint();
+                    check_count(n_paths);
+                    for (uint64_t i = 0; i < n_paths; ++i) { e->paths.push_back(str()); }
+                    e->path_exprs = expr_list();
+                    e->force = flag();
+                    result = e;
                     break;
                 }
                 case node_type::extern_decl: {

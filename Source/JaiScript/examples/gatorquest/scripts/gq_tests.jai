@@ -354,6 +354,7 @@ int run_hotreload() {
 		print("hotreload edits the scripts it runs from: run hotreload.ps1, which runs it from a scratch copy");
 		return 1;
 	}
+	import_recheck_interval(0);   // every poll checks: the test edits and polls faster than the check window
 	array<string> names = ["gq_types.jai", "gq_items.jai", "gq_ai.jai", "gq_actions.jai", "gq_data.jai"];
 	array<string> copies;
 	for (int i = 0; i < names.size(); ++i) { copies.push(src + "/" + names[i]); }
@@ -366,7 +367,7 @@ int run_hotreload() {
 		if (i == 0 || i == 2) { text.replace_all("\n", "\r\n"); }
 		write_file(copies[i], text);
 	}
-	array<string> first = dev_poll(DEV_MODULES.size());
+	array<string> first = dev_poll();
 	check(first.size() == 5 && !first.join(" ").contains("FAILED"), `the five rewritten files reload without errors (${first.join("; ")})`);
 	sim_init(5);
 	BOTS = [];
@@ -380,7 +381,7 @@ int run_hotreload() {
 	int frogs = spawn_frogs_around(me, 3);
 	for (int t = 0; t < 30; ++t) { sim_tick(); }
 	check(frogs > 0 && count_frog_targets(me) == 0, `before: ${frogs} frogs next to the gator do not attack`);
-	check(dev_poll(DEV_MODULES.size()).size() == 0, "nothing reloads while nothing changed");
+	check(dev_poll().size() == 0, "nothing reloads while nothing changed");
 	int tick0 = TICK;
 	int gold0 = CHARS[0].gold;
 	int sw0 = CHARS[0].skill[Sk.swords];
@@ -399,7 +400,7 @@ int run_hotreload() {
 	write_file(copies[2], ai);
 	write_file(copies[3], replace_once(read_file(copies[3]), "int buy_price(int item) { return imax(1, ITEMS[item].value * 11 / 10); }", "int buy_price(int item) { return imax(1, ITEMS[item].value * 2); }"));
 	write_file(copies[4], replace_once(read_file(copies[4]), "\"Swamp Rat|hp=10|", "\"Swamp Rat|hp=77|"));
-	array<string> msgs = dev_poll(DEV_MODULES.size());
+	array<string> msgs = dev_poll();
 	for (int i = 0; i < msgs.size(); ++i) { print("    " + msgs[i]); }
 	int failed = 0;
 	for (int i = 0; i < msgs.size(); ++i) {
@@ -446,7 +447,7 @@ int run_hotreload() {
 	// edit 2: change the method again; the field keeps the value we give it now
 	live.reload_marks = 42;
 	write_file(copies[0], replace_once(read_file(copies[0]), "int power() { return str * 2; }", "int power() { return str * 3; }"));
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 1 && !msgs[0].contains("FAILED"), "the second edit reloads");
 	var& live2 = CHARS[0];
 	check(live2.power() == CHARS[0].str * 3 && live2.reload_marks == 42, "the method changed again and the field kept its live value (42)");
@@ -455,30 +456,30 @@ int run_hotreload() {
 	string ui0 = UI_MODE;
 	write_file(src + "/gq_state.jai", read_file(src + "/gq_state.jai") + "// touched by the hot-reload test\n");
 	write_file(src + "/gq_cstate.jai", read_file(src + "/gq_cstate.jai") + "// touched by the hot-reload test\n");
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 2 && !msgs.join(" ").contains("FAILED"), `gq_state.jai and gq_cstate.jai reload (${msgs.join("; ")})`);
 	check(state_hash() == hash1 && CHARS[0].mob == me && TICK == tick0 + 40 && UI_MODE == ui0 && PRED_ON, "every mobile, player, tick and client setting survived the state files' reload");
 	// edit 4: broken edits are rejected at the import and the running code stays
 	// (a) a constant of the wrong type: the checker rejects the module before it runs
 	write_file(copies[1], replace_once(read_file(copies[1]), "int PACK_MAX = 60;", "int PACK_MAX = \"lots\";"));
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 1 && msgs[0].contains("FAILED") && PACK_MAX == 60, `a bad constant is rejected, PACK_MAX stays 60 (${msgs.join("; ")})`);
 	write_file(copies[1], replace_once(read_file(copies[1]), "int PACK_MAX = \"lots\";", "int PACK_MAX = 60;"));
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 1 && !msgs[0].contains("FAILED"), "fixing the constant reloads cleanly");
 	// (b) a type error inside a function: rejected by the checker, the old body keeps running
 	write_file(copies[3], replace_once(read_file(copies[3]), "int buy_price(int item) { return imax(1, ITEMS[item].value * 2); }", "int buy_price(int item) { return \"free\"; }"));
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 1 && msgs[0].contains("FAILED") && buy_price(I_BREAD) == price, `a static type error is rejected, buy_price unchanged (${msgs.join("; ")})`);
 	write_file(copies[3], replace_once(read_file(copies[3]), "int buy_price(int item) { return \"free\"; }", "int buy_price(int item) { return imax(1, ITEMS[item].value * 2); }"));
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 1 && !msgs[0].contains("FAILED"), "fixing the function reloads cleanly");
 	// (c) a run-time error while the module runs: caught at the import, the constant keeps its value
 	write_file(copies[1], replace_once(read_file(copies[1]), "int PACK_MAX = 60;", "int PACK_MAX = [60][3];"));
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 1 && msgs[0].contains("FAILED") && PACK_MAX == 60, `a run-time error in a reloading module is caught, PACK_MAX stays 60 (${msgs.join("; ")})`);
 	write_file(copies[1], replace_once(read_file(copies[1]), "int PACK_MAX = [60][3];", "int PACK_MAX = 60;"));
-	msgs = dev_poll(DEV_MODULES.size());
+	msgs = dev_poll();
 	check(msgs.size() == 1 && !msgs[0].contains("FAILED") && PACK_MAX == 60, "and the fixed file reloads");
 	// keep playing on the new code
 	BOTS[0].phase_t = TICK;

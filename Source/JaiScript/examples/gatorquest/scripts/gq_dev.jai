@@ -1,17 +1,17 @@
-// Gator Quest - dev-mode hot reload. Reaching a module's import again re-runs
-// it when its file changed since it last ran: functions and classes are
-// replaced in place (live instances migrate), a declaration with an
-// initializer takes its new value, one without keeps the live value. The
-// module is checked before any of it runs, so a broken edit raises at the
-// import and the running code stays as it was. An unchanged module costs a
-// stat. The two state files reload like the rest: all they declare is state.
+// Gator Quest - dev-mode hot reload. One group import per frame reaches every
+// module: the changed ones are all parsed and checked before any of them runs,
+// so a broken edit anywhere raises once and nothing applies (the running code
+// stays as it was until the file is fixed); otherwise they re-run in load
+// order: functions and classes are replaced in place (live instances migrate),
+// a declaration with an initializer takes its new value, one without keeps the
+// live value. Between the engine's check passes the import costs nanoseconds.
+// The two state files reload like the rest: all they declare is state.
 
 import "gq_save.jai";
 
 bool DEV_ON;
 int DEV_RELOADS;
-int DEV_SCAN;                    // the next module whose stamp the HUD looks at
-map<string, string> DEV_STAMP;   // module -> "modified:size" when last seen
+map<string, string> DEV_STAMP;   // module -> "modified:size" when it last ran
 
 // every module the running game can reload, in load order (this file and the entry file are not)
 array<string> DEV_MODULES = ["gq_enums.jai", "gq_types.jai", "gq_state.jai", "gq_cstate.jai", "gq_util.jai", "gq_defs.jai",
@@ -27,27 +27,28 @@ string dev_stamp(string module) {
 
 void dev_start() {
 	DEV_STAMP = {};
-	DEV_SCAN = 0;
 	for (int i = 0; i < DEV_MODULES.size(); ++i) { DEV_STAMP[DEV_MODULES[i]] = dev_stamp(DEV_MODULES[i]); }
 }
 
-// reach every import again (a module re-runs if its file changed), then look at `scan` stamps
-// to name what reloaded: an import does not say whether it re-ran, and a stamp costs 4x an idle import
-array<string> dev_poll(int scan) {
+// the frame's reload: one import of the whole list; the stamps name what ran only on a frame where something did
+array<string> dev_poll() {
 	array<string> msgs;
+	bool ran = false;
+	try {
+		ran = import(DEV_MODULES);
+	} catch (e) {
+		string text = to_string(e);
+		string module = "?";
+		for (int i = 0; i < DEV_MODULES.size(); ++i) {
+			if (text.contains(DEV_MODULES[i])) { module = DEV_MODULES[i]; break; }
+		}
+		array<string> el = text.lines();
+		msgs.push(`Reload FAILED (${module}): ` + (el.size() > 0 ? el[0] + (el.size() > 1 ? " " + string::trim(el[1]) : "") : "?"));
+		return msgs;
+	}
+	if (!ran) { return msgs; }
 	for (int i = 0; i < DEV_MODULES.size(); ++i) {
 		string module = DEV_MODULES[i];
-		try {
-			import(module);
-		} catch (e) {
-			array<string> el = to_string(e).lines();
-			msgs.push(`Reload FAILED (${module}): ` + (el.size() > 0 ? el[0] + (el.size() > 1 ? " " + string::trim(el[1]) : "") : "?"));
-			DEV_STAMP[module] = dev_stamp(module);
-		}
-	}
-	for (int k = 0; k < scan && k < DEV_MODULES.size(); ++k) {
-		string module = DEV_MODULES[DEV_SCAN];
-		DEV_SCAN = (DEV_SCAN + 1) % DEV_MODULES.size();
 		string stamp = dev_stamp(module);
 		if (stamp == DEV_STAMP.get(module, "")) { continue; }
 		DEV_STAMP[module] = stamp;

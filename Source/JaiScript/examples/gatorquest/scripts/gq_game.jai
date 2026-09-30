@@ -418,7 +418,7 @@ void play_loop() {
 		else { client_move(held); }
 		// dev mode: an edited script re-runs on the next frame
 		if (DEV_ON) {
-			array<string> msgs = dev_poll(1);
+			array<string> msgs = dev_poll();
 			for (int i = 0; i < msgs.size(); ++i) {
 				toast(msgs[i]);
 				cv_log(CV, msgs[i], msgs[i].contains("FAILED") ? 2 : 5);

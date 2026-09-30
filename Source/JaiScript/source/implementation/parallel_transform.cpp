@@ -1184,6 +1184,8 @@ namespace {
 				return wall(e.get(), "yield is not allowed in a parallel body");
 			case node_type::include_expr:
 				return wall(e.get(), "include is not allowed in a parallel body");
+			case node_type::import_expr:
+				return wall(e.get(), "import is not allowed in a parallel body");
 			default:
 				return fail(e.get(), "expression is not allowed in a parallel body (v0)");
 			}

@@ -276,6 +276,9 @@ namespace jai::detail {
 					case node_type::throw_expr: expr(static_cast<const throw_expr*>(e)->value.get()); return;
 					case node_type::yield_expr: expr(static_cast<const yield_expr*>(e)->value.get()); return;
 					case node_type::include_expr: expr(static_cast<const include_expr*>(e)->path_expr.get()); return;
+					case node_type::import_expr:
+						for (const auto& a : static_cast<const import_expr*>(e)->path_exprs) { expr(a.get()); }
+						return;
 					default: return;
 				}
 			}

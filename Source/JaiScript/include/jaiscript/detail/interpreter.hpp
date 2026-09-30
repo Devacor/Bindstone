@@ -198,10 +198,13 @@ namespace jai {
         void arm_execution_deadline() {
             budget_tick_ = 0;
             budget_active_ = execution_budget_.count() > 0;
+            const auto now = std::chrono::steady_clock::now();   // one read serves the deadline and the coarse clock
             if (budget_active_) {
-                execution_deadline_ = std::chrono::steady_clock::now() + execution_budget_;
+                execution_deadline_ = now + execution_budget_;
             }
+            note_coarse_clock(now);
         }
+        void note_coarse_clock(std::chrono::steady_clock::time_point now);
 
 
         // Scope management for local variables
@@ -508,6 +511,9 @@ namespace jai {
         checked_result<void> visit_expression_decl(expression_decl* decl) override;
         checked_result<void> visit_include_decl(include_decl* decl) override;
         checked_result<void> visit_include_expr(include_expr* expr);
+        checked_result<void> visit_import_expr(import_expr* expr);
+        checked_result<void> import_step(import_site& site, const std::vector<std::string>& literal,
+                                         const std::vector<expression_ptr>& computed, bool force, bool yields);
         checked_result<void> include_into_value_stack(expression* path_expr_node, const std::string& literal_path);
         checked_result<void> visit_import_decl(import_decl* decl) override;
         checked_result<void> visit_enum_decl(enum_decl* decl) override;
@@ -1097,7 +1103,9 @@ namespace jai {
             // must not be killed by the act of debugging); sync_debug_hook re-arms a
             // fresh deadline when the session ends.
             if (!budget_active_ || debug_hook_) { return false; }
-            if (std::chrono::steady_clock::now() < execution_deadline_) { return false; }
+            const auto now = std::chrono::steady_clock::now();
+            limits_->coarse_now = now.time_since_epoch().count();
+            if (now < execution_deadline_) { return false; }
             // Budget overruns are TERMINAL: no script catch may swallow a timeout
             limits_->terminal_error = true;
             return true;

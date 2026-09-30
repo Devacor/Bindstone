@@ -146,8 +146,10 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_yield:
 				out << (ins.a ? " value" : " void");
 				break;
-			case opcode::op_include:
 			case opcode::op_import:
+				out << " site=" << ins.a << " exprs=" << ins.b << (ins.c ? " value" : "");
+				break;
+			case opcode::op_include:
 				if (ins.b) {
 					out << " <expr>";
 				} else if (ins.a != k_invalid_u32 && ins.a < ch.messages.size()) {

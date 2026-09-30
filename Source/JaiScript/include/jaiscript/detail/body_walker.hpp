@@ -68,6 +68,9 @@ namespace jai::detail {
 			case node_type::include_expr:
 				expr(static_cast<include_expr*>(e.get())->path_expr);
 				return;
+			case node_type::import_expr:
+				for (const auto& a : static_cast<import_expr*>(e.get())->path_exprs) expr(a);
+				return;
 			case node_type::throw_expr:
 				expr(static_cast<throw_expr*>(e.get())->value);
 				return;

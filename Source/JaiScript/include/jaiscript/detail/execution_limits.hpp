@@ -35,6 +35,14 @@ namespace jai::detail {
 
 		// The longest NUL scan one binary::reader read runs (engine::binary_scan_limit); only the host sets it
 		size_t binary_scan_limit = size_t(1) << 20;
+		// A coarse steady_clock reading (ticks): refreshed at every execute entry and at the budget's periodic samples, both
+		// of which read the clock anyway, and by the import step every 16 import reaches. Readers accept it as stale by that
+		// much (engine::import_recheck_interval)
+		int64_t coarse_now = 0;
+		// The engine-wide import check pass (engine::import_skips): open while every import reached stats its modules; no
+		// new pass opens before import_window_until (coarse ticks). A top-level execute or resume closes it.
+		bool import_pass_open = false;
+		int64_t import_window_until = 0;
 
 		// Approximate script memory accounting (engine::memory_cap). HIGH-WATER MARK:
 		// charges only grow during one top-level execute (releases are not credited
@@ -64,6 +72,7 @@ namespace jai::detail {
 			terminal_error = false;
 			memory_used = 0;
 			memory_raises = 0;
+			import_pass_open = false;
 		}
 	};
 

@@ -229,7 +229,7 @@ nocopy class CreatureKind : ServerCreature {
 		dx = dx / length;
 		dy = dy / length;
 		for (int step = cells; step > 0; --step) {
-			Pointi landing = Pointi(round(here.x + dx * step), round(here.y + dy * step));
+			math::ivec3 landing = math::ivec3(round(here.x + dx * step), round(here.y + dy * step));
 			if (grid.inBounds(landing) && !grid.blocked(landing)) {
 				victim.stun(seconds);
 				victim.agent().stop();
@@ -267,7 +267,7 @@ nocopy class CreatureKind : ServerCreature {
 		flightRemaining = remaining;
 		double t = 1.0 - remaining / flightDuration;
 		double eased = 1.0 - (1.0 - t) * (1.0 - t);
-		agent().localPosition(Point(flightFrom.x + (flightTo.x - flightFrom.x) * eased, flightFrom.y + (flightTo.y - flightFrom.y) * eased));
+		agent().localPosition(math::vec3(flightFrom.x + (flightTo.x - flightFrom.x) * eased, flightFrom.y + (flightTo.y - flightFrom.y) * eased));
 	}
 
 	// Poison the victim: a fresh stack that outlives whoever applied it. Three stacks = 3 hp per tick.
@@ -374,7 +374,7 @@ nocopy class CreatureKind : ServerCreature {
 			return false;
 		}
 		var center = target.agent().gridPosition();
-		return teleportToCell(Pointi(round(center.x), round(center.y)), maxRadius);
+		return teleportToCell(math::ivec3(round(center.x), round(center.y)), maxRadius);
 	}
 
 	// The closest free cell to a grid cell (the cell itself first), nearest ring after.
@@ -392,7 +392,7 @@ nocopy class CreatureKind : ServerCreature {
 					if (max(abs(dx), abs(dy)) != radius) {
 						continue;
 					}
-					Pointi candidate = Pointi(cx + dx, cy + dy);
+					math::ivec3 candidate = math::ivec3(cx + dx, cy + dy);
 					if (grid.inBounds(candidate) && !grid.blocked(candidate)) {
 						agent().gridPosition(candidate);
 						return true;

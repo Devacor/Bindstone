@@ -736,7 +736,7 @@ private:
                 // and load back as the wrong type — fail loudly instead (cereal semantics).
                 throw serialization_error(std::string("Cannot serialize unregistered polymorphic type '") + actual_type.name() +
                     "' through pointer-to-base '" + typeid(elem_type).name() +
-                    "'. Register it with jai::registrar<T, Context>(\"Name\") or derive from jai::property_owner<T, ...>.");
+                    "'. Register it with jai::registrar<T, Context, jai::bases<Base>>(\"Name\") or derive from jai::property_owner<T, Base>.");
             }
         }
         self()->serialize("$val", *value);

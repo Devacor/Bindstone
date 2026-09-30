@@ -1674,19 +1674,26 @@ host_reference host_reference_argument(engine* eng, const std::vector<script_val
         return ref;   // parallel workers never write through a host reference
     }
     int component = -1;
-    auto target = backend->host_reference_argument(args, index, offset, component);
-    if (!target) {
-        throw runtime_error(format_error_message_numeric(target.message(), target.symbol_id(), target.symbol_id2()));
+    auto resolved = backend->host_reference_argument(args, index, offset, component);
+    if (!resolved) {
+        throw runtime_error(format_error_message_numeric(resolved.message(), resolved.symbol_id(), resolved.symbol_id2()));
     }
-    if (!target.value().is_reference()) {
-        return ref;
+    script_value target = std::move(resolved.value());
+    if (!target.is_reference()) {
+        // no script site named the argument: a reference the caller passed (a builtin hands its callback its elements)
+        const script_value& received = args[index + offset];
+        if (!received.is_reference() || !received.get_reference_holder()) {
+            return ref;
+        }
+        target = received;
+        component = -1;
     }
-    auto current = ref_checked_deref(target.value());
+    auto current = ref_checked_deref(target);
     if (!current) {
         throw runtime_error(format_error_message_numeric(current.message(), current.symbol_id(), current.symbol_id2()));
     }
     ref.value = component >= 0 ? math::component_value(current.value(), static_cast<size_t>(component), eng) : std::move(current.value());
-    ref.target = std::move(target.value());
+    ref.target = std::move(target);
     ref.component = component;
     return ref;
 }

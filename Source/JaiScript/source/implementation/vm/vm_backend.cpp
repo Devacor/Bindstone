@@ -21256,8 +21256,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 checked_result<script_value> vm_backend::call_script_function(const script_defined_function& function, const std::vector<script_value>& args,
                                                               const call_site* site, frame* caller_frame, chunk* caller_code) {
 	// Opaque entry (bound methods, constructors, function values): the arming invoke
-	// left the call-site context pending - consume it exactly once
-	if (!site) {
+	// left the call-site context pending - consume it exactly once, when this call is the site's
+	if (!site && detail::same_arguments(pending_site_ctx_.arguments, args)) {
 		site = pending_site_ctx_.site;
 		caller_frame = pending_site_ctx_.caller_frame;
 		caller_code = pending_site_ctx_.caller_code;

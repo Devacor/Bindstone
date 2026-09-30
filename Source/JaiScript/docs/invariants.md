@@ -311,10 +311,16 @@ box), so the value is taken explicitly, and only where a later argument may run 
 - A binding conversion that may run user code (`binding_may_run_code`) captures the later arguments first, in both
   binders; a coroutine captures its arguments in `coroutine_handle::set_function`, since it binds them at the first
   resume.
-- A VM graft rewrites the operands ahead of the grafted call into compiler temps (`plan_hoist`), and a temp holds a
-  name's value only as a scalar: a name that an outer call's parameter copies or binds by reference (anything but a
-  proven by-value int, float or bool parameter, or a `math::` intrinsic operand) refuses the graft even for a private local naming mutable aggregate storage, so that call keeps
-  its capture and its reference binding on both paths (the graft and the guard's fallback).
+- A VM graft stages an enclosing call's callee and earlier arguments at their original evaluation points. The ordinary
+  capture instruction takes any required value snapshot, and the call retains its original argument-source metadata for
+  reference binding. Its captured argument prefix stays in owned compiler slots and moves into the final call on both the graft and guard-fallback paths, so surrounding expression operands cannot interleave with it.
+  A private aggregate binding is not evidence that its contents cannot be written through a later argument.
+- An overload set with mixed parameter modes retains the evaluated value and original source until selection. A value
+  parameter takes the snapshot, a shared handle takes the evaluated identity, and a reference binds the original lvalue.
+  An all-reference/all-share set needs no deep snapshot. Static script dispatchers carry their callable metadata through
+  aliases; host callables retain their existing opaque binding contract. Constructors and new expressions carry the same
+  argument-source metadata as ordinary calls.
+
 
 A new call form must stamp its arguments and capture on both backends; an operand held across a later operand's
 evaluation must leave the interpreter's value stack (statements clear it at their boundaries). Suite `Call Argument

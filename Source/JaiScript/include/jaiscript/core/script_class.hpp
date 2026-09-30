@@ -297,6 +297,24 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
     bump_method_epoch();
 }
 
+inline checked_result<script_value> script_static_method_dispatch::operator()(const std::vector<script_value>& args) const {
+    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+    if (!backend) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+    }
+    script_callable payload;
+    payload.kind = script_callable::kind_type::static_method;
+    payload.ast = fallback;
+    payload.cls = cls;
+    payload.definition_env = definition_env;
+    const auto& table = cls->script_static_method_overloads();
+    const auto it = table.find(name_id);
+    if (it != table.end() && it->second.size() > 1) {
+        if (auto best = pick_best_overload(it->second, args)) { payload.ast = best; }
+    }
+    return backend->execute_callable(payload, args);
+}
+
 // Implementation of add_static_script_method. Same engine*+payload pattern; overloads
 // are resolved over static_method_overloads_ with the shared resolver, falling back to
 // the mint-time AST when nothing matches (preserving the old last-registered behavior).
@@ -323,29 +341,7 @@ inline void class_definition::add_static_script_method(std::string_view name, st
     static_method_overloads_[method_name_id].push_back(ast);
 
     static_methods_.insert_or_assign(name_id, script_value::make_function(
-        [ast, class_def, definition_env, eng, method_name_id](const std::vector<script_value>& args) -> checked_result<script_value> {
-            execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-            if (!backend) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-            }
-
-            script_callable payload;
-            payload.kind = script_callable::kind_type::static_method;
-            payload.ast = ast;
-            payload.cls = class_def;
-            payload.definition_env = definition_env;
-
-            auto it = class_def->static_method_overloads_.find(method_name_id);
-            if (it != class_def->static_method_overloads_.end() && it->second.size() > 1) {
-                if (auto best = pick_best_overload(it->second, args)) {
-                    payload.ast = best;
-                }
-            }
-
-            return backend->execute_callable(payload, args);
-        },
-        eng
-    ));
+        script_static_method_dispatch{eng, class_def, method_name_id, definition_env, ast}, eng));
 }
 
 // Implementation of has_static_method_with_arity (needs full function_decl definition)

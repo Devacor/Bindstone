@@ -182,8 +182,10 @@ namespace jai::vm {
         std::unordered_map<std::string, bool> nested_land_memo_;   // a call a graft's body makes, by what decides it (the callee, the grafts around it, its arguments' shapes and kinds): whether it grafts as the body's block instructions
         uint64_t inline_symbol_ = 0;
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> alias_pins_;   // a stdlib alias whose callee a guard resolved at its place (call site, mark temp): compile_math_into_temp takes them
-        std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> callee_probes_;   // a call whose callee was probed at its place ahead of a graft (probe ip, unused): compile_call takes the probe
-        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
+        std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> callee_probes_;   // a call staged ahead of a graft (probe ip, argument prefix already evaluated/captured in owned temps): compile_call completes it
+        std::unordered_map<const call_expr*, std::vector<uint32_t>> staged_arguments_;   // owned argument temps, moved into their call in source order
+        std::unordered_map<size_t, std::vector<size_t>> capture_sites_;   // capture instruction patches owned by an emitted callee probe
+        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; std::unordered_map<const call_expr*, size_t> argument_prefixes; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
         const char* inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame = nullptr) const;   // nullptr: the graft takes the call; else the rule that keeps it
         script_value_type arg_kind(const expression* a, const std::vector<const type_info*>* frame) const;
         std::vector<script_value_type> site_kinds(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, script_value_type* result) const;
@@ -240,6 +242,7 @@ namespace jai::vm {
         void compile_binary(const std::shared_ptr<binary_expr>& expr);
         void compile_unary(const std::shared_ptr<unary_expr>& expr);
         void compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement);
+        void record_argument_source(call_site& site, const expression_ptr& arg, size_t argc);
         void compile_call(const std::shared_ptr<call_expr>& expr);
         void compile_member(const std::shared_ptr<member_expr>& expr);
         void member_tail_into_temp(const expression* e);

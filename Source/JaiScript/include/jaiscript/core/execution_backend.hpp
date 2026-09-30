@@ -77,6 +77,16 @@ struct script_method_dispatch {
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
 };
 
+// Script static overloads retain their identity through aliases, so argument capture can distinguish them from host calls.
+struct script_static_method_dispatch {
+    engine* eng = nullptr;
+    std::shared_ptr<class_definition> cls;
+    uint64_t name_id = 0;
+    std::shared_ptr<environment> definition_env;
+    std::shared_ptr<function_decl> fallback;
+    checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+};
+
 namespace detail {
     struct parallel_method_pin_table;
 

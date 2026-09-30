@@ -144,6 +144,7 @@ namespace jai::vm {
         mutable const class_definition* probe_cd = nullptr;
         mutable uint64_t probe_epoch = 0;
         mutable bool probe_field_free = false;
+        std::vector<uint32_t> staged_argument_slots;   // immutable owned temps released if this call is abandoned before invocation
     };
 
     struct function_proto {

@@ -7557,7 +7557,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         }
                         capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] {
                             return parallel_pin_decl ? detail::parameters_binding(parallel_pin_decl->parameters, ai)
-                                                     : detail::method_binding(cls_pin.get(), dispatch->name_id, ai);
+                                                     : detail::method_binding(cls_pin.get(), dispatch->name_id, ai, expr->arguments.size());
                         });
                     } catch (const script_exception& e) {
                         active_exception_value_ = make_value(std::string(e.what()));
@@ -7759,7 +7759,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 push_value(make_value());
                 return {};
             }
-            capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai); });
+            capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai, false, expr->arguments.size()); });
         } catch (const script_exception& e) {
             // Convert to interpreter exception state
             active_exception_value_ = make_value(std::string(e.what()));
@@ -9334,6 +9334,18 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
 
 template<bool Replaying>
 checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_point* rs) {
+    // A new expression is a call boundary too: preserve its source expressions for reference parameters.
+    auto invoke_constructor = [&](const script_function& function, const std::vector<script_value>& args) {
+        detail::call_site_context ctx{&expr->arguments, nullptr};
+        struct restore_context {
+            const detail::call_site_context*& slot;
+            const detail::call_site_context* previous;
+            ~restore_context() { slot = previous; }
+        } restore{pending_call_ctx_, pending_call_ctx_};
+        pending_call_ctx_ = &ctx;
+        return function(args);
+    };
+
     // This handles expressions like: new Point(), new Point(3.0, 4.0), etc.
     // The new_expr contains a type and arguments
 
@@ -9528,7 +9540,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             args.push_back(std::move(pop_value()));
             capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
                 auto ctor = environment_->get(innerTypeName);
-                return ctor ? detail::callee_binding(ctor.value(), ai) : detail::arg_binding::opaque;
+                return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
             });
         }
 
@@ -9541,7 +9553,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
 
         script_value constructorFunc = std::move(ctor_result.value());
         const script_function& func = constructorFunc.as_function();
-        auto result = func(args);
+        auto result = invoke_constructor(func, args);
         if (!result) {
             return result.error_value();
         }
@@ -9565,7 +9577,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         args.push_back(std::move(pop_value()));
         capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
             auto ctor = environment_->get(className);
-            return ctor ? detail::callee_binding(ctor.value(), ai) : detail::arg_binding::opaque;
+            return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
         });
     }
 
@@ -9575,7 +9587,7 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
     if (ctor_result && ctor_result.value().is_function()) {
         script_value constructorFunc = std::move(ctor_result.value());
         const script_function& func = constructorFunc.as_function();
-        auto result = func(args);
+        auto result = invoke_constructor(func, args);
         if (!result) {
             // Function returned error - propagate it up
             return result.error_value();
@@ -13063,7 +13075,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
         argv = captured_out;
     }
     for (size_t i = 0; i < matching_ctor->parameters.size() && i < argv->size(); ++i) {
-        init_env->define(matching_ctor->parameters[i].name, (*argv)[i]);
+        init_env->define(matching_ctor->parameters[i].name, detail::argument_for_binding((*argv)[i], detail::parameters_binding(matching_ctor->parameters, i)));
     }
 
     // Track whether the iterative multi-level loop handled parent field initializers
@@ -13458,7 +13470,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
             const auto& param = ctor_ast->parameters[i];
             if (param.type && !param.type->type_name.empty()) {
                 // Parameter has explicit type - check if arg is compatible
-                auto arg_type = args[i].type();
+                auto arg_type = args[i].deref().type();
                 if (arg_type == script_value_type::jai_object_type) {
                     // For objects, check class name
                     auto resolved = resolve_member_target(args[i]);
@@ -14150,7 +14162,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
         }
 
-        const auto& arg = (*argv)[i];
+        const auto& arg = detail::argument_for_binding((*argv)[i], detail::parameter_binding(param));
 
         // Use pre-cached symbol ID (parameter binding optimization)
         // Symbol IDs are cached at function definition time in visit_function_decl

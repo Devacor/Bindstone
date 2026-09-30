@@ -58,7 +58,12 @@ namespace jai::detail::math {
 			t.storage = final_referent(t.pin);
 		} else if (base_expr && base_expr->get_type() == node_type::identifier_expr) {
 			if (script_value* cell = ident_cell(static_cast<const identifier_expr*>(base_expr))) {
-				t.storage = &cell->deref();
+				if (cell->scratch_ref_holder()) {   // an alias of a typed element or a property: the store lands in its scratch, then commits
+					t.pin = *cell;
+					t.storage = final_referent(t.pin);
+				} else {
+					t.storage = &cell->deref();
+				}
 			}
 		} else if (base_expr && is_ref_bindable_lvalue(base_expr)) {
 			auto resolved = resolve_ref_lvalue(base_expr, caller, caller_env, eng, symbolizer);

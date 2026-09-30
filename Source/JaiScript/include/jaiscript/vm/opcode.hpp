@@ -285,6 +285,8 @@ namespace jai::vm {
         op_take_temp,       // a = owned compiler argument slot: move it onto the operand stack and clear the slot
         op_c_boundary,      // a = boundary index, b = cell loop index, c = the statement's first general ip: a boundary operation (the block parks, its dirty cells written back, and the general form runs the statement)
         op_cells_resume,    // a = the trampoline (the instruction this one replaced, then a jump past it): the end of a boundary statement; a block parked for it resumes here, anything else runs the trampoline
+        op_velem_load,      // a = velem_protos index, b = frame slot (a compiler temp): the component of a vector buffer's element into the temp, else the element's member read
+        op_velem_store,     // a = velem_protos index: `a[i].x = v;` / `a[i].x op= v;` in statement position into a vector buffer's words, else the general member store
         op_halt,
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
@@ -595,6 +597,8 @@ namespace jai::vm {
             case opcode::op_deref_top: return "DEREF_TOP";
             case opcode::op_capture_arg: return "CAPTURE_ARG";
             case opcode::op_take_temp: return "TAKE_TEMP";
+            case opcode::op_velem_load: return "VELEM_LOAD";
+            case opcode::op_velem_store: return "VELEM_STORE";
             case opcode::op_size_temp: return "SIZE_TEMP";
             case opcode::op_c_size: return "C_SIZE";
             case opcode::op_c_ret: return "C_RET";

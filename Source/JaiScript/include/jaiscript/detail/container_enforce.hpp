@@ -365,7 +365,7 @@ namespace jai::detail {
 			case script_value_type::jai_char_type: return script_array::kind_t::c8;
 			case script_value_type::jai_string_type: return script_array::kind_t::str;
 			case script_value_type::jai_object_type: return script_array::kind_t::obj;
-			default: return script_array::kind_t::hetero;
+			default: return script_array::vec_kind_of(element.base_type);
 		}
 	}
 	inline script_value_type typed_kind_element_base(script_array::kind_t kind) {
@@ -378,7 +378,8 @@ namespace jai::detail {
 			case script_array::kind_t::c8: return script_value_type::jai_char_type;
 			case script_array::kind_t::str: return script_value_type::jai_string_type;
 			case script_array::kind_t::obj: return script_value_type::jai_object_type;
-			default: return script_value_type::jai_any_type;
+			case script_array::kind_t::hetero: return script_value_type::jai_any_type;
+			default: return script_array::vec_value_type(kind);
 		}
 	}
 	// An object buffer is homogeneous by EXACT class (the element rule today); the class
@@ -397,7 +398,8 @@ namespace jai::detail {
 			case script_array::kind_t::c8: return eng->get_type_info_char();
 			case script_array::kind_t::u8: return eng->get_type_info_uint8();
 			case script_array::kind_t::i8: return eng->get_type_info_int8();
-			default: return eng->get_type_info_string();
+			case script_array::kind_t::str: return eng->get_type_info_string();
+			default: return eng->get_type_info_math(script_array::vec_value_type(kind));
 		}
 	}
 
@@ -628,7 +630,8 @@ namespace jai::detail {
 				                          (target_elem_base == script_value_type::jai_int_type || target_elem_base == script_value_type::jai_float_type);
 				const bool bool_int_pair = (src_elem == script_value_type::jai_bool_type && target_elem_base == script_value_type::jai_int_type) ||
 				                           (src_elem == script_value_type::jai_int_type && target_elem_base == script_value_type::jai_bool_type);
-				if (!numeric_pair && !bool_int_pair && src_elem != target_elem_base) {
+				const bool math_pair = is_math_type(src_elem) && is_math_type(target_elem_base) && math::converts(src_elem, target_elem_base);
+				if (!numeric_pair && !bool_int_pair && !math_pair && src_elem != target_elem_base) {
 					out.offending = container_base_type_name(src_elem);
 					out.expected = target_type->canonical_name();
 					return out;

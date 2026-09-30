@@ -87,18 +87,28 @@ namespace stdlib {
             for (const auto& arg : args) { total_size += arg.unchecked_array_node()->size(); }
             const script_array* first = args[0].unchecked_array_node();
             if (first->is_typed()) {
-                // A typed first argument keeps its raw form when every appended element is
-                // numeric; anything else lands in a fresh dynamic array (no tag lie)
-                bool numeric_only = true;
-                for (size_t i = 1; i < args.size() && numeric_only; ++i) {
+                // A typed first argument keeps its raw form when every appended element fits it (a number into a
+                // numeric buffer, the same vector kind into a vector buffer); anything else lands in a fresh dynamic
+                // array (no tag lie)
+                using kind_t = script_array::kind_t;
+                const kind_t fk = first->kind();
+                const bool numeric_first = fk == kind_t::i64 || fk == kind_t::f64;
+                auto element_fits = [&](size_t idx) {
+                    return numeric_first ? (idx == script_value::TYPEID_INT || idx == script_value::TYPEID_FLOAT)
+                                         : script_array::is_vec_kind(fk) && idx == script_array::vec_storage_index(fk);
+                };
+                bool stays_typed = true;
+                for (size_t i = 1; i < args.size() && stays_typed; ++i) {
                     const script_array* node = args[i].unchecked_array_node();
-                    if (node->is_typed()) { continue; }
+                    if (node->is_typed()) {
+                        stays_typed = node->kind() == fk || (numeric_first && (node->kind() == kind_t::i64 || node->kind() == kind_t::f64));
+                        continue;
+                    }
                     for (const script_value& elem : node->values()) {
-                        const size_t idx = elem.deref().raw_storage_index();
-                        if (idx != script_value::TYPEID_INT && idx != script_value::TYPEID_FLOAT) { numeric_only = false; break; }
+                        if (!element_fits(elem.deref().raw_storage_index())) { stays_typed = false; break; }
                     }
                 }
-                if (numeric_only) {
+                if (stays_typed) {
                     script_value result = args[0].clone();
                     script_array* out = const_cast<script_array*>(result.unchecked_array_node());
                     out->reserve(total_size);

@@ -123,7 +123,7 @@ namespace jai::fuzz {
 			case script_array::kind_t::i8: return "int8";
 			case script_array::kind_t::str: return "string";
 			case script_array::kind_t::obj: return "object";
-			default: return "typed";
+			default: return script_array::is_vec_kind(node.kind()) ? math_type_name(script_array::vec_value_type(node.kind())) : "typed";
 		}
 	}
 

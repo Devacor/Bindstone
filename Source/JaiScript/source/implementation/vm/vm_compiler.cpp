@@ -129,6 +129,8 @@ namespace {
 			case opcode::op_call_temp:
 			case opcode::op_take_temp:
 			case opcode::op_member_temp:
+			case opcode::op_velem_load:
+			case opcode::op_velem_store:
 			case opcode::op_size_temp:
 			case opcode::op_math_temp:
 			case opcode::op_math_guard:
@@ -319,6 +321,8 @@ namespace {
 			case opcode::op_call_temp:
 			case opcode::op_take_temp:
 			case opcode::op_member_temp:
+			case opcode::op_velem_load:
+			case opcode::op_velem_store:
 			case opcode::op_size_temp:
 			case opcode::op_math_temp:
 			case opcode::op_math_guard:
@@ -1913,6 +1917,63 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				     assign->value.get(), assign->static_operand_class);
 			}
 			return true;
+		}
+		// Statement-position component store into a vector buffer's element (`a[i].x = v;`, `a[i].y += dy;`): the value an operand
+		// as the member store takes it, one op; a value that stays on the stack takes the general form
+		if (assign->target->get_type() == node_type::member_expr && callable_.active && velem_operand(assign->target.get())) {
+			const token_type op = assign->op.type;
+			const bool compound = op != token_type::equal;
+			if (!compound || op == token_type::plus_equal || op == token_type::minus_equal || op == token_type::star_equal ||
+			    op == token_type::slash_equal || op == token_type::percent_equal) {
+				auto member = std::static_pointer_cast<member_expr>(assign->target);
+				velem_proto p;
+				velem_proto_for(assign->target, p);
+				note_component_base(p.node, member.get());
+				p.proof = assign->static_store_proof;
+				p.compound = compound;
+				if (compound) {
+					p.kind = compound_kind_for(op);
+					if (assign->incdec_desugar) p.kind |= compound_flag_incdec;
+					if (assign->postfix_old_result) p.kind |= compound_flag_old_result;
+				}
+				const expression_ptr& value = assign->value;
+				bool value_operand = false;
+				if (value->get_type() == node_type::literal_expr || (value->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(value.get())) != k_invalid_u32)) {
+					p.value = make_fused_operand(value); value_operand = true;
+				} else if (fusable_index_expr(value.get()) && compile_subscript_into_temp(value, operand_expect(static_cast<const binary_expr*>(value.get())), p.value)) {
+					value_operand = true;
+				} else if (unary_temp_operand(value.get()) || math_temp_operand(value.get()) != detail::math_fn::none || member_temp_operand(value.get())) {
+					compile_value_into_temp(value, 0xFF, p.value); value_operand = true;
+				} else if (value->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(value.get()))) {
+					compile_expression(value);
+					vm_instruction& last = chunk_->code.back();
+					if (last.op == opcode::op_binary_fused) {
+						const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+						++temp_next_;
+						if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+						last.op = opcode::op_binary_fused_temp; last.b = t0;
+						p.value = fused_operand{}; p.value.slot = t0; p.value.symbol = temp_symbol_index(); p.value.direct = true;
+						value_operand = true;
+					} else {
+						// the value is on the stack: the general store over the element consumes it (value first)
+						compile_expression(member->object);
+						if (!compound) {
+							emit(opcode::op_set_member, p.node, p.proof);
+						} else {
+							emit(opcode::op_dup);
+							emit(opcode::op_get_member, add_node(member));
+							emit(opcode::op_member_compound, p.node, p.proof, p.kind | compound_flag_value_first);
+						}
+						emit(opcode::op_pop);
+						return true;
+					}
+				}
+				if (value_operand) {
+					chunk_->velem_protos.push_back(std::move(p));
+					emit(opcode::op_velem_store, static_cast<uint32_t>(chunk_->velem_protos.size() - 1));
+					return true;
+				}
+			}
 		}
 		// Statement-position member store onto a frame-slot base (`p.x = v;`, `t.posx = px;`, `p.life = p.life - 1;`): the value an
 		// operand (an identifier, a literal, or the temp a computed value lands in, as the subscript store takes it), one op, no push,
@@ -5052,7 +5113,44 @@ uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
 	return slot != k_invalid_u32 && slot < k_typed_slot_mask ? slot : k_invalid_u32;
 }
-bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e) || elem_member_operand(e); }
+bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e) || velem_operand(e) || elem_member_operand(e); }
+
+// `a[i].x` where the checker proved `a` a math vector buffer, `a` a frame slot, `i` a frame slot or an int literal and `x` a component
+// name: op_velem_load reads the component straight from the buffer's words
+bool vm_compiler::velem_operand(const expression* e) const {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
+	if (!e || e->get_type() != node_type::member_expr) return false;
+	const auto* m = static_cast<const member_expr*>(e);
+	if (m->is_static || m->null_safe || m->is_arrow || !m->object || m->object->get_type() != node_type::binary_expr) return false;
+	if (!detail::math::any_component_name(m->member)) return false;
+	const auto* b = static_cast<const binary_expr*>(m->object.get());
+	if (b->op.type != token_type::left_bracket || b->static_operand_class != operand_class_vec_element || !b->left || !b->right ||
+	    b->left->get_type() != node_type::identifier_expr) return false;
+	auto* self = const_cast<vm_compiler*>(this);
+	auto* id = static_cast<identifier_expr*>(b->left.get());
+	if (id->global_qualified) return false;
+	const uint32_t slot = self->identifier_slot_operand(id);
+	if (slot == k_invalid_u32 || slot >= k_typed_slot_mask) return false;
+	if (b->right->get_type() == node_type::literal_expr) {
+		return static_cast<const literal_expr*>(b->right.get())->value.raw_storage_index() == script_value::TYPEID_INT;
+	}
+	if (b->right->get_type() != node_type::identifier_expr) return false;
+	auto* ix = static_cast<identifier_expr*>(b->right.get());
+	if (ix->global_qualified) return false;
+	const uint32_t index_slot = self->identifier_slot_operand(ix);
+	return index_slot != k_invalid_u32 && index_slot < k_typed_slot_mask;
+}
+// the site row of a velem member: the subscript as a fused operand, the node, and the component each vector kind names
+void vm_compiler::velem_proto_for(const expression_ptr& member, velem_proto& p) {
+	const auto* m = static_cast<const member_expr*>(member.get());
+	p.sub = make_fused_operand(m->object.get());
+	p.node = add_node(member);
+	using k = script_array::kind_t;
+	for (k kind : {k::v2, k::iv2, k::v3, k::iv3, k::v4, k::rgba}) {
+		p.comp[static_cast<size_t>(kind) - static_cast<size_t>(k::v2)] =
+			static_cast<int8_t>(detail::math::component_of(script_array::vec_value_type(kind), m->member));
+	}
+}
 // `a[i].m` inside a loop over an array the checker proved holds class instances, `a` a frame slot: the element lands in an alias temp
 // and the member read in a member temp over it (a block takes the pair as an element alias's rebind)
 // the alias temp of an element member read: above every temp the function has used so far, so no earlier temp of the loop (a head's
@@ -5115,6 +5213,19 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 		++temp_next_;
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 		emit(opcode::op_size_temp, t, static_cast<uint32_t>(chunk_->call_sites.size() - 1), call->builtin_receiver);
+		out = fused_operand{};
+		out.slot = t;
+		out.symbol = temp_symbol_index();
+		out.direct = true;
+		return;
+	}
+	if (velem_operand(e.get())) {
+		velem_proto p;
+		velem_proto_for(e, p);
+		const uint32_t t = static_cast<uint32_t>(temp_next_++);
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		chunk_->velem_protos.push_back(std::move(p));
+		emit(opcode::op_velem_load, static_cast<uint32_t>(chunk_->velem_protos.size() - 1), t);
 		out = fused_operand{};
 		out.slot = t;
 		out.symbol = temp_symbol_index();
@@ -6429,6 +6540,12 @@ void vm_compiler::member_tail_into_temp(const expression* e) {
 void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 	if (expr->is_static) {
 		emit(opcode::op_get_static, add_node(expr));
+		return;
+	}
+	if (velem_operand(expr.get())) {
+		fused_operand t;
+		compile_member_into_temp(expr, t);
+		emit(opcode::op_load, t.slot, temp_symbol_index(), 0);
 		return;
 	}
 	compile_expression(expr->object);

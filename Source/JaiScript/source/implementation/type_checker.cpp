@@ -2569,7 +2569,9 @@ private:
 					const ctype cont = declared_container_receiver(b->left.get(), l);
 					const ctype el = container_value_type(cont);
 					const bool object_elements = el.kind == ctype::object_k && cont.kind == ctype::array_k && (!cont.tentative || cont.alias_proof);
+					const bool vec_elements = el.kind == ctype::math_k && cont.kind == ctype::array_k && (!cont.tentative || cont.alias_proof);
 					const uint8_t cls = object_elements ? operand_class_object_element
+					                  : vec_elements ? operand_class_vec_element
 					                  : !el.element_proof ? operand_class_unknown
 					                  : el.kind == ctype::int_k ? operand_class_int_int
 					                  : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;

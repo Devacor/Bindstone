@@ -74,6 +74,18 @@ namespace jai::vm {
         uint32_t base = k_invalid_u32;
         fused_operand value;
     };
+    // `a[i].x` (op_velem_load) and `a[i].x op= v;` (op_velem_store) where the checker proved `a` a math vector buffer, `a` a frame
+    // slot and `i` a frame slot or an int literal: the subscript as a one-level fused operand, the member node, the component each
+    // vector kind names (-1 none, indexed by kind - v2) and, for a store, the compound kind and flags, the store proof and the value
+    struct velem_proto {
+        fused_operand sub;
+        uint32_t node = k_invalid_u32;
+        uint32_t proof = 0;
+        uint32_t kind = 0;
+        bool compound = false;
+        int8_t comp[6] = {-1, -1, -1, -1, -1, -1};
+        fused_operand value;
+    };
     struct push_proto {
         fused_operand receiver;
         fused_operand value;              // ident / literal / one-level subscript (base ident, ident-or-literal index)
@@ -537,6 +549,7 @@ namespace jai::vm {
         std::vector<string_target_site> string_target_sites;
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
+        std::vector<velem_proto> velem_protos;
         // an inlined leaf (docs/typed_regions_design.md, Inlined leaves): the guard at guard_ip admits [begin_ip, fallback_ip) when the callee
         // name binds the function whose body is `body`; otherwise the fallback [fallback_ip, join_ip) runs the original statement
         struct inline_site {

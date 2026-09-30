@@ -290,6 +290,7 @@ namespace jai {
         void aggregate_lowering(bool on);
         bool aggregate_lowering() const;
         uint64_t aggregate_lowered_locals() const;   // the typed locals and parameters lowered so far (a coverage count for the gates)
+        uint64_t aggregate_lowered_sites() const;    // the function and lambda bodies the lowering rewrote so far (vector buffer statements included)
         // === THE MIDDLE END'S SWITCH (docs/typed_regions_design.md, the pinned forms onward) ===
         // On by default. The VM's proof-based elisions and passes over closed regions (the forms
         // that skip a check the region analysis proved redundant, the passes that rewrite a region)

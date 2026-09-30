@@ -3047,6 +3047,7 @@ private:
 						return ctype::make(integral ? ctype::int_k : ctype::float_k);
 					}
 				}
+				if (fn != math_fn::none && !detail::math_arity_accepts(fn, args.size())) { return {}; }   // the kernel raises the table's text
 				if (fn != math_fn::none && args.size() <= 8) { return math_intrinsic_result(fn, args); }
 				if (ctype t; library_namespace_call(c, m, args, t)) { return t; }
 				if (namespace_path_receiver(m)) { return check_namespace_entry(m, args, c->location); }

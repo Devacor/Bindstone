@@ -987,7 +987,11 @@ struct engine::implementation {
 
     // The view the backends run: the lowered bodies (built on first use) or the parsed ones
     void lowering_view(engine& self, const std::vector<declaration_ptr>& declarations, detail::aggregate_lowering_state& state) {
-        if (lowering_on() && !state.built) { detail::build_aggregate_lowering(self, declarations, state); aggregate_lowered_locals_ += state.lowered_locals; }
+        if (lowering_on() && !state.built) {
+            detail::build_aggregate_lowering(self, declarations, state);
+            aggregate_lowered_locals_ += state.lowered_locals;
+            aggregate_lowered_sites_ += state.sites.size();
+        }
         detail::set_aggregate_view(state, lowering_on());
     }
 
@@ -1503,6 +1507,7 @@ struct engine::implementation {
     ref_holder_pool_slot_holder vec_node_pool_;
     int8_t aggregate_lowering_ = -1;   // engine::aggregate_lowering: 1 on, 0 off, -1 the backend's default (on for the vm)
     uint64_t aggregate_lowered_locals_ = 0;
+    uint64_t aggregate_lowered_sites_ = 0;
 };
 
 engine::implementation::implementation()
@@ -2320,6 +2325,10 @@ bool engine::aggregate_lowering() const {
 
 uint64_t engine::aggregate_lowered_locals() const {
     return impl->aggregate_lowered_locals_;
+}
+
+uint64_t engine::aggregate_lowered_sites() const {
+    return impl->aggregate_lowered_sites_;
 }
 
 void engine::ir_passes(bool on) {

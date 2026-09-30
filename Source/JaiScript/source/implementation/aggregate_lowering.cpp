@@ -22,6 +22,7 @@
 #include <jaiscript/detail/aggregate_lowering.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/expr_children.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <algorithm>
 #include <cmath>
@@ -189,14 +190,18 @@ struct analysis {
 					auto* m = static_cast<const member_expr*>(c->callee.get());
 					if (!m->is_static) {
 						// a method on a lowered local reads it (the vector methods take no reference to their receiver)
+						bool vector_receiver = false;
 						if (m->object && m->object->get_type() == node_type::identifier_expr) {
 							const int cand = resolve(static_cast<const identifier_expr*>(m->object.get()));
-							if (cand >= 0) { resolved[static_cast<const identifier_expr*>(m->object.get())] = cand; use(cand, false); }
+							if (cand >= 0) { resolved[static_cast<const identifier_expr*>(m->object.get())] = cand; use(cand, false); vector_receiver = true; }
 							else expr(m->object.get(), pos::member_base);
 						} else {
 							expr(m->object.get(), pos::member_base);
+							vector_receiver = vector_valued(m->object.get());
 						}
-						const bool vec_method = m->object && vec_method_name(m->member);
+						// the vector library's by-value arguments only when the receiver is a vector: any other receiver's method
+						// may take a reference, whatever its name
+						const bool vec_method = vector_receiver && vec_method_name(m->member);
 						for (const auto& a : c->arguments) expr(a.get(), vec_method ? pos::intrinsic_arg : pos::call_arg);
 						break;
 					}
@@ -236,8 +241,19 @@ struct analysis {
 				expr(c->operand.get(), c->by_reference ? pos::ref_cast : pos::value);
 				break;
 			}
-			default: break;
+			default: for_each_child_expression(e, [&](const expression* child) { expr(child, pos::call_arg); }); break;   // import(...) and any other kind: its arguments run as a call's
 		}
+	}
+
+	// a receiver whose methods are the vector library's: an element of a local vector buffer or a math:: call's result
+	bool vector_valued(const expression* e) const {
+		if (!e) return false;
+		if (e->get_type() == node_type::binary_expr) {
+			auto* b = static_cast<const binary_expr*>(e);
+			return b->op.type == token_type::left_bracket && b->left && b->left->get_type() == node_type::identifier_expr &&
+			       vec_buffer.count(static_cast<const identifier_expr*>(b->left.get())) != 0;
+		}
+		return e->get_type() == node_type::call_expr && math_static_call(static_cast<const call_expr*>(e));
 	}
 
 	static bool vec_method_name(std::string_view n) {
@@ -400,24 +416,10 @@ struct analysis {
 bool contains_yield(const statement* s);
 bool contains_yield_expr(const expression* e) {
 	if (!e) return false;
-	switch (e->get_type()) {
-		case node_type::yield_expr: return true;
-		case node_type::binary_expr: return contains_yield_expr(static_cast<const binary_expr*>(e)->left.get()) || contains_yield_expr(static_cast<const binary_expr*>(e)->right.get());
-		case node_type::unary_expr: return contains_yield_expr(static_cast<const unary_expr*>(e)->operand.get());
-		case node_type::assignment_expr: return contains_yield_expr(static_cast<const assignment_expr*>(e)->target.get()) || contains_yield_expr(static_cast<const assignment_expr*>(e)->value.get());
-		case node_type::call_expr: {
-			auto* c = static_cast<const call_expr*>(e);
-			if (contains_yield_expr(c->callee.get())) return true;
-			for (const auto& a : c->arguments) if (contains_yield_expr(a.get())) return true;
-			return false;
-		}
-		case node_type::member_expr: return contains_yield_expr(static_cast<const member_expr*>(e)->object.get());
-		case node_type::ternary_expr: {
-			auto* t = static_cast<const ternary_expr*>(e);
-			return contains_yield_expr(t->condition.get()) || contains_yield_expr(t->then_expression.get()) || contains_yield_expr(t->else_expression.get());
-		}
-		default: return false;
-	}
+	if (e->get_type() == node_type::yield_expr) return true;
+	bool found = false;
+	for_each_child_expression(e, [&](const expression* child) { found = found || contains_yield_expr(child); });
+	return found;
 }
 bool contains_yield(const statement* s) {
 	if (!s) return false;
@@ -876,6 +878,7 @@ private:
 			return geometry_vector(fn, recv, c->arguments, 0, loc, f, ctx);
 		}
 		const math_fn fn = math_intrinsic_for_call(m);
+		if (!math_arity_accepts(fn, c->arguments.size())) return false;   // the boxed call raises the table's text
 		switch (fn) {
 			case math_fn::vec2_: case math_fn::vec3_: case math_fn::vec4_: case math_fn::ivec2_: case math_fn::ivec3_: case math_fn::color_:
 				return vec_ctor(fn, c, f, ctx);
@@ -958,7 +961,7 @@ private:
 
 	bool vec_family(math_fn fn, const call_expr* c, vform& f, stmt_ctx& ctx) {
 		const size_t argc = c->arguments.size();
-		if (argc == 0 || argc > 5) return false;
+		if (argc == 0 || argc > 5 || !math_arity_accepts(fn, argc)) return false;
 		const source_location& loc = c->location;
 		vform vs[5];
 		bool is_vec[5] = {false, false, false, false, false};
@@ -1401,7 +1404,31 @@ private:
 				if (v == t->value) return e;
 				return std::make_shared<throw_expr>(t->location, v);
 			}
-			default: return e;
+			case node_type::yield_expr: {
+				auto* y = static_cast<const yield_expr*>(e.get());
+				auto v = expr(y->value, ctx);
+				if (v == y->value) return e;
+				return std::make_shared<yield_expr>(y->location, v);
+			}
+			case node_type::include_expr: {
+				auto* in = static_cast<const include_expr*>(e.get());
+				auto p = expr(in->path_expr, ctx);
+				if (p == in->path_expr) return e;
+				auto copy = std::make_shared<include_expr>(*in);
+				copy->path_expr = p;
+				return copy;
+			}
+			case node_type::import_expr: {
+				auto* im = static_cast<const import_expr*>(e.get());
+				bool changed = false;
+				std::vector<expression_ptr> paths;
+				for (const auto& a : im->path_exprs) { paths.push_back(expr(a, ctx)); if (paths.back() != a) changed = true; }
+				if (!changed) return e;
+				auto copy = std::make_shared<import_expr>(*im);
+				copy->path_exprs = std::move(paths);
+				return copy;
+			}
+			default: return e;   // no children (a lambda's init-captures read no lowered local: the analysis lets them escape)
 		}
 	}
 
@@ -1547,21 +1574,29 @@ private:
 				copy->condition = cond; copy->cases = std::move(cases); copy->default_case = def;
 				return copy;
 			}
-			default: return s;   // parallel_for bodies and the rest keep their nodes
+			case node_type::parallel_for_stmt: {   // the containers run here; the body is the worker's function and keeps its node
+				auto* p = static_cast<const parallel_for_stmt*>(s.get());
+				stmt_ctx none;
+				auto c = expr(p->container, none);
+				bool changed = c != p->container;
+				std::vector<expression_ptr> extra;
+				for (const auto& x : p->extra_containers) { extra.push_back(expr(x, none)); if (extra.back() != x) changed = true; }
+				if (!changed) return s;
+				auto copy = std::make_shared<parallel_for_stmt>(*p);
+				copy->container = c; copy->extra_containers = std::move(extra);
+				return copy;
+			}
+			default: return s;   // no expression of its own (break, continue, fallthrough)
 		}
 	}
 
+	// a case body holds statements only (no declarations): a rewrite into several becomes a block (its temporaries are its own)
 	std::vector<statement_ptr> case_body(const std::vector<statement_ptr>& in, bool* changed) {
 		std::vector<statement_ptr> out;
 		for (const auto& st : in) {
-			std::vector<declaration_ptr> list;
-			stmt_into(st, list);
-			if (list.size() == 1 && list[0]->get_type() == node_type::statement_decl && static_cast<statement_decl*>(list[0].get())->statement == st) {
-				out.push_back(st);
-				continue;
-			}
-			*changed = true;
-			for (auto& d : list) out.push_back(std::move(d));
+			statement_ptr ns = stmt(st);
+			if (ns != st) *changed = true;
+			out.push_back(std::move(ns));
 		}
 		return out;
 	}
@@ -1623,6 +1658,23 @@ private:
 				out.push_back(copy);
 				return;
 			}
+			case node_type::include_decl: case node_type::import_decl: {
+				const expression_ptr& path = d->get_type() == node_type::include_decl ? static_cast<const include_decl*>(d.get())->path_expr
+				                                                                       : static_cast<const import_decl*>(d.get())->path_expr;
+				stmt_ctx ctx;
+				auto np = expr(path, ctx);
+				if (np == path) { out.push_back(d); return; }
+				if (d->get_type() == node_type::include_decl) {
+					auto copy = std::make_shared<include_decl>(*static_cast<const include_decl*>(d.get()));
+					copy->path_expr = np;
+					out.push_back(copy);
+				} else {
+					auto copy = std::make_shared<import_decl>(*static_cast<const import_decl*>(d.get()));
+					copy->path_expr = np;
+					out.push_back(copy);
+				}
+				return;
+			}
 			default: out.push_back(d); return;   // nested functions, classes, namespaces: their own sites
 		}
 	}
@@ -1677,19 +1729,17 @@ private:
 	}
 
 	// a store component by component is safe unless a later component reads a component stored before it
+	// a component slot is the lowered function's own: only its identifiers read it (a callee cannot name it)
 	static bool reads_slot(const expression* e, size_t slot) {
 		if (!e) return false;
 		switch (e->get_type()) {
 			case node_type::identifier_expr: return static_cast<const identifier_expr*>(e)->slot_index == slot;
-			case node_type::literal_expr: return false;
-			case node_type::binary_expr: return reads_slot(static_cast<const binary_expr*>(e)->left.get(), slot) || reads_slot(static_cast<const binary_expr*>(e)->right.get(), slot);
-			case node_type::unary_expr: return reads_slot(static_cast<const unary_expr*>(e)->operand.get(), slot);
-			case node_type::ternary_expr: {
-				auto* t = static_cast<const ternary_expr*>(e);
-				return reads_slot(t->condition.get(), slot) || reads_slot(t->then_expression.get(), slot) || reads_slot(t->else_expression.get(), slot);
+			case node_type::lambda_expr: return true;
+			default: {
+				bool found = false;
+				for_each_child_expression(e, [&](const expression* child) { found = found || reads_slot(child, slot); });
+				return found;
 			}
-			case node_type::call_expr: for (const auto& a : static_cast<const call_expr*>(e)->arguments) if (reads_slot(a.get(), slot)) return true; return false;
-			default: return true;   // anything else: assume it reads
 		}
 	}
 	static bool cross_reads(const vform& f, const candidate& c) {
@@ -1712,27 +1762,17 @@ private:
 	static bool has_store(const expression* e) {
 		if (!e) return false;
 		switch (e->get_type()) {
-			case node_type::assignment_expr: return true;
+			case node_type::assignment_expr: case node_type::import_expr: case node_type::include_expr: case node_type::yield_expr: return true;
 			case node_type::unary_expr: {
 				auto* u = static_cast<const unary_expr*>(e);
 				if (u->op.type == token_type::plus_plus || u->op.type == token_type::minus_minus) return true;
 				return has_store(u->operand.get());
 			}
-			case node_type::binary_expr: return has_store(static_cast<const binary_expr*>(e)->left.get()) || has_store(static_cast<const binary_expr*>(e)->right.get());
-			case node_type::member_expr: return has_store(static_cast<const member_expr*>(e)->object.get());
-			case node_type::ternary_expr: {
-				auto* t = static_cast<const ternary_expr*>(e);
-				return has_store(t->condition.get()) || has_store(t->then_expression.get()) || has_store(t->else_expression.get());
+			default: {
+				bool found = false;
+				for_each_child_expression(e, [&](const expression* child) { found = found || has_store(child); });
+				return found;
 			}
-			case node_type::call_expr: {
-				auto* c = static_cast<const call_expr*>(e);
-				if (has_store(c->callee.get())) return true;
-				for (const auto& a : c->arguments) if (has_store(a.get())) return true;
-				return false;
-			}
-			case node_type::array_literal_expr: for (const auto& x : static_cast<const array_literal_expr*>(e)->elements) if (has_store(x.get())) return true; return false;
-			case node_type::cast_expr: return has_store(static_cast<const cast_expr*>(e)->operand.get());
-			default: return false;
 		}
 	}
 
@@ -1838,14 +1878,14 @@ private:
 			bool hazard = false;
 			if (!compound) {
 				ok = vec_of(a->value, f, ctx);
-				hazard = ok && std::find(f.reads.begin(), f.reads.end(), cand) != f.reads.end() && cross_reads(f, c);
+				hazard = ok && cross_reads(f, c);   // by slot: a scalar component read (math::vec2(p.y, p.x)) is not in f.reads
 			} else if (!has_store(a->value.get())) {
 				vform self;
 				vec_of(a->target, self, ctx);
 				vform rhs;
 				const bool rv = vec_of(a->value, rhs, ctx);
 				ok = vec_row(base_op(op), &self, nullptr, rv ? &rhs : nullptr, rv ? nullptr : &a->value, loc, f, &ctx);
-				hazard = ok && rv && std::find(rhs.reads.begin(), rhs.reads.end(), cand) != rhs.reads.end() && cross_reads(f, c);
+				hazard = ok && cross_reads(f, c);   // p *= p.x reads the stored x in y's product
 			}
 			vform conv;
 			if (ok && convert_into(f, c.kind, loc, conv)) {
@@ -1991,18 +2031,7 @@ void collect_sites_expr(const expression* e, std::vector<site_input>& out) {
 			collect_sites_stmt(l->body.get(), out);
 			return;
 		}
-		case node_type::binary_expr: collect_sites_expr(static_cast<const binary_expr*>(e)->left.get(), out); collect_sites_expr(static_cast<const binary_expr*>(e)->right.get(), out); return;
-		case node_type::unary_expr: collect_sites_expr(static_cast<const unary_expr*>(e)->operand.get(), out); return;
-		case node_type::assignment_expr: collect_sites_expr(static_cast<const assignment_expr*>(e)->target.get(), out); collect_sites_expr(static_cast<const assignment_expr*>(e)->value.get(), out); return;
-		case node_type::call_expr: { auto* c = static_cast<const call_expr*>(e); collect_sites_expr(c->callee.get(), out); for (const auto& a : c->arguments) collect_sites_expr(a.get(), out); return; }
-		case node_type::member_expr: collect_sites_expr(static_cast<const member_expr*>(e)->object.get(), out); return;
-		case node_type::new_expr: for (const auto& a : static_cast<const new_expr*>(e)->arguments) collect_sites_expr(a.get(), out); return;
-		case node_type::ternary_expr: { auto* t = static_cast<const ternary_expr*>(e); collect_sites_expr(t->condition.get(), out); collect_sites_expr(t->then_expression.get(), out); collect_sites_expr(t->else_expression.get(), out); return; }
-		case node_type::array_literal_expr: for (const auto& x : static_cast<const array_literal_expr*>(e)->elements) collect_sites_expr(x.get(), out); return;
-		case node_type::map_literal_expr: for (const auto& [k, v] : static_cast<const map_literal_expr*>(e)->entries) { collect_sites_expr(k.get(), out); collect_sites_expr(v.get(), out); } return;
-		case node_type::cast_expr: collect_sites_expr(static_cast<const cast_expr*>(e)->operand.get(), out); return;
-		case node_type::throw_expr: collect_sites_expr(static_cast<const throw_expr*>(e)->value.get(), out); return;
-		default: return;
+		default: for_each_child_expression(e, [&](const expression* child) { collect_sites_expr(child, out); }); return;
 	}
 }
 
@@ -2048,10 +2077,11 @@ bool lower_site(engine& eng, const site_input& in, lowered_site& out, size_t& ou
 			c.comp_name[k] = view;
 		}
 	}
+	bool changed = false;
 	auto run = [&](bool dry, size_t& used) -> std::shared_ptr<block_stmt> {
 		rewriter rw(eng, cands, an, next, dry);
 		auto* b = static_cast<const block_stmt*>(body.get());
-		bool changed = false;
+		changed = false;
 		std::vector<declaration_ptr> list;
 		rw.param_prologue(list, b->location);
 		auto rest = rw.block_list(b->declarations, &changed);
@@ -2064,6 +2094,7 @@ bool lower_site(engine& eng, const site_input& in, lowered_site& out, size_t& ou
 	size_t used = 0;
 	run(true, used);   // settles which declarations keep their slot (needs_box)
 	auto lowered_body = run(false, used);
+	if (lowered == 0 && !changed) return false;   // a vector buffer none of whose statements lowered: the parsed body runs
 	out.decl = in.decl;
 	out.lambda = in.lambda;
 	out.source_body = body;

@@ -12730,9 +12730,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                     if (parent_script_class) {
                         // Find matching parent constructor (fewest defaults used wins)
                         const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
-                        std::shared_ptr<function_decl> parent_ctor;
+                        std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the arity match
                         size_t parent_defaults = SIZE_MAX;
-                        for (const auto& ctor_ast : parent_ctor_asts) {
+                        if (!parent_ctor) for (const auto& ctor_ast : parent_ctor_asts) {
                             if (arity_accepts(ctor_ast->parameters, init_args.size()) &&
                                 ctor_ast->parameters.size() - init_args.size() < parent_defaults) {
                                 parent_ctor = ctor_ast;
@@ -12803,9 +12803,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                 // Ancestor is a script class - find matching constructor and add to chain
                                                 // (fewest defaults used wins)
                                                 const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
-                                                std::shared_ptr<function_decl> ancestor_ctor;
+                                                std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the arity match
                                                 size_t ancestor_defaults = SIZE_MAX;
-                                                for (const auto& ac : ancestor_ctors) {
+                                                if (!ancestor_ctor) for (const auto& ac : ancestor_ctors) {
                                                     if (arity_accepts(ac->parameters, ancestor_args.size()) &&
                                                         ac->parameters.size() - ancestor_args.size() < ancestor_defaults) {
                                                         ancestor_ctor = ac;
@@ -12974,9 +12974,12 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
             
             // Find matching constructor in same class (fewest defaults used wins)
             const auto& ctor_asts = class_def->get_constructor_asts();
-            std::shared_ptr<function_decl> target_ctor;
+            // the delegation target through the one scorer (typed exact > conversion > var), else the arity match
+            std::vector<std::shared_ptr<function_decl>> other_ctors;
+            for (const auto& ctor_ast : ctor_asts) { if (ctor_ast != matching_ctor) { other_ctors.push_back(ctor_ast); } }
+            std::shared_ptr<function_decl> target_ctor = pick_best_overload(other_ctors, init_args);
             size_t target_defaults = SIZE_MAX;
-            for (const auto& ctor_ast : ctor_asts) {
+            if (!target_ctor) for (const auto& ctor_ast : ctor_asts) {
                 if (ctor_ast != matching_ctor && arity_accepts(ctor_ast->parameters, init_args.size()) &&
                     ctor_ast->parameters.size() - init_args.size() < target_defaults) {
                     target_ctor = ctor_ast;
@@ -13048,81 +13051,17 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // Get all constructor ASTs
     const auto& ctor_asts = class_def->get_constructor_asts();
 
-    // Find constructor with matching parameter count AND types (trailing defaults open
-    // the arity window; within a tier the ctor using FEWER defaults wins)
-    // Priority: 1) exact type match, 2) numeric conversion match, 3) untyped fallback
-    std::shared_ptr<function_decl> exact_match_ctor;
-    std::shared_ptr<function_decl> convertible_match_ctor;
-    std::shared_ptr<function_decl> arity_match_ctor;  // Fallback for untyped params
-    size_t exact_defaults = SIZE_MAX, convertible_defaults = SIZE_MAX, arity_defaults = SIZE_MAX;
-
-    for (const auto& ctor_ast : ctor_asts) {
-        if (!arity_accepts(ctor_ast->parameters, args.size())) {
-            continue;
-        }
-        const size_t defaults_used = ctor_ast->parameters.size() - args.size();
-
-        if (defaults_used < arity_defaults) {
-            arity_match_ctor = ctor_ast;
-            arity_defaults = defaults_used;
-        }
-
-        // Check if all parameter types match exactly
-        bool exact_match = true;
-        bool convertible_match = true;
-        for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
-            const auto& param = ctor_ast->parameters[i];
-            if (param.type && !param.type->type_name.empty()) {
-                // Parameter has explicit type - check if arg is compatible
-                auto arg_type = args[i].deref().type();
-                if (arg_type == script_value_type::jai_object_type) {
-                    // For objects, check class name
-                    auto resolved = resolve_member_target(args[i]);
-                    if (resolved) {
-                        if (resolved.class_name() != param.type->type_name) {
-                            exact_match = false;
-                            convertible_match = false;
-                        }
-                    } else {
-                        exact_match = false;
-                        convertible_match = false;
-                    }
-                } else {
-                    // For primitives, check base type
-                    if (arg_type != param.type->base_type) {
-                        exact_match = false;
-                        // Check if numeric conversion is allowed
-                        bool is_numeric_conversion =
-                            (arg_type == script_value_type::jai_int_type &&
-                             param.type->base_type == script_value_type::jai_float_type) ||
-                            (arg_type == script_value_type::jai_float_type &&
-                             param.type->base_type == script_value_type::jai_int_type);
-                        if (!is_numeric_conversion) {
-                            convertible_match = false;
-                        }
-                    }
-                }
+    // The class's constructor overloads through the one script-overload scorer (calls, methods and constructors rank alike:
+    // typed exact > conversion > var; KEEP BYTE-PARALLEL with vm_backend's constructor selection)
+    std::shared_ptr<function_decl> matching_ctor = pick_best_overload(ctor_asts, args);
+    if (!matching_ctor) {   // no viable overload: the arity match (fewest defaults) raises its parameter's own text at the binding
+        size_t fewest_defaults = SIZE_MAX;
+        for (const auto& ctor_ast : ctor_asts) {
+            if (arity_accepts(ctor_ast->parameters, args.size()) && ctor_ast->parameters.size() - args.size() < fewest_defaults) {
+                matching_ctor = ctor_ast;
+                fewest_defaults = ctor_ast->parameters.size() - args.size();
             }
-            // If param has no type, it accepts anything
         }
-
-        if (exact_match && defaults_used < exact_defaults) {
-            exact_match_ctor = ctor_ast;
-            exact_defaults = defaults_used;
-        }
-        if (convertible_match && defaults_used < convertible_defaults) {
-            convertible_match_ctor = ctor_ast;
-            convertible_defaults = defaults_used;
-        }
-    }
-
-    // Select best matching constructor: exact > convertible > arity fallback
-    std::shared_ptr<function_decl> matching_ctor = exact_match_ctor;
-    if (!matching_ctor) {
-        matching_ctor = convertible_match_ctor;
-    }
-    if (!matching_ctor) {
-        matching_ctor = arity_match_ctor;
     }
 
     if (!matching_ctor) {

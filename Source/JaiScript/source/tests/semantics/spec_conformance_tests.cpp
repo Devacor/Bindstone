@@ -2183,6 +2183,24 @@ private:
 		ruling_base_slots_keep_the_class();
 		ruling_block_callees();
 		ruling_var_typed_arrays();
+		constructor_overloads_rank_like_calls();
+	}
+
+	void constructor_overloads_rank_like_calls() {
+		test("a_constructor_overload_set_ranks_like_a_call", [this]() {
+			// the one script-overload scorer picks a constructor (a call, : this(...) and : super(...)): typed exact > conversion > var;
+			// a typed parameter the argument does not match ranks below every candidate it matches
+			expect("constructor ranking", R"(
+				class R { int got = 0; R(var& a, string tag) { got = -1; } R(var a, int tag) { got = a[0]; } }
+				class F { string which = ""; F(var x) { which = "var"; } F(float x) { which = "float"; } }
+				class D { string which = ""; D() : this(1) {} D(var x) { which = "var"; } D(int x) { which = "int"; } }
+				class B { string which = ""; B(var x) { which = "var"; } B(int x) { which = "int"; } }
+				class C : B { C() : super(5) {} }
+				var a = [7];
+				R r = R(a, 0); F f = F(2); D d = D(); C c = C(); B v = B("s");
+				"" + r.got + " " + f.which + " " + d.which + " " + c.which + " " + v.which;
+			)", "7 float int int var", check_mode::warn);
+		});
 	}
 
 	void ruling_var_typed_arrays() {

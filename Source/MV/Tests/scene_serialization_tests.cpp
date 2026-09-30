@@ -12,6 +12,8 @@
 #include "MV/Render/Scene/stencil.h"
 #include "MV/Render/Scene/palette.h"
 #include "MV/Render/Scene/path.h"
+#include "MV/Render/Scene/grid.h"
+#include <cstdlib>
 
 #include <string>
 #include <iostream>
@@ -137,6 +139,32 @@ namespace mv_tests {
 				check_not_null(palette.self(), "Palette did not load as Palette");
 				check_eq(std::string("mask"), stencil->id());
 				check_eq(std::string("colors"), palette->id());
+			});
+
+			test("reflected Point/Size/Color properties are script vectors writing the live member, both backends", [] {
+				for (bool interpreter : { false, true }) {
+					_putenv(interpreter ? "MV_SCRIPT_INTERPRETER=1" : "MV_SCRIPT_INTERPRETER=");
+					SceneHost host;
+					auto scene = Node::make(host.renderer, "root");
+					auto grid = scene->make("grid")->attach<MV::Scene::Grid>().self();
+					auto palette = scene->make("palette")->attach<MV::Scene::Palette>(host.mouse).self();
+					host.engine->add_global("g", host.engine->make_value(grid));
+					host.engine->add_global("p", host.engine->make_value(palette));
+					host.engine->add_global("n", host.engine->make_value(scene));
+					const std::string label = interpreter ? " (interpreter)" : " (vm)";
+					check_eq(std::string("math::vec3 math::vec3 math::vec3 math::vec3"),
+						host.engine->execute("type_of(g.topLeftOffset) + \" \" + type_of(g.cellDimensions) + \" \" + type_of(n.translateTo) + \" \" + type_of(p.selectorPercentSize)").to_string(), "types" + label);
+					host.engine->execute("g.topLeftOffset = math::vec3(1, 2, 3); g.topLeftOffset.x = 5; g.topLeftOffset.y += 10; g.topLeftOffset.z++; "
+						"g.cellDimensions.width = 4; g.cellDimensions.height += 2; n.translateTo.x = 7; n.translateTo.y -= 3; p.selectorPercentSize.width *= 2;");
+					const MV::Point<> offset = grid->gridOffset();
+					check_true(offset.x == 5.0f && offset.y == 12.0f && offset.z == 4.0f, "whole, component and compound stores reach topLeftOffset" + label);
+					check_true(grid->cellSize().width == 4.0f && grid->cellSize().height == 2.0f, "cellDimensions (width/height aliases)" + label);
+					check_true(scene->position().x == 7.0f && scene->position().y == -3.0f, "a node property" + label);
+					check_eq(std::string("true"), host.engine->execute("to_string(math::abs(p.selectorPercentSize.width - 1.7) < 0.0001)").to_string(), "a private palette property reads back the store" + label);
+					host.engine->execute("p.color(math::color(1, 0.25, 0, 1));");
+					check_eq(std::string("math::color (1.0, 0.25, 0.0, 1.0)"), host.engine->execute("type_of(p.color()) + \" \" + to_string(p.color())").to_string(), "a property named like its method is reached through the method" + label);
+				}
+				_putenv("MV_SCRIPT_INTERPRETER=");
 			});
 
 			test("PathMap keeps its Drawable-level state through save and load", [] {

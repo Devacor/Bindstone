@@ -1531,4 +1531,13 @@ namespace MV {
 
 } // namespace MV
 
+#include <jaiscript/math/adapter.hpp>
+
+JAI_BIND_VEC3((MV::Point<MV::PointPrecision>), x, y, z)
+JAI_BIND_IVEC3((MV::Point<int>), x, y, z)
+JAI_BIND_VEC3((MV::Size<MV::PointPrecision>), width, height, depth)
+JAI_BIND_IVEC3((MV::Size<int>), width, height, depth)
+JAI_BIND_COLOR((MV::Color), R, G, B, A)
+JAI_BIND_VEC2((MV::TexturePoint), textureX, textureY)
+
 #endif // _MV_POINTS_H_

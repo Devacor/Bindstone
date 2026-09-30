@@ -2355,6 +2355,15 @@ private:
 				t([]() { int u = 1; set37(u); return type_of(u) + ":" + u; });
 			)", "Cannot assign string to a variable declared int|int:2|string:5|string|int:3", check_mode::warn);
 		});
+		test("a_store_through_a_reference_copies_like_the_variables_own_store", [this]() {
+			// value semantics hold through the reference: the typed variable takes a copy, never the source's node
+			expect("ref store copies", R"(
+				array<int> src = [1, 2]; array<int> dst = [9, 9];
+				function fill(var& r) { r = src; r[0] = 5; }
+				fill(dst);
+				"" + src[0] + " " + dst[0] + " " + dst.size();
+			)", "1 5 2", check_mode::warn);
+		});
 	}
 
 	void static_members_bind_references() {

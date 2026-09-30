@@ -15,6 +15,11 @@
 #define JAI_FORCEINLINE inline
 #endif
 
+// Inline header code holds locks and guards across throws; without unwinding their destructors never run
+#if defined(_MSC_VER) && !defined(_CPPUNWIND)
+#error "JaiScript requires C++ exception unwinding (/EHsc)"
+#endif
+
 namespace jai {
     
     class engine;

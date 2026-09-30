@@ -41,7 +41,7 @@ public:
     }
 
     static std::string denied(const char* name = "app.edit") {
-        return std::string("Insufficient privilege: ") + name + ".: Insufficient privilege";
+        return std::string("Insufficient privilege: ") + name + ".";
     }
 
     template<class Engine>

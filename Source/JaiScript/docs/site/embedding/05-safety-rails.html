@@ -78,7 +78,7 @@ eng-&gt;execution_budget();           // read back; 0 disables; DEFAULT: 5.0 sec
 eng-&gt;execution_budget(0.05);
 eng-&gt;execute(&quot;var caught = 0; try { while (true) { } } catch (e) { caught = 1; } caught;&quot;);
 // throws to C++: &quot;Script execution budget exceeded - raise engine::execution_budget
-//                 or break up the work: Script execution budget exceeded&quot;
+//                 or break up the work&quot;
 eng-&gt;execute(&quot;2 + 2&quot;).as_int();    // 4 — the engine survives; each execute gets a fresh deadline</code></pre></div>
 <p>Why terminal: a catchable timeout is a denial-of-service kit. The differential fuzzer demonstrated a catch-and-retry loop that kept <code>execute()</code> from ever returning. The whole matrix (nested catches, catches inside functions, lambdas, and coroutines, reentrant execute boundaries, per-entry re-arming, the 5-second default) is covered by the test suite on both backends.</p>
 <p>A host entry is an <code>execute()</code> or <code>resume()</code> call, or a script function the host calls directly (a function value it holds, called through <code>as_function()</code>) while no script is running. Each one arms a fresh deadline from the budget set at that moment, so a host can lower the budget just for the calls it wants bounded.</p>

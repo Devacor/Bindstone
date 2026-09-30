@@ -17,10 +17,9 @@ endif()
 add_executable(embed_quickstart main.cpp)
 target_link_libraries(embed_quickstart PRIVATE JaiScript::jaiscript)
 
-if(MSVC)
-	# The library selects the static runtime and its headers need /bigobj in every consumer TU.
-	target_compile_options(embed_quickstart PRIVATE /bigobj)
-	set_property(TARGET embed_quickstart PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# An installed library carries the MSVC runtime it was built with; a subproject follows ours.
+if(EMBED_QUICKSTART_FIND_PACKAGE AND MSVC)
+	set_property(TARGET embed_quickstart PROPERTY MSVC_RUNTIME_LIBRARY "${JaiScript_MSVC_RUNTIME_LIBRARY}")
 endif()
 
 target_compile_definitions(embed_quickstart PRIVATE

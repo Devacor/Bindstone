@@ -24,8 +24,5 @@ else()
 endif()
 
 if(MSVC)
-    target_compile_options(jaiscript_lsp PRIVATE /W3 /EHsc /permissive- /bigobj)
-    set_property(TARGET jaiscript_lsp PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
+    target_compile_options(jaiscript_lsp PRIVATE /W3)
 endif()

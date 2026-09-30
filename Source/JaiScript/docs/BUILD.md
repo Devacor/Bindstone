@@ -224,17 +224,20 @@ find_package(JaiScript 0.1 CONFIG REQUIRED)          # -DCMAKE_PREFIX_PATH=/opt/
 target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
 ```
 
-On MSVC the in-tree build selects the static runtime (`/MT`, `/MTd`) for the library; a consumer
-built against the DLL runtime sets `MSVC_RUNTIME_LIBRARY` on the `jaiscript` target after
-`add_subdirectory`, or the linker complains about mismatched runtimes. The installed package
-records the runtime its library was built with in `JaiScript_MSVC_RUNTIME_LIBRARY`:
+On MSVC the library follows the runtime of the project that builds it: as a subproject it takes
+the parent's `CMAKE_MSVC_RUNTIME_LIBRARY` (CMake's default is the DLL runtime), and the in-tree
+build defaults to the static runtime (`/MT`, `/MTd`) unless you pass `CMAKE_MSVC_RUNTIME_LIBRARY`
+yourself. An installed package records the runtime its library was built with in
+`JaiScript_MSVC_RUNTIME_LIBRARY` (empty for CMake's default), so a consumer matches it with one
+line:
 
 ```cmake
 set_property(TARGET my_game PROPERTY MSVC_RUNTIME_LIBRARY "${JaiScript_MSVC_RUNTIME_LIBRARY}")
 ```
 
-MSVC consumers also compile with `/bigobj`: the binder headers overflow the default section
-limit in a Debug translation unit.
+The target carries its own interface flags: `/bigobj` on MSVC (the binder headers overflow the
+default section limit in a Debug translation unit) and `-Wa,-mbig-obj` on MinGW GCC. Warning
+flags stay private to the library.
 
 `examples/embed_quickstart/` is a complete consumer: `add_subdirectory` by default,
 `-DEMBED_QUICKSTART_FIND_PACKAGE=ON -DCMAKE_PREFIX_PATH=<prefix>` for the installed package.

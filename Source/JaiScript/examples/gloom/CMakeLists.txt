@@ -15,9 +15,6 @@ option(GLOOM_PORT_LUA "Build gloom_lua, the Lua/sol2 port of GLOOM" OFF)
 function(gloom_msvc_settings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W3 /EHsc /permissive- /bigobj)
-        set_property(TARGET ${target} PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        )
     endif()
 endfunction()
 

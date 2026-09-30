@@ -10,10 +10,7 @@ target_compile_definitions(jai_crawler PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(jai_crawler PRIVATE /W3 /EHsc /permissive- /bigobj)
-    set_property(TARGET jai_crawler PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
+    target_compile_options(jai_crawler PRIVATE /W3)
 endif()
 
 add_custom_command(TARGET jai_crawler POST_BUILD

@@ -1,5 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <chrono>
+#include <thread>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -51,6 +53,32 @@ public:
 				e->execute("for (int i = 0; i < 4; i++) { if (i == 0) { auto f = [&]() { i = 0; }; f(); } i = i - 1; }");
 			});
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
+		});
+
+		test("a_direct_host_call_runs_under_the_budget_set_before_it", [this]() {
+			// a host calling a script function with no script running is a host entry: the deadline is armed from the
+			// budget current at the call (not the last execute's), the entry's latch resets, and the clock sample is written
+			for (bool use_vm : {false, true}) {
+				const std::string be = use_vm ? " (vm)" : " (interpreter)";
+				auto e = engine::make();
+				if (use_vm) { e->set_backend(backend_type::vm); }
+				e->add_function("nap", []() { std::this_thread::sleep_for(std::chrono::milliseconds(3)); });
+				e->execution_budget(1000.0);
+				e->execute("function run(int n) -> int { nap(); int acc = 0; for (int i = 0; i < n; i++) { acc += 1; } return acc; }\n"
+				           "function idle() -> int { return 1; }");
+				const auto run = e->get_variable("run").as_function();
+				const std::vector<script_value> n{ script_value(static_cast<script_int>(20000), e.get()) };
+				const uint64_t samples = e->clock_sample_count();
+				check_true(e->get_variable("idle").as_function()({}).has_value(), "the idle call runs" + be);
+				check_true(e->clock_sample_count() > samples, "a direct call's entry writes the clock sample" + be);
+				e->execution_budget(0.0005);
+				auto tripped = run(n);
+				check_true(!tripped.has_value() && std::string(tripped.message()).find("Script execution budget exceeded") != std::string::npos,
+				           "the 3 ms nap outlives the 0.5 ms budget set before the call" + be);
+				e->execution_budget(1000.0);
+				auto fresh = run(n);
+				check_true(fresh.has_value() && fresh.value().as_int() == 20000, "the next call arms its own deadline" + be);
+			}
 		});
 
 		test("zero_budget_disables_the_limit", [this]() {

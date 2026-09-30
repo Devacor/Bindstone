@@ -146,6 +146,10 @@ public:
         interpreter_->push_external_call_scope();
     }
 
+    void begin_host_call() override {
+        interpreter_->begin_host_call();
+    }
+
     void pop_external_call_scope() override {
         interpreter_->pop_external_call_scope();
     }

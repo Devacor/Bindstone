@@ -362,7 +362,8 @@ namespace jai {
         // there is no runtime toggle (so the hot path carries no policy branch).
         bool throw_on_overflow() const;
 
-        // Wall-clock budget in seconds for one execute()/resume() call (fractional is
+        // Wall-clock budget in seconds for one host entry: an execute()/resume() call, or a script function the host
+        // calls while no script runs, each armed from the budget current at the entry (fractional is
         // fine — e.g. 1.0/60 for a frame). A script exceeding it raises a TERMINAL
         // runtime error (execution_budget_exceeded): script catch handlers are skipped
         // and execute() reports the failure to the host — a script can never swallow a

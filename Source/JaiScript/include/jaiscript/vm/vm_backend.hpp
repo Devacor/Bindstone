@@ -279,6 +279,7 @@ namespace jai::vm {
 
         script_value get_variable(const std::string& name) const override;
         void push_external_call_scope() override;
+        void begin_host_call() override;
         void pop_external_call_scope() override;
         bool has_variable(const std::string& name) const override;
 

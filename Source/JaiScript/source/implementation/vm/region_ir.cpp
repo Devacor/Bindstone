@@ -93,7 +93,7 @@ std::string listing(const region_ir& r) {
 
 std::vector<chunk::cell_mask> live_temps(const region_ir& r, const std::vector<chunk::cell_loop::cell>& cells,
                                          const std::vector<uint32_t>& slot_to_cell, const std::vector<std::pair<uint32_t, uint32_t>>& defs,
-                                         const std::vector<uint32_t>& copy_at, uint32_t copy_head, size_t copy_count) {
+                                         const std::vector<uint32_t>& copy_at, uint32_t copy_head, size_t copy_count, uint32_t held_below) {
 	std::vector<chunk::cell_mask> live(copy_count, chunk::cell_mask{});
 	std::vector<uint32_t> cur = slot_to_cell;
 	std::vector<size_t> def_end(cells.size(), 0);   // per compiler value: the copy offset after its defining instruction(s)
@@ -106,6 +106,14 @@ std::vector<chunk::cell_mask> live_temps(const region_ir& r, const std::vector<c
 			const uint32_t cl = op.reads[x] < cur.size() ? cur[op.reads[x]] : k_invalid_u32;
 			if (cl == k_invalid_u32 || !cells[cl].temp) continue;
 			for (size_t m = def_end[cl]; m < here_end && m < live.size(); ++m) { live[m].set(cl); }
+		}
+		if (held_below != 0) {
+			const size_t here_begin = copy_at[ip - r.head] - copy_head;
+			for (size_t s = 0; s < cur.size() && s < held_below; ++s) {
+				const uint32_t cl = cur[s];
+				if (cl == k_invalid_u32 || cl >= cells.size() || !cells[cl].temp || cells[cl].env_operand != k_invalid_u32) continue;
+				for (size_t m = here_begin; m < here_end && m < live.size(); ++m) { live[m].set(cl); }
+			}
 		}
 		while (nd < defs.size() && defs[nd].first == ip) { cur[cells[defs[nd].second].slot] = defs[nd].second; def_end[defs[nd].second] = here_end; ++nd; }
 	}

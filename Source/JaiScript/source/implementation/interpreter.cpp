@@ -2337,6 +2337,17 @@ std::optional<checked_result<script_value>> interpreter::object_unary_via_method
     return checked_result<script_value>(std::move(result.value()));
 }
 
+// A callable object (Dev ruling 2026-09-30): only a call that would raise not callable asks for it, so ordinary calls never
+// pay for it. KEEP BYTE-PARALLEL with vm_backend::call_operator_of
+script_value interpreter::call_operator_of(const script_value& callee) {
+    const script_value& v = callee.deref();
+    if (parallel_worker_ || (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type)) { return make_value(); }
+    auto target = resolve_member_target(v);
+    if (!target) { return make_value(); }
+    script_value method_val = target.method(op_call_id_);
+    return method_val.is_function() ? create_bound_method(v, method_val) : make_value();
+}
+
 interpreter::interpreter()
     : ownedSymbolizer_(std::make_unique<string_symbolizer>()),
       string_symbolizer_(ownedSymbolizer_.get()),
@@ -2388,6 +2399,7 @@ interpreter::interpreter()
     op_right_shift_id_ = string_symbolizer_->intern(">>");
     op_bang_id_ = string_symbolizer_->intern("!");
     op_tilde_id_ = string_symbolizer_->intern("~");
+    op_call_id_ = string_symbolizer_->intern("()");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
 
@@ -2459,6 +2471,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     op_right_shift_id_ = string_symbolizer_->intern(">>");
     op_bang_id_ = string_symbolizer_->intern("!");
     op_tilde_id_ = string_symbolizer_->intern("~");
+    op_call_id_ = string_symbolizer_->intern("()");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
 
@@ -2530,6 +2543,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     op_right_shift_id_ = string_symbolizer_->intern(">>");
     op_bang_id_ = string_symbolizer_->intern("!");
     op_tilde_id_ = string_symbolizer_->intern("~");
+    op_call_id_ = string_symbolizer_->intern("()");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
 
@@ -7330,12 +7344,16 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
 
     // Check if the callee is a function
     if (!callee.is_function()) {
-        const script_value& callee_value = callee.deref();
-        auto callee_target = resolve_member_target(callee_value);
-        auto text = not_callable_diagnostic(callee_name_symbol(expr->callee.get()), callee_value.type(), base_type_ids_[callee_value.type()],
-                                            callee_target.class_def ? std::string_view(callee_target.class_def->get_name()) : std::string_view{},
-                                            callee_target.class_def ? callee_target.class_def->get_type_id() : 0);
-        return checked_result<void>(make_error_code(runtime_error_code::not_a_function), text.message, text.sym0, text.sym1);
+        if (script_value call_operator = call_operator_of(callee); call_operator.is_function()) {
+            callee = std::move(call_operator);
+        } else {
+            const script_value& callee_value = callee.deref();
+            auto callee_target = resolve_member_target(callee_value);
+            auto text = not_callable_diagnostic(callee_name_symbol(expr->callee.get()), callee_value.type(), base_type_ids_[callee_value.type()],
+                                                callee_target.class_def ? std::string_view(callee_target.class_def->get_name()) : std::string_view{},
+                                                callee_target.class_def ? callee_target.class_def->get_type_id() : 0);
+            return checked_result<void>(make_error_code(runtime_error_code::not_a_function), text.message, text.sym0, text.sym1);
+        }
     }
     
     // Use a local vector for arguments to avoid issues with nested calls

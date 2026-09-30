@@ -632,6 +632,7 @@ namespace jai {
         void init_dispatch_table();
 
         // Optimized binary operation handlers - return checked_result for error propagation
+        struct binary_host;   // this backend's hooks for detail/binary_handlers.hpp
         checked_result<script_value> handle_add(const script_value& left, const script_value& right);
         checked_result<script_value> handle_subtract(const script_value& left, const script_value& right);
         checked_result<script_value> handle_multiply(const script_value& left, const script_value& right);

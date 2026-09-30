@@ -815,6 +815,8 @@ namespace jai {
         std::optional<script_exception> current_exception_;
         bool is_unwinding_ = false;
         std::optional<script_value> active_exception_value_;  // The exception message as a script_value (optional)
+        // A C++ exception raised under a call becomes the script exception its text throws; the call yields null
+        checked_result<void> raise_native_exception(const std::exception& e);
 
         std::vector<stack_trace_entry> captured_trace_;
         bool trace_captured_ = false;

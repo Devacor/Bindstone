@@ -2060,14 +2060,6 @@ private:
 				"" + assigns + " " + h.f.v;
 			)", "4 3", check_mode::warn);
 		});
-		test("f6_a_coroutine_whose_body_threw_is_completed", [this]() {
-			expect("coroutine after a throw", R"(
-				coroutine g() { throw; yield 1; }
-				coroutine k() { throw "boom"; yield 1; }
-				function t(var h) -> string { string r = ""; try { h.resume(); } catch (e) { r = e; } try { h.resume(); } catch (e) { r = r + "|" + e; } return r; }
-				t(g()) + " / " + t(k());
-			)", "No exception to re-throw|Cannot resume a completed coroutine / boom|Cannot resume a completed coroutine", check_mode::warn);
-		});
 		test("f7_an_argument_ahead_of_a_class_operator_takes_its_value_when_evaluated", [this]() {
 			// invariant 13: a later argument that runs user code does not change an earlier by-value argument
 			expect("capture ahead of operator", R"(
@@ -2082,6 +2074,20 @@ private:
 
 	// docs/SIMPLIFICATION_AUDIT.md: the audit's divergences, each pinned here by the change that fixes it
 	void simplification_audit_fixes() {
+		test("f6_a_coroutine_whose_body_threw_is_completed", [this]() {
+			// a native exception escaping the body fails the handle like a script throw; the resumer's state comes back
+			expect("coroutine after a throw", R"(
+				coroutine g() { throw; yield 1; }
+				coroutine k() { throw "boom"; yield 1; }
+				coroutine m() { yield 1; throw; yield 2; }
+				function t(var h) -> string { string r = ""; try { h.resume(); } catch (e) { r = e; } try { h.resume(); } catch (e) { r = r + "|" + e; } return r; }
+				function u(var h) -> string { h.resume(); return t(h); }
+				string out = t(g()) + " / " + t(k()) + " / " + u(m());
+				try { throw "outer"; } catch (e) { out += " / " + e; }
+				out;
+			)", "No exception to re-throw|Cannot resume a completed coroutine / boom|Cannot resume a completed coroutine / "
+			    "No exception to re-throw|Cannot resume a completed coroutine / outer", check_mode::warn);
+		});
 		test("f8_a_by_value_parameter_does_not_see_user_code_write_its_argument", [this]() {
 			// a by-value parameter holds a copy: user code the callee runs (a method on another local, a getter of the
 			// declared class or of a subclass the argument is, an operator, a conversion) never writes through it

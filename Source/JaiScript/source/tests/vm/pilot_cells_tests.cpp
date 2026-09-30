@@ -3375,6 +3375,50 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "pinned by kind under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_value_moved_into_a_pinned_cell_lands_there_at_its_definition", [this]() {
+			// a math result, an arithmetic result and a move's result that a move copies into a local or a graft value of the same pinned kind
+			// land in the destination directly when nothing reads them after the move; a graft's return onto its join runs nothing; the value
+			// read again later, a move inside a branch arm and a value a later iteration reads keep their moves; both backends, proofs off, the
+			// middle end off and the injected miss at every plain position
+			const std::string prelude =
+				"float wave(float x) { float s = math::sin(x); float c = math::cos(x); return s * c + 0.5; }\n"
+				"float mix(float a, float b, float t) { float d = b - a; return a + d * t; }\n"
+				"var run = function(int n) { float acc = 0.0; float x = 0.1; float keep = 0.0; for (int i = 0; i < n; i++) { float w = wave(x); float m = mix(w, x, 0.25); float y = m * 2.0; float z = math::sqrt(y * y + 1.0); if (i > 3) { keep = z; } else { keep = keep + 1.0; } acc = acc + y + z * keep; x = x + 0.37; } return acc; };\n"
+				"var carried = function(int n) { float p = 1.0; float q = 0.0; for (int i = 0; i < n; i++) { float r = math::cos(p); q = q + r; p = r + 0.5; } return q + p; };\n";
+			const std::string body = "string go() { return to_string(run(20)) + \"|\" + to_string(carried(20)); }\ngo();";
+			both(prelude + body, "", "moves at their definitions");
+			both(prelude + body, "", "moves at their definitions, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
+			check_true(count("C_MATH") >= 4, "the maths run in the blocks\n" + l);
+			{
+				// no math result is moved by the instruction after it: the math lands in the move's destination
+				std::vector<std::string> lines; for (size_t at = 0, nl; at < l.size(); at = nl + 1) { nl = l.find('\n', at); if (nl == std::string::npos) { nl = l.size(); } lines.push_back(l.substr(at, nl - at)); }
+				auto operands = [](const std::string& line, const char* op, uint64_t& a, uint64_t& b) {
+					const size_t at = line.find(op); if (at == std::string::npos) return false;
+					return std::sscanf(line.c_str() + at + std::strlen(op), " %llu %llu", reinterpret_cast<unsigned long long*>(&a), reinterpret_cast<unsigned long long*>(&b)) == 2;
+				};
+				size_t moved = 0;
+				for (size_t i = 0; i + 1 < lines.size(); ++i) {
+					uint64_t ma = 0, mb = 0, va = 0, vb = 0;
+					if (operands(lines[i], "C_MATH ", ma, mb) && operands(lines[i + 1], "C_MOV_P ", va, vb) && vb == (ma & 0xFFFFFFu)) { ++moved; }
+				}
+				check_eq(static_cast<size_t>(0), moved, "the math results land in their locals\n" + l);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "moves at their definitions under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

@@ -4126,6 +4126,96 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		size_t origin_override = SIZE_MAX;   // an argument's value records the probe as its origin
 		struct ret_pad { uint32_t at, proof, origin; };   // a C_RET's copy ip, the return's proof mode and the general ip of its tail
 		std::vector<ret_pad> ret_pads;
+		std::vector<uint8_t> jump_target(back - head + 2, 0);   // an operation some branch or resume lands on
+		auto elided_jump = [&](size_t n) {   // a jump onto the next instruction (over operations that emit nothing) emits nothing
+			const ir_op& o = ops[n];
+			if (o.kind != ir::jump || o.tok != 0 || o.target <= first + n) return false;
+			for (size_t m = n + 1; first + m < o.target; ++m) { if (m >= ops.size() || ops[m].kind != ir::skip) return false; }
+			return true;
+		};
+		for (size_t n = 0; n < ops.size(); ++n) {
+			const ir_op& o = ops[n];
+			if (((o.kind == ir::cmp && !o.head) || o.kind == ir::jump || o.kind == ir::boundary) && !elided_jump(n) && o.target >= head && o.target - head < jump_target.size()) { jump_target[o.target - head] = 1; }
+		}
+		// the slots each operation's successors may read (backward over the region's graph); where the block leaves or hands the general form
+		// control (an exit, a bail, a boundary, a door, the region's end) every slot counts as read
+		std::vector<uint32_t> live_slot_ids;
+		for (const ir_op& o : ops) { for (uint8_t r = 0; r < o.nreads; ++r) { live_slot_ids.push_back(o.reads[r]); } if (o.writes != k_invalid_u32) { live_slot_ids.push_back(o.writes); } }
+		std::sort(live_slot_ids.begin(), live_slot_ids.end());
+		live_slot_ids.erase(std::unique(live_slot_ids.begin(), live_slot_ids.end()), live_slot_ids.end());
+		const size_t live_words = (live_slot_ids.size() + 63) / 64;
+		auto live_bit = [&](uint32_t slot) -> size_t { return static_cast<size_t>(std::lower_bound(live_slot_ids.begin(), live_slot_ids.end(), slot) - live_slot_ids.begin()); };
+		const region_cfg live_cfg = control_flow(region);
+		std::vector<uint64_t> live_in((ops.size() + 2) * live_words, 0);
+		auto live_row = [&](size_t n) { return live_in.data() + n * live_words; };
+		std::fill(live_row(live_cfg.exit_node), live_row(live_cfg.exit_node) + live_words, ~0ull);
+		auto live_escape = [](ir k) {
+			switch (k) {
+			case ir::exit: case ir::bail: case ir::boundary: case ir::call: case ir::land: case ir::probe: case ir::ret: case ir::range: case ir::rebind: case ir::placeholder: return true;
+			default: return false;
+			}
+		};
+		std::vector<uint64_t> live_scratch(live_words);
+		auto live_out_of = [&](size_t n, uint64_t* out) {
+			const ir_op& o = ops[n];
+			const bool leaves = (o.kind == ir::cmp && o.head) || o.kind == ir::range || ((o.kind == ir::cmp || o.kind == ir::jump) && (o.target < first || o.target > back));   // an edge out of the block (the graph writes it as no edge)
+			std::fill(out, out + live_words, leaves ? ~0ull : 0ull);
+			for (const size_t s : live_cfg.succ[n]) {
+				if (s == live_cfg.exit_node) continue;
+				const uint64_t* in = s == live_cfg.back_node ? (region.straight ? live_row(live_cfg.exit_node) : live_row(0)) : live_row(s);
+				for (size_t w = 0; w < live_words; ++w) { out[w] |= in[w]; }
+			}
+		};
+		for (bool changed = true; changed && live_words;) {
+			changed = false;
+			for (size_t n = ops.size(); n-- > 0;) {
+				const ir_op& o = ops[n];
+				if (live_escape(o.kind)) { live_scratch.assign(live_words, ~0ull); }
+				else {
+					live_out_of(n, live_scratch.data());
+					if (o.writes != k_invalid_u32) { const size_t b = live_bit(o.writes); live_scratch[b / 64] &= ~(1ull << (b % 64)); }
+					for (uint8_t r = 0; r < o.nreads; ++r) { const size_t b = live_bit(o.reads[r]); live_scratch[b / 64] |= 1ull << (b % 64); }
+				}
+				uint64_t* row = live_row(n);
+				for (size_t w = 0; w < live_words; ++w) { if (row[w] != live_scratch[w]) { row[w] = live_scratch[w]; changed = true; } }
+			}
+		}
+		// a move of a compiler value the operation just ahead defined into a cell pinned to the same kind: that operation writes the move's
+		// destination instead, when nothing reaches the move but that operation and no successor reads the value; a miss at the operation
+		// re-runs it and the move on the general form
+		auto coalesce_move = [&](size_t ip, uint32_t t, uint32_t d, uint8_t k) -> bool {
+			if (ip <= first || jump_target[ip - head] || t >= cells.size() || d >= cells.size() || !live_words) return false;
+			const chunk::cell_loop::cell& tc = cells[t];
+			if (!tc.temp || tc.first_decl || tc.env_operand != k_invalid_u32) return false;
+			size_t p = ip - 1;   // the operation whose instruction is the last one emitted (a skip and an elided jump emit nothing)
+			while (p > first && (ops[p - first].kind == ir::skip || elided_jump(p - first))) { if (jump_target[p - head]) return false; --p; }
+			if (code.empty() || copy_at[p - head] != code.size() - 1 || ops[p - first].writes != tc.slot) return false;
+			live_out_of(ip - first, live_scratch.data());
+			const size_t tb = live_bit(tc.slot);
+			if (live_scratch[tb / 64] & (1ull << (tb % 64))) return false;
+			vm_instruction& pi = code.back();
+			const uint8_t kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT), ki = static_cast<uint8_t>(script_value::TYPEID_INT);
+			switch (pi.op) {
+			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
+				if (k != kf || pi.a != t) return false;
+				pi.a = d; return true;
+			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik:
+				if (k != ki || pi.a != t) return false;
+				pi.a = d; return true;
+			case opcode::op_c_arith_p: case opcode::op_c_arith: {
+				const opcode fast = static_cast<opcode>(pi.a >> k_cell_op_shift);
+				if ((pi.a & k_cell_index_mask) != t || k != (fast <= opcode::op_t_shr_ii ? ki : kf)) return false;
+				pi.a = (pi.a & ~k_cell_index_mask) | d; return true;
+			}
+			case opcode::op_c_math:   // the landing is the destination's own rule (a kind it does not take misses)
+				if ((pi.a & k_cell_index_mask) != t) return false;
+				pi.a = (pi.a & ~k_cell_index_mask) | d; return true;
+			case opcode::op_c_mov_p: case opcode::op_c_mov_k:   // a chain of moves: the first one lands in the last one's destination
+				if (pi.a != t) return false;
+				pi.a = d; return true;
+			default: return false;
+			}
+		};
 		auto append = [&](vm_instruction ins, size_t from_ip) {
 			if (origin_override != SIZE_MAX) { from_ip = origin_override; }
 			code.push_back(ins);
@@ -4161,7 +4251,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint32_t src = cell_of(op.b), dst = dst_of(op.a);
 				const uint8_t k = dst < cells.size() ? cells[dst].kind : 0;
 				const bool scalar = k == static_cast<uint8_t>(script_value::TYPEID_INT) || k == static_cast<uint8_t>(script_value::TYPEID_FLOAT) || k == static_cast<uint8_t>(script_value::TYPEID_BOOL);
-				if (scalar && op.tok != 1 && pinned_operand(src, k)) { append(vm_instruction{(src & k_typed_const_bit) ? opcode::op_c_mov_k : opcode::op_c_mov_p, dst, src & ~k_typed_const_bit, 0}, ip); }   // a pinned dst takes the value as it is
+				if (scalar && op.tok != 1 && pinned_operand(src, k)) {   // a pinned dst takes the value as it is
+					if (!(src & k_typed_const_bit) && (src == dst || coalesce_move(ip, src, dst, k))) break;   // a cell onto itself: its slot holds the value, or it is dirty and flushes it
+					append(vm_instruction{(src & k_typed_const_bit) ? opcode::op_c_mov_k : opcode::op_c_mov_p, dst, src & ~k_typed_const_bit, 0}, ip);
+				}
 				else { append(vm_instruction{opcode::op_c_mov, dst, src, op.tok}, ip); }
 				break;
 			}
@@ -4243,7 +4336,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				break;
 			}
 			case ir::math: append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), 0}, ip); break;
-			case ir::jump: fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 0, op.target, 0 }); append(vm_instruction{opcode::op_c_jump, 0, 0, op.tok}, ip); break;   // c = 1: an inner loop's back edge
+			case ir::jump:
+				if (ip >= first && elided_jump(ip - first)) break;   // onto the next instruction (a graft's return to its join): nothing to run
+				fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 0, op.target, 0 }); append(vm_instruction{opcode::op_c_jump, 0, 0, op.tok}, ip); break;   // c = 1: an inner loop's back edge
 			case ir::guard: {
 				const uint32_t alias = op.a < current.size() ? current[op.a] : k_invalid_u32;
 				fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 2, static_cast<uint32_t>(head + op.guarded), alias == k_invalid_u32 ? 0x1FFu : alias });   // the guarded read's copy offset

@@ -958,7 +958,7 @@ namespace jai::vm {
         uint64_t op_less_id_ = 0, op_less_equal_id_ = 0, op_greater_id_ = 0, op_greater_equal_id_ = 0;
         uint64_t op_equal_equal_id_ = 0, op_bang_equal_id_ = 0, op_spaceship_id_ = 0;
         uint64_t op_ampersand_id_ = 0, op_pipe_id_ = 0, op_caret_id_ = 0, op_left_shift_id_ = 0, op_right_shift_id_ = 0;
-        uint64_t op_tilde_id_ = 0;
+        uint64_t op_bang_id_ = 0, op_tilde_id_ = 0;
 
         // a compound kind's operator method (compound_and -> operator&)
         uint64_t compound_kind_symbol(uint32_t kind) const noexcept {
@@ -1234,7 +1234,7 @@ namespace jai::vm {
         std::optional<checked_result<bool>> object_equality_via_method(const script_value& left, const script_value& right);
         std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
-        std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
+        std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ! ~
 
         struct member_target {
             std::shared_ptr<class_instance> instance;

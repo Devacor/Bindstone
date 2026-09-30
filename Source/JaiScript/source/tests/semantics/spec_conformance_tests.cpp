@@ -2190,7 +2190,7 @@ private:
 
 	void script_class_operator_overloads() {
 		test("a_script_class_overloads_every_cpp_overloadable_operator", [this]() {
-			// Dev ruling 2026-09-30: unary - + ~ and binary % & | ^ << >> <=> join the declarable operators (unary vs binary by
+			// Dev ruling 2026-09-30: unary - + ! ~ and binary % & | ^ << >> <=> join the declarable operators (unary vs binary by
 			// the parameter count, like C++ member operators); a compound form is x = x op y through the class's operator; the
 			// class chain resolves them; a builtin operand keeps its builtin meaning
 			const std::string src = R"(
@@ -2206,6 +2206,7 @@ private:
 					int operator<=>(V o) { return n < o.n ? -1 : n > o.n ? 1 : 0; }
 					V operator-() { return V(0 - n); }
 					V operator+() { return V(n + 100); }
+					bool operator!() { return n == 0; }
 					V operator~() { return V(~n); }
 					V operator-(V o) { return V(n - o.n); }
 				}
@@ -2213,18 +2214,18 @@ private:
 				class P { int n = 0; P(int x) { n = x; } int operator%(Probe p) { return n % p.v; } }
 				V a = V(12); V b = V(5);
 				string direct = "" + (a % b).n + " " + (a & b).n + " " + (a | b).n + " " + (a ^ 1).n + " " + (a << 2).n + " " + (a >> 2).n + " " +
-				    (a <=> b) + " " + (-a).n + " " + (+a).n + " " + (~a).n + " " + (a - b).n;
+				    (a <=> b) + " " + (-a).n + " " + (+a).n + " " + !a + " " + !V(0) + " " + (~a).n + " " + (a - b).n;
 				V c = V(12);
 				c %= b; string comp = "" + c.n; c &= V(3); comp += " " + c.n; c |= V(4); comp += " " + c.n; c ^= 3; comp += " " + c.n;
 				c <<= 1; comp += " " + c.n; c >>= 2; comp += " " + c.n;
 				W w = W(12);
-				string inherited = "" + (w % b).n + " " + (-w).n + " " + (~w).n;
+				string inherited = "" + (w % b).n + " " + (-w).n + " " + (~w).n + " " + !W(0);
 				Probe pr = Probe(); pr.v = 5;
 				string mixed = "" + (P(12) % pr);
 				string builtin = "" + (7 % 3) + " " + (6 & 3) + " " + (-4) + " " + (+4) + " " + (+2.5) + " " + !0 + " " + (~0);
 				direct + "|" + comp + "|" + inherited + "|" + mixed + "|" + builtin;
 			)";
-			every_config("script operators", "2 4 13 13 48 3 1 -12 112 -13 7|2 2 6 5 10 2|2 -12 -13|2|1 2 -4 4 2.5 true -1",
+			every_config("script operators", "2 4 13 13 48 3 1 -12 112 false true -13 7|2 2 6 5 10 2|2 -12 -13 true|2|1 2 -4 4 2.5 true -1",
 				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); }, check_mode::strict);
 		});
 		test("an_operator_the_class_does_not_declare_keeps_the_builtin_text", [this]() {
@@ -2234,6 +2235,36 @@ private:
 				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
 				t([]() { V v; var w = -v; return 1; }) + "|" + t([]() { V v; var w = ~v; return 1; }) + "|" + t([]() { V v; var w = v % 2; return 1; });
 			)", "Unary minus requires numeric operand|Bitwise NOT requires integer operand|Invalid operands for % operator", check_mode::off);
+		});
+		test("a_class_operator_bang_decides_every_context_a_condition_reads", [this]() {
+			// `!v` runs operator!() as a value and in a condition alike; a value instance's truthiness is the negation of its
+			// operator!() (before to_bool()), so if (v), while, ?:, && and a bool slot read one answer; a handle's ! is its null test
+			const std::string src = R"(
+				class Z { int n = 0; Z(int x) { n = x; } bool operator!() { return n == 0; } }
+				class Q { int operator!() { return 0; } }
+				class B { bool operator!() { return true; } bool to_bool() { return true; } }
+				Z z0 = Z(0); Z z1 = Z(1);
+				string r = "";
+				if (!z0) { r += "a"; }
+				if (!z1) { r += "b"; }
+				if (z1) { r += "c"; }
+				if (z0) { r += "d"; }
+				r += !z0 ? "e" : "f";
+				bool b0 = z0; bool b1 = z1;
+				r += " " + b0 + " " + b1;
+				int k = 0;
+				while (!Z(k)) { k += 1; }
+				r += " " + k + " " + (z1 && true) + " " + (z0 || false);
+				shared_ptr<Z> sp = new Z(0);
+				r += " " + !sp;
+				Q q;
+				r += " " + (!q) + (q ? "T" : "F");
+				B bb;
+				r += " " + (bb ? "T" : "F") + (!bb ? "T" : "F");
+				r;
+			)";
+			every_config("operator! contexts", "ace false true 1 true false false 0T FT",
+				[&](engine& e) { return spec::render(e.execute(src)); }, check_mode::strict);
 		});
 	}
 

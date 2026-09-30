@@ -909,16 +909,16 @@ public:
         return false;
     }
 
-    // Truthiness probe memo (is_truthy on objects): does the chain define to_bool()?
+    // Truthiness probe memo (is_truthy on objects): does the chain define operator!() or to_bool()?
     // get_method's exact chain (defines_method); valid while method_epoch_ holds
-    bool may_define_to_bool() const {
+    bool may_define_truthiness() const {
         if (to_bool_memo_epoch_ != method_epoch_) {
-            uint64_t id = 0;
-            if (auto eng = engine_) { id = eng->symbolize("to_bool"); }
-            may_define_to_bool_ = id == 0 || defines_method(id);
+            uint64_t to_bool_id = 0, bang_id = 0;
+            if (auto eng = engine_) { to_bool_id = eng->symbolize("to_bool"); bang_id = eng->symbolize("!"); }
+            may_define_truthiness_ = to_bool_id == 0 || bang_id == 0 || defines_method(to_bool_id) || defines_method(bang_id);
             to_bool_memo_epoch_ = method_epoch_;
         }
-        return may_define_to_bool_;
+        return may_define_truthiness_;
     }
 
     script_value get_static_method(uint64_t id, bool throw_if_missing = true) const {
@@ -2186,7 +2186,7 @@ private:
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value null_field_value_;
     mutable uint64_t to_bool_memo_epoch_ = UINT64_MAX;
-    mutable bool may_define_to_bool_ = true;
+    mutable bool may_define_truthiness_ = true;
 
     class_type class_type_;
     access_level default_access_ = access_level::public_access;

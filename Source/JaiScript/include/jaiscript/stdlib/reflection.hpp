@@ -674,6 +674,27 @@ inline void register_reflection_functions(engine& eng_ref) {
         return make_bound_method(target, dispatcher).as_function()(call_args);
     });
 
+    // A method taken as a value is spelled reflect::bind(obj, "name") (Dev ruling 2026-09-30): the callable holds the object
+    // and keeps it alive, exactly as a bound method always has; a value type's methods run on the value, so a lambda wraps them
+    add("bind", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+        reflect_detail::expect_args(args, 2, "bind");
+        const std::string name = reflect_detail::expect_name(args, 1, "bind");
+        const script_value& target = args[0].deref();
+        auto door = reflect_detail::resolve_member_door(eng, target);
+        if (!door.def) {
+            throw runtime_error("reflect::bind takes a class instance, a handle or a host object; the methods of " +
+                                reflect_detail::semantic_type_name(target, eng) +
+                                " run on the value: wrap the call in a lambda ([&]() { ... })");
+        }
+        const uint64_t id = eng->get_symbolizer()->intern(name);
+        script_value dispatcher = door.def->get_method(id, false);
+        if (!dispatcher.is_function()) {
+            throw runtime_error("reflect::bind: '" + door.def->get_name() + "' has no method '" + name + "'");
+        }
+        reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
+        return make_bound_method(target, dispatcher);
+    });
+
     add("call", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 1, "call");
         const std::string name = reflect_detail::expect_name(args, 0, "call");

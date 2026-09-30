@@ -2187,6 +2187,7 @@ private:
 		compound_operators_have_one_table();
 		script_class_operator_overloads();
 		builtin_methods_as_values();
+		reflect_bind();
 		field_reference_stores();
 		nan_comparisons();
 	}
@@ -2244,6 +2245,30 @@ private:
 				string e2 = t([]() { O o; auto& r = o.f; r = "x"; return 1; });
 				plain + "|" + compound + "|" + (e1 == e2 ? "same text" : e1 + " vs " + e2);
 			)", "match|match 3|same text", check_mode::warn);
+		});
+	}
+
+	void reflect_bind() {
+		test("reflect_bind_binds_a_method_to_its_object", [this]() {
+			// Dev ruling 2026-09-30: reflect::bind(obj, "name") is the spelling of a method taken as a value: the callable holds the
+			// object (a value instance, a handle, a host object) and keeps it alive; a value type's methods run on the value (a
+			// lambda wraps them); the class's access control applies
+			expect("reflect::bind", R"(
+				class C { int n = 0; void bump() { n += 1; } int add(int k) { n += k; return n; } private: void hidden() {} }
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				C c; var b = reflect::bind(c, "bump"); b(); b();
+				var add = reflect::bind(c, "add");
+				shared_ptr<C> h = new C(); var hb = reflect::bind(h, "bump"); hb();
+				C c2; var b2 = reflect::bind(c2, "bump"); c2 = C(); b2();
+				var kept = reflect::bind(C(), "add");
+				"" + c.n + " " + add(5) + " " + h.n + " " + c2.n + " " + kept(3) + "|" +
+				    t([]() { var f = reflect::bind([1], "push"); return 1; }) + "|" +
+				    t([]() { string s = "ab"; var f = reflect::bind(s, "to_upper"); return 1; }) + "|" +
+				    t([]() { C k; var f = reflect::bind(k, "nope"); return 1; }) + "|" +
+				    t([]() { C k; var f = reflect::bind(k, "hidden"); return 1; });
+			)", "2 7 1 0 3|reflect::bind takes a class instance, a handle or a host object; the methods of array run on the value: wrap the call in a lambda ([&]() { ... })|"
+			    "reflect::bind takes a class instance, a handle or a host object; the methods of string run on the value: wrap the call in a lambda ([&]() { ... })|"
+			    "reflect::bind: 'C' has no method 'nope'|Cannot access private member 'hidden' of class 'C'", check_mode::warn);
 		});
 	}
 

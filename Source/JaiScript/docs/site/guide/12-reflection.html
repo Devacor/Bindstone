@@ -90,6 +90,14 @@ try { reflect::set(v, &quot;gold&quot;, 0); } catch (e) { print(&quot;writes enf
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">reads see everything: 100
 writes enforce: Cannot access private member &#x27;gold&#x27; of class &#x27;Vault&#x27;</code></pre></div>
 <p>Enforcement is from the <em>caller&#x27;s</em> context: inside a method of the declaring class, <code>reflect::set(this, &quot;gold&quot;, 7)</code> works, the same places direct syntax may touch private state.</p>
+<p><code>reflect::bind(obj, &quot;name&quot;)</code> hands back the method as a callable bound to <code>obj</code>: it holds the object and keeps it alive, so calling it later is <code>obj.name(&hellip;)</code> on the object it was taken from, even after the variable that held it is reassigned. It is the one spelling of a method taken as a value (<code>obj.name</code> without a call is an error, see <a href="07-classes.html#methods-as-values">Classes</a>). A string, array or map is a value, so <code>reflect::bind</code> refuses one and points to a lambda: <code>[&amp;]() { s.to_upper(); }</code>.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; void bump() { n += 1; } }
+Counter c;
+var bump = reflect::bind(c, &quot;bump&quot;);
+bump();
+bump();
+print(&quot;{}&quot;, c.n);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2</code></pre></div>
 <p><code>reflect::call(&quot;name&quot;, args&hellip;)</code> is the free-function twin: it resolves a global or namespace-qualified name and calls it. <code>reflect::construct(&quot;Class&quot;, args&hellip;)</code> and <code>reflect::construct_shared(&quot;Class&quot;, args&hellip;)</code> are spawn-by-name: the first is <code>Class(args)</code> (a value: copies are independent), the second is <code>new Class(args)</code> (a shared handle: copies alias one object; see <a href="03-value-semantics.html">Value Semantics</a>).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function raise(auto x) -&gt; auto { return x + 1; }
 namespace tools { function twice(auto x) -&gt; auto { return x * 2; } }

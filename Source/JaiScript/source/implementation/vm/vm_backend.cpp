@@ -7181,85 +7181,16 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	JAI_CELL_COST(2)
 	JAI_COARSE(coarse_flush_, coarse_flushes_)
 	materialize_raw_window(f);
-	cells_writeback(f, loop);
-	f.cells->reset();
-}
-
-// a compiler value is written back only where the general continuation reads it (its definition is live at this instruction): a
-// temp slot carries one cell per definition kind, and a dead definition must not overwrite the live one
-void vm_backend::cells_writeback(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
+	// a compiler value is flushed only where the general continuation reads it (its definition is live at this
+	// instruction): a temp slot carries one cell per definition kind, and a dead definition must not overwrite the live one
 	const size_t at = f.ip - loop.copy_head;
 	const chunk::cell_mask pending = cs.dirty & (at < loop.live_temps.size() ? (~loop.temp_mask | loop.live_temps[at]) : chunk::cell_mask::all());
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
 		if (!pending.test(k) || cs.kind[k] == 0) continue;
 		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } else { cell_flush_one(f, loop, k); }
 	}
-	cs.dirty.reset();
-}
-
-// the end of a boundary statement (f.ip): the block parked for it resumes when no entry of another block in this frame came between, the
-// debugger and the numeric operators are as they were, and every slot cell and landing check holds again (cells_resync); f.ip is then the
-// resume copy ip. Otherwise the block stays closed (its cells were clean at the park) and the general form continues at f.ip
-const chunk::cell_loop* vm_backend::cells_unpark(frame& f) {
-	cell_state& cs = *f.cells;
-	const uint32_t li = cs.park_loop;
-	cs.park_at = k_invalid_u32;
-	if (cs.park_serial != cs.entry_serial || li >= f.code->cell_loops.size() || debug_hook_ || has_custom_numeric_ops_) return nullptr;
-	const chunk::cell_loop& loop = f.code->cell_loops[li];
-	const size_t at = f.ip;
-	cs.loop = li;
-	cs.dirty.reset();
-	f.ip = loop.boundaries[cs.park_boundary].resume;
-	if (!cells_resync(f, loop)) { cs.reset(); f.ip = at; return nullptr; }
-	++cells_counters_.resumes;
-	return &loop;
-}
-
-// after a statement on the general form: each slot cell takes its slot again by the entry's guard (the statement may have written it, or a
-// callee through a reference), then the landing's checks for what user code may have reached (environment values, strings, sites, aliases,
-// grafts, aliases of the stdlib)
-bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
-	cell_state& cs = *f.cells;
-	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
-	const uint32_t define = loop.boundaries[cs.park_boundary].define;
-	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
-		const chunk::cell_loop::cell& cl = loop.cells[k];
-		const uint8_t have = cs.kind[k];
-		if (have == 0 || k == define || cl.temp || cl.env_operand != k_invalid_u32 || cl.iter_index || (have != kint && have != kflt && have != kbool)) continue;
-		const script_value* s = frame_slot(f, cl.slot);
-		if (!s || s->get_engine() != engine_) return false;
-		const uint8_t want = cl.kind != 0 ? cl.kind : static_cast<uint8_t>(s->raw_storage_index());
-		if ((want != kint && want != kflt && want != kbool) || s->raw_storage_index() != want) return false;
-		const type_info* canonical = want == kint ? ti_int_ : want == kflt ? ti_float_ : ti_bool_;
-		const type_info* st = s->type_info_raw();
-		if (st != canonical && !(st && st->base_type == script_value_type::jai_any_type)) return false;
-		cs.payload[k] = want == kint ? static_cast<int64_t>(s->unchecked_as_int()) : want == kflt ? cell_bits_of_float(s->unchecked_as_float()) : (s->unchecked_as_bool() ? 1 : 0);
-		cs.kind[k] = want;
-		cs.stamp[k] = cl.kind != 0 ? nullptr : const_cast<type_info*>(st);
-	}
-	if (const uint32_t k = define; k != k_invalid_u32) {
-		// the local the statement declared: its declared kind, or the block stays closed
-		const chunk::cell_loop::cell& cl = loop.cells[k];
-		const script_value* s = frame_slot(f, cl.slot);
-		if (!s || s->get_engine() != engine_ || s->raw_storage_index() != cl.kind) return false;
-		const type_info* st = s->type_info_raw();
-		const type_info* canonical = cl.kind == kint ? ti_int_ : cl.kind == kflt ? ti_float_ : ti_bool_;
-		if (st != canonical && st != cl.decl_stamp) return false;
-		cs.payload[k] = cl.kind == kint ? static_cast<int64_t>(s->unchecked_as_int()) : cl.kind == kflt ? cell_bits_of_float(s->unchecked_as_float()) : (s->unchecked_as_bool() ? 1 : 0);
-		cs.kind[k] = cl.kind;
-		cs.stamp[k] = nullptr;
-	}
-	return cells_reland_effects(f, loop);
-}
-
-// a boundary statement's end in the body: the block parked for it resumes; anything else runs the instruction this one replaced
-op_status vm_backend::exec_cells_resume(frame& f, const vm_instruction& ins) {
-	if (f.cells && f.cells->park_at == f.ip) [[unlikely]] {
-		if (const chunk::cell_loop* parked = cells_unpark(f)) return cells_run(f, *parked);
-	}
-	f.ip = ins.a;
-	return {};
+	cs.reset();
 }
 
 // one cell's payload back to its slot with the stamp the landing rule gives it: in place when the slot already holds the kind
@@ -7358,7 +7289,6 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	JAI_CELL_COST(3)
 	JAI_COARSE(coarse_miss_, coarse_misses_)
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
-	++cells_counters_.misses;
 	park_raw_callee(f, loop);   // a miss inside a raw call's argument zone: the general form resumes with the callee parked
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_cells_miss_step_[step < 8 ? step : 7];
@@ -7412,12 +7342,6 @@ JAI_FORCEINLINE void vm_backend::cells_flush_ip(frame& f, size_t& ip, const chun
 // the overflow text), then the next iteration runs as a block when the cells admit it
 op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
-	if (f.cells && f.cells->park_at == f.ip) [[unlikely]] {
-		// a boundary statement ending at the back edge: the parked block's own back edge steps the var cell (the slot's value, re-read)
-		const size_t here = f.ip;
-		if (const chunk::cell_loop* parked = cells_unpark(f)) return cells_run(f, *parked);
-		f.ip = here;
-	}
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
 	const counted_for_proto& p = f.code->counted_for_protos[loop.counted];
 	if (cfor_states_.empty()) {
@@ -7455,14 +7379,7 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 // the original back edge: budget poll, then the entry guards on the live-in slots and the unboxing
 op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	if (ins.op == opcode::op_cells_enter) return exec_cells_enter(f, ins);
-	if (ins.op == opcode::op_cells_resume) return exec_cells_resume(f, ins);
 	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
-	if (f.cells && f.cells->park_at == f.ip) [[unlikely]] {
-		// a boundary statement ending at the back edge: the parked block resumes at its own back edge (the budget polls there)
-		const size_t here = f.ip;
-		if (const chunk::cell_loop* parked = cells_unpark(f)) return cells_run(f, *parked);
-		f.ip = here;
-	}
 	if (execution_limit_exhausted()) [[unlikely]] { return raise_from(execution_limit_failure()); }
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
 	// window-backed record frames only: a fiber frame is call_frame-backed and takes the general form; a
@@ -7867,7 +7784,6 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	}
 	cs.env_of = environment_.get(); cs.env_serial = env_symbolizer_->env_epoch();
 	cs.raw_landing = 0; cs.raw_call = 0;   // no raw call is in flight at a block's entry (an earlier run may have ended in a C++ exception or an unwind)
-	++cs.entry_serial;   // a block parked in this frame for a statement does not resume over this entry's cells
 	if (cs.env_ptr.size() < loop.cells.size()) { cs.env_ptr.resize(loop.cells.size(), nullptr); }
 	if (cs.payload.size() < loop.cells.size()) {
 #ifdef JAISCRIPT_VM_PROFILE
@@ -7952,7 +7868,6 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 #endif
 	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // a stdlib alias's name rebound: the general form makes the real call
-	++cells_counters_.entries;
 	return true;
 }
 
@@ -7977,14 +7892,9 @@ static bool cells_miss_plain(opcode op) {
 	}
 }
 #endif
-// one frame's block run (Raw: a frame program's, its calls and returns on the hot switch: a raw call or return into another frame
-// program continues here with fp following it; any other switch returns to the raw chain)
+// one frame's block run (Raw: a frame program's, its calls and returns on the hot switch); a raw switch returns to the raw chain
 template <bool Raw>
-op_status vm_backend::cells_run_frame(frame*& fp, const chunk::cell_loop& entry_loop) {
-	const chunk::cell_loop* lp = &entry_loop;
-next_frame:
-	frame& f = *fp;
-	const chunk::cell_loop& loop = *lp;
+op_status vm_backend::cells_run_frame(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	const cell_regs regs{cs.payload.data(), cs.kind.data(), &cs.dirty, f.code->constants.data(), f.code->code.data(), &loop};   // the run's registers: the vectors never move during a run (the entry sized them)
 #ifdef JAISCRIPT_VM_PROFILE
@@ -8065,10 +7975,10 @@ next_frame:
 			}
 			[[fallthrough]];
 		case opcode::op_c_args:
-			if constexpr (Raw) { f.ip = ip; st = exec_c_args(f, ci); if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; } ip = f.ip; break; }
+			if constexpr (Raw) { f.ip = ip; st = exec_c_args(f, ci); if (raw_switch_) return st; ip = f.ip; break; }
 			[[fallthrough]];
 		case opcode::op_c_ret:
-			if constexpr (Raw) { st = exec_c_ret(f, ip, ci, regs); if (raw_switch_) { if (raw_follow(fp, lp, st)) goto next_frame; return st; } break; }
+			if constexpr (Raw) { st = exec_c_ret(f, ip, ci, regs); if (raw_switch_) return st; break; }
 			[[fallthrough]];
 		default: f.ip = ip; st = cells_run_cold(f, loop, ci); ip = f.ip; if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher, or raw; the block resumes at the landing)
 		}
@@ -8098,8 +8008,7 @@ op_status vm_backend::cells_run(frame& entry, const chunk::cell_loop& entry_loop
 	// block, so no plan outlives general code; a block without raw sites pays nothing)
 	if (entry_loop.raw_sites) [[unlikely]] { raw_epoch_advance(); }
 	if (entry_loop.frame_program) [[unlikely]] return cells_run_raw(entry, op_status::ok, true);
-	frame* ep = &entry;
-	const op_status st = cells_run_frame<false>(ep, entry_loop);
+	const op_status st = cells_run_frame<false>(entry, entry_loop);
 	if (!raw_switch_) [[likely]] return st;
 	return cells_run_raw(entry, st, false);   // a raw call from the block: the raw chain runs from here
 }
@@ -8113,7 +8022,7 @@ op_status vm_backend::cells_run_raw(frame& entry, op_status st, bool run_first) 
 		for (;;) {
 			if (run_first) {
 				const chunk::cell_loop& lp = fp->code->cell_loops[fp->cells->loop];
-				st = lp.frame_program ? cells_run_frame<true>(fp, lp) : cells_run_frame<false>(fp, lp);
+				st = lp.frame_program ? cells_run_frame<true>(*fp, lp) : cells_run_frame<false>(*fp, lp);
 			}
 			run_first = true;
 			frame* const next = raw_switch_;
@@ -8143,26 +8052,6 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_mload: return exec_c_mload(f, ci);   // the member sites: off the hot switch (row 148.3; the row 148.2 cliff)
 	case opcode::op_c_mstore: return exec_c_mstore(f, ci);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
-	case opcode::op_c_boundary: {
-		// a boundary operation: the dirty cells the statement may read go back, the block parks (its cells stay valid), and the general form runs
-		// the statement from its first instruction; the statement's end resumes the block (cells_unpark)
-		cell_state& cs = *f.cells;
-		materialize_raw_window(f);
-		cells_writeback(f, loop);
-		if (loop.iter_proto != k_invalid_u32 && loop.iter_index_cell != k_invalid_u32 && !iter_states_.empty()) {
-			// a range-for's iteration state names the next element, as a miss inside the body leaves it (the block resumes over its own index cell)
-			const int64_t idx = cs.payload[loop.iter_index_cell];
-			iter_states_.back().index = static_cast<size_t>(idx < 0 ? 0 : idx) + 1;
-		}
-		cs.park_at = loop.boundaries[ci.a].end;
-		cs.park_loop = ci.b;
-		cs.park_boundary = ci.a;
-		cs.park_serial = cs.entry_serial;
-		cs.loop = k_invalid_u32;
-		++cells_counters_.boundaries;
-		f.ip = ci.c;
-		return {};
-	}
 	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = loop.straight && ci.a == loop.head ? loop.trampoline : ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only, a return only in a frame program); materialize before handing f.ip back
 	}
@@ -8316,7 +8205,6 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 	pending_callee& pc = pending_callees_.emplace_back();
 	pc.fn = site.ic_fn;
 	pc.pin = site.ic_pin;
-	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 }
 // a raw call: the arguments instruction of a raw site whose probe found a raw callee. When every argument's kind is its parameter's, the callee's
 // record is pushed without an environment, a binder or an argument vector, the payloads land in its parameter cells, and its frame program runs
@@ -8508,6 +8396,7 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 // miss, and the caller decides where the general form resumes
 bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc, bool raw) {
 	cell_state& cs = *f.cells;
+	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
 	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return false;
 	if (!raw) for (const chunk::cell_loop::call_arg& a : cc.args) {
 		if (a.kind != 1) continue;
@@ -8516,12 +8405,6 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 		const script_value* s = frame_slot(f, cl.slot);
 		if (!s || s->raw_storage_index() != cs.kind[a.v]) return false;   // the local escaped by reference: the slot is the value from here on
 	}
-	return cells_reland_effects(f, loop);
-}
-bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop) {
-	cell_state& cs = *f.cells;
-	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
-	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return false;
 	// the environment and its epoch as at entry: the bindings recorded there still answer (the lookup cache's own rule)
 	const bool env_ok = environment_.get() == cs.env_of && env_symbolizer_->env_epoch() == cs.env_serial;
 	for (const uint32_t k : loop.env_cells) {
@@ -10207,9 +10090,8 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 		}
 	}
 	handled = true;
-	std::optional<script_value> rekeyed;   // an engine-less key (a chunk template) takes the map's engine; any other key is used as it is
-	if (!key_in.has_valid_engine()) { rekeyed.emplace(key_in); rekeyed->set_engine(container.get_engine()); }
-	const script_value& key = rekeyed ? *rekeyed : key_in;
+	script_value key = key_in;
+	if (!key.has_valid_engine()) { key.set_engine(container.get_engine()); }
 	if (map_tag) {
 		if (const type_info_ptr& key_type = map_tag->type_params.empty() ? no_type : map_tag->type_params[0];
 		    key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
@@ -10237,7 +10119,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 			default: return false;
 		}
 	};
-	if (value_type && exact_row() && !(value.type_info_raw() && value.type_info_raw()->base_type == script_value_type::jai_shared_ptr_type)) {
+	if (value_type && exact_row() && !(value.get_type_info() && value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type)) {
 		value_ref = value;
 	} else if (value_type) {
 		if (!vm_is_element_type_compatible(value, value_type, value_ref)) {
@@ -11321,68 +11203,16 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 			}
 		}
 	}
-	if (site.mic_cd && park_sibling_method(f, site)) { JAI_PROBE_SECTION(0); JAI_PROBE_SECTION(1); return {}; }
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed);
 	if (!resolved) return op_status::failed;
 	JAI_PROBE_SECTION(0);
-	if (scratch && &*scratch == resolved) { arm_sibling_method(f, site, *resolved); }
 	const op_status parked = park_callee(f, site, argc, *resolved);
 	JAI_PROBE_SECTION(1);
 #undef JAI_PROBE_SECTION
 	return parked;
 }
 
-// a bare call of a sibling method inside a method (`down(n - 1)` in a method of the same class): the member ladder's answer for this class
-// and method epoch (no own-scope binding, no field of the name, one overload on an all-public chain) is the class's dispatcher on this
-// frame's receiver, parked as such; the call enters it as the bound method it would have minted
-bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
-	if (parallel_worker_ || !cached_global_env_ || !f.locals || f.top_level || !f.locals->is_method) return false;
-	ensure_frame_member_scope(f, environment_.get());
-	if (frame_scope_state(f) != detail::member_scope_state::instance || !f.locals->scope_this) return false;
-	const script_value& this_val = *f.locals->scope_this;
-	const size_t ti = this_val.raw_storage_index();
-	if (ti != script_value::TYPEID_OBJECT && ti != script_value::TYPEID_SHARED_PTR) return false;
-	const auto& holder = const_cast<script_value&>(this_val).get_object_holder();
-	if (!holder || !holder->is_class_instance_wrapper || !holder->data) return false;
-	const class_instance& inst = *static_cast<class_instance*>(holder->data.get());
-	const class_definition* cd = inst.get_class_definition();
-	if (cd != site.mic_cd || cd->method_epoch() != site.mic_epoch) return false;
-	const uint64_t sym = f.code->symbols[site.callee.symbol];
-	if (mic_field_shadowed(site, inst, sym) || detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) return false;
-	pending_callee& pc = pending_callees_.emplace_back();
-	pc.value = site.mic_method;
-	pc.method = site.mic_dispatch;
-	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
-	return true;
-}
-// the sibling IC's fill: the resolution minted a bound method of this frame's receiver whose dispatcher is the class's own method of the
-// name, a single overload on an all-public chain; the class has no field of the name
-void vm_backend::arm_sibling_method(frame& f, const call_site& site, const script_value& resolved) {
-	if (parallel_worker_ || !cached_global_env_ || !f.locals || f.top_level || !f.locals->is_method || !f.locals->scope_this) return;
-	if (site.callee.symbol == k_invalid_u32 || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return;
-	if (resolved.raw_storage_index() != script_value::TYPEID_FUNCTION) return;
-	const auto* thunk = resolved.unchecked_as_function().target<script_callable_thunk>();
-	if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::bound_method || !thunk->payload.this_obj || !thunk->payload.bound_dispatch) return;
-	const script_value& this_val = *f.locals->scope_this;
-	const auto& holder = const_cast<script_value&>(this_val).get_object_holder();
-	const auto& bound_holder = const_cast<script_value&>(*thunk->payload.this_obj).get_object_holder();
-	if (!holder || !holder->is_class_instance_wrapper || !holder->data || !bound_holder || bound_holder->data != holder->data) return;
-	class_instance& inst = *static_cast<class_instance*>(holder->data.get());
-	class_definition* cd = inst.get_class_definition();
-	const uint64_t sym = f.code->symbols[site.callee.symbol];
-	if (!cd || cd->chain_has_nonpublic() || !cd->single_method_overload(sym)) return;
-	const script_value method = inst.get_method(sym, false);
-	if (method.raw_storage_index() != script_value::TYPEID_FUNCTION || thunk->payload.bound_dispatch->raw_storage_index() != script_value::TYPEID_FUNCTION ||
-	    &method.unchecked_as_function() != &thunk->payload.bound_dispatch->unchecked_as_function()) return;
-	const auto* dispatch = method.unchecked_as_function().target<script_method_dispatch>();
-	if (!dispatch || dispatch->eng != engine_) return;
-	site.mic_cd = cd;
-	site.mic_epoch = cd->method_epoch();
-	site.mic_field_free = !cd->chain_declares_field(sym) && cd->field_slot(sym) == class_definition::k_no_field_slot;
-	site.mic_method = method;
-	site.mic_dispatch = site.mic_method.as_function().target<script_method_dispatch>();
-}
 // the probe's outcome for a resolved callee: not callable raises, else the pending register takes it (the direct pair for
 // a script function of matching arity, the value otherwise)
 op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, const script_value& calleeVal) {
@@ -11761,20 +11591,6 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 		}
 	}
 
-	if (pc.method) {
-		// a sibling method parked by the probe's IC: entered as its bound method would be, else minted for the opaque path
-		const size_t slice_base = stack_.size() - argc;
-		auto resolved = pc.method->cls->resolve_method_overload_ref(pc.method->name_id, stack_.data() + slice_base, argc);
-		if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
-#ifdef JAISCRIPT_VM_PROFILE
-			cfs_probe_.bucket = 1;
-#endif
-			script_value receiver = *f.locals->scope_this;
-			return enter_script_method_sliced(f, std::move(pc.value), *pc.method, *resolved.value(), &receiver, slice_base, slice_base, argc, site);
-		}
-		pc.value = make_bound_method_thunk(*f.locals->scope_this, std::move(pc.value));
-		pc.method = nullptr;
-	}
 	// Bound-method thunk (bare sibling calls): SLICE-enter before any collection —
 	// the args on the stack bind in place, the receiver rides in from the payload,
 	// resolution reads the slice via the span overload. This is the brains-bench
@@ -14483,20 +14299,12 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
 					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
 					if (!parallel_worker_ && cd && cd->has_native_methods() && !cd->extended_ever()) {
-						const class_definition::native_entry* native = cd->find_native_method(member->member_id);
-						if (native && !inst->has_field(member->member_id)) {   // a field of the name is the member the call reads
+						if (const class_definition::native_method native = cd->find_native_method(member->member_id)) {
 							if (void* self = inst->cpp_object_pointer()) {
 								script_value out = make_null();
 								bool taken = false;
 								try {
-									taken = (*native)(self, objd, stack_.data() + args_base, argc, out);
-								} catch (const script_exception& e) {
-									stack_.truncate(args_base - 1);
-									active_exception_value_ = script_value(std::string(e.what()), engine_);
-									current_exception_ = e;
-									is_unwinding_ = true;
-									stack_.push_back(make_null());
-									return {};
+									taken = native(self, objd, stack_.data() + args_base, argc, out);
 								} catch (const std::exception& e) {
 									stack_.truncate(args_base - 1);
 									active_exception_value_ = script_value(std::string(e.what()), engine_);
@@ -16772,7 +16580,6 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			}
 		}
 		if (f.cells && f.cells->loop != k_invalid_u32) [[unlikely]] { cells_flush(f, f.code->cell_loops[f.cells->loop]); }   // a callee raised into an active block: the handler sees materialized slots
-		if (f.cells) { f.cells->park_at = k_invalid_u32; }   // a block parked for a statement that raised stays closed
 		f.ip = handler.handler_ip;
 		try_records_[handler_index].in_catch = true;
 		return true;
@@ -18890,7 +18697,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// the landing, whose case resumes the block); a callee that raised ahead of its frame unwinds from here
 			case opcode::op_cells_back:
 			case opcode::op_cells_enter:
-			case opcode::op_cells_resume:
 				VM_TRY_OP_SHARED(exec_cells_back(f, ins));
 				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }

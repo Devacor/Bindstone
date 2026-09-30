@@ -215,7 +215,6 @@ namespace {
 				out << "\n" << pre << "  entry_cells";
 				for (uint32_t c : l.entry_cells) { out << " " << c; }
 				if (!l.param_cells.empty()) { out << "\n" << pre << "  param_cells"; for (uint32_t c : l.param_cells) { out << " " << c; } out << " kinds=" << std::hex << l.param_kinds << std::dec; }
-				if (!l.boundaries.empty()) { out << "\n" << pre << "  boundaries"; for (const auto& bd : l.boundaries) { out << " (" << bd.start << " " << bd.end << " " << bd.resume << " " << static_cast<int64_t>(bd.define == 0xFFFFFFFFu ? -1 : bd.define) << ")"; } }
 				out << "\n" << pre << "  site_env_cache";
 				for (uint32_t c : l.site_env_cache) { out << " " << u(c); }
 				out << "\n" << pre << "  slot_to_cell";

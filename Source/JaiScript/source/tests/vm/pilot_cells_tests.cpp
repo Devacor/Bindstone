@@ -1266,9 +1266,9 @@ public:
 				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i; acc = acc + v; i = i + 1; } return acc; };"
 				" var f6 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + to_string(i).size(); i = i + 1; } return acc; };");
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
-			check_true(listing.find(": effect at") != std::string::npos, "the method call on a call's result is an effect, its loop too thin for a boundary: " + listing);
+			check_true(listing.find(": effect at") != std::string::npos, "the method call on a call's result is an effect: " + listing);
 			check_true(listing.find("CALL_TEMP") != std::string::npos && listing.find("C_PROBE") != std::string::npos, "the call the sum consumes lands in a temp and its loop closes through the door (row 146a): " + listing);
-			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes; as a boundary it would be most of the body): " + listing);
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes): " + listing);
 			check_true(listing.find("C_MLOAD") != std::string::npos && listing.find("(MEMBER_TEMP)") == std::string::npos, "the member read of a frame-slot instance is a load site and its loop closes (row 147a): " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
@@ -2029,7 +2029,7 @@ var via_callee = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n
 			const std::string listing = listing_of(listing_defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			size_t open = 0; for (size_t at = listing.find("-- open loop "); at != std::string::npos; at = listing.find("-- open loop ", at + 1)) { ++open; }
-			check_eq(size_t(2), open, "the computed argument after a verbatim load (an environment name, a reference slot) keeps its loop general (nothing beside the statement would stay in a block): " + listing);
+			check_eq(size_t(2), open, "the computed argument after a verbatim load (an environment name, a reference slot) keeps its loop general: " + listing);
 			check_eq(size_t(2), closed, "the computed argument before the load, and the getter-backed callee, close: " + listing);
 			check(listing.find("effect at") != std::string::npos, "the refusal is an effect refusal: " + listing);
 			check(listing.find(":probe") != std::string::npos, "the probe is an operation of the region: " + listing);
@@ -2274,7 +2274,7 @@ var MIXED = [3, 1, 4, 1, 5, "s", 2, 6];
 			size_t appends = 0; for (size_t at = listing.find("\tC_APPEND "); at != std::string::npos; at = listing.find("\tC_APPEND ", at + 1)) { ++appends; }
 			check(appends >= 10, "the appends are cell operations (" + std::to_string(appends) + "): " + listing);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
-			check_eq(size_t(10), closed, "ten loops close, the char append's stays general (a boundary would leave its loop only the counter; open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
+			check_eq(size_t(10), closed, "ten loops close, the char append's stays general (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 			check(listing.find(":append") != std::string::npos, "the IR names the append: " + listing);
 		});
 		test("a_string_environment_cell_is_re_borrowed_after_every_effect_point", [this]() {
@@ -2751,9 +2751,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("|") != std::string::npos, "the shapes ran: " + vm);
 			const std::string l = listing_of("var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; function build_strip(int k) -> var { return [k, k, k, k]; } var f = function(var& pix, int cols, int vh) { int acc = 0; int x = 0; while (x < cols) { int sidx = x % 4; int have = STRIP_SET[sidx]; if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; } int y = 0; int gi = x; while (y < vh) { int c = STRIP_SET[sidx] + y; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; } x = x + 1; } return acc; };");
-			check_true(l.find("C_BOUNDARY") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with a boundary in its cache-fill arm (without the reference alias, a main-path gap of its own): " + l);
+			check_true(l.find("C_BAIL") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with a bail in its cache-fill arm (without the reference alias, a main-path gap of its own): " + l);
 			const std::string m = listing_of("function dark(int v) -> int { return v - 1; } var f = function(var& pix, int n) { int acc = 0; int i = 0; while (i < n) { int fpi = i % 8; pix[fpi] = dark(pix[fpi]); acc = acc + pix[fpi]; i = i + 1; } return acc; };");
-			check_true(m.find("-- open loop") == std::string::npos && m.find("C_BOUNDARY") != std::string::npos && m.find("C_BAIL") == std::string::npos, "a translation gap on the main path is a boundary: " + m);
+			check_true(m.find("-- open loop") != std::string::npos && m.find("translation at") != std::string::npos && m.find("C_BAIL") == std::string::npos, "a translation gap on the main path stays a refusal: " + m);
 			// lights_tic's shape (JaiDOOM spec.jai): a declaration the translation does not take inside an arm, read by the arm's later
 			// statements, under a continue-guarded body; a bail stands for the rest of its arm, so the arm's local leaves no cell to guard
 			// at entry (the census at the first row 139 tip: lights_tic slot 5 want=1 have=0, refused at every entry)
@@ -2785,14 +2785,14 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(std::string("184,180,112,124|2,2,2,4"), run_on(true, lights));
 			const std::string k = listing_of(lights);
 			size_t bails = 0, last_bail = std::string::npos;
-			for (size_t at = k.find("C_BOUNDARY"); at != std::string::npos; at = k.find("C_BOUNDARY", at + 1)) { ++bails; last_bail = at; }
+			for (size_t at = k.find("C_BAIL"); at != std::string::npos; at = k.find("C_BAIL", at + 1)) { ++bails; last_bail = at; }
 			// row 153: the two element stores of jitter's result graft (their arguments are locals), while `int l2 = LT_MAX[i] - wobble(i) * 16`
-			// keeps its call (wobble returns inside a loop) and runs as a boundary standing for the declaration and the statements after it in
-			// its arm (the skips after it in the region's listing)
+			// keeps its call (wobble returns inside a loop) and its bail, standing for the rest of its arm (the skips after it in the region's
+			// listing)
 			(void)last_bail;
 			size_t jitter_grafts = 0; for (size_t at = k.find("-- inlined jitter"); at != std::string::npos; at = k.find("-- inlined jitter", at + 1)) { ++jitter_grafts; }
-			check_true(bails == 1 && jitter_grafts == 2 && k.find("-- open loop") == std::string::npos && k.find("boundary->") != std::string::npos && k.find("boundary->") < k.find("skip;", k.find("boundary->")),
-			           "the light loop closes with one boundary standing for the declaration and the statements after it in its arm, and two jitter grafts: " + k);
+			check_true(bails == 1 && jitter_grafts == 2 && k.find("-- open loop") == std::string::npos && k.find("bail->exit;") != std::string::npos && k.find("bail->exit;") < k.find("skip;", k.find("bail->exit;")),
+			           "the light loop closes with one bail standing for the rest of its arm and two jitter grafts: " + k);
 			// the same declaration over a leaf: `LT_MAX[i]`, an element read of a var array with no proven kind, reads into a temp ahead of
 			// the graft, so jitter grafts there too and the arm needs no bail
 			std::string graft_lights = lights;
@@ -2803,7 +2803,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(std::string("184,180,112,124|2,2,2,4"), run_on(true, graft_lights));
 			const std::string g = listing_of(graft_lights);
 			size_t g_grafts = 0; for (size_t at = g.find("-- inlined jitter"); at != std::string::npos; at = g.find("-- inlined jitter", at + 1)) { ++g_grafts; }
-			check_true(g_grafts == 3 && g.find("C_BAIL") == std::string::npos && g.find("C_BOUNDARY") == std::string::npos && g.find("-- open loop") == std::string::npos, "all three jitter calls graft and the loop closes without a bail or a boundary: " + g);
+			check_true(g_grafts == 3 && g.find("C_BAIL") == std::string::npos && g.find("-- open loop") == std::string::npos, "all three jitter calls graft and the loop closes without a bail: " + g);
 			const size_t cells_at = k.find("-- cell loop");
 			const std::string cells_line = cells_at == std::string::npos ? std::string() : k.substr(cells_at, k.find('\n', cells_at) - cells_at);
 			bool adopted_slot = false;
@@ -2859,7 +2859,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("caught:") != std::string::npos, "the shapes ran: " + vm);
 			const std::string l = listing_of("var STRIPS = [0, 0, 0, 0]; var STRIP_SET = [0, 0, 0, 0]; function build_strip(int k) -> var { return [k, k, k, k]; } var f = function(var& pix, int cols, int vh) { int acc = 0; int x = 0; while (x < cols) { int sidx = x % 4; int have = STRIP_SET[sidx]; if (have == 0) { STRIPS[sidx] = build_strip(sidx); STRIP_SET[sidx] = 1; } var& strip = STRIPS[sidx]; int y = 0; int gi = x; while (y < vh) { int c = strip[y]; pix[gi % 8] = c; acc = acc + c; gi = gi + 2; y = y + 1; } x = x + 1; } return acc; };");
-			check_true(l.find("C_REBIND") != std::string::npos && l.find("C_BOUNDARY") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with its alias as a rebind and its cache-fill arm as a boundary: " + l);
+			check_true(l.find("C_REBIND") != std::string::npos && l.find("C_BAIL") != std::string::npos && l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the column loop closes with its alias as a rebind and its cache-fill arm as a bail: " + l);
 		});
 		test("a_range_for_over_an_array_is_a_block", [this]() {
 			// a range-for over an array as a block head: by value (a typed buffer, a var array, an int-declared variable over floats, which binds
@@ -5168,82 +5168,6 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string oracle = session(false);
 			check_eq(oracle, session(true), "a rebound callee and a converting argument, both backends");
 			check_true(oracle.find("throw:") == std::string::npos, "runs: " + oracle);
-		});
-		test("boundary_operations_keep_the_loop_a_block", [this]() {
-			// one statement the block does not take (a map store) stays its own cost: the loop is one block entry, the statement runs on the general
-			// form every iteration with the block parked, and the block resumes after it (the counters, not a clock, pin the shape)
-			const std::string defs =
-				"map<int, int> m = {};\n"
-				"function tail_store() -> int { int s = 0; for (int i = 0; i < 1000; ++i) { s = (s + i * 3) % 1000003; s = s ^ (i & 255); m[i & 7] = s; } return s; }\n"
-				"function mid_store() -> int { int s = 0; int t = 0; for (int i = 0; i < 1000; ++i) { s = s + i; m[i & 3] = s; t = t + s * 2; } return t; }\n"
-				"function while_store() -> int { int s = 0; int i = 0; while (i < 1000) { s = s + i; m[i & 3] = s + 1; m[(i + 1) & 3] = s; i = i + 1; } return s; }\n"
-				"function writes_cell() -> int { int s = 1; int t = 0; for (int i = 0; i < 200; ++i) { m[i & 3] = i; s = m[i & 3] + s; t = t + s * 3; t = t ^ (i & 7); } return t; }\n"
-				"function thin() -> int { int t = 0; for (int i = 0; i < 300; ++i) { m[i & 3] = i + t; } return m[2]; }\n";
-			const std::string src = defs + "to_string(tail_store()) + \" \" + to_string(mid_store()) + \" \" + to_string(while_store()) + \" \" + to_string(writes_cell()) + \" \" + to_string(thin()) + \" \" + to_string(m[1]);";
-			const std::string oracle = run_on(false, src);
-			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
-			both(src, oracle, "boundary operations");
-			both(src, oracle, "boundary operations, proofs off", false);
-			const std::string l = listing_run(src);
-			const size_t tb = l.find("== tail_store ");
-			const std::string tl = tb == std::string::npos ? l : l.substr(tb, l.find("\n== ", tb + 1) - tb);
-			check_true(tl.find("(boundaries") != std::string::npos && tl.find("C_BOUNDARY") != std::string::npos && tl.find("-- open loop") == std::string::npos, "tail_store's loop closes with a boundary: " + tl);
-			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
-			e->execute(defs);
-			struct shape { const char* call; uint64_t iterations; uint64_t boundaries_per_iteration; };
-			for (const shape& sh : { shape{ "tail_store();", 1000, 1 }, shape{ "mid_store();", 1000, 1 }, shape{ "while_store();", 1000, 1 }, shape{ "writes_cell();", 200, 1 } }) {
-				const cell_counters c0 = e->cells_counters();
-				e->execute(sh.call);
-				const cell_counters c1 = e->cells_counters();
-				const std::string label = std::string(sh.call) + ": entries " + std::to_string(c1.entries - c0.entries) + ", boundaries " + std::to_string(c1.boundaries - c0.boundaries) +
-				                          ", resumes " + std::to_string(c1.resumes - c0.resumes) + ", misses " + std::to_string(c1.misses - c0.misses);
-				check_true(c1.entries - c0.entries <= 2, "one block entry per loop run (the first iteration may run general): " + label);
-				check_true(c1.boundaries - c0.boundaries >= sh.iterations * sh.boundaries_per_iteration - 2, "the statement runs as a boundary every iteration: " + label);
-				check_true(c1.resumes - c0.resumes + 2 >= c1.boundaries - c0.boundaries, "and the block resumes after it: " + label);
-				check_eq(uint64_t{0}, c1.misses - c0.misses, "nothing misses: " + label);
-			}
-			{
-				// a loop whose body is the statement alone stays general: a block would pay a park and a resume per iteration for the counter
-				const cell_counters c0 = e->cells_counters();
-				e->execute("thin();");
-				const cell_counters c1 = e->cells_counters();
-				check_eq(uint64_t{0}, c1.entries - c0.entries, "the thin loop enters no block");
-				check_eq(uint64_t{0}, c1.boundaries - c0.boundaries, "and parks nothing");
-			}
-			if (!engine::miss_injection_available()) { return; }
-			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
-				std::string got;
-				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
-				check_eq(oracle, got, "a miss at every " + std::to_string(every));
-			}
-		});
-		test("boundary_operations_hand_the_general_form_what_it_changed", [this]() {
-			// the statement changes a cell's kind (a var taking a string): the block does not resume and the rest runs general; a statement that raises
-			// leaves the block closed for the handler, and the loop runs again afterwards; a boundary inside an inner loop; a range-for with an alias
-			const std::string src =
-				"map<int, var> m = {};\n"
-				"function kind_change() -> string { var v = 0; int n = 0; for (int i = 0; i < 20; ++i) { v = v + 1; n = n + 1; if (i == 9) { m[0] = 1; v = to_string(v) + \"!\"; } } return to_string(v) + \" \" + to_string(n); }\n"
-				"function raises(int at) -> int { int s = 0; for (int i = 0; i < 20; ++i) { s = s + i; m[i & 3] = 100 / (i - at); s = s + 1; } return s; }\n"
-				"function nested() -> int { int t = 0; for (int j = 0; j < 5; ++j) { int s = 0; for (int i = 0; i < 10; ++i) { s = s + i * j; m[i & 1] = s; } t = t + s; } return t; }\n"
-				"class P { int x = 0; }\n"
-				"array<P> ps = [P(), P(), P()];\n"
-				"function aliases() -> int { int s = 0; for (int r = 0; r < 4; ++r) { for (auto& p : ps) { p.x = p.x + r; m[p.x & 3] = p.x; s = s + p.x; } } return s; }\n"
-				"string out = kind_change();\n"
-				"try { out += \" \" + to_string(raises(7)); } catch (e) { out += \" caught:\" + e; }\n"
-				"out += \" \" + to_string(raises(100)) + \" \" + to_string(nested()) + \" \" + to_string(aliases()) + \" \" + to_string(m[1]);\n"
-				"out;";
-			const std::string oracle = run_on(false, src);
-			check_true(oracle.find("caught:") != std::string::npos, "the interpreter's answer: " + oracle);
-			both(src, oracle, "what the statement changed");
-			both(src, oracle, "what the statement changed, proofs off", false);
-			if (!engine::miss_injection_available()) { return; }
-			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 7u, 11u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
-				std::string got;
-				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
-				check_eq(oracle, got, "a miss at every " + std::to_string(every));
-			}
 		});
 		test("raw_frames_write_back_environment_values_on_a_general_return", [this]() {
 			// a frame program entered by a general call (its environment write keeps it off the raw entry) returns through its pad: the environment

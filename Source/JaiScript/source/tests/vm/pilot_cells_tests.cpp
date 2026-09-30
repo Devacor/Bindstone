@@ -5263,6 +5263,75 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(std::string("539827 4,9,4"), got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("a_miss_inside_a_grafted_loop_resumes_the_graft_with_its_values", [this]() {
+			// Gator Quest's gen_overworld: a river walk (tile_at, set_tile and iclamp grafted, DX/DY element reads) and then fill_rect's grafted loops in
+			// one function; a miss anywhere in a block inside a graft's body resumes the graft's code, which reads the graft's parameters and locals the
+			// block defined (master read a stale x there under a miss every 7th instruction); both backends, proofs on and off, miss injection
+			const std::string src = R"(
+				array<int> W_W = [40, 8];
+				array<int> W_H = [30, 8];
+				array<int> W_OFF = [0, 1200];
+				array<int> TILES = [];
+				array<int> DX = [0, 1, 1, 1, 0, -1, -1, -1];
+				array<int> DY = [-1, -1, 0, 1, 1, 1, 0, -1];
+				for (int i = 0; i < 1264; ++i) { TILES.push(0); }
+				int SEED = 12345;
+				int rng_next() { SEED = (SEED * 1103515245 + 12345) % 2147483648; return SEED; }
+				int rnd(int n) { return n <= 1 ? 0 : rng_next() % n; }
+				int iclamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+				bool in_world(int w, int x, int y) { return x >= 0 && y >= 0 && x < W_W[w] && y < W_H[w]; }
+				int tile_at(int w, int x, int y) {
+					if (x < 0 || y < 0 || x >= W_W[w] || y >= W_H[w]) { return 99; }
+					return TILES[W_OFF[w] + y * W_W[w] + x];
+				}
+				void set_tile(int w, int x, int y, int t) {
+					if (in_world(w, x, y)) { TILES[W_OFF[w] + y * W_W[w] + x] = t; }
+				}
+				void fill_rect(int w, int x0, int y0, int x1, int y1, int t) {
+					for (int y = y0; y <= y1; ++y) {
+						for (int x = x0; x <= x1; ++x) { set_tile(w, x, y, t); }
+					}
+				}
+				void gen(int w) {
+					int ww = W_W[w];
+					int hh = W_H[w];
+					for (int y = 0; y < hh; ++y) {
+						for (int x = 0; x < ww; ++x) { TILES[W_OFF[w] + y * ww + x] = (x * 7 + y * 3) % 5; }
+					}
+					for (int r = 0; r < 4; ++r) {
+						int x = 5 + rnd(ww - 10);
+						int y = 5 + rnd(hh - 10);
+						int dir = rnd(8);
+						for (int step = 0; step < 40; ++step) {
+							int t = tile_at(w, x, y);
+							if (t == 9) { break; }
+							set_tile(w, x, y, step % 7 == 0 ? 9 : 8);
+							if (rnd(3) == 0) { dir = (dir + rnd(3) + 7) % 8; }
+							x = iclamp(x + DX[dir], 1, ww - 2);
+							y = iclamp(y + DY[dir], 1, hh - 2);
+						}
+					}
+					int sx = ww / 2 - 6;
+					int sy = hh / 2 - 5;
+					fill_rect(w, sx - 2, sy - 2, sx + 12, sy + 10, 6);
+					fill_rect(w, sx, sy, sx + 10, sy + 8, 7);
+				}
+				gen(0);
+				gen(1);
+				int sum = 0;
+				for (int i = 0; i < 1264; ++i) { sum = (sum * 7 + TILES[i]) % 1000003; }
+				to_string(sum);
+			)";
+			both(src, "523522", "a river walk and grafted fills");
+			both(src, "523522", "a river walk and grafted fills, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u, 17u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("523522"), got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("boundary_operations_hand_the_general_form_what_it_changed", [this]() {
 			// the statement changes a cell's kind (a var taking a string): the block does not resume and the rest runs general; a statement that raises
 			// leaves the block closed for the handler, and the loop runs again afterwards; a boundary inside an inner loop; a range-for with an alias

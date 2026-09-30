@@ -847,6 +847,7 @@ struct engine::implementation {
             cached = store_cached_script(sourcePath, content, std::move(parse_result.value()));
             stamp_spliced(*cached, prs.spliced_files());
         }
+        if (debugger_) { debugger_->note_source(sourcePath); }
         return cached;
     }
 
@@ -2341,11 +2342,10 @@ script_value engine::execute_file(const std::string& scriptPath) {
 script_value engine::execute_file(const std::string& scriptPath, const instance_variables& instanceVars) {
     auto allowed = require_privilege(privilege::filesystem);
     if (!allowed) { throw runtime_error(format_error(allowed)); }
-    impl->note_root_source(scriptPath);
     // File fast lane (parse-avoidance ladder): canonical-path key + one-stat gate. A
-    // stamp-valid re-execute touches zero file bytes. Any stamp change, epoch bump, a
-    // different path spelling (attribution stays byte-identical to the read path), or a
-    // failed verify falls through to the legacy read below.
+    // stamp-valid re-execute touches zero file bytes. Any stamp change, epoch bump or a
+    // failed verify falls through to the read below. The unit is attributed to the
+    // canonical path, the spelling import uses and source breakpoints normalize to.
     uint64_t mtime = 0, size = 0;
     bool statOk = implementation::stat_mtime_size(scriptPath, mtime, size);
     std::string canon;   // by value: a script can re-enter execute_file and rehash the maps
@@ -2357,11 +2357,15 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
             canonSlot = canonEc ? scriptPath : resolved.string();
         }
         canon = canonSlot;
+    }
+    const std::string& attributed = canon.empty() ? scriptPath : canon;
+    impl->note_root_source(attributed);
+    if (statOk) {
         auto it = impl->file_script_cache.find(canon);
         if (it != impl->file_script_cache.end()) {
             auto& node = it->second;
             bool stampValid = node.entry && node.entry->epoch == impl->script_cache_epoch &&
-                              node.attributed_path == scriptPath &&
+                              node.attributed_path == attributed &&
                               node.size == size && mtime <= node.mtime &&
                               !impl->spliced_changed(*node.entry);   // the spliced includes' stamps, as find_cached_script checks them: a changed dependency is a miss on every tier
             if (stampValid && !node.verified) {
@@ -2393,12 +2397,12 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
     std::stringstream buffer;
     buffer << file.rdbuf();
     std::string content = buffer.str();
-    script_value result = execute_source(content, instanceVars, scriptPath);
+    script_value result = execute_source(content, instanceVars, attributed);
 
     // Stamp AFTER a successful execute, with the PRE-read stat: an edit between that
     // stat and the read shows as strictly newer next time and re-verifies.
     if (statOk && !canon.empty()) {
-        if (auto entry = impl->find_cached_script(scriptPath, content)) {
+        if (auto entry = impl->find_cached_script(attributed, content)) {
             if (impl->file_script_cache.size() >= implementation::script_cache_max &&
                 impl->file_script_cache.find(canon) == impl->file_script_cache.end()) {
                 auto victim = impl->file_script_cache.begin();
@@ -2413,7 +2417,7 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
             node.mtime = mtime;
             node.size = size;
             node.verified = false;
-            node.attributed_path = scriptPath;
+            node.attributed_path = attributed;
             node.source = std::move(content);
             node.entry = std::move(entry);
             impl->file_script_cache[canon] = std::move(node);
@@ -3492,6 +3496,7 @@ size_t engine::max_call_depth(backend_type type) const {
 debug::controller& engine::debugger() {
     if (!impl->debugger_) {
         impl->debugger_ = std::make_unique<debug::controller>(this);
+        for (const auto& node : impl->script_cache) { impl->debugger_->note_source(node.path); }
         // Wire the active backend's statement hook. backend() constructs it lazily; the
         // vm backend's set_debug_controller is a no-op until phase 5.
         backend()->set_debug_controller(impl->debugger_.get());

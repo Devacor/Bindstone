@@ -169,7 +169,7 @@ public:
         send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":")"
             + requested_path + R"("},"breakpoints":[{"line":1}]}})");
         check_true(wait_for(cli, buf, "\"command\":\"setBreakpoints\""));
-        check_true(wait_for(cli, buf, "\"verified\":true"));
+        check_true(wait_for(cli, buf, "\"verified\":false"), "no loaded unit carries the path yet");
 
         if (alias_update != 0) {
             std::string alias_buf;
@@ -221,6 +221,10 @@ public:
                 "later equivalent path spelling must replace, not merge, the earlier line set");
         }
         check_eq(int64_t(42), eng->get_variable("breakpoint_value").as_int());
+        if (alias_update == 0) {
+            check_true(wait_for(cli, buf, "\"event\":\"breakpoint\"", 1000), "loading the unit verifies the breakpoint");
+            check_true(buf.find("\"verified\":true") != std::string::npos);
+        }
     }
 
     void forge_tests() override {
@@ -338,6 +342,31 @@ public:
             wait_for(cli, cont_buf, "\"command\":\"disconnect\"", 1000);
             close_client(cli);
             // eng's destructor stops the connector (joins its thread, detaches the controller).
+        });
+
+        test("dap_breakpoint_on_a_path_no_unit_carries_stays_unverified", [this]() {
+            wsa_up();
+            auto eng = make_engine();
+            eng->jaibite_cache(false);
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            struct client_guard { sock_t socket; ~client_guard() { close_client(socket); } } close{cli};
+
+            std::string buf;
+            send_dap(cli, R"({"seq":1,"type":"request","command":"initialize"})");
+            check_true(wait_for(cli, buf, "\"event\":\"initialized\""));
+            send_dap(cli, R"({"seq":2,"type":"request","command":"attach"})");
+            check_true(wait_for(cli, buf, "\"command\":\"attach\""));
+            send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"./__jai_dap_nowhere__/never.jai"},"breakpoints":[{"line":1}]}})");
+            check_true(wait_for(cli, buf, "\"command\":\"setBreakpoints\""));
+            check_true(buf.find("\"verified\":false") != std::string::npos);
+            check_true(buf.find("\"verified\":true") == std::string::npos);
+            eng->execute_file_source("./__jai_dap_elsewhere__/other.jai", "int other_value = 1;\n");
+            check_false(wait_for(cli, buf, "\"event\":\"breakpoint\"", 300), "another unit loading verifies nothing");
+            eng->debugger().set_enabled(false);
         });
 
         test("park_only_request_while_running_errors", [this]() {

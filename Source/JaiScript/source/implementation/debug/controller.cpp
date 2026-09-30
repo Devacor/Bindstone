@@ -61,6 +61,30 @@ void controller::publish_breakpoints(const std::string& file, std::vector<int> l
     bp_version_.fetch_add(1, std::memory_order_release);   // after publication: sync sees an at-least-as-new snapshot
 }
 
+void controller::set_on_source_loaded(std::function<void(const std::string&)> cb) {
+    std::lock_guard<std::mutex> lk(sources_mtx_);
+    on_source_loaded_ = std::move(cb);
+}
+
+void controller::note_source(const std::string& path) {
+    if (path.empty() || path == "<script>") return;
+    normalize_sources_.store(engine_->is_enabled(jai::filesystem), std::memory_order_relaxed);
+    std::function<void(const std::string&)> cb;
+    {
+        std::lock_guard<std::mutex> lk(sources_mtx_);
+        if (!sources_.insert(path).second) return;
+        cb = on_source_loaded_;
+    }
+    if (cb) cb(path);
+}
+
+bool controller::source_known(const std::string& path) const {
+    if (path == "<script>") return true;
+    const std::string normalized = normalize_sources_.load(std::memory_order_relaxed) ? normalize_bp_path(path) : path;
+    std::lock_guard<std::mutex> lk(sources_mtx_);
+    return sources_.contains(path) || sources_.contains(normalized);
+}
+
 void controller::clear_breakpoints() {
     auto current = breakpoints_.load(std::memory_order_acquire);
     auto next = std::make_shared<breakpoint_snapshot>();
@@ -196,6 +220,7 @@ bool controller::sync_hot_state() {
     }
     hot_step_or_pause_ = pending_pause_.load(std::memory_order_relaxed) != 0
         || step_mode_.load(std::memory_order_relaxed) != static_cast<int>(step_mode::none);
+    normalize_sources_.store(engine_->is_enabled(jai::filesystem), std::memory_order_relaxed);
     const uint64_t version = bp_version_.load(std::memory_order_acquire);
     if (version != hot_bp_version_) {
         auto snapshot = breakpoints_.load(std::memory_order_acquire);

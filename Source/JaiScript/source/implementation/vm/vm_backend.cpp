@@ -11118,6 +11118,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 				pending_callee& pc = pending_callees_.emplace_back();
 				pc.fn = site.ic_fn;
 				pc.pin = site.ic_pin;
+				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 				return {};
 			}
 		}
@@ -11143,6 +11144,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 		return raise_not_callable(name_id, calleeVal);
 	}
 	pending_callee pc;
+	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 	if (cached_global_env_ &&
 	    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION &&
 	    &calleeVal.unchecked_as_function() == site.ic_identity &&
@@ -11187,16 +11189,16 @@ void vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 		case capture_form_probe:
 			if (!pending_callees_.empty()) {
 				const pending_callee& pc = pending_callees_.back();
-				b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k) : detail::callee_binding(pc.value, k);
+				b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k) : detail::callee_binding(pc.value, k, false, f.code->call_sites[ins.a].arg_symbols.size());
 			}
 			break;
 		case capture_form_stack:
-			if (below != SIZE_MAX) { b = detail::callee_binding(stack_[below], k); }
+			if (below != SIZE_MAX) { b = detail::callee_binding(stack_[below], k, false, ins.a); }
 			break;
 		case capture_form_method: {
 			const auto* member = static_cast<const member_expr*>(f.code->nodes[f.code->call_sites[ins.a].member_node].get());
 			if (below != SIZE_MAX) {
-				b = detail::member_call_binding(stack_[below], member->member_id, member->object && member->object->get_type() == node_type::super_expr, k);
+				b = detail::member_call_binding(stack_[below], member->member_id, member->object && member->object->get_type() == node_type::super_expr, k, f.code->call_sites[ins.a].arg_symbols.size());
 			}
 			break;
 		}
@@ -11205,7 +11207,7 @@ void vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 			const type_info* t = !expr->type ? nullptr : expr->type->base_type == script_value_type::jai_shared_ptr_type ? expr->type->element_type().get() : expr->type.get();
 			if (t) {
 				auto ctor = environment_->get(t->type_name);
-				if (ctor) { b = detail::callee_binding(ctor.value(), k); }
+				if (ctor) { b = detail::callee_binding(ctor.value(), k, false, expr->arguments.size()); }
 			}
 			break;
 		}
@@ -12045,7 +12047,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 			}
 			if (thunk->payload.definition_env) {
 				return enter_constructor_in_loop(f, script_cls, thunk->payload.definition_env,
-				                                 arguments, nullptr);
+				                                 arguments, nullptr, &site);
 			}
 		}
 	}
@@ -14869,7 +14871,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				}
 				if (ctor_thunk->payload.definition_env) {
 					return enter_constructor_in_loop(f, script_cls,
-						ctor_thunk->payload.definition_env, args, expr->type.get());
+						ctor_thunk->payload.definition_env, args, expr->type.get(), ins.c ? &f.code->call_sites[ins.c - 1] : nullptr);
 				}
 			}
 		}
@@ -14919,7 +14921,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				}
 				if (ctor_thunk->payload.definition_env) {
 					return enter_constructor_in_loop(f, script_cls,
-						ctor_thunk->payload.definition_env, args, nullptr);
+						ctor_thunk->payload.definition_env, args, nullptr, ins.c ? &f.code->call_sites[ins.c - 1] : nullptr);
 				}
 			}
 		}
@@ -15803,7 +15805,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 	for (size_t i = 0; i < matching_ctor->parameters.size() && i < argv->size(); ++i) {
 		const auto& param = matching_ctor->parameters[i];
 		if (param.symbol_id == UINT64_MAX) { param.symbol_id = symbolizer_->intern(param.name); }
-		if (init_env) { init_env->define(param.symbol_id, (*argv)[i]); }
+		if (init_env) { init_env->define(param.symbol_id, detail::argument_for_binding((*argv)[i], detail::parameter_binding(param))); }
 	}
 
 	bool handled_parent_init = false;
@@ -16114,7 +16116,7 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 		for (size_t i = 0; i < args.size() && (exact_match || convertible_match); ++i) {
 			const auto& param = ctor_ast->parameters[i];
 			if (param.type && !param.type->type_name.empty()) {
-				auto arg_type = args[i].type();
+				auto arg_type = args[i].deref().type();
 				if (arg_type == script_value_type::jai_object_type) {
 					auto resolved = resolve_member_target(args[i]);
 					if (resolved) {
@@ -16228,7 +16230,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
                                                 const std::shared_ptr<script_class_definition>& class_def,
                                                 const std::shared_ptr<environment>& definition_env,
                                                 const std::vector<script_value>& call_args,
-                                                type_info* result_stamp) {
+                                                type_info* result_stamp, const call_site* site) {
 	std::shared_ptr<function_decl> matching_ctor;
 	std::vector<script_value> captured;
 	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured);
@@ -16265,7 +16267,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		script_value method = *entry.method;
 		op_status pushed;
 		try {
-			pushed = push_method_frame(f, std::move(method), *dispatch, matching_ctor, std::move(this_value), args, nullptr);
+			pushed = push_method_frame(f, std::move(method), *dispatch, matching_ctor, std::move(this_value), args, site);
 		} catch (const script_exception& e) {
 			active_exception_value_ = script_value(std::string(e.what()), engine_);
 			current_exception_ = e;
@@ -16488,6 +16490,10 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			try_records_.pop_back();
 			continue;
 		}
+		// Releasing stack operands or staged arguments can run destructors that reenter and grow try_records_.
+		// Keep an owned handler description across those calls; update the live record by index, never a stale reference.
+		const size_t handler_index = try_records_.size() - 1;
+		const try_record handler = rec;
 		if (failure) {
 			std::string message = format_error(*failure, *symbolizer_);
 			active_exception_value_ = script_value(message, engine_);
@@ -16495,37 +16501,50 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		}
 		is_unwinding_ = false;
 		trace_captured_ = false;
-		current_catch_var_id_ = rec.catch_var;
-		if (stack_.size() > rec.stack_size) {
-			stack_.truncate(rec.stack_size);
+		current_catch_var_id_ = handler.catch_var;
+		if (stack_.size() > handler.stack_size) {
+			stack_.truncate(handler.stack_size);
 		}
-		if (iter_states_.size() > rec.iter_size) {
-			release_iter_slots(f, rec.iter_size);
-			iter_states_.erase(iter_states_.begin() + rec.iter_size, iter_states_.end());
+		if (iter_states_.size() > handler.iter_size) {
+			release_iter_slots(f, handler.iter_size);
+			iter_states_.erase(iter_states_.begin() + handler.iter_size, iter_states_.end());
 		}
-		if (cfor_states_.size() > rec.cfor_size) {
-			cfor_states_.erase(cfor_states_.begin() + rec.cfor_size, cfor_states_.end());
+		if (cfor_states_.size() > handler.cfor_size) {
+			cfor_states_.erase(cfor_states_.begin() + handler.cfor_size, cfor_states_.end());
 		}
-		if (pending_callees_.size() > rec.pending_size) {
-			pending_callees_.erase(pending_callees_.begin() + rec.pending_size, pending_callees_.end());
+		// These temps own arguments evaluated for calls the exception bypassed. Release them before entering catch,
+		// but only after the handler state is restored: destruction may reenter the VM and grow its execution stacks.
+		std::vector<script_value> abandoned_arguments;
+		if (pending_callees_.size() > handler.pending_size) {
+			for (size_t pi = pending_callees_.size(); pi-- > handler.pending_size;) {
+				if (const auto* slots = pending_callees_[pi].staged_slots) {
+					for (uint32_t index : *slots) {
+						if (script_value* value = frame_slot(f, index)) {
+							abandoned_arguments.push_back(std::move(*value));
+							*value = make_null();
+						}
+					}
+				}
+			}
+			pending_callees_.erase(pending_callees_.begin() + handler.pending_size, pending_callees_.end());
 		}
-		environment_ = rec.entry_env;
+		environment_ = handler.entry_env;
 		// Bind the catch variable as a local of the catch body (KEEP BYTE-PARALLEL with
 		// the interpreter's visit_try_stmt bind): frame slot, or a scope env the matching
 		// op_catch_end pops (exec_iter_init's env_pushed shape)
-		if (rec.catch_var != 0 && !symbolizer_->get_string(rec.catch_var).empty()) {
+		if (handler.catch_var != 0 && !symbolizer_->get_string(handler.catch_var).empty()) {
 			script_value caught = active_exception_value_ ? *active_exception_value_ : make_null();
-			if (rec.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
-				frame_slot_set(f, rec.catch_slot, std::move(caught));
+			if (handler.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
+				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {
 				JAI_ENV_CENSUS(0); environment_ = acquire_scope_env(environment_);
-				environment_->define(rec.catch_var, std::move(caught));
-				rec.catch_env_pushed = true;
+				environment_->define(handler.catch_var, std::move(caught));
+				try_records_[handler_index].catch_env_pushed = true;
 			}
 		}
 		if (f.cells && f.cells->loop != k_invalid_u32) [[unlikely]] { cells_flush(f, f.code->cell_loops[f.cells->loop]); }   // a callee raised into an active block: the handler sees materialized slots
-		f.ip = rec.handler_ip;
-		rec.in_catch = true;
+		f.ip = handler.handler_ip;
+		try_records_[handler_index].in_catch = true;
 		return true;
 	}
 	return false;
@@ -17165,6 +17184,14 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
 		case opcode::op_index_fused_decl: return exec_index_fused_decl(f, ins);
 		case opcode::op_cast: return exec_cast(f, ins);
+		case opcode::op_take_temp: {
+			script_value* slot = frame_slot(f, ins.a);
+			assert(slot);
+			script_value value = std::move(*slot);
+			*slot = make_null();
+			stack_.push_back(std::move(value));
+			return {};
+		}
 		case opcode::op_capture_arg:
 			if (detail::capture_candidate(stack_.back(), static_cast<uint8_t>(ins.c & 3))) { capture_arg(f, ins); }
 			return {};
@@ -18517,6 +18544,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_cast:
 			case opcode::op_return_convert:
 			case opcode::op_capture_arg:
+			case opcode::op_take_temp:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or
@@ -20110,6 +20138,16 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		// Fresh element access per parameter: args may alias stack_, which nested
 		// conversions can reallocate between iterations
 		const auto& arg = args[args_base + i];
+		if (detail::deferred_argument(arg)) [[unlikely]] {
+			// Only a mixed-mode overload reaches this path. Resolve all remaining staged arguments once;
+			// the vector keeps their sources alive and bypasses the ordinary stack/window in-place elision.
+			std::vector<script_value> selected;
+			selected.reserve(argc);
+			for (size_t j = 0; j < argc; ++j) {
+				selected.push_back(detail::argument_for_binding(args[args_base + j], detail::parameters_binding(parameters, j)));
+			}
+			return bind_parameters(parameters, selected, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, later_taken);
+		}
 
 		if (param.is_reference) {
 			// the argument is the caller's code: it resolves under the caller's unit (docs/global_shadowing.md); the callee's

@@ -18,7 +18,12 @@ namespace jai::detail {
     // copy: a by-value parameter the binding copies; share: a handle parameter (shared_ptr/weak_ptr) the binding shares;
     // reference: the lvalue binds, nothing is taken; opaque: a host callable, whose C++ parameter decides (the value is
     // dereferenced, a heavy handle stays the object the argument named)
-    enum class arg_binding : uint8_t { copy, share, reference, opaque };
+    enum class arg_binding : uint8_t { copy = 1, share = 2, reference = 4, opaque = 8 };
+
+    inline bool deferred_binding(arg_binding b) {
+        const auto bits = static_cast<uint8_t>(b);
+        return (bits & (bits - 1)) != 0;
+    }
 
     inline arg_binding parameter_binding(const parameter& p) {
         if (p.is_reference) return arg_binding::reference;
@@ -30,33 +35,32 @@ namespace jai::detail {
         return i < params.size() ? parameter_binding(params[i]) : arg_binding::copy;
     }
 
-    // an overload set binds a position the way every candidate does; a mix takes the least a candidate allows
-    inline arg_binding overloads_binding(const std::vector<std::shared_ptr<function_decl>>& overloads, size_t i) {
-        if (overloads.empty()) return arg_binding::opaque;
-        arg_binding out = arg_binding::copy;
+    // Different viable parameter modes need both interpretations until dispatch selects an overload.
+    // The common single-mode case does not allocate or copy anything here.
+    inline arg_binding overloads_binding(const std::vector<std::shared_ptr<function_decl>>& overloads, size_t i, size_t argc = SIZE_MAX) {
+        uint8_t result = 0;
         for (const auto& o : overloads) {
-            if (!o) continue;
+            if (!o || (argc != SIZE_MAX && !arity_accepts(o->parameters, argc))) continue;
             const arg_binding b = parameters_binding(o->parameters, i);
-            if (b == arg_binding::reference) return b;
-            if (b == arg_binding::share) out = b;
+            result |= static_cast<uint8_t>(b);
         }
-        return out;
+        return result ? static_cast<arg_binding>(result) : arg_binding::opaque;
     }
 
-    inline arg_binding method_binding(const class_definition* cls, uint64_t name_id, size_t i) {
+    inline arg_binding method_binding(const class_definition* cls, uint64_t name_id, size_t i, size_t argc = SIZE_MAX) {
         if (!cls) return arg_binding::opaque;
         const auto& table = cls->script_method_overloads();
         auto it = table.find(name_id);
-        return it == table.end() ? arg_binding::opaque : overloads_binding(it->second, i);
+        return it == table.end() ? arg_binding::opaque : overloads_binding(it->second, i, argc);
     }
 
-    inline arg_binding constructor_binding(const class_definition* cls, size_t i) {
+    inline arg_binding constructor_binding(const class_definition* cls, size_t i, size_t argc = SIZE_MAX) {
         if (!cls || !cls->is_script_class()) return arg_binding::opaque;
         const auto& ctors = static_cast<const script_class_definition*>(cls)->get_constructor_asts();
-        return ctors.empty() ? arg_binding::copy : overloads_binding(ctors, i);
+        return ctors.empty() ? arg_binding::copy : overloads_binding(ctors, i, argc);
     }
 
-    inline arg_binding callee_binding(const script_value& callee, size_t i, bool through_bound = false) {
+    inline arg_binding callee_binding(const script_value& callee, size_t i, bool through_bound = false, size_t argc = SIZE_MAX) {
         const script_value& c = callee.deref();
         if (c.raw_storage_index() != script_value::TYPEID_FUNCTION) return arg_binding::opaque;
         const script_function& fn = c.unchecked_as_function();
@@ -66,20 +70,25 @@ namespace jai::detail {
                 case script_callable::kind_type::function: return p.fn ? parameters_binding(p.fn->parameters(), i) : arg_binding::opaque;
                 case script_callable::kind_type::method:
                 case script_callable::kind_type::static_method: return p.ast ? parameters_binding(p.ast->parameters, i) : arg_binding::opaque;
-                case script_callable::kind_type::constructor: return constructor_binding(p.cls.get(), i);
-                case script_callable::kind_type::bound_method: return p.bound_dispatch && !through_bound ? callee_binding(*p.bound_dispatch, i, true) : arg_binding::opaque;
+                case script_callable::kind_type::constructor: return constructor_binding(p.cls.get(), i, argc);
+                case script_callable::kind_type::bound_method: return p.bound_dispatch && !through_bound ? callee_binding(*p.bound_dispatch, i, true, argc) : arg_binding::opaque;
             }
         }
-        if (const auto* d = fn.target<script_method_dispatch>()) return method_binding(d->cls.get(), d->name_id, i);
+        if (const auto* d = fn.target<script_static_method_dispatch>()) {
+            const auto& table = d->cls->script_static_method_overloads();
+            const auto it = table.find(d->name_id);
+            return it == table.end() ? parameters_binding(d->fallback->parameters, i) : overloads_binding(it->second, i, argc);
+        }
+        if (const auto* d = fn.target<script_method_dispatch>()) return method_binding(d->cls.get(), d->name_id, i, argc);
         if (const auto* bm = fn.target<bound_method_fn>(); bm && bm->method.raw_storage_index() == script_value::TYPEID_FUNCTION) {
-            if (const auto* d = bm->method.unchecked_as_function().target<script_method_dispatch>()) return method_binding(d->cls.get(), d->name_id, i);
+            if (const auto* d = bm->method.unchecked_as_function().target<script_method_dispatch>()) return method_binding(d->cls.get(), d->name_id, i, argc);
         }
         return arg_binding::opaque;
     }
 
     // `recv.m(args)` resolved by lookup alone (no getter runs): a field's callable, else the class's method; `super.m` the
     // receiver's parent's method; any other receiver is a host or builtin callee
-    inline arg_binding member_call_binding(const script_value& receiver, uint64_t member_id, bool super_call, size_t i) {
+    inline arg_binding member_call_binding(const script_value& receiver, uint64_t member_id, bool super_call, size_t i, size_t argc = SIZE_MAX) {
         const script_value& recv = receiver.deref();
         const size_t ri = recv.raw_storage_index();
         if (ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_SHARED_PTR) return arg_binding::opaque;
@@ -90,15 +99,46 @@ namespace jai::detail {
         if (!cd) return arg_binding::opaque;
         if (super_call) {
             const auto parent = cd->get_parent();
-            return parent ? callee_binding(parent->get_method(member_id, false), i) : arg_binding::opaque;
+            return parent ? callee_binding(parent->get_method(member_id, false), i, false, argc) : arg_binding::opaque;
         }
-        if (const script_value* field = inst->find_field_value(member_id)) return callee_binding(*field, i);
-        return callee_binding(cd->get_method(member_id, false), i);
+        if (const script_value* field = inst->find_field_value(member_id)) return callee_binding(*field, i, false, argc);
+        return callee_binding(cd->get_method(member_id, false), i, false, argc);
+    }
+
+    inline auto deferred_argument(const script_value& v) {
+        const auto* holder = v.is_reference() ? v.get_reference_holder() : nullptr;
+        return holder && holder->argument_source ? holder : nullptr;
+    }
+
+    inline const script_value& argument_for_binding(const script_value& v, arg_binding b) {
+        if (const auto* holder = deferred_argument(v)) {
+            if (b == arg_binding::copy) return *holder->cell();
+            return b == arg_binding::reference ? holder->argument_source->lvalue : holder->argument_source->shared;
+        }
+        return v;
     }
 
     // what the binding would make of the argument now, in place: a copy parameter's value is dereferenced, its heavy payload
     // copied and a host-bound primitive decoded; a handle parameter's and an opaque callee's is dereferenced
     inline void capture_argument(script_value& v, uint8_t kind, arg_binding b) {
+        if (deferred_binding(b)) {
+            if (deferred_argument(v)) return;
+            script_value source = v;
+            script_value shared = v.deref();
+            script_value snapshot = v;
+            const bool needs_copy = (static_cast<uint8_t>(b) & static_cast<uint8_t>(arg_binding::copy)) != 0;
+            capture_argument(snapshot, kind, needs_copy ? arg_binding::copy : arg_binding::share);
+            const auto type = snapshot.get_type_info();
+            script_value captured = script_value::make_cell_reference(std::move(snapshot), v.get_engine());
+            captured.set_type_info(type);   // overload selection sees the value's evaluated type
+            captured.get_reference_holder()->argument_source = std::make_unique<argument_capture_storage>(argument_capture_storage{std::move(source), std::move(shared)});
+            v = std::move(captured);
+            return;
+        }
+        if (deferred_argument(v)) {
+            script_value selected = argument_for_binding(v, b);
+            v = std::move(selected);
+        }
         if (b == arg_binding::reference) return;
         if (v.raw_storage_index() == script_value::TYPEID_REFERENCE) {
             script_value d = v.deref();

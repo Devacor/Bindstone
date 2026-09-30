@@ -93,6 +93,8 @@ namespace jai {
         return static_cast<script_int>(f);
     }
 
+namespace detail { struct argument_capture_storage; }
+
     class script_value {
     public:
         script_value(std::nullptr_t) = delete;
@@ -1936,6 +1938,9 @@ namespace jai {
 
             static constexpr size_t cell_storage_size = 32;   // == sizeof(script_value), gated in value.cpp
             alignas(8) unsigned char cell_storage[cell_storage_size];
+            // Only an unresolved mixed-mode call uses this: cell() is its evaluated value snapshot, while this
+            // retained source supplies reference/shared-handle binding after overload selection. Never script-visible.
+            std::unique_ptr<detail::argument_capture_storage> argument_source;
             bool has_cell = false;      // inline storage holds the OWNED value
             bool has_map_key = false;   // inline storage holds the map KEY (container_map set)
             strong_ptr<script_map> container_map;
@@ -2586,6 +2591,14 @@ namespace jai {
         template<typename... Types> friend class std::tuple;
         template<typename K, typename C, typename A> friend class std::set;
     };
+
+    namespace detail {
+        struct argument_capture_storage {
+            script_value lvalue;       // original evaluated reference/source for T&
+            script_value shared;       // evaluated handle identity for shared_ptr<T>, even if the source is rebound
+        };
+    }
+
 
     // Permanent thin-value gates: 8B type_info_ + 8B engine_ + 16B variant (8B max payload + index).
     static_assert(sizeof(script_value) == 32 && alignof(script_value) == 8,

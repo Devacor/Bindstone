@@ -5150,6 +5150,141 @@ public:
             expect("var GK = [1, 2, 3]; class Conv { var v = 0; Conv(int x) { v = x; GK[1] = 900; } } function takes(Conv c, b) { return c.v + b; } to_string(takes(5, GK[1]))", "7", "a converting constructor");
         });
 
+		test("staged_argument_prefixes_survive_nested_calls_and_later_grafts", [expect]() {
+			const std::string defs =
+				"function read(array<int> a, int n) -> int { return a[0] + n; } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } ";
+			expect(defs + "function run() -> int { array<int> a = [1]; return read(a, read(a, change(a))); } run();",
+				"2", "nested pending call boundaries retain both earlier snapshots");
+			expect("function read(array<int> a, int x, int y) -> int { return a[0] + x + y; } "
+				"function first(array<int>& a) -> int { a[0] = 9; return 1; } "
+				"function second(array<int>& a) -> int { a[0] = 10; return 2; } "
+				"function run() -> int { array<int> a = [1]; int got = read(a, first(a), second(a)); return got * 100 + a[0]; } run();",
+				"410", "a second graft extends the existing argument prefix without reevaluation");
+			expect(defs + "function run() -> int { array<int> a = [1]; var f = read; return f(a, change(a)); } run();",
+				"1", "a callable local is resolved before its staged arguments");
+			expect(defs + "function run() -> int { array<int> a = [1]; var f = 5; try { f(a, change(a)); } catch (e) {} return a[0]; } run();",
+				"1", "an invalid callee fails before a writing graft");
+		});
+
+		test("a_failed_staged_call_releases_its_arguments_before_catch", [expect]() {
+			const std::string defs =
+				"int destroyed = 0; class Box { ~Box() { destroyed += 1; } } "
+				"function read(array<shared_ptr<Box>> a, int ignored) -> int { return 0; } "
+				"function fail(array<shared_ptr<Box>>& a, int zero) -> int { a[0] = null; return 1 / zero; } ";
+			expect(defs + "function run() -> int { array<shared_ptr<Box>> a = [cast<shared_ptr<Box>>(Box())]; "
+				"try { read(a, fail(a, 0)); } catch (e) {} return destroyed; } run();", "1",
+				"the captured handle is released before catch, not at the caller's return");
+			expect(defs + "function run() -> int { int total = 0; for (int i = 0; i < 3; ++i) { "
+				"array<shared_ptr<Box>> a = [cast<shared_ptr<Box>>(Box())]; "
+				"try { read(a, fail(a, 0)); } catch (e) { total += destroyed; } } return total; } run();", "6",
+				"each failed iteration releases its own captured arguments");
+			expect("function nested(int n) { try { if (n > 0) { nested(n - 1); } else { throw \"inside destructor\"; } } catch (e) {} } "
+				"int destroyed = 0; class Box { ~Box() { nested(16); destroyed += 1; } } "
+				"function read(array<shared_ptr<Box>> a, int ignored) -> int { return 0; } "
+				"function fail(array<shared_ptr<Box>>& a, int zero) -> int { a[0] = null; return 1 / zero; } "
+				"function run() -> int { array<shared_ptr<Box>> a = [cast<shared_ptr<Box>>(Box())]; "
+				"try { read(a, fail(a, 0)); } catch (e) {} return destroyed; } run();", "1",
+				"argument destruction may reenter and grow the handler stack");
+			expect(defs + "function run() -> int { array<shared_ptr<Box>> a = [cast<shared_ptr<Box>>(Box())]; "
+				"try { read(a, fail(a, 0)); } catch (e) {} return destroyed; } "
+				"int first = run(); fail = [](var& a, int zero) -> int { a[0] = null; throw \"rebound\"; return 0; }; "
+				"int second = run(); first * 10 + second;", "12",
+				"the rebound guard fallback releases the same captured arguments");
+		});
+
+		test("aggregate_argument_staging_keeps_the_writing_call_inlined", [this]() {
+			auto e = jai::engine::make();
+			e->set_backend(jai::backend_type::vm);
+			std::string listing;
+			e->disassembly_sink([&](const std::string& text, const std::string&) { listing += text; });
+			const auto result = e->execute(
+				"function read(array<int> a, int ignored) -> int { return a[0]; } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } "
+				"function run() -> int { array<int> a = [1]; return read(a, change(a)); } run();");
+			check_eq(script_int(1), result.as_int());
+			check_true(listing.find("-- inlined change") != std::string::npos, "the writing call must remain inlined");
+			check_true(listing.find("CAPTURE_ARG") != std::string::npos, "the earlier aggregate is captured through the normal call boundary");
+		});
+
+		test("mixed_overloads_keep_both_the_snapshot_and_the_original_lvalue", [expect]() {
+			const std::string defs =
+				"class Reader { int read(array<int> a, int tag) { return a[0]; } "
+				"int read(array<int>& a, string tag) { int old = a[0]; a[0] = 42; return old; } } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } ";
+			expect(defs + "Reader r; array<int> a = [1]; r.read(a, change(a));", "1", "selected value overload");
+			expect(defs + "Reader r; var f = r.read; array<int> a = [1]; f(a, change(a));", "1", "bound method value overload");
+			expect(defs + "Reader r; array<int> a = [1]; r.read(a, \"ref\"); a[0];", "42", "selected reference overload aliases");
+			expect(defs + "function tag(array<int>& a) { a[0] = 9; return \"ref\"; } "
+				"Reader r; array<int> a = [1]; int seen = r.read(a, tag(a)); seen * 100 + a[0];", "942",
+				"dynamic dispatch chooses the original reference after later evaluation");
+			expect("class Reader { int read(array<int> a, int tag) { return a[0]; } int read(array<int>& a) { return -1; } } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } Reader r; array<int> a = [1]; r.read(a, change(a));",
+				"1", "an inapplicable arity cannot suppress capture");
+			expect("class Reader { int read(int a, int tag) { return a; } int read(int& a, string tag) { a = 42; return a; } } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } Reader r; array<int> a = [1]; r.read(a[0], change(a));",
+				"1", "element value snapshot under mixed parameter modes");
+			expect("class Reader { int read(int a, int tag) { return a; } int read(int& a, string tag) { a = 42; return a; } } "
+				"function tag(array<int>& a) { a[0] = 9; return \"ref\"; } Reader r; array<int> a = [1]; r.read(a[0], tag(a)); a[0];",
+				"42", "element reference still names original storage");
+		});
+
+		test("constructors_select_captured_values_or_original_references", [expect]() {
+			const std::string defs =
+				"class Reader { int got = 0; Reader(array<int> a, int tag) { got = a[0]; } "
+				"Reader(array<int>& a, string tag) { got = a[0]; a[0] = 42; } } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } ";
+			expect(defs + "function run() -> int { array<int> a = [1]; Reader r = Reader(a, change(a)); return r.got; } run();", "1",
+				"constructor value overload");
+			expect(defs + "array<int> a = [1]; var r = new Reader(a, change(a)); r.got;", "1", "new value overload");
+			expect("class Reader { int got = 0; Reader(array<int>& a, string tag) { got = -1; } "
+				"Reader(array<int> a, int tag) { got = a[0]; } } "
+				"function change(var& a) -> int { a[0] = 9; return 0; } "
+				"var a = [1]; Reader r = Reader(a, change(a)); r.got;", "1",
+				"constructor selection sees the captured dynamic value, not its transport reference");
+
+			expect(defs + "function tag(array<int>& a) { a[0] = 9; return \"ref\"; } "
+				"function run() -> int { array<int> a = [1]; Reader r = Reader(a, tag(a)); return r.got * 100 + a[0]; } run();", "942",
+				"constructor keeps caller metadata for a reference parameter");
+			expect(defs + "function tag(array<int>& a) { a[0] = 9; return \"ref\"; } "
+				"function run() -> int { array<int> a = [1]; var r = new Reader(a, tag(a)); return r.got * 100 + a[0]; } run();", "942",
+				"new keeps caller metadata for a reference parameter");
+		});
+
+		test("shared_handles_freeze_identity_while_reference_parameters_keep_the_slot", [expect]() {
+			expect("class Box { int n = 1; } function f(shared_ptr<Box> p) -> int { p.n = 5; p = cast<shared_ptr<Box>>(Box()); p.n = 7; return p.n; } "
+				"shared_ptr<Box> p = cast<shared_ptr<Box>>(Box()); int result = f(p); result * 10 + p.n;", "75",
+				"a by-value handle shares its pointee but rebinding stays local");
+			expect("class Box { int n = 1; } function f(shared_ptr<Box>& p) -> int { p = cast<shared_ptr<Box>>(Box()); p.n = 7; return p.n; } "
+				"shared_ptr<Box> p = cast<shared_ptr<Box>>(Box()); int result = f(p); result * 10 + p.n;", "77",
+				"a reference to a handle aliases the caller's pointer slot");
+			const std::string defs =
+				"class Box { int n = 1; } class Reader { "
+				"int read(shared_ptr<Box> p, int tag) { return p.n; } "
+				"int read(shared_ptr<Box>& p, string tag) { p.n = 42; return p.n; } } ";
+			expect(defs + "function change(shared_ptr<Box>& p) -> int { p = cast<shared_ptr<Box>>(Box()); p.n = 9; return 0; } "
+				"Reader r; shared_ptr<Box> p = cast<shared_ptr<Box>>(Box()); int seen = r.read(p, change(p)); seen * 100 + p.n;", "109",
+				"a mixed-mode by-value handle keeps the identity evaluated before a rebind");
+			expect(defs + "function change(shared_ptr<Box>& p) { p = cast<shared_ptr<Box>>(Box()); p.n = 9; return \"ref\"; } "
+				"Reader r; shared_ptr<Box> p = cast<shared_ptr<Box>>(Box()); int seen = r.read(p, change(p)); seen * 100 + p.n;", "4242",
+				"a mixed-mode reference keeps the slot through that rebind");
+		});
+
+		test("static_script_methods_are_not_opaque_host_calls", [expect]() {
+			const std::string defs =
+				"class Reader { static int read(array<int> a, int tag) { return a[0]; } } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } ";
+			expect(defs + "array<int> a = [1]; Reader::read(a, change(a));", "1", "static value argument");
+			expect(defs + "var f = Reader::read; array<int> a = [1]; f(a, change(a));", "1", "aliased static value argument");
+			expect("class Reader { static int read(array<int> a, int tag) { return a[0]; } "
+				"static int read(array<int>& a, string tag) { a[0] = 42; return a[0]; } } "
+				"function change(array<int>& a) -> int { a[0] = 9; return 0; } array<int> a = [1]; Reader::read(a, change(a));",
+				"1", "mixed static overload value argument");
+			expect("class Reader { static int read(array<int> a, int tag) { return a[0]; } "
+				"static int read(array<int>& a, string tag) { a[0] = 42; return a[0]; } } "
+				"array<int> a = [1]; Reader::read(a, \"ref\"); a[0];", "42", "static reference control");
+		});
+
         test("errors_keep_their_order_and_text", [expect]() {
             expect("nocopy class Ledger { int total = 1; } auto ledger = Ledger(); var ran = 0; function side() { ran = 1; return 0; } function take(Ledger l, n) { return n; }"
                    " var msg = \"\"; try { take(ledger, side()); } catch (e) { msg = e; } to_string(ran) + (msg.contains(\"nocopy class 'Ledger'\") ? \" nocopy\" : \" \" + msg)", "1 nocopy", "a nocopy argument");

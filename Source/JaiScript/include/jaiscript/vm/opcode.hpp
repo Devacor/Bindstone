@@ -278,8 +278,9 @@ namespace jai::vm {
         op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
         op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code
-        op_capture_arg,     // a = call site (form new: the new_expr node), b = argument index, c = capture kind | form << 2: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
+        op_capture_arg,     // a = call site (new: expression node; stack: argument count), b = argument index, c = capture kind | form << 2: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
         op_c_ret,           // a = the value (a cell, or k_typed_const_bit | constant), b = the return pad (an op_return after the copy), c = the general ip of the return's tail: a frame program's return (raw into the caller's cell from a raw-entered frame, else boxed through the pad)
+        op_take_temp,       // a = owned compiler argument slot: move it onto the operand stack and clear the slot
         op_halt,
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
@@ -551,6 +552,7 @@ namespace jai::vm {
             case opcode::op_concat_append: return "CONCAT_APPEND";
             case opcode::op_deref_top: return "DEREF_TOP";
             case opcode::op_capture_arg: return "CAPTURE_ARG";
+            case opcode::op_take_temp: return "TAKE_TEMP";
             case opcode::op_size_temp: return "SIZE_TEMP";
             case opcode::op_c_size: return "C_SIZE";
             case opcode::op_c_ret: return "C_RET";

@@ -127,6 +127,7 @@ namespace {
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
 			case opcode::op_call_temp:
+			case opcode::op_take_temp:
 			case opcode::op_member_temp:
 			case opcode::op_size_temp:
 			case opcode::op_math_temp:
@@ -314,6 +315,7 @@ namespace {
 			case opcode::op_t_store_const:
 			case opcode::op_operand_temp:
 			case opcode::op_call_temp:
+			case opcode::op_take_temp:
 			case opcode::op_member_temp:
 			case opcode::op_size_temp:
 			case opcode::op_math_temp:
@@ -5275,7 +5277,9 @@ void vm_compiler::deref_ahead_of(const expression* pushed, const expression* lat
 // primitive loads as a plain value and needs nothing
 size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_t k, const expression* arg, uint32_t where, uint32_t form) {
 	if (k >= captures.size() || captures[k] == 0 || primitive_local(arg)) return SIZE_MAX;
-	return emit(opcode::op_capture_arg, where, static_cast<uint32_t>(k), captures[k] | (form << 2));
+	const size_t ip = emit(opcode::op_capture_arg, where, static_cast<uint32_t>(k), captures[k] | (form << 2));
+	if (form == capture_form_probe) { capture_sites_[where].push_back(ip); }
+	return ip;
 }
 
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
@@ -5938,6 +5942,26 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	return true;
 }
 
+void vm_compiler::record_argument_source(call_site& site, const expression_ptr& arg, size_t argc) {
+	const size_t index = site.arg_symbols.size();
+	if (arg->get_type() == node_type::identifier_expr && !graft_value(arg.get())) {
+		auto* id = static_cast<identifier_expr*>(arg.get());
+		site.arg_symbols.push_back(id->symbol_id);
+		site.arg_slots.push_back(identifier_slot_operand(id));
+		if (id->global_qualified) {
+			site.arg_global.resize(argc, 0);
+			site.arg_global[index] = 1;
+		}
+	} else {
+		site.arg_symbols.push_back(UINT64_MAX);
+		site.arg_slots.push_back(k_invalid_u32);
+		if (jai::detail::is_ref_bindable_lvalue(arg.get())) {
+			site.arg_lvalue_nodes.resize(argc, k_invalid_u32);
+			site.arg_lvalue_nodes[index] = add_node(arg);
+		}
+	}
+}
+
 void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	// Consumed HERE so nested arg calls never inherit the return-position hint
 	const bool tail_site = pending_tail_call_;
@@ -6036,22 +6060,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 			for (size_t k = 0; k < expr->arguments.size(); ++k) {
 				const auto& arg = expr->arguments[k];
-				if (arg->get_type() == node_type::identifier_expr && !graft_value(arg.get())) {
-					auto* arg_ident = static_cast<identifier_expr*>(arg.get());
-					site.arg_symbols.push_back(arg_ident->symbol_id);
-					site.arg_slots.push_back(identifier_slot_operand(arg_ident));
-					if (arg_ident->global_qualified) {
-						site.arg_global.resize(expr->arguments.size(), 0);
-						site.arg_global[site.arg_symbols.size() - 1] = 1;
-					}
-				} else {
-					site.arg_symbols.push_back(UINT64_MAX);
-					site.arg_slots.push_back(k_invalid_u32);
-					if (jai::detail::is_ref_bindable_lvalue(arg.get())) {
-						site.arg_lvalue_nodes.resize(expr->arguments.size(), k_invalid_u32);
-						site.arg_lvalue_nodes[site.arg_symbols.size() - 1] = add_node(arg);
-					}
-				}
+				record_argument_source(site, arg, expr->arguments.size());
 				compile_expression(arg);
 				if (const size_t ip = emit_arg_capture(captures, k, arg.get(), 0, capture_form_method); ip != SIZE_MAX) { capture_ips.push_back(ip); }
 			}
@@ -6122,8 +6131,16 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	// keep the verbatim load+op_call pair.
 	const bool probe_callee = expr->callee->get_type() == node_type::identifier_expr;
 	size_t probe_ip = SIZE_MAX;
+	size_t staged_args = 0;
+	std::vector<uint32_t> staged_slots;
 	if (auto pinned = callee_probes_.find(expr.get()); probe_callee && pinned != callee_probes_.end()) {   // probed at its place, ahead of a graft in its arguments
 		probe_ip = pinned->second.first;
+		staged_args = pinned->second.second;
+		if (auto staged = staged_arguments_.find(expr.get()); staged != staged_arguments_.end()) {
+			staged_slots = std::move(staged->second);
+			staged_arguments_.erase(staged);
+		}
+		assert(staged_slots.size() == staged_args);
 		callee_probes_.erase(pinned);
 	} else if (probe_callee) {
 		probe_ip = emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(expr->arguments.size()));
@@ -6147,31 +6164,23 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 	for (size_t k = 0; k < expr->arguments.size(); ++k) {
 		const auto& arg = expr->arguments[k];
-		if (arg->get_type() == node_type::identifier_expr && !graft_value(arg.get())) {
-			auto* arg_ident = static_cast<identifier_expr*>(arg.get());
-			site.arg_symbols.push_back(arg_ident->symbol_id);
-			site.arg_slots.push_back(identifier_slot_operand(arg_ident));
-			if (arg_ident->global_qualified) {
-				site.arg_global.resize(expr->arguments.size(), 0);
-				site.arg_global[site.arg_symbols.size() - 1] = 1;
-			}
-		} else {
-			site.arg_symbols.push_back(UINT64_MAX);
-			site.arg_slots.push_back(k_invalid_u32);
-			if (jai::detail::is_ref_bindable_lvalue(arg.get())) {
-				site.arg_lvalue_nodes.resize(expr->arguments.size(), k_invalid_u32);
-				site.arg_lvalue_nodes[site.arg_symbols.size() - 1] = add_node(arg);
-			}
-		}
+		record_argument_source(site, arg, expr->arguments.size());
+		if (k < staged_args) { emit(opcode::op_take_temp, staged_slots[k]); continue; }
 		compile_expression(arg);
-		emit_arg_capture(captures, k, arg.get(), 0, probe_callee ? capture_form_probe : capture_form_stack);
+		emit_arg_capture(captures, k, arg.get(), probe_callee ? static_cast<uint32_t>(probe_ip) : static_cast<uint32_t>(expr->arguments.size()),
+			probe_callee ? capture_form_probe : capture_form_stack);
 	}
 	if (!expr->arguments.empty()) {
 		chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
 	}
+	site.staged_argument_slots = std::move(staged_slots);
 	chunk_->call_sites.push_back(std::move(site));
 	if (probe_callee) {
 		chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
+		if (auto captures_at = capture_sites_.find(probe_ip); captures_at != capture_sites_.end()) {
+			for (size_t ip : captures_at->second) { chunk_->code[ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }
+			capture_sites_.erase(captures_at);
+		}
 		emit(opcode::op_call_from_scratch, static_cast<uint32_t>(expr->arguments.size()),
 		     static_cast<uint32_t>(chunk_->call_sites.size() - 1), tail_site ? 1u : 0u);
 	} else {
@@ -6234,11 +6243,14 @@ void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
 	std::vector<uint8_t> captures;
 	detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
 	const uint32_t node = add_node(expr);
+	call_site site;
 	for (size_t k = 0; k < expr->arguments.size(); ++k) {
+		record_argument_source(site, expr->arguments[k], expr->arguments.size());
 		compile_expression(expr->arguments[k]);
 		emit_arg_capture(captures, k, expr->arguments[k].get(), node, capture_form_new);
 	}
-	emit(opcode::op_new, node, static_cast<uint32_t>(expr->arguments.size()));
+	chunk_->call_sites.push_back(std::move(site));
+	emit(opcode::op_new, node, static_cast<uint32_t>(expr->arguments.size()), static_cast<uint32_t>(chunk_->call_sites.size()));
 }
 
 // Operand shape decided by the shared kernel (the interpreter takes the same branch at

@@ -850,6 +850,7 @@ namespace jai::vm {
             script_value value{std::monostate{}, nullptr};   // opaque/default-arg path
             const script_defined_function* fn = nullptr;     // direct path
             strong_ptr<script_function> pin;
+            const std::vector<uint32_t>* staged_slots = nullptr;
         };
         std::vector<pending_callee> pending_callees_;
 
@@ -1344,7 +1345,7 @@ namespace jai::vm {
                                             const std::shared_ptr<script_class_definition>& class_def,
                                             const std::shared_ptr<environment>& definition_env,
                                             const std::vector<script_value>& args,
-                                            type_info* result_stamp);
+                                            type_info* result_stamp, const call_site* site);
         checked_result<script_value> construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                 const std::vector<script_value>& args);
         void stamp_literal_field_initializers(const std::shared_ptr<class_instance>& instance,

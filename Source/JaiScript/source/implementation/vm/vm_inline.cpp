@@ -8,6 +8,7 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/transient_read.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/core/engine.hpp>
 
@@ -65,6 +66,7 @@ struct inline_context {
 	std::vector<uint64_t> field_ids;
 	std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>>* alias_pins = nullptr;   // the statement's clone: a pinned alias call keeps its guard
 	std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>>* callee_probes = nullptr;   // and a probed call its probe
+	std::unordered_map<const call_expr*, std::vector<uint32_t>>* staged_arguments = nullptr;
 	template <class T, class... A> std::shared_ptr<T> make(A&&... a) {
 		auto n = std::make_shared<T>(std::forward<A>(a)...);
 		pins.push_back(n);
@@ -580,6 +582,13 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 			if (!pins) continue;
 			if (auto pin = pins->find(ce); pin != pins->end()) { const auto v = pin->second; pins->erase(pin); (*pins)[n.get()] = v; }
 		}
+		if (c.staged_arguments) {
+			if (auto staged = c.staged_arguments->find(ce); staged != c.staged_arguments->end()) {
+				auto slots = std::move(staged->second);
+				c.staged_arguments->erase(staged);
+				(*c.staged_arguments)[n.get()] = std::move(slots);
+			}
+		}
 		// a replaced argument is the hoisted leaf's result temp, a slot of its return type: the outer call's proof for it is the types' agreement
 		if (auto callee_decl = c.replace && c.result && c.result_type ? ce->proven_callee_decl.lock() : nullptr) {
 			for (size_t i = 0; i < ce->arguments.size() && i < callee_decl->parameters.size(); ++i) {
@@ -988,6 +997,24 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 			auto* ce = static_cast<const call_expr*>(a.get());
 			if (x == ce->callee.get()) break;
 			if (!ce->callee) { out.why = "a callee that is not a name"; return false; }
+			// Preserve the ordinary call boundary for non-scalar/reference arguments: stage the callee and its complete
+			// earlier argument prefix into owned temps now, using the normal argument-capture rules. The final call keeps the original AST
+			// metadata for reference binding and only emits the remaining arguments. No aggregate is rejected or recopied.
+			size_t prefix = 0;
+			while (prefix < ce->arguments.size() && ce->arguments[prefix].get() != x) { ++prefix; }
+			const auto outer_decl = ce->proven_callee_decl.lock();
+			bool needs_boundary = false;
+			for (size_t ai = 0; ai < prefix; ++ai) {
+				const bool scalar_copy = outer_decl && ai < outer_decl->parameters.size() &&
+					!outer_decl->parameters[ai].is_reference && scalar_type(outer_decl->parameters[ai].type.get());
+				if (!scalar_copy && ce->arguments[ai]->get_type() != node_type::literal_expr) { needs_boundary = true; }
+			}
+			if (needs_boundary && ce->callee->get_type() == node_type::identifier_expr && !alias_call(ce, engine_)) {
+				if (!callee_probes_.count(ce) && std::find(probe_pins.begin(), probe_pins.end(), ce) == probe_pins.end()) { probe_pins.push_back(ce); }
+				pre.push_back(a);
+				out.argument_prefixes[ce] = prefix;
+				break;
+			}
 			if (ce->callee->get_type() == node_type::member_expr) { if (!math_call(ce)) { out.why = "a method call's argument"; return false; } }   // a method's receiver and lookup stand before its arguments
 			else if (ce->callee->get_type() == node_type::identifier_expr) {   // an alias's guard or a probe resolves its callee here; any other name is a private local
 				if (std::find(alias_pins.begin(), alias_pins.end(), ce) != alias_pins.end() || std::find(probe_pins.begin(), probe_pins.end(), ce) != probe_pins.end()) { pre.push_back(a); }
@@ -1019,21 +1046,19 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		case node_type::call_expr: {   // an alias's guard, or a callee's probe; any other call (an intrinsic over a name the call may write) has no spill
 			auto* pc = static_cast<const call_expr*>(p.get());
 			const bool alias = std::find(alias_pins.begin(), alias_pins.end(), pc) != alias_pins.end();
-			if (!alias && std::find(probe_pins.begin(), probe_pins.end(), pc) == probe_pins.end()) { out.why = "an operand before the call the block cannot spill"; return false; }
+			if (!alias && !out.argument_prefixes.count(pc) && std::find(probe_pins.begin(), probe_pins.end(), pc) == probe_pins.end()) { out.why = "an operand before the call the block cannot spill"; return false; }
 			out.spills.emplace_back(p, alias ? script_value_type::jai_function_type : script_value_type::jai_object_type);
 			break;
 		}
 		case node_type::identifier_expr: {
 			free_identifier = true;
-			// A private binding may still name aggregate storage the later call changes through a parameter. Keep the
-			// outer call's own capture/binding until a hoist can carry its snapshot and lvalue on both guard paths.
-			if (std::find(copied_args.begin(), copied_args.end(), p.get()) != copied_args.end()) { out.why = "a name an outer call binds by reference or copies, ahead of the call"; return false; }
 			const bool global = static_cast<const identifier_expr*>(p.get())->slot_index == SIZE_MAX;
 			if (global || !private_local(p.get()) || args_call) {
 				// a global, a closure's by-reference capture or a reference: the call (the graft, or the fallback's callee, whatever the name binds
 				// by then) may write it, so its value is taken ahead of the call, as the real call's operand order has it; with calls in the
 				// arguments, a private local too (a leaf there may bind it by reference). A temp holds its value only as a scalar: an outer call
 				// that binds it by reference or copies it (an array, a map, an instance) binds the name itself
+				if (std::find(copied_args.begin(), copied_args.end(), p.get()) != copied_args.end()) { out.why = "a name an outer call binds by reference or copies, ahead of the call"; return false; }
 				out.spills.emplace_back(p, script_value_type::jai_any_type);
 				break;
 			}
@@ -1258,7 +1283,15 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	refused = nullptr;
 	{
 		size_t temps = 0;
-		for (const auto& sp : plan.spills) { if (sp.second != script_value_type::jai_object_type) { ++temps; } }
+		for (const auto& sp : plan.spills) {
+			if (sp.second != script_value_type::jai_object_type) { ++temps; continue; }
+			const auto* pc = static_cast<const call_expr*>(sp.first.get());
+			if (auto prefix = plan.argument_prefixes.find(pc); prefix != plan.argument_prefixes.end()) {
+				const auto old = callee_probes_.find(pc);
+				const size_t have = old == callee_probes_.end() ? 0 : old->second.second;
+				if (prefix->second > have) { temps += prefix->second - have; }
+			}
+		}
 		std::shared_ptr<identifier_expr> r;
 		if (!void_type(fn->return_type.get())) { r = std::make_shared<identifier_expr>(call->location, std::string_view("\x01inl"), uint64_t(1)); r->slot_index = temp_next_ + temps; r->names_value_decl = true; }
 		inline_context dry;
@@ -1275,6 +1308,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	sc.budget = SIZE_MAX;
 	sc.alias_pins = &alias_pins_;
 	sc.callee_probes = &callee_probes_;
+	sc.staged_arguments = &staged_arguments_;
 	std::vector<const call_expr*> pinned;
 	for (const auto& [sub, kind] : plan.spills) {
 		if (kind == script_value_type::jai_function_type) {
@@ -1297,7 +1331,24 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		if (kind == script_value_type::jai_object_type) {
 			// a callee no graft takes, above the graft: its probe parks it here and the call compiled later takes the parked callee
 			auto* pc = static_cast<const call_expr*>(sub.get());
-			callee_probes_[pc] = { static_cast<uint32_t>(emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(pc->arguments.size()))), 0u };
+			auto found = callee_probes_.find(pc);
+			const uint32_t probe = found == callee_probes_.end()
+				? static_cast<uint32_t>(emit(opcode::op_probe_callee, 0, static_cast<uint32_t>(pc->arguments.size())))
+				: found->second.first;
+			size_t staged = found == callee_probes_.end() ? 0 : found->second.second;
+			if (auto prefix = plan.argument_prefixes.find(pc); prefix != plan.argument_prefixes.end()) {
+				std::vector<uint8_t> captures;
+				detail::transient_read_marker::stamp_arg_captures(pc->arguments, captures);
+				for (; staged < prefix->second; ++staged) {
+					compile_expression(pc->arguments[staged]);
+					emit_arg_capture(captures, staged, pc->arguments[staged].get(), probe, capture_form_probe);
+					const uint32_t slot = static_cast<uint32_t>(temp_next_++);
+					if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+					emit(opcode::op_call_temp, slot);
+					staged_arguments_[pc].push_back(slot);
+				}
+			}
+			callee_probes_[pc] = {probe, static_cast<uint32_t>(staged)};
 			pinned.push_back(pc);
 			continue;
 		}
@@ -1444,7 +1495,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		for (const auto& [s, t] : callable_.slot_types) { sc.slot_types[s] = t; }
 	}
 	expression_ptr replaced = clone_expr(root, sc);
-	for (const call_expr* p : pinned) { alias_pins_.erase(p); callee_probes_.erase(p); }   // moved to the clone's node when the clone holds it
+	for (const call_expr* p : pinned) { alias_pins_.erase(p); callee_probes_.erase(p); staged_arguments_.erase(p); }   // moved to the clone's node when the clone holds it
 	for (auto& n : sc.pins) { chunk_->nodes.push_back(n); }
 	--graft_nesting_;
 	return sc.ok ? replaced : nullptr;

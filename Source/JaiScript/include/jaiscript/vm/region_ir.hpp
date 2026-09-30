@@ -84,10 +84,13 @@ namespace jai::vm {
 	// dead definition is never flushed, so it cannot overwrite the live one of the same slot. copy_at maps an original
 	// ip's offset from the head to its first copy instruction, defs lists (ip, cell) in program order, copy_count is
 	// the copy's length. held_below (a block inside a graft's body): each operation also holds the current definition of
-	// every compiler slot below it, since the graft's code after a miss (the rest of the caller's statement) reads them
+	// every compiler slot below it, since the graft's code after a miss (the rest of the caller's statement) reads them.
+	// stmt_starts (per operation, the ip its caller's statement begins at): each operation also holds what its statement
+	// defined before it, since a miss re-runs the statement's rest on the general form, a graft's bailed body included
 	std::vector<chunk::cell_mask> live_temps(const region_ir& r, const std::vector<chunk::cell_loop::cell>& cells,
 	                                         const std::vector<uint32_t>& slot_to_cell, const std::vector<std::pair<uint32_t, uint32_t>>& defs,
-	                                         const std::vector<uint32_t>& copy_at, uint32_t copy_head, size_t copy_count, uint32_t held_below = 0);
+	                                         const std::vector<uint32_t>& copy_at, uint32_t copy_head, size_t copy_count, uint32_t held_below = 0,
+	                                         const std::vector<uint32_t>* stmt_starts = nullptr, uint32_t slot_limit = 0);
 
 } // namespace jai::vm
 

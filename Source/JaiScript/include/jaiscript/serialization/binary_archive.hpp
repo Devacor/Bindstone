@@ -243,15 +243,7 @@ public:
                     // If this is the first time seeing this shared object, serialize the data
                     // This makes serialization order-independent: weak_ptr can come before or after shared_ptr
                     if (is_new) {
-                        // Create a script_value from the object_holder using factory method
-                        script_value shared_val = script_value::make_object(
-                            std::string(shared->type_name),
-                            shared->type_id,
-                            shared->data,
-                            engine_ref_,
-                            shared->is_class_instance_wrapper
-                        );
-                        write_value(shared_val);
+                        write_value(weak_target_value(shared));
                     }
                 }
                 break;
@@ -309,27 +301,11 @@ public:
                     auto class_def = instance->get_class_definition();
                     if (class_def) {
                         auto eng = class_def->get_engine();
-                        if (eng) {
-                            for (const auto& prop_name : class_def->get_property_names()) {
-                                uint64_t getter_id = eng->symbolize("_get_" + prop_name);
-                                auto getter = class_def->get_method(getter_id);
-                                if (getter.type() == script_value_type::jai_function_type) {
-                                    std::vector<script_value> args = {value};
-                                    auto result = getter.as_function()(args);
-                                    if (!result) {
-                                        if (class_def->script_declares_user_accessor(getter_id) ||
-                                            result.error() == make_error_code(runtime_error_code::cpp_exception)) {
-                                            throw runtime_error(eng->format_error(result));
-                                        }
-                                        continue;   // a host property that cannot read stays out of the payload
-                                    }
-                                    if (eng->backend_unwinding()) {
-                                        return;   // the getter threw: the in-flight exception leaves to_binary
-                                    }
-                                    property_names.push_back(prop_name);
-                                    property_values.push_back(std::move(result.value()));
-                                }
-                            }
+                        if (eng && !for_each_serialized_property(value, class_def, eng, [&](const auto& prop_name, script_value&& prop_value) {
+                                property_names.push_back(std::string(prop_name));
+                                property_values.push_back(std::move(prop_value));
+                            })) {
+                            return;
                         }
                     }
                 }

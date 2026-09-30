@@ -2571,7 +2571,7 @@ public:
             // fuzz seed 129 (2026-09-02): the vm's unfused element-store lane took ANY typed
             // node with a numeric rhs - an int landed unchecked in a string buffer
             check_quad_error("array<string> s = [\"a\"]; int g = 5; s[0] = g", "string buffer element store rejects int");
-            check_quad("array<string> s = [\"a\"]; s[0] += 1; s[0]", "a1", "string buffer compound store concatenates through the enforcing path");
+            check_quad("array<string> s = [\"a\"]; s[0] += \"1\"; s[0]", "a1", "string buffer compound store concatenates through the enforcing path");
             check_quad("array<bool> f = [true, true]; f[0] = 0; f[1] = 7; to_json(f)", "[false,true]", "bool buffer element store converts an int (Dev ruling 2026-09-09)");
             check_quad_error("array<char> c = ['a']; c[0] += 1", "char buffer compound store rejects int");
             check_quad("array<string> s = [\"a\"]; string t = \"b\"; s[0] = t; s[0]", "b", "string buffer element store of a string");

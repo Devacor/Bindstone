@@ -4275,6 +4275,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // through jai::ints so the checked-overflow policy covers compound assignment.
                 const size_t leftIdx = target.raw_storage_index();
                 const size_t rightIdx = derefRight.raw_storage_index();
+                if (expr->op.type == token_type::plus_equal && detail::compound_plus_text(target, derefRight) == detail::compound_text::mismatch) {
+                    return detail::compound_mismatch(0, target, derefRight, engine_);   // one '+=' table for every destination
+                }
                 // Integral promotion (char_promotion.hpp): a char operand leaves the in-place
                 // ladder and takes the general arithmetic path as int64 0..255, storing back
                 // like the %= case does. KEEP BYTE-PARALLEL with the VM exec_compound_store.
@@ -4497,6 +4500,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 const size_t ci = currentValue.raw_storage_index();
                 const size_t ri = rightValue.raw_storage_index();
                 script_value resultValue = make_value();
+                const detail::compound_text text_pair = expr->op.type == token_type::plus_equal ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
+                if (text_pair == detail::compound_text::mismatch) { return detail::compound_mismatch(0, currentValue, rightValue, engine_); }
+                if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the VM)
+                    JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+                } else
                 switch (expr->op.type) {
                     case token_type::plus_equal:
                         if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -4687,7 +4695,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             const size_t ci = currentValue.raw_storage_index();
             const size_t ri = rightValue.raw_storage_index();
             script_value resultValue = make_value();
-
+            const detail::compound_text text_pair = expr->op.type == token_type::plus_equal ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
+            if (text_pair == detail::compound_text::mismatch) { return detail::compound_mismatch(0, currentValue, rightValue, engine_); }
+            if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the VM)
+                JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+            } else
             switch (expr->op.type) {
                 case token_type::plus_equal: {
                     if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -4965,11 +4977,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // Fall back to built-in operators
                 switch (expr->op.type) {
                     case token_type::plus_equal: {
-                        if ((currentValue.is_string() || rightValue.is_string()) && !currentValue.is_utf8_string() && !rightValue.is_utf8_string()) {
-                            resultValue = make_value(currentValue.to_string() + rightValue.to_string());
-                        } else {
-                            JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
+                        // one '+=' table for every destination: a text target appends text, a text operand never stringifies
+                        if (detail::compound_plus_text(currentValue.deref(), rightValue.deref()) == detail::compound_text::mismatch) {
+                            return detail::compound_mismatch(0, currentValue.deref(), rightValue.deref(), engine_);
                         }
+                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
                         break;
                     }
                     case token_type::minus_equal: {

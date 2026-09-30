@@ -985,7 +985,7 @@ private:
 			for (const char* source : {
 				"array<int> a = [0]; auto x = (a[0] = 3.9); int& r = x; r == 3;",
 				"map<string,int> m = {{\"a\",0}}; auto x = (m[\"a\"] = 3.9); int& r = x; r == 3;",
-				"array<string> a = [\"x\"]; auto x = (a[0] += 1); string& r = x; r == \"x1\";",
+				"array<string> a = [\"x\"]; auto x = (a[0] += \"1\"); string& r = x; r == \"x1\";",
 				"int x = -9.223372036854776e18; x == (-9223372036854775807 - 1);"
 			}) {
 				auto eng = make_engine();

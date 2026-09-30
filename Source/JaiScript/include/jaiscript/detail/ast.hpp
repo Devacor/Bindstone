@@ -787,8 +787,8 @@ namespace jai {
         // of a program-scope declaration keeps the existing value (detail::redeclaration_keeps_value)
         bool default_initialized = false;
         // `inline T x;` (program scope or a namespace): one variable every declaring unit shares - an existing one is
-        // adopted and its initializer never runs, else the declaration creates it (environment::share: a later plain
-        // declaration adopts it in place)
+        // adopted and its initializer never runs, else the declaration creates it (environment::share; a plain declaration
+        // of the name then raises, detail::inline_redefinition)
         bool is_inline = false;
         // Declared `auto` (Dev ruling 2026-09-27): the unit's first proof pass types the slot by its initializer's
         // STATIC type, once - a known type keeps auto (the runtime locks to the value, which has that type), a var

@@ -138,9 +138,10 @@ the visible global (a declaration would shadow it) and declares nothing, so a us
 no host defines the name raises `'G' is declared extern but never defined (an 'inline' declaration
 creates it)`. `inline int Score;` is the C++17 inline variable: one variable shared by every unit
 that declares it. The first to run creates it (its initializer, else the type's default, owned by no
-unit); every later inline declaration adopts it without running its initializer, and the first unit
-that declares the name without `inline` adopts the cell in place, so the inline units, the declaring
-unit and the host keep one cell. A strict-checked unit reads a name only a later unit declares the
+unit); every later inline declaration adopts it without running its initializer, as it adopts a
+variable a plain declaration or the host created, so the inline units and the host keep one cell. A
+declaration without `inline` of a name an inline declaration created raises `'Score' is already
+defined inline; declare it 'inline int Score;' to share it` instead of shadowing it. A strict-checked unit reads a name only a later unit declares the
 same way (`docs/static_checking.md`, escape hatches).
 
 ## Cost

@@ -1309,7 +1309,10 @@ namespace jai::vm {
         // shared_ptr is in hand; the pin makes the raw-pointer key sound forever)
         void worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code);
         // box_cell: escape-marked decls wrap the value into a cell (see reference_holder)
-        op_status define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false);
+        op_status define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell = false, const variable_decl* decl = nullptr);
+        op_status define_decl_value(frame& f, const variable_decl* decl, script_value value, bool box_cell = false) {
+            return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), box_cell, decl);
+        }
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type,
                                                                 std::string_view var_name = {},

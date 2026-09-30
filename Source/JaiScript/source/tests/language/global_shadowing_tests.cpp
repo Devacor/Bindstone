@@ -113,13 +113,15 @@ public:
 			});
 		});
 		test("an_inline_declaration_shares_the_visible_global_or_creates_it_when_absent", [this]() {
-			// Dev (2026-09-30): an inline variable is one variable every declaring unit shares; the first to run creates it (unit 0)
-			// and the first unit that declares the name without inline adopts that cell in place
-			every_backend("inline", "5 5|9 9|7 7 7", [](engine& e) {
+			// Dev (2026-09-30): an inline variable is one variable every inline declaration shares; the first to run creates it
+			// (unit 0) and a later one adopts it, as it adopts a plain unit's variable or a host global
+			every_backend("inline", "5 5|2 2|8 8|7 7 7", [](engine& e) {
 				e.execute("inline var G; G = 5; function f() { return G; }");
 				std::string out = e.execute("inline var G; to_string(G) + \" \" + to_string(f())").as_string();
-				e.execute("var G = 9;");
-				out += "|" + e.execute("to_string(f()) + \" \" + to_string(G)").as_string();
+				e.execute("int P = 2;");
+				out += "|" + e.execute("inline int P; function p() { return P; } to_string(P) + \" \" + to_string(p())").as_string();
+				e.add_global("Q", script_value(static_cast<int64_t>(8), &e));
+				out += "|" + e.execute("inline int Q = 1; function q() { return Q; } to_string(Q) + \" \" + to_string(q())").as_string();
 				e.execute("inline int H; H = 7;");
 				auto host = e.get_global_environment()->get("H");
 				out += "|" + e.execute("inline int H; to_string(H)").as_string() + " " + std::to_string(host ? host.value().as_int() : -1);
@@ -142,6 +144,31 @@ public:
 				e.execute("namespace cfg { inline int depth = 3; int width = 1; }");
 				e.execute("namespace cfg { inline int depth = 7; int width = 2; }");
 				out += "|" + e.execute("to_string(cfg::depth) + \" \" + to_string(cfg::width)").as_string();
+				return out;
+			});
+		});
+		test("a_plain_declaration_of_an_inline_variable_raises", [this]() {
+			// Dev (2026-09-30): a plain declaration never adopts what an inline declaration created; the text spells the fix
+			const std::string expected =
+				"'G' is already defined inline; declare it 'inline G;' to share it|"
+				"'N' is already defined inline; declare it 'inline int N;' to share it|"
+				"'A' is already defined inline; declare it 'inline array<int> A;' to share it|"
+				"'Z' is already defined inline; declare it 'inline auto Z;' to share it|"
+				"'Z' is already defined inline; declare it 'inline auto Z;' to share it|"
+				"'depth' is already defined inline; declare it 'inline int depth;' to share it|"
+				"5 3 0 1 3|6";
+			every_backend("inline plain", expected, [](engine& e) {
+				auto raised = [&](const std::string& src) {
+					try { e.execute(src); } catch (const std::exception& ex) { std::string w = ex.what(); return w.substr(0, w.find(": Invalid operation")); }
+					return std::string("no error");
+				};
+				e.execute("inline var G = 5; inline int N = 3; inline array<int> A; inline Z; namespace cfg { inline int depth = 1; }");
+				std::string out = raised("var G = 9;") + "|" + raised("int N = 1;") + "|" + raised("array<int> A = [1];") + "|" + raised("auto Z = 2;")
+					+ "|" + raised("auto [Z, W] = [1, 2];") + "|" + raised("namespace cfg { int depth = 7; }");
+				out += "|" + e.execute("to_string(G) + \" \" + to_string(N) + \" \" + to_string(A.size()) + \" \" + to_string(cfg::depth) + \" \" + to_string(N)").as_string();
+				const std::string rerun = "inline int R = 6; R";
+				e.execute(rerun);
+				out += "|" + e.execute(rerun).to_string();
 				return out;
 			});
 		});

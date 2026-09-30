@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
+#include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/stdlib/containers.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -6105,7 +6106,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         }
     }
     // Helper to store value in slot (local) or environment (global)
-    auto define_variable = [&](script_value value) {
+    auto define_variable = [&](script_value value) -> checked_result<void> {
         // Escape-marked declarations box into a cell (reference_holder cell mode):
         // reference binding then shares the handle. Reference values pass through
         // untouched (ref decls alias; a cell never wraps a reference).
@@ -6117,9 +6118,10 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             call_stack_.back().set_local(decl->slot_index, std::move(value));
         } else {
             // Global variable or no slot assigned - use environment
-            environment_->define_variable(decl->name_id, std::move(value));
+            if (!environment_->define_variable(decl->name_id, std::move(value))) [[unlikely]] { return detail::inline_redefinition(*string_symbolizer_, decl->name_id, decl); }
             if (decl->is_inline) [[unlikely]] { environment_->share(decl->name_id); }
         }
+        return {};
     };
 
     // The type the declaration binds to: explicit, or inferred from a uniform literal
@@ -6148,7 +6150,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         if (!decl->initializer) {
             // No initializer - create empty weak_ptr
             script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
-            define_variable(std::move(weak));
+            JAISCRIPT_TRY(define_variable(std::move(weak)));
         } else {
             // Evaluate initializer
             JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
@@ -6167,10 +6169,10 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             if (value.is_null()) {
                 // Initialize with null - create empty weak_ptr
                 script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
-                define_variable(std::move(weak));
+                JAISCRIPT_TRY(define_variable(std::move(weak)));
             } else if (value.is_weak_ptr()) {
                 // Initialize with another weak_ptr - copy it
-                define_variable(std::move(value));
+                JAISCRIPT_TRY(define_variable(std::move(value)));
             } else if (value.type() == script_value_type::jai_shared_ptr_type) {
                 // Validate type parameter - weak_ptr<T> should only accept shared_ptr<T> or subclass
                 auto expected_type = decl->type ? decl->type->element_type() : nullptr;
@@ -6199,7 +6201,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 if (!weak_result) {
                     return weak_result.error_value();
                 }
-                define_variable(std::move(weak_result.value()));
+                JAISCRIPT_TRY(define_variable(std::move(weak_result.value())));
             } else {
                 // A value-semantic object or a primitive: family D's declaration shape
                 // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
@@ -6221,7 +6223,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // No initializer - create null shared_ptr
             script_value null_ptr = make_value();
             null_ptr.set_type_info(decl->type);  // Mark as shared_ptr type
-            define_variable(std::move(null_ptr));
+            JAISCRIPT_TRY(define_variable(std::move(null_ptr)));
         } else {
             // Evaluate initializer
             JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
@@ -6244,7 +6246,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 }
                 // Initialize with null - that's fine
                 value.set_type_info(decl->type);  // Mark as shared_ptr type
-                define_variable(std::move(value));
+                JAISCRIPT_TRY(define_variable(std::move(value)));
             } else if (value.is_weak_ptr()) {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
             } else if (value.type() == script_value_type::jai_object_type ||
@@ -6268,7 +6270,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                             "Cannot infer shared_ptr<auto> pointee from this initializer - use var, or an explicit shared_ptr<T>");
                     }
                     value.set_type_info(inferred);
-                    define_variable(std::move(value));
+                    JAISCRIPT_TRY(define_variable(std::move(value)));
                     return {};
                 }
                 // Dev ruling (2026-07): typed shared_ptr declarations ENFORCE their
@@ -6299,7 +6301,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 // Initialize with object/shared_ptr - that's fine, objects are already shared_ptr
                 // Mark the type as shared_ptr to ensure reference semantics
                 value.set_type_info(decl->type);
-                define_variable(std::move(value));
+                JAISCRIPT_TRY(define_variable(std::move(value)));
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
             }
@@ -6330,7 +6332,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     if (!*minted) {
                         return minted->error_value();
                     }
-                    define_variable(std::move(minted->value()));
+                    JAISCRIPT_TRY(define_variable(std::move(minted->value())));
                     return {};
                 }
                 JAISCRIPT_TRY(bare_reference_access(targetSymbolId));
@@ -6343,11 +6345,11 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 if (!aliased) {
                     return aliased.error_value();
                 }
-                define_variable(std::move(aliased.value()));
+                JAISCRIPT_TRY(define_variable(std::move(aliased.value())));
             } else {
                 // Box the variable's storage into a cell and alias it (escape-legal:
                 // the ref keeps the cell alive after the env dies)
-                define_variable(share_boxed_env_storage(*targetPtr, engine_));
+                JAISCRIPT_TRY(define_variable(share_boxed_env_storage(*targetPtr, engine_)));
             }
         } else {
             // C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value)
@@ -6362,7 +6364,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     if (storage.is_reference() && !storage.get_reference_holder()) {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
                     }
-                    define_variable(share_boxed_env_storage(storage, engine_));
+                    JAISCRIPT_TRY(define_variable(share_boxed_env_storage(storage, engine_)));
                     return {};
                 }
             }
@@ -6377,7 +6379,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 if (!aliased) {
                     return aliased.error_value();
                 }
-                define_variable(std::move(aliased.value()));
+                JAISCRIPT_TRY(define_variable(std::move(aliased.value())));
             } else if (detail::is_member_final_ref_lvalue(decl->initializer.get())) {
                 // Member-final initializer (auto& p = G.player): field reads evaluate to
                 // COPIES, so the evaluated result can't alias - resolve the chain through
@@ -6398,7 +6400,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     if (!aliased) {
                         return aliased.error_value();
                     }
-                    define_variable(std::move(aliased.value()));
+                    JAISCRIPT_TRY(define_variable(std::move(aliased.value())));
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
                         "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
@@ -6593,7 +6595,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         // First assignment will lock the type
 
         // Define in slot (local) or environment (global)
-        define_variable(std::move(value));
+        JAISCRIPT_TRY(define_variable(std::move(value)));
         // After move, value is in moved-from state, so don't access it
     }
     return {};
@@ -12424,6 +12426,9 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // and its initializer sees the members declared before it. KEEP BYTE-PARALLEL with vm_backend::exec_namespace_variable.
             struct scope_swap { std::shared_ptr<environment>& slot; std::shared_ptr<environment> saved; ~scope_swap() { slot = std::move(saved); } } swap{environment_, environment_};
             environment_ = detail::namespace_scope(*engine_, *ns_data);
+            if (!var_decl->is_inline && environment_->inline_cell(var_decl->name_id)) [[unlikely]] {
+                return detail::inline_redefinition(*string_symbolizer_, var_decl->name_id, var_decl);
+            }
             JAISCRIPT_TRY(visit_variable_decl(var_decl));
             if (is_unwinding_) {
                 return {};
@@ -14752,8 +14757,8 @@ checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl*
 
         if (decl->slot_indices[i] != SIZE_MAX && !call_stack_.empty()) {
             call_stack_.back().set_local(decl->slot_indices[i], std::move(val));
-        } else {
-            environment_->define_variable(decl->names[i].second, std::move(val));
+        } else if (!environment_->define_variable(decl->names[i].second, std::move(val))) [[unlikely]] {
+            return detail::inline_redefinition(*string_symbolizer_, decl->names[i].second, nullptr);
         }
     }
 

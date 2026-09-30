@@ -14,7 +14,7 @@ MutedVision engine / Bindstone.
   (refused with the reason when it cannot be proven complete), document and workspace symbols.
 - **Syntax highlighting** - TextMate grammar for `.script`, `.jai`, and `.jaibite` files.
 - **Attach debugging** - breakpoints, stepping, call stack and variables over the Debug Adapter
-  Protocol. The DAP server lives inside the C++ host (`jai::debug_connector`, a raw TCP port); this
+  Protocol. The DAP server lives inside the C++ host (`jai::debug::debug_connector`, a raw TCP port); this
   extension points VS Code's DAP client straight at that socket, with nothing to spawn.
 
 The full guide is the docs page `docs/site/embedding/14-language-server.html` (and
@@ -56,7 +56,7 @@ The extension looks for it in this order: the `jaiscript.languageServer.path` se
 In the host, inject a connector on the engine:
 
 ```cpp
-engine->set_debug_connector(std::make_shared<jai::debug_connector>(1234));
+engine->set_debug_connector(std::make_shared<jai::debug::debug_connector>(1234));
 ```
 
 then add a `.vscode/launch.json` attach configuration with the same port and start it while the

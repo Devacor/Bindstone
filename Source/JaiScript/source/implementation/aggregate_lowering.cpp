@@ -550,6 +550,7 @@ private:
 			case token_type::equal_equal: return token(t, "==", loc);
 			case token_type::bang_equal: return token(t, "!=", loc);
 			case token_type::ampersand_ampersand: return token(t, "&&", loc);
+			case token_type::pipe_pipe: return token(t, "||", loc);
 			case token_type::bang: return token(t, "!", loc);
 			case token_type::equal: return token(t, "=", loc);
 			default: return token(t, "", loc);
@@ -846,7 +847,7 @@ private:
 			case math_fn::mix_out_: case math_fn::mix_in_out_: case math_fn::mix_out_in_: case math_fn::unmix_in_: case math_fn::unmix_out_:
 			case math_fn::unmix_in_out_: case math_fn::unmix_out_in_:
 				return vec_family(fn, c, f, ctx);
-			case math_fn::normalize_: case math_fn::cross_: case math_fn::perpendicular_: {
+			case math_fn::normalize_: case math_fn::cross_: case math_fn::perpendicular_: case math_fn::reflect_: case math_fn::project_: case math_fn::rotate_: {
 				if (c->arguments.empty()) return false;
 				vform first;
 				if (!vec_of(c->arguments[0], first, ctx)) return false;
@@ -998,6 +999,61 @@ private:
 				}
 				return true;
 			}
+			case math_fn::reflect_: case math_fn::project_: {
+				// d = dot(v, n); v - 2 d n (reflect) | d = dot(b, b); b * (dot(a, b) / d), zero when d is (project)
+				if (args.size() != from + 1 || !ctx.prelude || first.sensitive != 0) return false;
+				vform second;
+				if (!vec_of(args[from], second, ctx) || second.n != first.n || math::is_color(second.kind) || second.sensitive != 0) return false;
+				widen(first); widen(second);
+				if (!materialize(first, *ctx.prelude, loc) || !materialize(second, *ctx.prelude, loc)) return false;
+				f.merge(first); f.merge(second);
+				f.kind = family(first.kind); f.n = first.n;
+				if (fn == math_fn::reflect_) {
+					expression_ptr d = temp(false, dot_expr(first, second, loc), *ctx.prelude, loc);
+					for (size_t k = 0; k < f.n; ++k) f.c[k] = f32(bin(first.c[k], token_type::minus, bin(bin(lit_float(2.0, loc), token_type::star, d, loc), token_type::star, second.c[k], loc), loc), loc);
+					return true;
+				}
+				expression_ptr d = temp(false, dot_expr(second, second, loc), *ctx.prelude, loc);
+				auto nonzero = [&] { return bin(d, token_type::bang_equal, lit_float(0.0, loc), loc); };
+				expression_ptr s = temp(false, std::make_shared<ternary_expr>(loc, nonzero(), bin(dot_expr(first, second, loc), token_type::slash, d, loc), lit_float(0.0, loc)), *ctx.prelude, loc);
+				for (size_t k = 0; k < f.n; ++k) f.c[k] = std::make_shared<ternary_expr>(loc, nonzero(), f32(bin(second.c[k], token_type::star, s, loc), loc), lit_float(0.0, loc));
+				return true;
+			}
+			case math_fn::rotate_: {
+				// vec2: (x cos - y sin, x sin + y cos); vec3: Rodrigues about the normalized axis, the vector itself about a zero axis
+				const bool three = first.n == 3;
+				if (!ctx.prelude || first.sensitive != 0 || args.size() != from + (three ? 2 : 1) || (first.n != 2 && !three)) return false;
+				vform axis;
+				if (three && (!vec_of(args[from], axis, ctx) || axis.n != 3 || math::is_color(axis.kind) || axis.sensitive != 0)) return false;
+				uint8_t cls = c_unknown;
+				expression_ptr angle;
+				if (!row_scalar(args[args.size() - 1], cls, angle) || (cls != c_int && cls != c_float)) return false;
+				widen(first);
+				if (!materialize(first, *ctx.prelude, loc)) return false;
+				if (three) { widen(axis); if (!materialize(axis, *ctx.prelude, loc)) return false; f.merge(axis); }
+				f.merge(first);
+				f.kind = family(first.kind); f.n = first.n;
+				expression_ptr cs = temp(false, math_call("cos", {angle}, loc), *ctx.prelude, loc);
+				expression_ptr sn = temp(false, math_call("sin", {angle}, loc), *ctx.prelude, loc);
+				if (!three) {
+					f.c[0] = f32(bin(bin(first.c[0], token_type::star, cs, loc), token_type::minus, bin(first.c[1], token_type::star, sn, loc), loc), loc);
+					f.c[1] = f32(bin(bin(first.c[0], token_type::star, sn, loc), token_type::plus, bin(first.c[1], token_type::star, cs, loc), loc), loc);
+					return true;
+				}
+				expression_ptr len = temp(false, math_call("sqrt", {dot_expr(axis, axis, loc)}, loc), *ctx.prelude, loc);
+				auto nonzero = [&] { return bin(len, token_type::bang_equal, lit_float(0.0, loc), loc); };
+				expression_ptr k[3];
+				for (size_t c = 0; c < 3; ++c) k[c] = temp(false, std::make_shared<ternary_expr>(loc, nonzero(), bin(axis.c[c], token_type::slash, len, loc), lit_float(0.0, loc)), *ctx.prelude, loc);
+				expression_ptr kv = temp(false, bin(bin(bin(k[0], token_type::star, first.c[0], loc), token_type::plus, bin(k[1], token_type::star, first.c[1], loc), loc), token_type::plus, bin(k[2], token_type::star, first.c[2], loc), loc), *ctx.prelude, loc);
+				static constexpr size_t p[3] = {1, 2, 0}, q[3] = {2, 0, 1};
+				for (size_t c = 0; c < 3; ++c) {
+					auto kx = bin(bin(k[p[c]], token_type::star, first.c[q[c]], loc), token_type::minus, bin(k[q[c]], token_type::star, first.c[p[c]], loc), loc);
+					auto turned = bin(bin(bin(first.c[c], token_type::star, cs, loc), token_type::plus, bin(kx, token_type::star, sn, loc), loc), token_type::plus,
+					                  bin(bin(k[c], token_type::star, kv, loc), token_type::star, bin(lit_float(1.0, loc), token_type::minus, cs, loc), loc), loc);
+					f.c[c] = std::make_shared<ternary_expr>(loc, nonzero(), f32(turned, loc), f32(first.c[c], loc));
+				}
+				return true;
+			}
 			case math_fn::cross_: {
 				if (args.size() != from + 1) return false;
 				vform second;
@@ -1065,7 +1121,7 @@ private:
 		if (m->is_static) {
 			fn = math_intrinsic_for_call(m);
 			const size_t argc = c->arguments.size();
-			const bool two = fn == math_fn::dot_ || fn == math_fn::distance || fn == math_fn::distance_squared || fn == math_fn::cross_;
+			const bool two = fn == math_fn::dot_ || fn == math_fn::distance || fn == math_fn::distance_squared || fn == math_fn::cross_ || fn == math_fn::angle_between_;
 			const bool one = fn == math_fn::length_ || fn == math_fn::length_squared_;
 			if (!(two && argc == 2) && !(one && argc == 1)) return nullptr;
 			if (!vec_of(c->arguments[0], a, ctx)) return nullptr;
@@ -1083,7 +1139,7 @@ private:
 		}
 		if (math::is_color(a.kind) || (have_b && (math::is_color(b.kind) || b.n != a.n))) return nullptr;
 		if (fn == math_fn::cross_ && a.n != 2) return nullptr;
-		const bool exact = math::integral(a.kind) && (!have_b || math::integral(b.kind)) && fn != math_fn::length_ && fn != math_fn::distance;
+		const bool exact = math::integral(a.kind) && (!have_b || math::integral(b.kind)) && fn != math_fn::length_ && fn != math_fn::distance && fn != math_fn::angle_between_;
 		if (!exact) { widen(a); if (have_b) widen(b); }
 		const int operand_sensitive = a.sensitive + (have_b ? b.sensitive : 0);
 		if (operand_sensitive > (exact ? 0 : 1)) return nullptr;
@@ -1092,6 +1148,16 @@ private:
 		if (twice && (!simple_form(a) || (have_b && !simple_form(b)))) {
 			if (!ctx.prelude || operand_sensitive != 0) return nullptr;
 			if (!materialize(a, *ctx.prelude, loc) || (have_b && !materialize(b, *ctx.prelude, loc))) return nullptr;
+		}
+		if (fn == math_fn::angle_between_) {
+			// the lengths once, a zero one gives 0, else the clamped acos of the cosine (the kernel's order)
+			if (!ctx.prelude || operand_sensitive != 0) return nullptr;
+			if (!materialize(a, *ctx.prelude, loc) || !materialize(b, *ctx.prelude, loc)) return nullptr;
+			expression_ptr la = temp(false, math_call("sqrt", {dot_expr(a, a, loc)}, loc), *ctx.prelude, loc);
+			expression_ptr lb = temp(false, math_call("sqrt", {dot_expr(b, b, loc)}, loc), *ctx.prelude, loc);
+			auto zero = bin(bin(la, token_type::equal_equal, lit_float(0.0, loc), loc), token_type::pipe_pipe, bin(lb, token_type::equal_equal, lit_float(0.0, loc), loc), loc);
+			auto cosine = bin(dot_expr(a, b, loc), token_type::slash, bin(la, token_type::star, lb, loc), loc);
+			return std::make_shared<ternary_expr>(loc, zero, lit_float(0.0, loc), math_call("acos$", {cosine}, loc));
 		}
 		switch (fn) {
 			case math_fn::dot_: return dot_expr(a, b, loc);

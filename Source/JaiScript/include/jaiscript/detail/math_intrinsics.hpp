@@ -53,7 +53,7 @@ namespace jai::detail {
         // f32$(x) a binary32 component's value, i32$(x) an int32 component's, cstore$(x, kind) a component store's
         // narrowing, vop$(code, a, b) one ivec operator component, vcomp$(code, ...) one component of the component-wise
         // family
-        f32_, i32_, cstore_, vop_, vcomp_,
+        f32_, i32_, cstore_, vop_, vcomp_, acos_,
         count,
         none = count
     };
@@ -64,6 +64,7 @@ namespace jai::detail {
                 if (name == "abs") return math_fn::abs_;
                 if (name == "atan2") return math_fn::atan2_;
                 if (name == "angle_between") return math_fn::angle_between_;
+                if (name == "acos$") return math_fn::acos_;
                 return math_fn::none;
             case 'c':
                 if (name == "cos") return math_fn::cos_;
@@ -589,6 +590,8 @@ namespace jai::detail {
         inline checked_result<script_value> overflow(math::bop op) {
             return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), math::overflow_text(op));
         }
+        // angle_between's last step: the cosine clamped to [-1, 1], then acos
+        inline double clamped_acos(double c) noexcept { return std::acos(c < -1.0 ? -1.0 : (c > 1.0 ? 1.0 : c)); }
         // a step that overflowed: the error in a checked build, the wrapped value otherwise
         inline bool fails(bool ok) noexcept { return !ok && math::k_checked_overflow; }
 
@@ -746,9 +749,7 @@ namespace jai::detail {
             case math_fn::angle_between_: {
                 const double la = std::sqrt(geometry::dot(a, a)), lb = std::sqrt(geometry::dot(b, b));
                 if (la == 0.0 || lb == 0.0) { return script_value(0.0, eng); }
-                double c = geometry::dot(a, b) / (la * lb);
-                c = c < -1.0 ? -1.0 : (c > 1.0 ? 1.0 : c);
-                return script_value(std::acos(c), eng);
+                return script_value(geometry::clamped_acos(geometry::dot(a, b) / (la * lb)), eng);
             }
             case math_fn::perpendicular_: {
                 if (n != 2) { return bad_type(); }
@@ -851,6 +852,10 @@ namespace jai::detail {
     JAI_MATH_COLD inline checked_result<script_value> eval_lowering_step(math_fn fn, const script_value* const* args, size_t argc, engine* eng) {
         auto internal = [&] { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), lowering_step_text()); };
         switch (fn) {
+            case math_fn::acos_: {
+                if (argc != 1 || args[0]->raw_storage_index() != script_value::TYPEID_FLOAT) { return internal(); }
+                return script_value(geometry::clamped_acos(args[0]->unchecked_as_float()), eng);
+            }
             case math_fn::f32_:
             case math_fn::i32_: {
                 if (argc != 1) { return internal(); }
@@ -1204,6 +1209,7 @@ namespace jai::detail {
             case math_fn::cstore_:
             case math_fn::vop_:
             case math_fn::vcomp_:
+            case math_fn::acos_:
                 return eval_lowering_step(fn, args, argc, eng);
 
             case math_fn::round_: {

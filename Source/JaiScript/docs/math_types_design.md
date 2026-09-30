@@ -264,11 +264,12 @@ rewrites.
   the binary32 operation, so the bits agree), an ivec row runs `vop$` (the kernel's exact int64 step, int32 narrowing
   and texts), a scalar operand narrows as the kernel narrows it.
 - **The libraries.** The component-wise family runs `vcomp$` per component, the kernel's own per-component step
-  (`vec_component_value`, `vec_component_exact`), so the boxed call and the lowered form share one kernel. The geometry
-  rows `dot`, `length`, `length_squared`, `distance`, `distance_squared`, `normalize`, `cross` and `perpendicular`, as
-  free functions or methods, become component arithmetic in the kernel's order of operations; an ivec argument widens
-  exactly wherever the kernel reads doubles. `reflect`, `project`, `angle_between`, `rotate` and the OKLab mixes run
-  boxed on rebuilt values.
+  (`vec_component_value`, `vec_component_exact`), so the boxed call and the lowered form share one kernel. Every geometry
+  row (`dot`, `cross`, `length`, `length_squared`, `normalize`, `distance`, `distance_squared`, `reflect`, `project`,
+  `angle_between`, `perpendicular`, `rotate`), as a free function or a method, becomes component arithmetic in the kernel's
+  order of operations, its shared values (a length, a dot, a sine and cosine, a normalized axis) in temporaries and its
+  zero cases as conditionals; an ivec argument widens exactly wherever the kernel reads doubles, and `angle_between`'s last
+  step is `acos$` (the kernel's clamped acos). The OKLab mixes run boxed on rebuilt values.
 - **Constructors and conversions.** `math::K(...)`, the extension forms and the typed-slot conversions between kinds
   lower to their narrowed components.
 - **Values.** A vector the program needs as a value (a call argument of a lowered expression, a container element, a
@@ -298,7 +299,7 @@ rewrites.
   and drops the rewrite's temporaries. Error texts never name a component slot: every lowered store is of the slot's
   own type, and the fallback stores name the source local.
 - **Later.** Class fields (`pos$x` ... with flat storage, instance migration by name), multi-cell returns at grafted
-  calls, component parameters on raw typed frames, and the remaining geometry rows.
+  calls, and component parameters on raw typed frames.
 ### 4.4 Typed vector buffers
 
 `array<math::vec3>` and the other vector kinds are typed buffers with a stride equal to the component count (5.6):

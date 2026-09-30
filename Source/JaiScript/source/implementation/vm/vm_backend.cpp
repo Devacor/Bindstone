@@ -312,8 +312,13 @@ namespace {
 
 	// The tail's destructors may run script destructors that re-enter the VM and grow the vector: they run after the
 	// vector no longer holds it, in the order erase would run them
+#if defined(_MSC_VER)
+#define JAI_VM_COLD_PATH __declspec(noinline)
+#else
+#define JAI_VM_COLD_PATH __attribute__((noinline, cold))
+#endif
 	template <class V>
-	void truncate_detached_tail(V& v, size_t n) {
+	JAI_VM_COLD_PATH void truncate_detached_tail(V& v, size_t n) {
 		V doomed(std::make_move_iterator(v.begin() + static_cast<std::ptrdiff_t>(n)), std::make_move_iterator(v.end()));
 		v.erase(v.begin() + static_cast<std::ptrdiff_t>(n), v.end());
 	}

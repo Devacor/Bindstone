@@ -595,22 +595,20 @@ namespace jai::vm {
             // script destructor that pushes onto (and grows) this stack, so the dying value never sits in the buffer and
             // the loop re-reads the buffer by index. The slot left behind is dead storage: pop_back has already lowered
             // count past it; truncate lowers count past every slot it relocated.
-            template <bool KeepSlotValid>
             static void destroy_relocated(script_value& s) noexcept {
                 alignas(script_value) unsigned char doomed[sizeof(script_value)];
                 std::memcpy(doomed, static_cast<const void*>(&s), sizeof(script_value));
-                if constexpr (KeepSlotValid) { new (&s) script_value(std::monostate{}, nullptr); }   // still below count
                 std::launder(reinterpret_cast<script_value*>(doomed))->~script_value();
             }
             void pop_back() noexcept {
                 assert(count);
                 script_value& s = slots[--count];
-                if (!dtor_elidable(s)) { destroy_relocated<false>(s); }
+                if (!dtor_elidable(s)) { destroy_relocated(s); }
             }
             void truncate(size_t new_size) noexcept {
                 assert(new_size <= count);
                 for (size_t i = new_size; i < count; ++i) {
-                    if (!dtor_elidable(slots[i])) { destroy_relocated<true>(slots[i]); }
+                    if (!dtor_elidable(slots[i])) { destroy_relocated(slots[i]); }
                 }
                 count = new_size;
             }

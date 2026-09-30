@@ -14,7 +14,7 @@ region_cfg control_flow(const region_ir& r) {
 		const ir_op& op = ops[k];
 		switch (op.kind) {
 		case ir::exit: case ir::bail: case ir::ret: break;   // no successor: the block ends (a bail: the general form takes the iteration from here; a ret: the frame returns)
-		case ir::jump: g.succ[k][0] = node_of(op.target); break;
+		case ir::jump: case ir::boundary: g.succ[k][0] = node_of(op.target); break;   // a boundary continues at its statement's end
 		case ir::range:
 		case ir::cmp: g.succ[k][0] = k + 1; g.succ[k][1] = op.head ? g.exit_node : node_of(op.target); break;
 		default: g.succ[k][0] = k + 1; break;
@@ -81,7 +81,7 @@ std::string listing(const region_ir& r) {
 	for (size_t k = 0; k < r.ops.size(); ++k) {
 		const ir_op& op = r.ops[k];
 		text += std::to_string(k) + ":" + ir_name(op.kind);
-		if (op.kind == ir::cmp || op.kind == ir::jump || op.kind == ir::exit || op.kind == ir::bail || op.kind == ir::range || op.kind == ir::ret) {
+		if (op.kind == ir::cmp || op.kind == ir::jump || op.kind == ir::exit || op.kind == ir::bail || op.kind == ir::range || op.kind == ir::ret || op.kind == ir::boundary) {
 			text += op.kind == ir::ret ? "->return" : op.kind == ir::exit || op.kind == ir::bail || op.head || op.target > r.back || op.target < r.first ? "->exit" : op.target == r.back ? "->back" : "->" + std::to_string(op.target - r.first);
 		}
 		if (op.writes != k_invalid_u32) { text += " w" + std::to_string(op.writes); }

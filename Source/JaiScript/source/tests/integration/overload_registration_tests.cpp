@@ -99,6 +99,123 @@ public:
             check_eq((int64_t)7, eng->execute("auto z = C(); z.v").as_int());
             check_eq((int64_t)5, eng->execute("auto t = C(2, 3); t.v").as_int());
         });
+
+        // A bound method whose C++ signature takes only values that convert without failing gets a direct lane (the vm reaches the
+        // method it bound without minting a bound method); its results, its declines (an argument of another kind, a count mismatch)
+        // and its raises are the ordinary call's, on both backends. An overload, a guarded method or a class parameter has no lane.
+        test("binder_method_lanes_are_the_ordinary_call", [this]() {
+            struct Acc {
+                int64_t total = 0; double scale = 1.0; std::string tag; int32_t small = 0;
+                int64_t add(int64_t v) { total += v; return total; }
+                Acc& bump() { total += 1; return *this; }
+                double scaled(double v) const { return v * scale; }
+                int narrow(int32_t v) { small = v; return small * 2; }
+                void reset() { total = 0; }
+                int64_t get_total() const { return total; }
+                int boom(int v) { if (v > 2) { throw std::runtime_error("boom " + std::to_string(v)); } return v; }
+                std::string pick_i(int) { return "i"; }
+                std::string pick_s(const std::string&) { return "s"; }
+            };
+            auto run = [&](bool vm, const std::string& src, std::string* lanes = nullptr) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                dynamic_binder<Acc>(*e, "Acc").constructor<>()
+                    .method("add", &Acc::add)
+                    .method("bump", &Acc::bump)
+                    .method("scaled", &Acc::scaled)
+                    .method("narrow", &Acc::narrow)
+                    .method("reset", &Acc::reset)
+                    .method("get_total", &Acc::get_total)
+                    .method("boom", &Acc::boom)
+                    .method("label", [](Acc& self, const std::string& t) -> Acc& { self.tag = t; return self; })
+                    .method("tagged", [](const Acc& self, bool upper) -> std::string { return upper ? self.tag + "!" : self.tag; })
+                    .method("pick", &Acc::pick_i)
+                    .method("pick", &Acc::pick_s)
+                    .method("guarded", &Acc::get_total, jai::filesystem)
+                    .build();
+                if (lanes) {
+                    auto def = e->get_class_definition("Acc");
+                    for (const char* n : { "add", "bump", "scaled", "narrow", "reset", "get_total", "boom", "label", "tagged", "pick", "guarded" }) {
+                        if (def && def->find_native_method(e->symbolize(n))) { *lanes += std::string(n) + " "; }
+                    }
+                }
+                std::string got;
+                try { got = e->execute(src).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+                return got;
+            };
+            const std::string src = R"(
+                auto a = Acc();
+                int s = 0;
+                for (int i = 0; i < 50; ++i) { s = s + a.add(i) % 7; s = s + a.narrow(i); }
+                float f = a.scaled(3) + a.scaled(1.5);
+                a.label("x").label("tag");
+                string t = a.tagged(true) + a.tagged(false) + a.pick(1) + a.pick("q") + to_string(a.guarded());
+                string errs = "";
+                try { a.add("seven"); } catch (e) { errs = errs + "|" + e; }
+                try { a.narrow(1 << 40); } catch (e) { errs = errs + "|" + e; }
+                try { a.add(1, 2); } catch (e) { errs = errs + "|" + e; }
+                try { a.boom(5); } catch (e) { errs = errs + "|" + e; }
+                a.reset();
+                int chained = Acc().bump().bump().add(3) + a.bump().bump().get_total();
+                to_string(chained) + " " + to_string(s) + " " + to_string(f) + " " + t + " " + to_string(a.get_total()) + " " + to_string(a.boom(2)) + errs;
+            )";
+            const std::string oracle = run(false, src);
+            check_true(oracle.rfind("throw:", 0) != 0 && oracle.find("boom 5") != std::string::npos, "the interpreter's answer: " + oracle);
+            std::string lanes;
+            check_eq(oracle, run(true, src, &lanes), "the vm's answer is the interpreter's");
+            check_eq(std::string("add scaled narrow reset get_total boom label tagged "), lanes, "the lanes: every single unguarded binding of value parameters");
+        });
+
+        // A bare call of a sibling method inside a method (`step(n - 1)`) parks the class's method on the frame's receiver without minting a
+        // bound method: a subclass overriding the sibling, a redefinition of the class (hot reload), a local that shadows the name and
+        // alternating receivers of two classes all call what the ordinary resolution calls, on both backends
+        test("sibling_method_calls_resolve_as_the_member_ladder", [this]() {
+            const std::string src = R"(
+                class Walker {
+                    int base = 1;
+                    int step(int n) { return n + base; }
+                    int walk(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + step(i); } return s; }
+                    int shadowed(int n) { var step = function(int k) -> int { return 1000 + k; }; return step(n); }
+                    int down(int n) { if (n == 0) { return base; } return down(n - 1) + 1; }
+                }
+                class Runner : Walker {
+                    int step(int n) override { return n * 10; }
+                }
+                var w = Walker(); var r = Runner();
+                function probe() -> string { return to_string(w.walk(4)); }
+                string out = "";
+                for (int k = 0; k < 3; ++k) { out = out + to_string(w.walk(4)) + "," + to_string(r.walk(4)) + ";"; }
+                out = out + to_string(w.shadowed(2)) + "," + to_string(r.down(5)) + ";";
+                out;
+            )";
+            const std::string reload = R"(
+                class Walker {
+                    int base = 1;
+                    int step(int n) { return n - base; }
+                    int walk(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + step(i); } return s; }
+                    int shadowed(int n) { var step = function(int k) -> int { return 1000 + k; }; return step(n); }
+                    int down(int n) { if (n == 0) { return base; } return down(n - 1) + 1; }
+                }
+                extern function probe;
+                probe();
+            )";
+            auto run = [&](bool vm, bool proofs) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                if (!proofs) { e->type_proofs(false); }
+                std::string got;
+                try { got = e->execute(src).to_string(); got += "|" + e->execute(reload).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+                return got;
+            };
+            const std::string oracle = run(false, true);
+            check_true(oracle.rfind("throw:", 0) != 0, "the interpreter's answer: " + oracle);
+            check_eq(std::string("10,60;10,60;10,60;1002,6;|2"), oracle, "the expected values");
+            check_eq(oracle, run(true, true), "vm");
+            check_eq(oracle, run(true, false), "vm, proofs off");
+            check_eq(oracle, run(false, false), "interpreter, proofs off");
+        });
     }
 };
 

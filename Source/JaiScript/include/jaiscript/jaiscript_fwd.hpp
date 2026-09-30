@@ -69,6 +69,12 @@ namespace jai {
         unsigned int seq = 0;
     };
 
+    // The vm's cell block counters (engine::cells_counters): block entries, boundary operations run, parked blocks resumed, misses.
+    // Counted only on those paths, never per instruction; the interpreter reports zeros
+    struct cell_counters {
+        unsigned long long entries = 0, boundaries = 0, resumes = 0, misses = 0;
+    };
+
 } // namespace jai
 
 #endif // __JAISCRIPT_JAISCRIPT_FWD_HPP__

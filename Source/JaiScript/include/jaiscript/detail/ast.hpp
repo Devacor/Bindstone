@@ -256,6 +256,8 @@ namespace jai {
         bool transient_element_read = false;
         // Static operand kinds (operand_class_*): annotation only in v1, no consumer.
         mutable uint8_t static_operand_class = operand_class_unknown;
+        // a subscript's container the checker proved: 1 string, 2 array, 3 map (0 unproven)
+        mutable uint8_t subscript_receiver = 0;
 
         binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
             : expression(loc, node_type::binary_expr), left(l), op(o), right(r) {}

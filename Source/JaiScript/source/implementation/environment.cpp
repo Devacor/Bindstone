@@ -387,8 +387,13 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
 }
 
 script_value* environment::same_unit_cell(uint64_t id) {
-    if (parent_ || local_ids_.count(id) == 0 || inline_cells_.count(id)) { return nullptr; }
+    if (parent_ || local_ids_.count(id) == 0) { return nullptr; }
     const unit_stamp unit = symbolizer_->current_unit();
+    if (auto cell = inline_cells_.find(id); cell != inline_cells_.end()) {
+        if (cell->second.size() != 1 || cell->second.front() != unit.id) { return nullptr; }
+        inline_cells_.erase(cell);   // the running unit's own inline cell turns plain in place
+        unit_of_[id] = unit;
+    }
     auto owner = unit_of_.find(id);
     if (owner != unit_of_.end() && owner->second.id == unit.id) {
         auto flat = flat_lookup_.find(id);

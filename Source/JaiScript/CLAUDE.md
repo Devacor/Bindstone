@@ -466,7 +466,8 @@ engine stays usable", not by `check_throws`.
   `environment::inline_declare`). Inline and plain never mix across units, either order (Dev ruling 2026-09-30):
   plain after inline raises `'x' is already defined inline; declare it 'inline int x;' to share it`, inline after
   another unit's plain raises `'x' is already defined (not inline) in <file>; declare every definition 'inline' to
-  share it` (`detail/inline_variable.hpp`); a unit's own re-run switching kinds converts the cell in place; the checker
+  share it` (`detail/inline_variable.hpp`); a unit's own re-run switching kinds converts the cell in place (to inline keeps the value, to plain follows the
+  keep rule via `same_unit_cell`); the checker
   reports a closure mix once, at the plain declaration. `[[warn_mode]]` / `[[strict_mode]]`
   set the checker's mode for a unit (first declaration), a block (first statement) or one
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine

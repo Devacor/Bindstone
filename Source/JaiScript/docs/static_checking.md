@@ -407,7 +407,8 @@ declaration of a name an inline declaration created raises `'x' is already defin
 `var` spells `inline x;`), and an inline declaration of a name another unit's plain declaration
 created raises `'x' is already defined (not inline) in <file>; declare every definition 'inline' to share it` (a literal is `<script>`). A unit that switches its own declaration
 between the two on a re-run (a hot-reload edit) converts the variable in place: to inline it keeps
-its value, to plain it runs the initializer. The checker reports a mix across the closure once, at
+its value, to plain it follows the same-unit re-run rule (an initializer re-runs; without one the
+value stays unless the declared type changed). The checker reports a mix across the closure once, at
 the plain declaration. The checker treats it as a declared global of its type, like any declaration; it is
 the spelling for a name a unit needs to exist whether or not the module that owns it runs.
 

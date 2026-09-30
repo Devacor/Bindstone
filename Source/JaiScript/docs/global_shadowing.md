@@ -145,7 +145,8 @@ never mix across units, in either order: a plain declaration of an inline-create
 it, and an inline declaration of a name another unit declared plainly raises `'Score' is already
 defined (not inline) in <file>; declare every definition 'inline' to share it`; two plain
 declarations still shadow by unit. A unit whose re-run switches its own declaration between the two
-converts the cell in place (to inline it keeps the value, to plain it runs the initializer). A strict-checked unit reads a name only a later unit declares the
+converts the cell in place (to inline it keeps the value; to plain it follows the same-unit re-run rule: an
+initializer re-runs, without one the value stays unless the declared type changed). A strict-checked unit reads a name only a later unit declares the
 same way (`docs/static_checking.md`, escape hatches).
 
 ## Cost

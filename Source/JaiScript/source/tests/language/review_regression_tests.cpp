@@ -2117,7 +2117,7 @@ public:
                 try { s[idx()] += 1; } catch (e) { c1 = e; }
                 try { s[idx()] += "x"; } catch (e) { c2 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + s;
-            )", "II|Cannot assign int to a string character (it takes a char or a string)|Cannot apply '+=' to char and string|abc",   // one '+=' table: a char target takes no text
+            )", "II|Cannot assign int to a string character (it takes a char or a string)||axbc",
                 "a string subscript compound runs the index once", check_mode::strict);
         });
         test("map_compound_missing_key_starts_from_the_default", [this, expect_order]() {

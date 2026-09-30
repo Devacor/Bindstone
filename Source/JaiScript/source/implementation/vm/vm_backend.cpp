@@ -6330,7 +6330,8 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 		switch (op) {
 			case token_type::plus: {
 				// one '+=' table for every destination: a text target appends text, a text operand never stringifies
-				if (detail::compound_plus_text(currentValue.deref(), rightValue.deref()) == detail::compound_text::mismatch) {
+				const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
+				if (detail::compound_plus_text(currentValue.deref(), rightValue.deref(), text_slot) == detail::compound_text::mismatch) {
 					return raise_from(detail::compound_mismatch(0, currentValue.deref(), rightValue.deref(), engine_));
 				}
 				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));

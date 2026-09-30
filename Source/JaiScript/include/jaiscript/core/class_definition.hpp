@@ -2967,10 +2967,11 @@ inline error_propagator compound_mismatch(size_t op, const script_value& target,
 // reference): a string or utf8_string target appends a string, a char or a utf8_string; any other pairing with a text side is the
 // compound's operand error ('+=' never stringifies the way binary + does)
 enum class compound_text { none, append, mismatch };
-inline compound_text compound_plus_text(const script_value& target, const script_value& operand) {
+// A string subscript's element (a char read through a STRING-ELEMENT reference) is a text slot: it takes text back
+inline compound_text compound_plus_text(const script_value& target, const script_value& operand, bool text_slot = false) {
     const auto text = [](const script_value& v) { return v.is_string() || v.is_utf8_string(); };
     if (!text(target) && !text(operand)) { return compound_text::none; }
-    if (text(target) && (text(operand) || operand.raw_storage_index() == script_value::TYPEID_CHAR)) { return compound_text::append; }
+    if ((text_slot || text(target)) && (text(operand) || operand.raw_storage_index() == script_value::TYPEID_CHAR)) { return compound_text::append; }
     return compound_text::mismatch;
 }
 

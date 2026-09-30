@@ -6,6 +6,10 @@ import "rules.jai";
 Tuning tuning;
 int frames_run;
 array<string> journal;
+map<string, int> kills = {"orc": 3, "troll": 1};
+array<var> loot = [12, "rope", 2.5];
+
+void explode(string why) { throw why; }
 
 int tick(int frame) {
 	import("rules.jai");            // reached every frame: a touched rules.jai re-runs here

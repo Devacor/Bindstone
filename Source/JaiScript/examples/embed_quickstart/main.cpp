@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -174,12 +175,12 @@ static int run(int argc, char** argv) {
 	std::shared_ptr<jai::debug::debug_connector> connector;
 	if (debug) {
 		connector = jai::debug::listen(*eng);
-		if (connector->port() == 0) {
-			std::cout << "  debugger could not bind 127.0.0.1:" << jai::debug::default_port << " (in use?)\n";
+		if (!connector->listening()) {
+			std::cout << "  " << connector->error() << "\n";
 		} else {
 			std::cout << "  debugger listening on 127.0.0.1:" << connector->port() << "\n";
 		}
-		if (debug_wait && connector->port() != 0) {
+		if (debug_wait && connector->listening()) {
 			std::cout << "  attach from VS Code, set breakpoints in scripts/game.jai, then press Enter\n";
 			std::string line;
 			std::getline(std::cin, line);
@@ -195,6 +196,14 @@ static int run(int argc, char** argv) {
 	expect(dmg == 2, "tick(1) == 2 under rules v1 (got " + std::to_string(dmg) + ")");
 	int64_t crit = call(*eng, "tick", {eng->make_value(int64_t{5})}).as_int();
 	expect(crit == 12, "tick(5) adds tuning.crit (got " + std::to_string(crit) + ")");
+	try {
+		call(*eng, "explode", {eng->make_value("kaboom")});
+		expect(false, "a script throw inside a called function reaches the host");
+	} catch (const jai::script_exception& e) {
+		expect(std::string(e.what()) == "kaboom", std::string("a script throw arrives as jai::script_exception: ") + e.what());
+	}
+	auto typed_tick = jai::convert_script_function<int64_t(int64_t)>(eng->get_variable("tick"));
+	expect(typed_tick(1) == 2, "convert_script_function gives a typed std::function");
 
 	section("C++ class from script, signal into script");
 	jai::script_value spawned = call(*eng, "spawn", {eng->make_value("Ogre"), eng->make_value(int64_t{30})});
@@ -212,12 +221,27 @@ static int run(int argc, char** argv) {
 	expect(troll->hp == 25 && troll->name == "Cave Troll", "script writes land in the C++ object");
 	expect(eng->execute("troll.describe()").as_string() == "monster Cave Troll (25 hp)", "base-class method dispatches virtually");
 
+	section("read script state back");
+	auto kills = eng->get_variable("kills").as<std::map<std::string, int64_t>>();
+	expect(kills.size() == 2 && kills["orc"] == 3, "map<string, int> copies out as std::map<std::string, int64_t>");
+	jai::script_value loot = eng->get_variable("loot");
+	const std::vector<jai::script_value>& items = loot.as_array();
+	expect(items.size() == 3 && items[1].as_string() == "rope", "array<var> reads through as_array()");
+	jai::script_value journal_value = eng->get_variable("journal");
+	size_t visited = 0;
+	journal_value.unchecked_array_node()->for_each(eng.get(), [&](const jai::script_value& line) { visited += !line.as_string().empty(); });
+	expect(visited == 2, "script_array::for_each walks a typed array without copying it out");
+	std::string view_error;
+	try { (void)journal_value.as_array(); } catch (const std::exception& e) { view_error = e.what(); }
+	expect(view_error.find("array<string>") != std::string::npos, "as_array() on a typed array names its element type");
+
 	section("save and load through the archives");
 	SaveGame save;
 	save.wave = 3;
 	save.hero = "Alice";
 	save.scores = {10, 20, 30};
 	save.boss = troll;
+	const int64_t frames_saved = eng->execute("frames_run").as_int();
 	save.script_state = call(*eng, "snapshot").as_string();
 
 	std::string json = jai::to_json(*eng, save);
@@ -234,7 +258,7 @@ static int run(int argc, char** argv) {
 
 	eng->execute("frames_run = 0; journal = [];");
 	call(*eng, "restore", {eng->make_value(fromBinary.script_state)});
-	expect(eng->execute("frames_run").as_int() == 2 && eng->execute("journal.size()").as_int() == 2, "script state restored from the save");
+	expect(eng->execute("frames_run").as_int() == frames_saved && eng->execute("journal.size()").as_int() == 2, "script state restored from the save");
 
 	section("hot reload through import");
 	int64_t before = eng->execute("rules_version()").as_int();

@@ -160,6 +160,7 @@ Release pass.
 | `JAISCRIPT_ENABLE_PROFILING` | OFF | Profiler-friendly codegen and link flags |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native`; faster, non-portable binaries |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
+| `JAISCRIPT_LTCG` | top-level | `/GL` + `/LTCG` for MSVC Release builds (OFF as a subproject, so a consumer's Release link stays incremental) |
 
 "top-level" means ON when JaiScript is the top-level CMake project and OFF when another project
 pulls it in with `add_subdirectory`; [`docs/BUILD.md`](docs/BUILD.md) has every option and both

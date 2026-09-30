@@ -77,7 +77,8 @@ Visual Studio can open this directory directly (**File → Open → Folder**). I
 The configurations it offers come from `CMakeSettings.json`.
 
 Debug is where you want to live day to day: it has no link-time code generation, so an
-incremental link is seconds rather than minutes.
+incremental link is seconds rather than minutes. Release links with LTCG (`JAISCRIPT_LTCG`, ON
+when JaiScript is the top-level project); `-DJAISCRIPT_LTCG=OFF` gives a fast-linking Release.
 
 ## Options
 
@@ -97,6 +98,7 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_ENABLE_PROFILING` | OFF | Profiler-friendly codegen and link flags |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
+| `JAISCRIPT_LTCG` | top-level | Whole-program optimization for MSVC Release (`/GL`, `/LTCG`). The measured performance numbers use it. OFF as a subproject: a `/GL` library would turn every consumer's Release link into a whole-program link (about a minute per edit instead of seconds) |
 | `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` | OFF | Inert; nothing in the runtime reads it |
 | `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | Measurement only: `/GS-` on `vm_backend.cpp` (MSVC). Never ship with it |
 | `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |
@@ -211,7 +213,9 @@ target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
 turn the tools back on if you want them.
 
 **Installed, through `find_package`.** Build and install the library once per configuration;
-Debug and Release share a prefix (the Debug library is `jaiscriptd`):
+Debug and Release share a prefix (the Debug library is `jaiscriptd`). A top-level Release build
+compiles the library with `/GL` on MSVC; pass `-DJAISCRIPT_LTCG=OFF` for an install your Release
+edits link against quickly:
 
 ```bash
 cmake -S JaiScript -B build-jai -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/jaiscript       -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_LSP=OFF

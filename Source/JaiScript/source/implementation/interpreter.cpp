@@ -4978,7 +4978,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 switch (expr->op.type) {
                     case token_type::plus_equal: {
                         // one '+=' table for every destination: a text target appends text, a text operand never stringifies
-                        if (detail::compound_plus_text(currentValue.deref(), rightValue.deref()) == detail::compound_text::mismatch) {
+                        const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
+                        if (detail::compound_plus_text(currentValue.deref(), rightValue.deref(), text_slot) == detail::compound_text::mismatch) {
                             return detail::compound_mismatch(0, currentValue.deref(), rightValue.deref(), engine_);
                         }
                         JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));

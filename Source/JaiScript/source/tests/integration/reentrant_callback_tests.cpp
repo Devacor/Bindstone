@@ -18,12 +18,165 @@ namespace jai::foundry::tests {
 
 struct capture_probe { int v = 7; int value() const { return v; } };
 
+// A host object that calls a stored script callback from its methods and its destructor
+struct reentry_host {
+	std::function<void()> cb;
+	std::function<void()> on_death;
+	std::string name = "alive";
+	int* deaths = nullptr;
+	~reentry_host() {
+		name = "dead";
+		if (deaths) { ++*deaths; }
+		if (on_death) { on_death(); }
+	}
+	void call() { if (cb) { auto local = cb; local(); } }   // a local copy: the callback may end this object
+	void set(script_value f) { cb = convert_script_function<void()>(f); }
+	void set_death(script_value f) { on_death = convert_script_function<void()>(f); }
+	script_value hold(const script_value& v) { call(); return v; }
+	std::string run() { call(); return name; }
+};
+
+// A frame window of ~50 slots, recursed deep enough to move the vm's value stack several times (and within the
+// interpreter's call-depth cap)
+inline std::string stack_moving_source() {
+	std::string s = "function stack_deep(int n) -> int { ";
+	for (int i = 0; i < 48; ++i) { s += "int l" + std::to_string(i) + " = n + " + std::to_string(i) + "; "; }
+	return s + "if (n <= 0) { return l47; } return stack_deep(n - 1) + l0 - n; }";
+}
+
 // MV::Script::eval shape: a converted callback runs a nested execute() while the outer execute() is live.
 class reentrant_callback_tests : public suite {
 public:
 	reentrant_callback_tests() : suite("Reentrant Callbacks") {}
 
+	std::shared_ptr<engine> reentry_engine(int* deaths = nullptr) {
+		auto eng = make_engine();
+		stdlib::register_all(*eng);
+		dynamic_binder<reentry_host>(*eng, "ReentryHost")
+			.method("set", &reentry_host::set)
+			.method("set_death", &reentry_host::set_death)
+			.method("hold", &reentry_host::hold)
+			.method("run", &reentry_host::run)
+			.method("poke", [](reentry_host& h) -> reentry_host& { h.call(); return h; })
+			.build();
+		engine* raw = eng.get();
+		eng->add_function("make_host", [raw, deaths]() {
+			auto h = std::make_shared<reentry_host>();
+			h->deaths = deaths;
+			return raw->make_object(h);
+		});
+		eng->execute(stack_moving_source());
+		return eng;
+	}
+
+	// A script callback run from inside a host call or a release moves the vm's value stack; nothing the host call or
+	// the release still holds may point into it
+	void stack_moving_reentry() {
+		test("a_host_methods_reference_arguments_survive_a_callback_that_moves_the_stack", [this]() {
+			auto eng = reentry_engine();
+			auto r = eng->execute(R"(
+				var h = make_host();
+				h.set([]() -> void { stack_deep(150); });
+				var got = h.hold([10, 20, 30]);
+				var text = h.hold("text " + to_string(7));
+				var chained = h.poke().hold(5);
+				to_string(got[2]) + "|" + text + "|" + to_string(chained);
+			)");
+			check_eq(std::string("30|text 7|5"), r.to_string());
+		});
+
+		test("a_host_methods_receiver_outlives_a_callback_that_drops_it", [this]() {
+			int deaths = 0;
+			auto eng = reentry_engine(&deaths);
+			auto r = eng->execute(R"(
+				function local_receiver() -> string {
+					var mine = make_host();
+					mine.set([&]() -> void { mine = null; stack_deep(150); });
+					return mine.run();
+				}
+				var h = make_host();
+				h.set([]() -> void { h = null; stack_deep(150); });
+				h.run() + "|" + local_receiver();
+			)");
+			check_eq(std::string("alive|alive"), r.to_string(), "the call keeps its receiver alive");
+			check_eq(2, deaths, "each host object died once its call ended");
+		});
+
+		test("a_host_destructor_that_runs_script_leaves_the_frame_it_unwinds_intact", [this]() {
+			int deaths = 0;
+			auto eng = reentry_engine(&deaths);
+			auto r = eng->execute(R"(
+				function scoped() -> int {
+					var d = make_host();
+					d.set_death([]() -> void { stack_deep(150); });
+					var a1 = [1]; var e = make_host(); var a2 = [2, 2]; var a3 = "three " + to_string(3);
+					return a1.size() + a2.size() + a3.size();
+				}
+				var total = 0;
+				for (int i = 0; i < 3; i++) { total += scoped(); }
+				total;
+			)");
+			check_eq((int64_t)30, r.as_int());
+			check_eq(6, deaths, "every host object in the frame died with it");
+		});
+
+		test("a_store_whose_old_value_runs_a_destructor_that_moves_the_stack_lands", [this]() {
+			int deaths = 0;
+			auto eng = reentry_engine(&deaths);
+			auto r = eng->execute(R"(
+				class Grower { ~Grower() { stack_deep(150); } }
+				function over_script() -> string {
+					var g = Grower();
+					var keep = [1, 2, 3];
+					g = 7;
+					return to_string(g) + ":" + to_string(keep[2]);
+				}
+				function over_host() -> string {
+					var d = make_host();
+					d.set_death([]() -> void { stack_deep(150); });
+					var keep = [4, 5, 6];
+					d = "gone";
+					return d + ":" + to_string(keep[2]);
+				}
+				over_script() + "|" + over_host();
+			)");
+			check_eq(std::string("7:3|gone:6"), r.to_string());
+			check_eq(1, deaths, "the host object died at the store");
+		});
+
+		test("a_destructor_that_stores_to_the_variable_being_overwritten_keeps_its_store", [this]() {
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			auto r = eng->execute(R"(
+				var g = null;
+				class Rewriter { ~Rewriter() { g = 5; } }
+				g = Rewriter();
+				g = null;
+				to_string(g);
+			)");
+			check_eq(std::string("5"), r.to_string(), "the store lands first; the old value's destructor runs after it (C++ shared_ptr order)");
+		});
+
+		test("nested_builtin_calls_inside_a_builtin_callback_keep_the_outer_arguments", [this]() {
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			auto r = eng->execute(R"(
+				array<int> a = [3, 1, 2];
+				array<int> seen = [];
+				array<int> kept = a.filter([&](int x) -> bool {
+					array<int> b = [x];
+					b.push(x);
+					seen.push(b.size());
+					return x > 1;
+				});
+				to_string(kept.size()) + ":" + to_string(seen.size()) + ":" + to_string(kept[0]);
+			)");
+			check_eq(std::string("2:3:3"), r.to_string());
+		});
+	}
+
 	void forge_tests() override {
+		stack_moving_reentry();
 		test("nested_execute_in_converted_callback_keeps_outer_run", [this]() {
 			auto eng = make_engine();
 			engine* raw = eng.get();

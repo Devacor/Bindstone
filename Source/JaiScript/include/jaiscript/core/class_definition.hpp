@@ -6,7 +6,6 @@
 #include "engine.hpp"
 #include "native_cast.hpp"
 #include <jaiscript/detail/fault_injection.hpp>
-#include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
@@ -1061,7 +1060,6 @@ public:
         }
 
         if (has_script_dtor_) {
-            if (engine_) { engine_->execution_limits().script_destructor_instances = true; }
             auto* raw_instance = new class_instance(class_instance::interned_name_t{}, interned_name(), engine_);
             auto class_def = shared_from_this();
 
@@ -1553,13 +1551,15 @@ public:
     // C++ object, reached without minting a bound method. It declines (false) any argument shape it does not take,
     // and the ordinary call runs instead; what it throws raises as the ordinary call's would.
     using native_method = bool (*)(void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out);
-    // a lane the binder derives from a bound method's C++ signature: the same conversions on the method it bound (state), one per name
-    using native_lane = bool (*)(const void* state, void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out);
+    // a lane the binder derives from a bound method's C++ signature: the same conversions on the method it bound (state), one per name.
+    // The arguments are the caller's own temporaries: a lane may move one out (a reference parameter must not point into a buffer the
+    // host's callbacks can move)
+    using native_lane = bool (*)(const void* state, void* self, const script_value& receiver, script_value* args, size_t argc, script_value& out);
     struct native_entry {
         native_method plain = nullptr;
         native_lane lane = nullptr;
         std::shared_ptr<const void> state;
-        bool operator()(void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out) const {
+        bool operator()(void* self, const script_value& receiver, script_value* args, size_t argc, script_value& out) const {
             return plain ? plain(self, receiver, args, argc, out) : lane(state.get(), self, receiver, args, argc, out);
         }
     };

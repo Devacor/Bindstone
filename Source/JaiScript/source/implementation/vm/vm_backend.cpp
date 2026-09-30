@@ -434,10 +434,7 @@ script_value vm_backend::make_null() const {
 }
 
 vm_backend::value_stack::~value_stack() {
-	for (size_t i = 0; i < count; ++i) {   // the backend's limits may already be gone: always the reentry-safe release
-		if (!dtor_elidable(slots[i])) { destroy_slot(slots[i]); }
-	}
-	count = 0;
+	truncate(0);
 	::operator delete(slots);
 }
 

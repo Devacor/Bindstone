@@ -34,10 +34,6 @@ namespace jai::detail {
 		// Cleared only by a non-reentrant prepare_for_execution or a host-level resume.
 		bool terminal_error = false;
 
-		// Sticky: an instance of a class with a script destructor exists (or existed), so releasing a value may run script
-		// code that re-enters the backend; until then the vm's value stack destroys popped slots in place
-		bool script_destructor_instances = false;
-
 		// The longest NUL scan one binary::reader read runs (engine::binary_scan_limit); only the host sets it
 		size_t binary_scan_limit = size_t(1) << 20;
 		// The engine's clock sample: a real steady_clock reading (ticks) written where the engine reads that clock anyway -

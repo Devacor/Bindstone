@@ -6,6 +6,10 @@
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/vm/disassembler.hpp>
+#include <jaiscript/detail/effect_summary.hpp>
+#include <jaiscript/detail/transient_read.hpp>
+#include <functional>
+#include <iterator>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <algorithm>
 #include <limits>
@@ -14,6 +18,10 @@
 
 using namespace jai;
 using namespace jai::foundry;
+using jai::detail::callout_policy;
+using jai::detail::for_each_evaluated_child;
+using jai::detail::may_run_user_code;
+using jai::detail::transient_read_marker;
 
 namespace jai::foundry::tests {
 
@@ -29,10 +37,138 @@ class vm_backend_tests : public suite {
 public:
 	vm_backend_tests() : suite("VM Backend") {}
 
+	// Every expression node of a program, lambda bodies included
+	static void for_each_expression(const statement* s, const std::function<void(const expression*)>& f) {
+		if (!s) { return; }
+		std::function<void(const expression*)> walk_expr = [&](const expression* e) {
+			if (!e) { return; }
+			f(e);
+			for_each_evaluated_child(e, walk_expr);
+			if (e->get_type() == node_type::lambda_expr) {
+				auto* l = static_cast<const lambda_expr*>(e);
+				for (const auto& p : l->parameters) { walk_expr(p.default_value.get()); }
+				for_each_expression(l->body.get(), f);
+			}
+		};
+		switch (s->get_type()) {
+			case node_type::expression_stmt: walk_expr(static_cast<const expression_stmt*>(s)->expression.get()); return;
+			case node_type::expression_decl: walk_expr(static_cast<const expression_decl*>(s)->expression.get()); return;
+			case node_type::statement_decl: for_each_expression(static_cast<const statement_decl*>(s)->statement.get(), f); return;
+			case node_type::block_stmt: for (const auto& d : static_cast<const block_stmt*>(s)->declarations) { for_each_expression(d.get(), f); } return;
+			case node_type::if_stmt: {
+				auto* i = static_cast<const if_stmt*>(s);
+				walk_expr(i->condition.get()); for_each_expression(i->then_statement.get(), f); for_each_expression(i->else_statement.get(), f);
+				return;
+			}
+			case node_type::while_stmt: { auto* w = static_cast<const while_stmt*>(s); walk_expr(w->condition.get()); for_each_expression(w->body.get(), f); return; }
+			case node_type::for_stmt: {
+				auto* fs = static_cast<const for_stmt*>(s);
+				for_each_expression(fs->initializer.get(), f); walk_expr(fs->condition.get()); walk_expr(fs->update.get()); for_each_expression(fs->body.get(), f);
+				return;
+			}
+			case node_type::range_for_stmt: { auto* r = static_cast<const range_for_stmt*>(s); walk_expr(r->container.get()); for_each_expression(r->body.get(), f); return; }
+			case node_type::return_stmt: walk_expr(static_cast<const return_stmt*>(s)->value.get()); return;
+			case node_type::try_stmt: { auto* t = static_cast<const try_stmt*>(s); for_each_expression(t->try_block.get(), f); for_each_expression(t->catch_block.get(), f); return; }
+			case node_type::switch_stmt: {
+				auto* sw = static_cast<const switch_stmt*>(s);
+				walk_expr(sw->condition.get());
+				for (const auto& c : sw->cases) { walk_expr(c->value.get()); for (const auto& b : c->body) { for_each_expression(b.get(), f); } }
+				if (sw->default_case) { for (const auto& b : sw->default_case->body) { for_each_expression(b.get(), f); } }
+				return;
+			}
+			case node_type::variable_decl: walk_expr(static_cast<const variable_decl*>(s)->initializer.get()); return;
+			case node_type::destructuring_decl: walk_expr(static_cast<const destructuring_decl*>(s)->initializer.get()); return;
+			case node_type::function_decl: {
+				auto* fd = static_cast<const function_decl*>(s);
+				for (const auto& p : fd->parameters) { walk_expr(p.default_value.get()); }
+				for_each_expression(fd->body.get(), f);
+				return;
+			}
+			case node_type::class_decl: for (const auto& m : static_cast<const class_decl*>(s)->members) { for_each_expression(m.declaration.get(), f); } return;
+			case node_type::namespace_decl: for (const auto& d : static_cast<const namespace_decl*>(s)->declarations) { for_each_expression(d.get(), f); } return;
+			default: return;
+		}
+	}
+
 	void forge_tests() override {
 		test("backend_name", [this]() {
 			auto e = vm_engine();
 			check_eq(std::string("vm"), e->get_backend_name());
+		});
+
+		// detail/effect_summary.hpp answers every callout question; under the gated policies it must agree with the
+		// transient-read classifier node for node (the identity the consumers move over on), and strict may only add
+		test("effect_summary_matches_the_callout_classifier_on_every_node", [this]() {
+			std::vector<std::string> corpus = {
+				"var a = [1, 2]; var m = {\"k\": 1}; function f(var x, var y) { return x; } f(a[0] + 1, m[\"k\"] * 2); f(a, math::sqrt(4.0) + a[1]);",
+				"class P { int x = 0; int _get_y() { return x; } int operator+(int k) { return x + k; } } P p = P(); var q = p.y + (p + 1); var r = -a[0] && !(p.x < 3) || (a[1] ? 1 : 2);",
+				"var i = 0; i += a[i]; a[i] = m[\"k\"]; var l = [&](int k) { return k * i + a[k]; }; l(1); var s = \"x\" + 1; var n = new P(); throw s;",
+				"coroutine g() { yield 1 + 2; } for (int k = 0; k < 3; k++) { var v = cast<int>(a[k] + 0.5) >> 1; } switch (i) { case 1: i = i ^ 2; break; default: i--; }",
+				"var z = math::max(math::abs(i), 3) + math::random(); var w = f(i, f(i, i)); var t = [a[0], m[\"k\"]]; var u = {\"a\": a[1]};",
+			};
+			namespace fs = std::filesystem;
+			std::error_code ec;
+			if (fs::is_directory("examples", ec)) {
+				for (auto it = fs::recursive_directory_iterator("examples", ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+					if (it->is_regular_file(ec) && it->path().extension() == ".jai") {
+						std::ifstream in(it->path(), std::ios::binary);
+						corpus.push_back(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
+					}
+				}
+			}
+			auto e = vm_engine();
+			size_t nodes = 0, gated_runs = 0, strict_extra = 0, mismatches = 0;
+			for (const auto& src : corpus) {
+				auto* symbolizer = e->get_symbolizer();
+				auto templates = e->get_registered_template_types();
+				jai::lexer lex(src, symbolizer, templates);
+				auto tokens = lex.tokenize();
+				jai::parser p(tokens, symbolizer, e.get(), templates);
+				auto parsed = p.parse();
+				if (!parsed.has_value()) { continue; }
+				for (const auto& d : parsed.value()) {
+					for_each_expression(d.get(), [&](const expression* x) {
+						++nodes;
+						const bool gated = may_run_user_code<callout_policy::gated>(x);
+						const bool intrinsics = may_run_user_code<callout_policy::gated_intrinsics>(x);
+						const bool strict = may_run_user_code<callout_policy::strict>(x);
+						if (gated != !transient_read_marker::callout_free<false>(x) || intrinsics != !transient_read_marker::callout_free<true>(x) ||
+						    (gated && !strict)) {
+							++mismatches;
+						}
+						gated_runs += gated ? 1 : 0;
+						strict_extra += (strict && !gated) ? 1 : 0;
+					});
+				}
+			}
+			check_eq((size_t)0, mismatches, "effect summary disagreements");
+			check_gt(nodes, (size_t)200, "corpus nodes walked");
+			check_gt(gated_runs, (size_t)0, "some nodes run user code");
+			check_gt(strict_extra, (size_t)0, "strict counts unproven operators");
+		});
+
+		test("effect_summary_strict_trusts_only_proven_operands", [this]() {
+			auto e = vm_engine();
+			auto* symbolizer = e->get_symbolizer();
+			auto templates = e->get_registered_template_types();
+			jai::lexer lex("a + b; a[1];", symbolizer, templates);
+			auto tokens = lex.tokenize();
+			jai::parser p(tokens, symbolizer, e.get(), templates);
+			auto parsed = p.parse();
+			check_true(parsed.has_value(), "parses");
+			std::vector<binary_expr*> binaries;
+			for (const auto& d : parsed.value()) {
+				for_each_expression(d.get(), [&](const expression* x) {
+					if (x->get_type() == node_type::binary_expr) { binaries.push_back(const_cast<binary_expr*>(static_cast<const binary_expr*>(x))); }
+				});
+			}
+			check_eq((size_t)2, binaries.size(), "two binaries");
+			for (auto* b : binaries) {
+				check_false(may_run_user_code<callout_policy::gated>(b), "gated trusts the runtime gate");
+				check_true(may_run_user_code<callout_policy::strict>(b), "strict: unproven operands may be a class");
+				b->static_operand_class = b->op.type == token_type::left_bracket ? operand_class_float_float : operand_class_int_int;
+				check_false(may_run_user_code<callout_policy::strict>(b), "strict: proven operands run no user code");
+			}
 		});
 
 		test("arithmetic_basics", [this]() {

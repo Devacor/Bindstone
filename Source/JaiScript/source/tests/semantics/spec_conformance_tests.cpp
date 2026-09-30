@@ -161,6 +161,7 @@ public:
 		call_argument_capture();
 		simplification_audit_fixes();
 		rulings_2026_09_28();
+		handle_field_admission();
 #ifdef JAISCRIPT_SPEC_KNOWN_BUGS
 		known_bugs();
 #endif
@@ -2134,7 +2135,120 @@ private:
 		});
 	}
 
+	// SIMPLIFICATION_AUDIT.md suspects S-a, S-b, S-c and S-h, and the destructor a throw's unwinding skips
+	void known_bugs_simplification_suspects() {
+		test("a_destructor_that_reenters_while_a_frame_releases_its_loop_state_runs_to_completion", [this]() {
+			// C++: the last handle's release runs the destructor to completion and the caller continues intact. The VM erases
+			// iter_states_ in place (pop_script_frame_core, unwind_to_handler, frame_guard); the destructor's own range-for
+			// pushes onto the vector mid-erase, and at every depth where its size equals its capacity (1 2 3 4 6 9) the push
+			// reallocates it: heap-use-after-free under ASan, a crash in Debug
+			for (int depth = 1; depth <= 10; ++depth) {
+				std::string src = "var log = [];\n"
+					"class Probe { int id = 0; Probe(int i) { id = i; } ~Probe() { for (auto y : [1, 2]) { log.push(id * 10 + y); } } }\n"
+					"function mk() { return [new Probe(1)]; }\n"
+					"function f() {\n\tfor (auto a : mk()) {\n";
+				for (int i = 1; i < depth; ++i) { src += "\tfor (auto b" + std::to_string(i) + " : [7]) {\n"; }
+				src += "\treturn 5;\n";
+				for (int i = 1; i < depth; ++i) { src += "\t}\n"; }
+				src += "\t}\n\treturn 0;\n}\nlog.push(f());\nto_json(log);";
+				expect("loop state, depth " + std::to_string(depth), src, "[11,12,5]");
+			}
+		});
+		test("a_destructor_that_reenters_while_the_value_stack_truncates_runs_to_completion", [this]() {
+			// value_stack::truncate destroys the popped window in place and lowers count afterwards; the destructor's call
+			// grows the stack mid-loop at a recursion depth that leaves the count just under a capacity step (4096, 8192,
+			// 16384: heap-use-after-free); the range crosses each step
+			std::string wide = "function wide() -> int { ";
+			std::string rec = "function rec(int n) -> int { ";
+			for (int i = 0; i < 400; ++i) {
+				wide += "int w" + std::to_string(i) + " = " + std::to_string(i) + "; ";
+				rec += "int v" + std::to_string(i) + " = n; ";
+			}
+			wide += "return w399; }\n";
+			rec += "if (n == 0) { auto p = new Probe(1); return v1; } return rec(n - 1) + v399; }\n";
+			for (int depth = 6; depth <= 44; ++depth) {
+				const std::string src = "var log = [];\n" + wide +
+					"class Probe { int id = 0; Probe(int i) { id = i; } ~Probe() { log.push(wide()); } }\n" + rec +
+					"log.push(rec(" + std::to_string(depth) + "));\nto_json(log);";
+				expect("value stack, depth " + std::to_string(depth), src, "[399," + std::to_string(depth * (depth + 1) / 2) + "]");
+			}
+		});
+		test("a_callee_parked_by_an_execute_that_failed_is_released", [this]() {
+			// the uncaught error leaves the closure the call parked in pending_callees_ (prepare_for_execution clears the other
+			// stacks, not that one), so the captured instance outlives every handle the program holds until the engine dies
+			every_config("pending callee", "[1]", [](engine& e) {
+				e.execute("var log = []; class Probe { ~Probe() { log.push(1); } } var p = new Probe(); var f = [p]() { return 1; }; p = null;"
+				          " function boom() { throw \"x\"; return 0; }");
+				try { e.execute("f(boom());"); } catch (const std::exception&) {}
+				e.execute("f = null;");
+				return e.execute("to_json(log);").as_string();
+			});
+		});
+		test("an_operand_a_later_call_binds_by_reference_is_read_first", [this]() {
+			// invariant 12 / C++17: the left operand takes its value before the right side runs. The VM reads a private local
+			// inside the fused op after the call on its right when the reference-binding call hides under an assignment,
+			// a literal or a new expression (vm_compiler slot_argument_in has no case for them)
+			expect("slot argument", R"(
+				function bump(int& r) -> int { r = 100; return 1; }
+				function g(v) -> int { return 0; }
+				class C { int v = 0; C(int& r) { r = 100; v = 1; } }
+				function b1() -> int { int x = 1; int t = 0; return x + g(t = bump(x)); }
+				function b2() -> int { int x = 1; return x + g([bump(x)]); }
+				function b3() -> int { int x = 1; return x + g(new C(x)); }
+				function b4() -> int { int x = 1; return x + g({"k": bump(x)}); }
+				function b5() -> int { int x = 1; int t = 0; return x + g(t += bump(x)); }
+				"" + b1() + "," + b2() + "," + b3() + "," + b4() + "," + b5();
+			)", "1,1,1,1,1");
+		});
+		test("a_shared_ptr_variable_rejects_a_handle_holding_an_unrelated_class", [this]() {
+			// a typed shared_ptr<T> slot holds T or a subclass (the declaration's and the parameter's rule); a function-local or
+			// namespace '=' of a same-kind handle skips the pointee check on both backends (the gate at the slot store sends a
+			// shared_ptr into shared_ptr store straight to the slot, and enforce_type_compatibility's handle row stores it as-is)
+			expect("handle slot", R"(
+				class B { int x = 1; }
+				class D : B { int y = 2; }
+				class E : B { int z = 3; }
+				namespace ns { shared_ptr<D> x = null; }
+				function t(function f) -> string { string r = ""; try { r = "accepted " + f(); } catch (e) { r = "rejected"; } return r; }
+				t([]() { var v = new E(); shared_ptr<D> d = null; d = v; return type_of(d); }) + "|" +
+				t([]() { var v = new E(); ns::x = v; return type_of(ns::x); }) + "|" +
+				t([]() { var v = new E(); shared_ptr<D> d = v; return type_of(d); });
+			)", "rejected|rejected|rejected");
+		});
+		test("a_shared_ptr_declaration_and_assignment_admit_the_same_handles", [this]() {
+			// one admission rule per slot (R-q6 picks the static tag or the dynamic class); at program scope a declaration
+			// judges the class a shared_ptr<B> handle holds and '=' judges its static tag, so a handle holding a D enters
+			// shared_ptr<D> by declaration and not by '='
+			expect("handle admission", R"(
+				class B { int x = 1; }
+				class D : B { int y = 2; }
+				shared_ptr<B> gb = new D();
+				string by_decl = "accepted";
+				try { shared_ptr<D> g1 = gb; } catch (e) { by_decl = "rejected"; }
+				shared_ptr<D> g2 = null;
+				string by_assign = "accepted";
+				try { g2 = gb; } catch (e) { by_assign = "rejected"; }
+				by_decl == by_assign ? "agree" : "declaration " + by_decl + ", assignment " + by_assign;
+			)", "agree", check_mode::off);
+		});
+		test("a_throw_runs_the_destructors_of_the_frames_it_unwinds", [this]() {
+			// C++ [except.ctor]: stack unwinding destroys the automatic objects of every frame it leaves, as a run-time error
+			// already does here. A script throw unwinds with the unwinding flag set, and the destructor it releases re-enters
+			// the backend under that flag: its body unwinds at once and the thunk's catch(...) hides it, on both backends
+			expect("throw unwind", R"(
+				var log = [];
+				class Probe { int id = 0; Probe(int i) { id = i; } ~Probe() { log.push(id); } }
+				function f(int n) -> int { auto p = new Probe(n); throw n; return 0; }
+				function k(int n) -> int { auto p = new Probe(n); int z = [1][5]; return 0; }
+				try { k(1); } catch (e) { log.push(-1); }
+				try { f(2); } catch (e) { log.push(-2); }
+				to_json(log);
+			)", "[1,-1,2,-2]");
+		});
+	}
+
 	void known_bugs() {
+		known_bugs_simplification_suspects();
 		known_bugs_simplification_audit();
 	}
 
@@ -2939,6 +3053,32 @@ private:
 				}
 				run();
 			)", "3,3,3,9,3,3,3");
+		});
+	}
+
+	// A shared_ptr<T> field holds T or a subclass, the rule a shared_ptr<T> declaration enforces (CLAUDE.md: a shared_ptr<T>
+	// element takes a live instance of T or a subclass the way a shared_ptr<T> variable does)
+	void handle_field_admission() {
+		test("a_shared_ptr_field_rejects_a_handle_holding_an_unrelated_class", [this]() {
+			expect("field handle", R"(
+				class B { int x = 1; }
+				class D : B { int y = 2; }
+				class E : B { int z = 3; }
+				class H {
+					shared_ptr<D> d = null;
+					shared_ptr<B> b = null;
+					void put(var v) { d = v; }
+					void put_this(var v) { this.d = v; }
+				}
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				t([]() { var v = new E(); H h = H(); h.d = v; return type_of(h.d); }) + "|" +
+				t([]() { var v = new D(); H h = H(); h.d = v; return type_of(h.d); }) + "|" +
+				t([]() { var v = new E(); H h = H(); h.b = v; return type_of(h.b); }) + "|" +
+				t([]() { var v = new E(); H h = H(); h.put(v); return type_of(h.d); }) + "|" +
+				t([]() { var v = new E(); H h = H(); h.put_this(v); return type_of(h.d); }) + "|" +
+				t([]() { H h = H(); string s = ""; for (int i = 0; i < 4; i++) { var v = i < 3 ? new D() : new E(); try { h.put(v); s += "D"; } catch (e) { s += "x"; } } return s + type_of(h.d); });
+			)", "Cannot assign E to field 'd' of H (declared shared_ptr<D>)|D|E|Cannot assign E to field 'd' of H (declared shared_ptr<D>)|"
+			    "Cannot assign E to field 'd' of H (declared shared_ptr<D>)|DDDxD");
 		});
 	}
 };

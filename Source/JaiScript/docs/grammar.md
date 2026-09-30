@@ -211,7 +211,7 @@ methodDeclaration = "coroutine"? "static"? "override"? type (IDENTIFIER | operat
                   | "coroutine"? "function" ("static" | "override")* (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
                   | "coroutine" ("static" | "override")* (IDENTIFIER | operatorName) "(" parameterList? ")" ("->" type)? blockStatement
 
-operatorName = "operator" ("=" | "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | "!" | "~"
+operatorName = "operator" ("=" | "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | "~"
                           | "[]" | "()" | "<" | ">" | "<=" | ">=" | "==" | "!=" | "<=>")
 
 fieldDeclaration = "static"? type IDENTIFIER ("=" expression)? ";"
@@ -529,7 +529,7 @@ class Vec {
 
     static function count() { return liveCount; }
 
-    function operator+(other) {                // overloadable: = + - * / % & | ^ << >> ! ~ [] () < > <= >= == != <=>
+    function operator+(other) {                // overloadable: = + - * / % & | ^ << >> ~ [] () < > <= >= == != <=>
         return Vec(x + other.x, y + other.y);
     }
     function operator==(other) { return x == other.x && y == other.y; }
@@ -552,15 +552,15 @@ Typed operator methods accept named-class, container, and shared_ptr return type
 `function operator+(...)` spellings.
 
 The overloadable set is C++'s, less `&&`, `||`, the comma, `->` and `new`/`delete`: binary
-`+ - * / % & | ^ << >> < > <= >= == != <=>`, unary `- + ! ~`, `=`, `[]` and `()`. The parameter
+`+ - * / % & | ^ << >> < > <= >= == != <=>`, unary `- + ~`, `=`, `[]` and `()`. The parameter
 count tells a unary operator from a binary one (`V operator-()` negates, `V operator-(V o)`
 subtracts). An operator runs when its left operand (a unary operator's only operand) is a class
 instance whose class chain declares it; any other operand keeps the builtin meaning and its
 text (`-v` on a class without `operator-()` raises `Unary minus requires numeric operand`). A
 compound assignment `a op= b` is `a = a op b` through the class's `operator op`; there is no
-separate `operator op=`. `operator!()` is also the instance's truthiness, negated: `if (v)`, `while`, `?:`,
-`&&`, `||` and a `bool` slot read `!v` the way `!v` itself does, ahead of a `to_bool()`, and a
-`shared_ptr` handle's `!` stays its null test. `operator()` makes an instance callable: a call whose callee holds an
+separate `operator op=`. There is no `operator!`: as with a C++ operator bool, `!v` and `if (v)`
+go through the one contextual conversion (`!v` is `!to_bool(v)`), and declaring `operator!` is a
+parse error that says so. `operator()` makes an instance callable: a call whose callee holds an
 instance with an `operator()` runs it with the call's arguments (any arity, overloads chosen by
 the usual scorer), through a local, a global, a field, an element, a computed callee or a
 `shared_ptr` handle. It is consulted only where the call would otherwise raise not callable. A

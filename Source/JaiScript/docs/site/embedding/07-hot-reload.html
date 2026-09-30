@@ -125,7 +125,7 @@ later call, new body: 30</code></pre></div>
 <li><strong>State survives by declaration.</strong> Functions and classes replace in place (live instances migrate, rules above); a variable declared with an initializer takes the new value, one declared without (<code>int kills;</code>) keeps the value it holds.</li>
 <li><strong>The call form is an expression.</strong> <code>import(&quot;rules.jai&quot;)</code> answers <code>true</code> when a module ran on this reach; <code>import(&quot;a.jai&quot;, &quot;b.jai&quot;)</code> or an array of paths is one group decision; a trailing <code>jai::force</code> opens a pass at once (an F5 key).</li></ul>
 <p>The host side is a frame loop that reaches the imports, usually by calling a script function that names them. The C++ half, from <code>examples/embed_quickstart</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; game.jai</span><pre><code class="lang-jai">import &quot;rules.jai&quot;;
+<div class="codeblock cb-jai" data-host="rules.jai (damage_for) and the C++ loop below"><span class="cb-label">jaiscript &middot; game.jai</span><pre><code class="lang-jai">import &quot;rules.jai&quot;;
 
 int tick(int frame) {
     import(&quot;rules.jai&quot;);            // reached every frame: a touched rules.jai re-runs here

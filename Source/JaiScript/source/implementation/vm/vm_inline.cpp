@@ -8,6 +8,7 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/transient_read.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -513,15 +514,12 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 			auto* t = static_cast<const identifier_expr*>(a->target.get());
 			if (t->slot_index != SIZE_MAX && t->slot_index < c.slot_types.size() && scalar_type(c.slot_types[t->slot_index])) {
 				const script_value_type want = c.slot_types[t->slot_index]->base_type;
-				token_type base = token_type::plus;
-				switch (a->op.type) {
-				case token_type::minus_equal: base = token_type::minus; break;
-				case token_type::star_equal: base = token_type::star; break;
-				case token_type::slash_equal: base = token_type::slash; break;
-				case token_type::percent_equal: base = token_type::percent; break;
-				default: break;
-				}
-				lands = a->op.type == token_type::equal ? value_kind(a->value.get(), c) == want : arith_kind(base, want, value_kind(a->value.get(), c)) == want;
+				const token_type base = a->op.type == token_type::equal ? token_type::plus : jai::detail::compound_base(a->op.type);
+				const script_value_type got = a->op.type == token_type::equal ? value_kind(a->value.get(), c) : arith_kind(base, want, value_kind(a->value.get(), c));
+				// a store through the reference runs the variable's own table (Dev ruling 2026-09-28), so a number into a number slot
+				// converts exactly as the renamed store does
+				const auto numeric = [](script_value_type k) { return k == script_value_type::jai_int_type || k == script_value_type::jai_float_type; };
+				lands = got == want || (numeric(got) && numeric(want));
 			}
 		}
 		note_store(a->target.get(), c, lands);

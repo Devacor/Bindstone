@@ -7608,18 +7608,8 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             return parallel_pin_decl ? detail::parameters_binding(parallel_pin_decl->parameters, ai)
                                                      : detail::method_binding(cls_pin.get(), dispatch->name_id, ai, expr->arguments.size());
                         });
-                    } catch (const script_exception& e) {
-                        active_exception_value_ = make_value(std::string(e.what()));
-                        current_exception_ = e;
-                        is_unwinding_ = true;
-                        push_value(make_value());
-                        return {};
                     } catch (const std::runtime_error& e) {
-                        active_exception_value_ = make_value(std::string(e.what()));
-                        current_exception_ = script_exception(e.what());
-                        is_unwinding_ = true;
-                        push_value(make_value());
-                        return {};
+                        return raise_native_exception(e);
                     }
                 }
 
@@ -7710,20 +7700,9 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     std::optional<checked_result<script_value>> callOutcome;
                     try {
                         callOutcome.emplace(call_function(script_func, arguments, &mctx));
-                    } catch (const script_exception& e) {
-                        pending_call_ctx_ = saved_ctx;
-                        active_exception_value_ = make_value(std::string(e.what()));
-                        current_exception_ = e;
-                        is_unwinding_ = true;
-                        push_value(make_value());
-                        return {};
                     } catch (const std::exception& e) {
                         pending_call_ctx_ = saved_ctx;
-                        active_exception_value_ = make_value(std::string(e.what()));
-                        current_exception_ = script_exception(e.what());
-                        is_unwinding_ = true;
-                        push_value(make_value());
-                        return {};
+                        return raise_native_exception(e);
                     }
                     pending_call_ctx_ = saved_ctx;
                     checked_result<script_value>& result_checked = *callOutcome;
@@ -7809,20 +7788,8 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 return {};
             }
             capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai, false, expr->arguments.size()); });
-        } catch (const script_exception& e) {
-            // Convert to interpreter exception state
-            active_exception_value_ = make_value(std::string(e.what()));
-            current_exception_ = e;
-            is_unwinding_ = true;
-            push_value(make_value());  // Push null for the failed call
-            return {};
         } catch (const std::runtime_error& e) {
-            // Convert runtime errors to script exceptions
-            active_exception_value_ = make_value(std::string(e.what()));
-            current_exception_ = script_exception(e.what());
-            is_unwinding_ = true;
-            push_value(make_value());  // Push null for the failed call
-            return {};
+            return raise_native_exception(e);
         }
     }
 
@@ -7851,20 +7818,9 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
         } else {
             callOutcome.emplace(func(arguments));
         }
-    } catch (const script_exception& e) {
-        pending_call_ctx_ = saved_ctx;
-        active_exception_value_ = make_value(std::string(e.what()));
-        current_exception_ = e;
-        is_unwinding_ = true;
-        push_value(make_value());
-        return {};
     } catch (const std::exception& e) {
         pending_call_ctx_ = saved_ctx;
-        active_exception_value_ = make_value(std::string(e.what()));
-        current_exception_ = script_exception(e.what());
-        is_unwinding_ = true;
-        push_value(make_value());
-        return {};
+        return raise_native_exception(e);
     }
     pending_call_ctx_ = saved_ctx;
     checked_result<script_value>& result_checked = *callOutcome;
@@ -12873,6 +12829,18 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     return {};
 }
 
+checked_result<void> interpreter::raise_native_exception(const std::exception& e) {
+    active_exception_value_ = make_value(std::string(e.what()));
+    if (const auto* thrown = dynamic_cast<const script_exception*>(&e)) {
+        current_exception_ = *thrown;
+    } else {
+        current_exception_ = script_exception(e.what());
+    }
+    is_unwinding_ = true;
+    push_value(make_value());
+    return {};
+}
+
 // A failure of a nested run (include/import) re-raised in this run as if the nested code ran here: its runtime error
 // itself (caught with its text alone), or its thrown value; a load failure (parse, static check, missing file) raises its
 // text. KEEP BYTE-PARALLEL with vm_backend::raise_nested_failure.
@@ -14709,6 +14677,21 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
     auto prev_status = handle.get_status();
     handle.set_status(coroutine_handle::status::running);
 
+    // Every exit hands the resumer back its coroutine and yield request; a C++ exception escaping the body fails the
+    // handle (vm run_fiber parity). Declared ahead of the exception swap, so it runs after it.
+    struct resume_exit {
+        interpreter* in;
+        coroutine_handle& handle;
+        coroutine_handle* prev_coroutine;
+        bool prev_yield_request;
+        int uncaught = std::uncaught_exceptions();
+        ~resume_exit() {
+            if (std::uncaught_exceptions() > uncaught) { handle.set_status(coroutine_handle::status::failed); }
+            in->active_coroutine_ = prev_coroutine;
+            in->hasYieldRequest_ = prev_yield_request;
+        }
+    } exit_guard{this, handle, prev_coroutine, prev_yield_request};
+
     // The exception trio follows the frames (KEEP BYTE-PARALLEL with vm_backend::run_fiber's
     // fiber_exception_swap): the resumer's is saved here and comes back on every exit (a
     // throw escaping the body keeps its exception pair live for the resumer's catch); a
@@ -14798,10 +14781,22 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
     } else {
         detail::call_depth_guard depth_guard(current_call_depth_);
-        auto caller_env = environment_;
-        auto caller_return_value = std::move(returnValue_);
-        bool caller_has_return = hasReturnValue_;
-        const detail::member_scope_ctx caller_member_scope = member_scope_;
+        // Detached frames die LAST (after the caller state is restored): releasing their
+        // locals can fire destructors that reenter call_function
+        std::vector<call_frame> dying_frames;
+        struct caller_state_restore {
+            interpreter* in;
+            std::shared_ptr<environment> env;
+            std::optional<script_value> return_value;
+            bool has_return;
+            detail::member_scope_ctx member_scope;
+            ~caller_state_restore() {
+                in->environment_ = std::move(env);
+                in->returnValue_ = std::move(return_value);
+                in->hasReturnValue_ = has_return;
+                in->member_scope_ = member_scope;
+            }
+        } caller_state{this, environment_, std::move(returnValue_), hasReturnValue_, member_scope_};
 
         // The coroutine's frames go ABOVE the resumer's (vm frames_ parity): a trace taken
         // inside the segment names the whole resume chain
@@ -14810,14 +14805,24 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
             call_stack_.push_back(std::move(saved_frame));
         }
         state.saved_call_stack.clear();
-        // Detached frames die LAST (after the caller state is restored): releasing their
-        // locals can fire destructors that reenter call_function
-        std::vector<call_frame> dying_frames;
         auto detach_frames = [&](std::vector<call_frame>& into) {
             into.assign(std::make_move_iterator(call_stack_.begin() + frame_base),
                         std::make_move_iterator(call_stack_.end()));
             call_stack_.erase(call_stack_.begin() + frame_base, call_stack_.end());
         };
+        // A C++ exception escaping the segment takes the coroutine's frames down with it, ahead of the caller state
+        struct frames_on_throw {
+            interpreter* in;
+            size_t base;
+            std::vector<call_frame>& dying;
+            int uncaught = std::uncaught_exceptions();
+            ~frames_on_throw() {
+                if (std::uncaught_exceptions() > uncaught && in->call_stack_.size() > base) {
+                    dying.assign(std::make_move_iterator(in->call_stack_.begin() + base), std::make_move_iterator(in->call_stack_.end()));
+                    in->call_stack_.erase(in->call_stack_.begin() + base, in->call_stack_.end());
+                }
+            }
+        } frames_guard{this, frame_base, dying_frames};
 
         environment_ = state.saved_environment;
         returnValue_ = std::move(state.saved_return_value);
@@ -14907,15 +14912,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
                 detach_frames(dying_frames);
             }
         }
-
-        environment_ = caller_env;
-        returnValue_ = std::move(caller_return_value);
-        hasReturnValue_ = caller_has_return;
-        member_scope_ = caller_member_scope;
     }
-
-    active_coroutine_ = prev_coroutine;
-    hasYieldRequest_ = prev_yield_request;
 
     if (error_result) {
         return std::move(*error_result);

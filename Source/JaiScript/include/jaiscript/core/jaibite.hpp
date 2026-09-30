@@ -72,6 +72,7 @@ namespace jai {
         uint64_t proof_epoch_ = UINT64_MAX;   // UINT64_MAX = nodes carry no proofs
         bool autos_typed_ = false;   // the first proof pass types the auto slots, in every mode
         uint32_t unit_ = 0;   // shadowing unit, numbered at the first execute
+        std::shared_ptr<void> lowering_;   // detail::aggregate_lowering_state (engine::aggregate_lowering)
     };
 
 } // namespace jai

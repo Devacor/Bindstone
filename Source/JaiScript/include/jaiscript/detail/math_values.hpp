@@ -317,8 +317,9 @@ namespace jai::detail::math {
 	inline constexpr std::string_view temporary_member_text = "Cannot assign to a member of a temporary";
 	// Writes component c of the vec held in `target` (live storage) from `value` (dereferenced, bound decoded): an int, a
 	// float or a bool narrows by the kind's rule; returns the stored component as the scalar a read yields
-	JAI_MATH_COLD inline checked_result<script_value> store_component(script_value& target, int c, const script_value& value, engine* eng) {
-		const vk k = target.unchecked_vec_kind();
+	// The value a component of kind k holds after a store of `value` (its word in `bits`): the store's narrowing, shared by
+	// the component store and the lowered component slots
+	inline checked_result<script_value> narrow_component(vk k, const script_value& value, uint32_t& bits, engine* eng) {
 		const scalar s = read_scalar(value);
 		if (!s.ok) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), component_store_text(k));
@@ -326,14 +327,18 @@ namespace jai::detail::math {
 		if (integral(k)) {
 			auto v = scalar_i32(s);
 			if (!v) { return v.error_value(); }
-			target.unchecked_set_vec_word(static_cast<size_t>(c), static_cast<uint32_t>(v.value()));
+			bits = static_cast<uint32_t>(v.value());
 			return script_value(static_cast<script_int>(v.value()), eng);
 		}
 		const float f = scalar_f32(s);
-		uint32_t bits;
 		std::memcpy(&bits, &f, 4);
-		target.unchecked_set_vec_word(static_cast<size_t>(c), bits);
 		return script_value(static_cast<script_float>(f), eng);
+	}
+	JAI_MATH_COLD inline checked_result<script_value> store_component(script_value& target, int c, const script_value& value, engine* eng) {
+		uint32_t bits = 0;
+		auto stored = narrow_component(target.unchecked_vec_kind(), value, bits, eng);
+		if (stored) { target.unchecked_set_vec_word(static_cast<size_t>(c), bits); }
+		return stored;
 	}
 
 	// ---- operators --------------------------------------------------------------------------------------------------
@@ -355,6 +360,39 @@ namespace jai::detail::math {
 			case bop::div: return "Integer overflow in '/'";
 			default: return "Integer overflow in '%'";
 		}
+	}
+
+	// One ivec component of `a op b`: two int32 operands (or a narrowed scalar) computed exactly in int64 and narrowed to
+	// int32 under the policy; a zero divisor raises the scalar kernels' texts
+	inline checked_result<int32_t> int_component(bop op, int64_t a, int64_t b) noexcept {
+		int64_t v = 0;
+		switch (op) {
+			case bop::add: v = a + b; break;
+			case bop::sub: v = a - b; break;
+			case bop::mul: v = a * b; break;
+			case bop::div:
+				if (b == 0) { return checked_result<int32_t>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation"); }
+				v = a / b;
+				break;
+			case bop::mod:
+				if (b == 0) { return checked_result<int32_t>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation"); }
+				v = a % b;
+				break;
+		}
+		if (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()) {
+			if constexpr (k_checked_overflow) {
+				return checked_result<int32_t>(make_error_code(runtime_error_code::invalid_numeric_operand), overflow_text(op));
+			}
+		}
+		return static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>(v)));
+	}
+	inline checked_result<int32_t> int_component_negate(int32_t x) noexcept {
+		if (x == std::numeric_limits<int32_t>::min()) {
+			if constexpr (k_checked_overflow) {
+				return checked_result<int32_t>(make_error_code(runtime_error_code::invalid_numeric_operand), "Integer overflow in unary '-'");
+			}
+		}
+		return static_cast<int32_t>(0u - static_cast<uint32_t>(x));
 	}
 
 	// `l op r` where at least one side is a vec: vec op vec (the same kind, componentwise), vec op scalar and scalar op
@@ -385,28 +423,9 @@ namespace jai::detail::math {
 				si = narrowed.value();
 			}
 			for (size_t c = 0; c < n; ++c) {
-				const int64_t a = lm ? i32_at(l, c) : si;
-				const int64_t b = rm ? i32_at(r, c) : si;
-				int64_t v = 0;
-				switch (op) {
-					case bop::add: v = a + b; break;
-					case bop::sub: v = a - b; break;
-					case bop::mul: v = a * b; break;
-					case bop::div:
-						if (b == 0) { return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation"); }
-						v = a / b;
-						break;
-					case bop::mod:
-						if (b == 0) { return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation"); }
-						v = a % b;
-						break;
-				}
-				if (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()) {
-					if constexpr (k_checked_overflow) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), overflow_text(op));
-					}
-				}
-				out[c] = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>(v)));
+				auto v = int_component(op, lm ? i32_at(l, c) : si, rm ? i32_at(r, c) : si);
+				if (!v) { return v.error_value(); }
+				out[c] = v.value();
 			}
 			return make(k, f, out, eng);
 		}
@@ -434,13 +453,9 @@ namespace jai::detail::math {
 		int32_t i[k_max_dims] = {0, 0, 0, 0};
 		for (size_t c = 0; c < dims(k); ++c) {
 			if (integral(k)) {
-				const int32_t x = i32_at(v, c);
-				if (x == std::numeric_limits<int32_t>::min()) {
-					if constexpr (k_checked_overflow) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), "Integer overflow in unary '-'");
-					}
-				}
-				i[c] = static_cast<int32_t>(0u - static_cast<uint32_t>(x));
+				auto x = int_component_negate(i32_at(v, c));
+				if (!x) { return x.error_value(); }
+				i[c] = x.value();
 			} else {
 				f[c] = -f32_at(v, c);
 			}

@@ -185,6 +185,7 @@ namespace jai::fuzz {
 		bool alive = false;                       // trivial follow-up execute succeeded
 		bool budget_hit = false;                  // any segment raised a budget error
 		uint64_t alias_binds = 0;                 // engine::parameter_alias_binds() after the run (gate coverage)
+		uint64_t lowered_locals = 0;              // engine::aggregate_lowered_locals() after the run (gate coverage)
 	};
 
 	struct run_config {
@@ -198,6 +199,7 @@ namespace jai::fuzz {
 		bool proofs = true;                       // engine::type_proofs (the proof differential gate flips it)
 		bool param_alias = true;                  // engine::parameter_alias (the elision differential gate flips it)
 		bool passes = true;                       // engine::ir_passes (the middle end's differential gate flips it)
+		int lowering = -1;                        // engine::aggregate_lowering: -1 the backend's default (interpreter boxed, vm lowered), else forced
 		uint32_t miss_every = 0;                  // engine::cells_miss_every (the miss injection gate; a build with the lever)
 	};
 
@@ -213,6 +215,7 @@ namespace jai::fuzz {
 		eng->type_proofs(cfg.proofs);
 		eng->parameter_alias(cfg.param_alias);
 		eng->ir_passes(cfg.passes);
+		if (cfg.lowering >= 0) eng->aggregate_lowering(cfg.lowering != 0);
 		if (cfg.miss_every) eng->cells_miss_every(cfg.miss_every);
 		eng->static_checking(check_mode::warn);   // generated programs are not statically clean; this measures runtime parity
 		eng->execution_budget(cfg.budget_seconds);
@@ -262,6 +265,7 @@ namespace jai::fuzz {
 		try {
 			out.alive = (eng->execute("1 + 1").as_int() == 2);
 			out.alias_binds = eng->parameter_alias_binds();
+			out.lowered_locals = eng->aggregate_lowered_locals();
 		} catch (...) {
 			out.alive = false;
 		}
@@ -294,7 +298,9 @@ namespace jai::fuzz {
 			"\n      vm    (len " + std::to_string(b.size()) + "): ..." + excerpt(b);
 	}
 
-	inline compare_result compare_program(const program& p, double budget_seconds, bool proofs = true, bool param_alias = true, bool passes = true, uint32_t miss_every = 0) {
+	// lowering: 0 each backend's default (the interpreter boxed against the vm lowered: the lowering's differential), 1 both boxed,
+	// 2 both lowered (with the other two it pins lowered == boxed on both backends)
+	inline compare_result compare_program(const program& p, double budget_seconds, bool proofs = true, bool param_alias = true, bool passes = true, uint32_t miss_every = 0, int lowering = 0) {
 		compare_result cr;
 		run_config interp_cfg;
 		interp_cfg.budget_seconds = budget_seconds;
@@ -302,6 +308,7 @@ namespace jai::fuzz {
 		interp_cfg.param_alias = param_alias;
 		interp_cfg.passes = passes;
 		interp_cfg.miss_every = miss_every;
+		interp_cfg.lowering = lowering == 0 ? -1 : lowering == 2 ? 1 : 0;
 		run_config vm_cfg = interp_cfg;
 		vm_cfg.use_vm = true;
 		cr.interp = run_program(p, interp_cfg);

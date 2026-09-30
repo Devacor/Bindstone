@@ -2,6 +2,7 @@
 
 # Collect all implementation source files
 set(JAISCRIPT_SOURCES
+    implementation/aggregate_lowering.cpp
     implementation/class_registry.cpp
     implementation/conversion_registry.cpp
     implementation/coroutine.cpp

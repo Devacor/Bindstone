@@ -18,6 +18,7 @@
 #include "implementation/parse_errors.cpp"
 #include "implementation/interpreter_dispatch.cpp"
 #include "implementation/type_checker.cpp"
+#include "implementation/aggregate_lowering.cpp"
 #include "implementation/schema_binding.cpp"
 #include "implementation/vm/vm_compiler.cpp"
 #include "implementation/vm/vm_inline.cpp"

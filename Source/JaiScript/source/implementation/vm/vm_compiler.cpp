@@ -3400,10 +3400,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (alias && !(ip + 1 < back && code[ip + 1].op == opcode::op_call_temp && code[ip + 1].a == st.b && detail::math_alias_kernel(fn))) { refuse(chunk::cell_refusal_translation, ip); break; }
 				uint8_t rk = kflt;
 				switch (fn) {
-				case detail::math_fn::itrunc: case detail::math_fn::ifloor: rk = kint; break;
+				case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::i32_: rk = kint; break;
 				case detail::math_fn::abs_: rk = alias ? kflt : 0; break;
 				case detail::math_fn::floor_: case detail::math_fn::ceil_: case detail::math_fn::sqrt_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
-				case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: break;
+				case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: case detail::math_fn::f32_: break;
 				default: refuse(chunk::cell_refusal_translation, ip); break;
 				}
 				if (refusal != chunk::cell_refusal_none) break;
@@ -3662,10 +3662,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }   // a computed argument after a verbatim load would run ahead of that load's getter
 						uint8_t rk = kflt;
 						switch (static_cast<detail::math_fn>(next->a)) {
-						case detail::math_fn::itrunc: case detail::math_fn::ifloor: rk = kint; break;
+						case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::i32_: rk = kint; break;
 						case detail::math_fn::abs_: rk = 0; break;
 						case detail::math_fn::floor_: case detail::math_fn::ceil_: case detail::math_fn::sqrt_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
-						case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: break;
+						case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: case detail::math_fn::f32_: break;
 						default: refuse(chunk::cell_refusal_translation, a + 1); break;
 						}
 						if (refusal != chunk::cell_refusal_none) break;
@@ -4554,6 +4554,7 @@ detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
 	case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::floor_: case detail::math_fn::ceil_:
 	case detail::math_fn::sqrt_: case detail::math_fn::abs_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
 	case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians:
+	case detail::math_fn::f32_: case detail::math_fn::i32_:
 		return fn;
 	default: return detail::math_fn::none;
 	}

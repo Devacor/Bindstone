@@ -6,6 +6,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/aggregate_lowering.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
@@ -772,6 +773,9 @@ struct engine::implementation {
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
         std::string closure_parse_failures;            // units that failed to parse: the program stops there, before any check
+        // The aggregate lowering's sites: the checker's diagnostics and the jaibite writer see the parsed bodies, the proof
+        // pass and both backends the lowered ones (engine::aggregate_lowering)
+        mutable detail::aggregate_lowering_state lowering;
     };
     uint64_t script_cache_epoch = 0;
     uint64_t script_cache_clock = 0;
@@ -972,11 +976,23 @@ struct engine::implementation {
     // stamps disagree with the switch/surface epoch (stamp on, clear off). A trusted
     // jaibite entry (checked, epoch current) never re-collects diagnostics; its proofs
     // still stamp.
+    // The lowering runs where it pays: the vm's typed rows and cells run component slots at the float-local floor, while the
+    // interpreter's per-node dispatch makes a scalarized vector slower than the boxed kernel (an explicit setting wins)
+    bool lowering_on() const { return aggregate_lowering_ < 0 ? current_backend_type == backend_type::vm : aggregate_lowering_ != 0; }
+
+    // The view the backends run: the lowered bodies (built on first use) or the parsed ones
+    void lowering_view(engine& self, const std::vector<declaration_ptr>& declarations, detail::aggregate_lowering_state& state) {
+        if (lowering_on() && !state.built) { detail::build_aggregate_lowering(self, declarations, state); aggregate_lowered_locals_ += state.lowered_locals; }
+        detail::set_aggregate_view(state, lowering_on());
+    }
+
     void check_entry(engine& self, script_cache_entry& entry, bool want_diagnostics) {
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
         const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
-        const bool need_proofs = entry.proof_epoch != want_proof_epoch || !entry.autos_typed;
+        const bool need_proofs = entry.proof_epoch != want_proof_epoch || !entry.autos_typed ||
+                                 (lowering_on() && !entry.lowering.built) || entry.lowering.lowered_view != lowering_on();
         if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
+            detail::set_aggregate_view(entry.lowering, false);   // diagnostics read the parsed bodies
             detail::check_options o;
             o.diagnostics = true;
             o.proofs = detail::check_options::proofs_t::leave;
@@ -989,6 +1005,7 @@ struct engine::implementation {
             entry.checked_epoch = check_surface_epoch_;
         }
         if (need_check || need_proofs) {
+            lowering_view(self, entry.declarations, entry.lowering);
             stamp_proofs(self, entry);
             entry.proof_epoch = want_proof_epoch;
             entry.autos_typed = true;
@@ -1107,6 +1124,7 @@ struct engine::implementation {
         std::vector<std::string> extra;
         extra.reserve(instanceVars.size());
         for (const auto& [name, value] : instanceVars) { extra.push_back(name); }
+        detail::aggregate_source_view source(&entry.lowering);
         detail::check_options o;
         o.proofs = detail::check_options::proofs_t::leave;
         o.program_names = &program_names_;
@@ -1415,8 +1433,11 @@ struct engine::implementation {
                 entry.checked_epoch == check_surface_epoch_ && !entry.check_result.has_errors()) {
                 flags |= detail::k_jaibite_flag_checked_clean;
             }
-            auto bytes = detail::serialize_jaibite(entry.declarations, string_symbolizer_,
-                                                   self.registration_fingerprint(), flags, sourcePath);
+            std::vector<uint8_t> bytes;
+            {
+                detail::aggregate_source_view source(&entry.lowering);   // a sibling holds the parsed program
+                bytes = detail::serialize_jaibite(entry.declarations, string_symbolizer_, self.registration_fingerprint(), flags, sourcePath);
+            }
             std::ofstream file(sibling, std::ios::binary | std::ios::trunc);
             if (!file.is_open()) {
                 ++jaibite_cache_write_failures_;
@@ -1475,6 +1496,8 @@ struct engine::implementation {
     // any vector is still out, so its place in the destruction order does not matter)
     type_info* type_info_math_[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};   // vec2, vec3, ivec2, ivec3, vec4, color
     ref_holder_pool_slot_holder vec_node_pool_;
+    int8_t aggregate_lowering_ = -1;   // engine::aggregate_lowering: 1 on, 0 off, -1 the backend's default (on for the vm)
+    uint64_t aggregate_lowered_locals_ = 0;
 };
 
 engine::implementation::implementation()
@@ -2150,10 +2173,14 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
 // surface epoch moved, in every mode. Source is only available at creation time (loaded
 // bites format their listing without snippets).
 void engine::check_bite(jai::jaibite& bite, const std::string* source) {
+    if (!bite.lowering_) { bite.lowering_ = std::make_shared<detail::aggregate_lowering_state>(); }
+    auto& lowering = *std::static_pointer_cast<detail::aggregate_lowering_state>(bite.lowering_);
     const uint64_t want_proof_epoch = impl->type_proofs_ ? impl->check_surface_epoch_ : UINT64_MAX;
     const bool need_check = impl->static_check_mode_ != check_mode::off &&
                             bite.check_state_ == jaibite::check_state::unchecked;
-    const bool need_proofs = bite.proof_epoch_ != want_proof_epoch || !bite.autos_typed_;
+    const bool need_proofs = bite.proof_epoch_ != want_proof_epoch || !bite.autos_typed_ ||
+                             (impl->lowering_on() && !lowering.built) || lowering.lowered_view != impl->lowering_on();
+    if (need_check) { detail::set_aggregate_view(lowering, false); }   // diagnostics read the parsed bodies
     if (need_check || need_proofs) {
         detail::check_options o;
         o.diagnostics = need_check;
@@ -2163,6 +2190,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         o.program_classes = &impl->program_classes_;
         o.program_functions = &impl->program_functions_;
         o.program_globals = &impl->program_globals_;
+        if (!need_check) { impl->lowering_view(*this, bite.declarations_, lowering); }   // this walk is the proof pass
         check_report r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
         if (need_check) {
             bite.check_report_ = std::move(r);
@@ -2171,6 +2199,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
             detail::check_options p = o;   // the proof pass alone reads the program's globals and types the auto slots
             p.diagnostics = false;
             p.proofs = impl->type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
+            impl->lowering_view(*this, bite.declarations_, lowering);
             detail::run_static_check(*this, bite.declarations_, nullptr, p);
         }
         bite.proof_epoch_ = want_proof_epoch;
@@ -2206,6 +2235,7 @@ std::vector<uint8_t> jaibite::save_bytes() const {
         throw script_exception("jaibite: owning engine no longer exists");
     }
     uint32_t flags = (check_state_ == check_state::clean) ? detail::k_jaibite_flag_checked_clean : 0;
+    detail::aggregate_source_view source(lowering_ ? std::static_pointer_cast<detail::aggregate_lowering_state>(lowering_).get() : nullptr);
     return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags);
 }
 
@@ -2269,6 +2299,22 @@ void engine::type_proofs(bool on) {
 
 bool engine::type_proofs() const {
     return impl->type_proofs_;
+}
+
+void engine::aggregate_lowering(bool on) {
+    if (impl->aggregate_lowering_ == (on ? 1 : 0)) { return; }
+    if (impl->has_executed_) {
+        throw runtime_error("aggregate_lowering after execute() is unsupported: defined functions capture the body they were declared with");
+    }
+    impl->aggregate_lowering_ = on ? 1 : 0;
+}
+
+bool engine::aggregate_lowering() const {
+    return impl->lowering_on();
+}
+
+uint64_t engine::aggregate_lowered_locals() const {
+    return impl->aggregate_lowered_locals_;
 }
 
 void engine::ir_passes(bool on) {

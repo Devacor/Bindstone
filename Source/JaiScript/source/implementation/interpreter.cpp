@@ -6343,6 +6343,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     return {};
                 }
                 JAISCRIPT_TRY(bare_reference_access(targetSymbolId));
+                if (auto method = bare_method_reference_error(identExpr)) { return *method; }
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(targetSymbolId, "Cannot take reference of undefined variable"), targetSymbolId);
             }
             
@@ -7775,6 +7776,18 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
 
 // The member read on an already-evaluated receiver: the compound-member store evaluates the
 // receiver once and holds it across the read, the rhs and the store-back
+// A reference bound to a bare name that lands on an instance method (auto& r = heal, cast<T&>(heal)): the same violation, never
+// an undefined variable. KEEP BYTE-PARALLEL with vm_backend::bare_method_reference
+std::optional<checked_result<void>> interpreter::bare_method_reference_error(const identifier_expr* expr) {
+    if (!member_scope_.active() || !member_scope_.this_storage) { return std::nullopt; }
+    auto member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage, member_scope_.statics, expr->symbol_id,
+                                             /*want_methods*/ true);
+    if (member && member.what == detail::member_probe_hit::kind::method && member.instance) {
+        return bare_method_value_error(expr, *member_scope_.this_storage);
+    }
+    return std::nullopt;
+}
+
 // A bare method name read without a call inside a method (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with
 // vm_backend::raise_bare_method_value
 checked_result<void> interpreter::bare_method_value_error(const identifier_expr* expr, const script_value& self) {
@@ -9522,6 +9535,7 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
                 auto minted = bind_bare_cpp_property_ref(targetSymbolId, ident->global_qualified);
                 if (!minted) {
                     JAISCRIPT_TRY(bare_reference_access(targetSymbolId));
+                    if (auto method = bare_method_reference_error(ident)) { return *method; }
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(targetSymbolId, "Cannot take reference of undefined variable"), targetSymbolId);
                 }
                 if (!*minted) {
@@ -11013,6 +11027,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                         }
                         out.emplace(std::move(minted->value()));
                     } else {
+                        if (auto method = bare_method_reference_error(ident)) { return *method; }
                         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
                             environment_->undefined_text(ident->symbol_id, "Cannot take reference of undefined variable"), ident->symbol_id);
                     }

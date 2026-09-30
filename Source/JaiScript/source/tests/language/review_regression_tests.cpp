@@ -2772,7 +2772,7 @@ public:
                 )");
                 decl_msg[idx] = caught(*e, "w.decl();");
                 arg_msg[idx] = caught(*e, "w.arg();");
-                check_true(decl_msg[idx].find("Cannot take reference of undefined variable") != std::string::npos, decl_msg[idx]);
+                check_true(decl_msg[idx].find("'doubled' is a method of W; call it with doubled() or bind it with reflect::bind(this, \"doubled\")") != std::string::npos, decl_msg[idx]);   // a reference to a method is the method-value violation
                 check_true(arg_msg[idx].find("'doubled' is a method of W; call it with doubled() or bind it with reflect::bind(this, \"doubled\")") != std::string::npos, arg_msg[idx]);   // a method handed to a reference is a method read without a call
                 ++idx;
             }

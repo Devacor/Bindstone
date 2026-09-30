@@ -11227,6 +11227,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			return define_decl_value(f, decl, std::move(minted->value()));
 		}
 		VM_TRY(frame_bare_member_access(f, target_sym));
+		if (auto method = bare_method_reference(f, target_sym)) { return *method; }
 		return raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(target_sym, "Cannot take reference of undefined variable"), target_sym);
 	}
 
@@ -12965,6 +12966,19 @@ op_status vm_backend::exec_from_this(frame& f, const vm_instruction& ins) {
 		stack_.push_back(std::move(this_val));
 	}
 	return {};
+}
+
+// A reference bound to a bare name that lands on an instance method; KEEP BYTE-PARALLEL with
+// interpreter::bare_method_reference_error
+std::optional<op_status> vm_backend::bare_method_reference(frame& f, uint64_t name_id) {
+	if (!f.locals || f.top_level) { return std::nullopt; }
+	ensure_frame_member_scope(f, environment_.get());
+	if (!frame_scope_active(f) || !f.locals->scope_this) { return std::nullopt; }
+	auto member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this, f.locals->scope_static, name_id, /*want_methods*/ true);
+	if (member && member.what == detail::member_probe_hit::kind::method && member.instance) {
+		return raise_bare_method_value(name_id, *f.locals->scope_this);
+	}
+	return std::nullopt;
 }
 
 // A bare method name read without a call inside a method (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with
@@ -17526,6 +17540,7 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 	}
 	if (!storage) {
 		VM_TRY(frame_bare_member_access(f, symbol_id));
+		if (auto method = bare_method_reference(f, symbol_id)) { return *method; }
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
 	}
@@ -17576,6 +17591,7 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 				if (!global_only) { auto b = bind_bare_cpp_property_ref(f, target_sym); if (b) { minted.emplace(std::move(*b)); } }
 				if (!minted) {
 					VM_TRY(frame_bare_member_access(f, target_sym));
+					if (auto method = bare_method_reference(f, target_sym)) { return *method; }
 					return raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(target_sym, "Cannot take reference of undefined variable"), target_sym);
 				}
 				if (!*minted) {

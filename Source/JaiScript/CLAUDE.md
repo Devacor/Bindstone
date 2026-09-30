@@ -396,7 +396,8 @@ engine stays usable", not by `check_throws`.
   inside a method is the same violation (`call it with heal() or bind it with reflect::bind(this, "heal")`): the interpreter's
   `identifier_callee_lookup_` and the vm's `probe_callee_resolving_` mark callee resolution (an `op_load` is never a callee),
   the checker reports an instance method it resolves in the enclosing class chain; locals and parameters still win, a static
-  method stays a function value.
+  method stays a function value. A reference bound to such a name (`auto& r = heal`, `T& r = heal`, `cast<T&>(heal)`, a `-> T&`
+  return) raises the same text, never `Cannot take reference of undefined variable` (`bare_method_reference(_error)`).
 - **Stores through references** (Dev ruling 2026-09-30, R-q7): `auto& r = o.f; r = v` (and `r op= v`) runs the direct field
   store's table and text (`detail::field_store_convert` via `ref_field_store`); an element reference runs the direct subscript
   store's kernel. There is no second, narrower reference table.

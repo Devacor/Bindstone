@@ -21008,9 +21008,10 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					// bind point, so the fast-path constraint holds.
 					// (KEEP BYTE-PARALLEL with the interpreter's bind_reference_parameter)
 					frame_slot_set(callee, param.slot_index, script_value(arg));
-				} else if (detail::ref_parameter_takes_temporary(*engine_, parameters, callee_body ? callee_body : (alias_fn && alias_fn->name != "<lambda>" ? alias_fn->body.get() : nullptr), i, !parallel_worker_)) {
-					// a temporary binds a parameter the callee never writes through (detail/ref_param_writes.hpp)
-					frame_slot_set(callee, param.slot_index, script_value::make_cell_reference(script_value(arg.deref()), engine_));
+				} else if (detail::is_string_reference_temporary(param, arg) ||
+					detail::ref_parameter_takes_temporary(*engine_, parameters, callee_body ? callee_body : (alias_fn && alias_fn->name != "<lambda>" ? alias_fn->body.get() : nullptr), i, !parallel_worker_)) {
+					// string& accepts writable temporaries; other types keep the inferred read-only rule.
+					frame_slot_set(callee, param.slot_index, detail::make_reference_argument_temporary(param, arg, engine_));
 				} else {
 					return raise_(
 						make_error_code(runtime_error_code::invalid_reference),
@@ -21026,8 +21027,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				} else if (arg_type == script_value_type::jai_object_type ||
 				    arg_type == script_value_type::jai_shared_ptr_type) {
 					frame_slot_set(callee, param.slot_index, script_value(arg));
-				} else if (detail::ref_parameter_takes_temporary(*engine_, parameters, callee_body ? callee_body : (alias_fn && alias_fn->name != "<lambda>" ? alias_fn->body.get() : nullptr), i, !parallel_worker_)) {
-					frame_slot_set(callee, param.slot_index, script_value::make_cell_reference(script_value(arg), engine_));
+				} else if (detail::is_string_reference_temporary(param, arg) ||
+					detail::ref_parameter_takes_temporary(*engine_, parameters, callee_body ? callee_body : (alias_fn && alias_fn->name != "<lambda>" ? alias_fn->body.get() : nullptr), i, !parallel_worker_)) {
+					frame_slot_set(callee, param.slot_index, detail::make_reference_argument_temporary(param, arg, engine_));
 				} else {
 					return raise_(
 						make_error_code(runtime_error_code::invalid_reference),

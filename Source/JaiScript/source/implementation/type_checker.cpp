@@ -2945,33 +2945,39 @@ private:
                 }
                 if (viable && aliasing) { map_key_alias(c->arguments[i]->location, c->arguments[i].get()); }
             }
-            // a literal where every viable overload binds the parameter by reference: it binds a temporary when the
-            // callee (every override of a method) never writes through the parameter, else the load reports the write
-            for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
-                const node_type k = c->arguments[i]->get_type();
-                if (k != node_type::literal_expr && k != node_type::array_literal_expr && k != node_type::map_literal_expr) { continue; }
-                std::vector<const function_decl*> by_ref;
-                bool all_ref = false;
-                for (const auto* fn : *ov) {
-                    if (!script_fn_viable(fn, args)) { continue; }
-                    all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference;   // a coroutine binds a copy
-                    if (!all_ref) { break; }
-                    by_ref.push_back(fn);
-                }
-                if (!all_ref || by_ref.empty()) { continue; }
-                if (!ov_class.empty()) {
-                    for (const auto* fn : overrides_of(ov_class, by_ref.front()->name)) { by_ref.push_back(fn); }
-                }
-                for (const auto* fn : by_ref) {
-                    if (i >= fn->parameters.size() || !fn->parameters[i].is_reference || fn->is_coroutine) { continue; }
-                    const ref_param_write w = ref_writes(fn, i);
-                    if (w.writes) {
-                        diag(diag_level::error, c->arguments[i]->location, "'" + std::string(fn->name) + "' writes through parameter '" +
-                             fn->parameters[i].name + "' (line " + std::to_string(w.line) + "); pass a variable");
-                        break;
-                    }
-                }
-            }
+			// string& accepts string literals; other reference types require inferred read-only admission.
+			for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
+				const node_type k = c->arguments[i]->get_type();
+				if (k != node_type::literal_expr && k != node_type::array_literal_expr && k != node_type::map_literal_expr) { continue; }
+				std::vector<const function_decl*> by_ref;
+				bool all_ref = false;
+				for (const auto* fn : *ov) {
+					if (!script_fn_viable(fn, args)) { continue; }
+					all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference;   // a coroutine binds a copy
+					if (!all_ref) { break; }
+					by_ref.push_back(fn);
+				}
+				if (!all_ref || by_ref.empty()) { continue; }
+				// Stay lenient when a viable string& overload can bind this literal; dispatch still selects the callee.
+				if (args[i].kind == ctype::string_k && std::any_of(by_ref.begin(), by_ref.end(), [i](const function_decl* a_function) {
+					const parameter& param = a_function->parameters[i];
+					return param.type && param.type->base_type == script_value_type::jai_string_type;
+				})) {
+					continue;
+				}
+				if (!ov_class.empty()) {
+					for (const auto* fn : overrides_of(ov_class, by_ref.front()->name)) { by_ref.push_back(fn); }
+				}
+				for (const auto* fn : by_ref) {
+					if (i >= fn->parameters.size() || !fn->parameters[i].is_reference || fn->is_coroutine) { continue; }
+					const ref_param_write w = ref_writes(fn, i);
+					if (w.writes) {
+						diag(diag_level::error, c->arguments[i]->location, "'" + std::string(fn->name) + "' writes through parameter '" +
+							fn->parameters[i].name + "' (line " + std::to_string(w.line) + "); pass a variable");
+						break;
+					}
+				}
+			}
         }
         return t;
     }

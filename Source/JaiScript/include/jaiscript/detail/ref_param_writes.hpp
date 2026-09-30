@@ -4,7 +4,8 @@
 #define __JAISCRIPT_DETAIL_REF_PARAM_WRITES_HPP__
 
 // Inferred-const reference parameters: whether a function can write through its `T&`
-// parameter. A parameter the body never writes through takes a literal or a temporary
+// parameter. string& separately accepts writable string temporaries (ref_lvalue.hpp).
+// For other types, a parameter the body never writes through takes a literal or a temporary
 // (the caller binds a temporary cell, C++ `const T&` without the keyword); one it writes
 // through keeps needing a variable. ONE kernel for the checker (the load diagnostic) and
 // both backends (the bind): each supplies how a callee name resolves to script functions.

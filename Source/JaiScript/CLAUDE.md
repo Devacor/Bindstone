@@ -657,7 +657,12 @@ engine stays usable", not by `check_throws`.
   `index_flag_string_target`) and `detail/string_element.hpp` writes through the copy-on-write gates, so copies never see
   it. Anything but a char or text raises `Cannot assign int to a string character (it takes a char or a string)` (strict
   checker: a load error on a declared string); a temporary base keeps `Cannot assign to rvalue expression`.
-- **Inferred-const reference parameters** (guide ch. 3): a declared function's or method's `T&`
+- **String reference temporaries** (guide ch. 3): a script `string&` parameter accepts a writable string literal or
+  computed string temporary, lambdas included; an existing lvalue still aliases its storage. The fallback is a private,
+  owner-pinned cell: ordinary strings share their copy-on-write buffer, C++-bound temporary strings detach from native
+  storage, and an escaping capture or reference return keeps the cell alive. No const keyword, reference conversion
+  or overload-ranking change. Native C++ binding rules and reference declarations are unchanged.
+- **Inferred-const reference parameters** (guide ch. 3): for types other than `string&`, a declared function's or method's `T&`
   parameter that its body never writes through takes a literal or a temporary (bound to a temporary cell, C++ `const T&`
   without the keyword); a variable still binds with no copy. ONE kernel `detail/ref_param_writes.hpp` decides: writes are
   stores/compounds/`++` rooted at the parameter or a reference alias, a method call on it (reading builtins excepted on an

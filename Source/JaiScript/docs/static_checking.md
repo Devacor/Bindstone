@@ -117,7 +117,11 @@ methods, inherited fields) all check against the declared type.
 **Calls** — checked only when the callee resolves statically:
 - same-script functions/ctors/methods: arity (with defaults) + per-arg assignability
   (same conversion table, element boundary included — note a `string` parameter accepts anything). Overloads: error
-  only if NO overload matches. A reference parameter takes any argument type. A literal
+  only if NO overload matches. A reference parameter takes any argument type. A script
+  `string&` parameter accepts a string literal or computed string temporary even when
+  it writes through the parameter: the runtime binds a private, owner-pinned cell.
+  Existing string lvalues still alias their storage. This applies to script lambdas too,
+  adds no reference conversion, and leaves overload ranking unchanged. For other types, a literal
   (a number, string, char, bool or null literal, an array or map literal) where every viable
   overload binds the parameter by reference is accepted when no overload - and, for a method,
   no override in a class derived from the receiver's - writes through the parameter
@@ -132,7 +136,8 @@ methods, inherited fields) all check against the declared type.
   unseen), a `shared_ptr` parameter, a constructor or an unseen callee (a lambda, a host
   function, a user method; the printing/conversion builtins, `math::`/`string::` and the
   container builtins take copies), or returning it by reference. A lambda called through a
-  variable keeps needing a variable. A coroutine binds a copy of its arguments, so a literal
+  variable keeps needing a variable except for `string&`. Native C++ binding rules are
+  unchanged. A coroutine binds a copy of its arguments, so a literal
   is fine there.
 - host (C++) functions via `engine::host_function_signatures`: arity across overloads
   (variadic = anything), and per-arg only certainties (a known primitive with no builtin

@@ -13609,13 +13609,13 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         call_stack_[frame_index].set_local(param.slot_index, script_value(*evaluated_arg));
         return {};
     }
-    // a temporary binds a parameter a declared function never writes through (detail/ref_param_writes.hpp); a lambda keeps
-    // needing a variable
-    if (evaluated_arg && callee && callee->name != "<lambda>" &&
-        detail::ref_parameter_takes_temporary(*engine_, callee->parameters(), callee->body.get(), param_index, !parallel_worker_)) {
-        call_stack_[frame_index].set_local(param.slot_index, script_value::make_cell_reference(script_value(evaluated_arg->deref()), engine_));
-        return {};
-    }
+	// string& accepts a writable temporary, including in lambdas; other types keep the inferred read-only rule.
+	if (evaluated_arg && (detail::is_string_reference_temporary(param, *evaluated_arg) ||
+		(callee && callee->name != "<lambda>" &&
+			detail::ref_parameter_takes_temporary(*engine_, callee->parameters(), callee->body.get(), param_index, !parallel_worker_)))) {
+		call_stack_[frame_index].set_local(param.slot_index, detail::make_reference_argument_temporary(param, *evaluated_arg, engine_));
+		return {};
+	}
 
     return checked_result<void>(
         make_error_code(runtime_error_code::invalid_reference),
@@ -13957,22 +13957,22 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 // A reference VALUE is already an lvalue: copying it shares the holder, so
                 // the parameter aliases the same storage (parallel_for binds each owned
                 // element this way; C++ callers can pass make_*_reference values too).
-                auto arg_type = arg.current_type();
-                if (arg.is_reference()) {
-                    call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
-                } else if (arg_type == script_value_type::jai_object_type ||
-                    arg_type == script_value_type::jai_shared_ptr_type) {
-                    call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
-                } else if (function.name != "<lambda>" &&
-                           detail::ref_parameter_takes_temporary(*engine_, function.parameters(), function.body.get(), i, !parallel_worker_)) {
-                    call_stack_[frame_index].set_local(param.slot_index, script_value::make_cell_reference(script_value(arg), engine_));
-                } else {
-                    cleanup();
-                    return checked_result<script_value>(
-                        make_error_code(runtime_error_code::invalid_reference),
-                        "Cannot pass non-lvalue to reference parameter"
-                    );
-                }
+				auto arg_type = arg.current_type();
+				if (arg.is_reference()) {
+					call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
+				} else if (arg_type == script_value_type::jai_object_type ||
+					arg_type == script_value_type::jai_shared_ptr_type) {
+					call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
+				} else if (detail::is_string_reference_temporary(param, arg) || (function.name != "<lambda>" &&
+					detail::ref_parameter_takes_temporary(*engine_, function.parameters(), function.body.get(), i, !parallel_worker_))) {
+					call_stack_[frame_index].set_local(param.slot_index, detail::make_reference_argument_temporary(param, arg, engine_));
+				} else {
+					cleanup();
+					return checked_result<script_value>(
+						make_error_code(runtime_error_code::invalid_reference),
+						"Cannot pass non-lvalue to reference parameter"
+					);
+				}
             }
         } else {
             // Escape-marked value params box into a cell so downstream ref binds share it

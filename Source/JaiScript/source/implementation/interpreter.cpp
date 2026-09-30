@@ -17,6 +17,7 @@
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
+#include <jaiscript/detail/binary_handlers.hpp>
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (vm parity)
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/utf8_operands.hpp>
@@ -54,33 +55,6 @@ namespace {
     }
     inline checked_result<script_value> int_overflow_sv(const char* msg) {
         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
-    }
-
-    // Twin-parity zero-divisor check for cpp-bound operands: index 14 skips the raw-index
-    // gates of visit_binary_expr's fast paths, which would move a bound-zero divisor's error
-    // from the fast-path surface onto the dispatch handlers' bare "Division by zero". Each
-    // shape passes the exact (op x type-pair) coverage of its own inline zero checks so bound
-    // operands keep the plain twin's error surface. Byte-parallel with vm_backend.cpp's copy.
-    struct bound_zero_divisor_error { runtime_error_code code; const char* text; };
-    inline std::optional<bound_zero_divisor_error> bound_fastpath_zero_divisor(
-            token_type op, const script_value& left, const script_value& right,
-            bool float_div_covered, bool float_mod_covered) {
-        if (op != token_type::slash && op != token_type::percent) return std::nullopt;
-        if (left.is_int() && right.is_int()) {
-            if (right.unchecked_as_int() != 0) return std::nullopt;
-            return op == token_type::slash
-                ? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in integer operation"}
-                : bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in integer operation"};
-        }
-        if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
-            if (!(op == token_type::slash ? float_div_covered : float_mod_covered)) return std::nullopt;
-            const script_float rf = right.is_int() ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
-            if (rf != 0.0) return std::nullopt;
-            return op == token_type::slash
-                ? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in float operation"}
-                : bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in float operation"};
-        }
-        return std::nullopt;
     }
 
     // Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: SHARE
@@ -151,232 +125,6 @@ namespace {
         } \
     } while(0)
 
-// Element compatibility/conversion live in the shared kernel (detail/container_enforce.hpp,
-// used verbatim by both backends and the field kernel). These forwards keep the
-// historical local names push/subscript-store call.
-static bool is_element_type_compatible(
-    const script_value& element,
-    type_info_ptr element_type,
-    script_value& array_owner
-) {
-    return detail::container_element_compatible(element, element_type, array_owner.get_engine());
-}
-
-static checked_result<script_value> convert_array_element(
-    engine* eng,
-    const script_value& element,
-    type_info_ptr element_type
-) {
-    return detail::convert_container_element(eng, element, element_type);
-}
-
-// Capture semantics: C++-backed objects (make_object wrappers, raw cpp holders) are
-// reference types in script — capturing one shares the underlying object, mirroring
-// shared_ptr capture. Pure script objects keep capture-by-value (deep copy).
-static script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
-    auto type_info = value.get_type_info();
-    if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
-        return value;
-    }
-    if (value.is_object()) {
-        auto holder = const_cast<script_value&>(value).get_object_holder();
-        if (holder) {
-            if (!holder->is_class_instance_wrapper) {
-                return value;  // raw C++ object holder: share
-            }
-            auto instance = std::static_pointer_cast<class_instance>(holder->data);
-            if (instance && symbolizer && instance->has_field(symbolizer->intern(class_constants::CPP_OBJECT_FIELD))) {
-                return value;  // class_instance wrapping a C++ object: share
-            }
-        }
-    }
-    return value.clone();
-}
-
-// Helper function to convert script_value_type to a human-readable string
-static std::string get_type_name(script_value_type type) {
-    switch (type) {
-        case script_value_type::jai_null_type: return "null";
-        case script_value_type::jai_int_type: return "int";
-        case script_value_type::jai_float_type: return "float";
-        case script_value_type::jai_string_type: return "string";
-        case script_value_type::jai_utf8_string_type: return "utf8_string";
-        case script_value_type::jai_char_type: return "char";
-        case script_value_type::jai_bool_type: return "bool";
-        case script_value_type::jai_array_type: return "array";
-        case script_value_type::jai_map_type: return "map";
-        case script_value_type::jai_object_type: return "object";
-        case script_value_type::jai_function_type: return "function";
-        case script_value_type::jai_reference_type: return "reference";
-        case script_value_type::jai_shared_ptr_type: return "shared_ptr";
-        case script_value_type::jai_weak_ptr_type: return "weak_ptr";
-        case script_value_type::jai_any_type: return "any";
-        case script_value_type::jai_invalid_type: return "invalid";
-        default: return "unknown";
-    }
-}
-
-// Helper to get a human-readable type name from a script_value
-static std::string get_value_type_name(const script_value& val) {
-    return detail::container_value_type_name(val);
-}
-
-// Helper to get type name from a type_info, falling back to base type
-static std::string get_type_info_name(type_info_ptr info) {
-    return info ? info->canonical_name() : "unknown";
-}
-
-// Forward declaration for mutual recursion
-static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path,
-                                                           const detail::arity_count_symbols& counts, const string_symbolizer& symbols);
-
-// Helper to validate map value homogeneity for auto declarations
-// Returns: error_code if values have different types, success otherwise
-static checked_result<void> validate_map_homogeneous(const script_value& map_value, const std::string& path,
-                                                     const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
-    if (!map_value.is_map()) {
-        return {};  // Not a map, nothing to validate
-    }
-
-    const auto& map = map_value.as_map();
-    if (map.size() <= 1) {
-        // Empty or single-value maps are trivially homogeneous
-        // But still need to recursively validate the single value if it's a container
-        if (map.size() == 1) {
-            const script_value& first_val = map.begin()->second.is_reference() ?
-                map.begin()->second.deref() : map.begin()->second;
-            JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[0]", counts, symbols));
-        }
-        return {};
-    }
-
-    // Get the type of the first value (deduced type)
-    auto first_it = map.begin();
-    const script_value& first_val = first_it->second.is_reference() ? first_it->second.deref() : first_it->second;
-    script_value_type deduced_type = first_val.type();
-    std::string deduced_type_name = get_type_name(deduced_type);
-
-    // For object types, also track class name
-    std::string deduced_class_name;
-    if (deduced_type == script_value_type::jai_object_type) {
-        auto type_info = first_val.get_type_info();
-        if (type_info) {
-            deduced_class_name = type_info->type_name;
-        }
-    }
-
-    // Recursively validate the first value if it's a container
-    JAISCRIPT_TRY(validate_container_homogeneous(first_val, path + "[first]", counts, symbols));
-
-    // Check all other values match
-    size_t idx = 1;
-    for (auto it = ++map.begin(); it != map.end(); ++it, ++idx) {
-        const script_value& val = it->second.is_reference() ? it->second.deref() : it->second;
-        script_value_type val_type = val.type();
-
-        // Check base type match
-        if (val_type != deduced_type) {
-            return detail::homogeneity_error(runtime_error_code::map_value_type_mismatch,
-                detail::auto_map_values, detail::auto_map_values_at, idx, counts, symbols);
-        }
-
-        // For object types, also check class name match
-        if (deduced_type == script_value_type::jai_object_type && !deduced_class_name.empty()) {
-            auto val_type_info = val.get_type_info();
-            std::string val_class_name = val_type_info ? val_type_info->type_name : "";
-            if (val_class_name != deduced_class_name) {
-                return detail::homogeneity_error(runtime_error_code::map_value_type_mismatch,
-                    detail::auto_map_classes, detail::auto_map_classes_at, idx, counts, symbols);
-            }
-        }
-
-        // Recursively validate this value if it's a container
-        JAISCRIPT_TRY(validate_container_homogeneous(val, path + "[" + std::to_string(idx) + "]", counts, symbols));
-    }
-
-    return {};
-}
-
-// Helper to validate array homogeneity for auto/array<auto> declarations
-// Returns: error_code if elements have different types, success otherwise
-// For auto x = [...] and array<auto> x = [...], all elements must have the same type
-// Recursively validates nested arrays and maps to arbitrary depth
-static checked_result<void> validate_array_homogeneous(const script_value& array_value, const std::string& path,
-                                                       const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
-    if (!array_value.is_array()) {
-        return {};  // Not an array, nothing to validate
-    }
-
-    if (array_value.unchecked_array_node()->is_typed()) {
-        return {};   // raw int/float buffers are homogeneous by construction
-    }
-    const auto& elements = array_value.as_array();
-    if (elements.size() <= 1) {
-        // Empty or single-element arrays are trivially homogeneous
-        // But still need to recursively validate the single element if it's a container
-        if (elements.size() == 1) {
-            const script_value& first = elements[0].is_reference() ? elements[0].deref() : elements[0];
-            JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]", counts, symbols));
-        }
-        return {};
-    }
-
-    // Get the type of the first element (deduced type)
-    const script_value& first = elements[0].is_reference() ? elements[0].deref() : elements[0];
-    script_value_type deduced_type = first.type();
-    std::string deduced_type_name = get_type_name(deduced_type);
-
-    // For object types, also track class name
-    std::string deduced_class_name;
-    if (deduced_type == script_value_type::jai_object_type) {
-        auto type_info = first.get_type_info();
-        if (type_info) {
-            deduced_class_name = type_info->type_name;
-        }
-    }
-
-    // Recursively validate the first element if it's a container
-    JAISCRIPT_TRY(validate_container_homogeneous(first, path + "[0]", counts, symbols));
-
-    // Check all other elements match
-    for (size_t i = 1; i < elements.size(); ++i) {
-        const script_value& elem = elements[i].is_reference() ? elements[i].deref() : elements[i];
-        script_value_type elem_type = elem.type();
-
-        // Check base type match
-        if (elem_type != deduced_type) {
-            return detail::homogeneity_error(runtime_error_code::array_element_type_mismatch,
-                detail::auto_array_elements, detail::auto_array_elements_at, i, counts, symbols);
-        }
-
-        // For object types, also check class name match
-        if (deduced_type == script_value_type::jai_object_type && !deduced_class_name.empty()) {
-            auto elem_type_info = elem.get_type_info();
-            std::string elem_class_name = elem_type_info ? elem_type_info->type_name : "";
-            if (elem_class_name != deduced_class_name) {
-                return detail::homogeneity_error(runtime_error_code::array_element_type_mismatch,
-                    detail::auto_array_classes, detail::auto_array_classes_at, i, counts, symbols);
-            }
-        }
-
-        // Recursively validate this element if it's a container
-        JAISCRIPT_TRY(validate_container_homogeneous(elem, path + "[" + std::to_string(i) + "]", counts, symbols));
-    }
-
-    return {};  // All elements are the same type
-}
-
-// Unified container homogeneity validation - handles both arrays and maps recursively
-static checked_result<void> validate_container_homogeneous(const script_value& container, const std::string& path,
-                                                           const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
-    if (container.is_array()) {
-        return validate_array_homogeneous(container, path, counts, symbols);
-    } else if (container.is_map()) {
-        return validate_map_homogeneous(container, path, counts, symbols);
-    }
-    return {};  // Not a container, nothing to validate
-}
-
 // Initialize built-in method registries with interned method names for O(1) lookup
 void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_method_registries& out) {
     // Array methods
@@ -398,10 +146,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 
         // Validate element type compatibility
-        if (!is_element_type_compatible(args[0], element_type, self)) {
+        if (!detail::container_element_compatible(args[0], element_type, self.get_engine())) {
             // Get type names for error message
-            std::string value_type = get_value_type_name(args[0]);
-            std::string expected_type = get_type_info_name(element_type);
+            std::string value_type = detail::container_value_type_name(args[0]);
+            std::string expected_type = detail::type_info_display_name(element_type);
             // Intern the type names for the error message
             uint64_t value_type_id = ctx.get_string_symbolizer()->intern(value_type);
             uint64_t expected_type_id = ctx.get_string_symbolizer()->intern(expected_type);
@@ -412,7 +160,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         // Convert element if needed (e.g., int -> float for array<float>)
-        auto converted_result = convert_array_element(ctx.get_engine(), args[0], element_type);
+        auto converted_result = detail::convert_container_element(ctx.get_engine(), args[0], element_type);
         if (!converted_result) { return converted_result.error_value(); }
         script_value converted = std::move(converted_result.value());
 
@@ -3434,7 +3182,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 						// cpp-bound operands (index 14) skip the gates above: keep the zero-divisor
 						// error surface identical to this shape's plain fast path (twin parity)
 						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-							if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
+							if (auto z = detail::bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
 								return checked_result<void>(make_error_code(z->code), z->text);
 							}
 						}
@@ -3547,7 +3295,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 						// twin parity for bound operands: float / and % are covered inline in this
 						// shape (vm op_binary_fused), so bound pairs keep the same error surface
 						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-							if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
+							if (auto z = detail::bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
 								return checked_result<void>(make_error_code(z->code), z->text);
 							}
 						}
@@ -3662,7 +3410,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 						// twin parity for bound operands: float / and % are covered inline in this
 						// shape (vm op_binary_fused), so bound pairs keep the same error surface
 						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-							if (auto z = bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
+							if (auto z = detail::bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
 								return checked_result<void>(make_error_code(z->code), z->text);
 							}
 						}
@@ -3881,8 +3629,8 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         if (type_info_ptr key_type = map_tag->key_type();
                             key_type && key_type->base_type != script_value_type::jai_any_type &&
                             key.deref().type() != key_type->base_type) {
-                            uint64_t got_id = string_symbolizer_->intern(get_value_type_name(key.deref()));
-                            uint64_t want_id = string_symbolizer_->intern(get_type_info_name(key_type));
+                            uint64_t got_id = string_symbolizer_->intern(detail::container_value_type_name(key.deref()));
+                            uint64_t want_id = string_symbolizer_->intern(detail::type_info_display_name(key_type));
                             return checked_result<void>(make_error_code(runtime_error_code::map_key_type_mismatch),
                                 "Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
                         }
@@ -6346,9 +6094,9 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
     // Validate element type if this is a container subscript reference
     type_info_ptr element_type = refHolder->container_element_type;
     if (element_type) {
-        if (!is_element_type_compatible(value, element_type, *target_ptr)) {
-            std::string value_type = get_value_type_name(value);
-            std::string expected_type = get_type_info_name(element_type);
+        if (!detail::container_element_compatible(value, element_type, target_ptr->get_engine())) {
+            std::string value_type = detail::container_value_type_name(value);
+            std::string expected_type = detail::type_info_display_name(element_type);
             uint64_t value_type_id = string_symbolizer_->intern(value_type);
             uint64_t expected_type_id = string_symbolizer_->intern(expected_type);
             return checked_result<void>(
@@ -6357,7 +6105,7 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
                 value_type_id, expected_type_id);
         }
         // Convert element if needed (e.g., int -> float for array<float>)
-        auto converted = convert_array_element(engine_, value, element_type);
+        auto converted = detail::convert_container_element(engine_, value, element_type);
         if (!converted) { return converted.error_value(); }
         *target_ptr = std::move(converted.value());
     } else {
@@ -6922,7 +6670,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 }
 
                 if (requires_homogeneity) {
-                    JAISCRIPT_TRY(validate_container_homogeneous(value, "", arity_count_ids_, *string_symbolizer_));
+                    JAISCRIPT_TRY(detail::validate_container_homogeneous(value, arity_count_ids_, *string_symbolizer_));
                     // A uniform primitive literal infers the element type and takes its
                     // representation (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
                     if (value.is_array()) {
@@ -9144,7 +8892,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         if (capture_by_ref) {
                             captureEnv->define(var_id, share_boxed_env_storage(*src.cell, engine_));
                         } else {
-                            captureEnv->define(var_id, clone_for_capture(src.cell->deref(), string_symbolizer_));
+                            captureEnv->define(var_id, detail::clone_for_capture(src.cell->deref(), string_symbolizer_));
                         }
                     } else if (src.what == detail::capture_source::kind::cpp_property) {
                         auto read = capture_by_ref
@@ -9155,7 +8903,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                             return read.error_value();
                         }
                         captureEnv->define(var_id, capture_by_ref ? std::move(read.value())
-                                                                  : clone_for_capture(read.value(), string_symbolizer_));
+                                                                  : detail::clone_for_capture(read.value(), string_symbolizer_));
                     }
                 }
             }
@@ -9194,7 +8942,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 } else {
                     auto capture_result = environment_->get(this_id);
                     if (!capture_result) return capture_result.error_value();
-                    captureEnv->define(this_id, clone_for_capture(capture_result.value(), string_symbolizer_));
+                    captureEnv->define(this_id, detail::clone_for_capture(capture_result.value(), string_symbolizer_));
                 }
                 continue;
             }
@@ -9223,7 +8971,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 // place; the closure and the original share the cell
                 captureEnv->define(capture.symbol_id, share_boxed_env_storage(*src.cell, engine_));
             } else {
-                captureEnv->define(capture.symbol_id, clone_for_capture(src.cell->deref(), string_symbolizer_));
+                captureEnv->define(capture.symbol_id, detail::clone_for_capture(src.cell->deref(), string_symbolizer_));
             }
         }
 
@@ -9247,7 +8995,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         captureEnv->define(ref.symbol_id, share_boxed_env_storage(*slot_val, engine_));
                     } else {
                         // Automatic / [=] capture of a local: by value
-                        captureEnv->define(ref.symbol_id, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                        captureEnv->define(ref.symbol_id, detail::clone_for_capture(slot_val->deref(), string_symbolizer_));
                     }
                 }
                 // Patch the AST node so future lookups go through the env path
@@ -11866,7 +11614,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
                                 // cycle (same lifecycle hazard visit_lambda_expr documents)
                                 captureEnv = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
                             }
-                            captureEnv->define(sym, clone_for_capture(slot_val->deref(), string_symbolizer_));
+                            captureEnv->define(sym, detail::clone_for_capture(slot_val->deref(), string_symbolizer_));
                         }
                     }
                 }

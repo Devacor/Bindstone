@@ -513,49 +513,13 @@ namespace jai::detail {
 	// their constraint is looser: actual-class resolution, subtypes, and raw instances
 	// into shared_ptr-tagged fields are accepted.
 
-	inline const char* ref_type_name_of(script_value_type type) {
-		switch (type) {
-			case script_value_type::jai_null_type: return "null";
-			case script_value_type::jai_int_type: return "int";
-			case script_value_type::jai_float_type: return "float";
-			case script_value_type::jai_string_type: return "string";
-			case script_value_type::jai_utf8_string_type: return "utf8_string";
-			case script_value_type::jai_char_type: return "char";
-			case script_value_type::jai_bool_type: return "bool";
-			case script_value_type::jai_array_type: return "array";
-			case script_value_type::jai_map_type: return "map";
-			case script_value_type::jai_object_type: return "object";
-			case script_value_type::jai_function_type: return "function";
-			case script_value_type::jai_reference_type: return "reference";
-			case script_value_type::jai_shared_ptr_type: return "shared_ptr";
-			case script_value_type::jai_weak_ptr_type: return "weak_ptr";
-			case script_value_type::jai_any_type: return "any";
-			case script_value_type::jai_invalid_type: return "invalid";
-			default: return "unknown";
-		}
-	}
-
-	inline std::string ref_value_type_name(const script_value& val) {
-		return container_value_type_name(val);
-	}
-
-	inline std::string ref_type_info_name(type_info_ptr info) {
-		return info ? info->canonical_name() : "unknown";
-	}
-
-	// Element errors name {0} exactly like the direct subscript-assign error does (the kernel's
-	// spelling: the payload's type, never a var tag)
-	inline std::string ref_element_value_type_name(const script_value& val) {
-		return container_value_type_name(val);
-	}
-
 	// Field constraints render shared_ptr tags in full: their type_name alone is the
 	// pointee class, which made "Cannot assign 'S' to field of type 'S'" possible
 	inline std::string ref_field_constraint_name(type_info_ptr info) {
 		if (info && info->base_type == script_value_type::jai_shared_ptr_type && !info->type_name.empty()) {
 			return "shared_ptr<" + info->type_name + ">";
 		}
-		return ref_type_info_name(info);
+		return type_info_display_name(info);
 	}
 
 	// Object constraints resolve the ACTUAL instance class (a var local's tag is 'any';
@@ -711,10 +675,9 @@ namespace jai::detail {
 
 	inline checked_result<void> ref_constraint_error(string_symbolizer* symbolizer, const script_value& value,
 	                                                 type_info_ptr constraint, bool is_field) {
-		uint64_t value_type_id = symbolizer->intern(is_field ? ref_value_type_name(value)
-		                                                     : ref_element_value_type_name(value));
+		uint64_t value_type_id = symbolizer->intern(container_value_type_name(value));
 		uint64_t expected_type_id = symbolizer->intern(is_field ? ref_field_constraint_name(constraint)
-		                                                        : ref_type_info_name(constraint));
+		                                                        : type_info_display_name(constraint));
 		return checked_result<void>(
 			make_error_code(is_field ? runtime_error_code::type_mismatch
 			                         : runtime_error_code::array_element_type_mismatch),
@@ -750,7 +713,7 @@ namespace jai::detail {
 		    referent->type_name != "auto") {
 			const script_value& actual = result.deref();
 			if (!actual.is_null() && actual.type() != referent->base_type) {
-				uint64_t got = symbolizer->intern(ref_value_type_name(actual));
+				uint64_t got = symbolizer->intern(container_value_type_name(actual));
 				uint64_t want = symbolizer->intern(return_type->type_name);
 				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
 					"Cannot return reference to '{0}' from a function returning '{1}'", got, want);

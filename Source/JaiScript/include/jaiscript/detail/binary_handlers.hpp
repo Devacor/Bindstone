@@ -16,6 +16,7 @@
 //   checked_result<script_value> equal(l, r)   // the backend's == entry, for memberwise element comparison
 
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/integer_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
 #include <jaiscript/detail/utf8_operands.hpp>
@@ -41,6 +42,29 @@ namespace jai::detail {
 	}
 	inline checked_result<script_value> type_mismatch_error(const char* text) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), text);
+	}
+
+	// A cpp-bound operand (index 14) skips a fast lane's raw-index gates; its zero divisor keeps the lane's error text.
+	// Each lane passes the (op x type-pair) coverage of its own inline zero checks.
+	struct bound_zero_divisor_error { runtime_error_code code; const char* text; };
+	inline std::optional<bound_zero_divisor_error> bound_fastpath_zero_divisor(token_type op, const script_value& left, const script_value& right,
+	                                                                           bool float_div_covered, bool float_mod_covered) {
+		if (op != token_type::slash && op != token_type::percent) { return std::nullopt; }
+		if (left.is_int() && right.is_int()) {
+			if (right.unchecked_as_int() != 0) { return std::nullopt; }
+			return op == token_type::slash
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in integer operation"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in integer operation"};
+		}
+		if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
+			if (!(op == token_type::slash ? float_div_covered : float_mod_covered)) { return std::nullopt; }
+			const script_float rf = right.is_int() ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
+			if (rf != 0.0) { return std::nullopt; }
+			return op == token_type::slash
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in float operation"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in float operation"};
+		}
+		return std::nullopt;
 	}
 
 	template <arith_op Op>

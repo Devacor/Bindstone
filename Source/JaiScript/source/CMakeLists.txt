@@ -118,6 +118,9 @@ if(MSVC)
 
     # The binder headers overflow the default section limit in a consumer's Debug TU too
     target_compile_options(jaiscript PUBLIC /bigobj)
+    # A consumer TU's inline copies of the headers (thread_pool's lock guards) win COMDAT
+    # selection, so every consumer needs unwinding even when CMAKE_CXX_FLAGS is overridden
+    target_compile_options(jaiscript PUBLIC /EHsc)
 else()
     target_compile_options(jaiscript PRIVATE
         -Wall

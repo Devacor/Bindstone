@@ -13,6 +13,7 @@
 #include <jaiscript/detail/slot_site.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <set>
+#include <unordered_set>
 #include <algorithm>
 #include <functional>
 #include <cstdio>
@@ -1543,11 +1544,37 @@ public:
     // C++ object, reached without minting a bound method. It declines (false) any argument shape it does not take,
     // and the ordinary call runs instead; what it throws raises as the ordinary call's would.
     using native_method = bool (*)(void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out);
-    void add_native_method(uint64_t id, native_method fn) { native_methods_[id] = fn; }
-    bool has_native_methods() const noexcept { return !native_methods_.empty(); }
-    native_method find_native_method(uint64_t id) const {
+    // a lane the binder derives from a bound method's C++ signature: the same conversions on the method it bound (state), one per name
+    using native_lane = bool (*)(const void* state, void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out);
+    struct native_entry {
+        native_method plain = nullptr;
+        native_lane lane = nullptr;
+        std::shared_ptr<const void> state;
+        bool operator()(void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out) const {
+            return plain ? plain(self, receiver, args, argc, out) : lane(state.get(), self, receiver, args, argc, out);
+        }
+    };
+    void add_native_method(uint64_t id, native_method fn) { native_entry& e = native_methods_[id]; e.plain = fn; e.lane = nullptr; e.state.reset(); }
+    // a second binding of the name (an overload) withdraws the derived lane: resolution among overloads stays the ordinary call's
+    void add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state) {
+        if (!native_lane_names_.insert(id).second) {
+            auto it = native_methods_.find(id);
+            if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
+            return;
+        }
+        auto [it, fresh] = native_methods_.try_emplace(id);
+        if (!fresh && it->second.plain) return;
+        it->second.lane = fn; it->second.state = std::move(state);
+    }
+    void withdraw_native_lane(uint64_t id) {
+        native_lane_names_.insert(id);
         auto it = native_methods_.find(id);
-        return it == native_methods_.end() ? nullptr : it->second;
+        if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
+    }
+    bool has_native_methods() const noexcept { return !native_methods_.empty(); }
+    const native_entry* find_native_method(uint64_t id) const {
+        auto it = native_methods_.find(id);
+        return it == native_methods_.end() ? nullptr : &it->second;
     }
     uint64_t reflection_generation() const { return reflection_generation_; }
     // The C++ identity behind a host-backed class (nullptr for script classes) — lets
@@ -2116,7 +2143,8 @@ private:
     bool auto_registered_ = false;
     bool cpp_backed_ = false;
     bool strict_signatures_ = false;
-    std::unordered_map<uint64_t, native_method> native_methods_;
+    std::unordered_map<uint64_t, native_entry> native_methods_;
+    std::unordered_set<uint64_t> native_lane_names_;   // every name the binder bound (a second binding is an overload)
     uint64_t reflection_generation_ = 0;
     std::vector<uint64_t> field_order_;
     const std::type_info* cpp_type_ = nullptr;

@@ -121,6 +121,7 @@ public:
     // Diagnostic builds (JAISCRIPT_VM_PROFILE): zero the per-opcode and per-script-function
     // tables so a warm-up phase drops out of the report; a no-op everywhere else
     virtual void profile_reset() {}
+    virtual cell_counters cells_counters() const { return {}; }
 
     // Innermost active environment during execution — the debugger enumerates in-scope
     // locals from it while parked. Default null (vm until phase 5); the interpreter

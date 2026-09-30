@@ -32,6 +32,7 @@ endif()
 # Options. Tools, tests and examples build by default only when JaiScript is the top-level project.
 option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_INSTALL "Generate the install rules and the JaiScript CMake package" ${JAISCRIPT_IS_TOP_LEVEL})
+option(JAISCRIPT_LTCG "Whole-program optimization for MSVC Release builds (/GL, /LTCG)" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_ENABLE_PROFILING "Enable profiling instrumentation" OFF)
 option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)
 option(JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES "Enable debugging environment cycles" OFF)
@@ -47,13 +48,16 @@ if(MSVC)
         $<$<CONFIG:Release>:/Ob2>      # Inline function expansion
         $<$<CONFIG:Release>:/Oi>       # Enable intrinsic functions
         $<$<CONFIG:Release>:/Ot>       # Favor fast code
-        $<$<CONFIG:Release>:/GL>       # Whole program optimization
     )
     add_link_options(
-        $<$<CONFIG:Release>:/LTCG>     # Link-time code generation
         $<$<CONFIG:Release>:/OPT:REF>  # Remove unreferenced functions
         $<$<CONFIG:Release>:/OPT:ICF>  # Identical COMDAT folding
     )
+    # A /GL library turns every consumer's Release link into a whole-program link
+    if(JAISCRIPT_LTCG)
+        add_compile_options($<$<CONFIG:Release>:/GL>)
+        add_link_options($<$<CONFIG:Release>:/LTCG>)
+    endif()
     # RelWithDebInfo: Optimizations + debugging
     add_compile_options(
         $<$<CONFIG:RelWithDebInfo>:/O2>

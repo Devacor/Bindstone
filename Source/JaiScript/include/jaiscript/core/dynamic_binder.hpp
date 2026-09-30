@@ -588,38 +588,55 @@ public:
     }
     template<typename Method>
     struct lane_state { Method method; engine* eng; };
+    // A lane argument as its parameter reads it. A const script_value& parameter takes the value out of the caller's slot (a
+    // move, no copy): the method may call back into script, which can move the buffer that slot lives in. Every other lane
+    // parameter converts to a value before the call.
+    template<typename P>
+    struct lane_held {
+        script_value& slot;
+        explicit lane_held(script_value& s) : slot(s) {}
+        decltype(auto) get(engine* eng) { return detail::value_converter<P>::from(slot, eng); }
+    };
+    template<typename P> requires std::is_same_v<P, const script_value&>
+    struct lane_held<P> {
+        script_value owned;
+        explicit lane_held(script_value& slot) : owned(std::move(slot)) {}
+        const script_value& get(engine*) const { return owned; }
+    };
     template<typename Self, typename R, typename Method, typename... Args, size_t... Is>
-    static void lane_call(Self* obj, const lane_state<Method>& st, const script_value* args, script_value& out, std::index_sequence<Is...>) {
+    static void lane_call(Self* obj, const lane_state<Method>& st, script_value* args, script_value& out, std::index_sequence<Is...>) {
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(st.eng, &storage);
+        std::tuple<lane_held<Args>...> held{ lane_held<Args>(args[Is])... };
         if constexpr (std::is_void_v<R>) {
-            (obj->*st.method)(detail::value_converter<Args>::from(args[Is], st.eng)...);
+            (obj->*st.method)(std::get<Is>(held).get(st.eng)...);
             out = script_value(std::monostate{}, st.eng);
         } else {
-            R result = (obj->*st.method)(detail::value_converter<Args>::from(args[Is], st.eng)...);
+            R result = (obj->*st.method)(std::get<Is>(held).get(st.eng)...);
             out = detail::value_converter<R>::to(result, st.eng);
         }
     }
     template<typename Self, typename R, typename Method, typename... Args>
-    static bool member_lane(const void* state, void* self, const script_value&, const script_value* args, size_t argc, script_value& out) {
+    static bool member_lane(const void* state, void* self, const script_value&, script_value* args, size_t argc, script_value& out) {
         if (argc != sizeof...(Args) || !lane_args<Args...>(args, std::index_sequence_for<Args...>{})) { return false; }
         lane_call<Self, R, Method, Args...>(static_cast<Self*>(self), *static_cast<const lane_state<Method>*>(state), args, out, std::index_sequence_for<Args...>{});
         return true;
     }
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static bool self_lane_call(const void* state, void* self, const script_value& receiver, const script_value* args, script_value& out, std::index_sequence<Is...>) {
+    static bool self_lane_call(const void* state, void* self, const script_value& receiver, script_value* args, script_value& out, std::index_sequence<Is...>) {
         const lane_state<Callable>& st = *static_cast<const lane_state<Callable>*>(state);
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(st.eng, &storage);
         T& obj = *static_cast<T*>(self);
+        std::tuple<lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>...> held{ lane_held<std::tuple_element_t<Is + 1, ArgsTuple>>(args[Is])... };
         if constexpr (std::is_void_v<R>) {
-            st.method(obj, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is], st.eng)...);
+            st.method(obj, std::get<Is>(held).get(st.eng)...);
             out = script_value(std::monostate{}, st.eng);
         } else if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
-            st.method(obj, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is], st.eng)...);
-            out = receiver;
+            out = receiver;   // before the call: the receiver is the caller's slot, which a callback may move
+            st.method(obj, std::get<Is>(held).get(st.eng)...);
         } else {
-            R result = st.method(obj, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is], st.eng)...);
+            R result = st.method(obj, std::get<Is>(held).get(st.eng)...);
             out = detail::value_converter<R>::to(result, st.eng);
         }
         return true;
@@ -627,7 +644,7 @@ public:
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
     static bool self_lane_args(const script_value* args, std::index_sequence<Is...>) { return (lane_arg<std::tuple_element_t<Is + 1, ArgsTuple>>(args[Is]) && ...); }
     template<typename R, typename ArgsTuple, typename Callable, size_t N>
-    static bool self_lane(const void* state, void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out) {
+    static bool self_lane(const void* state, void* self, const script_value& receiver, script_value* args, size_t argc, script_value& out) {
         if (argc != N || !self_lane_args<R, ArgsTuple, Callable>(args, std::make_index_sequence<N>{})) { return false; }
         return self_lane_call<R, ArgsTuple, Callable>(state, self, receiver, args, out, std::make_index_sequence<N>{});
     }

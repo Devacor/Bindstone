@@ -183,11 +183,11 @@ namespace detail { struct argument_capture_storage; }
 
         script_value& operator=(script_value&& other) noexcept {
             if (this != &other) {
-                type_info_ = std::move(other.type_info_);
+                type_info_ = other.type_info_;
                 engine_ = other.engine_;
-                storage_ = std::move(other.storage_);
                 other.type_info_ = nullptr;
                 other.engine_ = nullptr;
+                storage_ = std::move(other.storage_);   // last: the old payload's release may re-enter
             }
             return *this;
         }
@@ -2231,13 +2231,14 @@ namespace detail { struct argument_capture_storage; }
                 std::memcpy(&p_, &o.p_, sizeof(p_));
                 o.index_ = TYPEID_NULL;
             }
-            // Both assignments pin/steal o BEFORE destroy(): o may live inside our own
-            // payload (x = x.deref() through a map-entry reference holding the last pin
-            // on a temporary map), and destroy-then-copy reads freed memory there.
+            // Both assignments pin/steal o first (o may live inside our own payload: x = x.deref() through a map-entry
+            // reference holding the last pin on a temporary map) and release the old payload LAST, after the new one is
+            // in place: that release may run a destructor that stores to this very slot or moves the buffer holding it
+            // (C++ shared_ptr assignment order), so nothing here touches *this after it.
             storage& operator=(const storage& o) noexcept {
                 if (this != &o) {
                     storage pinned(o);
-                    destroy();
+                    storage doomed(std::move(*this));
                     index_ = pinned.index_;
                     std::memcpy(&p_, &pinned.p_, sizeof(p_));
                     pinned.index_ = TYPEID_NULL;
@@ -2250,7 +2251,7 @@ namespace detail { struct argument_capture_storage; }
                     payload stolen;
                     std::memcpy(&stolen, &o.p_, sizeof(p_));
                     o.index_ = TYPEID_NULL;
-                    destroy();
+                    storage doomed(std::move(*this));
                     index_ = stolen_index;
                     std::memcpy(&p_, &stolen, sizeof(p_));
                 }
@@ -2260,9 +2261,7 @@ namespace detail { struct argument_capture_storage; }
                 requires (!std::is_same_v<std::remove_cvref_t<T>, storage> &&
                           std::is_constructible_v<storage, T&&>)
             storage& operator=(T&& v) noexcept {
-                destroy();
-                new (this) storage(std::forward<T>(v));
-                return *this;
+                return *this = storage(std::forward<T>(v));
             }
             ~storage() { destroy(); }
 
@@ -2587,18 +2586,6 @@ namespace detail { struct argument_capture_storage; }
             if (raw_storage_index() != TYPEID_REFERENCE) { return SIZE_MAX; }
             auto& holder = *storage_.get_if<TYPEID_REFERENCE>();
             return holder && holder->container ? holder->container_index : SIZE_MAX;
-        }
-
-        // Destroying this value runs no code: a string only frees memory, and an object, array or map another handle
-        // still owns only loses a count (a value holding the last one may run script destructors)
-        bool release_runs_no_code() const noexcept {
-            switch (raw_storage_index()) {
-                case TYPEID_STRING: case TYPEID_UTF8_STRING: return true;
-                case TYPEID_OBJECT: { const auto* h = storage_.get_if<TYPEID_OBJECT>(); return h && h->use_count() > 1; }
-                case TYPEID_ARRAY: { const auto* h = storage_.get_if<TYPEID_ARRAY>(); return h && h->use_count() > 1; }
-                case TYPEID_MAP: { const auto* h = storage_.get_if<TYPEID_MAP>(); return h && h->use_count() > 1; }
-                default: return false;
-            }
         }
 
         // Check if array/map has unique ownership (for COW optimization)

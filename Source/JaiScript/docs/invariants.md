@@ -51,22 +51,34 @@ reserve the full `local_count` up front, never reallocate mid-frame (the 2026-07
 finding-2 failure mode was silent wrong loop counts in Release). The interpreter's
 `call_stack_` frames keep the old rule unchanged.
 
-## 2c. A released value may run a script destructor that re-enters the VM
+## 2c. A released value, or a host call, may run script that re-enters the VM
 
-Dropping the last handle to an instance runs its script destructor synchronously, and the
-destructor pushes onto the same execution stacks the release is shrinking. So a VM container never
-destroys an element while it still holds it: `iter_states_`, `try_records_` and `pending_callees_`
-shrink through `truncate_detached` / `pop_back_detached` (the tail moves into a local first; the
-tail is a noinline cold path so the hot frame pop keeps its inlining), and `value_stack::pop_back` /
-`truncate` destroy in place while `execution_limits::script_destructor_instances` is clear (no
-instance of a class with a script destructor has been created on the engine, so no release can run
-script code; `class_definition::create_instance` sets it, parallel workers copy it at region entry);
-once set they destroy a slot in place only when `script_value::release_runs_no_code()` says the
-release cannot cascade, else they relocate it out (memcpy) first and re-read the buffer by index.
-A host C++ destructor that calls back into script is outside this guard.
+Dropping the last handle to an instance runs its destructor synchronously (a script destructor, or a
+host C++ destructor that calls a stored script callback), and a host method may call script back
+before it returns. That script pushes onto the same execution stacks and can move the value stack's
+buffer. The rules that keep this sound:
+
+- A handle's destructor (`strong_ptr`, `weaker_ptr`) reads its pointer once, nulls it and releases
+  through a local, so a value whose release re-enters is never touched again by its own destructor.
+- `value_stack::pop_back` / `truncate` destroy a slot in place while `count` still covers it (a
+  re-entry pushes above it, never over it) and re-read the buffer by index after every release.
+- `storage` assignment puts the new payload in place first and releases the old one last, so a
+  destructor that stores to the slot being assigned keeps its store (C++ `shared_ptr` order) and one
+  that moves the buffer finds the slot already written.
+- A VM container never destroys an element while it still holds it: `iter_states_`, `try_records_`
+  and `pending_callees_` shrink through `truncate_detached` / `pop_back_detached` (the tail moves into
+  a local first; a noinline cold path, so the hot frame pop keeps its inlining).
+  `builtin_arg_pool_` is a deque: a nested builtin call's vector never moves an outer one.
+- A host lane (`class_definition::native_lane`) never hands the host a reference into the value
+  stack: a `const script_value&` parameter moves its argument out of the slot into the lane's
+  frame (`dynamic_binder::lane_held`), and a method returning its receiver copies it before the call.
+  The receiver slot owns a handle, so a callback that drops the receiver's last variable does not
+  end the call's object.
+
 A destructor that runs while a throw unwinds gets its own exception state (`execute_callable`
 parks the unwinding flag, exception, value and trace around it). Pinned by Spec Conformance
-`reentrant_destructors_and_operand_order` (the ASan build shows the heap-use-after-free when broken).
+`reentrant_destructors_and_operand_order` and Reentrant Callbacks (the ASan build shows the
+heap-use-after-free when broken).
 
 ## 3. Reference cells (mode 1 is DELETED, 2026-07 stage C)
 

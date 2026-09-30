@@ -19,7 +19,7 @@
 #include <cassert>
 #include <chrono>
 #include <memory>
-#include <cstring>
+#include <deque>
 #include <new>
 #include <optional>
 #include <unordered_map>
@@ -591,41 +591,20 @@ namespace jai::vm {
             void relocate_to(size_t new_cap); // the ONE buffer move (grow_push + reserve)
             script_value& back() noexcept { assert(count); return slots[count - 1]; }
             const script_value& back() const noexcept { assert(count); return slots[count - 1]; }
-            // A heavy slot relocates out (memcpy, like the buffer's own growth) before it dies: its destructor may run a
-            // script destructor that pushes onto (and grows) this stack, so the dying value never sits in the buffer and
-            // the loop re-reads the buffer by index. The slot left behind is dead storage: pop_back has already lowered
-            // count past it; truncate lowers count past every slot it relocated.
-            static void destroy_relocated(script_value& s) noexcept {
-                alignas(script_value) unsigned char doomed[sizeof(script_value)];
-                std::memcpy(doomed, static_cast<const void*>(&s), sizeof(script_value));
-                std::launder(reinterpret_cast<script_value*>(doomed))->~script_value();
-            }
-            static void destroy_slot(script_value& s) noexcept {
-                if (s.release_runs_no_code()) { s.~script_value(); }   // no destructor can re-enter: in place
-                else { destroy_relocated(s); }
-            }
-            // No instance with a script destructor has existed on this engine: no release can re-enter, pops destroy in place
-            bool releases_may_reenter() const noexcept;
+            // A release can run code (a script or host destructor) that pushes onto this stack and moves its buffer, so a
+            // slot dies in place while count still covers it (the re-entry pushes above it, never over it) and the loop
+            // re-reads the buffer by index. A handle's destructor reads its pointer once, nulls it and releases through a
+            // local, so the dying slot is not touched after the release, wherever the buffer went (invariants §2c).
             void pop_back() noexcept {
                 assert(count);
-                script_value& s = slots[--count];
-                if (!dtor_elidable(s)) {
-                    if (!releases_may_reenter()) [[likely]] { s.~script_value(); }
-                    else { destroy_slot(s); }
-                }
+                script_value& s = slots[count - 1];
+                if (!dtor_elidable(s)) { s.~script_value(); }
+                --count;
             }
             void truncate(size_t new_size) noexcept {
                 assert(new_size <= count);
-                if (!releases_may_reenter()) [[likely]] {
-                    script_value* first = slots + new_size;
-                    script_value* const last = slots + count;
-                    for (; first != last; ++first) {
-                        if (!dtor_elidable(*first)) { first->~script_value(); }
-                    }
-                } else {
-                    for (size_t i = new_size; i < count; ++i) {
-                        if (!dtor_elidable(slots[i])) { destroy_slot(slots[i]); }
-                    }
+                for (size_t i = new_size; i < count; ++i) {
+                    if (!dtor_elidable(slots[i])) { slots[i].~script_value(); }
                 }
                 count = new_size;
             }
@@ -2046,7 +2025,7 @@ namespace jai::vm {
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f);
         op_status exec_size_temp(frame& f, const vm_instruction& ins);
-        std::vector<std::vector<script_value>> builtin_arg_pool_;   // op_call_builtin's argument vectors by nesting depth (a builtin may call back into the VM)
+        std::deque<std::vector<script_value>> builtin_arg_pool_;   // op_call_builtin's argument vectors by nesting depth: a builtin may call back into the VM, and a deeper call's vector must not move this one
         size_t builtin_arg_depth_ = 0;
         op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);
         // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
@@ -2171,10 +2150,6 @@ namespace jai::vm {
         cell_counters cells_counters_{};   // entries, boundaries, resumes, misses (engine::cells_counters)
         void raw_epoch_advance() { raw_epoch_ += 2; }
     };
-
-    inline bool vm_backend::value_stack::releases_may_reenter() const noexcept {
-        return owner->limits_->script_destructor_instances;
-    }
 
 } // namespace jai::vm
 

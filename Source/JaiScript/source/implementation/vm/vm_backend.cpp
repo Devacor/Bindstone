@@ -20778,7 +20778,8 @@ script_value vm_backend::share_env_ref(script_value& storage) {
 // those (the caller decides between an evaluated reference, a temporary and the non-lvalue error). KEEP BYTE-PARALLEL with
 // interpreter::bind_site_reference.
 op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame* caller_frame, chunk* caller_code,
-                                          const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound) {
+                                          const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound,
+                                          host_slot* slot_out) {
 	const uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
 	const uint32_t slot = i < site.arg_slots.size() ? site.arg_slots[i] : k_invalid_u32;
 
@@ -20786,6 +20787,12 @@ op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame
 	// walk to an unrelated same-named outer variable)
 	if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_frame) {
 		if (script_value* slotPtr = frame_slot(*caller_frame, slot)) {
+			if (slot_out && !slotPtr->is_reference()) {   // an unboxed local: nothing else reaches it during a host call
+				*slot_out = host_slot{ caller_frame, slot };
+				out = *slotPtr;
+				bound = true;
+				return {};
+			}
 			return reference_to_storage(*slotPtr, out, bound);
 		}
 	}
@@ -20914,6 +20921,14 @@ op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame
 	return {};
 }
 
+checked_result<void> vm_backend::host_slot_store(const host_slot& slot, script_value& value) {
+	script_value* storage = frame_slot(*const_cast<frame*>(static_cast<const frame*>(slot.frame)), slot.slot);
+	if (!storage) {
+		return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+	}
+	return detail::variable_store(*storage, value, engine_);
+}
+
 op_status vm_backend::reference_to_storage(script_value& storage, script_value& out, bool& bound) {
 	if (storage.is_reference() && !storage.get_reference_holder()) {
 		return raise_(
@@ -20931,8 +20946,9 @@ op_status vm_backend::reference_to_storage(script_value& storage, script_value& 
 // A host callable's T& argument (execution_backend::host_reference_argument): the argument the call in flight passed, when
 // the callable received it (a callback a builtin makes with its own arguments did not), resolved as a T& parameter binds it
 checked_result<script_value> vm_backend::host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                                 int& component) {
+                                                                 int& component, host_slot& slot) {
 	component = -1;
+	slot = {};
 	const pending_call_site ctx = pending_site_ctx_;
 	if (!ctx.site || !ctx.arguments || ctx.arguments->size() + offset != args.size() || index >= ctx.arguments->size()) {
 		return make_null();
@@ -20943,7 +20959,7 @@ checked_result<script_value> vm_backend::host_reference_argument(const std::vect
 	}
 	script_value site_ref = make_null();
 	bool bound = false;
-	if (bind_site_reference(index, *ctx.site, ctx.caller_frame, ctx.caller_code, environment_, site_ref, bound) != op_status::ok) {
+	if (bind_site_reference(index, *ctx.site, ctx.caller_frame, ctx.caller_code, environment_, site_ref, bound, &slot) != op_status::ok) {
 		return pending_error_;
 	}
 	if (bound) {

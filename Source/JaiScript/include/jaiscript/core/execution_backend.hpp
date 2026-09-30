@@ -229,10 +229,13 @@ public:
     virtual void pop_external_call_scope() {}
     // A host callable's non-const T& argument: the reference a script T& parameter would bind for argument `index` of the
     // call in flight (docs/reference_model.md), or a non-reference when the argument names no lvalue or no script site
-    // made this call; for a math component argument (v.x) the reference to the value and in `component` the component.
+    // made this call; for a math component argument (v.x) the reference to the value and in `component` the component;
+    // for an unboxed frame-slot local its value, with `slot` naming it for host_slot_store.
     // args is what the callable received, `offset` leading entries (a receiver) ahead of the arguments.
     virtual checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                                 int& component);
+                                                                 int& component, host_slot& slot);
+    // The store back into a local host_reference_argument named by its slot (the variable's own table)
+    virtual checked_result<void> host_slot_store(const host_slot& slot, script_value& value);
     // A host calling a script function while no script runs: the deadline arms from the current budget and the entry's
     // limits reset, as at a top-level execute or resume
     virtual void begin_host_call() {}

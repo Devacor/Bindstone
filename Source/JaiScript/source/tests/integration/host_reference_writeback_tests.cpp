@@ -69,6 +69,12 @@ public:
 		e->add_function("boom", [](int64_t& x) { x = 7; throw std::runtime_error("boom"); });
 		e->add_function("mut_less", [](int64_t& a, int64_t& b) { const bool r = a < b; a = -1; b = -1; return r; });
 		e->add_function("swap_ab", [](int64_t& a, int64_t& b) { std::swap(a, b); });
+		e->add_function("around", [raw](int64_t& x, script_value during) {
+			x = 5;
+			engine::external_call_guard guard(raw);
+			(void)during.as_function()(std::vector<script_value>{});
+			x += 1;
+		});
 		dynamic_binder<gate>(*e, "Gate")
 			.constructor<>()
 			.property("count", &gate::count)
@@ -162,6 +168,17 @@ public:
 			expect("var a = [1, 2, 3]; int i = 0; function side() -> int { return 10; } add_i64(a[i + 1], side()); a.join(\",\")", "1,12,3", "a computed element ahead of an argument that runs code");
 			expect("int x = 1; function bump_x() -> int { x = 100; return 1; } add_i64(x, bump_x()); to_string(x)", "101", "the callee starts from the variable as it is at the call");
 			expect("int x = 1; string m = \"\"; try { boom(x); } catch (e) { m = e; } m + to_string(x)", "boom7", "a callee's write before it throws stands");
+		});
+
+		test("a_callback_during_the_call_sees_the_variable_before_the_store", [expect]() {
+			// the callee works on its copy: script the host runs meanwhile sees the variable as it was, and the variable takes
+			// the callee's final value when it returns (the same whether the local lives in a cell or in its frame slot)
+			expect("function f() -> string { int v = 1; string seen = \"\"; around(v, [&]() { seen = to_string(v); }); return seen + \"|\" + to_string(v); } f()", "1|6", "a local a lambda captures by reference");
+			expect("function f() -> string { int v = 1; around(v, [&]() { v = 100; }); return to_string(v); } f()", "6", "the store after the call wins over a write during it");
+			expect("function f() -> string { int v = 1; int w = 0; around(v, [=]() { }); around(v, []() { }); return to_string(v) + to_string(w); } f()", "60", "an unboxed local, twice");
+			expect("int g = 1; string seen = \"\"; function peek() { seen = to_string(g); } around(g, peek); seen + \"|\" + to_string(g)", "1|6", "a global a callback reads by name");
+			expect("class Box { int v = 1; } var b = Box(); string seen = \"\"; around(b.v, [&]() { seen = to_string(b.v); }); seen + \"|\" + to_string(b.v)", "1|6", "a field");
+			expect("function f() -> int { int v = 1; for (int i = 0; i < 3; i++) { add_i64(v, i); } return v; } to_string(f())", "4", "a loop local stays a plain slot");
 		});
 
 		test("builtin_callbacks_take_the_elements_as_lvalues", [expect]() {

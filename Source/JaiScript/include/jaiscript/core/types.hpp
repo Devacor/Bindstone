@@ -229,6 +229,13 @@ namespace jai {
         checked_result<script_value> operator()(const std::vector<script_value>& args) const;   // core/value.hpp
     };
 
+    // A frame-slot local a host T& argument names, as the backend re-finds it after the call (a frame and a slot): an
+    // unboxed local nothing else can reach, so the call stores back into it without boxing it in a cell
+    struct host_slot {
+        const void* frame = nullptr;
+        size_t slot = 0;
+    };
+
     // For serializable functions, we need to track additional info
     struct function_info {
         std::string name;           // Function name (for debugging)

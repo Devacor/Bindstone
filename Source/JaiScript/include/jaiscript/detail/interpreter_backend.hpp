@@ -155,8 +155,11 @@ public:
     }
 
     checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                         int& component) override {
-        return interpreter_->host_reference_argument(args, index, offset, component);
+                                                         int& component, host_slot& slot) override {
+        return interpreter_->host_reference_argument(args, index, offset, component, slot);
+    }
+    checked_result<void> host_slot_store(const host_slot& slot, script_value& value) override {
+        return interpreter_->host_slot_store(slot, value);
     }
 
     checked_result<script_value> resume_coroutine(coroutine_handle& handle) override {

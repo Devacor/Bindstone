@@ -6,6 +6,7 @@
 #include "types.hpp"
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/math/adapter.hpp>
 #include <vector>
 #include <memory>
 #include <type_traits>
@@ -437,6 +438,8 @@ namespace jai {
                 info.native_size = sizeof(T);
                 info.id = symbolizer.intern(info.canonical_name());
                 return info;
+            } else if constexpr (math_adapted<T>) {
+                return make_math(symbolizer, math_adapter<std::remove_cv_t<T>>::kind);
             } else {
                 // For custom types, create an object type with the type name
                 return make_object(symbolizer, typeid(T).name());

@@ -95,6 +95,37 @@ script_value script_value::make_vec(script_value_type kind, const uint32_t* word
     return v;
 }
 
+bool script_value::math_words_as(script_value_type kind, uint32_t* words) const {
+    const script_value* v = &deref();
+    script_value decoded(std::monostate{}, engine_);
+    if (v->raw_storage_index() == TYPEID_CPP_BOUND) {
+        decoded = v->bound_decoded_temp();
+        v = &decoded;
+    }
+    if (!is_math_index(v->raw_storage_index())) { return false; }
+    const script_value_type from = v->current_type();
+    if (from == kind) {
+        std::memcpy(words, v->unchecked_vec_node().words, sizeof(script_vec_node::words));
+        return true;
+    }
+    if (!detail::math::converts(from, kind)) { return false; }
+    auto converted = detail::math::convert(*v, kind, engine_);
+    if (!converted) { return false; }
+    std::memcpy(words, converted.value().unchecked_vec_node().words, sizeof(script_vec_node::words));
+    return true;
+}
+
+const char* script_value::math_conversion_text(script_value_type kind) noexcept {
+    switch (kind) {
+        case script_value_type::jai_vec2_type: return "Cannot convert {0} to math::vec2";
+        case script_value_type::jai_vec3_type: return "Cannot convert {0} to math::vec3";
+        case script_value_type::jai_vec4_type: return "Cannot convert {0} to math::vec4";
+        case script_value_type::jai_ivec2_type: return "Cannot convert {0} to math::ivec2";
+        case script_value_type::jai_ivec3_type: return "Cannot convert {0} to math::ivec3";
+        default: return "Cannot convert {0} to math::color";
+    }
+}
+
 namespace {
     template <typename M> script_value vec_from(const M& m, script_value_type kind, engine* eng) {
         uint32_t words[4] = {0, 0, 0, 0};

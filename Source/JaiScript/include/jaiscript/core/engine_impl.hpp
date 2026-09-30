@@ -157,7 +157,13 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
     // pointee's identity, never become an object of a class named "std::shared_ptr<U>"
     // (non-const lvalues reach here because the universal-reference make_value beats
     // the const shared_ptr<U>& overload).
-    if constexpr (is_specialization_v<NonConstT, std::shared_ptr>) {
+    if constexpr (math_adapted<NonConstT>) {
+        using adapter = math_adapter<NonConstT>;
+        const typename adapter::native_type native = adapter::to_native(t);
+        uint32_t words[4] = {0, 0, 0, 0};
+        std::memcpy(words, &native, sizeof(native));
+        return script_value::make_vec(adapter::kind, words, eng);
+    } else if constexpr (is_specialization_v<NonConstT, std::shared_ptr>) {
         if (!t) {
             return script_value(std::monostate{}, eng);
         }
@@ -287,6 +293,8 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
             // The element IS a handle: share identity via make_object<U>. Wrapping the
             // handle in another shared_ptr registered as "std::shared_ptr<U>" throws.
             arr.push(eng->make_value(item));
+        } else if constexpr (math_adapted<T>) {
+            arr.push(convert_custom_type_with_registry(item, eng));   // the vector buffer of the adapter's kind
         } else {
             if (eng) {
                 auto registry = eng->get_conversion_registry();

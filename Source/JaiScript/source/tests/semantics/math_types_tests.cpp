@@ -6,6 +6,12 @@
 #include <jaiscript/math/types.hpp>
 #include <jaiscript/detail/aggregate_lowering.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/math/adapter.hpp>
+#include <chrono>
+#include <cstdlib>
+#include <cstdio>
+#include <vector>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -522,3 +528,141 @@ public:
 
 using math_types_tests = jai::foundry::tests::math_types_tests;
 FOUNDRY_REGISTER(math_types_tests)
+
+// Host math types adapted to the native kinds (docs/math_types_design.md 8): they cross every binding as math values
+namespace adapter_hosts {
+    struct point3 { float x = 0, y = 0, z = 0; point3() = default; point3(float a, float b, float c) : x(a), y(b), z(c) {} };
+    struct cell3 { int x = 0, y = 0, z = 0; };
+    struct rgba { float R = 1, G = 1, B = 1, A = 1; };
+    struct extent { float width = 0, height = 0, depth = 0; };
+    struct body {
+        point3 pos;
+        extent size;
+        rgba tint;
+        std::vector<point3> path;
+        point3 get_pos() const { return pos; }
+        void set_pos(const point3& p) { pos = p; }
+        point3 moved(point3 d) const { return point3(pos.x + d.x, pos.y + d.y, pos.z + d.z); }
+    };
+    // the class-bound twin the adapters replace (a Point bound with dynamic_binder)
+    struct cpoint { float x = 0, y = 0, z = 0; cpoint() = default; cpoint(float a, float b, float c) : x(a), y(b), z(c) {} };
+}
+JAI_BIND_VEC3((adapter_hosts::point3), x, y, z)
+JAI_BIND_IVEC3((adapter_hosts::cell3), x, y, z)
+JAI_BIND_COLOR((adapter_hosts::rgba), R, G, B, A)
+JAI_BIND_VEC3((adapter_hosts::extent), width, height, depth)
+
+namespace jai::foundry::tests {
+
+class math_adapter_tests : public suite {
+public:
+    math_adapter_tests() : suite("Math Adapters") {}
+
+    static std::shared_ptr<jai::engine> host(bool use_vm) {
+        using namespace adapter_hosts;
+        auto e = jai::engine::make();
+        if (use_vm) { e->set_backend(jai::backend_type::vm); }
+        e->execution_budget(0);
+        jai::stdlib::register_all(e);
+        e->add_function("scale3", [](point3 p, float k) { return point3(p.x * k, p.y * k, p.z * k); });
+        e->add_function("len2", [](const point3& p) { return static_cast<double>(p.x * p.x + p.y * p.y + p.z * p.z); });
+        e->add_function("bump", [](point3& p) { p.x += 100; return static_cast<double>(p.x); });
+        e->add_function("cell_sum", [](cell3 c) { return static_cast<script_int>(c.x + c.y + c.z); });
+        e->add_function("tint_of", [](rgba c) { return rgba{c.R * 0.5f, c.G, c.B, c.A}; });
+        e->add_function("default_tint", []() { return rgba{}; });
+        e->add_function("box", [](extent x) { return extent{x.width * 2, x.height, x.depth}; });
+        e->add_function("path_len", [](std::vector<point3> path) { return static_cast<script_int>(path.size()); });
+        e->add_function("path_sum", [](std::vector<point3> path) { double s = 0; for (const auto& p : path) s += p.x + p.y + p.z; return s; });
+        e->add_function("make_path", [](int n) { std::vector<point3> out; for (int i = 0; i < n; ++i) out.emplace_back(float(i), float(i) * 2, 1.0f); return out; });
+        e->add_function("native3", [](jai::vec3 v) { return jai::vec3{v.z, v.y, v.x}; });
+        jai::dynamic_binder<body>(*e, "Body")
+            .constructor<>()
+            .property("pos", &body::pos)
+            .property("size", &body::size)
+            .property("tint", &body::tint)
+            .property("path", &body::path)
+            .property("p2", &body::get_pos, &body::set_pos)
+            .method("moved", &body::moved)
+            .build();
+        return e;
+    }
+
+    void forge_tests() override {
+        auto run = [](const std::string& src, bool use_vm) {
+            auto e = host(use_vm);
+            try { return e->execute(src).to_string(); }
+            catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+        };
+        auto expect = [this, run](const std::string& src, const std::string& expected, const char* what) {
+            for (bool use_vm : {false, true}) {
+                check_eq(expected, run(src, use_vm), std::string(what) + (use_vm ? " (vm)" : " (interpreter)"));
+            }
+        };
+
+        test("parameters_and_returns", [expect]() {
+            expect("var r = scale3(math::vec3(1, 2, 3), 2); to_string(r) + type_of(r)", "(2.0, 4.0, 6.0)math::vec3", "a host value in and out");
+            expect("to_string(len2(math::vec3(1, 2, 2)))", "9.0", "a const reference parameter");
+            expect("math::vec3 v = math::vec3(1, 2, 3); var r = bump(v); to_string(r) + to_string(v)", "101.0(1.0, 2.0, 3.0)", "a reference parameter takes a private copy");
+            expect("to_string(cell_sum(math::ivec3(1, 2, 3))) + to_string(cell_sum(math::vec3(1.9, 2.1, 3)))", "66", "an int host type; a vec3 converts by the typed-slot table");
+            expect("var c = tint_of(math::color(0.5, 0.25, 1, 1)); to_string(c) + type_of(c) + to_string(default_tint())", "(0.25, 0.25, 1.0, 1.0)math::color(1.0, 1.0, 1.0, 1.0)", "a color host type");
+            expect("var b = box(math::vec3(2, 3, 4)); to_string(b.width + b.height + b.depth)", "11.0", "the width/height/depth aliases read a host extent");
+            expect("to_string(native3(math::vec3(1, 2, 3)))", "(3.0, 2.0, 1.0)", "jai::vec3 is its own adapter");
+            expect("string m = \"\"; try { scale3(5, 2); } catch (e) { m = e; } m", "No viable candidates for function call", "a scalar is not a vector");
+            expect("string m = \"\"; try { scale3(math::vec2(1, 2), 2); } catch (e) { m = e; } m", "No viable candidates for function call", "another dimension is not a vector of this kind");
+        });
+
+        test("vectors_of_host_values", [expect, this]() {
+            expect("array<math::vec3> a = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)]; to_string(path_len(a)) + to_string(path_sum(a))", "221.0", "a vector buffer into std::vector");
+            expect("var p = make_path(3); p.join(\" \") + type_of(p[2])", "(0.0, 0.0, 1.0) (1.0, 2.0, 1.0) (2.0, 4.0, 1.0)math::vec3", "std::vector out as a vector buffer");
+            auto e = host(false);
+            script_value p = e->execute("make_path(2)");
+            check(p.unchecked_array_node()->kind() == script_array::kind_t::v3, "a returned std::vector<point3> is an array<math::vec3> buffer");
+            script_value v = e->make_value(adapter_hosts::point3(1, 2, 3));
+            check_eq(std::string("(1.0, 2.0, 3.0)"), v.to_string(), "make_value of a host value is a math value");
+            auto back = e->execute("math::vec3(7, 8, 9)").as<adapter_hosts::point3>();
+            check(back.x == 7 && back.y == 8 && back.z == 9, "as<Host>() reads a math value");
+        });
+
+        test("bound_members", [expect]() {
+            expect("var b = Body(); b.pos = math::vec3(1, 2, 3); b.pos.x = 5; b.pos.z += 1; to_string(b.pos) + type_of(b.pos)", "(5.0, 2.0, 4.0)math::vec3", "a member reads and stores as a math value, components included");
+            expect("var b = Body(); math::vec3 v = b.pos; v.x = 9; to_string(b.pos) + to_string(v)", "(0.0, 0.0, 0.0)(9.0, 0.0, 0.0)", "a member read is a copy");
+            expect("var b = Body(); b.size = math::vec3(1, 2, 3); b.size.height = 7; to_string(b.size.width + b.size.height)", "8.0", "an extent member");
+            expect("var b = Body(); b.tint.g = 0.5; to_string(b.tint)", "(1.0, 0.5, 1.0, 1.0)", "a color member");
+            expect("var b = Body(); b.p2 = math::vec3(1, 1, 1); b.p2.y = 3; to_string(b.p2) + to_string(b.pos)", "(1.0, 3.0, 1.0)(1.0, 3.0, 1.0)", "a getter/setter property");
+            expect("var b = Body(); b.pos = math::vec3(1, 2, 3); to_string(b.moved(math::vec3(1, 1, 1)))", "(2.0, 3.0, 4.0)", "a method");
+            expect("var b = Body(); b.path = [math::vec3(1, 2, 3)]; to_string(b.path.size())", "1", "a vector member");
+        });
+
+        test("adapter_vs_class_binding_timing", [this]() {
+            // A/B against the class-bound path (a Point bound with dynamic_binder): opt-in, prints ns per call
+            if (!std::getenv("JAI_MATH_ADAPTER_BENCH")) { return; }
+            for (bool use_vm : {false, true}) {
+                auto e = host(use_vm);
+                using adapter_hosts::cpoint;
+                jai::dynamic_binder<cpoint>(*e, "CPoint").constructor<>().constructor<float, float, float>()
+                    .property("x", &cpoint::x).property("y", &cpoint::y).property("z", &cpoint::z).build();
+                e->add_function("cscale3", [](cpoint p, float k) { return cpoint(p.x * k, p.y * k, p.z * k); });
+                const char* adapted = "function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); float s = 0.0; for (int i = 0; i < n; i++) { math::vec3 q = scale3(p, 1.5); s += q.x; } return s; } f(200000);";
+                const char* classed = "function f(int n) -> float { var p = CPoint(1, 2, 3); float s = 0.0; for (int i = 0; i < n; i++) { var q = cscale3(p, 1.5); s += q.x; } return s; } f(200000);";
+                auto time = [&](const char* src) {
+                    double best = 1e30;
+                    for (int r = 0; r < 5; ++r) {
+                        auto t0 = std::chrono::steady_clock::now();
+                        e->execute(src);
+                        const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / 200000.0;
+                        if (ns < best) best = ns;
+                    }
+                    return best;
+                };
+                const double a = time(adapted), c = time(classed);
+                std::printf("BENCH adapter_%s %.1f\nBENCH class_%s %.1f\n", use_vm ? "vm" : "interp", a, use_vm ? "vm" : "interp", c);
+            }
+            check(true, "timing printed");
+        });
+    }
+};
+
+} // namespace jai::foundry::tests
+
+using math_adapter_tests = jai::foundry::tests::math_adapter_tests;
+FOUNDRY_REGISTER(math_adapter_tests)

@@ -152,6 +152,10 @@ namespace detail { struct argument_capture_storage; }
         script_value(const color& v, engine* eng);
         // A vec of `kind` (jai_vec2_type ... jai_ivec3_type) from its component words (binary32 or int32 bits)
         static script_value make_vec(script_value_type kind, const uint32_t* words, engine* eng);
+        // This value as a math value of `kind`'s component words: the kind itself, the other precision of the same
+        // dimensions (the typed-slot conversion), a decoded bound value; false for anything else (value.cpp)
+        bool math_words_as(script_value_type kind, uint32_t* words) const;
+        static const char* math_conversion_text(script_value_type kind) noexcept;
         
         // Template constructors for all numeric types - ALL require engine references
         // NOTE: Implementations are in value_impl.hpp (include after engine.hpp)
@@ -1154,6 +1158,17 @@ namespace detail { struct argument_capture_storage; }
         // ============================================================================
         template<typename T>
         checked_result<T> checked_as() const {
+            if constexpr (math_adapted<T> && !std::is_reference_v<T> && !std::is_pointer_v<T>) {
+                using adapter = math_adapter<std::remove_cv_t<T>>;
+                typename adapter::native_type native{};
+                static_assert(sizeof(native) <= 16 && std::is_trivially_copyable_v<decltype(native)>);
+                uint32_t words[4] = {0, 0, 0, 0};
+                if (!math_words_as(adapter::kind, words)) {
+                    return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), math_conversion_text(adapter::kind), deref().type_id());
+                }
+                std::memcpy(&native, words, sizeof(native));
+                return checked_result<T>(adapter::from_native(native));
+            }
             // Try to unwrap transparent wrappers for basic types (int, float, bool, string, char)
             // This allows observable_property_ref<int> to be used as int in C++ code
             if constexpr (std::is_same_v<T, script_int> || std::is_same_v<T, int> || std::is_same_v<T, int64_t> ||

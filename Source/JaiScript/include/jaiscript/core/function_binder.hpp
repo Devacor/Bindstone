@@ -290,6 +290,15 @@ class engine;
         template<typename T>
         struct value_converter<T&> {
             static T& from(const script_value& v, engine* eng) {
+                if constexpr (math_adapted<T>) {
+                    auto* storage = detail::get_engine_parameter_storage(eng);
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for reference conversion");
+                    }
+                    std::remove_cv_t<T>& temp = storage->allocate<std::remove_cv_t<T>>();
+                    temp = v.as<std::remove_cv_t<T>>();
+                    return temp;
+                }
                 // Get the actual target value (dereferences if v is a reference)
                 script_value& target = const_cast<script_value&>(v).deref();
                 
@@ -321,6 +330,9 @@ class engine;
                 // would look up a class literally named "std::shared_ptr<T>".
                 if constexpr (is_specialization_v<T, std::shared_ptr>) {
                     return value_converter<T>::to(t, eng);
+                }
+                else if constexpr (math_adapted<T>) {
+                    return convert_custom_type_with_registry<std::remove_cv_t<T>>(t, eng);
                 }
                 // avoids copying non-copyable types and preserves reference semantics
                 else if constexpr (std::is_class_v<T> &&
@@ -371,6 +383,16 @@ class engine;
                     using key_type = typename T::key_type;
                     using value_type = typename T::mapped_type;
                     temp = conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
+                    return temp;
+                }
+                // A math value has no host object to alias: the decoded host value in parameter storage
+                else if constexpr (math_adapted<T>) {
+                    auto* storage = detail::get_engine_parameter_storage(eng);
+                    if (!storage) {
+                        throw runtime_error("No parameter storage available for const reference conversion");
+                    }
+                    T& temp = storage->allocate<T>();
+                    temp = v.as<T>();
                     return temp;
                 }
                 // Smart-pointer params can't alias script storage (the holder owns T, not
@@ -857,6 +879,12 @@ class engine;
                 // the tuple element is an lvalue, so const shared_ptr<T>& binds to it.
                 if constexpr (is_specialization_v<base_type, std::shared_ptr>) {
                     return actual_arg.as<base_type>();
+                }
+                // A math value has no host object to alias: the decoded host value (for T&, a private copy)
+                else if constexpr (math_adapted<base_type>) {
+                    ref_or_copy_argument<base_type> holder;
+                    holder.owned = actual_arg.as<base_type>();
+                    return holder;
                 }
                 // For custom classes, get shared_ptr and return reference to the object
                 // Exclude string, script_value, bound_array, bound_map, and built-in container types which have special handling

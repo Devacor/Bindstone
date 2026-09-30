@@ -322,6 +322,11 @@ static int compute_param_match_cost(
             } else {
                 totalCost += 50;                 // no C++ type info - typed overloads preferred
             }
+        } else if (is_math_type(paramInfo.base_type)) {
+            // an adapted host parameter takes its kind exactly and the other precision by the typed-slot table
+            if (argType == paramInfo.base_type) { continue; }
+            if (!detail::math::converts(argType, paramInfo.base_type)) { return -1; }
+            totalCost += 1;
         } else {
             int cost = convReg ? convReg->get_builtin_conversion_cost(argType, paramInfo.base_type)
                                : (argType == paramInfo.base_type ? 0 : 1000);

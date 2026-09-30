@@ -95,7 +95,8 @@ namespace jai {
         // the running unit's own inline cell turns plain in place
         bool define_variable(uint64_t id, const script_value& value);
         bool define_variable(uint64_t id, script_value&& value);
-        // The program-scope cell the running unit already declared for `id` (a re-run of the same unit), else null
+        // The program-scope cell the running unit already declared for `id` (a re-run of the same unit), else null; the
+        // unit's own inline cell turns plain (a declaration switched from inline)
         script_value* same_unit_cell(uint64_t id);
         // Inline and plain declarations of one name never mix across units (Dev ruling 2026-09-30). An inline declaration
         // in this program or namespace scope: create (nothing there), adopt (an inline cell, a host global, the running

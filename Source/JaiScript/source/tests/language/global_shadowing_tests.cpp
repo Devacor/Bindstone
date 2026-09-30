@@ -177,16 +177,21 @@ public:
 			});
 		});
 		test("a_same_unit_reload_flips_a_declaration_between_plain_and_inline", [this]() {
-			// the edit converts the cell in place: plain to inline keeps the value (an inline declaration adopts), inline to plain runs the
-			// initializer; another unit then sees the cell's current kind
+			// the edit converts the cell in place: plain to inline keeps the value (an inline declaration adopts), inline to plain follows
+			// the same-unit rule (an initializer re-runs; without one the value stays unless the declared type changed); another unit
+			// then sees the cell's current kind
 			const auto dir = jai::foundry::test_temp_directory() / "inline_flip";
 			std::filesystem::create_directories(dir);
 			const std::string file = (dir / "flip.jai").string();
-			every_backend("flip", "4 4 55 conflict flip.jai|1 1 3", [&](engine& e) {
+			every_backend("flip", "4 4 55 55 55 55 0.0 conflict flip.jai|1 1 3", [&](engine& e) {
 				auto run = [&](const std::string& text) { { std::ofstream(file, std::ios::trunc) << text; } return e.execute_file(file).to_string(); };
 				std::string out = run("int F = 4; F");
 				out += " " + run("inline int F = 9; F");
 				out += " " + run("int F = 55; F");
+				out += " " + run("inline int F = 1; F");
+				out += " " + run("int F; F");
+				out += " " + run("inline int F; F");
+				out += " " + run("float F; F");
 				try { e.execute("inline int F;"); out += " no error"; }
 				catch (const std::exception& ex) {
 					const std::string w = ex.what();

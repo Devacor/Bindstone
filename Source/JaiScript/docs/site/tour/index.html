@@ -69,7 +69,7 @@ print(&quot;a = ({}, {})   b = ({}, {})&quot;, a.x, a.y, b.x, b.y);</code></pre>
 
 Ship s = Ship();
 s.hull = &quot;full&quot;;   // a string into an int field: caught before anything runs</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">script:4:9: error: cannot assign &#x27;string&#x27; to field &#x27;hull&#x27; declared &#x27;int&#x27; (declared at 1:18)
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;script&gt;:4:9: error: cannot assign &#x27;string&#x27; to field &#x27;hull&#x27; declared &#x27;int&#x27; (declared at 1:18)
     s.hull = &quot;full&quot;;   // a string into an int field: caught before anything runs
             ^</code></pre></div>
 <p>Nothing ran. No half-initialized level, no bug report three hours into a playtest. When you genuinely want a dynamic value, <code>var</code> is the escape hatch, and the checker lets it through. The types you do write also make the code faster: the runtime trusts what the checker proved.</p>

@@ -157,7 +157,7 @@ caught: Cannot cast &#x27;int&#x27; to &#x27;char&#x27;</code></pre></div>
     print(&quot;never printed&quot;);
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:9: error: cannot initialize &#x27;n&#x27; declared &#x27;int&#x27; with &#x27;string&#x27;
+&lt;script&gt;:2:9: error: cannot initialize &#x27;n&#x27; declared &#x27;int&#x27; with &#x27;string&#x27;
         int n = &quot;seven&quot;;
             ^</code></pre></div>
 <p>The rule in one line: a mismatch the checker can see (a literal, a typed local, a typed return) fails the load; a mismatch it cannot see (a <code>var</code>-sourced value) raises where it lands and is catchable there. <a href="../guide/02-type-ladder.html#when-a-mismatch-is-caught">The Type Ladder</a> walks through both halves, and <a href="../guide/13-strict-checking.html">Types That Fail Early</a> collects the whole story. The third kind of error (the terminal kind) is next.</p>

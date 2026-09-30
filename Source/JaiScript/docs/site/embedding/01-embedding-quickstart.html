@@ -122,7 +122,7 @@ script is rejected before a single statement runs.</p>
 eng-&gt;execute(&quot;undefined_thing + 1&quot;);   // throws jai::static_check_error — nothing ran</code></pre></div>
 <p><code>what()</code> is the whole accumulated listing, compiler style: every error in the file, not just the first:</p>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">static check failed:
-script:1:1: error: use of undeclared identifier &#x27;undefined_thing&#x27;
+&lt;script&gt;:1:1: error: use of undeclared identifier &#x27;undefined_thing&#x27;
     undefined_thing + 1;
     ^</code></pre></div>
 <p>Names your host injects at run time aren&#x27;t in the script&#x27;s text, so the checker cannot see them.

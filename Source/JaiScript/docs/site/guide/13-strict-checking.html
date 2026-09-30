@@ -41,7 +41,7 @@ print(&quot;before&quot;);
 x = &quot;oops&quot;;
 print(&quot;after&quot;);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+&lt;script&gt;:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
     x = &quot;oops&quot;;
        ^</code></pre></div>
 <p>Nothing ran. <code>before</code> never printed. The checker saw a string literal flowing into a slot declared <code>int</code>, and under strict that is a <strong>load error</strong>: the load fails, the whole listing is the error text, and the engine is untouched. On the C++ side <code>execute()</code> throws <code>jai::static_check_error</code>; the standalone runner prints the listing and exits 1.</p>
@@ -56,10 +56,10 @@ x is still 5</code></pre></div>
 <p>That is the whole split. <strong>What the checker can see</strong> (literals, typed locals and parameters, typed returns, typed fields, calls to functions defined in the same program, members of a class it knows) fails the load. <strong>What it cannot see</strong> (anything <code>var</code>-sourced, container elements, callables held in variables, values that arrive from the host) raises at run time, catchable, and byte-identical on both backends. Every &quot;raises&quot; in the earlier chapters is the second kind.</p>
 <h2 id="reading-a-diagnostic">Reading a diagnostic<a class="hlink" href="#reading-a-diagnostic" aria-label="link">&#8203;</a></h2>
 <p>A listing is compiler-shaped, one entry per problem, and every entry has the same three lines:</p>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">script:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;script&gt;:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
     x = &quot;oops&quot;;
        ^</code></pre></div>
-<ul><li><code>script:3:4</code>, the line and column of the offending expression. For a file reached through <code>import</code> or <code>include</code> the resolved path replaces <code>script</code> (<a href="10-modules.html#what-the-checker-sees-across-files">Modules</a>); the runner names the file when it loads anyway (warn mode) and says <code>script</code> when the load fails.</li>
+<ul><li><code>&lt;script&gt;:3:4</code>, the line and column of the offending expression. For a file reached through <code>import</code> or <code>include</code> the resolved path replaces <code>script</code> (<a href="10-modules.html#what-the-checker-sees-across-files">Modules</a>); the runner names the file when it loads anyway (warn mode) and says <code>script</code> when the load fails.</li>
 <li><code>error</code> or <code>warning</code>, the severity. Errors gate the load under strict; warnings never gate, in any mode.</li>
 <li>The message, in the checker&#x27;s voice: lower-case, names quoted, types bare, and <code>(declared at L:C)</code> pointing at the declaration it is holding you to.</li>
 <li>The source line and a caret under the column.</li></ul>
@@ -71,10 +71,10 @@ x is still 5</code></pre></div>
 Creature c = Creature();
 c.hp = &quot;full&quot;;                              // a type error: this one gates the load</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:3:22: warning: local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 2:9)
+&lt;script&gt;:3:22: warning: local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 2:9)
         int poke() { int hp = 1; return hp; }   // shadows the field: a warning
                          ^
-script:6:7: error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27; (declared at 2:9)
+&lt;script&gt;:6:7: error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27; (declared at 2:9)
     c.hp = &quot;full&quot;;                              // a type error: this one gates the load
           ^</code></pre></div>
 <p>The shadowing warning would not have stopped the load on its own; the field store did. (Shadowing warnings are covered in <a href="07-classes.html">Classes</a>; the runner prints warnings when a load fails or when you pass <code>--check=warn</code>, and a host reads them from <code>engine-&gt;last_check_diagnostics()</code>.)</p>
@@ -85,7 +85,7 @@ script:6:7: error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; decl
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 print(&quot;{}&quot;, fib(10, 2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:23: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:10)
+&lt;script&gt;:2:23: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:10)
     print(&quot;{}&quot;, fib(10, 2));
                           ^</code></pre></div>
 <p>The checker knows <code>fib</code>&#x27;s signature because <code>fib</code> is defined in the same program. Put the function in a variable and the knowledge is gone. A callable held in a variable is unchecked, and the same two mistakes become run-time errors:</p>
@@ -101,7 +101,7 @@ class Archer : Unit { int range = 6; }
 Unit u = Archer();
 print(&quot;{}&quot;, u.range);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:4:15: error: no member &#x27;range&#x27; in class &#x27;Unit&#x27; (declared at 1:7)
+&lt;script&gt;:4:15: error: no member &#x27;range&#x27; in class &#x27;Unit&#x27; (declared at 1:7)
     print(&quot;{}&quot;, u.range);
                   ^</code></pre></div>
 <p>This is C++&#x27;s rule too: <code>u</code> is declared <code>Unit</code>, and a <code>Unit</code> has no <code>range</code>, whatever it holds tonight. There are two fixes. <code>cast&lt;Archer&amp;&gt;(u)</code> is a reference to the same object, seen as an <code>Archer</code>, and reads and writes go through it; a <code>var</code> receiver drops the question to run time:</p>
@@ -204,7 +204,7 @@ print(&quot;loaded; on_packet waits for the host to register net_relay&quot;);</
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern int tick_rate;
 tick_rate = &quot;fast&quot;;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:12: error: cannot assign &#x27;string&#x27; to &#x27;tick_rate&#x27; declared &#x27;int&#x27; (declared at 1:1)
+&lt;script&gt;:2:12: error: cannot assign &#x27;string&#x27; to &#x27;tick_rate&#x27; declared &#x27;int&#x27; (declared at 1:1)
     tick_rate = &quot;fast&quot;;
                ^</code></pre></div>
 <p>At run time the declaration is a no-op on both backends. The name resolves when it is used, exactly as it would have without the line, and a name still missing then raises the ordinary <code>Undefined variable &#x27;name&#x27;</code>. If the same program does define the name after all, the <code>extern</code> is inert and the definition wins, which makes it the right spelling for a shared file that calls into a module only some programs import (<a href="10-modules.html#three-escape-valves">Modules</a> has that shape).</p>
@@ -218,10 +218,10 @@ script:2:12: error: cannot assign &#x27;string&#x27; to &#x27;tick_rate&#x27; de
 [[warn_mode]] y = 5;               // covers this one statement: &#x27;y&#x27; is a warning
 z = 5;                             // the mode reverted: this one is an error</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:15: warning: use of undeclared identifier &#x27;y&#x27;
+&lt;script&gt;:2:15: warning: use of undeclared identifier &#x27;y&#x27;
     [[warn_mode]] y = 5;               // covers this one statement: &#x27;y&#x27; is a warning
                   ^
-script:3:1: error: use of undeclared identifier &#x27;z&#x27;
+&lt;script&gt;:3:1: error: use of undeclared identifier &#x27;z&#x27;
     z = 5;                             // the mode reverted: this one is an error
     ^</code></pre></div>
 <p>Unit position, for a file whose hooks reach host names the checker cannot see. The load succeeds, the function waits for the host:</p>
@@ -234,10 +234,10 @@ print(&quot;loaded; on_debug_key waits for the host&quot;);</code></pre></div>
 function on_debug_key() { return debug_overlay(1); }
 [[strict_mode]] { int n = 1; n = &quot;one&quot;; }   // re-armed strict inside a warn unit: gates the load</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:2:34: warning: use of undeclared identifier &#x27;debug_overlay&#x27;
+&lt;script&gt;:2:34: warning: use of undeclared identifier &#x27;debug_overlay&#x27;
     function on_debug_key() { return debug_overlay(1); }
                                      ^
-script:3:33: error: cannot assign &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 3:23)
+&lt;script&gt;:3:33: error: cannot assign &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 3:23)
     [[strict_mode]] { int n = 1; n = &quot;one&quot;; }   // re-armed strict inside a warn unit: gates the load
                                     ^</code></pre></div>
 <p>The runtime never changes. Both backends treat an attribute as nothing, and a warn region&#x27;s type mistakes raise at run time exactly as they would with no checker at all (the <code>debug_overlay</code> call above would raise <code>Undefined variable</code> if it ran before the host registered it). A file&#x27;s mode says nothing about the files it imports, and a <code>[[warn_mode]]</code> leaf never fails its program. <code>warn_mode</code> and <code>strict_mode</code> are the only attribute names; anything else in <code>[[ ]]</code> is a parse error.</p>

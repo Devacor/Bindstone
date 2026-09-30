@@ -30,7 +30,7 @@ const check_report& d = engine->last_check_diagnostics();   // last checked exec
 (cap 100), compiler style:
 
 ```
-script:12:5: error: cannot assign 'string' to 'x' declared 'int' (declared at 8:3)
+<script>:12:5: error: cannot assign 'string' to 'x' declared 'int' (declared at 8:3)
     x = "hello";
     ^
 ```

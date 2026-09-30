@@ -118,7 +118,7 @@ class Tiger : Cat { int stripes = 12; }
 Cat c = Tiger();
 print(c.stripes);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-script:4:9: error: no member &#x27;stripes&#x27; in class &#x27;Cat&#x27; (declared at 1:7)
+&lt;script&gt;:4:9: error: no member &#x27;stripes&#x27; in class &#x27;Cat&#x27; (declared at 1:7)
     print(c.stripes);
             ^</code></pre></div>
 <p>The spelled fix is <code>cast&lt;Tiger&amp;&gt;(c)</code>: a <em>reference</em> to the same object, so reads and writes through it land in <code>c</code>. (A value-form <code>cast&lt;Tiger&gt;(c)</code> would hand you a copy. See <a href="../guide/02-type-ladder.html#cast-the-explicit-boundary">cast in The Type Ladder</a>.) A <code>var</code> receiver is the other way out: it is unchecked, so the member resolves at run time. Either way, a wrong guess about the dynamic class is a catchable error, never a silent read:</p>
@@ -213,7 +213,7 @@ private:
 }
 auto c = Chest();
 print(c.gold);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">script:6:9: error: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;script&gt;:6:9: error: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;
     print(c.gold);
             ^</code></pre></div>
 <h2 id="accessors-get-x-set-x">Accessors: <code>_get_x</code> / <code>_set_x</code><a class="hlink" href="#accessors-get-x-set-x" aria-label="link">&#8203;</a></h2>

@@ -4145,6 +4145,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
         }
     }
+    // Only the statement's own root discards its value; a nested assignment's stored value is consumed
+    struct result_needed_scope { bool& flag; bool saved; ~result_needed_scope() { flag = saved; } } result_needed{ expression_result_needed_, expression_result_needed_ };
+    expression_result_needed_ = expr != unconsumed_root_;
 
     // For compound assignment operators, we need the current value
     if (expr->op.type != token_type::equal) {
@@ -5513,6 +5516,18 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     }
                     return ident_env->assign(identifier->symbol_id, std::move(v));
                 };
+                // The value of a store through an alias, a bound variable or a handle: a consumed one is the destination's
+                // stored value; the statement root hands the host its right-hand side
+                const bool handle_rows = store_through || (currentVal && (currentVal->is_cpp_bound() || currentVal->is_weak_ptr() ||
+                    (currentVal->get_type_info() && currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type)));
+                std::optional<script_value> host_result;
+                if (handle_rows && !expression_result_needed_) { host_result = value; }
+                script_value* const stored_cell = boxed_cell ? currentVal : nullptr;
+                auto push_stored = [&]() {
+                    if (host_result) { push_value(std::move(*host_result)); return; }
+                    const script_value* stored = stored_cell ? stored_cell : ident_env->get_value_ptr(identifier->symbol_id);
+                    push_value(stored ? clone_for_assignment(stored->deref()) : make_value());
+                };
                 if (store_through) {
                     // This is a reference - assign through it (deep copy the value)
                     JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_));
@@ -5685,8 +5700,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 if (source_holder && source_holder->data && source_holder->is_class_instance_wrapper) {
                                     auto source_instance = std::static_pointer_cast<class_instance>(source_holder->data);
                                     if (source_instance) {
-                                        // Copy all fields from source to target
                                         instance->copy_fields_from(*source_instance);
+                                        push_stored();
                                         return checked_result<void>();
                                     }
                                 }
@@ -5704,7 +5719,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             args.push_back(std::move(value));  // the value being assigned
                             auto result = func(args);
                             if (result) {
-                                // Operator= succeeded - underlying object was modified in place
+                                if (is_unwinding_) { push_value(make_value()); } else { push_stored(); }
                                 return checked_result<void>();
                             }
                             return result.error_value();   // the operator's own error, never a stand-in text
@@ -5794,6 +5809,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         script_value* stored = ident_env->get_value_ptr(identifier->symbol_id);
                         push_value(stored ? *stored : make_value());  // Shallow copy, not clone
                     }
+                }
+                if (handle_rows) {
+                    if (is_unwinding_) { push_value(make_value()); } else { push_stored(); }
                 }
             } else {
                 // ::name targets never reach members - a global miss is an error
@@ -6147,12 +6165,9 @@ script_value interpreter::string_element_pin(script_value& base_raw, const expre
 // statement visitors
 template<bool Replaying>
 checked_result<void> interpreter::visit_expression_stmt_t(expression_stmt* stmt) {
-    // Tell assignment expressions they can skip deep-cloning the result
-    bool prev = expression_result_needed_;
-    expression_result_needed_ = false;
-
+    const expression* prev = std::exchange(unconsumed_root_, stmt->expression.get());
     auto result = eval_root<Replaying>(stmt->expression.get());
-    expression_result_needed_ = prev;
+    unconsumed_root_ = prev;
     if (!result) [[unlikely]] {
         if (is_yield_signal(result)) {
             note_statement_yield(stmt, stmt->expression.get());
@@ -12505,9 +12520,8 @@ template<bool Replaying>
 checked_result<void> interpreter::visit_expression_decl_t(expression_decl* decl) {
     // A statement's value is not consumed: no read-back for an assignment expression (the
     // top-level implicit return hands the host the right-hand side, like the vm)
-    const bool prev = expression_result_needed_;
-    expression_result_needed_ = false;
-    struct restore_flag { bool& flag; bool value; ~restore_flag() { flag = value; } } restore{ expression_result_needed_, prev };
+    struct restore_root { const expression*& root; const expression* saved; ~restore_root() { root = saved; } } restore{ unconsumed_root_, unconsumed_root_ };
+    unconsumed_root_ = decl->expression.get();
     JAISCRIPT_TRY_ROOT(decl, decl->expression.get());
     return {};
 }
@@ -13771,8 +13785,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     detail::call_depth_guard depth_guard(current_call_depth_);
     // A callee's own statements decide whether their assignment expressions are consumed; the
     // caller's statement position (an expression statement clears the flag) must not leak in
-    struct result_flag_scope { bool& flag; bool saved; ~result_flag_scope() { flag = saved; } } result_flag{ expression_result_needed_, expression_result_needed_ };
-    expression_result_needed_ = true;
+    struct unconsumed_root_scope { const expression*& root; const expression* saved; ~unconsumed_root_scope() { root = saved; } } root_scope{ unconsumed_root_, unconsumed_root_ };
+    unconsumed_root_ = nullptr;
 
     // Consume the pending call-site context (set by visit_call around the invoke): ref
     // params bind against the caller's variables through it. Consumed exactly once -

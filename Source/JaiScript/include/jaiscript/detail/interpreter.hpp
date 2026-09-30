@@ -936,9 +936,10 @@ namespace jai {
 		uint64_t getValue_id_;
 		uint64_t cpp_object_field_id_;  // "_cpp_object"
 
-        // When false, assignment expressions skip the deep clone of the result
-        // (the result would be immediately discarded by visit_expression_stmt)
+        // The running assignment's value is consumed (it reads the destination back); false only for the root of an
+        // expression statement, whose value is discarded
         bool expression_result_needed_ = true;
+        const expression* unconsumed_root_ = nullptr;
 
         // Engine pointer for script_value creation (raw pointer - no atomic ops on copy)
         // Interpreter lifetime is managed by engine, so engine will always outlive interpreter

@@ -2005,28 +2005,15 @@ private:
 
 	// docs/SIMPLIFICATION_AUDIT.md F1-F8: each moves to its spec group in the change that fixes it
 	void known_bugs_simplification_audit() {
-		test("f1_a_nested_assignment_yields_the_destinations_stored_value", [this]() {
-			// Dev ruling 2026-09-08: the value of an assignment is the destination's stored value, consumed anywhere
-			expect("nested stored value", R"(
-				class C { int n = 0; static int s = 0; }
-				function id(var v) { return v; }
-				C c = C(); array<int> a = [0];
-				var r1 = 0; r1 = (c.n = 3.9);
-				var r2 = 0; r2 = (a[0] = 3.9);
-				string r3 = to_string(a[0] = 4.9);
-				var r4 = id(C::s = 5.9);
-				type_of(r1) + ":" + r1 + " " + type_of(r2) + ":" + r2 + " " + r3 + " " + type_of(r4) + ":" + r4;
-			)", "int:3 int:3 4 int:5", check_mode::warn);
-		});
-		test("f2_a_handle_store_yields_the_stored_handle", [this]() {
-			expect("handle store value", R"(
+		test("f2_a_weak_store_yields_the_stored_weak_handle", [this]() {
+			// the vm hands back the right-hand side (the shared handle) of a consumed store into a weak_ptr
+			expect("weak store value", R"(
 				class Foo { int v = 1; }
 				shared_ptr<Foo> sp = Foo();
 				weak_ptr<Foo> w = sp;
-				auto r1 = (w = null);
-				auto r2 = (w = sp);
-				"" + (r1 == null) + " " + (r2 != null);
-			)", "true true", check_mode::warn);
+				auto h = (w = sp);
+				type_of(h);
+			)", "weak_ptr", check_mode::warn);
 		});
 		test("f3_a_store_takes_its_right_sides_value_before_the_target", [this]() {
 			// Dev ruling 2026-09-27 (C++17): the right operand of every assignment operator, its value included, before the target
@@ -2074,6 +2061,31 @@ private:
 
 	// docs/SIMPLIFICATION_AUDIT.md: the audit's divergences, each pinned here by the change that fixes it
 	void simplification_audit_fixes() {
+		test("f1_a_nested_assignment_yields_the_destinations_stored_value", [this]() {
+			// Dev ruling 2026-09-08: the value of an assignment is the destination's stored value, consumed anywhere
+			expect("nested stored value", R"(
+				class C { int n = 0; static int s = 0; }
+				function id(var v) { return v; }
+				C c = C(); array<int> a = [0];
+				var r1 = 0; r1 = (c.n = 3.9);
+				var r2 = 0; r2 = (a[0] = 3.9);
+				string r3 = to_string(a[0] = 4.9);
+				var r4 = id(C::s = 5.9);
+				type_of(r1) + ":" + r1 + " " + type_of(r2) + ":" + r2 + " " + r3 + " " + type_of(r4) + ":" + r4;
+			)", "int:3 int:3 4 int:5", check_mode::warn);
+		});
+		test("f2_a_handle_store_yields_a_value", [this]() {
+			expect("handle store value", R"(
+				class Foo { int v = 1; }
+				shared_ptr<Foo> sp = Foo();
+				weak_ptr<Foo> w = sp;
+				auto r1 = (w = null);
+				auto r2 = (w = sp);
+				shared_ptr<Foo> s2 = Foo();
+				auto r3 = (s2 = null);
+				"" + (r1 == null) + " " + (r2 != null) + " " + (r3 == null);
+			)", "true true true", check_mode::warn);
+		});
 		test("f6_a_coroutine_whose_body_threw_is_completed", [this]() {
 			// a native exception escaping the body fails the handle like a script throw; the resumer's state comes back
 			expect("coroutine after a throw", R"(

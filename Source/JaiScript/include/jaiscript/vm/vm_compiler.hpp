@@ -107,6 +107,7 @@ namespace jai::vm {
         bool fusable_index_expr(const expression* e);
         bool index_read_partner_shape(const binary_expr* rb);
         bool try_emit_fused_index(binary_expr* expr, uint32_t flags);
+        bool try_emit_fused_index_shape(binary_expr* expr, uint32_t flags);
         bool compile_subscript_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out);
         uint32_t member_base_slot(const expression* e) const;   // a member read or store whose base is a frame-slot identifier: the base's slot, else invalid
         bool member_temp_operand(const expression* e) const;
@@ -234,6 +235,7 @@ namespace jai::vm {
         // The chunk::string_target_sites entry of a subscript store target (k_invalid_u32 when
         // its base can only be a temporary or arrives as its own reference)
         uint32_t string_target_site_for(const expression_ptr& target);
+        bool try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site);
         bool try_emit_fused_push(const std::shared_ptr<call_expr>& call);
         // Branch-position condition: &&/|| thread straight to conditional jumps (no bool
         // materialization; each comparison pairs into fused_cmp_jump). Falsy control lands

@@ -337,6 +337,7 @@ namespace jai::vm {
         // the guard's always form (op_operand_temp c = 2): the container's value is taken ahead of an index that may run user
         // code (a custom numeric operator, a getter, an operator[]), whatever the slot holds; the readers take the temp every time
         bool guard_always = false;
+        uint8_t receiver = 0;   // the subscript's container the checker proved (binary_expr::subscript_receiver): 1 string, 2 array, 3 map, 0 unproven
         // op_index_store_fused: the store target's chunk::string_target_sites entry (k_invalid_u32 = none)
         uint32_t string_target = k_invalid_u32;
     };
@@ -473,6 +474,12 @@ namespace jai::vm {
             bool frame_program = false;
             bool raw_enterable = false;
             bool raw_sites = false;   // a call of the block may be raw (plans is sized): only such a block advances the raw epoch at its entry and its doors
+            // a boundary operation (docs/typed_regions_design.md "Boundary operations"): a statement the translation does not take runs on the
+            // general form while the block stays parked; start is its first general ip, end the general ip it ends at (the resume point: a
+            // CELLS_RESUME there, or the loop's back edge), resume the copy ip the block continues from, define the cell of the local the
+            // statement declares (read back from its slot at the resume, whatever the block held before)
+            struct boundary { uint32_t start = 0, end = 0, resume = 0, define = 0xFFFFFFFFu; };
+            std::vector<boundary> boundaries;
             std::vector<uint32_t> param_cells;
             std::string ir_text;   // the region's canonical operations (index:kind, ->target, w slot, r slots), filled only when the compiler lists the IR
             uint32_t param_kinds = 0;   // the parameter cells' kinds, four bits per parameter (the call site's raw_kinds form)

@@ -85,8 +85,11 @@ add_executable(jaiscript_tests
 target_link_libraries(jaiscript_tests PRIVATE jaiscript)
 
 # Enable environment cycle detection for tests (always on for debugging)
+# JAISCRIPT_TESTS_SOURCE_ROOT: the JaiScript folder, so corpus tests find examples/ from any working directory
+get_filename_component(JAISCRIPT_TESTS_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 target_compile_definitions(jaiscript_tests PRIVATE
     JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
+    JAISCRIPT_TESTS_SOURCE_ROOT="${JAISCRIPT_TESTS_SOURCE_ROOT}"
 )
 
 # Include test directory for relative includes

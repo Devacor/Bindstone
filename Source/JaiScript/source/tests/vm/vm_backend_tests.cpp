@@ -1874,16 +1874,16 @@ public:
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				jai::stdlib::register_all(e);
 				auto msg = e->execute(src).as<std::string>();
-				check_true(msg.find("Cannot assign 'string' to field of type 'int'") != std::string::npos,
-					"typed field rejects retype through the ref");
+				check_true(msg.find("Cannot assign string to field 'v' of Box (declared int)") != std::string::npos,
+					"typed field rejects retype through the ref with the direct store's text");
 				check_true(msg.find("|1") != std::string::npos, "field value untouched after rejected write");
 				if (!use_vm) { first = msg; } else { check_eq(first, msg, "identical error text on both backends"); }
 			}
 		});
 
 		test("tier1_typed_field_numeric_conversion_and_null", [this]() {
-			// float converts into an int field like elements do; typed object fields
-			// stay nullable through the ref (the `TreeNode left = null` idiom)
+			// float converts into an int field and null stores a typed null in a class field, as the direct field
+			// store does (the `TreeNode left = null` idiom; the field's own table, Dev ruling 2026-09-30)
 			const char* src = R"(
 				class Node { int num = 1; Node next = null; }
 				function put(var& x, var val) { x = val; }
@@ -1899,7 +1899,7 @@ public:
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
-				check_eq(std::string("2|null"), got);
+				check_eq(std::string("2|object"), got);
 				if (!use_vm) { first = got; } else { check_eq(first, got); }
 			}
 		});
@@ -1925,7 +1925,7 @@ public:
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("str|1|") == 0, "var field binds unconstrained; int field unchanged");
-				check_true(got.find("Cannot assign 'string' to field of type 'int'") != std::string::npos,
+				check_true(got.find("Cannot assign string to field 'i' of Box (declared int)") != std::string::npos,
 					"declared int field constrains the ref");
 				if (!use_vm) { first = got; } else { check_eq(first, got, "identical error text on both backends"); }
 			}
@@ -2182,8 +2182,7 @@ public:
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("9|") == 0, got);
-				check_true(got.find("Cannot assign") != std::string::npos &&
-				           got.find("field of type") != std::string::npos, got);
+				check_true(got.find("Cannot assign string to field 'v' of O (declared int)") != std::string::npos, got);
 				if (!use_vm) { first = got; } else { check_eq(first, got, "identical on both backends"); }
 			}
 		});
@@ -3143,8 +3142,8 @@ public:
 				out;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
-			check_true(i_out.find("Cannot assign 'Stranger' to field of type 'Node'") != std::string::npos,
-				"interp: rejection names the actual class");
+			check_true(i_out.find("Cannot assign Stranger to field 'n' of Holder (declared Node)") != std::string::npos,
+				std::string("interp: rejection names the actual class, got: ") + i_out);
 			check_eq(i_out, v_out, "rejection message parity");
 		});
 
@@ -3238,9 +3237,8 @@ public:
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
 			check_true(i_out.find("AB|") == 0, std::string("interp: raw same-class and subtype accepted, got: ") + i_out);
-			// RULED (2026-07): the ref constraint is the DECLARED type ('S p'), so the
-			// rejection names 'S' rather than the bind-time value's shared_ptr<S> tag
-			check_true(i_out.find("Cannot assign 'int' to field of type 'S'") != std::string::npos,
+			// the ref runs the field's table (Dev ruling 2026-09-30): the DECLARED type ('S p') names the slot
+			check_true(i_out.find("Cannot assign int to field 'p' of H (declared S)") != std::string::npos,
 				std::string("interp: rejection names the declared constraint, got: ") + i_out);
 			check_eq(i_out, v_out, "shared_ptr field constraint parity");
 		});
@@ -3258,7 +3256,7 @@ public:
 				msg;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
-			check_true(i_out.find("Cannot assign 'int' to field of type 'shared_ptr<S>'") != std::string::npos,
+			check_true(i_out.find("Cannot assign int to field 'p' of H (declared shared_ptr<S>)") != std::string::npos,
 				std::string("interp: auto field keeps the value-tag constraint, got: ") + i_out);
 			check_eq(i_out, v_out, "auto-field shared_ptr constraint parity");
 		});

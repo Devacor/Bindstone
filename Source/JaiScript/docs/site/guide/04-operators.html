@@ -71,7 +71,7 @@ side_effects;</code></pre></div>
 1 == 1.0 = true
 side_effects = 0
 == result: 0</code></pre></div>
-<p>Float ordering uses a total order (NaN included) so values remain valid map keys. <code>==</code> and <code>&lt;=&gt;</code> are kept mutually consistent by design.</p>
+<p>Float comparisons follow IEEE: a NaN operand makes <code>==</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> false and <code>!=</code> true, on every path (a condition, a loop head, an array compared element by element). NaN has no order, so <code>&lt;=&gt;</code> with a NaN operand raises <code>Cannot order NaN with &lt;=&gt;</code>. Map keys keep a total order that places NaN, so a NaN key is found again.</p>
 <h2 id="evaluation-order-is-a-contract">Evaluation order is a contract<a class="hlink" href="#evaluation-order-is-a-contract" aria-label="Link to this section">&#8203;</a></h2>
 <p>In a call, the callee expression is evaluated <strong>before</strong> any argument, and arguments go <strong>left to right</strong>. Binary operators evaluate their left operand first. This is the C++17 rule, it holds on both backends, and it is the order errors surface in too: if the callee and the first argument both fail, you see the callee&#x27;s error.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function a() { print(&quot;argument a&quot;); return 1; }

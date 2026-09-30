@@ -761,7 +761,8 @@ namespace jai::detail {
 				return {};
 			}
 			if (tag && tag->base_type != script_value_type::jai_reference_type) {
-				auto stored = typed_store_convert(value, tag, eng, []() { return slot_site{slot_kind::assignment, {}, {}}; });
+				// the value copy first (value semantics: an array store never aliases its source), then the variable's table
+				auto stored = typed_store_convert(clone_for_assignment(value), tag, eng, []() { return slot_site{slot_kind::assignment, {}, {}}; });
 				if (!stored) { return stored.error_value(); }
 				script_value v = std::move(stored.value());
 				v.set_type_info(tag);

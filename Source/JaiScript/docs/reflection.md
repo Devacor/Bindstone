@@ -44,6 +44,7 @@ for (auto f : reflect::fields(obj)) {
 reflect::get(x, "hp")                   // reads like x.hp
 reflect::set(x, "hp", 50)              // writes like x.hp = 50 — same type + access enforcement
 reflect::invoke(x, "heal", 25)         // calls like x.heal(25) — overloads, defaults, access
+reflect::bind(x, "heal")               // x's heal as a callable (holds x, keeps it alive); a value type's methods need a lambda
 reflect::call("spawn_wave", 3)         // calls a FREE function by name — script or host-registered
 reflect::construct("Goblin", 30)       // == Goblin(30), value semantics
 reflect::construct_shared("Goblin", 30) // == new Goblin(30), reference semantics

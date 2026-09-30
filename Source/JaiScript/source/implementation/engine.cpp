@@ -92,7 +92,10 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
     // Host-boundary detection BEFORE the call (the backends' host-level-resume rule):
     // an invocation with no execute in flight is a fresh host entry.
     const bool host_boundary = !backend->is_executing() && !backend->is_unwinding();
-    if (host_boundary) { eng->note_host_entry(); }
+    if (host_boundary) {
+        eng->note_host_entry();
+        backend->begin_host_call();
+    }
     auto result = backend->execute_callable(payload, args);
     if (host_boundary && result.has_value() && backend->is_unwinding()) [[unlikely]] {
         // Uncaught script throw crossing the host boundary: report EXACTLY like

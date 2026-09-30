@@ -770,6 +770,12 @@ bool vm_backend::has_variable(const std::string& name) const {
 	return environment_->contains(name);
 }
 
+void vm_backend::begin_host_call() {
+	if (engine_) { limits_ = &engine_->execution_limits(); }
+	arm_execution_deadline();
+	limits_->reset_for_execute();
+}
+
 void vm_backend::push_external_call_scope() {
 	if (frames_.empty()) { arm_execution_deadline(); }
 	external_site_stack_.push_back(pending_site_ctx_);

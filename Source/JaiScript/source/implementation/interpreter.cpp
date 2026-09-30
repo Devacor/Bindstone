@@ -2780,6 +2780,12 @@ void interpreter::sync_debug_hook() {
     debug_hook_ = next;
 }
 
+void interpreter::begin_host_call() {
+    if (engine_) { limits_ = &engine_->execution_limits(); }
+    arm_execution_deadline();
+    limits_->reset_for_execute();
+}
+
 void interpreter::prepare_for_execution() {
     sync_debug_hook();
     arm_execution_deadline();

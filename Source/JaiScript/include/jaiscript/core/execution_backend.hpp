@@ -226,6 +226,9 @@ public:
     // invocation of a script function (see engine::external_call_guard)
     virtual void push_external_call_scope() {}
     virtual void pop_external_call_scope() {}
+    // A host calling a script function while no script runs: the deadline arms from the current budget and the entry's
+    // limits reset, as at a top-level execute or resume
+    virtual void begin_host_call() {}
 
     // Coroutine resume; default body (coroutine.cpp) fails the handle with
     // "Coroutines are not supported by this backend"

@@ -549,6 +549,7 @@ namespace jai {
         // External (C++) invocations of script functions must not see the pending
         // call-site context of whatever script call is in flight - reference params
         // would bind its variables. A one-pointer shelf replaces the old metadata stack.
+        void begin_host_call();
         void push_external_call_scope() {
             // A host-level callback (no script in flight) is its own budgeted entry
             if (execute_depth_ == 0 && call_stack_.empty()) { arm_execution_deadline(); }

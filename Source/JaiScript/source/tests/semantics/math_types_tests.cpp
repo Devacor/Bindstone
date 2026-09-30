@@ -8,6 +8,11 @@
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/math/adapter.hpp>
+#include <jaiscript/properties/property_manager.hpp>
+#include <jaiscript/properties/observable_property.hpp>
+#include <jaiscript/properties/macros.hpp>
+#include <jaiscript/properties/property_serialization.hpp>
+#include <jaiscript/serialization/archive.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
@@ -531,10 +536,10 @@ FOUNDRY_REGISTER(math_types_tests)
 
 // Host math types adapted to the native kinds (docs/math_types_design.md 8): they cross every binding as math values
 namespace adapter_hosts {
-    struct point3 { float x = 0, y = 0, z = 0; point3() = default; point3(float a, float b, float c) : x(a), y(b), z(c) {} };
-    struct cell3 { int x = 0, y = 0, z = 0; };
-    struct rgba { float R = 1, G = 1, B = 1, A = 1; };
-    struct extent { float width = 0, height = 0, depth = 0; };
+    struct point3 { float x = 0, y = 0, z = 0; point3() = default; point3(float a, float b, float c) : x(a), y(b), z(c) {} template <class A> void serialize(A& ar) { ar(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z)); } friend bool operator==(const point3&, const point3&) = default; };
+    struct cell3 { int x = 0, y = 0, z = 0; template <class A> void serialize(A& ar) { ar(JAI_NVP(x), JAI_NVP(y), JAI_NVP(z)); } };
+    struct rgba { float R = 1, G = 1, B = 1, A = 1; template <class Ar> void serialize(Ar& ar) { ar(JAI_NVP(R), JAI_NVP(G), JAI_NVP(B), JAI_NVP(A)); } };
+    struct extent { float width = 0, height = 0, depth = 0; template <class A> void serialize(A& ar) { ar(JAI_NVP(width), JAI_NVP(height), JAI_NVP(depth)); } };
     struct body {
         point3 pos;
         extent size;
@@ -551,6 +556,22 @@ JAI_BIND_VEC3((adapter_hosts::point3), x, y, z)
 JAI_BIND_IVEC3((adapter_hosts::cell3), x, y, z)
 JAI_BIND_COLOR((adapter_hosts::rgba), R, G, B, A)
 JAI_BIND_VEC3((adapter_hosts::extent), width, height, depth)
+
+namespace adapter_hosts {
+    // reflected properties of adapted types surface as the math kinds with no per-property binding
+    class shape : public jai::property_owner<shape> {
+    public:
+        JAI_PROPERTY((point3), position);
+        JAI_PROPERTY((extent), size, extent{1, 2, 3});
+        JAI_OBSERVABLE_PROPERTY((point3), velocity);
+        JAI_NAMED_PROPERTY((rgba), "tint", currentTint);
+        JAI_PROPERTY((cell3), cell);
+        JAI_NAMED_PROPERTY((rgba), "hue", currentHue, rgba{0.5f, 0.5f, 0.5f, 1.0f});
+        int velocity_changes = 0;
+        jai::receiver<void(const point3&, const point3&)>::shared_type velocity_receiver;
+        shape() { velocity_receiver = velocity.on_change.connect([this](const point3&, const point3&) { ++velocity_changes; }); }
+    };
+}
 
 namespace jai::foundry::tests {
 
@@ -631,6 +652,44 @@ public:
             expect("var b = Body(); b.p2 = math::vec3(1, 1, 1); b.p2.y = 3; to_string(b.p2) + to_string(b.pos)", "(1.0, 3.0, 1.0)(1.0, 3.0, 1.0)", "a getter/setter property");
             expect("var b = Body(); b.pos = math::vec3(1, 2, 3); to_string(b.moved(math::vec3(1, 1, 1)))", "(2.0, 3.0, 4.0)", "a method");
             expect("var b = Body(); b.path = [math::vec3(1, 2, 3)]; to_string(b.path.size())", "1", "a vector member");
+        });
+
+        test("reflected_properties", [this]() {
+            // every JAI_PROPERTY of an adapted type is a math value in script, and stores (whole, component, compound) reach the
+            // live C++ member through the property's own assignment
+            for (bool use_vm : {false, true}) {
+                using adapter_hosts::shape;
+                auto e = host(use_vm);
+                jai::dynamic_binder<shape>(*e, "Shape").auto_bind().build();
+                auto s = std::make_shared<shape>();
+                e->add_global("s", e->make_value(s));
+                const std::string label = use_vm ? " (vm)" : " (interpreter)";
+                check_eq(std::string("math::vec3(1.0, 2.0, 3.0)math::color"), e->execute("type_of(s.position) + to_string(s.size) + type_of(s.tint)").to_string(), "types" + label);
+                e->execute("s.position = math::vec3(1, 2, 3); s.position.x = 5; s.position.y += 10; s.position.z++; s.size.height = 7; s.tint.g = 0.5; s.cell.x = 4; s.cell.y += 2;");
+                check(s->position->x == 5 && s->position->y == 12 && s->position->z == 4, "whole, component and compound stores reach the member" + label);
+                check(s->size->height == 7 && s->size->width == 1, "an extent's alias store" + label);
+                check(s->currentTint->G == 0.5f && s->currentTint->R == 1.0f, "a named property" + label);
+                check(s->cell->x == 4 && s->cell->y == 2, "an int kind" + label);
+                e->execute("s.velocity = math::vec3(1, 1, 1); s.velocity.x = 2; s.velocity.y *= 3;");
+                check(s->velocity->x == 2 && s->velocity->y == 3 && s->velocity->z == 1, "an observable property" + label);
+                check_eq(3, s->velocity_changes, "every store notifies" + label);
+                check_eq(std::string("(5.0, 12.0, 4.0)"), e->execute("math::vec3 p = s.position; p.x = 0; to_string(s.position)").to_string(), "a read is a copy" + label);
+                check_eq(std::string("true"), e->execute("string m = \"\"; try { s.position = 5; } catch (e) { m = e; } to_string(m.contains(\"math::vec3\"))").to_string(), "a scalar store rejects" + label);
+            }
+        });
+
+        test("reflected_property_named_like_a_method", [this]() {
+            // a bound method of the property's name is the class's spelling; the property is reached through it
+            for (bool use_vm : {false, true}) {
+                using adapter_hosts::shape;
+                auto e = host(use_vm);
+                jai::dynamic_binder<shape>(*e, "Shape").auto_bind().method("hue", [](shape& self) { return self.currentHue.get(); }).build();
+                auto s = std::make_shared<shape>();
+                e->add_global("s", e->make_value(s));
+                const std::string label = use_vm ? " (vm)" : " (interpreter)";
+                check_eq(std::string("math::color(0.5, 0.5, 0.5, 1.0)"), e->execute("type_of(s.hue()) + to_string(s.hue())").to_string(), "the method answers" + label);
+                check_eq(std::string("math::vec3"), e->execute("type_of(s.position)").to_string(), "other properties still surface" + label);
+            }
         });
 
         test("adapter_vs_class_binding_timing", [this]() {

@@ -10,6 +10,8 @@
 #include <concepts>
 #include <type_traits>
 #include <typeindex>
+#include <cstring>
+#include <jaiscript/properties/property_schema.hpp>
 
 
 // Forward declarations
@@ -626,6 +628,29 @@ namespace jai {
 			// No-op
 		}
 	};
+
+	// The schema's math bridge for a property of ValueT: empty unless ValueT has a math_adapter
+	template <typename ValueT>
+	math_property_bridge math_bridge_of() {
+		if constexpr (math_adapted<ValueT>) {
+			using adapter = math_adapter<ValueT>;
+			math_property_bridge bridge;
+			bridge.kind = adapter::kind;
+			bridge.read = [](const void* host, uint32_t* words) {
+				const typename adapter::native_type native = adapter::to_native(*static_cast<const ValueT*>(host));
+				std::memcpy(words, &native, sizeof(native));
+			};
+			bridge.assign = [](property_base& property, const uint32_t* words) {
+				typename adapter::native_type native{};
+				std::memcpy(&native, words, sizeof(native));
+				const ValueT host = adapter::from_native(native);
+				return property.erased_assign(&host);
+			};
+			return bridge;
+		} else {
+			return {};
+		}
+	}
 
 } // namespace jai
 #endif

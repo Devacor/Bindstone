@@ -39,7 +39,9 @@
                 #name, \
                 std::type_index(typeid(ValueT)), \
                 allow_ser, \
-                is_obs \
+                is_obs, \
+                false, \
+                jai::math_bridge_of<ValueT>() \
             } \
         ); \
         return 0; \
@@ -90,7 +92,9 @@
                 prop_name, \
                 std::type_index(typeid(ValueT)), \
                 true, \
-                false \
+                false, \
+                false, \
+                jai::math_bridge_of<ValueT>() \
             } \
         ); \
         return 0; \

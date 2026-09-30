@@ -23,6 +23,7 @@ struct host_options {
 	int64_t frames = 1700;               // smoke frame budget (covers every scene of the reel)
 	std::string expect;                  // smoke: required stream hash (hex), exit 1 on mismatch
 	int64_t perf = 0;                    // headless per-scene timing: N frames per scene
+	int64_t perf_warmup = 0;             // untimed frames on the same runtime, followed by a reboot of the measured scene
 	double perf_at = 3.0;                // perf: scene time the measured frames start from
 	std::string csv;                     // perf: also write rows to this file
 	int64_t workers = -1;                // parallel width; -1 engine default, 1 serial (ports: always serial)

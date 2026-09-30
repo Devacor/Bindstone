@@ -187,6 +187,8 @@ Every scene holds 30 fps on the VM with room to spare (mean 2.8 ms, worst
 
 ### Scoreboard
 
+The [2026-09-29 comparison](ports/RESULTS_2026-09-29.md) covers natural/shaped JaiScript, Lua and Squirrel with warm-up, interleaving and padding controls. See [comparison instructions](ports/COMPARISON.md) for the runner.
+
 `scenes/skull_natural.jai` is OSSUARY written the way a user would write it:
 the same algorithms and the same frames as `skull.jai` (scene hash
 `1aba3d7537895828`), without the spellings chosen to fit the VM's fast paths

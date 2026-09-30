@@ -98,7 +98,7 @@ class WindowsMachine:
 			more = self.kernel.Process32FirstW(handle,ctypes.byref(entry))
 			while more:
 				name = entry.name.lower()
-				if name in ("cl.exe","link.exe","ninja.exe","msbuild.exe","bindstone.exe") or name.startswith(("jai_gloom","gloom_","jaiscript","jai_doom_","reference_host")):
+				if name in ("cl.exe","link.exe","ninja.exe","msbuild.exe","bindstone.exe") or name.startswith(("jai_gloom","gloom_","jaiscript","jai_doom_","reference_host","jai_demoreel","demoreel_")):
 					result.append({"name":name,"pid":entry.pid})
 				more = self.kernel.Process32NextW(handle,ctypes.byref(entry))
 		finally:

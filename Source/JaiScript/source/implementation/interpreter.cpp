@@ -5011,46 +5011,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
             }
             
-            // Directly assign the result without creating new AST nodes (optimization)
-            if (expr->target->get_type() == node_type::identifier_expr) {
-                auto* identifier = static_cast<identifier_expr*>(expr->target.get());
-                // Fast path for simple identifier assignment
-                if (identifier->symbol_id == UINT64_MAX) {
-                    identifier->symbol_id = string_symbolizer_->intern(identifier->name);
-                }
-
-                // FIX #5: Enforce type compatibility for compound assignments
-                script_value* currentVal = identifier->global_qualified
-                    ? get_global_environment()->get_value_ptr(identifier->symbol_id)
-                    : environment_->get_value_ptr(identifier->symbol_id);
-                if (currentVal) {
-                    type_info_ptr target_type = currentVal->get_type_info();
-                    if (target_type && target_type->base_type != script_value_type::jai_any_type) {
-                        auto enforced = enforce_type_compatibility(std::move(resultValue), target_type, identifier->name);
-                        if (!enforced) {
-                            return enforced.error_value();
-                        }
-                        resultValue = std::move(enforced.value());
-                    }
-                }
-
-                // §12.1: identifier compound on a bound VARIABLE stays write-through instead of
-                // silently replacing the binding with a detached value
-                if (currentVal && currentVal->is_cpp_bound()) {
-                    currentVal->assign_through(resultValue);
-                    push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
-                    return {};
-                }
-
-                // FIX #3/#4: Save result before moving to avoid returning moved-from value
-                script_value returnValue = resultValue.clone();
-                if (identifier->global_qualified) {
-                    JAISCRIPT_TRY(get_global_environment()->assign(identifier->symbol_id, std::move(resultValue)));
-                } else {
-                    JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(resultValue)));
-                }
-                push_value(std::move(returnValue));
-            } else if (currentValue.is_reference()) {
+            if (currentValue.is_reference()) {
                 // The target read minted the element reference: store through it, never
                 // re-evaluate the subscript (its side effects, and any yield, ran once)
                 JAISCRIPT_TRY(store_through_subscript_reference(currentValue, std::move(resultValue)));

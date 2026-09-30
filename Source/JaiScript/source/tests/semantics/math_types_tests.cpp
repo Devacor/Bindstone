@@ -161,8 +161,9 @@ public:
             expect(raised("var q = math::vec3(1, 2, 3) + math::ivec3(1, 2, 3);"), "Invalid operands for + operator", "mixed kinds");
             expect(raised("var q = math::vec2(1, 2) + math::vec3(1, 2, 3);"), "Invalid operands for + operator", "mixed dimensions");
             expect(raised("var q = math::vec2(1, 2) % 2;"), "Invalid operands for % operator", "vec modulo");
-            expect(raised("var q = math::vec2(1, 1) / 0;"), "Division by zero in float operation", "float division by zero");
-            expect(raised("var q = math::ivec2(1, 1) / math::ivec2(1, 0);"), "Division by zero in integer operation", "int division by zero");
+            expect(raised("var q = math::vec2(1, 1) / 0;"), "Division by zero", "float division by zero");
+            expect(raised("var q = math::ivec2(1, 1) / math::ivec2(1, 0);"), "Division by zero", "int division by zero");
+            expect(raised("var q = math::ivec2(1, 1) % math::ivec2(1, 0);"), "Modulo by zero", "int modulo by zero");
             expect(raised("var q = math::vec2(1, 1) < math::vec2(2, 2);"), "math::vec2 has no ordering", "no ordering");
             expect(raised("var q = math::ivec3(1, 1, 1) <=> math::ivec3(1, 1, 1);"), "math::ivec3 has no ordering", "no spaceship");
         });
@@ -328,9 +329,9 @@ public:
             expect("function f() -> string { math::ivec2 a = math::ivec2(2147483647, 5); string m = \"\"; try { a = a + math::ivec2(1, 0); } catch (e) { m = e; } return m + to_string(a); } f()",
                    "Integer overflow in '+'(2147483647, 5)", "an ivec overflow");
             expect("function f() -> string { math::ivec2 a = math::ivec2(4, 5); string m = \"\"; try { a = a / math::ivec2(2, 0); } catch (e) { m = e; } return m + to_string(a); } f()",
-                   "Division by zero in integer operation(4, 5)", "an ivec division by zero");
+                   "Division by zero(4, 5)", "an ivec division by zero");
             expect("function f() -> string { math::vec2 v = math::vec2(4, 5); string m = \"\"; try { v = v / math::vec2(2, 0); } catch (e) { m = e; } return m + to_string(v); } f()",
-                   "Division by zero in float operation(4.0, 5.0)", "a vec division by zero");
+                   "Division by zero(4.0, 5.0)", "a vec division by zero");
             expect("function f() -> string { math::vec3 v = math::vec3(1, 2, 3); string m = \"\"; try { v.y = \"a\"; } catch (e) { m = e; } return m + to_string(v); } f()",
                    "Cannot store a non-numeric value in a math::vec3 component(1.0, 2.0, 3.0)", "a component store's text");
             expect("[[warn_mode]] function f() -> string { math::vec3 v = math::vec3(1, 2, 3); string m = \"\"; try { var w = v.w; } catch (e) { m = e; } try { v.w = 1; } catch (e) { m += \"|\" + e; } return m; } f()",

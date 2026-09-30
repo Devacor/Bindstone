@@ -371,11 +371,11 @@ namespace jai::detail::math {
 			case bop::sub: v = a - b; break;
 			case bop::mul: v = a * b; break;
 			case bop::div:
-				if (b == 0) { return checked_result<int32_t>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation"); }
+				if (b == 0) { return checked_result<int32_t>(make_error_code(runtime_error_code::division_by_zero), "Division by zero"); }
 				v = a / b;
 				break;
 			case bop::mod:
-				if (b == 0) { return checked_result<int32_t>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation"); }
+				if (b == 0) { return checked_result<int32_t>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero"); }
 				v = a % b;
 				break;
 		}
@@ -439,7 +439,7 @@ namespace jai::detail::math {
 				case bop::sub: f[c] = a - b; break;
 				case bop::mul: f[c] = a * b; break;
 				default:
-					if (b == 0.0f) { return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation"); }
+					if (b == 0.0f) { return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero"); }
 					f[c] = a / b;
 					break;
 			}

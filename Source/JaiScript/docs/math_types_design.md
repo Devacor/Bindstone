@@ -360,7 +360,8 @@ whose type changed. The work is the accessor's single entry for every observer, 
     fixed operation order. Both backends and the cell lowering use that order; for example `dot` is
     `((ax*bx) + (ay*by)) + (az*bz)`, each step rounded to binary32.
   - The kernel TU compiles without contraction (3.2).
-- **Division by zero.** Component division by zero follows IEEE (infinity or NaN), as script floats do. MV's `/`
+- **Division by zero.** A zero divisor component raises `Division by zero` (`%` on ivec: `Modulo by zero`), the texts and
+  codes of scalar `/` and `%` (docs/diagnostics.md). MV's `/`
   substitutes 1 for a zero divisor component and prints an error for a zero scalar. JaiScript does not reproduce that
   quirk.
 

@@ -2784,12 +2784,30 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
 // lives in typed_slot.hpp (defined out of line in environment.cpp).
 checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value, const type_info_ptr& target_type, engine* eng);
 
+// A shared handle's pointee against a shared_ptr<T> slot, by the class it holds: T or a subclass (the declaration's rule;
+// an unresolvable class stays lenient)
+inline bool shared_handle_pointee_admits(const script_value& v, const type_info_ptr& declared, engine* eng) {
+    auto expected = declared->element_type();
+    if (!expected || expected->type_name.empty() || expected->base_type == script_value_type::jai_any_type) {
+        return true;
+    }
+    auto view = resolve_slot_class(v, eng);
+    if (!view.instance || !view.def || view.def->get_name() == expected->type_name) {
+        return true;
+    }
+    return view.def->is_subtype_of(expected->type_name);
+}
+
 // Field-store rows for shared_ptr<T> / weak_ptr<T> declared fields (the handle_target
-// verdict): a same-kind tag stores as-is (its own tag), a live object or handle of T or a
-// subclass stores into a shared_ptr<T> field, a dynamic holder is ground truth there.
+// verdict): a same-kind tag stores as-is (its own tag) when a shared handle holds T or a
+// subclass, a live object or handle of T or a subclass stores into a shared_ptr<T> field,
+// a dynamic holder is ground truth there.
 inline std::optional<script_value> field_handle_rows(const script_value& v, const type_info_ptr& declared, engine* eng) {
     const auto target = declared->base_type;
     if (v.type() == target) {
+        if (target == script_value_type::jai_shared_ptr_type && !shared_handle_pointee_admits(v, declared, eng)) {
+            return std::nullopt;
+        }
         return v;
     }
     if (weak_slot_takes_shared(v, declared, eng)) {   // weak_ptr<T> field = shared handle (C++: weak = shared)

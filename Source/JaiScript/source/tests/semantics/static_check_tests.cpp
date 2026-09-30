@@ -2094,17 +2094,27 @@ public:
             std::filesystem::remove_all(dir);
         });
 
-        test("extern_declares_the_shared_global_when_nothing_provides_it", [this]() {
-            // Dev (2026-09-12): an extern that finds nothing brings the shared global into being as a null placeholder of
-            // its declared type, so a read yields null (a typed use reports the null) rather than an undefined name; a
-            // function extern still declares nothing
+        test("extern_without_a_definition_raises_at_its_first_use", [this]() {
+            // Dev (2026-09-30): an extern declares nothing; a use while nothing defines the name raises, and `inline` creates it
             auto e = make_engine();
             e->execute("extern ghost;\nfunction touch() -> int { return ghost; }");
-            check_true(outcome(*e, "touch()").rfind("ERROR Cannot return null from 'touch'", 0) == 0, outcome(*e, "touch()"));
-            check_true(e->execute("extern int ghost;\nghost == null").as_bool(), "the typed placeholder is null");
+            std::string read = outcome(*e, "touch()");
+            check_true(read.rfind("ERROR 'ghost' is declared extern but never defined (an 'inline' declaration creates it)", 0) == 0, read);
+            check_eq((size_t)0, error_count(e->check("extern int ghost;\nfunction f() -> int { return ghost; }")));
+            check_true(e->execute("inline int ghost;\nghost == 0").as_bool(), "inline creates the variable with its type's default");
+            check_eq((int64_t)0, e->execute("touch()").as_int());
             auto f = make_engine();
             std::string call = outcome(*f, "extern function host_fn;\nhost_fn(1)");
-            check_true(call.rfind("ERROR Undefined variable 'host_fn'", 0) == 0, call);
+            check_true(call.rfind("ERROR 'host_fn' is declared extern but never defined", 0) == 0, call);
+        });
+
+        test("inline_declares_a_checked_global", [this]() {
+            auto e = make_engine();
+            check_eq((size_t)0, error_count(e->check("inline int hp;\nfunction f() -> int { return hp + 1; }")));
+            auto r = e->check("inline int hp = 3;\nfunction g() { hp = \"full\"; }");
+            check_eq((size_t)1, error_count(r));
+            check_true(r.diagnostics[0].message.find("cannot assign 'string'") != std::string::npos, r.diagnostics[0].message);
+            check_eq((size_t)0, error_count(e->check("inline cfg;\nfunction h() { cfg = \"any\"; cfg = 1.5; }")));
         });
 
         test("extern_in_a_shared_leaf_declares_an_optional_siblings_names", [this]() {

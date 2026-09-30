@@ -272,13 +272,32 @@ checked_result<script_value> environment::get(uint64_t id) const {
 
     // Not found anywhere - id is already the interned variable name
     return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
+        undefined_text(id), id);
 }
 
-void environment::define_shared(uint64_t id, script_value&& value) {
-    if (local_ids_.count(id) != 0) { return; }
-    define(id, std::move(value));   // no unit_of_ entry: the cell belongs to unit 0
+void environment::share(uint64_t id) {
+    if (parent_ || local_ids_.count(id) == 0) { return; }
+    unit_of_.erase(id);   // the cell belongs to unit 0
     shared_placeholders_.insert(id);
+}
+
+void environment::note_extern(uint64_t id, bool function) {
+    environment* root = this;
+    while (root->parent_) { root = root->parent_.get(); }
+    if (!root->extern_names_) { root->extern_names_ = std::make_unique<std::unordered_map<uint64_t, bool>>(); }
+    (*root->extern_names_)[id] = function;
+}
+
+std::string_view environment::undefined_text(uint64_t id, std::string_view otherwise) const {
+    const environment* root = this;
+    while (root->parent_) { root = root->parent_.get(); }
+    if (root->extern_names_) {
+        if (auto it = root->extern_names_->find(id); it != root->extern_names_->end()) {
+            return it->second ? "'{0}' is declared extern but never defined"
+                              : "'{0}' is declared extern but never defined (an 'inline' declaration creates it)";
+        }
+    }
+    return otherwise;
 }
 
 void environment::define_variable(uint64_t id, const script_value& value) {
@@ -460,7 +479,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 
     return checked_result<std::reference_wrapper<const script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
+        undefined_text(id), id);
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
@@ -539,7 +558,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 
     return checked_result<std::reference_wrapper<script_value>>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
+        undefined_text(id), id);
 }
 
 checked_result<void> environment::assign(const std::string& name, script_value&& value) {
@@ -619,7 +638,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
 
     return checked_result<void>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
+        undefined_text(id), id);
 }
 
 checked_result<void> environment::assign(uint64_t id, script_value&& value) {
@@ -692,7 +711,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
 
     return checked_result<void>(
         make_error_code(runtime_error_code::undefined_variable),
-        "Undefined variable '{0}'", id);
+        undefined_text(id), id);
 }
 
 bool environment::contains(const std::string& name) const {
@@ -757,6 +776,7 @@ void environment::clear_values() {
     versions_.clear();
     unit_of_.clear();
     shared_placeholders_.clear();
+    extern_names_.reset();
     bump_env_epoch();   // local storage died: stale vm lookup-cache pointers must miss
 }
 

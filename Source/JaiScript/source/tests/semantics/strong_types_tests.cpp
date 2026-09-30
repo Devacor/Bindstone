@@ -343,10 +343,9 @@ public:
             check_eq(caught, true, "var-sourced string into a locked int raises at runtime");
         });
 
-        test("extern_declares_shared_placeholders_on_both_backends", [this]() {
+        test("extern_raises_until_defined_and_inline_creates_on_both_backends", [this]() {
             auto eng = make_engine();
-            // typed and untyped externs bring shared null placeholders into being (Dev, 2026-09-12); a function extern runs
-            // as nothing; the host's add_global and a later declaration write the shared cell in place
+            // externs declare nothing (Dev, 2026-09-30): a use before the host's add_global or a declaration raises
             auto r = eng->execute(R"(
                 extern int hp;
                 extern loose;
@@ -358,10 +357,22 @@ public:
                 try { total(); } catch (e) { caught = e; }
                 caught
             )");
-            check_eq(std::string("Cannot access 'v' on null ('G' is null)"), r.as<std::string>());
+            check_eq(std::string("'hp' is declared extern but never defined (an 'inline' declaration creates it)"), r.as<std::string>());
             eng->add_global("hp", script_value((int64_t)4, eng.get()));
             eng->execute("var G = Game();");
             check_eq((int64_t)7, eng->execute("total()").as_int());
+            // an inline handle starts null; a later declaration adopts the shared cell in place
+            auto inl = make_engine();
+            check_eq(std::string("Cannot access 'v' on null ('G' is null)"), inl->execute(R"(
+                class Game { int v = 3; }
+                inline shared_ptr<Game> G;
+                function read_v() -> int { return G.v; }
+                var caught = "";
+                try { read_v(); } catch (e) { caught = e; }
+                caught
+            )").as<std::string>());
+            inl->execute("var G = Game();");
+            check_eq((int64_t)3, inl->execute("read_v()").as_int());
             // a typed extern is a checked receiver: the store below is rejected before anything runs
             auto strict = make_engine();
             std::string text;

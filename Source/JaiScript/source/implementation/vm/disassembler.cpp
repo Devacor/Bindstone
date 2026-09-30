@@ -128,6 +128,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_enum_decl:
 			case opcode::op_extern_decl:
 			case opcode::op_decl_keep:
+			case opcode::op_decl_share:
 				out << " node=" << ins.a;
 				break;
 			case opcode::op_null_guard:

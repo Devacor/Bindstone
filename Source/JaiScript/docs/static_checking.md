@@ -381,20 +381,29 @@ extern shared_ptr<Game> G;        // typed: G.hp is checked against Game and pro
 extern config;                    // untyped: var - reads and stores are dynamic
 ```
 
-At run time an extern binds the unit to the shared global instead of declaring its own (a
-declaration would shadow it, `docs/global_shadowing.md`), and when no unit has declared the
-name yet the extern brings the shared global into being as a null placeholder of the declared
-type, and the first unit that declares the name adopts that cell in place; a function extern
-declares nothing. An extern name counts as declared, and a program's closure carries it to every unit like any
+At run time an extern declares nothing: the unit uses the visible global instead of declaring
+its own (a declaration would shadow it, `docs/global_shadowing.md`), and an extern may run
+before the unit or the host that defines the name. A read, store or call of the name while
+nothing defines it raises `'G' is declared extern but never defined (an 'inline' declaration
+creates it)` (a function extern: `'f' is declared extern but never defined`), on both backends.
+A declaration in any unit, a host `add_global`/`add_global_ref` and a host function all count as
+the definition. An extern name counts as declared, and a program's closure carries it to every unit like any
 top-level name. It is also the spelling for a shared leaf that calls into a module only some
 programs import (a netplay hook behind a runtime flag): the leaf declares the names it
 reaches for, and in a program that imports the module too the declaration is inert - the
 closure knows the real definition, and the call resolves to it at run time. The typed form
 gives the name that certain type: member checks, assignment checks and proofs flow exactly
 as for a declared variable of that type (a proof stays a runtime-guarded lane, so a host
-value that contradicts the declared type runs the ordinary conversion). At run time the
-declaration is a no-op on both backends - the name resolves dynamically as before, and a
-name still missing when used raises the ordinary `Undefined variable 'name'` error.
+value that contradicts the declared type runs the ordinary conversion).
+
+`inline` on a variable is the C++17 inline variable: one variable shared by every unit that
+declares it. `inline T name;`, `inline name;` (a `var`) and `inline T name = init;` are allowed at
+program scope and in a namespace. The first declaration to run creates the variable (the
+initializer, else the type's default: `int` 0, `string` "", a class default-constructed, `var`
+null); every later one, in any unit or a re-run of the same unit, adopts the existing variable
+and runs no initializer. At program scope the first declaration of the name without `inline`
+adopts the variable in place and owns it from then on. The checker treats it as a declared global of its type, like any declaration; it is
+the spelling for a name a unit needs to exist whether or not the module that owns it runs.
 
 `[[warn_mode]]` and `[[strict_mode]]` set the checker's mode for a region of one unit. They
 compose, innermost wins, and the engine's mode (`static_checking`) is the default for every

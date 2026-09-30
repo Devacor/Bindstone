@@ -786,6 +786,10 @@ namespace jai {
         // Declared without an initializer (`T x;`, `var x;`): the parser supplies the type's default, and a same-unit re-run
         // of a program-scope declaration keeps the existing value (detail::redeclaration_keeps_value)
         bool default_initialized = false;
+        // `inline T x;` (program scope or a namespace): one variable every declaring unit shares - an existing one is
+        // adopted and its initializer never runs, else the declaration creates it (environment::share: a later plain
+        // declaration adopts it in place)
+        bool is_inline = false;
         // Declared `auto` (Dev ruling 2026-09-27): the unit's first proof pass types the slot by its initializer's
         // STATIC type, once - a known type keeps auto (the runtime locks to the value, which has that type), a var
         // or unknown static type makes `type` the var marker; the spelling stays auto for re-checks and .jaibite
@@ -1025,9 +1029,9 @@ namespace jai {
             : declaration(loc, node_type::destructuring_decl), initializer(std::move(init)) {}
     };
 
-    // extern declaration: a name defined outside the program (host-registered, another engine,
-    // a later dynamic definition). The checker treats it as a declared global; both backends
-    // run it as a no-op and the name resolves dynamically as before.
+    // extern declaration: a name defined outside the program (host-registered, another unit, a later dynamic
+    // definition). The checker treats it as a declared global; both backends only record the name, so a use that
+    // finds nothing defined says the extern was never defined (environment::undefined_text).
     class extern_decl : public declaration {
     public:
         type_info_ptr type;   // null for `extern name;` (var) and the function form

@@ -112,21 +112,70 @@ public:
 				return e.execute("R = 7; to_string(f()) + \" \" + to_string(R) + \" \" + to_string(G)").as_string();
 			});
 		});
-		test("an_extern_declaration_shares_the_visible_global_or_declares_it_when_absent", [this]() {
-			// Dev (2026-09-12): extern is how a unit shares a global instead of owning one; when no unit has declared the name,
-			// the extern brings the shared global into being (unit 0); the first unit that declares the name adopts that cell in
-			// place, so the externing units, the declaring unit and the host keep sharing it
-			every_backend("extern", "5 5|9 9|7 7 7", [](engine& e) {
-				e.execute("extern var G; G = 5; function f() { return G; }");
-				std::string out = e.execute("extern var G; to_string(G) + \" \" + to_string(f())").as_string();
+		test("an_inline_declaration_shares_the_visible_global_or_creates_it_when_absent", [this]() {
+			// Dev (2026-09-30): an inline variable is one variable every declaring unit shares; the first to run creates it (unit 0)
+			// and the first unit that declares the name without inline adopts that cell in place
+			every_backend("inline", "5 5|9 9|7 7 7", [](engine& e) {
+				e.execute("inline var G; G = 5; function f() { return G; }");
+				std::string out = e.execute("inline var G; to_string(G) + \" \" + to_string(f())").as_string();
 				e.execute("var G = 9;");
 				out += "|" + e.execute("to_string(f()) + \" \" + to_string(G)").as_string();
-				e.execute("extern int H; H = 7;");
+				e.execute("inline int H; H = 7;");
 				auto host = e.get_global_environment()->get("H");
-				out += "|" + e.execute("extern int H; to_string(H)").as_string() + " " + std::to_string(host ? host.value().as_int() : -1);
+				out += "|" + e.execute("inline int H; to_string(H)").as_string() + " " + std::to_string(host ? host.value().as_int() : -1);
 				out += " " + e.execute("function h() { return H; } h();").to_string();
 				return out;
 			});
+		});
+		test("an_inline_initializer_runs_once_and_every_type_takes_its_default", [this]() {
+			every_backend("inline init", "5 5 6|0 0.0 '' 0 0 3 null|3 2", [](engine& e) {
+				const std::string first = "inline int N = 5;";
+				e.execute(first);
+				std::string out = e.execute("to_string(N)").as_string();
+				e.execute("inline int N = 9;");
+				out += " " + e.execute("to_string(N)").as_string();
+				e.execute("N = 6;");
+				e.execute(first);
+				out += " " + e.execute("to_string(N)").as_string();
+				e.execute("class P { int x = 3; } inline int a; inline float b; inline string s; inline array<int> arr; inline map<string, int> m; inline P p; inline v;");
+				out += "|" + e.execute("to_string(a) + \" \" + to_string(b) + \" '\" + s + \"' \" + to_string(arr.size()) + \" \" + to_string(m.size()) + \" \" + to_string(p.x) + \" \" + to_string(v)").as_string();
+				e.execute("namespace cfg { inline int depth = 3; int width = 1; }");
+				e.execute("namespace cfg { inline int depth = 7; int width = 2; }");
+				out += "|" + e.execute("to_string(cfg::depth) + \" \" + to_string(cfg::width)").as_string();
+				return out;
+			});
+		});
+		test("a_plain_extern_declares_nothing_and_raises_until_something_defines_it", [this]() {
+			const std::string undefined = "'G' is declared extern but never defined (an 'inline' declaration creates it)";
+			std::string every_use;
+			for (int i = 0; i < 7; ++i) { every_use += undefined + "|"; }
+			every_backend("extern", every_use + "4 4|3|11|'hf' is declared extern but never defined", [&](engine& e) {
+				e.execute("extern int G; function f() { return G; } function set(int v) { G = v; } function bump() { G += 1; } function inc() { ++G; }"
+				          " function alias() { int& r = G; return r; } function takes(int& x) { x = 1; } function pass() { takes(G); }"
+				          " function cap() { var l = [G]() { return G; }; return l(); }");
+				auto caught = [&](const std::string& call) {
+					return e.execute("var t = \"\"; try { " + call + "; } catch (ex) { t = ex; } t").as_string();
+				};
+				std::string out;
+				for (const char* call : { "f()", "set(3)", "bump()", "inc()", "alias()", "pass()", "cap()" }) { out += caught(call) + "|"; }
+				out.pop_back();
+				e.execute("int G = 4;");
+				out += "|" + e.execute("to_string(f()) + \" \" + to_string(G)").as_string();
+				e.execute("int K = 2;");
+				out += "|" + e.execute("extern int K; to_string(K + 1)").as_string();
+				e.execute("extern int H; function h() { return H; }");
+				e.add_global("H", script_value(static_cast<int64_t>(11), &e));
+				out += "|" + e.execute("to_string(h())").as_string();
+				out += "|" + e.execute("extern function hf; var t = \"\"; try { hf(1); } catch (ex) { t = ex; } t").as_string();
+				return out;
+			});
+		});
+		test("inline_is_a_program_scope_or_namespace_variable", [this]() {
+			for (const char* src : { "function f() { inline int x; }", "{ inline int y; }", "int G = 1; inline int& r = G;",
+			                         "namespace n { inline function f() { } }", "class C { inline int x; }" }) {
+				auto e = engine::make();
+				check_throws([&]() { e->execute(src); }, src);
+			}
 		});
 		test("a_reference_argument_resolves_in_the_callers_unit", [this]() {
 			// row 123.6: a by-reference argument is the caller's code, so it binds the caller's unit's cell; the call enters the

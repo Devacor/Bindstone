@@ -177,7 +177,7 @@ eng-&gt;execute(&quot;undefined_thing + 1&quot;);   // throws jai::static_check_
 <code>extern</code> declares one without defining it, and the same script becomes a <em>runtime</em> error
 instead, catchable and raised only if control flow actually reaches the name:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;extern function spawn_wave; spawn_wave(3);&quot;);
-// throws jai::runtime_error: &quot;Undefined variable &#x27;spawn_wave&#x27;&quot;</code></pre></div>
+// throws jai::runtime_error: &quot;&#x27;spawn_wave&#x27; is declared extern but never defined&quot;</code></pre></div>
 <p>(<code>what()</code> appends the error&#x27;s category, <code>&lt;text&gt;: &lt;category&gt;</code>, when the text does not already begin with it: <code>Cannot apply &#x27;+=&#x27; to string and int: Type mismatch</code>. A script <code>catch</code> sees the text alone.)</p>
 <p>The other two surfaces are unchanged by checking, and the engine survives all of them:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;throw \&quot;from script\&quot;;&quot;); // uncaught script throw -&gt; jai::runtime_error(&quot;from script&quot;)

@@ -1000,6 +1000,7 @@ void parser::synchronize() {
         switch (peek().type) {
             case token_type::class_keyword:
             case token_type::extern_keyword:
+            case token_type::inline_keyword:
             case token_type::auto_keyword:
             case token_type::var_keyword:
             case token_type::int_keyword:
@@ -2496,6 +2497,9 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     if (match(token_type::extern_keyword)) {
         return extern_declaration();
+    }
+    if (match(token_type::inline_keyword)) {
+        return inline_variable_declaration();
     }
 
     // Check for include/import directives
@@ -4175,6 +4179,8 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         // Parse any declaration (class, function, variable)
         declaration_ptr member_decl = nullptr;
 
+        const token member_start = peek();
+        const bool inline_member = match(token_type::inline_keyword);
         bool nested_nocopy = match(token_type::nocopy_keyword);
         if (nested_nocopy || match(token_type::class_keyword)) {
             if (nested_nocopy) { JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'")); }
@@ -4199,13 +4205,16 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         } else {
             // Function or variable declaration
             const bool function_spelling = check(token_type::function_keyword);
-            auto type_result = parse_type();
-            if (!type_result) {
-                synchronize();
-                continue;
+            type_info_ptr type;
+            if (!(inline_member && untyped_declaration_ahead())) {
+                auto type_result = parse_type();
+                if (!type_result) {
+                    synchronize();
+                    continue;
+                }
+                // `var& r = G;` / `Box& get()`: a reference variable or a reference-returning function, as at program scope
+                type = wrap_reference_return_type(std::move(type_result.value()));
             }
-            // `var& r = G;` / `Box& get()`: a reference variable or a reference-returning function, as at program scope
-            type_info_ptr type = wrap_reference_return_type(std::move(type_result.value()));
             const bool reference_member = type && type->base_type == script_value_type::jai_reference_type;
 
             if (!check(token_type::identifier)) {
@@ -4309,6 +4318,15 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 var_decl->function_spelling = function_spelling;
                 member_decl = var_decl;
             }
+        }
+
+        if (inline_member && member_decl) {
+            auto* var_decl = member_decl->get_type() == node_type::variable_decl ? static_cast<variable_decl*>(member_decl.get()) : nullptr;
+            if (!var_decl || (var_decl->type && var_decl->type->base_type == script_value_type::jai_reference_type)) {
+                report_error(var_decl ? "An inline variable cannot be a reference" : "'inline' declares a variable", member_start);
+                continue;
+            }
+            var_decl->is_inline = true;
         }
 
         if (member_decl) {
@@ -4499,6 +4517,39 @@ checked_result<declaration_ptr> parser::extern_declaration() {
     JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after extern declaration"));
     auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
     return std::make_shared<extern_decl>(loc, type, is_function, name_view, name_id);
+}
+
+bool parser::untyped_declaration_ahead() const {
+    if (!check(token_type::identifier) || current_ + 1 >= stream_->size()) { return false; }
+    const token_type next = (*stream_)[current_ + 1].type;
+    return next == token_type::semicolon || next == token_type::equal;
+}
+
+// inline [type] name [= init];: the C++17 inline variable - one variable shared by every unit that declares it
+checked_result<declaration_ptr> parser::inline_variable_declaration() {
+    const token at = previous();
+    if (nesting_depth_ != 0) {
+        report_error("An inline variable is declared at program scope or in a namespace", at);
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    std::shared_ptr<variable_decl> decl;
+    if (untyped_declaration_ahead()) {
+        token name = advance();
+        expression_ptr init;
+        if (match(token_type::equal)) { JAISCRIPT_TRY_ASSIGN(init, expression()); }
+        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
+        decl = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
+        decl->default_initialized = !init;
+    } else {
+        JAISCRIPT_TRY_ASSIGN(declaration_ptr parsed, variable_declaration());
+        decl = std::static_pointer_cast<variable_decl>(parsed);
+    }
+    if (decl->type && decl->type->base_type == script_value_type::jai_reference_type) {
+        report_error("An inline variable cannot be a reference", at);
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    decl->is_inline = true;
+    return declaration_ptr(decl);
 }
 
 // [[warn_mode]] / [[strict_mode]] at a statement position, optional trailing ';'. none when

@@ -15,7 +15,7 @@ Exactly the lexer's keyword table (`lexer::keywords_` in `lexer.cpp`):
 ```
 array auto bool break case cast catch char class const continue coroutine
 default else enum extern fallthrough false float for function if import
-include int map namespace new null nullptr override private public
+include inline int map namespace new null nullptr override private public
 return shared_ptr static string super switch this throw true try var
 void weak_ptr while yield
 ```
@@ -32,7 +32,8 @@ Notes:
 - A leading `#` before `include`/`import` is skipped by the lexer, so `#include "x"` and
   `include "x"` are identical.
 - `extern` declares a name defined outside the program to the static checker (see "extern
-  declarations" below); it is a no-op at run time.
+  declarations" below); at run time it defines nothing.
+- `inline` on a variable is the C++17 inline variable (see "inline variables" below).
 - `[[warn_mode]]` / `[[strict_mode]]` before a statement set the static checker's mode for a
   unit (first declaration of a file), a block (first statement of a block) or that one statement
   (see "check-mode attributes" below); both backends run them as nothing.
@@ -175,6 +176,7 @@ declaration = classDeclaration
             | includeDirective
             | importDirective
             | externDeclaration
+            | inlineDeclaration
             | functionDeclaration
             | variableDeclaration
             | destructuringDeclaration
@@ -261,10 +263,15 @@ importDirective  = "#"? "import"  (STRING_LITERAL | "<" path ">" | "(" expressio
 // extern declarations: a name defined outside the program (a host-registered global or
 // function, another engine, a later dynamic definition). The static checker counts the name
 // as declared - typed: that type (members checked, proofs flow); "function": a callable of
-// unknown signature (calls unchecked); bare: var. Both backends run it as a no-op; the name
-// resolves dynamically as before, and a still-missing name raises the ordinary
-// "Undefined variable" error when used.
+// unknown signature (calls unchecked); bare: var. Both backends define nothing; the name
+// resolves when used, and a use while nothing defines it raises "'x' is declared extern but
+// never defined (an 'inline' declaration creates it)".
 externDeclaration = "extern" ("function" | type)? IDENTIFIER ";"
+
+// inline variables (program scope and namespace bodies only): one variable shared by every unit
+// that declares it; the first to run creates it (initializer, else the type's default), every
+// later one adopts it and runs no initializer. Bare: var. Never a reference.
+inlineDeclaration = "inline" (variableDeclaration | IDENTIFIER ("=" expression)? ";")
 
 // check-mode attributes (static checker only; both backends run them as nothing). Before a
 // statement: covers that statement's own subtree (a nested function/lambda body keeps the

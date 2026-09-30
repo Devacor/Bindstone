@@ -2913,7 +2913,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             return checked_result<void>();
         }
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-            "Undefined variable '{0}'", expr->symbol_id);
+            environment_->undefined_text(expr->symbol_id), expr->symbol_id);
     }
     if (expr->symbol_id == getValue_id_) {
     }
@@ -3075,7 +3075,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         // Use error code instead of exception state - include variable name for debugging
         uint64_t name_id = string_symbolizer_->intern(expr->name);
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-            "Undefined variable '{0}'", name_id);
+            environment_->undefined_text(name_id), name_id);
     }
     return checked_result<void>();
 }
@@ -3818,7 +3818,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                     // ::name targets never reach the implicit this.member fallback
                     if (identifier->global_qualified) {
                         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                            "Undefined variable '{0}'", identifier->symbol_id);
+                            environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
                     }
                     // Fallback: identifier is an implicit this.member access
                     // Check if 'this' exists and has this field
@@ -3881,7 +3881,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                     }
                     uint64_t name_id = string_symbolizer_->intern(identifier->name);
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '{0}'", name_id);
+                        environment_->undefined_text(name_id), name_id);
                 }
             } else {
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));
@@ -4480,7 +4480,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 };
                 varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
                 if (!varPtr) [[unlikely]] {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", identifier->symbol_id);
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
                 }
                 if (deferred_target) {
                     // the target's reference is read here, after the right side: a removed element or map entry is the
@@ -4503,14 +4503,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // ::name targets never reach the implicit this.member fallback
                 if (identifier->global_qualified) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '{0}'", identifier->symbol_id);
+                        environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
                 }
                 // Fallback: identifier is an implicit this.member access
                 // Check if 'this' exists and has this field
                 script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
                 if (!this_ptr || !this_ptr->is_object()) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '{0}' (no 'this' in scope)", identifier->symbol_id);
+                        environment_->undefined_text(identifier->symbol_id, "Undefined variable '{0}' (no 'this' in scope)"), identifier->symbol_id);
                 }
 
                 script_value& this_val = *this_ptr;
@@ -4518,7 +4518,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
                 if (!instance || !instance->has_field(identifier->symbol_id)) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '{0}' (not a field of 'this')", identifier->symbol_id);
+                        environment_->undefined_text(identifier->symbol_id, "Undefined variable '{0}' (not a field of 'this')"), identifier->symbol_id);
                 }
                 if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
                     JAISCRIPT_TRY(detail::enforce_member_access(field_class, identifier->symbol_id, environment_->find_access_context()));
@@ -5615,7 +5615,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // ::name targets never reach members - a global miss is an error
                 if (identifier->global_qualified) {
                     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        "Undefined variable '{0}'", identifier->symbol_id);
+                        environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
                 }
                 // Variable doesn't exist in environment
                 // Try static_method_environment's assign (which handles static fields)
@@ -6095,9 +6095,14 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
 
 template<bool Replaying>
 checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
-    // a same-unit re-run of a program-scope declaration written without an initializer keeps the variable (the vm's op_decl_keep)
-    if (decl->default_initialized && decl->slot_index == SIZE_MAX && !environment_->get_parent()) [[unlikely]] {
-        if (const script_value* cell = environment_->same_unit_cell(decl->name_id); cell && detail::redeclaration_keeps_value(*decl, *cell)) { return {}; }
+    // a same-unit re-run of a program-scope declaration written without an initializer keeps the variable, an inline
+    // declaration adopts the variable it finds (the vm's op_decl_keep)
+    if ((decl->default_initialized || decl->is_inline) && decl->slot_index == SIZE_MAX) [[unlikely]] {
+        if (decl->is_inline) {
+            if (environment_->get_own_value_ptr(decl->name_id)) { return {}; }
+        } else if (!environment_->get_parent()) {
+            if (const script_value* cell = environment_->same_unit_cell(decl->name_id); cell && detail::redeclaration_keeps_value(*decl, *cell)) { return {}; }
+        }
     }
     // Helper to store value in slot (local) or environment (global)
     auto define_variable = [&](script_value value) {
@@ -6113,6 +6118,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         } else {
             // Global variable or no slot assigned - use environment
             environment_->define_variable(decl->name_id, std::move(value));
+            if (decl->is_inline) [[unlikely]] { environment_->share(decl->name_id); }
         }
     };
 
@@ -6328,7 +6334,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     return {};
                 }
                 JAISCRIPT_TRY(bare_reference_access(targetSymbolId));
-                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
+                return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(targetSymbolId, "Cannot take reference of undefined variable"), targetSymbolId);
             }
             
             // Check if the target is itself a reference
@@ -8849,7 +8855,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 // even though contains() might return false
                 if (!environment_->contains(this_id) && !environment_->get_value_ptr(this_id)) {
                     return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
-                        "Cannot capture undefined variable '{0}'", capture.symbol_id);
+                        environment_->undefined_text(capture.symbol_id, "Cannot capture undefined variable '{0}'"), capture.symbol_id);
                 }
                 if (capture.by_reference) {
                     script_value* targetPtr = environment_->get_value_ptr(this_id);
@@ -8883,7 +8889,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             auto src = detail::resolve_capture_source(slot_val, environment_.get(), member_scope_, capture.symbol_id);
             if (!src.is_variable()) {
                 return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
-                    "Cannot capture undefined variable '{0}'", capture.symbol_id);
+                    environment_->undefined_text(capture.symbol_id, "Cannot capture undefined variable '{0}'"), capture.symbol_id);
             }
             if (capture.by_reference && src.global) { continue; }   // [&g] of a global: the lambda reads it when it runs
             if (capture.by_reference) {
@@ -9492,7 +9498,7 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
                 auto minted = bind_bare_cpp_property_ref(targetSymbolId, ident->global_qualified);
                 if (!minted) {
                     JAISCRIPT_TRY(bare_reference_access(targetSymbolId));
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", targetSymbolId);
+                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(targetSymbolId, "Cannot take reference of undefined variable"), targetSymbolId);
                 }
                 if (!*minted) {
                     return minted->error_value();
@@ -10984,7 +10990,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                         out.emplace(std::move(minted->value()));
                     } else {
                         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                            "Cannot take reference of undefined variable", ident->symbol_id);
+                            environment_->undefined_text(ident->symbol_id, "Cannot take reference of undefined variable"), ident->symbol_id);
                     }
                 } else {
                     out.emplace(share_boxed_env_storage(*storage, engine_));
@@ -13431,7 +13437,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             if (!g) {
                 return checked_result<void>(
                     make_error_code(runtime_error_code::undefined_variable),
-                    "Cannot take reference of undefined variable"
+                    environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id
                 );
             }
             return bind_reference_to_storage(*g, frame_index, param.slot_index);
@@ -13491,7 +13497,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             if (!beyond) {
                 return checked_result<void>(
                     make_error_code(runtime_error_code::undefined_variable),
-                    "Cannot take reference of undefined variable"
+                    environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id
                 );
             }
             return bind_reference_to_storage(*beyond, frame_index, param.slot_index);
@@ -13510,7 +13516,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             }
             return checked_result<void>(
                 make_error_code(runtime_error_code::undefined_variable),
-                "Cannot take reference of undefined variable"
+                environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id
             );
         }
         return bind_reference_to_storage(*argPtr, frame_index, param.slot_index);
@@ -14720,17 +14726,10 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
     return {};
 }
 
-// extern names a shared global: the unit binds to the visible one instead of owning a cell, and the shared
-// global comes into being here when no unit has declared the name (a typed null placeholder; a function
-// extern declares nothing). KEEP BYTE-PARALLEL with vm_backend::exec_extern_decl.
+// extern declares nothing: the name resolves to whatever defines it, and a use while nothing does raises the
+// extern's own text. KEEP BYTE-PARALLEL with vm_backend::exec_extern_decl.
 checked_result<void> interpreter::visit_extern_decl(extern_decl* decl) {
-    if (decl->is_function) { return {}; }
-    auto global = get_global_environment();
-    if (!global->get_value_ptr(decl->name_id)) {
-        script_value placeholder = make_value();
-        if (decl->type) { placeholder.set_type_info(decl->type); }
-        global->define_shared(decl->name_id, std::move(placeholder));
-    }
+    environment_->note_extern(decl->name_id, decl->is_function);
     return {};
 }
 

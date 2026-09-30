@@ -2273,6 +2273,38 @@ private:
 	}
 
 	void builtin_methods_as_values() {
+		test("a_bare_method_name_read_without_a_call_is_an_error", [this]() {
+			// Dev ruling 2026-09-30: a bare method name read without a call inside a method is the same violation, the receiver
+			// spelled this; the lookup order stands (locals -> members -> globals): only a resolution that lands on an instance
+			// method errors, so a local or parameter of that name wins and a static method stays a function value
+			expect("bare method values", R"(
+				class Player {
+					int hp = 5;
+					void heal() { hp += 1; }
+					function get() { return heal; }
+					function call_it() { heal(); return hp; }
+					function local_wins() { var heal = 7; return heal; }
+					function param_wins(int heal) { return heal; }
+					function in_lambda() { var f = [this]() { heal(); return hp; }; return f(); }
+					static int twice(int x) { return x * 2; }
+					function static_value() { var f = twice; return f(4); }
+				}
+				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				Player q;
+				"" + q.call_it() + " " + q.local_wins() + " " + q.param_wins(3) + " " + q.in_lambda() + " " + q.static_value() + "|" +
+				    t([]() { Player p; var f = p.get(); return 1; });
+			)", "6 7 3 7 8|'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")", check_mode::off);
+			every_config("bare method value at load", "rejected", [&](engine& e) {
+				try {
+					e.execute("class Player { void heal() {} function get() { return heal; } }");
+					return std::string("loaded");
+				} catch (const std::exception& ex) {
+					const std::string what = ex.what();
+					return what.find("'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")") != std::string::npos
+					    ? std::string("rejected") : what;
+				}
+			});
+		});
 		test("a_method_read_without_a_call_is_an_error", [this]() {
 			// Dev ruling 2026-09-30: obj.method without a call reads too easily as a call, so it is an error for user, builtin and
 			// host methods: a class instance, handle or host object binds with reflect::bind, a value type's methods take a lambda;

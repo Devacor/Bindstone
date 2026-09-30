@@ -2980,6 +2980,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             JAISCRIPT_TRY(detail::bare_member_access(member, expr->symbol_id, environment_->find_access_context()));
             if (member.what == detail::member_probe_hit::kind::method) {
                 if (member.instance && member_scope_.this_storage) {
+                    if (!identifier_callee_lookup_) { return bare_method_value_error(expr, *member_scope_.this_storage); }
                     push_value(create_bound_method(*member_scope_.this_storage, member.method_value));
                 } else {
                     push_value(std::move(member.method_value));   // static method: unbound callable
@@ -3058,6 +3059,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                     // Check for methods (returns bound method)
                     script_value method = instance->get_method(name_id, false);
                     if (!method.is_invalid()) {
+                        if (!identifier_callee_lookup_) { return bare_method_value_error(expr, this_val); }
                         script_value bound_method = create_bound_method(this_val, method);
                         push_value(std::move(bound_method));
                         return checked_result<void>();
@@ -7363,8 +7365,10 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
         callee = rs->partial[0];
     } else {
         member_callee_lookup_ = expr->callee->get_type() == node_type::member_expr;
+        identifier_callee_lookup_ = expr->callee->get_type() == node_type::identifier_expr;
         auto callee_result = eval_child<Replaying>(expr->callee.get(), rs, 0);
         member_callee_lookup_ = false;
+        identifier_callee_lookup_ = false;
         if (!callee_result) [[unlikely]] {
             if (is_yield_signal(callee_result)) park_operands(expr, rp_call_generic, 0, {});
             return callee_result.error_value();
@@ -7771,6 +7775,19 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
 
 // The member read on an already-evaluated receiver: the compound-member store evaluates the
 // receiver once and holds it across the read, the rhs and the store-back
+// A bare method name read without a call inside a method (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with
+// vm_backend::raise_bare_method_value
+checked_result<void> interpreter::bare_method_value_error(const identifier_expr* expr, const script_value& self) {
+    if (parallel_worker_) [[unlikely]] {
+        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+            "'{0}' is a method: call it or bind it with reflect::bind", expr->symbol_id);
+    }
+    auto target = resolve_member_target(self.deref());
+    const std::string owner = target.class_def ? target.class_def->get_name() : std::string("this");
+    return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "{0}",
+        string_symbolizer_->intern(detail::bare_method_value_text(expr->name, owner)));
+}
+
 // obj.method without a call (Dev ruling 2026-09-30): a method is called or bound, never read bare. KEEP BYTE-PARALLEL with
 // vm_backend::raise_method_value
 checked_result<void> interpreter::method_value_error(const member_expr* expr, const script_value& object, bool bindable) {

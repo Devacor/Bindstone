@@ -917,6 +917,7 @@ namespace jai {
         uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)
         base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at construction
         detail::arity_count_symbols arity_count_ids_;   // arity text count spellings, interned at construction
+        bool identifier_callee_lookup_ = false;   // visit_call_expr -> visit_identifier: the bare name is being called
         bool member_callee_lookup_ = false;   // visit_call_expr -> visit_member_expr: the member is being called (null-receiver text)
 
         // Cached symbol IDs for operator overloading (initialized in constructor)
@@ -1211,6 +1212,7 @@ namespace jai {
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null
         checked_result<void> method_value_error(const member_expr* expr, const script_value& object, bool bindable);   // obj.method without a call
+        checked_result<void> bare_method_value_error(const identifier_expr* expr, const script_value& self);   // a bare method name without a call
 
         // One resolution for every shape a C++/script object reaches the interpreter in:
         // class_instance wrappers (make_object, script classes), cpp_bound non-owning

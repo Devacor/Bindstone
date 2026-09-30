@@ -39,6 +39,12 @@ namespace jai::detail {
 		return text + " or bind it with reflect::bind(" + receiver + ", \"" + std::string(member) + "\")";
 	}
 
+	// The same violation spelled bare inside a method (implicit this)
+	inline std::string bare_method_value_text(std::string_view member, std::string_view owner) {
+		return "'" + std::string(member) + "' is a method of " + std::string(owner) + "; call it with " + std::string(member) +
+		       "() or bind it with reflect::bind(this, \"" + std::string(member) + "\")";
+	}
+
 }
 
 #endif // __JAISCRIPT_DETAIL_METHOD_VALUE_HPP__

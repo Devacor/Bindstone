@@ -3967,10 +3967,14 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string prelude =
 				"void by_ref(var& p) { p = 1; }\n"
 				"void by_int(int& p) { p = 2; }\n"
-				"class W { int fld = 5; int f() { return 1; } int fields() { by_ref(fld); int a = fld; by_int(fld); return a * 10 + fld; } void named() { by_ref(f); } }\n"
+				"class W { int fld = 5; int f() { return 1; } int fields() { by_ref(fld); int a = fld; by_int(fld); return a * 10 + fld; } }\n"
 				"W w = W();\n";
 			both(prelude + "to_string(w.fields());", "12", "a field bound by reference");
-			both(prelude + "var r = \"\"; try { w.named(); } catch (e) { r = e; } r;", "Cannot take reference of undefined variable", "a method name bound by reference");
+			// a method name handed to a reference parameter is a method read without a call: the strict checker refuses it at load
+			const std::string named = prelude + "class N { int f() { return 1; } void named() { by_ref(f); } }\n0;";
+			both(named, "", "a method name bound by reference");
+			const std::string refused = run_on(true, named, true);
+			check_true(refused.find("'f' is a method of N; call it with f() or bind it with reflect::bind(this, \"f\")") != std::string::npos, refused);
 			const std::string l = listing_run(prelude + "w.fields();");
 			check_true(l.find("-- call kept by_ref line 3: a reference argument that is not a local") != std::string::npos, "the call stays with its rule: " + l);
 		});

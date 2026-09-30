@@ -2714,7 +2714,12 @@ private:
 				if (global_tier_name(id->name)) { return {}; }
 				if (access_denied(hit, id->name, id->location)) { return {}; }
 				if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
-				if (hit.methods) { return ctype::make(ctype::function_k); }
+				if (hit.methods) {
+					if (!hit.methods->empty() && !hit.methods->front()->is_static && bare_field_context()) {   // a method is called or bound, never read bare (Dev ruling 2026-09-30)
+						diag(diag_level::error, id->location, detail::bare_method_value_text(id->name, class_ctx_name_));
+					}
+					return ctype::make(ctype::function_k);
+				}
 				if (hit.field && !hit.field->is_static && !hit.methods && bare_field_context() && !chain_has_user_accessor(class_ctx_name_, id->name)) { bare_this_field_ = true; }
 				if (hit.field && (hit.field->type || hit.field->function_spelling)) { return member_type(hit); }
 				return {};

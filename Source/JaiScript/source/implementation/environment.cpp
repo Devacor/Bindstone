@@ -276,9 +276,9 @@ checked_result<script_value> environment::get(uint64_t id) const {
 }
 
 void environment::share(uint64_t id) {
-    if (parent_ || local_ids_.count(id) == 0) { return; }
-    unit_of_.erase(id);   // the cell belongs to unit 0
-    shared_placeholders_.insert(id);
+    if (local_ids_.count(id) == 0) { return; }
+    if (!parent_) { unit_of_.erase(id); }   // the cell belongs to unit 0
+    inline_cells_.insert(id);
 }
 
 void environment::note_extern(uint64_t id, bool function) {
@@ -300,39 +300,34 @@ std::string_view environment::undefined_text(uint64_t id, std::string_view other
     return otherwise;
 }
 
-void environment::define_variable(uint64_t id, const script_value& value) {
-    define_variable(id, script_value(value));
+bool environment::define_variable(uint64_t id, const script_value& value) {
+    return define_variable(id, script_value(value));
 }
 
-void environment::define_variable(uint64_t id, script_value&& value) {
+bool environment::define_variable(uint64_t id, script_value&& value) {
     if (parent_) {
         define(id, std::move(value));
-        return;
+        return true;
     }
     const unit_stamp unit = symbolizer_->current_unit();
     if (local_ids_.count(id) == 0) {
         define(id, std::move(value));
         unit_of_[id] = unit;
-        return;
+        return true;
     }
-    if (auto shared = shared_placeholders_.find(id); shared != shared_placeholders_.end()) {
-        shared_placeholders_.erase(shared);
-        define(id, std::move(value));   // the declaring unit adopts the extern's shared global in place
-        unit_of_[id] = unit;
-        return;
-    }
+    if (inline_cells_.count(id)) { return false; }
     auto owner = unit_of_.find(id);
     const unit_stamp flat_unit = owner == unit_of_.end() ? unit_stamp{} : owner->second;
     if (flat_unit.id == unit.id) {
         define(id, std::move(value));   // the same unit writes in place; the cell keeps the seq of its first declaration
-        return;
+        return true;
     }
     auto versions = versions_.find(id);
     if (versions != versions_.end()) {
         for (auto& v : versions->second) {
             if (v.unit.id == unit.id) {
                 *v.cell = std::move(value);
-                return;
+                return true;
             }
         }
     }
@@ -340,7 +335,7 @@ void environment::define_variable(uint64_t id, script_value&& value) {
     if (flat == flat_lookup_.end()) {
         define(id, std::move(value));
         unit_of_[id] = unit;
-        return;
+        return true;
     }
     versions_[id].push_back({flat_unit, flat->second});
     if (engine* eng = value.get_engine()) {
@@ -351,10 +346,11 @@ void environment::define_variable(uint64_t id, script_value&& value) {
     unit_of_[id] = unit;
     symbolizer_->note_shadow();
     bump_env_epoch();
+    return true;
 }
 
 script_value* environment::same_unit_cell(uint64_t id) {
-    if (parent_ || local_ids_.count(id) == 0 || shared_placeholders_.count(id)) { return nullptr; }
+    if (parent_ || local_ids_.count(id) == 0 || inline_cells_.count(id)) { return nullptr; }
     const unit_stamp unit = symbolizer_->current_unit();
     auto owner = unit_of_.find(id);
     if (owner != unit_of_.end() && owner->second.id == unit.id) {
@@ -775,7 +771,7 @@ void environment::clear_values() {
     local_ids_.clear();
     versions_.clear();
     unit_of_.clear();
-    shared_placeholders_.clear();
+    inline_cells_.clear();
     extern_names_.reset();
     bump_env_epoch();   // local storage died: stale vm lookup-cache pointers must miss
 }

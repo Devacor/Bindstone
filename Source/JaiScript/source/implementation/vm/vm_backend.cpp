@@ -8,6 +8,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #define JAI_COARSE(acc, cnt)
 #endif
 #include <jaiscript/detail/null_member_diagnostic.hpp>
+#include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/script_class.hpp>
@@ -1979,7 +1980,7 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	return ptr;
 }
 
-op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell) {
+op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_index, script_value value, bool box_cell, const variable_decl* decl) {
 	// Escape-marked declarations box into a cell (reference_holder cell mode): reference
 	// binding then shares the handle. Reference values pass through (ref decls alias).
 	if (box_cell && !value.is_reference()) {
@@ -1987,8 +1988,8 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 	}
 	if (slot_index != SIZE_MAX && f.locals && !f.top_level) {
 		frame_slot_set(f, slot_index, std::move(value));
-	} else {
-		environment_->define_variable(name_id, std::move(value));
+	} else if (!environment_->define_variable(name_id, std::move(value))) [[unlikely]] {
+		return raise_from(detail::inline_redefinition(*symbolizer_, name_id, decl));
 	}
 	return {};
 }
@@ -10912,7 +10913,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 
 	if (is_weak_ptr) {
 		if (!has_init) {
-			return define_decl_value(f, decl->name_id, decl->slot_index,
+			return define_decl_value(f, decl,
 				script_value::make_empty_weak_ptr(decl->type, engine_));
 		}
 		script_value value = std::move(stack_.back());
@@ -10925,11 +10926,11 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			value = std::move(derefed);
 		}
 		if (value.is_null()) {
-			return define_decl_value(f, decl->name_id, decl->slot_index,
+			return define_decl_value(f, decl,
 				script_value::make_empty_weak_ptr(decl->type, engine_));
 		}
 		if (value.is_weak_ptr()) {
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
+			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 		}
 		if (value.type() == script_value_type::jai_shared_ptr_type) {
 			auto expected_type = decl->type ? decl->type->element_type() : nullptr;
@@ -10952,7 +10953,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			if (!weak_result) {
 				return raise_from(weak_result);
 			}
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(weak_result.value()), decl->ref_escaping);
+			return define_decl_value(f, decl, std::move(weak_result.value()), decl->ref_escaping);
 		}
 		// A value-semantic object or a primitive: family D's declaration shape
 		// (KEEP BYTE-PARALLEL with the interpreter's visit_var_decl)
@@ -10972,7 +10973,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			}
 			script_value null_ptr = make_null();
 			null_ptr.set_type_info(decl->type);
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(null_ptr), decl->ref_escaping);
+			return define_decl_value(f, decl, std::move(null_ptr), decl->ref_escaping);
 		}
 		script_value value = std::move(stack_.back());
 		stack_.pop_back();
@@ -10989,7 +10990,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 					"Cannot infer shared_ptr<auto> pointee from null - use var, or an explicit shared_ptr<T>");
 			}
 			value.set_type_info(decl->type);
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
+			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 		}
 		if (value.is_weak_ptr()) {
 			return raise_(make_error_code(runtime_error_code::invalid_weak_ptr_conversion), "Cannot initialize shared_ptr directly from weak_ptr");
@@ -11015,7 +11016,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 						"Cannot infer shared_ptr<auto> pointee from this initializer - use var, or an explicit shared_ptr<T>");
 				}
 				value.set_type_info(inferred);
-				return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
+				return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 			}
 			// Dev ruling (2026-07): typed shared_ptr declarations ENFORCE their
 			// pointee class (wrong-class init used to alias silently). Same class
@@ -11043,7 +11044,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 				}
 			}
 			value.set_type_info(decl->type);
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
+			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 		}
 		return raise_(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
 	}
@@ -11158,7 +11159,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		detail::drop_var_slot(value, engine_);   // nor does a var-held array's
 	}
 
-	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), decl->ref_escaping);
+	return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 }
 
 // `env` = a CALLER env at a ref-arg bind (environment_ already points at the callee's chain)
@@ -11217,7 +11218,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			if (!*minted) {
 				return raise_from(*minted);
 			}
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(minted->value()));
+			return define_decl_value(f, decl, std::move(minted->value()));
 		}
 		VM_TRY(frame_bare_member_access(f, target_sym));
 		return raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(target_sym, "Cannot take reference of undefined variable"), target_sym);
@@ -11228,11 +11229,11 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
+		return define_decl_value(f, decl, std::move(aliased.value()));
 	}
 	// Box the variable's storage into a cell and alias it (escape-legal: the ref
 	// keeps the cell alive after the env dies)
-	return define_decl_value(f, decl->name_id, decl->slot_index, share_env_ref(*targetPtr));
+	return define_decl_value(f, decl, share_env_ref(*targetPtr));
 }
 
 op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
@@ -11245,7 +11246,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
+		return define_decl_value(f, decl, std::move(aliased.value()));
 	}
 	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
 	if (decl->initializer && decl->initializer->get_type() == node_type::member_expr &&
@@ -11257,7 +11258,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (storage.is_reference() && !storage.get_reference_holder()) {
 				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 			}
-			return define_decl_value(f, decl->name_id, decl->slot_index, share_env_ref(storage));
+			return define_decl_value(f, decl, share_env_ref(storage));
 		}
 	}
 	if (decl->initializer && detail::is_member_final_ref_lvalue(decl->initializer.get())) {
@@ -11279,7 +11280,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (!aliased) {
 				return raise_from(aliased);
 			}
-			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(aliased.value()));
+			return define_decl_value(f, decl, std::move(aliased.value()));
 		}
 	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
@@ -15992,6 +15993,9 @@ op_status vm_backend::exec_namespace_decl(frame& f, const vm_instruction& ins) {
 // every path: types, handles, references, the texts), as the interpreter's visit_variable_decl runs under the same
 // swap; the initializer sees the members declared before it. KEEP BYTE-PARALLEL with interpreter::visit_namespace_decl.
 op_status vm_backend::exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data) {
+	if (auto* var_decl = static_cast<const variable_decl*>(member_decl.get()); !var_decl->is_inline && detail::namespace_scope(*engine_, ns_data)->inline_cell(var_decl->name_id)) [[unlikely]] {
+		return raise_from(detail::inline_redefinition(*symbolizer_, var_decl->name_id, var_decl));
+	}
 	std::shared_ptr<chunk> compiled;
 	const node_unit_key key{ member_decl.get(), current_unit().id };
 	if (auto cached = decl_chunk_cache_.find(key); cached != decl_chunk_cache_.end()) {

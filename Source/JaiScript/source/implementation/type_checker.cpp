@@ -10,6 +10,7 @@
 // callable slots additionally enforce the approved static contract.
 
 #include <jaiscript/detail/type_checker.hpp>
+#include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -380,6 +381,8 @@ private:
     bool deferred_ = false;   // a program-table class met before the engine defined it: the unit's proofs re-stamp after the next import
     std::vector<std::string>* deferred_out_ = nullptr;   // their names, for the engine's re-stamp test
     std::unordered_map<std::string_view, sclass> program_sclasses_;
+    std::unordered_set<std::string> inline_names_;   // inline declarations walked so far (a namespace's as ns::name)
+    std::vector<std::string_view> namespace_names_;
     std::unordered_map<std::string_view, std::vector<const function_decl*>> functions_;
     std::unordered_map<std::string_view, const enum_decl*> enums_;
     std::unordered_set<std::string_view> namespaces_;
@@ -3542,7 +3545,9 @@ private:
                 auto* n = static_cast<namespace_decl*>(d);
                 scopes_.emplace_back();
                 namespace_scopes_.push_back(scopes_.size() - 1);
+                namespace_names_.push_back(n->name);
                 for (auto& inner : n->declarations) { walk_decl(inner.get()); }
+                namespace_names_.pop_back();
                 namespace_scopes_.pop_back();
                 scopes_.pop_back();
                 break;
@@ -3638,8 +3643,38 @@ private:
 		return init;
 	}
 
+	// A plain declaration of a name an inline declaration defines (this unit's earlier one, or another closure unit's) is
+	// the runtime's refusal (detail::inline_redefinition); this unit's own inline declaration of the name leaves the other
+	// units' order to the runtime
+	void check_inline_redefinition(const variable_decl* decl) {
+		const bool program = scopes_.size() == 1;
+		const bool in_namespace = !program && !namespace_scopes_.empty() && namespace_scopes_.back() == scopes_.size() - 1;
+		if (!program && !in_namespace) { return; }
+		std::string key = in_namespace ? std::string(namespace_names_.back()) + "::" + std::string(decl->name) : std::string(decl->name);
+		if (decl->is_inline) { inline_names_.insert(std::move(key)); return; }
+		bool defined_inline = inline_names_.count(key) != 0;
+		if (!defined_inline && program && program_globals_ && !unit_declares_inline(decl->name)) {
+			if (auto it = program_globals_->find(key); it != program_globals_->end()) {
+				for (const auto& [unit, globals] : it->second) {
+					for (const auto& g : globals) { defined_inline = defined_inline || (g && g->is_inline); }
+				}
+			}
+		}
+		if (defined_inline) { diag(diag_level::error, decl->location, detail::inline_redefinition_text(decl, decl->name)); }
+	}
+	bool unit_declares_inline(std::string_view name) const {
+		for (const auto& d : decls_) {
+			if (d && d->get_type() == node_type::variable_decl) {
+				auto* v = static_cast<const variable_decl*>(d.get());
+				if (v->is_inline && v->name == name) { return true; }
+			}
+		}
+		return false;
+	}
+
 	void walk_variable_decl(variable_decl* decl) {
 		if (!decl->type && !decl->function_spelling) { decl->auto_spelled = true; }
+		check_inline_redefinition(decl);
 		ctype init{};
 		bool has_init = decl->initializer != nullptr;
 		bool is_reference_decl = decl->type && decl->type->base_type == script_value_type::jai_reference_type;

@@ -361,7 +361,7 @@ public:
             eng->add_global("hp", script_value((int64_t)4, eng.get()));
             eng->execute("var G = Game();");
             check_eq((int64_t)7, eng->execute("total()").as_int());
-            // an inline handle starts null; a later declaration adopts the shared cell in place
+            // an inline handle starts null; a store fills the shared cell
             auto inl = make_engine();
             check_eq(std::string("Cannot access 'v' on null ('G' is null)"), inl->execute(R"(
                 class Game { int v = 3; }
@@ -371,7 +371,7 @@ public:
                 try { read_v(); } catch (e) { caught = e; }
                 caught
             )").as<std::string>());
-            inl->execute("var G = Game();");
+            inl->execute("inline shared_ptr<Game> G; G = cast<shared_ptr<Game>>(Game());");
             check_eq((int64_t)3, inl->execute("read_v()").as_int());
             // a typed extern is a checked receiver: the store below is rejected before anything runs
             auto strict = make_engine();

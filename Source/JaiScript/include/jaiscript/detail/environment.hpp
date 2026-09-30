@@ -90,14 +90,15 @@ namespace jai {
         void define(uint64_t id, script_value&& value);
         // A variable declaration at program scope: another unit redeclaring the name gets its own
         // cell and the old one stays the binding of the units that declared or saw it; the same
-        // unit, a child environment, a function or a class definition write in place (define)
-        void define_variable(uint64_t id, const script_value& value);
-        void define_variable(uint64_t id, script_value&& value);
+        // unit, a child environment, a function or a class definition write in place (define). False, defining
+        // nothing: an inline declaration created the name's program-scope cell (detail::inline_redefinition)
+        bool define_variable(uint64_t id, const script_value& value);
+        bool define_variable(uint64_t id, script_value&& value);
         // The program-scope cell the running unit already declared for `id` (a re-run of the same unit), else null
         script_value* same_unit_cell(uint64_t id);
-        // An inline variable's program-scope cell just created: owned by no unit, so the first unit that declares the
-        // name without inline adopts the cell in place and every unit keeps sharing it
+        // An inline variable's cell just created (program scope: owned by no unit); only inline declarations share it
         void share(uint64_t id);
+        bool inline_cell(uint64_t id) const { return inline_cells_.count(id) != 0; }
         // A plain extern names a global some unit or the host defines; a lookup that finds nothing says so
         void note_extern(uint64_t id, bool function);
         std::string_view undefined_text(uint64_t id, std::string_view otherwise = "Undefined variable '{0}'") const;
@@ -304,7 +305,7 @@ namespace jai {
         struct binding_version { unit_stamp unit; script_value* cell; };
         std::unordered_map<uint64_t, std::vector<binding_version>> versions_;
         std::unordered_map<uint64_t, unit_stamp> unit_of_;
-        std::unordered_set<uint64_t> shared_placeholders_;
+        std::unordered_set<uint64_t> inline_cells_;
         std::unique_ptr<std::unordered_map<uint64_t, bool>> extern_names_;   // root only: plain externs (true = function)
         script_value* shadowed_cell(uint64_t id) const;
 

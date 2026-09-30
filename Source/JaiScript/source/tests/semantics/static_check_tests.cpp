@@ -2117,6 +2117,24 @@ public:
             check_eq((size_t)0, error_count(e->check("inline cfg;\nfunction h() { cfg = \"any\"; cfg = 1.5; }")));
         });
 
+        test("a_plain_declaration_of_an_inline_variable_is_a_load_error", [this]() {
+            const std::string text = "'frags' is already defined inline; declare it 'inline int frags;' to share it";
+            auto e = make_engine();
+            auto same = e->check("inline int frags;\nint frags = 1;");
+            check_eq((size_t)1, error_count(same));
+            check_true(same.diagnostics[0].message == text, same.diagnostics[0].message);
+            check_eq((size_t)0, error_count(e->check("int frags = 1;\ninline int frags;")), "an inline declaration adopts a plain one");
+            check_eq((size_t)1, error_count(e->check("namespace hud { inline int frags; }\nnamespace hud { int frags = 2; }")));
+            auto dir = closure_dir("inline_redefinition");
+            write_unit(dir, "hud.jai", "inline int frags;\n");
+            auto p = program_engine(dir);
+            auto other = p->check("import \"hud.jai\";\nint frags = 3;\n");
+            check_eq((size_t)1, error_count(other));
+            check_true(other.diagnostics[0].message == text, other.diagnostics[0].message);
+            check_eq((size_t)0, error_count(p->check("import \"hud.jai\";\ninline int frags = 3;\n")));
+            std::filesystem::remove_all(dir);
+        });
+
         test("extern_in_a_shared_leaf_declares_an_optional_siblings_names", [this]() {
             // A leaf every root imports calls into a module only SOME roots import, behind a
             // runtime flag: the single-player program never declares those names, so the leaf

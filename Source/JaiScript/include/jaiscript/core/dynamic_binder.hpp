@@ -240,6 +240,7 @@ namespace dynamic_binder_validation {
         using inner_type = get_validation_type_t<T>;  // Unwrap smart pointers
 
         return !std::is_fundamental_v<inner_type> &&
+               !math_adapted<inner_type> &&
                !std::is_same_v<inner_type, std::string> &&
                !is_std_container<inner_type>::value &&
                !is_signal_type<inner_type>::value &&
@@ -373,6 +374,7 @@ concept has_jai_auto_bind = requires(dynamic_binder<T>& builder) {
 // Builder pattern for registering C++ classes to JaiScript
 template<typename T>
 class dynamic_binder {
+    static_assert(!math_adapted<T>, "T binds as a native math type (math_adapter); delete its dynamic_binder registration");
 public:
     dynamic_binder(engine& engine, const std::string& class_name)
         : engine_(engine), class_name_(class_name) {
@@ -997,6 +999,7 @@ private:
                         make_signal_script_ops(cpp_obj->*member)));
                 }
                 else if constexpr (std::is_class_v<P> &&
+                                   !math_adapted<P> &&
                                    !std::is_same_v<P, std::string> &&
                                    !std::is_same_v<P, script_value> &&
                                    !dynamic_binder_validation::is_std_container<P>::value &&
@@ -1154,7 +1157,8 @@ public:
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
                 using value_type = std::tuple_element_t<0, typename setter_traits::argument_types>;
-                auto value = args[1].as<value_type>();
+                using read_type = std::conditional_t<math_adapted<std::remove_cvref_t<value_type>>, std::remove_cvref_t<value_type>, value_type>;   // a math value has no host object to alias
+                auto value = args[1].as<read_type>();
                 (cpp_obj->*setter)(value);
                 return script_value(std::monostate{}, engine_ptr);
             });
@@ -1169,7 +1173,8 @@ public:
 
                 using setter_traits = detail::function_traits<std::decay_t<Setter>>;
                 using value_type = std::tuple_element_t<1, typename setter_traits::argument_types>;
-                auto value = args[1].as<value_type>();
+                using read_type = std::conditional_t<math_adapted<std::remove_cvref_t<value_type>>, std::remove_cvref_t<value_type>, value_type>;   // a math value has no host object to alias
+                auto value = args[1].as<read_type>();
                 setter(*cpp_obj, value);
                 return script_value(std::monostate{}, engine_ptr);
             });

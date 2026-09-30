@@ -1388,6 +1388,8 @@ namespace jai {
             } else if constexpr (is_specialization_v<decay_t, std::shared_ptr>) {
                 using element_type = typename decay_t::element_type;
                 return param_type_info(script_value_type::jai_shared_ptr_type, std::type_index(typeid(element_type)));
+            } else if constexpr (math_adapted<decay_t>) {
+                return param_type_info(math_adapter<decay_t>::kind);
             } else {
                 return param_type_info(script_value_type::jai_object_type, std::type_index(typeid(decay_t)));
             }

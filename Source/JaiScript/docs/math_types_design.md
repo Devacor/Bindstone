@@ -652,16 +652,30 @@ A binding may take these directly (`void f(jai::vec3)`), with no adapter involve
 
 ### 8.2 The adapter
 
-The registration spelling names the host type, the script kind and the host's components:
+An adapter is a compile-time trait, `jai::math_adapter<Host>` (`include/jaiscript/math/adapter.hpp`), written with one
+macro in the host type's own header. The binder has to know at compile time that a type crosses as a math value
+(`value_converter<T>` and the parameter signatures are templates), and a trait keeps the engine free of adapter state.
+A per-engine registration call such as `vec_adapter<T>(eng, "math::vec3")` could not change how `value_converter<T>`
+compiles.
 
 ```cpp
-jai::vec_adapter<MV::Point<float>>(eng, "math::vec3").components(&MV::Point<float>::x, &MV::Point<float>::y,
-                                                                 &MV::Point<float>::z);
+JAI_BIND_VEC3((MV::Point<float>), x, y, z)   // at global scope, beside the host type
 ```
 
-A binder method whose signature takes or returns an adapted type exchanges components directly with slots at a
-statically resolved call site (no boxed value), and boxed values at a dynamic one. The traits below are the
-compile-time form the registration fills (the exact spelling settles at step 4).
+What an adapted type does today:
+- **Parameters and returns** cross as math values: by value, `const T&` and `T&`. A `T&` parameter gets a private copy,
+  the rule plain values already follow for `int&`. The copy is a pooled vector node; no class instance is created.
+- **Overloads.** The overload scorer takes an adapted parameter's own kind exactly and the other precision at a
+  conversion cost.
+- **Members.** `dynamic_binder::property` members and getter/setter properties read a copy and store through the
+  typed-slot conversion. Component stores (`obj.pos.x = 5`) go through the property's scratch and setter.
+- **Containers.** `std::vector<Host>` converts to and from the kind's vector buffer.
+- **Host API.** `engine::make_value` and `script_value::as<Host>()` convert to and from the math value.
+- **Double registration** is rejected: a `dynamic_binder<T>` of an adapted `T` does not compile.
+
+Two parts of the design are not built yet. A statically resolved call site does not yet exchange components with slots
+(the typed host calls of the raw-typed-frames campaign), and bound members are not yet aliased through a cpp-bound
+vector box (8.4). The traits below list the full design.
 
 ```cpp
 namespace jai {

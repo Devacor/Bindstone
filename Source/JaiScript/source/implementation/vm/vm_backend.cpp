@@ -373,6 +373,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		op_caret_id_ = symbolizer_->intern("^");
 		op_left_shift_id_ = symbolizer_->intern("<<");
 		op_right_shift_id_ = symbolizer_->intern(">>");
+		op_bang_id_ = symbolizer_->intern("!");
 		op_tilde_id_ = symbolizer_->intern("~");
 		builtin_push_id_ = symbolizer_->intern("push");   // interned HERE: symbolizer freezes during parallel regions
 		builtin_has_id_ = symbolizer_->intern("has");
@@ -1331,7 +1332,7 @@ bool vm_backend::object_to_bool_via_method(const script_value& value) {
 		auto* oh = h->get();
 		if (oh->is_class_instance_wrapper && oh->data) {
 			if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
-			    cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_to_bool()) {
+			    cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_truthiness()) {
 				return true;
 			}
 		}
@@ -1339,6 +1340,16 @@ bool vm_backend::object_to_bool_via_method(const script_value& value) {
 	auto target = resolve_member_target(value);
 	if (!target) {
 		return true;
+	}
+	// a class's operator!() decides first, so `!v` in a condition and `!v` as a value agree (Dev ruling 2026-09-30)
+	if (auto negated = object_unary_via_method(value, token_type::bang)) {
+		if (!*negated) {
+			if (!is_unwinding_ && !limits_->terminal_error) {
+				raise_script_exception(format_error(*negated, *symbolizer_), source_location{});
+			}
+			return false;
+		}
+		return !is_truthy(negated->value());
 	}
 	auto method_val = target.method(to_bool_id_);
 	if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
@@ -1553,7 +1564,8 @@ std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_me
 // A class's unary operator (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with interpreter::object_unary_via_method
 std::optional<checked_result<script_value>> vm_backend::object_unary_via_method(const script_value& operand, token_type op) {
 	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
-	const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
+	if (op == token_type::bang && operand.type() != script_value_type::jai_object_type) { return std::nullopt; }   // a handle's ! is its null test
+	const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op == token_type::bang ? op_bang_id_ : op_tilde_id_;
 	auto target = resolve_member_target(operand);
 	if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
 	script_value method_val = target.method(id);
@@ -4682,6 +4694,9 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 	// full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
 	// 2026-07). Identical result for bound primitives. Byte-parallel with the interpreter.
 	if (static_cast<token_type>(ins.a) == token_type::bang) {
+		if (operand.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
+			if (auto landed = user_unary(token_type::bang)) { return *landed; }
+		}
 		stack_.push_back(script_value(!is_truthy(operand), engine_));
 		return {};
 	}

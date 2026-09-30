@@ -2450,7 +2450,7 @@ private:
 				auto* u = static_cast<unary_expr*>(e);
 				ctype operand = infer(u->operand.get());
 				if (operand.kind == ctype::object_k && (u->op.type == token_type::minus || u->op.type == token_type::plus ||
-				                                        u->op.type == token_type::tilde)) {
+				                                        u->op.type == token_type::bang || u->op.type == token_type::tilde)) {
 					if (auto user = class_unary_operator(operand.cls, u->op.type)) { return *user; }
 				}
 				switch (u->op.type) {
@@ -3148,10 +3148,10 @@ private:
         return false;
     }
 
-    // A class operand's unary - + ~ runs the chain's overload taking no argument (both backends): its declared result, or
+    // A class operand's unary - + ! ~ runs the chain's overload taking no argument (both backends): its declared result, or
     // unknown; nullopt when the chain declares none (the builtin rule and its text apply)
     std::optional<ctype> class_unary_operator(std::string_view cls, token_type op) {
-        const std::string_view name = op == token_type::minus ? "-" : op == token_type::plus ? "+" : "~";
+        const std::string_view name = op == token_type::minus ? "-" : op == token_type::plus ? "+" : op == token_type::bang ? "!" : "~";
         member_hit hit = lookup_member(cls, name, /*want_static=*/false);
         if (!hit.found) { return std::nullopt; }
         if (hit.methods) {

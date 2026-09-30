@@ -2127,7 +2127,7 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
         auto* oh = h->get();
         if (oh->is_class_instance_wrapper && oh->data) {
             if (auto* cd = static_cast<class_instance*>(oh->data.get())->get_class_definition();
-                cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_to_bool()) {
+                cd && (cd->is_script_class() || !cd->extended_ever()) && !cd->may_define_truthiness()) {
                 return true;
             }
         }
@@ -2135,6 +2135,19 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
     auto target = resolve_member_target(value);
     if (!target) {
         return true;  // Not a class object - treat as truthy
+    }
+    // a class's operator!() decides first, so `!v` in a condition and `!v` as a value agree (Dev ruling 2026-09-30)
+    if (auto negated = object_unary_via_method(value, token_type::bang)) {
+        if (!*negated) {
+            if (!is_unwinding_ && !limits_->terminal_error) {
+                const std::string message = format_error(*negated, *string_symbolizer_);
+                active_exception_value_ = make_value(message);
+                current_exception_ = script_exception(message);
+                is_unwinding_ = true;
+            }
+            return false;
+        }
+        return !is_truthy(negated->value());
     }
 
     auto method_id = string_symbolizer_->intern("to_bool");
@@ -2309,7 +2322,8 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
 // when the class declares none (the builtin meaning and text follow). KEEP BYTE-PARALLEL with vm_backend::object_unary_via_method
 std::optional<checked_result<script_value>> interpreter::object_unary_via_method(const script_value& operand, token_type op) {
     if (parallel_worker_) [[unlikely]] { return std::nullopt; }
-    const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
+    if (op == token_type::bang && operand.type() != script_value_type::jai_object_type) { return std::nullopt; }   // a handle's ! is its null test
+    const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op == token_type::bang ? op_bang_id_ : op_tilde_id_;
     auto target = resolve_member_target(operand);
     if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
     script_value method_val = target.method(id);
@@ -2372,6 +2386,7 @@ interpreter::interpreter()
     op_caret_id_ = string_symbolizer_->intern("^");
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
+    op_bang_id_ = string_symbolizer_->intern("!");
     op_tilde_id_ = string_symbolizer_->intern("~");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
@@ -2442,6 +2457,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     op_caret_id_ = string_symbolizer_->intern("^");
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
+    op_bang_id_ = string_symbolizer_->intern("!");
     op_tilde_id_ = string_symbolizer_->intern("~");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
@@ -2512,6 +2528,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     op_caret_id_ = string_symbolizer_->intern("^");
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
+    op_bang_id_ = string_symbolizer_->intern("!");
     op_tilde_id_ = string_symbolizer_->intern("~");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
@@ -3662,6 +3679,9 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
     // full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
     // 2026-07). Identical result for bound primitives. Byte-parallel with exec_unary.
     if (expr->op.type == token_type::bang) {
+        if (operand.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
+            if (auto landed = user_unary(token_type::bang)) { return std::move(*landed); }
+        }
         push_value(make_value(!is_truthy(operand)));
         return {};
     }

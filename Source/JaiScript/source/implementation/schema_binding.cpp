@@ -201,6 +201,31 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 
 } // namespace
 
+void bind_schema_math_property(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
+		const std::string& prop_name, const math_property_bridge& bridge, const schema_property_access& access) {
+	engine* eng = &a_engine;
+	auto getter = [prop_name, bridge, eng, access](void* self) -> script_value {
+		const jai::property_base* prop = access.find(self, prop_name);
+		const void* host = prop ? prop->erased_value_ptr() : nullptr;
+		if (!host) {
+			return script_value(std::monostate{}, eng);
+		}
+		uint32_t words[4] = {0, 0, 0, 0};
+		bridge.read(host, words);
+		return script_value::make_vec(bridge.kind, words, eng);
+	};
+	auto setter = [prop_name, bridge, access](void* self, const script_value& arg) {
+		uint32_t words[4] = {0, 0, 0, 0};
+		if (!arg.math_words_as(bridge.kind, words)) {
+			throw runtime_error(format_error_message_numeric(script_value::math_conversion_text(bridge.kind), arg.deref().type_id(), 0));
+		}
+		if (jai::property_base* prop = access.find(self, prop_name)) {
+			bridge.assign(*prop, words);
+		}
+	};
+	register_schema_property(a_engine, class_def, metadata, prop_name, access, std::move(getter), std::move(setter));
+}
+
 bool bind_schema_primitive_property(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
 		const std::string& prop_name, std::type_index value_type, bool is_observable, const schema_property_access& access) {
 	return bind_schema_typed<int>(a_engine, class_def, metadata, prop_name, value_type, is_observable, access) ||

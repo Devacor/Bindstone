@@ -306,6 +306,9 @@ namespace detail {
 
 	bool bind_schema_primitive_property(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
 		const std::string& prop_name, std::type_index value_type, bool is_observable, const schema_property_access& access);
+	// A property of a math-adapted type reads and writes as its math kind (schema_binding.cpp)
+	void bind_schema_math_property(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
+		const std::string& prop_name, const math_property_bridge& bridge, const schema_property_access& access);
 } // namespace detail
 
 // ============================================================================
@@ -447,6 +450,7 @@ public:
         , class_name_(std::move(other.class_name_))
         , class_def_(std::move(other.class_def_))
         , serialization_metadata_(std::move(other.serialization_metadata_))
+        , pending_math_properties_(std::move(other.pending_math_properties_))
         , has_explicit_constructor_(other.has_explicit_constructor_)
         , built_(other.built_)
     {
@@ -1505,6 +1509,10 @@ private:
                 continue;
             }
 
+            if (prop_meta->math) {
+                pending_math_properties_.push_back({ prop_name, prop_meta->math, access });
+                continue;
+            }
             // Non-primitive property types are bound manually.
             detail::bind_schema_primitive_property(engine_, *class_def_, serialization_metadata_,
                 prop_name, value_type, is_observable, access);
@@ -1590,6 +1598,14 @@ public:
         // Prevent double-build
         if (built_) return;
         built_ = true;
+
+        // A bound method of the same name is the class's chosen spelling (Palette's color() /
+        // color(c)); the property stays reachable through it
+        for (const pending_math_property& pending : pending_math_properties_) {
+            if (class_def_->defines_method(engine_.symbolize(pending.name))) continue;
+            detail::bind_schema_math_property(engine_, *class_def_, serialization_metadata_, pending.name, pending.bridge, pending.access);
+        }
+        pending_math_properties_.clear();
 
         if constexpr (std::is_base_of_v<script_extensible, T>) {
             class_definition::script_slot_hooks hooks;
@@ -1843,6 +1859,12 @@ private:
     std::string class_name_;
     std::shared_ptr<class_definition> class_def_;
     serialization::class_metadata serialization_metadata_;
+    struct pending_math_property {
+        std::string name;
+        math_property_bridge bridge;
+        detail::schema_property_access access;
+    };
+    std::vector<pending_math_property> pending_math_properties_;
     bool has_explicit_constructor_ = false;  // Track if user registered any constructor
     bool built_ = false;  // Track if build() was called
     

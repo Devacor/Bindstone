@@ -6,11 +6,22 @@
 #include <unordered_map>
 #include <typeindex>
 #include <mutex>
+#include <cstdint>
+#include <jaiscript/math/adapter.hpp>
 
 namespace jai {
 
 // Forward declarations
 class property_base;
+
+// A property whose value type has a math_adapter reads and writes as that math kind: the host value's component words
+// out, and component words back through the property's own assignment (observable properties notify)
+struct math_property_bridge {
+	script_value_type kind = script_value_type::jai_invalid_type;
+	void (*read)(const void* host, uint32_t* words) = nullptr;
+	bool (*assign)(property_base& property, const uint32_t* words) = nullptr;
+	explicit operator bool() const noexcept { return read != nullptr; }
+};
 
 // ============================================================================
 // Property Metadata (stored once per type, not per instance)
@@ -24,17 +35,19 @@ struct property_meta {
 	bool default_allow_serialization = true;
 	bool is_observable = false;        // True if this is an observable_property
 	bool is_signal = false;            // True for JAI_SIGNAL_PROPERTY (binds the generic Signal view)
+	math_property_bridge math;         // set when the value type is math-adapted (script reads and writes the math kind)
 
 	// Default constructor for containers
 	property_meta()
 		: value_type_id(typeid(void)) {}
 
-	property_meta(std::string n, std::type_index value_ti, bool allow_ser, bool observable, bool signal_prop = false)
+	property_meta(std::string n, std::type_index value_ti, bool allow_ser, bool observable, bool signal_prop = false, math_property_bridge math_bridge = {})
 		: name(std::move(n))
 		, value_type_id(value_ti)
 		, default_allow_serialization(allow_ser)
 		, is_observable(observable)
-		, is_signal(signal_prop) {
+		, is_signal(signal_prop)
+		, math(math_bridge) {
 	}
 };
 

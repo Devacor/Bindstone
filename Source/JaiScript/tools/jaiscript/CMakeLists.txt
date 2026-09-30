@@ -18,10 +18,7 @@ else()
 endif()
 
 if(MSVC)
-    target_compile_options(jaiscript_runner PRIVATE /W3 /EHsc /permissive- /bigobj)
-    set_property(TARGET jaiscript_runner PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
+    target_compile_options(jaiscript_runner PRIVATE /W3)
 endif()
 
 option(JAISCRIPT_RUNNER_PADDING_CONTROL "Build a cold-help placement control for the standalone runner" OFF)

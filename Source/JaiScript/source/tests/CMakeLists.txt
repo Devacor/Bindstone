@@ -175,16 +175,7 @@ endif()
 
 # Platform-specific settings
 if(MSVC)
-    target_compile_options(jaiscript_tests PRIVATE
-        /W3                 # Warning level 3
-        /EHsc              # Exception handling model
-        /permissive-       # Standards conformance
-        /bigobj            # Allow large object files
-    )
-    # Use static runtime to match library
-    set_property(TARGET jaiscript_tests PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
+    target_compile_options(jaiscript_tests PRIVATE /W3)
     # JAI_MAX_CALL_DEPTH (10000) recursion frames exceed the 1 MB default stack in
     # Debug; a larger stack lets the catchable depth-limit error actually fire.
     target_link_options(jaiscript_tests PRIVATE /STACK:134217728)
@@ -317,10 +308,7 @@ add_executable(jaiscript_fuzz
 target_link_libraries(jaiscript_fuzz PRIVATE jaiscript)
 target_include_directories(jaiscript_fuzz PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC)
-    target_compile_options(jaiscript_fuzz PRIVATE /W3 /EHsc /permissive- /bigobj)
-    set_property(TARGET jaiscript_fuzz PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
+    target_compile_options(jaiscript_fuzz PRIVATE /W3)
     # Same deep-recursion headroom as jaiscript_tests (catchable depth-limit errors).
     target_link_options(jaiscript_fuzz PRIVATE /STACK:134217728)
 else()

@@ -3678,8 +3678,17 @@ namespace {
         return s;
     }
     std::string env_value(const char* name) {
+#ifdef _MSC_VER
+        char* v = nullptr;
+        size_t n = 0;
+        if (_dupenv_s(&v, &n, name) != 0 || !v) { return std::string(); }
+        std::string out(v);
+        std::free(v);
+        return out;
+#else
         const char* v = std::getenv(name);
         return v && *v ? std::string(v) : std::string();
+#endif
     }
     std::string home_directory() {
         std::string h = env_value("HOME");

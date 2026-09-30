@@ -116,16 +116,17 @@ if(MSVC)
         )
     endif()
 
-    # Use static runtime for consistent linkage
-    set_property(TARGET jaiscript PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
+    # The binder headers overflow the default section limit in a consumer's Debug TU too
+    target_compile_options(jaiscript PUBLIC /bigobj)
 else()
     target_compile_options(jaiscript PRIVATE
         -Wall
         -Wextra
         -Wpedantic
     )
+    if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(jaiscript PUBLIC -Wa,-mbig-obj)
+    endif()
 endif()
 
 # Precompiled headers - parse heavy templates once instead of per-TU

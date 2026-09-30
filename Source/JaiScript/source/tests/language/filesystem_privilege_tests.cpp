@@ -37,9 +37,9 @@ public:
     }
 
     static std::string denied() { return "Insufficient privilege: filesystem."; }
-    // Existing runtime convention: caught text is the catalog message; uncaught
-    // checked errors append the error-category text at the host boundary.
-    static std::string runtime_denied() { return denied() + ": Insufficient privilege"; }
+    // The host boundary drops a category the text already begins with, so an uncaught
+    // denial reads exactly as the caught one.
+    static std::string runtime_denied() { return denied(); }
 
     template<class Engine, class Function>
     static void add_protected(Engine& eng, const std::string& name, Function function) {

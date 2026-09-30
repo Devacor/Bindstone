@@ -57,6 +57,29 @@ using class_name_map = std::unordered_map<std::string, std::shared_ptr<class_def
 // Factory defined by the VM backend TU (source/implementation/vm/vm_backend.cpp)
 std::unique_ptr<execution_backend> create_vm_backend();
 
+namespace {
+
+// A checked error leaves a backend as "<text>: <category>" (std::system_error's what()). The host sees
+// the category only when it adds something: text that already begins with it drops the repeat.
+script_exception without_repeated_category(const script_exception& e) {
+    if (e.thrown) { return e; }
+    const std::string_view text = e.what();
+    const size_t cut = text.rfind(": ");
+    if (cut == std::string_view::npos) { return e; }
+    const std::string_view category = text.substr(cut + 2);
+    const std::string_view head = text.substr(0, cut);
+    if (category.empty() || head.substr(0, category.size()) != category) { return e; }
+    const auto& errors = runtime_error_category();
+    for (int ev = 1; ev <= static_cast<int>(runtime_error_code::coroutine_suspended); ++ev) {
+        if (errors.message(ev) == category) {
+            return script_exception(std::string(head), e.location());
+        }
+    }
+    return e;
+}
+
+}
+
 checked_result<script_value> script_callable_thunk::operator()(const std::vector<script_value>& args) const {
     // bound_method: make_bound_method's EXACT opaque behavior (prepend the receiver,
     // call the dispatch value, anchor a non-owning result on the receiver) — no
@@ -103,7 +126,7 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
         // original message), then scrub so the engine stays usable. Mid-script host
         // callbacks keep the latched unwinding flag instead - the calling script's
         // catch must still see the original thrown VALUE.
-        script_exception ex = backend->get_current_exception();
+        script_exception ex = without_repeated_category(backend->get_current_exception());
         backend->prepare_for_execution();
         throw ex;
     }
@@ -2057,7 +2080,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
 
         if (be->is_unwinding()) {
             if (be->is_executing()) { be->park_nested_failure(); }
-            throw be->get_current_exception();
+            throw without_repeated_category(be->get_current_exception());
         }
 
         // No need to sync globals - they're already in the shared environment!

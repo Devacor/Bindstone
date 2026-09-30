@@ -169,7 +169,7 @@ try {
 } catch (e) {
     print(&quot;this never prints: budget errors are TERMINAL, catch is skipped&quot;);
 }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Script execution budget exceeded - raise engine::execution_budget or break up the work: Script execution budget exceeded</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Script execution budget exceeded - raise engine::execution_budget or break up the work</code></pre></div>
 <p>(The catch body did not run. The error went straight to the host.) Trying this from a terminal? The standalone runner lifts the budget by default, so give it one back: <code>jaiscript --budget=1 runaway.jai</code>.</p>
 <p><code>engine::memory_cap(bytes)</code> works alongside it for allocation bombs: the <strong>first</strong> raise is catchable (the growth is denied), but a <strong>second</strong> raise in the same execute is terminal. Both limits re-arm per <code>execute()</code>, and neither can be swallowed from inside a function, lambda, or coroutine. The terminality is the point.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/04-operators.html"><span>&larr; previous</span>Operators &amp; Arithmetic</a><a class="next" rel="next" href="../guide/06-functions.html"><span>next &rarr;</span>Functions &amp; Lambdas</a></nav></article>
 </main>

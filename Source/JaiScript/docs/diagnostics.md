@@ -3,7 +3,7 @@
 Every runtime error text is byte-identical on both backends (the interpreter and the vm raise
 through the same kernels or through byte-parallel twins). This catalog lists the texts a script
 can observe (`catch (e)` sees the text alone; an uncaught error's `what()` appends the error
-code's category message, `<text>: <category>`), grouped by family. Four families were redesigned
+code's category message, `<text>: <category>`, unless the text already begins with it), grouped by family. Four families were redesigned
 in one pass (null receiver, "no member", arity/overloads, typed boundary); the rest are listed
 with a one-line recommendation each and are otherwise untouched.
 

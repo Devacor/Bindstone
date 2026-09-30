@@ -1933,9 +1933,9 @@ int run_selftest(const console_state& con) {
 			try {
 				eng->execute("saved_read(fixture + \"/content.txt\");");
 			} catch (const std::exception& error) {
-				uncaught_denial = error.what() == denial + ": Insufficient privilege";
+				uncaught_denial = error.what() == denial;
 			}
-			expect_privilege(uncaught_denial, "uncaught denial preserves public error suffix");
+			expect_privilege(uncaught_denial, "uncaught denial reads as the caught text (no repeated category)");
 			expect_privilege(slurp_file(content.string()) == "unchanged", "denied write leaves bytes unchanged");
 			expect_privilege(fs::exists(removable), "denied delete preserves file");
 			expect_privilege(!fs::exists(fixture / "created") && !fs::exists(fixture / "probe-created"),

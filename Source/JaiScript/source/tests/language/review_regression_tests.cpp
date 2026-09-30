@@ -2028,6 +2028,28 @@ public:
             }
         });
 
+        test("host_what_does_not_repeat_its_category", [this]() {
+            auto what_of = [](const std::shared_ptr<jai::engine>& e, const char* script) {
+                try { e->execute(script); } catch (const std::exception& ex) { return std::string(ex.what()); }
+                return std::string();
+            };
+            auto sandbox = make_engine();
+            sandbox->disable(jai::filesystem);
+            check_eq(std::string("Insufficient privilege: filesystem."), what_of(sandbox, "extern x; import(\"nowhere.jai\");"));
+            auto e = make_engine();
+            e->static_checking(check_mode::warn);
+            check_eq(std::string("Undefined variable 'undefined_thing'"), what_of(e, "undefined_thing + 1;"));
+            check_eq(std::string("Cannot apply '+=' to string and int: Type mismatch"), what_of(e, "string u = \"x\"; u += 5;"),
+                "a category that adds information stays");
+            e->static_checking(check_mode::strict);
+            e->execution_budget(0.05);
+            const std::string budget = what_of(e, "while (true) { }");
+            e->execution_budget(5.0);
+            check_eq(std::string("Script execution budget exceeded - raise engine::execution_budget or break up the work"), budget);
+            check_eq(std::string("Undefined variable 'q': Undefined variable"),
+                what_of(e, "throw \"Undefined variable 'q': Undefined variable\";"), "a script throw keeps its text exactly");
+        });
+
         test("member_compound_order_pinned", [this, expect_order, recv_prelude]() {
             expect_order((std::string(recv_prelude) + R"(
                 int boom() { log += "R"; throw "boom"; }

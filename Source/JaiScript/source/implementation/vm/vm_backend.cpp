@@ -97,16 +97,16 @@ namespace {
 		if (left.is_int() && right.is_int()) {
 			if (right.unchecked_as_int() != 0) return std::nullopt;
 			return op == token_type::slash
-				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in integer operation"}
-				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in integer operation"};
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero"};
 		}
 		if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
 			if (!(op == token_type::slash ? float_div_covered : float_mod_covered)) return std::nullopt;
 			const script_float rf = right.is_int() ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
 			if (rf != 0.0) return std::nullopt;
 			return op == token_type::slash
-				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in float operation"}
-				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in float operation"};
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero"};
 		}
 		return std::nullopt;
 	}
@@ -2172,7 +2172,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
 			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
 			if (b == 0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 			}
 			script_int r;
 			if (!ints::try_div(a, b, r)) return vm_int_overflow_sv("Integer overflow in '/'");
@@ -2182,7 +2182,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
 			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
 			if (rf == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+				return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 			}
 			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			return script_value(lf / rf, engine_);
@@ -2199,7 +2199,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 		const script_int a = unwrapped_left.unchecked_as_int(), b = unwrapped_right.unchecked_as_int();
 		if (b == 0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 		}
 		script_int r;
 		if (!ints::try_div(a, b, r)) return vm_int_overflow_sv("Integer overflow in '/'");
@@ -2210,7 +2210,7 @@ checked_result<script_value> vm_backend::handle_divide(const script_value& left,
 	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
 		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
 		if (rf == 0.0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+			return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 		}
 		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
 		return script_value(lf / rf, engine_);
@@ -2242,7 +2242,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 		if (li_raw == script_value::TYPEID_INT && ri_raw == script_value::TYPEID_INT) {
 			const script_int b = right.unchecked_as_int();
 			if (b == 0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 			}
 			return script_value(ints::mod(left.unchecked_as_int(), b), engine_);
 		}
@@ -2250,7 +2250,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 		    (ri_raw == script_value::TYPEID_INT || ri_raw == script_value::TYPEID_FLOAT)) {
 			script_float rf = (ri_raw == script_value::TYPEID_INT) ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
 			if (rf == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 			}
 			script_float lf = (li_raw == script_value::TYPEID_INT) ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			return script_value(std::fmod(lf, rf), engine_);
@@ -2267,7 +2267,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 		const script_int b = unwrapped_right.unchecked_as_int();
 		if (b == 0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 		}
 		return script_value(ints::mod(unwrapped_left.unchecked_as_int(), b), engine_);
 	}
@@ -2276,7 +2276,7 @@ checked_result<script_value> vm_backend::handle_modulo(const script_value& left,
 	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
 		script_float rf = (ri == script_value::TYPEID_INT) ? script_float(unwrapped_right.unchecked_as_int()) : unwrapped_right.unchecked_as_float();
 		if (rf == 0.0) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+			return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 		}
 		script_float lf = (li == script_value::TYPEID_INT) ? script_float(unwrapped_left.unchecked_as_int()) : unwrapped_left.unchecked_as_float();
 		return script_value(std::fmod(lf, rf), engine_);
@@ -2802,10 +2802,10 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '-'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '*'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::slash:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation")); return true; }
+				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
 				{ script_int rr; if (!ints::try_div(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '/'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::percent:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation")); return true; }
+				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
 				out.emplace(script_value(ints::mod(a, b), engine_)); return true;
 			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
 			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
@@ -2825,10 +2825,10 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			case token_type::minus: out.emplace(script_value(a - b, engine_)); return true;
 			case token_type::star: out.emplace(script_value(a * b, engine_)); return true;
 			case token_type::slash:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation")); return true; }
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
 				out.emplace(script_value(a / b, engine_)); return true;
 			case token_type::percent:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation")); return true; }
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
 				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
 			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
 			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
@@ -2875,10 +2875,10 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '-'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '*'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::slash:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation")); return true; }
+				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
 				{ script_int rr; if (!ints::try_div(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '/'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::percent:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation")); return true; }
+				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
 				out.emplace(script_value(ints::mod(a, b), engine_)); return true;
 			default: return false;
 			}
@@ -2896,10 +2896,10 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			case token_type::minus: out.emplace(script_value(a - b, engine_)); return true;
 			case token_type::star: out.emplace(script_value(a * b, engine_)); return true;
 			case token_type::slash:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation")); return true; }
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
 				out.emplace(script_value(a / b, engine_)); return true;
 			case token_type::percent:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation")); return true; }
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
 				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
 			default: return false;
 			}
@@ -2929,10 +2929,10 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '-'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '*'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::slash:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation")); return true; }
+				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
 				{ script_int rr; if (!ints::try_div(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '/'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
 			case token_type::percent:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation")); return true; }
+				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
 				out.emplace(script_value(ints::mod(a, b), engine_)); return true;
 			default: return false;
 			}
@@ -2950,10 +2950,10 @@ bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_v
 			case token_type::minus: out.emplace(script_value(a - b, engine_)); return true;
 			case token_type::star: out.emplace(script_value(a * b, engine_)); return true;
 			case token_type::slash:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation")); return true; }
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
 				out.emplace(script_value(a / b, engine_)); return true;
 			case token_type::percent:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation")); return true; }
+				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
 				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
 			default: return false;
 			}
@@ -3030,7 +3030,7 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 				return script_value(rr, engine_);
 			case token_type::percent:
 				if (rightInt == 0) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Division by zero");
+					return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				}
 				return script_value(ints::mod(leftInt, rightInt), engine_);
 			default:
@@ -3067,7 +3067,7 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 			return script_value(leftNum / rightNum, engine_);
 		case token_type::percent:
 			if (rightNum == 0.0) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Division by zero");
+				return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 			}
 			return script_value(std::fmod(leftNum, rightNum), engine_);
 		default:
@@ -4327,7 +4327,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 			}
 			case compound_percent: {
 				if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+					return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				}
 				VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight, 4));
 				VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym)));
@@ -4458,22 +4458,14 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				return raise_from(detail::compound_mismatch(2, currentValue, rightValue, engine_));
 			}
 			break;
-		case compound_slash:
-			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return raise_(make_error_code(runtime_error_code::division_by_zero));
-			}
-			if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf / rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(3, currentValue, rightValue, engine_));
-			}
+		case compound_slash: {
+			// the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
 			break;
+		}
 		case compound_percent: {
 			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+				return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 			}
 			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
 			break;
@@ -5352,10 +5344,10 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-'")); emit_int(rr); return {}; }
 			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*'")); emit_int(rr); return {}; }
 			case token_type::slash:
-				if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+				if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 				{ script_int rr; if (!ints::try_div(a, b, rr)) return raise_from(vm_int_overflow_v("Integer overflow in '/'")); emit_int(rr); return {}; }
 			case token_type::percent:
-				if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+				if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				emit_int(ints::mod(a, b)); return {};
 			case token_type::less: sink(script_value(a < b, engine_)); return {};
 			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
@@ -5374,10 +5366,10 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 			case token_type::minus: emit_float(a - b); return {};
 			case token_type::star: emit_float(a * b); return {};
 			case token_type::slash:
-				if (b == 0.0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
+				if (b == 0.0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 				emit_float(a / b); return {};
 			case token_type::percent:
-				if (b == 0.0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
+				if (b == 0.0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				emit_float(std::fmod(a, b)); return {};
 			case token_type::less: sink(script_value(a < b, engine_)); return {};
 			case token_type::less_equal: sink(script_value(a <= b, engine_)); return {};
@@ -5765,11 +5757,11 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 						if (!ints::try_mul(a, b, rhs)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
 						break;
 					case token_type::slash:
-						if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+						if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 						if (!ints::try_div(a, b, rhs)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
 						break;
 					case token_type::percent:
-						if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+						if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 						rhs = ints::mod(a, b);
 						break;
 					default:
@@ -6355,7 +6347,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 			}
 			case token_type::percent: {
 				if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+					return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				}
 				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
 				break;
@@ -6572,11 +6564,11 @@ op_status vm_backend::raw_int_arith(token_type op, script_int a, script_int b,
 		if (!ints::try_mul(a, b, out)) return raise_from(vm_int_overflow_v("Integer overflow in '*'"));
 		return {};
 	case token_type::slash:
-		if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
+		if (b == 0) return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 		if (!ints::try_div(a, b, out)) return raise_from(vm_int_overflow_v("Integer overflow in '/'"));
 		return {};
 	case token_type::percent:
-		if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
+		if (b == 0) return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 		out = ints::mod(a, b);
 		return {};
 	default:
@@ -10497,7 +10489,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 					return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 				}
 				if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
-					return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+					return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				}
 				const script_value current = storage->get(static_cast<size_t>(index), engine_);
 				script_value resultValue = make_null();
@@ -10524,7 +10516,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 						return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
 					}
 					if (op == token_type::percent && rhs_idx == script_value::TYPEID_INT && rhs.unchecked_as_int() == 0) {
-						return raise_(make_error_code(runtime_error_code::division_by_zero), "Modulo by zero");
+						return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 					}
 					script_value resultValue = make_null();
 					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));
@@ -13798,26 +13790,13 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 			break;
 		}
 		case compound_slash: {
-			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return raise_(make_error_code(runtime_error_code::division_by_zero),
-					"Division by zero");
-			} else if (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0) {
-				return raise_(make_error_code(runtime_error_code::division_by_zero),
-					"Division by zero");
-			}
-			if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				resultValue = script_value(cf / rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(3, currentValue, rightValue, engine_));
-			}
+			// the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
+			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
 			break;
 		}
 		case compound_percent: {
 			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return raise_(make_error_code(runtime_error_code::division_by_zero),
+				return raise_(make_error_code(runtime_error_code::modulo_by_zero),
 					"Modulo by zero");
 			}
 			VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));

@@ -5485,7 +5485,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"A = function(var i, var j) { return 7; };\n"
 				"out + \" | \" + run(2);";
 			// flip's setf(k) stores 2.5 into the int k through the reference: k's own table keeps it an int (Dev ruling 2026-09-28)
-			const std::string want = "7.5400642840316 91 12.0 10.5 156 | 30.54493464052287:int | E:Integer overflow in '*' | E:Division by zero in integer operation | 42.0 5 3.0 1.5 28";
+			const std::string want = "7.5400642840316 91 12.0 10.5 156 | 30.54493464052287:int | E:Integer overflow in '*' | E:Division by zero | 42.0 5 3.0 1.5 28";
 			both(src, want, "untyped leaves");
 			both(src, want, "untyped leaves, proofs off", false);
 			const std::string l = listing_run(src);

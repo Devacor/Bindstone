@@ -53,16 +53,16 @@ namespace jai::detail {
 		if (left.is_int() && right.is_int()) {
 			if (right.unchecked_as_int() != 0) { return std::nullopt; }
 			return op == token_type::slash
-				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in integer operation"}
-				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in integer operation"};
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero"};
 		}
 		if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
 			if (!(op == token_type::slash ? float_div_covered : float_mod_covered)) { return std::nullopt; }
 			const script_float rf = right.is_int() ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
 			if (rf != 0.0) { return std::nullopt; }
 			return op == token_type::slash
-				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero in float operation"}
-				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero in float operation"};
+				? bound_zero_divisor_error{runtime_error_code::division_by_zero, "Division by zero"}
+				: bound_zero_divisor_error{runtime_error_code::modulo_by_zero, "Modulo by zero"};
 		}
 		return std::nullopt;
 	}
@@ -91,14 +91,14 @@ namespace jai::detail {
 		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 			script_int out;
 			if (const auto fault = int_arith(op, l.unchecked_as_int(), r.unchecked_as_int(), out); fault != scalar_fault::none) {
-				return scalar_fault_error<checked_result<script_value>>(op, fault, false);
+				return scalar_fault_error<checked_result<script_value>>(op, fault);
 			}
 			return h.make_int(out);
 		}
 		if (numeric_storage(li) && numeric_storage(ri)) {
 			script_float out;
 			if (const auto fault = float_arith(op, as_script_float(l, li), as_script_float(r, ri), out); fault != scalar_fault::none) {
-				return scalar_fault_error<checked_result<script_value>>(op, fault, true);
+				return scalar_fault_error<checked_result<script_value>>(op, fault);
 			}
 			return h.make_float(out);
 		}

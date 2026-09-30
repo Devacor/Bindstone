@@ -5216,8 +5216,7 @@ bool vm_compiler::lift_partners_ok(const binary_expr* b) {
 
 // Whole-tree classification: operands and pure value-op binaries all the way down. Returns the binary-node
 // count (the conservative temp bound), -1 = not fusible. literal-op-literal nodes stay UNFUSED, mirroring
-// binary_shape's refusal: the interpreter's fast paths never fire for them, and the general paths' error
-// spellings differ from the fused kernel's ("Division by zero" vs "... in float operation"; fuzz seed 115)
+// binary_shape's refusal: the interpreter's fast paths never fire for them (fuzz seed 115)
 int vm_compiler::lift_fusible_nodes(const expression* e) {
 	if (lift_operand_shape(e)) { return 0; }
 	if (e->get_type() != node_type::binary_expr) { return -1; }

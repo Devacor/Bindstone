@@ -177,8 +177,8 @@ try {
     print(&quot;float: caught {}&quot;, e);
 }
 &quot;still running&quot;;</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int:   caught Division by zero in integer operation
-float: caught Division by zero in float operation
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int:   caught Division by zero
+float: caught Division by zero
 == result: still running</code></pre></div>
 <h2 id="equality">Equality: memberwise values, pointer-compared handles<a class="hlink" href="#equality" aria-label="link">&#8203;</a></h2>
 <p><code>==</code> and <code>!=</code> compare <strong>values memberwise</strong>, the way C++ containers do: arrays element by element, maps entry by entry in key order, class instances field by field, each stopping at the first difference and short-circuiting on a size or class mismatch. A class that defines <code>operator==</code> takes precedence, for itself and wherever it appears as an element or a field. A <code>shared_ptr</code> handle compares like <code>std::shared_ptr</code>, by pointer: two <code>new</code> objects with equal fields are not equal, a handle equals itself and its aliases. Identity for everything else is a separate question, asked with <code>same_object(x, y)</code>: references resolve to their referents, handles to the object they share, and containers and instances are the same object only when they are one allocation. Primitives and strings carry no identity, so <code>same_object</code> compares them as values.</p>

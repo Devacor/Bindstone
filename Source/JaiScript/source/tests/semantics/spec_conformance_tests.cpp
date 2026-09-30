@@ -162,6 +162,8 @@ public:
 		simplification_audit_fixes();
 		rulings_2026_09_28();
 		handle_field_admission();
+		reentrant_destructors_and_operand_order();
+		handle_admission();
 #ifdef JAISCRIPT_SPEC_KNOWN_BUGS
 		known_bugs();
 #endif
@@ -2135,13 +2137,12 @@ private:
 		});
 	}
 
-	// SIMPLIFICATION_AUDIT.md suspects S-a, S-b, S-c and S-h, and the destructor a throw's unwinding skips
-	void known_bugs_simplification_suspects() {
+	// SIMPLIFICATION_AUDIT.md suspects S-a, S-b and S-c, and F13 (the destructors a throw's unwinding releases)
+	void reentrant_destructors_and_operand_order() {
 		test("a_destructor_that_reenters_while_a_frame_releases_its_loop_state_runs_to_completion", [this]() {
-			// C++: the last handle's release runs the destructor to completion and the caller continues intact. The VM erases
-			// iter_states_ in place (pop_script_frame_core, unwind_to_handler, frame_guard); the destructor's own range-for
-			// pushes onto the vector mid-erase, and at every depth where its size equals its capacity (1 2 3 4 6 9) the push
-			// reallocates it: heap-use-after-free under ASan, a crash in Debug
+			// C++: the last handle's release runs the destructor to completion and the caller continues intact. The released
+			// loop state leaves the VM's vector before it dies: the destructor's own range-for pushes onto that vector, and at
+			// every depth where its size equals its capacity (1 2 3 4 6 9) the push reallocates it
 			for (int depth = 1; depth <= 10; ++depth) {
 				std::string src = "var log = [];\n"
 					"class Probe { int id = 0; Probe(int i) { id = i; } ~Probe() { for (auto y : [1, 2]) { log.push(id * 10 + y); } } }\n"
@@ -2155,9 +2156,9 @@ private:
 			}
 		});
 		test("a_destructor_that_reenters_while_the_value_stack_truncates_runs_to_completion", [this]() {
-			// value_stack::truncate destroys the popped window in place and lowers count afterwards; the destructor's call
-			// grows the stack mid-loop at a recursion depth that leaves the count just under a capacity step (4096, 8192,
-			// 16384: heap-use-after-free); the range crosses each step
+			// a popped window's heavy slot leaves the value stack before it dies: the destructor's call grows the stack at a
+			// recursion depth that leaves the count just under a capacity step (4096, 8192, 16384); the range crosses each step
+			// (the unfixed fault shows under ASan only)
 			std::string wide = "function wide() -> int { ";
 			std::string rec = "function rec(int n) -> int { ";
 			for (int i = 0; i < 400; ++i) {
@@ -2174,8 +2175,8 @@ private:
 			}
 		});
 		test("a_callee_parked_by_an_execute_that_failed_is_released", [this]() {
-			// the uncaught error leaves the closure the call parked in pending_callees_ (prepare_for_execution clears the other
-			// stacks, not that one), so the captured instance outlives every handle the program holds until the engine dies
+			// the closure a call parked when the execute ended uncaught is released with the run, so the captured instance dies
+			// with the program's last handle
 			every_config("pending callee", "[1]", [](engine& e) {
 				e.execute("var log = []; class Probe { ~Probe() { log.push(1); } } var p = new Probe(); var f = [p]() { return 1; }; p = null;"
 				          " function boom() { throw \"x\"; return 0; }");
@@ -2186,8 +2187,8 @@ private:
 		});
 		test("an_operand_a_later_call_binds_by_reference_is_read_first", [this]() {
 			// invariant 12 / C++17: the left operand takes its value before the right side runs. The VM reads a private local
-			// inside the fused op after the call on its right when the reference-binding call hides under an assignment,
-			// a literal or a new expression (vm_compiler slot_argument_in has no case for them)
+			// inside the fused op after the call on its right unless that call's arguments may write it: a reference-binding
+			// call under an assignment, a literal or a new expression, and a store or ++/-- naming it directly
 			expect("slot argument", R"(
 				function bump(int& r) -> int { r = 100; return 1; }
 				function g(v) -> int { return 0; }
@@ -2197,58 +2198,151 @@ private:
 				function b3() -> int { int x = 1; return x + g(new C(x)); }
 				function b4() -> int { int x = 1; return x + g({"k": bump(x)}); }
 				function b5() -> int { int x = 1; int t = 0; return x + g(t += bump(x)); }
-				"" + b1() + "," + b2() + "," + b3() + "," + b4() + "," + b5();
-			)", "1,1,1,1,1");
+				function d1() -> int { int x = 1; return x + g(x = 5); }
+				function d2() -> int { int x = 1; return x + g(x++); }
+				function d3() -> int { int x = 1; return x + g(++x); }
+				function d4() -> int { int x = 1; return x + g(x += 7); }
+				function d5() -> int { int x = 1; return x + g([x = 5]); }
+				"" + b1() + "," + b2() + "," + b3() + "," + b4() + "," + b5() + "|" + d1() + "," + d2() + "," + d3() + "," + d4() + "," + d5();
+			)", "1,1,1,1,1|1,1,1,1,1");
 		});
-		test("a_shared_ptr_variable_rejects_a_handle_holding_an_unrelated_class", [this]() {
-			// a typed shared_ptr<T> slot holds T or a subclass (the declaration's and the parameter's rule); a function-local or
-			// namespace '=' of a same-kind handle skips the pointee check on both backends (the gate at the slot store sends a
-			// shared_ptr into shared_ptr store straight to the slot, and enforce_type_compatibility's handle row stores it as-is)
-			expect("handle slot", R"(
+		test("a_throw_runs_the_destructors_of_the_frames_it_unwinds", [this]() {
+			// C++ [except.ctor]: stack unwinding destroys the automatic objects of every frame it leaves, as a run-time error
+			// does; the destructor runs under its own exception state (its own try/catch works) and the throw resumes after it
+			expect("throw unwind", R"(
+				var log = [];
+				class Probe { int id = 0; Probe(int i) { id = i; } ~Probe() { log.push(id); } }
+				class Guarded { ~Guarded() { try { throw "inner"; } catch (e) { log.push("caught " + e); } } }
+				class Raiser { ~Raiser() { log.push("raiser"); throw "from dtor"; } }
+				function f(int n) -> int { auto p = new Probe(n); throw n; return 0; }
+				function k(int n) -> int { auto p = new Probe(n); int z = [1][5]; return 0; }
+				function nested(int n) -> int { auto q = new Probe(n); return f(n + 1); }
+				function guarded() -> int { auto g = new Guarded(); throw "outer"; return 0; }
+				function raiser() -> int { auto r = new Raiser(); throw "outer"; return 0; }
+				try { k(1); } catch (e) { log.push(-1); }
+				try { f(2); } catch (e) { log.push(-2); }
+				try { nested(10); } catch (e) { log.push(-10); }
+				try { guarded(); } catch (e) { log.push("then " + e); }
+				try { raiser(); } catch (e) { log.push("then " + e); }
+				to_json(log);
+			)", "[1,-1,2,-2,11,10,-10,\"caught inner\",\"then outer\",\"raiser\",\"then outer\"]");
+		});
+	}
+
+	// R-q6 (Dev ruling 2026-09-30): a typed shared_ptr<U> enters shared_ptr<T> by its STATIC pointee, C++-style - an upcast
+	// converts, a downcast needs cast<shared_ptr<T>>; a var source by the class its object really has (T or a subclass);
+	// an unrelated class never. One rule at every site, both backends
+	void handle_admission() {
+		test("a_shared_ptr_slot_admits_by_the_static_type_or_a_var_sources_class_at_every_site", [this]() {
+			const char* sources[][2] = {
+				{"down", "shared_ptr<B> s = new D();"},
+				{"var_d", "var s = new D();"},
+				{"var_e", "var s = new E();"},
+				{"cast", "shared_ptr<B> b0 = new D(); auto s = cast<shared_ptr<D>>(b0);"},
+			};
+			const char* d_sites[] = {
+				"shared_ptr<D> d = s;", "shared_ptr<D> d = null; d = s;", "GD = s;", "ns::d = s;", "H h = H(); h.d = s;",
+				"take_d(s);", "array<shared_ptr<D>> a = [null]; a[0] = s;",
+			};
+			const char* b_sites[] = {
+				"shared_ptr<B> d = s;", "shared_ptr<B> d = null; d = s;", "GB = s;", "ns::b = s;", "H h = H(); h.b = s;",
+				"take_b(s);", "array<shared_ptr<B>> a = [null]; a[0] = s;",
+			};
+			std::string src = R"(
 				class B { int x = 1; }
 				class D : B { int y = 2; }
 				class E : B { int z = 3; }
-				namespace ns { shared_ptr<D> x = null; }
-				function t(function f) -> string { string r = ""; try { r = "accepted " + f(); } catch (e) { r = "rejected"; } return r; }
-				t([]() { var v = new E(); shared_ptr<D> d = null; d = v; return type_of(d); }) + "|" +
-				t([]() { var v = new E(); ns::x = v; return type_of(ns::x); }) + "|" +
-				t([]() { var v = new E(); shared_ptr<D> d = v; return type_of(d); });
-			)", "rejected|rejected|rejected");
+				class H { shared_ptr<D> d = null; shared_ptr<B> b = null; }
+				namespace ns { shared_ptr<D> d = null; shared_ptr<B> b = null; }
+				shared_ptr<D> GD = null;
+				shared_ptr<B> GB = null;
+				function take_d(shared_ptr<D> p) -> int { return 1; }
+				function take_b(shared_ptr<B> p) -> int { return 1; }
+				function t(function f) -> string { string r = "+"; try { f(); } catch (e) { r = "-"; } return r; }
+				function ret_down() -> shared_ptr<D> { shared_ptr<B> b = new D(); return b; }
+				function ret_up() -> shared_ptr<B> { shared_ptr<D> d = new D(); return d; }
+				string out = "";
+			)";
+			for (const auto& s : sources) {
+				src += std::string("out += \"") + s[0] + ":\";\n";
+				for (const char* site : d_sites) { src += std::string("out += t([]() { ") + s[1] + " " + site + " });\n"; }
+				src += "out += \"|\";\n";
+			}
+			src += "out += \"up:\";\n";
+			for (const char* site : b_sites) { src += std::string("out += t([]() { shared_ptr<D> s = new D(); ") + site + " });\n"; }
+			// a slot keeps its declared static type after taking a derived handle; returns convert like the other sites
+			src += R"(
+				out += "|keep:" + t([]() { shared_ptr<B> bb = null; bb = new D(); shared_ptr<D> d = bb; }) +
+				       t([]() { H h = H(); h.b = new D(); shared_ptr<D> d = h.b; }) +
+				       t([]() { ns::b = new D(); shared_ptr<D> d = ns::b; });
+				out += "|ret:" + t([]() { ret_down(); }) + t([]() { ret_up(); });
+				out;
+			)";
+			expect("handle admission", src, "down:-------|var_d:+++++++|var_e:-------|cast:+++++++|up:+++++++|keep:---|ret:-+", check_mode::off);
 		});
 		test("a_shared_ptr_declaration_and_assignment_admit_the_same_handles", [this]() {
-			// one admission rule per slot (R-q6 picks the static tag or the dynamic class); at program scope a declaration
-			// judges the class a shared_ptr<B> handle holds and '=' judges its static tag, so a handle holding a D enters
-			// shared_ptr<D> by declaration and not by '='
+			// at program scope as in a function: a statically Base-typed handle holding a Derived enters shared_ptr<Derived> by
+			// neither form, and a var holding one enters by both
 			expect("handle admission", R"(
 				class B { int x = 1; }
 				class D : B { int y = 2; }
 				shared_ptr<B> gb = new D();
-				string by_decl = "accepted";
-				try { shared_ptr<D> g1 = gb; } catch (e) { by_decl = "rejected"; }
+				var gv = gb;
+				string out = "";
+				try { shared_ptr<D> g1 = gb; out += "+"; } catch (e) { out += "-"; }
 				shared_ptr<D> g2 = null;
-				string by_assign = "accepted";
-				try { g2 = gb; } catch (e) { by_assign = "rejected"; }
-				by_decl == by_assign ? "agree" : "declaration " + by_decl + ", assignment " + by_assign;
-			)", "agree", check_mode::off);
+				try { g2 = gb; out += "+"; } catch (e) { out += "-"; }
+				try { shared_ptr<D> g3 = gv; out += "+"; } catch (e) { out += "-"; }
+				try { g2 = gv; out += "+"; } catch (e) { out += "-"; }
+				out;
+			)", "--++", check_mode::off);
 		});
-		test("a_throw_runs_the_destructors_of_the_frames_it_unwinds", [this]() {
-			// C++ [except.ctor]: stack unwinding destroys the automatic objects of every frame it leaves, as a run-time error
-			// already does here. A script throw unwinds with the unwinding flag set, and the destructor it releases re-enters
-			// the backend under that flag: its body unwinds at once and the thunk's catch(...) hides it, on both backends
-			expect("throw unwind", R"(
-				var log = [];
-				class Probe { int id = 0; Probe(int i) { id = i; } ~Probe() { log.push(id); } }
-				function f(int n) -> int { auto p = new Probe(n); throw n; return 0; }
-				function k(int n) -> int { auto p = new Probe(n); int z = [1][5]; return 0; }
-				try { k(1); } catch (e) { log.push(-1); }
-				try { f(2); } catch (e) { log.push(-2); }
-				to_json(log);
-			)", "[1,-1,2,-2]");
+		test("a_handle_admission_rejection_names_the_class_it_judged", [this]() {
+			expect("handle texts", R"(
+				class B { int x = 1; }
+				class D : B { int y = 2; }
+				class E : B { int z = 3; }
+				class H { shared_ptr<D> d = null; }
+				shared_ptr<D> GD = null;
+				function t(function f) -> string { string r = ""; try { f(); } catch (e) { r = e; } return r; }
+				t([]() { shared_ptr<B> s = new D(); shared_ptr<D> d = s; }) + "|" +
+				t([]() { shared_ptr<B> s = new D(); shared_ptr<D> d = null; d = s; }) + "|" +
+				t([]() { shared_ptr<B> s = new D(); GD = s; }) + "|" +
+				t([]() { var s = new E(); H h = H(); h.d = s; });
+			)", "Cannot initialize shared_ptr<D> with B: type must match or be a subclass|Cannot assign B to 'd' (declared shared_ptr<D>)|"
+			    "Cannot assign shared_ptr<B> to shared_ptr<D>|Cannot assign E to field 'd' of H (declared shared_ptr<D>)", check_mode::off);
+		});
+		test("the_checker_reports_a_static_downcast_or_an_unrelated_handle_at_load", [this]() {
+			// strict: a load error at every site (a shared_ptr<T> namespace variable store included); warn: the unit loads, the runtime raises
+			const std::string P = "class B { int x = 1; } class D : B { int y = 2; } class E : B { int z = 3; } class H { shared_ptr<D> hd = null; }\n"
+				"namespace ns { shared_ptr<D> nd = null; int n = 0; } shared_ptr<D> GD = null; function take_d(shared_ptr<D> p) -> int { return 1; }\n";
+			struct row { const char* label; const char* src; size_t errors; };
+			const row rows[] = {
+				{"a downcast at every site",
+				 "function s1() { shared_ptr<B> s = new D(); shared_ptr<D> d = s; }"
+				 "function s2() { shared_ptr<B> s = new D(); shared_ptr<D> d = null; d = s; }"
+				 "function s3() { shared_ptr<B> s = new D(); GD = s; }"
+				 "function s4() { shared_ptr<B> s = new D(); ns::nd = s; }"
+				 "function s5() { shared_ptr<B> s = new D(); H h = H(); h.hd = s; }"
+				 "function s6() { shared_ptr<B> s = new D(); take_d(s); }"
+				 "function s7() { shared_ptr<B> s = new D(); array<shared_ptr<D>> a = [null]; a[0] = s; }"
+				 "function s8() -> shared_ptr<D> { shared_ptr<B> s = new D(); return s; }", 8},
+				{"an unrelated class", "function u1() { shared_ptr<E> s = new E(); shared_ptr<D> d = s; } function u2() { shared_ptr<E> s = new E(); ns::nd = s; }", 2},
+				{"a cast, a var source and an upcast", "function ok() { shared_ptr<B> s = new D(); shared_ptr<D> d = cast<shared_ptr<D>>(s); var v = s; shared_ptr<D> d2 = v;"
+				 " shared_ptr<D> dd = new D(); shared_ptr<B> b = dd; }", 0},
+				{"other namespace stores stay run-time checks", "function f() { ns::n = \"text\"; ns::n = 2.5; }", 0},
+			};
+			for (const auto& r : rows) {
+				every_config(r.label, std::to_string(r.errors), [&](engine& e) { return std::to_string(e.check(P + r.src).error_count()); });
+			}
+			every_config("warn loads", "loaded|-", [&](engine& e) {
+				return e.execute(P + "function f() { shared_ptr<B> s = new D(); ns::nd = s; }"
+				                     " string r = \"loaded|\"; try { f(); r += \"+\"; } catch (ex) { r += \"-\"; } r;").as_string();
+			}, check_mode::warn);
 		});
 	}
 
 	void known_bugs() {
-		known_bugs_simplification_suspects();
 		known_bugs_simplification_audit();
 	}
 

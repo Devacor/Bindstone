@@ -310,6 +310,26 @@ namespace {
 		return {};
 	}
 
+	// The tail's destructors may run script destructors that re-enter the VM and grow the vector: they run after the
+	// vector no longer holds it, in the order erase would run them
+	template <class V>
+	void truncate_detached(V& v, size_t n) {
+		if (v.size() <= n) { return; }
+		V doomed(std::make_move_iterator(v.begin() + static_cast<std::ptrdiff_t>(n)), std::make_move_iterator(v.end()));
+		v.erase(v.begin() + static_cast<std::ptrdiff_t>(n), v.end());
+	}
+
+	template <class V>
+	void pop_back_detached(V& v) {
+		auto doomed = std::move(v.back());
+		v.pop_back();
+	}
+
+	// a constructor that completed arms its instance's destructor (KEEP BYTE-PARALLEL with interpreter::construct_instance)
+	void construction_completed(script_value& instance_value) {
+		if (auto instance = instance_value.get_class_instance()) { instance->construction_pending(false); }
+	}
+
 } // namespace
 
 struct vm_backend::frame_guard {
@@ -324,12 +344,8 @@ struct vm_backend::frame_guard {
 	}
 	~frame_guard() {
 		vm->frames_.pop_back();
-		if (vm->try_records_.size() > try_base) {
-			vm->try_records_.erase(vm->try_records_.begin() + try_base, vm->try_records_.end());
-		}
-		if (vm->iter_states_.size() > iter_base) {
-			vm->iter_states_.erase(vm->iter_states_.begin() + iter_base, vm->iter_states_.end());
-		}
+		truncate_detached(vm->try_records_, try_base);
+		truncate_detached(vm->iter_states_, iter_base);
 		if (vm->cfor_states_.size() > cfor_base) {
 			vm->cfor_states_.erase(vm->cfor_states_.begin() + cfor_base, vm->cfor_states_.end());
 		}
@@ -698,8 +714,9 @@ void vm_backend::prepare_for_execution() {
 
 	if (!reentrant) {
 		stack_.clear();
-		try_records_.clear();
-		iter_states_.clear();
+		truncate_detached(try_records_, 0);
+		truncate_detached(iter_states_, 0);
+		truncate_detached(pending_callees_, 0);
 		cfor_states_.clear();
 		// Terminal latch (and memory allowance) reset only at a NON-reentrant entry: a
 		// nested execute must not grant the outer run's unwinding error a second life
@@ -1123,10 +1140,10 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	// Completed, errored, or threw: the fiber's stacks die here (window included) -
 	// clear while they are still the live ones; the guard then swaps the empties back
 	// into state storage.
-	try_records_.clear();
-	iter_states_.clear();
+	truncate_detached(try_records_, 0);
+	truncate_detached(iter_states_, 0);
 	cfor_states_.clear();
-	pending_callees_.clear();
+	truncate_detached(pending_callees_, 0);
 	stack_.clear();
 
 	yielding_ = prev_yielding;
@@ -3203,9 +3220,10 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 				sym->intern(out.mismatch->first), sym->intern(out.mismatch->second));
 		}
 		case verdict::handle_target:
-			// shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is; a shared handle
-			// downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
-			if (value.type() == target_type->base_type) {
+			// shared_ptr<T> / weak_ptr<T> `=`: a same-kind tag stores as-is when a shared handle's judged class is T or a
+			// subclass (R-q6); a shared handle downgrades into a weak_ptr<T> slot exactly as the declaration form does (outside the table)
+			if (value.type() == target_type->base_type &&
+			    (target_type->base_type != script_value_type::jai_shared_ptr_type || detail::shared_handle_admits(value, target_type, engine_))) {
 				return std::move(value);
 			}
 			if (detail::weak_slot_takes_shared(value, target_type, engine_)) {
@@ -3290,19 +3308,13 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 			}
 			auto source_type_info = derefed_arg.get_type_info();
 			if (source_type_info && source_type_info->base_type == script_value_type::jai_shared_ptr_type &&
-			    target_base_type == script_value_type::jai_shared_ptr_type) {
-				if (!source_type_info->type_name.empty() && source_type_info->type_name == target_type->type_name) {
-					return arg;
-				}
-				auto resolved = resolve_member_target(derefed_arg);
-				if (resolved) {
-					if (resolved.class_name() == target_type->type_name) {
-						return arg;
-					}
-					if (resolved.class_def && resolved.class_def->is_subtype_of(target_type->type_name)) {
-						return arg;
-					}
-				}
+			    target_base_type == script_value_type::jai_shared_ptr_type &&
+			    detail::shared_handle_admits(derefed_arg, target_type, engine_)) {
+				// R-q6: the parameter or return value has the declared static type (KEEP BYTE-PARALLEL with the interpreter)
+				if (arg.is_reference()) { return arg; }
+				script_value bound = arg;
+				detail::keep_handle_slot_type(bound, target_type);
+				return bound;
 			}
 			break;
 		}
@@ -3594,12 +3606,14 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
 			                  slot_type->base_type == script_value_type::jai_object_type ||
 			                  slot_type->base_type == script_value_type::jai_array_type ||
-			                  slot_type->base_type == script_value_type::jai_map_type)) {
+			                  slot_type->base_type == script_value_type::jai_map_type ||
+			                  slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
 				auto enforced = enforce_type_compatibility(std::move(value), slot_type, symbolizer_->get_string(sym));
 				if (!enforced) {
 					return raise_from(enforced);
 				}
 				value = std::move(enforced.value());
+				detail::keep_handle_slot_type(value, slot_type);
 				// var slots keep a shared_ptr-tagged rhs's marker (decl parity;
 				// flattening to 'any' would detach at the copy)
 				if (detail::var_slot(slot_type.get()) &&
@@ -3828,21 +3842,13 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 					}
 					VM_TRY(store_back(std::move(value)));
 				} else {
-					std::string actual_type_name = value_element ? value_element->type_name : "";
-
-					bool compatible = (actual_type_name == expected_type_name);
-					if (!compatible && !actual_type_name.empty() && engine_) {
-						auto actual_class = engine_->get_class_definition(actual_type_name);
-						if (actual_class && actual_class->is_subtype_of(expected_type_name)) {
-							compatible = true;
-						}
-					}
-
-					if (!compatible) {
-						uint64_t actual_id = value_element ? value_element->id : 0;
+					// R-q6: a typed source by its static pointee, a var-held one by its object's class
+					// (KEEP BYTE-PARALLEL with the interpreter's environment row)
+					if (!detail::shared_handle_admits(value, ptr_type_info, engine_)) {
 						uint64_t expected_id = expected_type ? expected_type->id : 0;
 						return raise_(make_error_code(runtime_error_code::type_mismatch),
-							"Cannot assign shared_ptr<{0}> to shared_ptr<{1}>", actual_id, expected_id);
+							"Cannot assign shared_ptr<{0}> to shared_ptr<{1}>",
+							symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)), expected_id);
 					}
 
 					value.set_type_info(ptr_type_info);
@@ -11024,30 +11030,13 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 				value.set_type_info(inferred);
 				return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 			}
-			// Dev ruling (2026-07): typed shared_ptr declarations ENFORCE their
-			// pointee class (wrong-class init used to alias silently). Same class
-			// and derived->base (script chains + host upcasts) stay legal;
-			// unresolvable classes stay lenient (opaque host flows).
-			auto expected_type = decl->type->element_type();
-			if (expected_type && !expected_type->type_name.empty() &&
-			    expected_type->base_type != script_value_type::jai_any_type) {
-				const std::string& expected_class = expected_type->type_name;
-				std::string actual_class;
-				if (auto instance = value.get_class_instance()) {
-					actual_class = instance->get_class_name();
-				}
-				if (!actual_class.empty() && actual_class != expected_class) {
-					bool is_subtype = false;
-					if (auto eng = engine_) {
-						auto actual_def = eng->get_class_definition(actual_class);
-						is_subtype = actual_def && actual_def->is_subtype_of(expected_class);
-					}
-					if (!is_subtype) {
-						return raise_(make_error_code(runtime_error_code::type_mismatch),
-							"Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
-							expected_type->id, symbolizer_->intern(actual_class));
-					}
-				}
+			// Typed shared_ptr declarations enforce their pointee class (R-q6: a typed source by its
+			// static pointee, a var-held one by its object's class; detail::shared_handle_admits)
+			// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
+			if (!detail::shared_handle_admits(value, decl->type, engine_)) {
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
+					"Cannot initialize shared_ptr<{0}> with {1}: type must match or be a subclass",
+					decl->type->element_type()->id, symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)));
 			}
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
@@ -12184,9 +12173,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	const size_t window_extent = stack_.size() - args_base;
 	// The dying frame's loop state dies at the boundary pop would have killed it
 	// (cfor fast-state pointers into the old window die BEFORE the window is reused)
-	if (iter_states_.size() > rec.iter_base) {
-		iter_states_.erase(iter_states_.begin() + rec.iter_base, iter_states_.end());
-	}
+	truncate_detached(iter_states_, rec.iter_base);
 	if (cfor_states_.size() > rec.cfor_base) {
 		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
 	}
@@ -14053,12 +14040,14 @@ op_status vm_backend::store_namespace_cell(const detail::namespace_store_target&
 	if (slot_type && (slot_type->base_type != incoming.type() ||
 	                  slot_type->base_type == script_value_type::jai_object_type ||
 	                  slot_type->base_type == script_value_type::jai_array_type ||
-	                  slot_type->base_type == script_value_type::jai_map_type)) {
+	                  slot_type->base_type == script_value_type::jai_map_type ||
+	                  slot_type->base_type == script_value_type::jai_shared_ptr_type)) {
 		auto enforced = enforce_type_compatibility(std::move(incoming), slot_type, member->member);
 		if (!enforced) {
 			return raise_from(enforced);
 		}
 		incoming = std::move(enforced.value());
+		detail::keep_handle_slot_type(incoming, slot_type);
 		if (detail::var_slot(slot_type.get()) &&
 		    (!incoming.get_type_info() || incoming.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
 			detail::var_stamp(incoming, slot_type, engine_);
@@ -16674,6 +16663,7 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 	const uint64_t prof_c1 = __rdtsc();
 #endif
 	auto instance = class_def->create_instance();
+	instance->construction_pending(true);
 
 	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
@@ -16715,6 +16705,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	method_env->define(symbolizer_->get_this_id(), this_value);
 
 	auto result = execute_method_ast(matching_ctor, method_env, captured.empty() ? args : captured);
+	if (result && !is_unwinding_) { construction_completed(this_value); }
 
 #ifdef JAISCRIPT_VM_PROFILE
 	profile_ctor_cyc_[4] += __rdtsc() - prof_c4;
@@ -16750,6 +16741,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		if (!result) {
 			return raise_from(result);
 		}
+		if (!is_unwinding_) { construction_completed(this_value); }
 		script_value value = std::move(result.value());
 		if (result_stamp && value.type() == script_value_type::jai_object_type) {
 			value.set_type_info(type_info_ptr{result_stamp});
@@ -16929,7 +16921,7 @@ op_status vm_backend::exec_try_pop(frame&, const vm_instruction&) {
 		return raise_(make_error_code(runtime_error_code::internal_error), "try record stack underflow");
 	}
 	current_catch_var_id_ = try_records_.back().saved_catch_var_id;
-	try_records_.pop_back();
+	pop_back_detached(try_records_);
 	return {};
 }
 
@@ -16968,7 +16960,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 	if (limits_->terminal_error) [[unlikely]] {
 		while (!try_records_.empty() && try_records_.back().owner == &f) {
 			current_catch_var_id_ = try_records_.back().saved_catch_var_id;
-			try_records_.pop_back();
+			pop_back_detached(try_records_);
 		}
 		return false;
 	}
@@ -16985,12 +16977,12 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 				active_exception_value_ = rec.saved_exception_value;
 			}
 			current_catch_var_id_ = rec.saved_catch_var_id;
-			try_records_.pop_back();
+			pop_back_detached(try_records_);
 			continue;
 		}
 		if (!failure && !(is_unwinding_ && current_exception_)) {
 			current_catch_var_id_ = rec.saved_catch_var_id;
-			try_records_.pop_back();
+			pop_back_detached(try_records_);
 			continue;
 		}
 		// Releasing stack operands or staged arguments can run destructors that reenter and grow try_records_.
@@ -17011,7 +17003,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		}
 		if (iter_states_.size() > handler.iter_size) {
 			release_iter_slots(f, handler.iter_size);
-			iter_states_.erase(iter_states_.begin() + handler.iter_size, iter_states_.end());
+			truncate_detached(iter_states_, handler.iter_size);
 		}
 		if (cfor_states_.size() > handler.cfor_size) {
 			cfor_states_.erase(cfor_states_.begin() + handler.cfor_size, cfor_states_.end());
@@ -17030,7 +17022,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 					}
 				}
 			}
-			pending_callees_.erase(pending_callees_.begin() + handler.pending_size, pending_callees_.end());
+			truncate_detached(pending_callees_, handler.pending_size);
 		}
 		environment_ = handler.entry_env;
 		// Bind the catch variable as a local of the catch body (KEEP BYTE-PARALLEL with
@@ -17350,7 +17342,7 @@ op_status vm_backend::exec_iter_pop(frame& f, const vm_instruction&) {
 	if (!iter_states_.empty()) {
 		env_pushed = iter_states_.back().env_pushed;
 		release_iter_slots(f, iter_states_.size() - 1);
-		iter_states_.pop_back();
+		pop_back_detached(iter_states_);
 	}
 	if (env_pushed) {
 		pop_scopes_pooled(1);
@@ -19373,6 +19365,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 
 	const int entry_call_depth = current_call_depth_;
 	(void)entry_call_depth;
+	const size_t entry_pending = pending_callees_.size();
 
 	call_frame top_locals;
 	frame f;
@@ -19425,6 +19418,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	if (stack_.size() > f.stack_base) {
 		stack_.truncate(f.stack_base);
 	}
+	truncate_detached(pending_callees_, entry_pending);   // a callee parked when the run ended uncaught
 	environment_ = f.entry_env;
 
 	// Every in-loop pop path must decrement exactly once (no RAII on that path)
@@ -19474,6 +19468,40 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 }
 
 checked_result<script_value> vm_backend::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
+	// A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
+	// destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with interpreter::execute_callable)
+	struct unwind_park {
+		vm_backend* self;
+		bool active;
+		std::optional<script_exception> exception;
+		std::optional<script_value> value;
+		std::vector<stack_frame> trace;
+		bool trace_captured = false;
+		uint64_t catch_var = 0;
+		explicit unwind_park(vm_backend* vm) : self(vm), active(vm->is_unwinding_) {
+			if (!active) { return; }
+			exception = std::move(self->current_exception_);
+			self->current_exception_.reset();
+			value = std::move(self->active_exception_value_);
+			self->active_exception_value_.reset();
+			trace = std::move(self->captured_trace_);
+			self->captured_trace_.clear();
+			trace_captured = self->trace_captured_;
+			self->trace_captured_ = false;
+			catch_var = self->current_catch_var_id_;
+			self->current_catch_var_id_ = 0;
+			self->is_unwinding_ = false;
+		}
+		~unwind_park() {
+			if (!active) { return; }
+			self->current_exception_ = std::move(exception);
+			self->active_exception_value_ = std::move(value);
+			self->captured_trace_ = std::move(trace);
+			self->trace_captured_ = trace_captured;
+			self->current_catch_var_id_ = catch_var;
+			self->is_unwinding_ = true;
+		}
+	} park{this};
 	switch (payload.kind) {
 		case script_callable::kind_type::function:
 			return call_script_function(*payload.fn, args);
@@ -20093,18 +20121,12 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		stack_.truncate(rec.f.stack_base);
 	}
 	JAI_POP_SUB(1);
-	if (try_records_.size() > rec.try_base) {
-		try_records_.erase(try_records_.begin() + rec.try_base, try_records_.end());
-	}
-	if (iter_states_.size() > rec.iter_base) {
-		iter_states_.erase(iter_states_.begin() + rec.iter_base, iter_states_.end());
-	}
+	truncate_detached(try_records_, rec.try_base);
+	truncate_detached(iter_states_, rec.iter_base);
 	if (cfor_states_.size() > rec.cfor_base) {
 		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
 	}
-	if (pending_callees_.size() > rec.pending_base) {
-		pending_callees_.erase(pending_callees_.begin() + rec.pending_base, pending_callees_.end());
-	}
+	truncate_detached(pending_callees_, rec.pending_base);
 	JAI_POP_SUB(2);
 	if (!rec.env_lazy) {
 		// Moved out first so the pool's use_count()==1 guard sees today's count
@@ -20234,6 +20256,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		}
 		if (rec.ctor_frame) [[unlikely]] {
 			result = rec.locals.get_this();   // a constructor call yields its instance (a bare `return;` ends the body early)
+			construction_completed(result);
 		} else if (rec.method_result_anchor) {
 			anchor_method_result(result, rec.locals.get_this());
 		}
@@ -20265,6 +20288,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 	}
 	if (rec.ctor_frame) [[unlikely]] {
 		conv.value() = rec.locals.get_this();
+		construction_completed(conv.value());
 	}
 	if (rec.ctor_result_stamp && conv.value().type() == script_value_type::jai_object_type) [[unlikely]] {
 		conv.value().set_type_info(type_info_ptr{rec.ctor_result_stamp});
@@ -20389,6 +20413,7 @@ op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& i
 op_status vm_backend::fall_off_script_frame(frame*& fp) {
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	script_value result = rec.ctor_frame ? rec.locals.get_this() : implicit_result_for_record(rec);   // conversion skipped: fall-off parity
+	if (rec.ctor_frame) [[unlikely]] { construction_completed(result); }
 	if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
 		result.set_type_info(rec.ctor_result_stamp);
 	}
@@ -21097,9 +21122,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	const size_t entry_pending = pending_callees_.size();
 	auto cleanup = [&]() {
 		if (is_unwinding_ && !trace_captured_) capture_stack_trace();
-		if (pending_callees_.size() > entry_pending) {
-			pending_callees_.erase(pending_callees_.begin() + entry_pending, pending_callees_.end());
-		}
+		truncate_detached(pending_callees_, entry_pending);
 		clear_this_on_frame_exit(f.entry_env);
 		environment_ = previousEnv;
 		has_return_value_ = previousHasReturn;

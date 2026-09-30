@@ -299,7 +299,12 @@ engine stays usable", not by `check_throws`.
   names the payload's type, never `any`). **Handle-typed elements take null** (Dev ruling
   2026-09-08): `array<shared_ptr<T>>`, `array<weak_ptr<T>>` and `map<K, shared_ptr<T>>` values
   hold null like a C++ vector of handles, and a `shared_ptr<T>` element takes a live instance of
-  `T` or a subclass the way a `shared_ptr<T>` variable does (the slot owns the handle); by-value
+  `T` or a subclass the way a `shared_ptr<T>` variable does (the slot owns the handle). **Handle
+  admission** (R-q6, Dev ruling 2026-09-30): a typed handle enters `shared_ptr<T>` by its STATIC
+  pointee, C++-style (an upcast converts; a `shared_ptr<Base>` holding a `Derived` needs
+  `cast<shared_ptr<Derived>>`), a `var` source by its object's class, an unrelated class never; one
+  kernel (`detail::shared_handle_admits`) at every site, and a typed slot keeps its declared type
+  (`detail::keep_handle_slot_type`); the checker reports a static downcast at load; by-value
   class and primitive elements stay non-nullable (`Cannot store null in array<Foo>`). A
   `shared_ptr<T>` type spells itself in full (`array<shared_ptr<Foo>>`); its id is that spelling
   interned, distinct from `Foo`'s. **Element conversions** (Dev ruling 2026-09-09): int and float

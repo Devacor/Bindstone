@@ -194,6 +194,17 @@ b.own.v = 50;
 print(to_string(a.link.v) + &quot; &quot; + to_string(a.own.v) + &quot; &quot; + to_string(same_object(a.link, b.link)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5 1 true</code></pre></div>
 <p>The same holds for <code>array&lt;shared_ptr&lt;Node&gt;&gt;</code> and <code>map&lt;string, shared_ptr&lt;Node&gt;&gt;</code>: a copy of the container is a new container whose handles point at the old objects. Cloning through a handle is an explicit act: copy the object the handle names (<code>Node fresh = a.link;</code>, a value declaration from a handle) and wrap it again.</p>
+<p>A handle converts the way a C++ <code>shared_ptr</code> does. A <code>shared_ptr&lt;Derived&gt;</code> enters a <code>shared_ptr&lt;Base&gt;</code> slot (an upcast). A handle typed <code>shared_ptr&lt;Base&gt;</code> does not enter a <code>shared_ptr&lt;Derived&gt;</code> slot, even when the object it holds is a <code>Derived</code>: that downcast is spelled <code>cast&lt;shared_ptr&lt;Derived&gt;&gt;(b)</code>. A <code>var</code> source has no static class, so it is judged by the class its object really has: it enters when that class is <code>Derived</code> or a subclass of it. A handle holding an unrelated class never enters. The rule is the same at every slot (a declaration, an assignment, a field, a namespace variable, a parameter, a return value, a container element), and the strict checker reports a downcast or an unrelated class it can see at load.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
+class Derived : Base { int t = 9; }
+
+shared_ptr&lt;Derived&gt; d = new Derived();
+shared_ptr&lt;Base&gt; b = d;                              // upcast: converts
+shared_ptr&lt;Derived&gt; back = cast&lt;shared_ptr&lt;Derived&gt;&gt;(b);   // downcast: spelled
+var v = b;
+shared_ptr&lt;Derived&gt; fromVar = v;                     // a var source: its object is a Derived
+// shared_ptr&lt;Derived&gt; bad = b;                      // load error: a shared_ptr&lt;Base&gt; is not a shared_ptr&lt;Derived&gt;
+</code></pre></div>
 <h2 id="escape-hatch-6-cast-t-and-cast-shared-ptr-t">Escape hatch 6: <code>cast&lt;T&amp;&gt;</code> and <code>cast&lt;shared_ptr&lt;T&gt;&gt;</code><a class="hlink" href="#escape-hatch-6-cast-t-and-cast-shared-ptr-t" aria-label="Link to this section">&#8203;</a></h2>
 <p><code>cast</code> comes in three forms, and the difference between them is exactly this chapter&#x27;s subject: <code>cast&lt;T&gt;(e)</code> is a <strong>copy</strong>, <code>cast&lt;T&amp;&gt;(e)</code> is a <strong>reference</strong> to the same object, <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> is a <strong>handle</strong> sharing it. The reference form earns its place here as the strict-mode fix for a classic situation: a base-typed variable holding a derived object, and you need a member only the derived class declares.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }

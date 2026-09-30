@@ -4580,16 +4580,43 @@ bool vm_compiler::private_local(const expression* e) {
 	return slot != k_invalid_u32 && callable_.escaping.count(slot) == 0;
 }
 
-// the one route by which user code reaches a private local: a call that takes it as a direct argument (a reference parameter binds the
-// slot) or as a method's receiver (an in-place mutator); a math intrinsic takes its arguments by value
+// the routes by which the subtree writes a private local: a store or ++/-- naming it, or a call that takes it as a direct argument (a
+// reference parameter binds the slot) or as a method's receiver (an in-place mutator); a math intrinsic takes its arguments by value;
+// a node kind not listed answers yes
 bool vm_compiler::slot_argument_in(const expression* e, uint32_t slot) {
 	if (!e || slot == k_invalid_u32) return false;
 	auto names = [&](const expression* a) {
 		return a && a->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(a))) == slot;
 	};
 	switch (e->get_type()) {
+	case node_type::literal_expr:
+	case node_type::identifier_expr:
+	case node_type::this_expr:
+	case node_type::super_expr:
+	case node_type::lambda_expr:
+		return false;
 	case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); return slot_argument_in(b->left.get(), slot) || slot_argument_in(b->right.get(), slot); }
-	case node_type::unary_expr: return slot_argument_in(static_cast<const unary_expr*>(e)->operand.get(), slot);
+	case node_type::unary_expr: {
+		auto* u = static_cast<const unary_expr*>(e);
+		if ((u->op.type == token_type::plus_plus || u->op.type == token_type::minus_minus) && names(u->operand.get())) return true;
+		return slot_argument_in(u->operand.get(), slot);
+	}
+	case node_type::assignment_expr: {
+		auto* a = static_cast<const assignment_expr*>(e);
+		return names(a->target.get()) || slot_argument_in(a->target.get(), slot) || slot_argument_in(a->value.get(), slot);
+	}
+	case node_type::new_expr: {
+		for (const auto& a : static_cast<const new_expr*>(e)->arguments) { if (names(a.get()) || slot_argument_in(a.get(), slot)) return true; }
+		return false;
+	}
+	case node_type::array_literal_expr: {
+		for (const auto& a : static_cast<const array_literal_expr*>(e)->elements) { if (slot_argument_in(a.get(), slot)) return true; }
+		return false;
+	}
+	case node_type::map_literal_expr: {
+		for (const auto& [k, v] : static_cast<const map_literal_expr*>(e)->entries) { if (slot_argument_in(k.get(), slot) || slot_argument_in(v.get(), slot)) return true; }
+		return false;
+	}
 	case node_type::cast_expr: return slot_argument_in(static_cast<const cast_expr*>(e)->operand.get(), slot);
 	case node_type::member_expr: return slot_argument_in(static_cast<const member_expr*>(e)->object.get(), slot);
 	case node_type::ternary_expr: {
@@ -4604,7 +4631,7 @@ bool vm_compiler::slot_argument_in(const expression* e, uint32_t slot) {
 		for (const auto& a : c->arguments) { if ((!intrinsic && names(a.get())) || slot_argument_in(a.get(), slot)) return true; }
 		return slot_argument_in(c->callee.get(), slot);
 	}
-	default: return false;
+	default: return true;
 	}
 }
 

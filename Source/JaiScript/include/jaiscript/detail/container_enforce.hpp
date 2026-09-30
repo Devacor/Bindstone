@@ -91,6 +91,8 @@ namespace jai::detail {
 	// engine.cpp: the class rows of the element boundary judge the instance behind the value's
 	// tag (a var-held Animal, a shared_ptr<Dog> handle) with the scalar table's own admission
 	bool object_element_admits(const script_value& v, const type_info& element_type, engine* eng);
+	// a handle into a shared_ptr<T> element: a variable's rule (R-q6: the static pointee of a typed handle, a var-held one's class)
+	bool shared_element_admits(const script_value& v, const type_info_ptr& element_type, engine* eng);
 	// The class a tag names for the subclass walk: a handle tag's pointee, else the tag itself
 	inline uint64_t class_tag_id(const type_info& t) {
 		const bool handle = t.base_type == script_value_type::jai_shared_ptr_type || t.base_type == script_value_type::jai_weak_ptr_type;
@@ -148,8 +150,7 @@ namespace jai::detail {
 				}
 			}
 			if (target_type == script_value_type::jai_shared_ptr_type && !element_type->type_name.empty()) {
-				// a handle into a shared_ptr<T> element: the pointee's class, like a shared_ptr<T> field
-				return object_element_admits(actual_element, *element_type, eng);
+				return shared_element_admits(actual_element, element_type, eng);
 			}
 			return true;
 		}

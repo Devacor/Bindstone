@@ -5123,6 +5123,10 @@ bool object_element_admits(const script_value& v, const type_info& element_type,
     return class_slot_admits(resolve_slot_class(v, eng), v, element_type, eng);
 }
 
+bool shared_element_admits(const script_value& v, const type_info_ptr& element_type, engine* eng) {
+    return shared_handle_admits(v, element_type, eng);
+}
+
 type_info_ptr object_element_own_tag(const script_value& v, engine* eng) {
     auto view = resolve_slot_class(v, eng);
     return view.def ? view.def->get_type_info() : nullptr;

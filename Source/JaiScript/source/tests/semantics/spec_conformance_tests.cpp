@@ -159,6 +159,7 @@ public:
 		compound_subscript_order();
 		auto_static_type();
 		call_argument_capture();
+		simplification_audit_fixes();
 #ifdef JAISCRIPT_SPEC_KNOWN_BUGS
 		known_bugs();
 #endif
@@ -2077,7 +2078,13 @@ private:
 				"" + sz(G, o + 1);
 			)", "2", check_mode::warn);
 		});
-		test("f8_a_by_value_parameter_does_not_see_a_write_through_another_local", [this]() {
+	}
+
+	// docs/SIMPLIFICATION_AUDIT.md: the audit's divergences, each pinned here by the change that fixes it
+	void simplification_audit_fixes() {
+		test("f8_a_by_value_parameter_does_not_see_user_code_write_its_argument", [this]() {
+			// a by-value parameter holds a copy: user code the callee runs (a method on another local, a getter of the
+			// declared class or of a subclass the argument is, an operator, a conversion) never writes through it
 			expect("parameter alias proof", R"(
 				class Box { int n = 1; }
 				Box G = Box();
@@ -2085,10 +2092,25 @@ private:
 				P GQ = P();
 				function f(Box p) -> int { var q = GQ; q.poke(); return p.n; }
 				function f2(Box p) -> int { P q = GQ; q.poke(); return p.n; }
+				class B { int x = 1; int y = 1; int _get_x() { GB.y = 5; return 3; } }
+				B GB = B();
+				function g(B p) -> int { int a = p.x; return a * 10 + p.y; }
+				class C { int x = 1; int y = 1; }
+				class D : C { int _get_x() { GC.y = 5; return 3; } }
+				C GC = D();
+				function h(C p) -> int { int a = p.x; return a * 10 + p.y; }
+				class K { int v = 0; int operator+(int k) { G.n = 9; return k; } bool to_bool() { G.n = 8; return true; } }
+				K GK = K();
+				function i1(Box p) -> int { K k = GK; int t = k + 1; return p.n; }
+				function i2(Box p) -> int { K k = GK; if (k) { return p.n; } return 0; }
 				string s = "" + f(G);
-				G.n = 1;
-				s + " " + f2(G);
-			)", "1 1", check_mode::warn);
+				G.n = 1; s += " " + f2(G);
+				s += " " + g(GB);
+				s += " " + h(GC);
+				G.n = 1; s += " " + i1(G);
+				G.n = 1; s += " " + i2(G);
+				s;
+			)", "1 1 31 31 1 1", check_mode::warn);
 		});
 	}
 

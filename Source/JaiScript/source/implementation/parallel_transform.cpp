@@ -486,7 +486,10 @@ namespace {
 		std::unordered_set<uint64_t> collected_host_ids;
 		std::unordered_set<type_info*> collected_types;
 		std::unordered_map<uint64_t, size_t> capture_index;   // name id -> adm.captures slot
-		std::vector<std::unordered_set<uint64_t>> scopes;   // current function's scopes
+		// A local's declared type; primitive: it can never hold a class instance (a primitive or string type, or an auto
+		// slot the runtime locks to a primitive initializer), so dispatching on it runs no user code
+		struct local_info { type_info_ptr type; bool primitive = false; };
+		std::vector<std::unordered_map<uint64_t, local_info>> scopes;   // current function's scopes
 		bool failed = false;
 		// parallel_for bodies (in-place root mode): the element may bind by reference and
 		// diagnostics carry the parallel_for prefix. Member access and member STORES are
@@ -529,12 +532,21 @@ namespace {
 				return false;
 			}
 		}
-		// Static type of a member/subscript chain rooted at the proof root (null = unknown or
-		// a step that can run user code: a user accessor, a field no class declares)
+		// Static type of a member/subscript chain rooted at the proof root, a declared local or a typed global (null =
+		// unknown or a step that can run user code: a user accessor, a field no class declares)
 		type_info_ptr proof_chain_type(const expression* e) {
 			if (!e) { return nullptr; }
 			if (e->get_type() == node_type::identifier_expr) {
-				return is_element_symbol(static_cast<const identifier_expr*>(e)->symbol_id) ? root_type : nullptr;
+				auto* n = static_cast<const identifier_expr*>(e);
+				if (is_element_symbol(n->symbol_id)) { return root_type; }
+				if (!n->global_qualified) {
+					if (const local_info* l = local(n->symbol_id)) { return l->type; }
+					if (self_field(n->symbol_id)) { return nullptr; }
+				}
+				auto global = eng.get_global_environment()->get(n->symbol_id);
+				if (!global) { return nullptr; }
+				type_info_ptr t = global.value().get_type_info();
+				return (t && t->base_type != script_value_type::jai_any_type) ? t : nullptr;
 			}
 			if (e->get_type() == node_type::member_expr) {
 				auto* m = const_cast<member_expr*>(static_cast<const member_expr*>(e));
@@ -543,7 +555,7 @@ namespace {
 				auto cls = eng.get_class_registry().find_script_class(std::string(base->type_name));
 				if (!cls) { return nullptr; }
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
-				if (cls->user_accessor(m->member_id) != nullptr) { return nullptr; }
+				if (read_runs_accessor(cls.get(), m->member_id)) { return nullptr; }
 				if (!cls->find_field_declaring_class(m->member_id)) { return nullptr; }
 				return cls->get_field_declared_type(m->member_id);
 			}
@@ -578,6 +590,178 @@ namespace {
 				break;
 			}
 			return true;
+		}
+
+		// A member read through a receiver declared cls runs a user getter when cls or any class derived from it
+		// declares one (the instance may be a subclass)
+		bool accessor_in_hierarchy(const class_definition* cls, uint64_t accessor_id) {
+			if (cls->user_accessor(accessor_id) != nullptr) { return true; }
+			for (const auto& entry : eng.get_class_registry().script_classes_) {
+				const class_definition* other = entry.second.get();
+				if (other && other != cls && other->derives_from(cls) && other->user_accessor(accessor_id) != nullptr) { return true; }
+			}
+			return false;
+		}
+		bool read_runs_accessor(const class_definition* cls, uint64_t member_id) {
+			return accessor_in_hierarchy(cls, sym.get_getter_id_with_view(member_id).first);
+		}
+		// A store (and, for a compound, the read) through a member of a statically typed receiver: the receiver chain,
+		// the accessors of every class the instance may be, and the field's conversion
+		bool member_store_may_run_code(member_expr* m, const expression_ptr& value, bool reads) {
+			type_info_ptr base = proof_chain_type(m->object.get());
+			if (!class_type(base)) { return true; }
+			auto cls = eng.get_class_registry().find_script_class(std::string(base->type_name));
+			if (!cls) { return true; }
+			if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
+			if (reads && read_runs_accessor(cls.get(), m->member_id)) { return true; }
+			if (accessor_in_hierarchy(cls.get(), sym.get_setter_id_with_view(m->member_id).first)) { return true; }
+			if (!cls->find_field_declaring_class(m->member_id)) { return true; }
+			return conversion_may_run_code(cls->get_field_declared_type(m->member_id), value);
+		}
+
+		// Proof mode has no worker walls, so every place user code can run on a value the walk cannot see through
+		// escapes the root: an operator, a truthiness test, a conversion or a method on a value that may be a class
+		// instance. maybe_object is false only where the static kind is a primitive or a string.
+		type_info_ptr return_type;   // the walked function's declared return type
+
+		static bool class_type(const type_info_ptr& t) {
+			return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty();
+		}
+		std::string_view static_class(const expression_ptr& e) {
+			type_info_ptr t;
+			if (e && e->get_type() == node_type::identifier_expr) {
+				auto* n = static_cast<const identifier_expr*>(e.get());
+				if (is_element_symbol(n->symbol_id)) { t = root_type; }
+				else if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id)) { t = l->type; }
+			} else if (e && chain_root_is_element(e)) {
+				t = proof_chain_type(e.get());
+			}
+			return class_type(t) ? std::string_view(t->type_name) : std::string_view();
+		}
+		static bool primitive_result_method(std::string_view name) {
+			static constexpr std::string_view k_primitive[] = {
+				"size", "empty", "length", "has", "contains", "index_of", "find", "rfind", "find_first_of", "find_last_of",
+				"find_first_not_of", "find_last_not_of", "starts_with", "ends_with", "count", "to_int",
+			};
+			for (auto n : k_primitive) { if (name == n) { return true; } }
+			return false;
+		}
+		// Builtins that call back into script (a predicate, a comparator, an element's operator< or to_string)
+		static bool builtin_runs_script(std::string_view name) {
+			return name == "sort" || name == "filter" || name == "remove_if" || name == "join";
+		}
+		static bool builtin_container(const type_info_ptr& t) {
+			return t && (t->base_type == script_value_type::jai_array_type || t->base_type == script_value_type::jai_map_type ||
+			             t->base_type == script_value_type::jai_string_type);
+		}
+		bool builtin_method_call(const call_expr* call) {
+			if (!call->callee || call->callee->get_type() != node_type::member_expr) { return false; }
+			auto* m = static_cast<const member_expr*>(call->callee.get());
+			if (m->is_static || builtin_runs_script(m->member)) { return false; }
+			return builtin_container(proof_chain_type(m->object.get()));
+		}
+		bool maybe_object(const expression_ptr& e) {
+			if (!e) { return false; }
+			switch (e->get_type()) {
+			case node_type::literal_expr:
+				return false;
+			case node_type::identifier_expr: {
+				auto* n = static_cast<const identifier_expr*>(e.get());
+				if (is_element_symbol(n->symbol_id)) { return true; }
+				if (!n->global_qualified) {
+					if (const local_info* l = local(n->symbol_id)) { return !l->primitive; }
+					if (self_field(n->symbol_id)) { return true; }
+				}
+				auto global = eng.get_global_environment()->get(n->symbol_id);
+				return !(global && primitive_or_string(global.value().get_type_info()));
+			}
+			case node_type::member_expr:
+				return static_cast<const member_expr*>(e.get())->is_static || !primitive_or_string(proof_chain_type(e.get()));
+			case node_type::binary_expr: {
+				auto* b = static_cast<const binary_expr*>(e.get());
+				if (b->op.type == token_type::left_bracket) { return !primitive_or_string(proof_chain_type(e.get())); }
+				return maybe_object(b->left) || maybe_object(b->right);
+			}
+			case node_type::unary_expr:
+				return maybe_object(static_cast<const unary_expr*>(e.get())->operand);
+			case node_type::ternary_expr: {
+				auto* t = static_cast<const ternary_expr*>(e.get());
+				return maybe_object(t->then_expression) || maybe_object(t->else_expression);
+			}
+			case node_type::cast_expr:
+				return !primitive_or_string(static_cast<const cast_expr*>(e.get())->target);
+			case node_type::assignment_expr: {
+				auto* a = static_cast<const assignment_expr*>(e.get());
+				if (a->target && a->target->get_type() == node_type::identifier_expr) {
+					auto* n = static_cast<const identifier_expr*>(a->target.get());
+					if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id); l && l->primitive) { return false; }
+				}
+				return maybe_object(a->target) || maybe_object(a->value);
+			}
+			case node_type::call_expr: {
+				auto* call = static_cast<const call_expr*>(e.get());
+				if (call->callee && call->callee->get_type() == node_type::member_expr) {
+					auto* m = static_cast<const member_expr*>(call->callee.get());
+					if (m->is_static) { return jai::detail::math_intrinsic_for_call(m) == jai::detail::math_fn::none; }
+					return !(builtin_method_call(call) && primitive_result_method(m->member));
+				}
+				if (call->callee && call->callee->get_type() == node_type::identifier_expr) {
+					auto* callee = static_cast<const identifier_expr*>(call->callee.get());
+					if (primitive_ctor_name(callee->name)) { return false; }
+					auto global = eng.get_global_environment()->get(callee->symbol_id);
+					if (global && global.value().is_function()) {
+						if (const script_callable* payload = payload_from_function_value(global.value())) {
+							return !(payload->fn && primitive_or_string(payload->fn->return_type));
+						}
+					}
+				}
+				return true;
+			}
+			default:
+				return true;
+			}
+		}
+		// A conversion into a slot declared t runs user code: a primitive slot takes an instance through its to_int() /
+		// to_float() / to_string() / to_bool(), a class slot takes anything but its own class through a converting
+		// constructor or operator=
+		bool conversion_may_run_code(const type_info_ptr& t, const expression_ptr& value) {
+			if (!t || t->base_type == script_value_type::jai_any_type) { return false; }
+			if (primitive_or_string(t)) { return maybe_object(value); }
+			if (class_type(t)) {
+				if (value && value->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(value.get())->value.is_null()) { return false; }
+				return static_class(value) != std::string_view(t->type_name);
+			}
+			return false;
+		}
+		// A plain store into a local: the slot's declared type converts, and a slot that may hold an instance runs its
+		// class's operator= for anything but that class
+		bool local_store_may_run_code(const local_info& l, const expression_ptr& value) {
+			if (l.primitive) { return maybe_object(value); }
+			if (value && value->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(value.get())->value.is_null()) { return false; }
+			if (class_type(l.type)) { return static_class(value) != std::string_view(l.type->type_name); }
+			return true;
+		}
+		// A store (compound: a read, the operator, then the store) into a target
+		bool store_may_run_code(const expression_ptr& target, const expression_ptr& value, bool compound) {
+			if (!target) { return false; }
+			if (compound && (maybe_object(target) || maybe_object(value))) { return true; }
+			switch (target->get_type()) {
+			case node_type::identifier_expr: {
+				auto* n = static_cast<const identifier_expr*>(target.get());
+				if (is_element_symbol(n->symbol_id)) { return !compound && local_store_may_run_code(typed_local(root_type), value); }
+				if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id)) { return !compound && local_store_may_run_code(*l, value); }
+				return false;   // enclosing state: the walk rejects the store
+			}
+			case node_type::member_expr:
+				return member_store_may_run_code(static_cast<member_expr*>(target.get()), value, compound);
+			case node_type::binary_expr: {
+				auto* b = static_cast<const binary_expr*>(target.get());
+				if (b->op.type != token_type::left_bracket || !builtin_container(proof_chain_type(b->left.get()))) { return true; }
+				return maybe_object(b->right) || maybe_object(value);
+			}
+			default:
+				return true;
+			}
 		}
 
 		// Captured-read touch collection (the CHEAP half of the two-layer design: the
@@ -681,6 +865,7 @@ namespace {
 				return fail(m, std::string(what) + " reaches captured state '" + std::string(root->name) +
 				               "' (captured reads are read-only, and objects cannot be captured)");
 			}
+			if (proof_mode && root && !proof_chain_type(m)) { root_escaped = true; }   // an unknown receiver or a user accessor
 			for (const expression_ptr* idx : indexes) {
 				if (!walk_expr(*idx)) { return false; }
 			}
@@ -811,13 +996,21 @@ namespace {
 			}
 		}
 
-		void declare(uint64_t id) { scopes.back().insert(id); }
+		void declare(uint64_t id, local_info info = {}) { scopes.back()[id] = std::move(info); }
 		bool is_local(uint64_t id) const {
 			for (const auto& s : scopes) {
 				if (s.count(id)) { return true; }
 			}
 			return false;
 		}
+		const local_info* local(uint64_t id) const {
+			for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+				auto found = it->find(id);
+				if (found != it->end()) { return &found->second; }
+			}
+			return nullptr;
+		}
+		static local_info typed_local(const type_info_ptr& t) { return { t, primitive_or_string(t) }; }
 
 		// Root-parameter contract for the region's entry body: transform requires a
 		// by-value unary param; parallel_for takes either (auto& mutates in place,
@@ -850,18 +1043,21 @@ namespace {
 			}
 
 			// Fresh scope stack per function
-			std::vector<std::unordered_set<uint64_t>> saved;
+			decltype(scopes) saved;
 			saved.swap(scopes);
 			scopes.emplace_back();
+			const type_info_ptr saved_return = return_type;
+			return_type = fn->return_type;
 			bool ok = true;
 			for (const auto& p : fn->parameters()) {
 				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }   // warm (idempotent lazy fill)
-				declare(p.symbol_id);
+				declare(p.symbol_id, typed_local(p.type));
 				if (param_mode != root_param::none) {
 					if (element_symbol == UINT64_MAX) { element_symbol = p.symbol_id; } else { element_symbols.push_back(p.symbol_id); }
 				}
 				collect_type(p.type);
 				if (p.default_value && !walk_expr(p.default_value)) { ok = false; break; }
+				if (proof_mode && p.default_value && conversion_may_run_code(p.type, p.default_value)) { root_escaped = true; }
 			}
 			if (ok) {
 				collect_type(fn->return_type);
@@ -869,6 +1065,7 @@ namespace {
 					if (!walk_stmt(d)) { ok = false; break; }
 				}
 			}
+			return_type = saved_return;
 			scopes.swap(saved);
 			if (lenient) { warm_stmt(fn->body); }
 			return ok;
@@ -928,13 +1125,13 @@ namespace {
 
 			const class_definition* saved_class = method_class;
 			method_class = cls;
-			std::vector<std::unordered_set<uint64_t>> saved;
+			decltype(scopes) saved;
 			saved.swap(scopes);
 			scopes.emplace_back();
 			bool ok = true;
 			for (const auto& p : decl->parameters) {
 				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }   // warm (idempotent lazy fill)
-				declare(p.symbol_id);
+				declare(p.symbol_id, typed_local(p.type));
 				collect_type(p.type);
 				if (p.default_value && !walk_expr(p.default_value)) { ok = false; break; }
 			}
@@ -989,10 +1186,12 @@ namespace {
 			}
 			case node_type::if_stmt: {
 				auto* n = static_cast<if_stmt*>(s.get());
+				if (proof_mode && maybe_object(n->condition)) { root_escaped = true; }
 				return walk_expr(n->condition) && walk_stmt(n->then_statement) && walk_stmt(n->else_statement);
 			}
 			case node_type::while_stmt: {
 				auto* n = static_cast<while_stmt*>(s.get());
+				if (proof_mode && maybe_object(n->condition)) { root_escaped = true; }
 				return walk_expr(n->condition) && walk_stmt(n->body);
 			}
 			case node_type::for_stmt: {
@@ -1000,6 +1199,7 @@ namespace {
 				scopes.emplace_back();
 				bool ok = walk_stmt(n->initializer) && walk_expr(n->condition) &&
 				          walk_expr(n->update) && walk_stmt(n->body);
+				if (proof_mode && maybe_object(n->condition)) { root_escaped = true; }   // after the initializer declares the loop's locals
 				scopes.pop_back();
 				return ok;
 			}
@@ -1016,20 +1216,35 @@ namespace {
 				if (!walk_expr(n->container)) { return false; }
 				if (n->variable_name_id == UINT64_MAX) { n->variable_name_id = sym.intern(n->variable_name); }
 				collect_type(n->element_type);
+				// the loop binds each element unconverted: the variable is primitive when the container's elements are
+				local_info loop_var;
+				if (proof_mode) {
+					type_info_ptr ct = proof_chain_type(n->container.get());
+					if (!builtin_container(ct)) { root_escaped = true; }   // a coroutine or an instance: iteration runs user code
+					type_info_ptr et = !ct ? nullptr
+					                 : ct->base_type == script_value_type::jai_array_type ? ct->element_type()
+					                 : ct->base_type == script_value_type::jai_string_type ? ct : nullptr;
+					loop_var = { n->element_type ? n->element_type : et, !n->is_reference && primitive_or_string(et) &&
+					             (!n->element_type || primitive_or_string(n->element_type)) };
+				}
 				scopes.emplace_back();
-				declare(n->variable_name_id);
+				declare(n->variable_name_id, loop_var);
 				bool ok = walk_stmt(n->body);
 				scopes.pop_back();
 				return ok;
 			}
-			case node_type::return_stmt:
-				return walk_expr(static_cast<return_stmt*>(s.get())->value);
+			case node_type::return_stmt: {
+				auto* n = static_cast<return_stmt*>(s.get());
+				if (proof_mode && n->value && conversion_may_run_code(return_type, n->value)) { root_escaped = true; }
+				return walk_expr(n->value);
+			}
 			case node_type::break_stmt:
 			case node_type::continue_stmt:
 			case node_type::fallthrough_stmt:
 				return true;
 			case node_type::switch_stmt: {
 				auto* n = static_cast<switch_stmt*>(s.get());
+				if (proof_mode && maybe_object(n->condition)) { root_escaped = true; }
 				if (!walk_expr(n->condition)) { return false; }
 				for (const auto& c : n->cases) {
 					if (!walk_expr(c->value)) { return false; }
@@ -1069,7 +1284,14 @@ namespace {
 					ok = walk_expr(n->initializer);
 				}
 				if (!ok) { return false; }
-				declare(n->name_id);
+				local_info info = typed_local(n->type);
+				if (proof_mode) {
+					const bool reference = n->type.get() && n->type->is_reference();
+					if (!reference && conversion_may_run_code(n->type, n->initializer)) { root_escaped = true; }
+					if (reference) { info = {}; }
+					else if (!n->type && n->initializer && !maybe_object(n->initializer)) { info.primitive = true; }   // auto locks to its primitive initializer
+				}
+				declare(n->name_id, info);
 				return true;
 			}
 			case node_type::destructuring_decl: {
@@ -1114,6 +1336,13 @@ namespace {
 			}
 			case node_type::binary_expr: {
 				auto* n = static_cast<binary_expr*>(e.get());
+				if (proof_mode) {
+					if (n->op.type == token_type::left_bracket) {
+						if (!builtin_container(proof_chain_type(n->left.get())) || maybe_object(n->right)) { root_escaped = true; }
+					} else if (maybe_object(n->left) || maybe_object(n->right)) {
+						root_escaped = true;
+					}
+				}
 				if (n->op.type == token_type::left_bracket) {
 					// Subscript READ rooted at an enclosing name: the borrow-eligible
 					// capture shape (raw element reads through the region borrow)
@@ -1132,13 +1361,16 @@ namespace {
 				auto* n = static_cast<unary_expr*>(e.get());
 				if (n->op.type == token_type::plus_plus || n->op.type == token_type::minus_minus) {
 					if (proof_mode && chain_root_is_element(n->operand)) { root_escaped = true; }   // a user operator could run on the referent
+					if (proof_mode && store_may_run_code(n->operand, nullptr, true)) { root_escaped = true; }
 					return walk_target(n->operand, "increment/decrement");
 				}
+				if (proof_mode && maybe_object(n->operand)) { root_escaped = true; }
 				return walk_expr(n->operand);
 			}
 			case node_type::assignment_expr: {
 				auto* n = static_cast<assignment_expr*>(e.get());
 				if (proof_mode && n->op.type != token_type::equal && chain_root_is_element(n->target)) { root_escaped = true; }
+				if (proof_mode && store_may_run_code(n->target, n->value, n->op.type != token_type::equal)) { root_escaped = true; }
 				return walk_target(n->target, "assignment") && walk_expr(n->value);
 			}
 			case node_type::call_expr:
@@ -1157,6 +1389,7 @@ namespace {
 				return fail(e.get(), "'this'/'super' is not allowed in a parallel body");
 			case node_type::ternary_expr: {
 				auto* n = static_cast<ternary_expr*>(e.get());
+				if (proof_mode && maybe_object(n->condition)) { root_escaped = true; }
 				return walk_expr(n->condition) && walk_expr(n->then_expression) && walk_expr(n->else_expression);
 			}
 			case node_type::array_literal_expr: {
@@ -1178,6 +1411,7 @@ namespace {
 			case node_type::cast_expr: {
 				auto* n = static_cast<cast_expr*>(e.get());
 				if (n->by_reference) { return fail(e.get(), "cast<T&> is not allowed in a parallel body"); }
+				if (proof_mode && conversion_may_run_code(n->target, n->operand)) { root_escaped = true; }
 				return walk_expr(n->operand);
 			}
 			case node_type::yield_expr:
@@ -1247,6 +1481,7 @@ namespace {
 					}
 					if (fn != jai::detail::math_fn::none) {
 						for (const auto& a : call->arguments) {
+							if (proof_mode && maybe_object(a)) { root_escaped = true; }
 							if (!walk_expr(a)) { return false; }
 						}
 						return true;
@@ -1263,6 +1498,9 @@ namespace {
 				// misses the frozen interner - in unsafe mode too, where the pin is bypassed
 				m->getter_id = sym.get_getter_id_with_view(m->member_id).first;
 				(void)sym.get_setter_id_with_view(m->member_id);
+				// proof mode: a method on anything but the root runs no user code only as a builtin of a statically known
+				// container or string
+				if (proof_mode && !chain_root_is_element(m->object) && !builtin_method_call(call)) { root_escaped = true; }
 				// A method on captured state must be a known read-only builtin: anything
 				// else may mutate the (worker-private snapshot of the) receiver, which
 				// would silently diverge across worker counts
@@ -1290,7 +1528,7 @@ namespace {
 						const bool container_or_string = rt && (rt->base_type == script_value_type::jai_array_type ||
 						                                        rt->base_type == script_value_type::jai_map_type ||
 						                                        rt->base_type == script_value_type::jai_string_type);
-						if (!container_or_string || !parallel_readonly_method(m->member)) { root_escaped = true; }
+						if (!container_or_string || !parallel_readonly_method(m->member) || builtin_runs_script(m->member)) { root_escaped = true; }
 					} else if (!walk_expr(m->object)) {
 						return false;
 					}
@@ -1325,8 +1563,11 @@ namespace {
 			// useful violation first (e.g. a nested parallel_transform names itself,
 			// not its function-valued argument)
 			bool callee_ok = false;
+			// proof mode: an argument converts into its parameter (a host function formats or converts whatever it takes)
+			bool converts_like_host = false;
 			if (primitive_ctor_name(callee->name)) {
 				callee_ok = true;   // int(x)/float(x)/... conversions - backend-resolved, pure
+				converts_like_host = true;
 			} else {
 				auto global = eng.get_global_environment()->get(callee->symbol_id);
 				if (!global || !global.value().is_function()) {
@@ -1341,6 +1582,7 @@ namespace {
 					// (the callee may store through it) - reject the alias statically
 					const auto& params = payload->fn->parameters();
 					for (size_t i = 0; i < call->arguments.size() && i < params.size(); ++i) {
+						if (proof_mode && !params[i].is_reference && conversion_may_run_code(params[i].type, call->arguments[i])) { root_escaped = true; }
 						if (!params[i].is_reference) { continue; }
 						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
 							return fail(root, "argument passes enclosing state '" + std::string(root->name) +
@@ -1354,11 +1596,13 @@ namespace {
 						adm.host_functions.emplace_back(callee->symbol_id, callee_name);
 					}
 					callee_ok = true;
+					converts_like_host = true;
 				} else {
 					return fail(callee, "host function '" + callee_name + "' is not callable in a parallel body (v0)");
 				}
 			}
 			for (const auto& a : call->arguments) {
+				if (proof_mode && converts_like_host && maybe_object(a)) { root_escaped = true; }
 				if (!walk_expr(a)) { return false; }
 			}
 			return callee_ok;

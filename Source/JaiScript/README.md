@@ -7,7 +7,7 @@ two interchangeable backends — a tree-walking interpreter and a bytecode VM �
 byte-for-byte parity by 2,400+ tests and a differential fuzzer. It has no dependencies and
 builds as a static library plus headers.
 
-The documentation — a 13-chapter language guide, a 13-chapter embedding guide, the examples
+The documentation — a 14-chapter language guide, a 14-chapter embedding guide, the examples
 and a reference — is a static site in [`docs/site/`](docs/site/). Open
 `docs/site/index.html` in a browser; a clone is all you need.
 

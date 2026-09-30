@@ -67,6 +67,8 @@ The audit wrote a repro for each suspected divergence and ran it with the `x64-R
 | F11 | `auto& e0 = ai[0]; var q = (e0 += 1.5);` over `array<int>` | q = 2.5, stored 2 | same | 2 (the stored value) | `ref_compound_store_constrained` returns the value before conversion (RL:893). |
 | F12 | `x %= 0` → `Modulo by zero` with code `division_by_zero`; `x % 0` → `Modulo by zero in integer operation`; `x /= 0` → `Division by zero`; `x %= 0.0` → `Division by zero` | same | same | one text per condition (needs a ruling) | Five spellings (ID binary handlers, `evaluate_arithmetic` I:7119, compound ladders I:4867/5040, VB:4276/4430/6306/10432) |
 
+Status: F9, F10, F12 and F11's texts are settled on both backends (Spec Conformance `a_compound_operator_has_one_table_at_every_destination`: member `/=` divides like the local, one `+=` table for every destination, `Division by zero` for `/` and `/=`, `Modulo by zero` for `%` and `%=`); F11's value read-back stays with the store kernel.
+
 Divergences between the two backends are F1-F6. F7-F12 are shared by both backends, so parity checks cannot see them. Each of them sits where a rule has several implementations and the copies disagree.
 
 ### Suspected, not reproduced or not run

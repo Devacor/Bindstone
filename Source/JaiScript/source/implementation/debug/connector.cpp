@@ -39,6 +39,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -68,6 +69,12 @@ namespace {
     inline int poll_sock(pollfd_t* fds, int n, int ms) { return ::poll(fds, static_cast<nfds_t>(n), ms); }
     inline void set_nonblocking(sock_t s) { int f = ::fcntl(s, F_GETFL, 0); ::fcntl(s, F_SETFL, f | O_NONBLOCK); }
 #endif
+
+std::string socket_error_text(int code) {
+    std::string text = std::system_category().message(code);
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == '.' || text.back() == ' ')) text.pop_back();
+    return text + ", " + std::to_string(code);
+}
 
 inline void set_nodelay(sock_t s) { int yes = 1; ::setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&yes), sizeof(yes)); }
 
@@ -292,6 +299,7 @@ struct debug_connector::impl {
     sock_t wake_r_ = kInvalid;
     sock_t wake_w_ = kInvalid;
     int bound_port_ = 0;
+    std::string error_;   // why the listener is not serving; empty while it is
 
     bool session_active_ = false;
     bool want_close_client_ = false;
@@ -376,9 +384,17 @@ struct debug_connector::impl {
     }
 
     // ---- lifecycle ----
+    bool fail_listener(const char* step) {
+        const int code = last_err();
+        error_ = std::string("debugger cannot listen on ") + host + ":" + std::to_string(requested_port) + ": " + step
+            + " failed (" + socket_error_text(code) + ")";
+        if (listener_ != kInvalid) { close_sock(listener_); listener_ = kInvalid; }
+        return false;
+    }
+
     bool open_listener() {
         listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (listener_ == kInvalid) return false;
+        if (listener_ == kInvalid) return fail_listener("socket");
         int yes = 1;
 #ifdef _WIN32
         // SO_REUSEADDR on Windows lets this bind land on top of another process's wildcard
@@ -393,8 +409,8 @@ struct debug_connector::impl {
         addr.sin_port = htons(static_cast<uint16_t>(requested_port));
         if (::inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1)
             addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        if (::bind(listener_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) { close_sock(listener_); listener_ = kInvalid; return false; }
-        if (::listen(listener_, 1) != 0) { close_sock(listener_); listener_ = kInvalid; return false; }
+        if (::bind(listener_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) return fail_listener("bind");
+        if (::listen(listener_, 1) != 0) return fail_listener("listen");
         socklen_t len = sizeof(addr);
         if (::getsockname(listener_, reinterpret_cast<sockaddr*>(&addr), &len) == 0)
             bound_port_ = ntohs(addr.sin_port);
@@ -408,7 +424,7 @@ struct debug_connector::impl {
         ctrl_->set_on_stopped([this](const stop_info& si) { on_stop(si); });
         ctrl_->set_on_source_loaded([this](const std::string&) { verify_pending(); });
         if (!open_listener()) return;
-        if (!make_wake_pair(wake_r_, wake_w_)) { close_sock(listener_); listener_ = kInvalid; return; }
+        if (!make_wake_pair(wake_r_, wake_w_)) { fail_listener("wake pair"); bound_port_ = 0; return; }
         running_.store(true, std::memory_order_release);
         started_ = true;
         thread_ = std::thread([this] { run(); });
@@ -732,6 +748,14 @@ void debug_connector::stop() {
 
 int debug_connector::port() const {
     return impl_->bound_port_;
+}
+
+bool debug_connector::listening() const {
+    return impl_->started_ && impl_->error_.empty();
+}
+
+const std::string& debug_connector::error() const {
+    return impl_->error_;
 }
 
 std::shared_ptr<debug_connector> listen(engine& eng, int port, std::string host) {

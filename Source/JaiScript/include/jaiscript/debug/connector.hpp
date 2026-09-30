@@ -36,7 +36,9 @@ public:
     void start(engine* eng) override;   // open the listener, launch the connector thread
     void stop() override;               // disarm + detach the controller, join the thread
 
-    int port() const;                   // the bound port (useful when constructed with 0)
+    int port() const;                   // the bound port (useful when constructed with 0); 0 when not listening
+    bool listening() const;             // started and serving
+    const std::string& error() const;   // why not: "debugger cannot listen on 127.0.0.1:52472: bind failed (...)"
 
 private:
     struct impl;
@@ -47,6 +49,7 @@ private:
 // Collapses the host-side wiring to one line (a host still owns any "wait for attach" UI):
 //   auto conn = jai::debug::listen(*eng);            // default port
 //   auto conn = jai::debug::listen(*eng, 40000);     // custom port
+//   if (!conn->listening()) log(conn->error());      // a taken port does not throw
 std::shared_ptr<debug_connector> listen(engine& eng, int port = default_port,
                                         std::string host = "127.0.0.1");
 

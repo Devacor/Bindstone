@@ -16,23 +16,17 @@ namespace binding_traits {
 
 // ============ Container Reference Detection ============
 
-// Detect std::vector references (but exclude script_value vectors which are native)
+// Detect const std::vector references (but exclude script_value vectors which are native). A non-const one writes the
+// callee's final value back into the script lvalue (core/function_binder.hpp host_writes_back).
 template<typename T>
 struct is_std_vector_ref : std::false_type {};
 
 template<typename T>
-struct is_std_vector_ref<std::vector<T>&> : std::bool_constant<!std::is_same_v<T, script_value>> {};
-
-template<typename T>
 struct is_std_vector_ref<const std::vector<T>&> : std::bool_constant<!std::is_same_v<T, script_value>> {};
 
-// Detect std::map references (but exclude script_value maps which are native)
+// Detect const std::map references (but exclude script_value maps which are native)
 template<typename T>
 struct is_std_map_ref : std::false_type {};
-
-template<typename K, typename V>
-struct is_std_map_ref<std::map<K, V>&> : std::bool_constant<
-    !(std::is_same_v<K, script_value> && std::is_same_v<V, script_value>)> {};
 
 template<typename K, typename V>
 struct is_std_map_ref<const std::map<K, V>&> : std::bool_constant<
@@ -111,20 +105,18 @@ inline void check_binding_validity(const std::string& name) {
         "╔════════════════════════════════════════════════════════════════╗\n"
         "║                  JaiScript Binding Error                       ║\n"
         "╠════════════════════════════════════════════════════════════════╣\n"
-        "║ Cannot bind functions with container reference parameters:     ║\n"
+        "║ Cannot bind functions with const container reference params:   ║\n"
         "║   • const std::vector<T>&                                      ║\n"
-        "║   • std::vector<T>&                                            ║\n"
         "║   • const std::map<K,V>&                                       ║\n"
-        "║   • std::map<K,V>&                                             ║\n"
         "║                                                                ║\n"
-        "║ Why? These create misleading copies, not true references!     ║\n"
+        "║ Why? These bind a converted copy, not the script container!   ║\n"
         "║                                                                ║\n"
         "║ Solutions:                                                     ║\n"
         "║ 1. Use bound_array<T> or bound_map<K,V> for zero-copy       ║\n"
         "║ 2. Use std::vector<T> (by value) if copying is acceptable     ║\n"
-        "║ 3. #define JAI_ALLOW_MISLEADING_REFERENCE_BINDING before      ║\n"
-        "║    including JaiScript headers to allow (but beware:          ║\n"
-        "║    mutations won't affect the original!)                       ║\n"
+        "║ 3. std::vector<T>& writes the callee's result back            ║\n"
+        "║ 4. #define JAI_ALLOW_MISLEADING_REFERENCE_BINDING before      ║\n"
+        "║    including JaiScript headers to allow                        ║\n"
         "╚════════════════════════════════════════════════════════════════╝\n"
     );
 }

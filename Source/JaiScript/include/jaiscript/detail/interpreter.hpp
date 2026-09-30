@@ -556,6 +556,7 @@ namespace jai {
             external_ctx_stack_.push_back(pending_call_ctx_);
             pending_call_ctx_ = nullptr;
         }
+        checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset, int& component);
         void pop_external_call_scope() {
             if (!external_ctx_stack_.empty()) {
                 pending_call_ctx_ = external_ctx_stack_.back();
@@ -1329,7 +1330,9 @@ namespace jai {
                                                       unit_stamp caller_unit,
                                                       const script_defined_function* callee = nullptr, size_t param_index = 0);
         // Share-or-box against the caller's variable storage (cell model)
-        checked_result<void> bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot);
+        checked_result<bool> reference_to_storage(script_value& storage, script_value& out);
+        checked_result<bool> bind_site_reference(const expression* argExpr, call_frame* caller_locals,
+                                                 const std::shared_ptr<environment>& caller_env, script_value& out);
 
         // Type conversion helpers (constructor-based conversions)
         // Attempts to convert a value to a target type using constructor-based conversion.

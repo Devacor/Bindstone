@@ -661,7 +661,7 @@ public:
         test("parameters_and_returns", [expect]() {
             expect("var r = scale3(math::vec3(1, 2, 3), 2); to_string(r) + type_of(r)", "(2.0, 4.0, 6.0)math::vec3", "a host value in and out");
             expect("to_string(len2(math::vec3(1, 2, 2)))", "9.0", "a const reference parameter");
-            expect("math::vec3 v = math::vec3(1, 2, 3); var r = bump(v); to_string(r) + to_string(v)", "101.0(1.0, 2.0, 3.0)", "a reference parameter takes a private copy");
+            expect("math::vec3 v = math::vec3(1, 2, 3); var r = bump(v); to_string(r) + to_string(v)", "101.0(101.0, 2.0, 3.0)", "a reference parameter writes the callee's value back");
             expect("to_string(cell_sum(math::ivec3(1, 2, 3))) + to_string(cell_sum(math::vec3(1.9, 2.1, 3)))", "66", "an int host type; a vec3 converts by the typed-slot table");
             expect("var c = tint_of(math::color(0.5, 0.25, 1, 1)); to_string(c) + type_of(c) + to_string(default_tint())", "(0.25, 0.25, 1.0, 1.0)math::color(1.0, 1.0, 1.0, 1.0)", "a color host type");
             expect("var b = box(math::vec3(2, 3, 4)); to_string(b.width + b.height + b.depth)", "11.0", "the width/height/depth aliases read a host extent");

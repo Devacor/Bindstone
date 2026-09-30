@@ -12357,7 +12357,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 			// Opaque invoke: arm the pending call-site context for the callee's bind
 			pending_call_site saved_pending = pending_site_ctx_;
 			pending_site_ctx_ = arguments.empty() ? saved_pending
-			                                      : pending_call_site{&site, &f, f.code};
+			                                      : pending_call_site{&site, &f, f.code, &arguments};
 			struct pending_restore {
 				vm_backend* vm; pending_call_site saved;
 				~pending_restore() { vm->pending_site_ctx_ = saved; }
@@ -12507,7 +12507,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 			// Opaque invoke: arm the pending call-site context for the callee's bind
 			pending_call_site saved_pending = pending_site_ctx_;
 			pending_site_ctx_ = arguments.empty() ? saved_pending
-			                                      : pending_call_site{&site, &f, f.code};
+			                                      : pending_call_site{&site, &f, f.code, &arguments};
 			struct pending_restore {
 				vm_backend* vm; pending_call_site saved;
 				~pending_restore() { vm->pending_site_ctx_ = saved; }
@@ -14804,7 +14804,7 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 	detail::deref_builtin_args_in_place(arguments);
 	pending_call_site saved_pending = pending_site_ctx_;
-	pending_site_ctx_ = arguments.empty() ? saved_pending : pending_call_site{&site, &f, f.code};
+	pending_site_ctx_ = arguments.empty() ? saved_pending : pending_call_site{&site, &f, f.code, &arguments};
 	struct pending_restore {
 		vm_backend* vm; pending_call_site saved;
 		~pending_restore() { vm->pending_site_ctx_ = saved; }
@@ -15326,7 +15326,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				detail::deref_builtin_args_in_place(arguments);
 				pending_call_site saved_pending = pending_site_ctx_;
 				pending_site_ctx_ = arguments.empty() ? saved_pending
-				                                      : pending_call_site{&site, &f, f.code};
+				                                      : pending_call_site{&site, &f, f.code, &arguments};
 				struct pending_restore {
 					vm_backend* vm; pending_call_site saved;
 					~pending_restore() { vm->pending_site_ctx_ = saved; }
@@ -15558,6 +15558,12 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t prof_sp1 = __rdtsc();
 #endif
+		pending_call_site saved_pending = pending_site_ctx_;
+		pending_site_ctx_ = args.empty() || !ins.c ? saved_pending : pending_call_site{&f.code->call_sites[ins.c - 1], &f, f.code, &args};
+		struct pending_restore {
+			vm_backend* vm; pending_call_site saved;
+			~pending_restore() { vm->pending_site_ctx_ = saved; }
+		} restore_pending{this, saved_pending};
 		auto result = func(args);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_new_count_;
@@ -15608,6 +15614,12 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 		const uint64_t prof_new1 = __rdtsc();
 #endif
+		pending_call_site saved_pending = pending_site_ctx_;
+		pending_site_ctx_ = args.empty() || !ins.c ? saved_pending : pending_call_site{&f.code->call_sites[ins.c - 1], &f, f.code, &args};
+		struct pending_restore {
+			vm_backend* vm; pending_call_site saved;
+			~pending_restore() { vm->pending_site_ctx_ = saved; }
+		} restore_pending{this, saved_pending};
 		auto result = func(args);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_new_count_;
@@ -20761,7 +20773,148 @@ script_value vm_backend::share_env_ref(script_value& storage) {
 	return script_value(storage);
 }
 
-op_status vm_backend::bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot) {
+// Resolves argument i of a compile-time call site to the reference a T& binds: a frame-slot local, a static, a
+// field/subscript/chain lvalue, a variable of the caller's scope or a C++ property. bound=false: the argument names none of
+// those (the caller decides between an evaluated reference, a temporary and the non-lvalue error). KEEP BYTE-PARALLEL with
+// interpreter::bind_site_reference.
+op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame* caller_frame, chunk* caller_code,
+                                          const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound) {
+	const uint64_t symbol_id = i < site.arg_symbols.size() ? site.arg_symbols[i] : UINT64_MAX;
+	const uint32_t slot = i < site.arg_slots.size() ? site.arg_slots[i] : k_invalid_u32;
+
+	// Caller frame-slot local (env lookup can't see slot locals and would
+	// walk to an unrelated same-named outer variable)
+	if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_frame) {
+		if (script_value* slotPtr = frame_slot(*caller_frame, slot)) {
+			return reference_to_storage(*slotPtr, out, bound);
+		}
+	}
+
+	// Field/subscript/chain lvalue argument: resolve through the shared
+	// helper into an owner-pinned reference (Tier 1)
+	const uint32_t lvalue_node = i < site.arg_lvalue_nodes.size() ? site.arg_lvalue_nodes[i] : k_invalid_u32;
+	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter)
+	if (lvalue_node != k_invalid_u32 && caller_code && caller_env &&
+	    caller_code->nodes[lvalue_node]->get_type() == node_type::member_expr &&
+	    static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get())->is_static) {
+		const class_definition* access = caller_frame ? frame_access_context(*caller_frame) : caller_env->find_access_context();
+		if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get()),
+		                                             *caller_env, *symbolizer_, access)) {
+			if (!*cell) { return raise_from(*cell); }
+			return reference_to_storage(*cell->value(), out, bound);
+		}
+	}
+	if (lvalue_node != k_invalid_u32 && caller_code &&
+	    detail::is_ref_bindable_lvalue(static_cast<const expression*>(caller_code->nodes[lvalue_node].get()))) {
+		if (caller_frame) {
+			// the kernel resolves in the CALLER's member scope (environment_
+			// already points at the callee's chain mid-push)
+			ensure_frame_member_scope(*caller_frame, caller_env.get());
+		}
+		auto resolved = detail::resolve_ref_lvalue(
+			static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
+			caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
+		if (resolved) {
+			out = std::move(resolved.value());
+			bound = true;
+			return {};
+		}
+		// The kernel's generic non-lvalue verdict falls through to Tier 2
+		// (identifier-keyed map entries classify Tier 1 but only evaluation
+		// can resolve them); access enforcement and other specific errors
+		// propagate. (KEEP BYTE-PARALLEL with bind_reference_parameter)
+		if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
+			return raise_from(resolved);
+		}
+	}
+
+	if (symbol_id != UINT64_MAX && caller_env) {
+		// ::name ref args bind against the GLOBAL env only
+		if (i < site.arg_global.size() && site.arg_global[i] != 0) {
+			script_value* g = engine_->get_global_environment()->get_value_ptr(symbol_id);
+			if (!g) {
+				return raise_(
+					make_error_code(runtime_error_code::undefined_variable),
+					environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
+			}
+			return reference_to_storage(*g, out, bound);
+		}
+		// Caller member scope: a field/static outranks a same-named global
+		// as a ref target (bound as raw storage, exactly like the old
+		// fallback bound the same pointer when no global collided).
+		// (KEEP BYTE-PARALLEL with interpreter::bind_reference_parameter.)
+		script_value* argPtr = nullptr;
+		bool member_shadowed = false;
+		if (caller_frame && caller_frame->locals) {
+			ensure_frame_member_scope(*caller_frame, caller_env.get());
+			if (frame_scope_active(*caller_frame)) {
+				const auto caller_scope = frame_scope_state(*caller_frame);
+				argPtr = detail::own_scope_lookup(caller_env.get(),
+				                                  caller_frame->locals->scope_floor, symbol_id);
+				if (!argPtr) {
+					auto member = detail::probe_member_scope(caller_scope,
+					                                         caller_frame->locals->scope_this,
+					                                         caller_frame->locals->scope_static,
+					                                         symbol_id, /*want_methods*/ false);
+					if (member) {
+						VM_TRY(detail::bare_member_access(member, symbol_id, frame_access_context(*caller_frame)));
+					}
+					argPtr = member.value_ptr;
+					// A C++ property binds the member itself / its accessors (reference_model.md)
+					if (member.what == detail::member_probe_hit::kind::cpp_property) {
+						auto minted = detail::bind_cpp_property_ref(*caller_frame->locals->scope_this,
+						                                            symbol_id, engine_, symbolizer_);
+						if (!minted) {
+							return raise_from(minted);
+						}
+						out = std::move(minted.value());
+						bound = true;
+						return {};
+					}
+				}
+				if (!argPtr) {
+					if (detail::member_scope_has_method(caller_scope,
+					                                    caller_frame->locals->scope_this,
+					                                    caller_frame->locals->scope_static, symbol_id)) {
+						member_shadowed = true;
+					} else {
+						argPtr = caller_frame->locals->scope_floor
+							? caller_frame->locals->scope_floor->get_value_ptr(symbol_id)
+							: caller_env->get_value_ptr(symbol_id);
+					}
+				}
+			}
+		}
+		if (!argPtr && !member_shadowed &&
+		    !(caller_frame && caller_frame->locals && frame_scope_active(*caller_frame))) {
+			argPtr = caller_env->get_value_ptr(symbol_id);
+			if (!argPtr && caller_frame) {
+				argPtr = frame_this_member_ptr(*caller_frame, symbol_id);   // method-lazy caller: bare field args
+			}
+		}
+		if (!argPtr) {
+			// A hybrid's C++ property reached through the env's 'this' (lambdas made
+			// in methods); KEEP BYTE-PARALLEL with interpreter::bind_reference_parameter
+			if (auto minted = caller_frame && !member_shadowed
+			        ? bind_bare_cpp_property_ref(*caller_frame, symbol_id, caller_env.get()) : std::nullopt) {
+				if (!*minted) {
+					return raise_from(*minted);
+				}
+				out = std::move(minted->value());
+				bound = true;
+				return {};
+			}
+			return raise_(
+				make_error_code(runtime_error_code::undefined_variable),
+				member_shadowed ? std::string_view("Cannot take reference of undefined variable")
+				                : environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
+		}
+		return reference_to_storage(*argPtr, out, bound);
+	}
+	return {};
+}
+
+op_status vm_backend::reference_to_storage(script_value& storage, script_value& out, bool& bound) {
 	if (storage.is_reference() && !storage.get_reference_holder()) {
 		return raise_(
 			make_error_code(runtime_error_code::invalid_reference),
@@ -20770,8 +20923,55 @@ op_status vm_backend::bind_reference_to_storage(script_value& storage, frame& ca
 	// Share the holder (zero alloc; cells alias the same box, element/field refs keep
 	// their container/instance re-resolution), boxing on demand when the variable
 	// predates its escape mark (cross-execute global, C++ define, dynamic shape)
-	frame_slot_set(callee, param_slot, share_env_ref(storage));
+	out = share_env_ref(storage);
+	bound = true;
 	return {};
+}
+
+// A host callable's T& argument (execution_backend::host_reference_argument): the argument the call in flight passed, when
+// the callable received it (a callback a builtin makes with its own arguments did not), resolved as a T& parameter binds it
+checked_result<script_value> vm_backend::host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
+                                                                 int& component) {
+	component = -1;
+	const pending_call_site ctx = pending_site_ctx_;
+	if (!ctx.site || !ctx.arguments || ctx.arguments->size() + offset != args.size() || index >= ctx.arguments->size()) {
+		return make_null();
+	}
+	const script_value& passed = (*ctx.arguments)[index];
+	if (ctx.arguments != &args && !detail::same_argument(passed, args[index + offset])) {
+		return make_null();
+	}
+	script_value site_ref = make_null();
+	bool bound = false;
+	if (bind_site_reference(index, *ctx.site, ctx.caller_frame, ctx.caller_code, environment_, site_ref, bound) != op_status::ok) {
+		return pending_error_;
+	}
+	if (bound) {
+		return site_ref;
+	}
+	const uint32_t lvalue_node = index < ctx.site->arg_lvalue_nodes.size() ? ctx.site->arg_lvalue_nodes[index] : k_invalid_u32;
+	if (lvalue_node != k_invalid_u32 && ctx.caller_code && ctx.caller_frame &&
+	    ctx.caller_code->nodes[lvalue_node]->get_type() == node_type::member_expr) {
+		frame& caller = *ctx.caller_frame;
+		auto part = detail::math::component_argument(static_cast<const member_expr*>(ctx.caller_code->nodes[lvalue_node].get()), component,
+			[&](const identifier_expr* id) -> script_value* {
+				if (id->global_qualified) { return engine_->get_global_environment()->get_value_ptr(id->symbol_id); }
+				return resolve_local_or_env(caller, ctx.caller_code->component_base_slot(lvalue_node), id->symbol_id);
+			},
+			[&](const member_expr* m) {
+				return detail::math::static_component_cell(m, *engine_, *environment_, *symbolizer_, frame_access_context(caller));
+			},
+			[this](script_value& storage) { return share_env_ref(storage); },
+			caller_view(&caller), environment_.get(), engine_, symbolizer_);
+		if (!part || component >= 0) {
+			return part;
+		}
+	}
+	if (const auto* holder = detail::deferred_argument(passed)) {
+		const script_value& lvalue = holder->argument_source->lvalue;
+		return lvalue.is_reference() && lvalue.get_reference_holder() ? lvalue : make_null();
+	}
+	return passed.is_reference() && passed.get_reference_holder() ? passed : make_null();
 }
 
 template <class ArgsT>
@@ -20860,144 +21060,11 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
 			enter_unit(caller_unit);
 			if (site) {
-				// Stateless ref binding from the compile-time call site: identifier args
-				// share the caller storage's cell handle (boxing on demand when the
-				// variable predates its escape mark); field/subscript lvalue args resolve
-				// to owner-pinned identity refs via the shared kernel.
-				const uint64_t symbol_id = i < site->arg_symbols.size() ? site->arg_symbols[i] : UINT64_MAX;
-				const uint32_t slot = i < site->arg_slots.size() ? site->arg_slots[i] : k_invalid_u32;
-
-				// Caller frame-slot local (env lookup can't see slot locals and would
-				// walk to an unrelated same-named outer variable)
-				if (symbol_id != UINT64_MAX && slot != k_invalid_u32 && caller_frame) {
-					if (script_value* slotPtr = frame_slot(*caller_frame, slot)) {
-						VM_TRY(bind_reference_to_storage(*slotPtr, callee, param.slot_index));
-						continue;
-					}
-				}
-
-				// Field/subscript/chain lvalue argument: resolve through the shared
-				// helper into an owner-pinned reference (Tier 1)
-				const uint32_t lvalue_node = i < site->arg_lvalue_nodes.size() ? site->arg_lvalue_nodes[i] : k_invalid_u32;
-				// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter)
-				if (lvalue_node != k_invalid_u32 && caller_code && caller_env &&
-				    caller_code->nodes[lvalue_node]->get_type() == node_type::member_expr &&
-				    static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get())->is_static) {
-					const class_definition* access = caller_frame ? frame_access_context(*caller_frame) : caller_env->find_access_context();
-					if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get()),
-					                                             *caller_env, *symbolizer_, access)) {
-						if (!*cell) { return raise_from(*cell); }
-						VM_TRY(bind_reference_to_storage(*cell->value(), callee, param.slot_index));
-						continue;
-					}
-				}
-				if (lvalue_node != k_invalid_u32 && caller_code) {
-					if (caller_frame) {
-						// the kernel resolves in the CALLER's member scope (environment_
-						// already points at the callee's chain mid-push)
-						ensure_frame_member_scope(*caller_frame, caller_env.get());
-					}
-					auto resolved = detail::resolve_ref_lvalue(
-						static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
-						caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
-					if (resolved) {
-						frame_slot_set(callee, param.slot_index, std::move(resolved.value()));
-						continue;
-					}
-					// The kernel's generic non-lvalue verdict falls through to Tier 2
-					// (identifier-keyed map entries classify Tier 1 but only evaluation
-					// can resolve them); access enforcement and other specific errors
-					// propagate. (KEEP BYTE-PARALLEL with bind_reference_parameter)
-					if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
-						return raise_from(resolved);
-					}
-				}
-
-				if (symbol_id != UINT64_MAX && caller_env) {
-					// ::name ref args bind against the GLOBAL env only
-					if (i < site->arg_global.size() && site->arg_global[i] != 0) {
-						script_value* g = engine_->get_global_environment()->get_value_ptr(symbol_id);
-						if (!g) {
-							return raise_(
-								make_error_code(runtime_error_code::undefined_variable),
-								environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
-						}
-						VM_TRY(bind_reference_to_storage(*g, callee, param.slot_index));
-						continue;
-					}
-					// Caller member scope: a field/static outranks a same-named global
-					// as a ref target (bound as raw storage, exactly like the old
-					// fallback bound the same pointer when no global collided).
-					// (KEEP BYTE-PARALLEL with interpreter::bind_reference_parameter.)
-					script_value* argPtr = nullptr;
-					bool member_shadowed = false;
-					bool property_bound = false;
-					if (caller_frame && caller_frame->locals) {
-						ensure_frame_member_scope(*caller_frame, caller_env.get());
-						if (frame_scope_active(*caller_frame)) {
-							const auto caller_scope = frame_scope_state(*caller_frame);
-							argPtr = detail::own_scope_lookup(caller_env.get(),
-							                                  caller_frame->locals->scope_floor, symbol_id);
-							if (!argPtr) {
-								auto member = detail::probe_member_scope(caller_scope,
-								                                         caller_frame->locals->scope_this,
-								                                         caller_frame->locals->scope_static,
-								                                         symbol_id, /*want_methods*/ false);
-								if (member) {
-									VM_TRY(detail::bare_member_access(member, symbol_id, frame_access_context(*caller_frame)));
-								}
-								argPtr = member.value_ptr;
-								// A C++ property binds the member itself / its accessors (reference_model.md)
-								if (member.what == detail::member_probe_hit::kind::cpp_property) {
-									auto minted = detail::bind_cpp_property_ref(*caller_frame->locals->scope_this,
-									                                            symbol_id, engine_, symbolizer_);
-									if (!minted) {
-										return raise_from(minted);
-									}
-									frame_slot_set(callee, param.slot_index, std::move(minted.value()));
-									property_bound = true;
-								}
-							}
-							if (!argPtr && !property_bound) {
-								if (detail::member_scope_has_method(caller_scope,
-								                                    caller_frame->locals->scope_this,
-								                                    caller_frame->locals->scope_static, symbol_id)) {
-									member_shadowed = true;
-								} else {
-									argPtr = caller_frame->locals->scope_floor
-										? caller_frame->locals->scope_floor->get_value_ptr(symbol_id)
-										: caller_env->get_value_ptr(symbol_id);
-								}
-							}
-						}
-					}
-					if (property_bound) {
-						continue;
-					}
-					if (!argPtr && !member_shadowed &&
-					    !(caller_frame && caller_frame->locals && frame_scope_active(*caller_frame))) {
-						argPtr = caller_env->get_value_ptr(symbol_id);
-						if (!argPtr && caller_frame) {
-							argPtr = frame_this_member_ptr(*caller_frame, symbol_id);   // method-lazy caller: bare field args
-						}
-					}
-					if (!argPtr) {
-						// A hybrid's C++ property reached through the env's 'this' (lambdas made
-						// in methods); KEEP BYTE-PARALLEL with interpreter::bind_reference_parameter
-						if (auto minted = caller_frame && !member_shadowed
-						        ? bind_bare_cpp_property_ref(*caller_frame, symbol_id, caller_env.get()) : std::nullopt) {
-							if (!*minted) {
-								return raise_from(*minted);
-							}
-							frame_slot_set(callee, param.slot_index, std::move(minted->value()));
-							continue;
-						}
-						return raise_(
-							make_error_code(runtime_error_code::undefined_variable),
-							member_shadowed ? std::string_view("Cannot take reference of undefined variable")
-							                : environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
-					}
-					VM_TRY(bind_reference_to_storage(*argPtr, callee, param.slot_index));
+				script_value site_ref = make_null();
+				bool bound = false;
+				VM_TRY(bind_site_reference(i, *site, caller_frame, caller_code, caller_env, site_ref, bound));
+				if (bound) {
+					frame_slot_set(callee, param.slot_index, std::move(site_ref));
 				} else if (arg.is_reference() && arg.get_reference_holder()) {
 					// Tier 2 (general lvalues; Dev ruling 2026-07-12): the argument already
 					// evaluated in normal left-to-right order, and subscript/map reads over

@@ -283,6 +283,8 @@ namespace jai::vm {
         void push_external_call_scope() override;
         void begin_host_call() override;
         void pop_external_call_scope() override;
+        checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
+                                                             int& component) override;
         bool has_variable(const std::string& name) const override;
 
         void push_scope() override;
@@ -773,6 +775,7 @@ namespace jai::vm {
             const call_site* site = nullptr;
             frame* caller_frame = nullptr;
             chunk* caller_code = nullptr;
+            const std::vector<script_value>* arguments = nullptr;   // as passed (a host callable's T& resolution)
         };
         pending_call_site pending_site_ctx_{};
         std::vector<pending_call_site> external_site_stack_;
@@ -1172,7 +1175,9 @@ namespace jai::vm {
         // Ref-param bind against the caller's variable storage: shares an existing
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark
-        op_status bind_reference_to_storage(script_value& storage, frame& callee, size_t param_slot);
+        op_status reference_to_storage(script_value& storage, script_value& out, bool& bound);
+        op_status bind_site_reference(size_t i, const call_site& site, frame* caller_frame, chunk* caller_code,
+                                      const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound);
         // Kernel caller-view over a frame: window frames hand the resolver their raw
         // window span (lawful: resolve_ref_lvalue never runs script, so the stack
         // cannot grow mid-resolve); fiber/legacy frames keep the call_frame read.

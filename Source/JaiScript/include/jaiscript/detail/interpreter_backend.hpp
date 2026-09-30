@@ -154,6 +154,11 @@ public:
         interpreter_->pop_external_call_scope();
     }
 
+    checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
+                                                         int& component) override {
+        return interpreter_->host_reference_argument(args, index, offset, component);
+    }
+
     checked_result<script_value> resume_coroutine(coroutine_handle& handle) override {
         return interpreter_->resume_coroutine(handle);
     }

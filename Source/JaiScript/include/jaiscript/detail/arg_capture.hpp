@@ -12,6 +12,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/transient_read.hpp>
+#include <bit>
 
 namespace jai::detail {
 
@@ -83,6 +84,10 @@ namespace jai::detail {
         if (const auto* bm = fn.target<bound_method_fn>(); bm && bm->method.raw_storage_index() == script_value::TYPEID_FUNCTION) {
             if (const auto* d = bm->method.unchecked_as_function().target<script_method_dispatch>()) return method_binding(d->cls.get(), d->name_id, i, argc);
         }
+        // a host callable's non-const T& (a C++ T&, which the call writes back) binds the lvalue
+        if (const auto* w = fn.target<host_writeback_function>()) return i < 64 && ((w->mask >> i) & 1) ? arg_binding::reference : arg_binding::opaque;
+        if (const auto* d = fn.target<engine::overload_dispatch>()) return static_cast<arg_binding>(d->argument_binding(i, argc));
+        if (const auto* d = fn.target<class_definition::cpp_method_dispatch>()) return static_cast<arg_binding>(d->argument_binding(i, argc));
         return arg_binding::opaque;
     }
 
@@ -103,6 +108,32 @@ namespace jai::detail {
         }
         if (const script_value* field = inst->find_field_value(member_id)) return callee_binding(*field, i, false, argc);
         return callee_binding(cd->get_method(member_id, false), i, false, argc);
+    }
+
+    // A host callable's received argument is still the one the call site passed (the callee may hold a dereferenced or
+    // re-wrapped copy of it): the same scalar, text or math value, the same heavy payload. A callback a builtin makes
+    // with its own arguments fails it.
+    inline bool same_argument(const script_value& passed_in, const script_value& received_in) {
+        const script_value& passed = passed_in.deref();
+        const script_value& received = received_in.deref();
+        const size_t k = passed.raw_storage_index();
+        if (k != received.raw_storage_index()) return false;
+        switch (k) {
+            case script_value::TYPEID_NULL: return true;
+            case script_value::TYPEID_INT: return passed.unchecked_as_int() == received.unchecked_as_int();
+            case script_value::TYPEID_FLOAT: return std::bit_cast<uint64_t>(passed.unchecked_as_float()) == std::bit_cast<uint64_t>(received.unchecked_as_float());
+            case script_value::TYPEID_STRING:
+            case script_value::TYPEID_UTF8_STRING:
+            case script_value::TYPEID_CHAR:
+            case script_value::TYPEID_BOOL:
+            case script_value::TYPEID_CPP_BOUND: return passed == received;
+            case script_value::TYPEID_ARRAY: return const_cast<script_value&>(passed).get_array_storage().get() == const_cast<script_value&>(received).get_array_storage().get();
+            case script_value::TYPEID_MAP: return &passed.unchecked_as_map() == &received.unchecked_as_map();
+            case script_value::TYPEID_OBJECT:
+            case script_value::TYPEID_SHARED_PTR: return passed.get_object_holder().get() == received.get_object_holder().get();
+            case script_value::TYPEID_FUNCTION: return &passed.unchecked_as_function() == &received.unchecked_as_function();
+            default: return script_value::is_math_index(k) && passed == received;
+        }
     }
 
     inline auto deferred_argument(const script_value& v) {

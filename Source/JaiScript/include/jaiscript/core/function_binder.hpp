@@ -548,6 +548,128 @@ class engine;
             }
         };
         
+        // A non-const T& host parameter whose argument reaches the callee as a private copy: the callee's final value
+        // is stored back through the script lvalue the argument names. A registered class aliases its live object,
+        // a bound view aliases its container and a callback stays opaque, so none of those write back.
+        template<typename P>
+        consteval bool host_writes_back() {
+            if constexpr (!std::is_lvalue_reference_v<P> || std::is_const_v<std::remove_reference_t<P>>) { return false; }
+            else {
+                using D = std::remove_cv_t<std::remove_reference_t<P>>;
+                return std::is_arithmetic_v<D> || std::is_enum_v<D> || std::is_same_v<D, std::string> ||
+                       std::is_same_v<D, script_value> || is_specialization_v<D, std::vector> || is_script_map_like_v<D> ||
+                       is_specialization_v<D, std::shared_ptr> || math_adapted<D>;
+            }
+        }
+
+        template<typename... Ps>
+        consteval uint64_t host_writeback_mask() {
+            uint64_t mask = 0;
+            uint64_t bit = 1;
+            ((mask |= host_writes_back<Ps>() ? bit : 0, bit <<= 1), ...);
+            return mask;
+        }
+        // Skip = the leading self parameter of a method lambda, which is no script argument
+        template<typename Tuple, size_t Skip = 0> struct tuple_writeback_mask;
+        template<typename... Ps> struct tuple_writeback_mask<std::tuple<Ps...>, 0> { static constexpr uint64_t value = host_writeback_mask<Ps...>(); };
+        template<typename P0, typename... Ps> struct tuple_writeback_mask<std::tuple<P0, Ps...>, 1> { static constexpr uint64_t value = host_writeback_mask<Ps...>(); };
+        template<> struct tuple_writeback_mask<std::tuple<>, 1> { static constexpr uint64_t value = 0; };
+
+        // engine.cpp: the script lvalue a host T& argument names (target: the reference its store goes through, null when
+        // the argument names none - a literal, a temporary, a call no script site made) and the value the callee starts from
+        struct host_reference {
+            script_value target;
+            script_value value;
+            int component = -1;   // a math component argument (v.x): the component the store writes in target's value
+        };
+        host_reference host_reference_argument(engine* eng, const std::vector<script_value>& args, size_t index, size_t offset);
+        checked_result<void> host_reference_store(engine* eng, script_value& target, int component, script_value&& value);
+
+        template<uint64_t Mask>
+        using host_call_result_t = std::conditional_t<Mask != 0, checked_result<script_value>, script_value>;
+
+        template<typename T>
+        struct writeback_argument {
+            T* live = nullptr;
+            std::optional<T> owned;
+            script_value target;
+            int component = -1;
+            operator T&() { return live ? *live : *owned; }
+        };
+
+        template<typename T>
+        T writeback_decode(const script_value& v, engine* eng) {
+            if constexpr (std::is_same_v<T, script_value>) { return v; }
+            else if constexpr (std::is_enum_v<T>) { return static_cast<T>(v.as<script_int>()); }
+            else { return value_converter<T>::from(v, eng); }
+        }
+
+        template<typename T>
+        script_value writeback_encode(const T& t, engine* eng) {
+            if constexpr (std::is_same_v<T, script_value>) { return t; }
+            else if constexpr (std::is_same_v<T, bool>) { return script_value(t, eng); }
+            else if constexpr (std::is_same_v<T, char>) { return script_value(static_cast<script_char>(t), eng); }
+            else if constexpr (std::is_enum_v<T> || std::is_integral_v<T>) { return script_value(static_cast<script_int>(t), eng); }
+            else if constexpr (std::is_floating_point_v<T>) { return script_value(static_cast<script_float>(t), eng); }
+            else { return value_converter<T>::to(t, eng); }
+        }
+
+        // An exact-width host variable (a cpp_bound argument) is the callee's object itself
+        template<typename T>
+        writeback_argument<T> make_writeback_argument(const std::vector<script_value>& args, size_t index, size_t offset, engine* eng) {
+            writeback_argument<T> a{ nullptr, std::nullopt, script_value(std::monostate{}, eng), -1 };
+            script_value& actual = const_cast<script_value&>(args[index + offset].deref());
+            if constexpr (std::is_arithmetic_v<T> || std::is_same_v<T, std::string>) {
+                if (actual.is_cpp_bound()) {
+                    a.live = &actual.template as<T&>();
+                    return a;
+                }
+            }
+            host_reference ref = host_reference_argument(eng, args, index, offset);
+            a.target = std::move(ref.target);
+            a.component = ref.component;
+            a.owned.emplace(writeback_decode<T>(a.target.is_reference() ? ref.value : actual, eng));
+            return a;
+        }
+
+        template<typename T>
+        checked_result<void> commit_writeback(writeback_argument<T>& a, engine* eng) {
+            if (a.live || !a.target.is_reference()) { return {}; }
+            return host_reference_store(eng, a.target, a.component, writeback_encode<T>(*a.owned, eng));
+        }
+        template<typename T>
+        checked_result<void> commit_writeback(T&, engine*) { return {}; }
+
+        // In parameter order; the first failed store is the call's error
+        template<typename Tuple>
+        checked_result<void> commit_writebacks(Tuple& carriers, engine* eng) {
+            checked_result<void> result;
+            std::apply([&](auto&... carrier) {
+                ((result ? void(result = commit_writeback(carrier, eng)) : void()), ...);
+            }, carriers);
+            return result;
+        }
+
+        // The callee's writes are stored back after it returns, and after it throws (a C++ callee's writes before a throw
+        // stand); the result converts while the private copies it may name still live
+        template<typename R, typename Tuple, typename Call>
+        checked_result<script_value> invoke_with_writeback(Tuple& carriers, engine* eng, Call&& call) {
+            script_value out(std::monostate{}, eng);
+            try {
+                if constexpr (std::is_void_v<R>) {
+                    call();
+                } else {
+                    decltype(auto) result = call();
+                    out = value_converter<R>::to(result, eng);
+                }
+            } catch (...) {
+                (void)commit_writebacks(carriers, eng);
+                throw;
+            }
+            if (auto stored = commit_writebacks(carriers, eng); !stored) { return stored.error_value(); }
+            return out;
+        }
+
         // Helper to extract function traits
         template<typename T>
         struct function_traits;
@@ -747,8 +869,11 @@ class engine;
         
         // Reference-aware calling methods
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
-        static script_value call_with_reference_support(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
-            if constexpr (std::is_void_v<R>) {
+        static checked_result<script_value> call_with_reference_support(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+            if constexpr (detail::tuple_writeback_mask<ArgsTuple>::value != 0) {
+                auto arg_tuple = std::make_tuple(create_argument<std::tuple_element_t<Is, ArgsTuple>, Is>(args, eng)...);
+                return detail::invoke_with_writeback<R>(arg_tuple, eng, [&]() -> decltype(auto) { return std::apply(func, arg_tuple); });
+            } else if constexpr (std::is_void_v<R>) {
                 // Void function with reference support
                 call_with_reference_support_void<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
                 return script_value(std::monostate{}, eng); // Return null for void
@@ -770,7 +895,7 @@ class engine;
         template<typename ArgsTuple, typename F, size_t... Is>
         static void call_with_bound_maps_void(F&& func, const std::vector<script_value>& args, engine* eng) {
             // Create tuple of arguments, handling bound_map types specially
-            auto arg_tuple = std::make_tuple(create_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], eng)...);
+            auto arg_tuple = std::make_tuple(create_argument<std::tuple_element_t<Is, ArgsTuple>, Is>(args, eng)...);
             
             // Call function with unpacked arguments
             std::apply(std::forward<F>(func), arg_tuple);
@@ -831,25 +956,19 @@ class engine;
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
         static R call_with_bound_maps(F&& func, const std::vector<script_value>& args, engine* eng) {
             // Create tuple of arguments, handling bound_map types specially
-            auto arg_tuple = std::make_tuple(create_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], eng)...);
+            auto arg_tuple = std::make_tuple(create_argument<std::tuple_element_t<Is, ArgsTuple>, Is>(args, eng)...);
             
             // Call function with unpacked arguments
             return std::apply(std::forward<F>(func), arg_tuple);
         }
         
-        // Non-const T& argument carrier: either a live lvalue (cpp-bound write-through
-        // target) or a private copy for plain args - converts to T& at the apply site.
-        template<typename T>
-        struct ref_or_copy_argument {
-            T* live = nullptr;
-            T owned{};
-            operator T&() { return live ? *live : owned; }
-        };
-
         // Create individual arguments, handling bound_array and bound_map types specially
-        template<typename T>
-        static auto create_argument(const script_value& arg, engine* eng) {
-            if constexpr (is_bound_array_ref<T>::value) {
+        template<typename T, size_t I>
+        static auto create_argument(const std::vector<script_value>& args, engine* eng) {
+            const script_value& arg = args[I];
+            if constexpr (detail::host_writes_back<T>()) {
+                return detail::make_writeback_argument<std::remove_cvref_t<T>>(args, I, 0, eng);
+            } else if constexpr (is_bound_array_ref<T>::value) {
                 using V = typename is_bound_array_ref<T>::value_type;
                 
                 if (!arg.is_array()) {
@@ -880,11 +999,9 @@ class engine;
                 if constexpr (is_specialization_v<base_type, std::shared_ptr>) {
                     return actual_arg.as<base_type>();
                 }
-                // A math value has no host object to alias: the decoded host value (for T&, a private copy)
+                // A math value has no host object to alias: the decoded host value
                 else if constexpr (math_adapted<base_type>) {
-                    ref_or_copy_argument<base_type> holder;
-                    holder.owned = actual_arg.as<base_type>();
-                    return holder;
+                    return actual_arg.as<base_type>();
                 }
                 // For custom classes, get shared_ptr and return reference to the object
                 // Exclude string, script_value, bound_array, bound_map, and built-in container types which have special handling
@@ -901,18 +1018,6 @@ class engine;
                 } else if constexpr (std::is_same_v<base_type, script_value>) {
                     // For script_value references, return directly - no conversion needed
                     return actual_arg;
-                } else if constexpr (!std::is_const_v<std::remove_reference_t<T>> && std::is_lvalue_reference_v<T>) {
-                    // Survives make_tuple's decay so the callee sees a real lvalue. Bound targets
-                    // alias the LIVE C++ variable (S9/12.4 write-through); plain values get a
-                    // private copy - the 12.4 aliasing delta stays confined to cpp-bound args.
-                    ref_or_copy_argument<base_type> holder;
-                    script_value& target = const_cast<script_value&>(actual_arg);
-                    if (target.is_cpp_bound()) {
-                        holder.live = &target.as<T>();
-                    } else {
-                        holder.owned = target.as<T>();
-                    }
-                    return holder;
                 } else {
                     // For built-in types and special types, use the non-const as<T&>() method
                     return const_cast<script_value&>(actual_arg).as<T>();

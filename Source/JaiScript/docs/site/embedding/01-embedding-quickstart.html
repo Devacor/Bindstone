@@ -125,7 +125,16 @@ eng-&gt;execute(&quot;narrow += 7;&quot;);             // by NAME any width work
 <div class="codeblock cb-plain"><pre><code class="lang-plain">gold after as&lt;script_int&amp;&gt; += 5: 15
 int32 as&lt;script_int&amp;&gt;: cannot bind a non-const script reference to a C++-bound variable of a different width
 narrow after script += 7: 12</code></pre></div>
-<p>The same rules apply to <strong>non-const <code>T&amp;</code> parameters</strong> of <code>add_function</code> bindings: a bound argument of exactly-matching width aliases the live variable (the callee&#x27;s writes land in C++), while a <em>plain</em> script variable passed to the same <code>T&amp;</code> parameter keeps copy isolation. The callee gets a private copy and the caller never sees its writes. The aliasing delta is confined to cpp-bound arguments.</p>
+<p>The same rules apply to <strong>non-const <code>T&amp;</code> parameters</strong> of <code>add_function</code> bindings: a bound argument of exactly-matching width aliases the live variable (the callee&#x27;s writes land in C++). A <em>plain</em> script argument works as in C++: the callee gets a copy of the value the argument names, and when it returns (or throws) its final value is stored back into that argument with the store a script <code>=</code> makes, so the variable&#x27;s declared type converts or rejects it with the usual text.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function(&quot;heal&quot;, [](int64_t&amp; hp, int64_t amount) { hp = std::min&lt;int64_t&gt;(hp + amount, 100); });
+eng-&gt;add_function(&quot;tag&quot;, [](std::string&amp; name) { name += &quot; (healed)&quot;; });</code></pre></div>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hp = 40;
+heal(hp, 25);             // hp is 65
+var party = [10, 20];
+heal(party[1], 90);       // party[1] is 100
+tag(player.name);         // a field, a map value, a C++ property (through its setter), v.x of a vector
+heal(hp + 1, 5);          // a temporary: the callee works on a copy, nothing is stored back</code></pre></div>
+<p>Every value kind writes back the same way: integers, floats, <code>bool</code>, <code>std::string</code>, <code>std::vector</code>, <code>std::map</code>, <code>jai::script_value</code>, <code>std::shared_ptr&lt;T&gt;</code>, enums and the host types a math adapter binds. A registered class taken as <code>T&amp;</code> is the live object itself and needs no store. Any lvalue a script <code>T&amp;</code> parameter binds is written back (a variable, a field, an element, a map value, a static, a reference, a C++ property) and so is a math component (<code>v.x</code>); a literal or a temporary is passed as a copy and nothing is stored. A <code>const T&amp;</code> parameter is a read and costs nothing extra, and a binding with no non-const <code>T&amp;</code> parameter runs exactly as before: the choice is made when the function is bound.</p>
 <h2 id="running-a-script-file">Running a script file<a class="hlink" href="#running-a-script-file" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_include_path(&quot;scripts&quot;);           // where import/include look after the file&#x27;s own folder
 eng-&gt;execute_file(&quot;scripts/game.jai&quot;);      // parse (or load the .jaibite sibling), check, run</code></pre></div>

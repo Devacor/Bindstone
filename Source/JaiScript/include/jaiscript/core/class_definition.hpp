@@ -473,6 +473,68 @@ public:
     // identical reloads must keep field proofs armed)
     void set_auto_accessor_ids(std::unordered_set<uint64_t> ids) { auto_accessor_ids_ = std::move(ids); }
 
+    // A host method name's callable: the C++ overload the arguments select
+    struct cpp_method_dispatch {
+        class_definition* cls;
+        uint64_t name_id;
+        checked_result<script_value> operator()(const std::vector<script_value>& raw_args) const {
+            if (raw_args.empty() || raw_args[0].get_engine() == nullptr) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
+                                                    "Class definition no longer exists");
+            }
+            try {
+            // C++ boundary: escape-boxed locals arrive as CELL references (script
+            // parameter binding derefs them; the bound-method mint path does not) —
+            // normalize so overload scoring and converters see hoisted-temp values.
+            std::vector<script_value> scratch;
+            const std::vector<script_value>& args = detail::deref_builtin_args(raw_args, scratch);
+
+            size_t script_arg_count = args.size() - 1;
+
+            auto& overloads_for_name = cls->cpp_method_overloads_[name_id];
+            auto it = overloads_for_name.find(script_arg_count);
+            if (it == overloads_for_name.end() || it->second.empty()) {
+                return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
+                                             name_id, args.data() + 1, script_arg_count, args[0].get_engine());
+            }
+
+            auto& entries = it->second;
+            if (entries.size() == 1) {
+                return entries.front().func(args);
+            }
+
+            std::vector<std::vector<param_type_info>> sigs;
+            sigs.reserve(entries.size());
+            for (const auto& e : entries) {
+                sigs.push_back(e.param_types);
+            }
+            int best = args[0].get_engine()->select_cpp_overload(args, sigs);
+            if (best < 0) {
+                return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
+                                             name_id, args.data() + 1, script_arg_count, args[0].get_engine());
+            }
+            return entries[static_cast<size_t>(best)].func(args);
+            } catch (const std::exception& e) {
+                return host_exception_result(raw_args[0].get_engine(), e);
+            }
+        }
+        // how the overloads taking argc arguments bind argument i (detail::arg_binding bits: 4 = the lvalue, for a C++ T& the
+        // call writes back; 8 = the host's)
+        uint8_t argument_binding(size_t i, size_t argc) const {
+            uint8_t bits = 0;
+            auto name_it = cls->cpp_method_overloads_.find(name_id);
+            if (name_it == cls->cpp_method_overloads_.end()) { return 8; }
+            for (const auto& [arity, entries] : name_it->second) {
+                if (argc != SIZE_MAX && arity != argc) { continue; }
+                for (const auto& e : entries) {
+                    const auto* w = e.func.target<host_writeback_function>();
+                    bits |= w && i < 64 && ((w->mask >> i) & 1) ? 4 : 8;
+                }
+            }
+            return bits ? bits : 8;
+        }
+    };
+
     void add_method(const std::string& name, script_function func, size_t arity = SIZE_MAX) {
         add_method(name, std::move(func), arity, {});
     }
@@ -514,52 +576,7 @@ public:
             }
             method_arities_[name_id].push_back(arity);
 
-            class_definition* class_def_ptr = this;
-
-            methods_.insert_or_assign(name_id, script_value::make_function(
-                [class_def_ptr, name_id](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
-                    if (raw_args.empty() || raw_args[0].get_engine() == nullptr) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::class_not_found),
-                                                            "Class definition no longer exists");
-                    }
-                    try {
-                    // C++ boundary: escape-boxed locals arrive as CELL references (script
-                    // parameter binding derefs them; the bound-method mint path does not) —
-                    // normalize so overload scoring and converters see hoisted-temp values.
-                    std::vector<script_value> scratch;
-                    const std::vector<script_value>& args = detail::deref_builtin_args(raw_args, scratch);
-
-                    size_t script_arg_count = args.size() - 1;
-
-                    auto& overloads_for_name = class_def_ptr->cpp_method_overloads_[name_id];
-                    auto it = overloads_for_name.find(script_arg_count);
-                    if (it == overloads_for_name.end() || it->second.empty()) {
-                        return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
-                                                     name_id, args.data() + 1, script_arg_count, args[0].get_engine());
-                    }
-
-                    auto& entries = it->second;
-                    if (entries.size() == 1) {
-                        return entries.front().func(args);
-                    }
-
-                    std::vector<std::vector<param_type_info>> sigs;
-                    sigs.reserve(entries.size());
-                    for (const auto& e : entries) {
-                        sigs.push_back(e.param_types);
-                    }
-                    int best = args[0].get_engine()->select_cpp_overload(args, sigs);
-                    if (best < 0) {
-                        return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
-                                                     name_id, args.data() + 1, script_arg_count, args[0].get_engine());
-                    }
-                    return entries[static_cast<size_t>(best)].func(args);
-                    } catch (const std::exception& e) {
-                        return host_exception_result(raw_args[0].get_engine(), e);
-                    }
-                },
-                engine_
-            ));
+            methods_.insert_or_assign(name_id, script_value::make_function(cpp_method_dispatch{ this, name_id }, engine_));
         } else {
             methods_.insert_or_assign(name_id, script_value::make_function(
                 [func, eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
@@ -593,17 +610,18 @@ public:
     // C++-only registration door (dynamic_binder statics; script statics take
     // add_static_script_method) — args normalize like add_method's.
     void add_static_method(uint64_t name_id, script_function func, size_t arity = SIZE_MAX) {
-        static_methods_.insert_or_assign(name_id, script_value::make_function(
-            [func, eng = engine_](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
-                std::vector<script_value> scratch;
-                try {
-                    return func(detail::deref_builtin_args(raw_args, scratch));
-                } catch (const std::exception& e) {
-                    return host_exception_result(eng, e);
-                }
-            },
-            engine_
-        ));
+        const auto* writeback = func.target<host_writeback_function>();
+        const uint64_t writeback_mask = writeback ? writeback->mask : 0;
+        script_function call = [func, eng = engine_](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+            std::vector<script_value> scratch;
+            try {
+                return func(detail::deref_builtin_args(raw_args, scratch));
+            } catch (const std::exception& e) {
+                return host_exception_result(eng, e);
+            }
+        };
+        if (writeback_mask != 0) { call = host_writeback_function{ std::move(call), writeback_mask }; }
+        static_methods_.insert_or_assign(name_id, script_value::make_function(std::move(call), engine_));
 
         if (arity != SIZE_MAX) {
             static_method_arities_[name_id].push_back(arity);

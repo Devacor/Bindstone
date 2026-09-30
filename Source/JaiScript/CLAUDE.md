@@ -185,7 +185,10 @@ dynamic_binder<MyClass>(engine, "MyClass")
     .base_class<BaseClass>()      // enables inheritance + automatic upcast on shared_ptr<Base>
     .build();
 ```
-Zero-copy const& bindings, operator overloading, ctor overloading. A method returning `T&`
+Zero-copy const& bindings, operator overloading, ctor overloading. A non-const `T&` parameter of a value kind
+(`add_function`, method, static method, constructor; Dev ruling 2026-09-30) writes the callee's final value back into
+the script lvalue argument through the store `=` makes, a literal or temporary staying a copy (decided at bind time,
+`detail::host_writes_back`; backends resolve the lvalue through `execution_backend::host_reference_argument`). A method returning `T&`
 into its receiver (the chaining idiom) is kept alive across temporaries via the
 `object_holder::keep_alive` anchor — don't remove it. A getter-only `.property()` (`nullptr`
 setter, or a member whose type is not copy-assignable) registers a REJECTING setter: every

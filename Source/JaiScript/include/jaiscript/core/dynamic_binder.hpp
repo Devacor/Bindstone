@@ -504,7 +504,7 @@ public:
                 return dynamic_binder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, eng);
             };
 
-            engine_.add_overloaded_function_with_full_types(class_name_, sizeof...(Args), [class_def = class_def_, class_name = class_name_, engine_ptr, helper](const std::vector<script_value>& args) -> script_value {
+            engine_.add_overloaded_function_with_full_types(class_name_, sizeof...(Args), writeback_tagged<detail::host_writeback_mask<Args...>()>([class_def = class_def_, class_name = class_name_, engine_ptr, helper](const std::vector<script_value>& args) -> script_value {
                 try {
                     // Extract arguments using index-based unpacking via helper
                     auto cpp_obj = helper(args, engine_ptr);
@@ -520,7 +520,7 @@ public:
                 } catch (const std::exception&) {
                     throw;
                 }
-            },
+            }),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... });
         }
 
@@ -660,7 +660,8 @@ public:
     // Add method binding - member function pointer version
     template<typename R, typename... Args, typename Requirements = privilege>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...), Requirements required = privilege::none) {
-        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
+        constexpr uint64_t writeback = detail::host_writeback_mask<Args...>();
+        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
             }
@@ -684,7 +685,7 @@ public:
         // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
         // by argument type instead of the last registration silently winning.
         const bool unguarded = lane_unguarded(required);
-        class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
+        class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), sizeof...(Args),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
         using Method = R(T::*)(Args...);
         if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
@@ -701,7 +702,8 @@ public:
     // Add const method binding
     template<typename R, typename... Args, typename Requirements = privilege>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...) const, Requirements required = privilege::none) {
-        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
+        constexpr uint64_t writeback = detail::host_writeback_mask<Args...>();
+        auto method_func = [method, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
             if (args.empty()) {
                 throw runtime_error("Method called without 'this' object");
             }
@@ -724,7 +726,7 @@ public:
         // Add method to the class definition with its C++ parameter signature (see non-const
         // overload) so same-arity const overloads resolve by argument type.
         const bool unguarded = lane_unguarded(required);
-        class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
+        class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), sizeof...(Args),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
         using Method = R(T::*)(Args...) const;
         if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
@@ -766,7 +768,8 @@ public:
             }
         }
 
-        auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
+        constexpr uint64_t writeback = detail::tuple_writeback_mask<args_tuple, has_self_param ? 1 : 0>::value;
+        auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
             if (has_self_param) {
                 // Lambda expects T& as first parameter, we need to extract it from args[0]
                 // args[0] is the class_instance, remaining args are the actual parameters
@@ -808,7 +811,7 @@ public:
         // argument type. Arity from script perspective excludes self.
         constexpr size_t script_arity = has_self_param ? traits::arity - 1 : traits::arity;
         constexpr size_t self_offset = has_self_param ? 1 : 0;
-        class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), script_arity,
+        class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), script_arity,
             param_sig_from_tuple<args_tuple, self_offset, script_arity>(), result_info<typename traits::return_type>());
         if constexpr (has_self_param) {
             if (lane) {
@@ -828,11 +831,15 @@ public:
     // Add static method binding - for regular function pointers
     template<typename R, typename... Args>
     dynamic_binder& static_method(const std::string& name, R(*func)(Args...)) {
-        auto static_method_func = [func, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        constexpr uint64_t writeback = detail::host_writeback_mask<Args...>();
+        auto static_method_func = [func, engine_ptr = &engine_](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
             // Validate argument count (no 'this' for static methods)
             if (args.size() != sizeof...(Args)) {
                 throw runtime_error("Static method expects " + std::to_string(sizeof...(Args)) + 
                                  " arguments, got " + std::to_string(args.size()));
+            }
+            if constexpr (writeback != 0) {
+                return callWithWriteback<R, std::tuple<Args...>, 0, 0>(func, args, std::index_sequence_for<Args...>{}, engine_ptr);
             }
             
             // Call the static function directly
@@ -854,7 +861,7 @@ public:
         };
         
         // Add static method to the class definition with arity
-        class_def_->add_static_method(name, static_method_func, sizeof...(Args));
+        class_def_->add_static_method(name, writeback_tagged<writeback>(script_function(static_method_func)), sizeof...(Args));
 
         return *this;
     }
@@ -868,11 +875,15 @@ public:
 
         using traits = detail::function_traits<std::decay_t<Callable>>;
         
-        auto static_method_func = [callable = std::forward<Callable>(callable), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value;
+        auto static_method_func = [callable = std::forward<Callable>(callable), engine_ptr = &engine_](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
             // Validate argument count
             if (args.size() != traits::arity) {
                 throw runtime_error("Static method expects " + std::to_string(traits::arity) + 
                                  " arguments, got " + std::to_string(args.size()));
+            }
+            if constexpr (writeback != 0) {
+                return callWithWriteback<typename traits::return_type, typename traits::argument_types, 0, 0>(callable, args, std::make_index_sequence<traits::arity>{}, engine_ptr);
             }
             
             // Call the callable directly (no 'this' parameter)
@@ -895,7 +906,7 @@ public:
         };
 
         // Add static method to the class definition with arity
-        class_def_->add_static_method(name, static_method_func, traits::arity);
+        class_def_->add_static_method(name, writeback_tagged<writeback>(script_function(static_method_func)), traits::arity);
 
         return *this;
     }
@@ -1937,6 +1948,46 @@ private:
         }
     }
     
+    // A host callable with non-const T& parameters carries its mask for the argument capture (host_writeback_function)
+    template<uint64_t Mask>
+    static script_function writeback_tagged(script_function fn) {
+        if constexpr (Mask != 0) { return host_writeback_function{ std::move(fn), Mask }; }
+        else { return fn; }
+    }
+
+    // One argument's carrier: a T& that writes back holds its private copy and the lvalue it stores to, every other
+    // parameter what value_converter hands the call
+    template<typename P>
+    using carrier_t = std::conditional_t<detail::host_writes_back<P>(), detail::writeback_argument<std::remove_cvref_t<P>>,
+                                         std::conditional_t<std::is_lvalue_reference_v<P>, P, std::remove_cvref_t<P>>>;
+    template<typename P, size_t I, size_t Offset>
+    static carrier_t<P> make_carrier(const std::vector<script_value>& args, engine* eng) {
+        if constexpr (detail::host_writes_back<P>()) { return detail::make_writeback_argument<std::remove_cvref_t<P>>(args, I, Offset, eng); }
+        else { return detail::value_converter<P>::from(args[I + Offset], eng); }
+    }
+    template<typename P, typename C>
+    static decltype(auto) pass_carrier(C& c) {
+        if constexpr (detail::host_writes_back<P>()) { return static_cast<std::remove_cvref_t<P>&>(c); }
+        else if constexpr (std::is_lvalue_reference_v<P>) { return static_cast<P>(c); }
+        else { return std::move(c); }
+    }
+    // Skip = leading tuple elements that are no script argument (a method lambda's self); Offset = leading args entries
+    // that are no script argument (the receiver)
+    template<typename ArgsTuple, size_t Skip, size_t Offset, size_t... Is>
+    static auto make_carriers(const std::vector<script_value>& args, engine* eng, std::index_sequence<Is...>) {
+        return std::tuple<carrier_t<std::tuple_element_t<Is + Skip, ArgsTuple>>...>{
+            make_carrier<std::tuple_element_t<Is + Skip, ArgsTuple>, Is, Offset>(args, eng)... };
+    }
+    template<typename R, typename ArgsTuple, size_t Skip, size_t Offset, typename Invoke, size_t... Is>
+    static checked_result<script_value> callWithWriteback(Invoke&& invoke, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+        detail::parameter_storage storage;
+        detail::parameter_storage::scope_guard guard(eng, &storage);
+        auto carriers = make_carriers<ArgsTuple, Skip, Offset>(args, eng, std::index_sequence<Is...>{});
+        return detail::invoke_with_writeback<R>(carriers, eng, [&]() -> decltype(auto) {
+            return invoke(pass_carrier<std::tuple_element_t<Is + Skip, ArgsTuple>>(std::get<Is>(carriers))...);
+        });
+    }
+
     // Helper method for creating objects with arguments
     template<typename... Args, size_t... Is>
     static std::shared_ptr<T> createObjectImpl(const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
@@ -1944,17 +1995,28 @@ private:
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
-        return std::make_shared<T>(detail::value_converter<Args>::from(args[Is], eng)...);
+        if constexpr (detail::host_writeback_mask<Args...>() != 0) {
+            std::shared_ptr<T> made;
+            auto result = callWithWriteback<void, std::tuple<Args...>, 0, 0>([&made](auto&&... a) { made = std::make_shared<T>(std::forward<decltype(a)>(a)...); },
+                                                                         args, std::index_sequence<Is...>{}, eng);
+            if (!result) { throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2())); }
+            return made;
+        } else {
+            return std::make_shared<T>(detail::value_converter<Args>::from(args[Is], eng)...);
+        }
     }
-    
+
     // Helper method for calling member functions
     template<typename R, typename... Args, size_t... Is>
-    static script_value callMethodImpl(T* obj, R(T::*method)(Args...), const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto callMethodImpl(T* obj, R(T::*method)(Args...), const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
-        if constexpr (std::is_void_v<R>) {
+        if constexpr (detail::host_writeback_mask<Args...>() != 0) {
+            return callWithWriteback<R, std::tuple<Args...>, 0, 1>([obj, method](auto&&... a) -> decltype(auto) { return (obj->*method)(std::forward<decltype(a)>(a)...); },
+                                                               args, std::index_sequence<Is...>{}, eng);
+        } else if constexpr (std::is_void_v<R>) {
             (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
             return script_value(std::monostate{}, eng); // null for void
         } else {
@@ -1965,12 +2027,15 @@ private:
     
     // Helper method for calling const member functions
     template<typename R, typename... Args, size_t... Is>
-    static script_value callConstMethodImpl(const T* obj, R(T::*method)(Args...) const, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto callConstMethodImpl(const T* obj, R(T::*method)(Args...) const, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
-        if constexpr (std::is_void_v<R>) {
+        if constexpr (detail::host_writeback_mask<Args...>() != 0) {
+            return callWithWriteback<R, std::tuple<Args...>, 0, 1>([obj, method](auto&&... a) -> decltype(auto) { return (obj->*method)(std::forward<decltype(a)>(a)...); },
+                                                               args, std::index_sequence<Is...>{}, eng);
+        } else if constexpr (std::is_void_v<R>) {
             (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
             return script_value(std::monostate{}, eng); // null for void
         } else {
@@ -2006,12 +2071,14 @@ private:
     
     // Helper method for calling lambdas/callables
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static script_value callCallableImpl(Callable&& callable, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto callCallableImpl(Callable&& callable, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
-        if constexpr (std::is_void_v<R>) {
+        if constexpr (detail::tuple_writeback_mask<ArgsTuple>::value != 0) {
+            return callWithWriteback<R, ArgsTuple, 0, 0>(callable, args, std::index_sequence<Is...>{}, eng);
+        } else if constexpr (std::is_void_v<R>) {
             callable(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
             return script_value(std::monostate{}, eng); // null for void
         } else {
@@ -2022,7 +2089,7 @@ private:
     
     // Helper method for calling lambdas with self parameter
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static script_value callLambdaWithSelf(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto callLambdaWithSelf(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // We need to call the lambda with:
         // - self as the first argument
         // - remaining args starting from args[1] mapped to tuple indices 1, 2, 3...
@@ -2034,12 +2101,21 @@ private:
     
     // implementation helper that correctly maps arguments
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static script_value callLambdaWithSelfImpl(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto callLambdaWithSelfImpl(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
-        if constexpr (std::is_void_v<R>) {
+        if constexpr (detail::tuple_writeback_mask<ArgsTuple, 1>::value != 0) {
+            auto invoke = [&callable, self](auto&&... a) -> decltype(auto) { return callable(*self, std::forward<decltype(a)>(a)...); };
+            if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
+                auto result = callWithWriteback<void, ArgsTuple, 1, 1>([&invoke](auto&&... a) { invoke(std::forward<decltype(a)>(a)...); },
+                                                                   args, std::index_sequence<Is...>{}, eng);
+                return result ? checked_result<script_value>(args[0]) : result;
+            } else {
+                return callWithWriteback<R, ArgsTuple, 1, 1>(invoke, args, std::index_sequence<Is...>{}, eng);
+            }
+        } else if constexpr (std::is_void_v<R>) {
             // Call with self as first argument, then args[1], args[2], etc.
             callable(*self, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is + 1], eng)...);
             return script_value(std::monostate{}, eng); // null for void

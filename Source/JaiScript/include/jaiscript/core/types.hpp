@@ -220,7 +220,15 @@ namespace jai {
     // Function type for script functions
     // Returns checked_result to allow proper error propagation without exceptions
     using script_function = std::function<checked_result<script_value>(const std::vector<script_value>&)>;
-    
+
+    // A host callable with non-const T& parameters (bit i = script argument i): the argument capture binds those
+    // positions as lvalues, as it does a script function's T& parameters (detail/arg_capture.hpp)
+    struct host_writeback_function {
+        script_function fn;
+        uint64_t mask = 0;
+        checked_result<script_value> operator()(const std::vector<script_value>& args) const;   // core/value.hpp
+    };
+
     // For serializable functions, we need to track additional info
     struct function_info {
         std::string name;           // Function name (for debugging)

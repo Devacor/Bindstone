@@ -1,7 +1,10 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <filesystem>
+#include <fstream>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -13,6 +16,60 @@ public:
     namespace_tests() : suite("Namespace Tests") {}
 
     void forge_tests() override {
+        // using ns::name; (a comma list): the rest of the unit's text reads the name as its qualified spelling (Dev ruling
+        // 2026-09-30: parse time, file-local, not transitive, any namespace; the name cannot be declared again)
+        test("using_declarations", [&]() {
+            const std::string utils = "namespace utils { auto add(a, b) { return a + b; } int LIMIT = 7; }\n";
+            for (bool use_vm : {false, true}) {
+                auto run = [&](const std::string& src) -> std::string {
+                    auto eng = make_engine();
+                    if (use_vm) { eng->set_backend(backend_type::vm); }
+                    stdlib::register_all(eng);
+                    try { return eng->execute(src).to_string(); } catch (const std::exception& e) { return std::string("ERROR: ") + e.what(); }
+                };
+                const char* be = use_vm ? " (vm)" : " (interpreter)";
+                check_eq(std::string("8"), run(utils + "using utils::add, utils::LIMIT; add(LIMIT, 1)"), std::string("a function and a variable") + be);
+                check_eq(std::string("14.0math::vec3"), run("using math::vec3, math::dot; vec3 a = vec3(1, 2, 3); to_string(dot(a, a)) + type_of(a)"), std::string("math types") + be);
+                check_eq(std::string("4.0"), run("using math::vec2; function f(vec2 p) -> vec2 { return p * 2; } to_string(f(vec2(1, 2)).y)"), std::string("types in signatures") + be);
+                check_eq(std::string("7"), run(utils + "class C { int add = 5; } using utils::add; var c = C(); c.add + add(1, 1)"), std::string("a member name after '.' stays") + be);
+                check_eq(std::string("x7"), run(utils + "using utils::LIMIT; `x${LIMIT}`"), std::string("a template string's splice") + be);
+                check_eq(std::string("3"), run(utils + "function g() -> int { using utils::add; return add(1, 2); } g()"), std::string("inside a function") + be);
+                check(run(utils + "using utils::add; int add = 3;").find("by a using declaration") != std::string::npos, std::string("the name cannot be declared again") + be);
+                check(run(utils + "using utils::add; function add() {}").find("by a using declaration") != std::string::npos, std::string("nor as a function") + be);
+                check(run("using vec3;").find("names no namespace") != std::string::npos, std::string("a using declaration takes a qualified name") + be);
+                check(run(utils + "using utils::add; using utils::add;").find("already named by a using declaration") != std::string::npos, std::string("one name, one using") + be);
+                // file-local: a later string of the same engine does not see it
+                auto eng = make_engine();
+                if (use_vm) { eng->set_backend(backend_type::vm); }
+                eng->execute(utils + "using utils::add; var first = add(1, 1);");
+                bool leaked = true;
+                try { eng->execute("add(1, 1)"); } catch (const std::exception&) { leaked = false; }
+                check(!leaked, std::string("not transitive across units") + be);
+                // an included file neither inherits the includer's using nor passes its own on
+                const auto dir = jai::foundry::test_temp_directory();
+                { std::ofstream(dir / "using_inc_a.jai") << "var from_a = add(2, 3);\n"; }
+                { std::ofstream(dir / "using_inc_b.jai") << "using utils::LIMIT;\nvar from_b = LIMIT;\n"; }
+                auto inc = make_engine();
+                if (use_vm) { inc->set_backend(backend_type::vm); }
+                inc->add_include_path(dir.string());
+                bool inherited = true;
+                try { inc->execute(utils + "using utils::add; include \"using_inc_a.jai\";"); } catch (const std::exception&) { inherited = false; }
+                check(!inherited, std::string("an included file does not inherit the includer's using") + be);
+                auto inc2 = make_engine();
+                if (use_vm) { inc2->set_backend(backend_type::vm); }
+                inc2->add_include_path(dir.string());
+                check_eq((int64_t)7, inc2->execute(utils + "include \"using_inc_b.jai\"; from_b").as_int(), std::string("the included file's own using applies to its text") + be);
+                auto inc3 = make_engine();
+                if (use_vm) { inc3->set_backend(backend_type::vm); }
+                inc3->add_include_path(dir.string());
+                bool passed_on = true;
+                try { inc3->execute(utils + "include \"using_inc_b.jai\"; LIMIT"); } catch (const std::exception&) { passed_on = false; }
+                check(!passed_on, std::string("and does not reach the includer") + be);
+                std::filesystem::remove(dir / "using_inc_a.jai");
+                std::filesystem::remove(dir / "using_inc_b.jai");
+            }
+        });
+
         test("namespace_basic_function", [&]() {
             auto eng = make_engine();
             auto result = eng->execute(R"(

@@ -63,6 +63,7 @@ namespace jai {
         std::string_view lexeme;  // Points to symbolizer storage (permanent) or static strings
         uint64_t symbol_id = 0;   // Pre-interned symbol ID for identifiers (0 = not interned)
         source_location location;
+        std::string_view using_name;   // the first token of a name a using declaration rewrote: the name as written (declaration sites reject it)
 
         union {
             script_int int_value;

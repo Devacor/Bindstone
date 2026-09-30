@@ -9,7 +9,7 @@ measured baseline, the representation, the semantics, the API, the binding layer
 migration and the plan with its gates. The measurements come from throwaway harnesses described in "Measurements".
 
 Items needing a ruling are marked **[Dev]** and collected in the last section. Dev accepted the first fourteen
-recommendations of section 13 on 2026-09-27; the **[Dev]** marks record where each ruling applies, and item 15 is open.
+recommendations of section 13 on 2026-09-27 and ruled item 15 on 2026-09-30; the **[Dev]** marks record where each ruling applies.
 
 ## 1. Decisions already made (Dev, 2026-09-27 and 2026-09-28)
 
@@ -298,8 +298,26 @@ rewrites.
   the proof pass and both backends the lowered one. The debugger's locals view folds `p$x`, `p$y`, `p$z` back into `p`
   and drops the rewrite's temporaries. Error texts never name a component slot: every lowered store is of the slot's
   own type, and the fallback stores name the source local.
-- **Later.** Class fields (`pos$x` ... with flat storage, instance migration by name), multi-cell returns at grafted
-  calls, and component parameters on raw typed frames.
+- **Later.** Class fields (4.3.1), multi-cell returns at grafted calls, and component parameters on raw typed frames.
+
+#### 4.3.1 Fields
+
+A vector field is one cell of the instance's flat field storage holding the boxed node. Whole-value operations on it cost
+about what a float field's do; a component store on it (`pos.x += v`) resolves the field and writes the node in place,
+which requires that no evaluated copy of the base still shares the node (the component store releases its evaluated base
+before it writes; otherwise every store would copy the node).
+
+Scalar replacement of a field changes what the instance holds, and every observer of an instance's fields reads that:
+the text of an instance, `to_json`/`from_json`, the binary archive, `reflect::` (field lists, reads and writes by name),
+structural `==` and copies, hot-reload migration, the debugger's instance view, host field access
+(`class_instance::get_field`, `script_extensible`), `extend`, the parallel element proofs, the member ICs and field proofs.
+The design that keeps them all correct is a split between logical and physical fields: the class definition records a
+vector field as one logical field over consecutive physical slots (`pos$x`, `pos$y`, `pos$z`, typed float or int),
+and the observers above go through one accessor that reads and writes the logical field (building or unpacking the
+vector), while the lowering's field reads and stores address the physical slots directly and the VM's typed rows and cells
+run them like locals. Migration maps physical slots by name, so a kind change of the field resets it like any field
+whose type changed. The work is the accessor's single entry for every observer, then the lowering of `this.pos` and
+`obj.pos` accesses behind the existing field proofs.
 ### 4.4 Typed vector buffers
 
 `array<math::vec3>` and the other vector kinds are typed buffers with a stride equal to the component count (5.6):
@@ -812,15 +830,9 @@ instructions are an optional last step (section 12) held to the 1.5% bar.
     `script_namespace.hpp`, but these names are reserved.
   - Kinds are reachable only qualified. **[Dev]** `vec3` bare, or a `using` spelling. The recommendation is qualified
     only, since bare `color` would collide with MV's `color()` methods and ordinary variable names.
-  - The language has no `using` form. The smallest C++-like one, proposed and not built (**[Dev]**, decision 15): a
-    using-declaration, `using math::vec3;` (several names: `using math::vec3, math::dot;`), at program, namespace or block
-    scope, lexically scoped like a declaration. The parser records the alias in its scope; inside it the bare name is
-    the qualified one in every position (a type in declarations, parameters, returns, `array<vec3>` and `cast<vec3>`, the
-    constructor or function in expression position), and declaring a variable, function or class of that name in the
-    same scope is a parse error, so the alias never silently changes meaning. The rewrite happens at parse time, so the
-    checker, both backends and the lowering see only qualified names and nothing else changes; the `.jaibite` version
-    bumps. `using namespace math;` is left out: it would make every `math::` function name (`length`, `dot`, `min`) a
-    bare name and collide with ordinary locals.
+  - `using math::vec3;` (several names: `using math::vec3, math::dot;`) makes the bare name the qualified one for the
+    rest of the unit's text, rewritten at parse time (Dev ruling 2026-09-30; `docs/namespaces.md` \"Using declarations\"):
+    file-local and not transitive, any namespace, the name cannot be declared again, and `using namespace` does not exist.
 - **ctype.**
   - One new kind `math_k`, with a sub-kind naming the math type.
   - Tables per sub-kind feed diagnostics and completion:
@@ -996,6 +1008,5 @@ whole-program regression.
 14. **Floating-point contraction** (3.2): pin `-ffp-contract=off` for Clang/GCC builds (including Xcode for iOS). The
     vector kernels need it, and today's double kernels have the same exposure. The finding comes from compiler
     defaults, not a measured divergence.
-15. **A `using` declaration** (10; open): `using math::vec3;` at program, namespace or block scope, rewritten at parse
-    time (recommended as the smallest C++-like form), or qualified names only as decided in 10. `using namespace math;`
-    is not recommended.
+15. **A `using` declaration** (10; ruled 2026-09-30): `using ns::name;` rewritten at parse time, file-local, not
+    transitive, for any namespace; no `using namespace`.

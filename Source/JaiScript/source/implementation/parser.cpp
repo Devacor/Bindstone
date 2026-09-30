@@ -817,8 +817,95 @@ type_info_ptr parser::store_type_info(type_info&& info) {
     return engine_->get_type_info(info);
 }
 
+bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<token>& out) {
+    bool any = false;
+    for (const token& t : in) { if (t.type == token_type::identifier && t.lexeme == "using") { any = true; break; } }
+    if (!any) return false;
+    struct alias { std::string_view name; std::vector<token> target; };
+    std::vector<alias> aliases;
+    out.clear();
+    out.reserve(in.size());
+    const size_t n = in.size();
+    auto statement_start = [&]() {
+        if (out.empty()) return true;
+        const token_type k = out.back().type;
+        return k == token_type::semicolon || k == token_type::left_brace || k == token_type::right_brace;
+    };
+    for (size_t i = 0; i < n; ++i) {
+        const token& t = in[i];
+        if (t.type == token_type::identifier && t.lexeme == "using" && statement_start() && i + 1 < n && in[i + 1].type == token_type::identifier) {
+            std::vector<alias> items;
+            size_t j = i + 1;
+            bool ok = true;
+            while (true) {
+                if (j >= n || in[j].type != token_type::identifier) { report_error("Expected a qualified name after 'using' (using ns::name;)", j < n ? in[j] : t); ok = false; break; }
+                const size_t start = j++;
+                while (j + 1 < n && in[j].type == token_type::colon_colon && in[j + 1].type == token_type::identifier) { j += 2; }
+                std::vector<token> target(in.begin() + static_cast<std::ptrdiff_t>(start), in.begin() + static_cast<std::ptrdiff_t>(j));
+                const std::string_view last = target.back().lexeme;
+                const size_t cut = last.rfind("::");
+                if (target.size() == 1 && cut == std::string_view::npos) {
+                    report_error("'using" + std::string(" ") + std::string(last) + "' names no namespace: a using declaration takes a qualified name (using ns::name;)", in[start]);
+                    ok = false;
+                    break;
+                }
+                items.push_back({cut == std::string_view::npos ? last : last.substr(cut + 2), std::move(target)});
+                if (j < n && in[j].type == token_type::comma) { ++j; continue; }
+                break;
+            }
+            if (ok && (j >= n || in[j].type != token_type::semicolon)) { report_error("Expected ';' after the using declaration", j < n ? in[j] : t); ok = false; }
+            if (ok) {
+                for (auto& a : items) {
+                    const bool taken = std::any_of(aliases.begin(), aliases.end(), [&](const alias& x) { return x.name == a.name; });
+                    if (taken) { report_error("'" + std::string(a.name) + "' is already named by a using declaration", a.target.back()); continue; }
+                    aliases.push_back(std::move(a));
+                }
+            }
+            while (j < n && in[j].type != token_type::semicolon && in[j].type != token_type::eof) { ++j; }
+            i = j < n && in[j].type == token_type::semicolon ? j : j - 1;
+            continue;
+        }
+        if (t.type == token_type::identifier && !aliases.empty()) {
+            const token_type before = out.empty() ? token_type::eof : out.back().type;
+            // after '.', '?.' or '::' a name is a member; after '->' it is a member unless a body or a reference follows (a return type)
+            const token_type after = i + 1 < n ? in[i + 1].type : token_type::eof;
+            const bool return_type = before == token_type::arrow && (after == token_type::left_brace || after == token_type::ampersand || after == token_type::semicolon);
+            if (before != token_type::dot && (before != token_type::arrow || return_type) && before != token_type::colon_colon && before != token_type::question_dot) {
+                auto a = std::find_if(aliases.begin(), aliases.end(), [&](const alias& x) { return x.name == t.lexeme; });
+                if (a != aliases.end()) {
+                    for (size_t k = 0; k < a->target.size(); ++k) {
+                        token copy = a->target[k];
+                        copy.location = t.location;
+                        if (k == 0) { copy.using_name = a->name; }
+                        out.push_back(std::move(copy));
+                    }
+                    continue;
+                }
+            }
+        }
+        out.push_back(t);
+    }
+    return true;
+}
+
+// A declaration's name: never a using name (the name stands for its qualified spelling) nor a qualified spelling
+bool parser::reject_using_name(const token& t, const char* what) {
+    if (t.type != token_type::identifier) return false;
+    if (!t.using_name.empty()) {
+        report_error("'" + std::string(t.using_name) + "' names " + std::string(t.lexeme) + (t.lexeme.find("::") == std::string_view::npos ? "::..." : "") +
+                     " by a using declaration; a " + std::string(what) + " cannot be declared with that name", t);
+        return true;
+    }
+    if (t.lexeme.find("::") != std::string_view::npos) {
+        report_error("'" + std::string(t.lexeme) + "' is a qualified name; a " + std::string(what) + " cannot be declared with it", t);
+        return true;
+    }
+    return false;
+}
+
 checked_result<std::vector<declaration_ptr>> parser::parse() {
     std::vector<declaration_ptr> declarations;
+    if (apply_using_declarations(*stream_, using_stream_)) { stream_ = &using_stream_; }
 
     while (!is_at_end()) {
         const size_t errors_before = errors_.size();
@@ -991,6 +1078,9 @@ void parser::report_expected_name(const std::string& expected_message, const cha
 }
 
 checked_result<token> parser::consume_name(const std::string& expected_message, const char* what) {
+    if (check(token_type::identifier) && reject_using_name(peek(), what)) {
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     if (!check(token_type::identifier) && is_type_keyword_token(peek().type)) {
         return consume(token_type::identifier, type_keyword_name_message(peek().lexeme, what));
     }
@@ -2422,6 +2512,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     // Check for enum keyword
     if (match(token_type::enum_keyword)) {
+        if (check(token_type::identifier) && reject_using_name(peek(), "enum")) { return make_error_code(parse_error_code::unexpected_token); }
         JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected enum name"));
         auto [name_id, name_view] = symbolizer_->intern_with_view(name_tok.lexeme);
         JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' after enum name"));
@@ -3066,7 +3157,9 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     if (!file) return false;
     std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     lexer lex(content, symbolizer_, registered_template_types_, resolved.value());
-    const std::vector<token> tokens = lex.tokenize();
+    const std::vector<token> lexed = lex.tokenize();
+    std::vector<token> used;   // the included file's own using declarations apply to its own text only
+    const std::vector<token>& tokens = apply_using_declarations(lexed, used) ? used : lexed;
     const std::vector<token>* saved_stream = stream_;
     const size_t saved_current = current_;
     const std::optional<token> saved_pushed_back = pushed_back_token_;
@@ -3433,6 +3526,7 @@ checked_result<statement_ptr> parser::try_statement() {
 
 // declaration parsing implementations
 checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
+    if (check(token_type::identifier) && reject_using_name(peek(), "class")) { return make_error_code(parse_error_code::unexpected_token); }
     JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "Expected class name"));
 
     std::vector<std::string_view> base_classes;
@@ -3812,6 +3906,10 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             }
             type_info_ptr type = std::move(type_result.value());
 
+            if (check(token_type::identifier) && reject_using_name(peek(), "member")) {
+                synchronize_class_member(class_open_index);
+                continue;
+            }
             if (check(token_type::identifier)) {
                 token name = advance();
                 std::string method_name(name.lexeme);
@@ -4460,6 +4558,7 @@ checked_result<declaration_ptr> parser::function_declaration() {
     JAISCRIPT_TRY_ASSIGN(type_info_ptr return_type, parse_type());
     return_type = wrap_reference_return_type(return_type);
 
+    if (check(token_type::identifier) && reject_using_name(peek(), "function")) { return make_error_code(parse_error_code::unexpected_token); }
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected function name"));
     auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
     return parse_function_body(name_view, name_id, return_type);

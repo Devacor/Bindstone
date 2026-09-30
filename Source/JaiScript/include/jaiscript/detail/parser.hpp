@@ -36,6 +36,11 @@ namespace jai {
     private:
         std::vector<declaration_ptr> recovered_;
         const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
+        std::vector<token> using_stream_;    // the program's stream after its using declarations rewrote it
+        // `using ns::name;` (a comma list) at a statement's start: the rest of THIS token stream reads each name as its qualified
+        // spelling (Dev ruling 2026-09-30: file-local, not transitive, any namespace); false when the stream names no using
+        bool apply_using_declarations(const std::vector<token>& in, std::vector<token>& out);
+        bool reject_using_name(const token& t, const char* what);
         std::string filename_;
         size_t current_ = 0;
         std::vector<std::string> errors_;

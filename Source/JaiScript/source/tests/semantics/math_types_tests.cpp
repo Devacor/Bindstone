@@ -5,6 +5,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/math/types.hpp>
 #include <jaiscript/detail/aggregate_lowering.hpp>
+#include <jaiscript/detail/math_intrinsics.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -310,6 +311,10 @@ public:
                   "float d = math::dot(p, n) + p.length() + p.length_squared() + p.distance_to(n) + math::distance_squared(p, c); return to_string(n) + to_string(z) + to_string(c) + to_string(d) + to_string(p.cross(n)); } f()", "the geometry rows");
             agree("function f() -> string { math::ivec3 a = math::ivec3(2, 3, 4); math::ivec3 b = math::ivec3(-1, 5, 2); math::ivec2 h = math::ivec2(3, -7); var d = math::dot(a, b); var c = math::cross(a, b); "
                   "var p = math::perpendicular(h); var l = a.length_squared(); var s = math::distance_squared(a, b); return to_string(d) + type_of(d) + to_string(c) + to_string(p) + to_string(l) + to_string(s) + to_string(math::cross(h, math::ivec2(1, 1))); } f()", "exact ivec geometry");
+            agree("function f() -> string { math::vec3 v = math::vec3(1, -2, 0.5); math::vec3 n = math::vec3(0, 1, 0); math::vec3 axis = math::vec3(1, 1, 0.25); math::vec2 p = math::vec2(3, -1); math::ivec3 iv = math::ivec3(4, -5, 6); float t = 0.7; "
+                  "math::vec3 r = math::reflect(v, n); math::vec3 j = math::project(v, axis); math::vec3 z = math::project(v, math::vec3()); math::vec2 q = math::rotate(p, t); math::vec2 q2 = p.rotated(2); "
+                  "math::vec3 w = math::rotate(v, axis, t); math::vec3 w2 = v.rotated(math::vec3(), t); math::vec3 w3 = math::rotate(iv, axis, 1.25); float a = math::angle_between(v, axis) + math::angle_between(v, math::vec3()) + math::angle_between(iv, v); "
+                  "return to_string(r) + to_string(j) + to_string(z) + to_string(q) + to_string(q2) + to_string(w) + to_string(w2) + to_string(w3) + to_string(a) + to_string(math::reflect(iv, n)); } f()", "reflect, project, rotate and angle_between");
             agree("function f() -> string { math::ivec3 big = math::ivec3(2000000000, 2000000000, 2000000000); math::vec3 n = big.normalized(); return to_string(big.length()) + to_string(n) + to_string(math::distance(big, -big)); } f()", "ivec components widen where the kernel reads doubles");
             agree("function f() -> string { math::color c = math::color(0.25, 0.5, 0.75, 0.5); c.g = 0.125; c.a *= 2; math::color m = math::mix(c, math::color(1, 0, 0), 0.5); math::color k = math::clamp(c * 3, 0.0, 1.0); "
                   "math::color r = math::mix_rgb(c, m, 0.5); return to_string(c) + to_string(m) + to_string(k) + to_string(r) + to_string(c == m); } f()", "colors lowered, OKLab boxed");
@@ -350,6 +355,12 @@ public:
             for (const auto& [name, value] : locals) { shown += name + "=" + value.to_string() + " "; }
             check_eq(std::string("p=(1.0, 2.5, 3.0) n=4 c=(7, -1) "), shown, "lowered locals fold for the debugger");
             check(listings.find("T_ADD_FF") != std::string::npos && listings.find("C_MATH") != std::string::npos, "the lowered local runs as float slots in a cell block: " + listings.substr(0, 2000));
+            listings.clear();
+            e->execute("function g() -> float { math::vec3 v = math::vec3(1, 2, 3); math::vec3 w = math::rotate(v, math::vec3(0, 0, 1), 0.5); float a = math::angle_between(v, w); return w.x + a; } g();");
+            const std::string rotate_call = "MATH " + std::to_string(static_cast<int>(jai::detail::math_fn::rotate_)) + " ";
+            const std::string angle_call = "MATH " + std::to_string(static_cast<int>(jai::detail::math_fn::angle_between_)) + " ";
+            check(listings.find("T_MUL_FF") != std::string::npos && listings.find(rotate_call) == std::string::npos && listings.find(angle_call) == std::string::npos,
+                  "rotate and angle_between run as component arithmetic, no boxed call");
             (void)raised;
         });
 

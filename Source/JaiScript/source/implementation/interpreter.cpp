@@ -3032,6 +3032,56 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
     return checked_result<void>();
 }
 
+// Gate on STORAGE, not declared type: a typed-but-uninitialized variable (`int x;`) holds monostate
+checked_result<bool> interpreter::scalar_lane(token_type op, const script_value& left, const script_value& right, bool concat) {
+    if (!detail::scalar_arith_op(op) && !detail::scalar_compare_op(op)) { return false; }
+    const size_t li = left.raw_storage_index();
+    const size_t ri = right.raw_storage_index();
+    if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+        const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
+        if (detail::scalar_compare_op(op)) {
+            push_value(make_bool_fast(detail::scalar_compare(op, a, b)));
+            return true;
+        }
+        script_int out;
+        if (const auto fault = detail::int_arith(op, a, b, out); fault != detail::scalar_fault::none) [[unlikely]] {
+            return detail::scalar_fault_error<checked_result<bool>>(op, fault, false);
+        }
+        push_value(make_int_fast(out));
+        return true;
+    }
+    if (detail::numeric_storage(li) && detail::numeric_storage(ri)) {
+        const script_float a = detail::as_script_float(left, li), b = detail::as_script_float(right, ri);
+        if (detail::scalar_compare_op(op)) {
+            push_value(make_bool_fast(detail::scalar_compare(op, a, b)));
+            return true;
+        }
+        script_float out;
+        if (const auto fault = detail::float_arith(op, a, b, out); fault != detail::scalar_fault::none) [[unlikely]] {
+            return detail::scalar_fault_error<checked_result<bool>>(op, fault, true);
+        }
+        push_value(make_float_fast(out));
+        return true;
+    }
+    if (concat && op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+        const script_string& left_text = left.unchecked_as_string();
+        const script_string& right_text = right.unchecked_as_string();
+        // engine::memory_cap chokepoint: deny the concat result before it exists
+        if (!limits_->memory_charge(sizeof(script_value) + left_text.size() + right_text.size())) [[unlikely]] {
+            return detail::raise_memory_cap(*limits_);
+        }
+        push_value(make_value(left_text + right_text));
+        return true;
+    }
+    // a cpp-bound operand (index 14) skips the gates above: its zero divisor keeps this lane's error text
+    if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
+        if (auto zero = detail::bound_fastpath_zero_divisor(op, left, right, true, true)) {
+            return checked_result<bool>(make_error_code(zero->code), zero->text);
+        }
+    }
+    return false;
+}
+
 template<bool Replaying>
 checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const replay_point* rs) {
     // Track if we've pre-fetched values to avoid duplicate lookups
@@ -3061,131 +3111,9 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 
 					// Fast path for integer arithmetic (most common in loops)
 					if (can_use_fast_path(expr->op.type)) {
-						// Gate on STORAGE, not declared type: a typed-but-uninitialized variable
-						// (`int x;`) holds monostate and unchecked_* access would deref null.
-						const size_t leftIdx = leftVal.raw_storage_index();
-						const size_t rightIdx = rightVal.raw_storage_index();
-
-						if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT) {
-							script_int leftInt = leftVal.unchecked_as_int();
-							script_int rightInt = rightVal.unchecked_as_int();
-
-							switch (expr->op.type) {
-							case token_type::plus:
-								{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::minus:
-								{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::star:
-								{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::slash:
-								if (rightInt == 0) {
-									return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-								}
-								{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::percent:
-								if (rightInt == 0) {
-									return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-								}
-								push_value(make_int_fast(ints::mod(leftInt, rightInt)));
-								return {};
-							case token_type::less:
-								push_value(make_bool_fast(leftInt < rightInt));
-								return {};
-							case token_type::less_equal:
-								push_value(make_bool_fast(leftInt <= rightInt));
-								return {};
-							case token_type::greater:
-								push_value(make_bool_fast(leftInt > rightInt));
-								return {};
-							case token_type::greater_equal:
-								push_value(make_bool_fast(leftInt >= rightInt));
-								return {};
-							case token_type::equal_equal:
-								push_value(make_bool_fast(leftInt == rightInt));
-								return {};
-							case token_type::bang_equal:
-								push_value(make_bool_fast(leftInt != rightInt));
-								return {};
-							default:
-								break; // Fall through to normal path
-							}
-						}
-						// Fast path for float/mixed arithmetic
-						else if ((leftIdx == script_value::TYPEID_INT || leftIdx == script_value::TYPEID_FLOAT) &&
-							(rightIdx == script_value::TYPEID_INT || rightIdx == script_value::TYPEID_FLOAT)) {
-							script_float leftFloat = leftIdx == script_value::TYPEID_INT ?
-								static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
-							script_float rightFloat = rightIdx == script_value::TYPEID_INT ?
-								static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
-
-							switch (expr->op.type) {
-							case token_type::plus:
-								push_value(make_float_fast(leftFloat + rightFloat));
-								return {};
-							case token_type::minus:
-								push_value(make_float_fast(leftFloat - rightFloat));
-								return {};
-							case token_type::star:
-								push_value(make_float_fast(leftFloat * rightFloat));
-								return {};
-							case token_type::slash:
-								if (rightFloat == 0.0) {
-									return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-								}
-								push_value(make_float_fast(leftFloat / rightFloat));
-								return {};
-							case token_type::percent:
-								if (rightFloat == 0.0) {
-									return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-								}
-								push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
-								return {};
-							case token_type::less:
-								push_value(make_bool_fast(leftFloat < rightFloat));
-								return {};
-							case token_type::less_equal:
-								push_value(make_bool_fast(leftFloat <= rightFloat));
-								return {};
-							case token_type::greater:
-								push_value(make_bool_fast(leftFloat > rightFloat));
-								return {};
-							case token_type::greater_equal:
-								push_value(make_bool_fast(leftFloat >= rightFloat));
-								return {};
-							case token_type::equal_equal:
-								push_value(make_bool_fast(leftFloat == rightFloat));
-								return {};
-							case token_type::bang_equal:
-								push_value(make_bool_fast(leftFloat != rightFloat));
-								return {};
-							default:
-								break;
-							}
-						}
-						// Fast path for string concatenation (common operation)
-						else if (expr->op.type == token_type::plus &&
-							leftIdx == script_value::TYPEID_STRING &&
-							rightIdx == script_value::TYPEID_STRING) {
-							const script_string& leftStr = leftVal.unchecked_as_string();
-							const script_string& rightStr = rightVal.unchecked_as_string();
-							// engine::memory_cap chokepoint: deny the concat result before it exists
-							if (!limits_->memory_charge(sizeof(script_value) + leftStr.size() + rightStr.size())) [[unlikely]] {
-								return detail::raise_memory_cap(*limits_);
-							}
-							push_value(make_value(leftStr + rightStr));
-							return {};
-						}
-						// cpp-bound operands (index 14) skip the gates above: keep the zero-divisor
-						// error surface identical to this shape's plain fast path (twin parity)
-						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-							if (auto z = detail::bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
-								return checked_result<void>(make_error_code(z->code), z->text);
-							}
-						}
+						auto lane = scalar_lane(expr->op.type, leftVal, rightVal, true);
+						if (!lane) { return lane.error_value(); }
+						if (lane.value()) { return {}; }
 					}
 
 					// Fast path didn't handle it - copy values for fallback dispatch
@@ -3201,104 +3129,10 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 					const script_value& leftVal = leftPtr->deref();
 					const script_value& rightVal = rightLit->value;  // Direct access - no lookup!
 
-					// Ultra-fast integer path (most common for loop conditions)
 					if (can_use_fast_path(expr->op.type)) {
-						// Use raw_storage_index for fastest type check
-						size_t leftIdx = leftVal.raw_storage_index();
-						size_t rightIdx = rightVal.raw_storage_index();
-
-						if (leftIdx == 1 && rightIdx == 1) {  // Both ints
-							script_int leftInt = leftVal.unchecked_as_int();
-							script_int rightInt = rightVal.unchecked_as_int();
-
-							switch (expr->op.type) {
-							case token_type::less:
-								push_value(make_bool_fast(leftInt < rightInt));
-								return {};
-							case token_type::less_equal:
-								push_value(make_bool_fast(leftInt <= rightInt));
-								return {};
-							case token_type::greater:
-								push_value(make_bool_fast(leftInt > rightInt));
-								return {};
-							case token_type::greater_equal:
-								push_value(make_bool_fast(leftInt >= rightInt));
-								return {};
-							case token_type::equal_equal:
-								push_value(make_bool_fast(leftInt == rightInt));
-								return {};
-							case token_type::bang_equal:
-								push_value(make_bool_fast(leftInt != rightInt));
-								return {};
-							case token_type::plus:
-								{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::minus:
-								{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::star:
-								{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::slash:
-								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-								{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::percent:
-								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-								push_value(make_int_fast(ints::mod(leftInt, rightInt)));
-								return {};
-							default:
-								break;
-							}
-						}
-						// Float/mixed numeric path
-						else if ((leftIdx == 1 || leftIdx == 2) && (rightIdx == 1 || rightIdx == 2)) {
-							script_float leftFloat = leftIdx == 1 ?
-								static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
-							script_float rightFloat = rightIdx == 1 ?
-								static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
-
-							switch (expr->op.type) {
-							case token_type::less:
-								push_value(make_bool_fast(leftFloat < rightFloat));
-								return {};
-							case token_type::less_equal:
-								push_value(make_bool_fast(leftFloat <= rightFloat));
-								return {};
-							case token_type::greater:
-								push_value(make_bool_fast(leftFloat > rightFloat));
-								return {};
-							case token_type::greater_equal:
-								push_value(make_bool_fast(leftFloat >= rightFloat));
-								return {};
-							case token_type::plus:
-								push_value(make_float_fast(leftFloat + rightFloat));
-								return {};
-							case token_type::minus:
-								push_value(make_float_fast(leftFloat - rightFloat));
-								return {};
-							case token_type::star:
-								push_value(make_float_fast(leftFloat * rightFloat));
-								return {};
-							case token_type::slash:
-								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-								push_value(make_float_fast(leftFloat / rightFloat));
-								return {};
-							case token_type::percent:
-								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-								push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
-								return {};
-							default:
-								break;
-							}
-						}
-						// twin parity for bound operands: float / and % are covered inline in this
-						// shape (vm op_binary_fused), so bound pairs keep the same error surface
-						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-							if (auto z = detail::bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
-								return checked_result<void>(make_error_code(z->code), z->text);
-							}
-						}
+						auto lane = scalar_lane(expr->op.type, leftVal, rightVal, false);
+						if (!lane) { return lane.error_value(); }
+						if (lane.value()) { return {}; }
 					}
 					// Fast path didn't fully handle - copy for slow path (literal needs hydration)
 					pre_fetched_left = leftVal;
@@ -3316,104 +3150,10 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 				if (script_value* rightPtr = resolve_local_or_env(rightId->slot_index, rightId->symbol_id, rightId->global_qualified)) {
 					script_value rightVal = rightPtr->deref();
 
-					// Ultra-fast integer path
 					if (can_use_fast_path(expr->op.type)) {
-						size_t leftIdx = leftVal.raw_storage_index();
-						size_t rightIdx = rightVal.raw_storage_index();
-
-						if (leftIdx == 1 && rightIdx == 1) {  // Both ints
-							script_int leftInt = leftVal.unchecked_as_int();
-							script_int rightInt = rightVal.unchecked_as_int();
-
-							switch (expr->op.type) {
-							case token_type::less:
-								push_value(make_bool_fast(leftInt < rightInt));
-								return {};
-							case token_type::less_equal:
-								push_value(make_bool_fast(leftInt <= rightInt));
-								return {};
-							case token_type::greater:
-								push_value(make_bool_fast(leftInt > rightInt));
-								return {};
-							case token_type::greater_equal:
-								push_value(make_bool_fast(leftInt >= rightInt));
-								return {};
-							case token_type::equal_equal:
-								push_value(make_bool_fast(leftInt == rightInt));
-								return {};
-							case token_type::bang_equal:
-								push_value(make_bool_fast(leftInt != rightInt));
-								return {};
-							case token_type::plus:
-								{ script_int rr; if (!ints::try_add(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '+'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::minus:
-								{ script_int rr; if (!ints::try_sub(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '-'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::star:
-								{ script_int rr; if (!ints::try_mul(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '*'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::slash:
-								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation");
-								{ script_int rr; if (!ints::try_div(leftInt, rightInt, rr)) return int_overflow_v("Integer overflow in '/'"); push_value(make_int_fast(rr)); }
-								return {};
-							case token_type::percent:
-								if (rightInt == 0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation");
-								push_value(make_int_fast(ints::mod(leftInt, rightInt)));
-								return {};
-							default:
-								break;
-							}
-						}
-						// Float/mixed numeric path (vm op_binary_fused parity: informative
-						// zero-divisor texts live on this shape's fast-path surface too)
-						else if ((leftIdx == 1 || leftIdx == 2) && (rightIdx == 1 || rightIdx == 2)) {
-							script_float leftFloat = leftIdx == 1 ?
-								static_cast<script_float>(leftVal.unchecked_as_int()) : leftVal.unchecked_as_float();
-							script_float rightFloat = rightIdx == 1 ?
-								static_cast<script_float>(rightVal.unchecked_as_int()) : rightVal.unchecked_as_float();
-
-							switch (expr->op.type) {
-							case token_type::less:
-								push_value(make_bool_fast(leftFloat < rightFloat));
-								return {};
-							case token_type::less_equal:
-								push_value(make_bool_fast(leftFloat <= rightFloat));
-								return {};
-							case token_type::greater:
-								push_value(make_bool_fast(leftFloat > rightFloat));
-								return {};
-							case token_type::greater_equal:
-								push_value(make_bool_fast(leftFloat >= rightFloat));
-								return {};
-							case token_type::plus:
-								push_value(make_float_fast(leftFloat + rightFloat));
-								return {};
-							case token_type::minus:
-								push_value(make_float_fast(leftFloat - rightFloat));
-								return {};
-							case token_type::star:
-								push_value(make_float_fast(leftFloat * rightFloat));
-								return {};
-							case token_type::slash:
-								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation");
-								push_value(make_float_fast(leftFloat / rightFloat));
-								return {};
-							case token_type::percent:
-								if (rightFloat == 0.0) return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation");
-								push_value(make_float_fast(std::fmod(leftFloat, rightFloat)));
-								return {};
-							default:
-								break;
-							}
-						}
-						// twin parity for bound operands: float / and % are covered inline in this
-						// shape (vm op_binary_fused), so bound pairs keep the same error surface
-						else if (leftIdx == script_value::TYPEID_CPP_BOUND || rightIdx == script_value::TYPEID_CPP_BOUND) {
-							if (auto z = detail::bound_fastpath_zero_divisor(expr->op.type, leftVal, rightVal, true, true)) {
-								return checked_result<void>(make_error_code(z->code), z->text);
-							}
-						}
+						auto lane = scalar_lane(expr->op.type, leftVal, rightVal, false);
+						if (!lane) { return lane.error_value(); }
+						if (lane.value()) { return {}; }
 					}
 					// Fast path didn't fully handle - save for slow path (literal needs hydration)
 					pre_fetched_left = leftVal.has_valid_engine() ? leftVal : hydrate_literal(leftVal);

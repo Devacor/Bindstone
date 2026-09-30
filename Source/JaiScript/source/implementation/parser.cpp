@@ -2184,7 +2184,7 @@ checked_result<expression_ptr> parser::unary() {
             "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
     }
 
-    if (match({token_type::bang, token_type::minus, token_type::plus_plus,
+    if (match({token_type::bang, token_type::minus, token_type::plus, token_type::plus_plus,
                token_type::minus_minus, token_type::ampersand, token_type::tilde})) {
         token op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, unary());
@@ -2195,6 +2195,11 @@ checked_result<expression_ptr> parser::unary() {
         // a negated numeric literal is a literal: the sign is part of the number as the language reads it, so -1 and
         // -1.5 are constants to every consumer (the fused compare, the move rows, the counted head); the lexer's largest
         // magnitude is INT64_MAX, so the negation always fits, and -0.0 keeps IEEE's sign as the runtime negation would
+        // +x on a number is the number (C++'s unary plus); a class's operator+() is the unary_expr's
+        if (op.type == token_type::plus && right->get_type() == node_type::literal_expr) {
+            const size_t k = static_cast<literal_expr*>(right.get())->value.raw_storage_index();
+            if (k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT) { return right; }
+        }
         if (op.type == token_type::minus && right->get_type() == node_type::literal_expr) {
             const script_value& lv = static_cast<literal_expr*>(right.get())->value;
             if (lv.raw_storage_index() == script_value::TYPEID_INT) {
@@ -3946,7 +3951,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 continue;
             }
             if (func_member->name == className.lexeme ||
-                (!func_member->name.empty() && func_member->name[0] == '~')) {
+                (func_member->name.size() > 1 && func_member->name[0] == '~')) {
                 report_error("constructors and destructors cannot be coroutines", peek());
                 synchronize_class_member(class_open_index);
                 continue;
@@ -4218,6 +4223,16 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
     if (check(token_type::greater_equal)) { advance(); return std::string(">="); }
     if (check(token_type::equal_equal)) { advance(); return std::string("=="); }
     if (check(token_type::bang_equal)) { advance(); return std::string("!="); }
+    // Dev ruling 2026-09-30: the rest of C++'s overloadable set (&&, ||, the comma, ->, new and delete stay out); unary or
+    // binary by the parameter count, like a C++ member operator
+    if (check(token_type::percent)) { advance(); return std::string("%"); }
+    if (check(token_type::ampersand)) { advance(); return std::string("&"); }
+    if (check(token_type::pipe)) { advance(); return std::string("|"); }
+    if (check(token_type::caret)) { advance(); return std::string("^"); }
+    if (check(token_type::left_shift)) { advance(); return std::string("<<"); }
+    if (check(token_type::right_shift)) { advance(); return std::string(">>"); }
+    if (check(token_type::spaceship)) { advance(); return std::string("<=>"); }
+    if (check(token_type::tilde)) { advance(); return std::string("~"); }
     report_error("Expected operator symbol after 'operator' keyword", peek());
     return std::nullopt;
 }

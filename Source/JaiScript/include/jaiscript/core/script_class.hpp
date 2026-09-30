@@ -42,7 +42,7 @@ public:
 
         // Constructors and destructors don't need override validation
         bool is_constructor = (name == get_name());
-        bool is_destructor = (name.size() > 0 && name[0] == '~');
+        bool is_destructor = (name.size() > 1 && name[0] == '~');   // "~" alone is operator~
 
         // Find if this method exists in parent classes
         auto method_info = find_method(name);

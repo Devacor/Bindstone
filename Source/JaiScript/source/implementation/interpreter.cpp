@@ -2305,6 +2305,24 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
     return std::nullopt;
 }
 
+// A class's unary operator (Dev ruling 2026-09-30): the chain's overload taking no argument, called on the operand; nullopt
+// when the class declares none (the builtin meaning and text follow). KEEP BYTE-PARALLEL with vm_backend::object_unary_via_method
+std::optional<checked_result<script_value>> interpreter::object_unary_via_method(const script_value& operand, token_type op) {
+    if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+    const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
+    auto target = resolve_member_target(operand);
+    if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
+    script_value method_val = target.method(id);
+    if (!method_val.is_function()) { return std::nullopt; }
+    script_value bound = create_bound_method(operand, method_val);
+    auto result = bound.as_function()(std::vector<script_value>{});
+    if (!result) {
+        if (is_unwinding_) { return checked_result<script_value>(make_value()); }
+        return checked_result<script_value>(result.error_value());
+    }
+    return checked_result<script_value>(std::move(result.value()));
+}
+
 interpreter::interpreter()
     : ownedSymbolizer_(std::make_unique<string_symbolizer>()),
       string_symbolizer_(ownedSymbolizer_.get()),
@@ -2354,6 +2372,7 @@ interpreter::interpreter()
     op_caret_id_ = string_symbolizer_->intern("^");
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
+    op_tilde_id_ = string_symbolizer_->intern("~");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
 
@@ -2423,6 +2442,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     op_caret_id_ = string_symbolizer_->intern("^");
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
+    op_tilde_id_ = string_symbolizer_->intern("~");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
 
@@ -2492,6 +2512,7 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     op_caret_id_ = string_symbolizer_->intern("^");
     op_left_shift_id_ = string_symbolizer_->intern("<<");
     op_right_shift_id_ = string_symbolizer_->intern(">>");
+    op_tilde_id_ = string_symbolizer_->intern("~");
     subscript_op_id_ = string_symbolizer_->intern("[]");
     assign_operator_id_ = string_symbolizer_->intern("=");
 
@@ -3628,6 +3649,15 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
         operand = std::move(derefed);
     }
 
+    // a class instance's unary operator answers where the builtin rows miss (KEEP BYTE-PARALLEL with vm_backend::exec_unary)
+    auto user_unary = [&](token_type uop) -> std::optional<checked_result<void>> {
+        auto user = object_unary_via_method(operand, uop);
+        if (!user) { return std::nullopt; }
+        if (!*user) { return checked_result<void>(user->error_value()); }
+        push_value(std::move(user->value()));
+        return checked_result<void>{};
+    };
+
     // `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
     // full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
     // 2026-07). Identical result for bound primitives. Byte-parallel with exec_unary.
@@ -3655,6 +3685,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
             } else if (oi == script_value::TYPEID_FLOAT) {
                 push_value(make_value(-operand.unchecked_as_float()));
             } else {
+                if (auto landed = user_unary(token_type::minus)) { return std::move(*landed); }
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary minus requires numeric operand");
             }
             break;
@@ -3664,9 +3695,17 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
             push_value(make_value(!is_truthy(operand)));
             break;
 
+        case token_type::plus:
+            // C++'s unary plus: a number is itself, a char promotes to its int
+            if (oi == script_value::TYPEID_INT || oi == script_value::TYPEID_FLOAT) { push_value(std::move(operand)); break; }
+            if (oi == script_value::TYPEID_CHAR) { push_value(detail::char_promoted(operand, engine_)); break; }
+            if (auto landed = user_unary(token_type::plus)) { return std::move(*landed); }
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary plus requires numeric operand");
+
         case token_type::tilde:
             // Bitwise NOT
             if (oi != script_value::TYPEID_INT) {
+                if (auto landed = user_unary(token_type::tilde)) { return std::move(*landed); }
                 return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Bitwise NOT requires integer operand");
             }
             push_value(make_value(~operand.unchecked_as_int()));
@@ -11814,7 +11853,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 
                 // Constructor will be registered after all members are processed
                 
-            } else if (method_name.size() > 0 && method_name[0] == '~') {
+            } else if (method_name.size() > 1 && method_name[0] == '~') {   // "~" alone is operator~
                 // Destructor
                 // Set in_method flag while processing destructor body
                 if (current_class_context_) {

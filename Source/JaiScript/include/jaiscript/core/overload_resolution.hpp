@@ -28,6 +28,20 @@ inline bool arity_accepts(const std::vector<parameter>& params, size_t argc) {
     return argc >= required_parameter_count(params) && argc <= params.size();
 }
 
+// A unary operator the class chain declares (Dev ruling 2026-09-30): a script overload of the name that takes no argument
+// (the class or a base), or a host class's method of that name (its binding decides the arity)
+inline bool declares_unary_operator(const class_definition* def, uint64_t name_id) {
+    bool script_declared = false;
+    for (const class_definition* c = def; c; c = c->get_parent().get()) {
+        const auto& overloads = c->script_method_overloads();
+        if (auto it = overloads.find(name_id); it != overloads.end()) {
+            script_declared = true;
+            for (const auto& d : it->second) { if (arity_accepts(d->parameters, 0)) { return true; } }
+        }
+    }
+    return !script_declared && def && def->get_method(name_id, false).is_function();
+}
+
 // Shared script-overload scorer used by method, static-method and constructor dispatch.
 // Priority: 1) all typed + exact match, 2) all typed + conversions (fewest first)
 //           3) var/any parameters (fallback; a typed parameter the argument does not

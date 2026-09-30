@@ -377,6 +377,17 @@ engine stays usable", not by `check_throws`.
   Proof = the parallel admission walk in `proof_mode` (`prove_readonly_parameters`), cached per
   function against `engine::definition_epoch()`; kill switch `engine::parameter_alias(false)`,
   gates `parameter_alias_differential_gate` + `jaiscript_fuzz --no-param-alias`.
+- **Operator overloading** (Dev ruling 2026-09-30): a script class declares C++'s overloadable set less `&& || , ->
+  new delete` - binary `+ - * / % & | ^ << >> < > <= >= == != <=>`, unary `- + ! ~` (told apart by the parameter count),
+  `=`, `[]`, `()`. An operator runs only when the (left) operand is a class instance whose chain declares it (unary:
+  `declares_unary_operator`, `core/overload_resolution.hpp`; binary: `object_arithmetic_via_method`); every other operand
+  keeps the builtin meaning, text and fast lanes. A value instance's truthiness is `!operator!()` ahead of `to_bool()`
+  (the vm folds `!` in a condition onto a truthiness jump; the class memo `may_define_truthiness` keeps a class with
+  neither on the one-flag path); a handle's `!` stays its null test. `a op= b` is `a = a op b` through `operator op` (no `operator op=`).
+  `operator()` is looked up ONLY where a call would raise not callable (`call_operator_of`, both backends: the interpreter's
+  generic call, the vm's `park_callee`, `exec_probe_member`, the stack and member call ops), so ordinary calls compile and
+  run unchanged; a `function` slot still takes only a function or null (wrap an instance in a lambda). Unary `+` is the
+  number itself, a char promotes.
 - **User accessors** `_get_x` / `_set_x`: member access `expr.x` (any receiver, `this.x`
   included) reads through the nearest USER `_get_x` in the class chain and stores through the
   nearest USER `_set_x` (compound assigns and `++`/`--` read then write through them); the

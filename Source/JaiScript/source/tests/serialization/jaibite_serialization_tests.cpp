@@ -341,6 +341,11 @@ public:
                 extern loose;
                 class Game { int v = 3; }
                 extern shared_ptr<Game> G;
+                inline int shared_count = 2;
+                inline int shared_count = 9;
+                namespace cfg { inline int depth = 3; }
+                namespace cfg { inline int depth = 4; }
+                var shared_text = to_string(shared_count) + to_string(cfg::depth);
                 function use_all() -> int { return host_int + G.v; }
                 var caught = "";
                 try { use_all(); } catch (e) { caught = e; }
@@ -352,14 +357,14 @@ public:
                 [[strict_mode]] y = y * 2;
                 function bump() { [[warn_mode]] y = y + 1; }
                 bump();
-                caught + "|" + c2 + "|" + to_string(y);
+                caught + "|" + c2 + "|" + to_string(y) + "|" + shared_text;
             )");
             // statement::check_mode_attr arrived with format version 11, the try_stmt catch
             // variable symbol + slot with 12, the own-file location marker with 14 (right after
             // the 4-byte magic)
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)27, (int)bytes[4], "jaibite format version");   // 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types; 26: import(...) is an expression (import_expr); 24: array<uint8> / array<int8> element types; 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
+            check_eq((int)28, (int)bytes[4], "jaibite format version");   // 28: variable_decl::is_inline; 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types; 26: import(...) is an expression (import_expr); 24: array<uint8> / array<int8> element types; 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }

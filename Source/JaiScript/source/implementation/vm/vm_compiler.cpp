@@ -6533,6 +6533,15 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 // A program-scope declaration written without an initializer: a same-unit re-run keeps the variable, so the default is not
 // evaluated at all (the interpreter asks the same question before its evaluation)
 void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& decl) {
+	if (decl->is_inline) {
+		const uint32_t node = add_node(decl);
+		emit(opcode::op_decl_keep, node);
+		const size_t skip = emit(opcode::op_jump_if_true, k_invalid_u32, 1);
+		compile_variable_decl_value(decl);
+		emit(opcode::op_decl_share, node);
+		patch_jump(skip, chunk_->code.size());
+		return;
+	}
 	if (decl->default_initialized && decl->slot_index == SIZE_MAX) {
 		emit(opcode::op_decl_keep, add_node(decl));
 		const size_t skip = emit(opcode::op_jump_if_true, k_invalid_u32, 1);

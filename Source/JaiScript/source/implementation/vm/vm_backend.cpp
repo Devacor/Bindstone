@@ -3346,7 +3346,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Undefined variable '{0}'", sym);
+			environment_->undefined_text(sym), sym);
 	}
 	if (ins.a != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* local = frame_slot(f, ins.a)) {
@@ -3437,7 +3437,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 				return {};
 			}
 			return raise_(make_error_code(runtime_error_code::undefined_variable),
-				"Undefined variable '{0}'", sym);
+				environment_->undefined_text(sym), sym);
 		}
 	}
 	if (script_value* cached = env_lookup_cached(f, f.ip * 3, sym)) {
@@ -3490,7 +3490,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 		}
 	}
 	return raise_(make_error_code(runtime_error_code::undefined_variable),
-		"Undefined variable '{0}'", sym);
+		environment_->undefined_text(sym), sym);
 }
 
 op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
@@ -3705,7 +3705,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		store_target = engine_->get_global_environment()->get_env_var_ptr(sym);
 		if (!store_target) {
 			return raise_(make_error_code(runtime_error_code::undefined_variable),
-				"Undefined variable '{0}'", sym);
+				environment_->undefined_text(sym), sym);
 		}
 	} else if (!member_wins) {
 		store_target = environment_->get_env_var_ptr(sym);
@@ -4417,12 +4417,12 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	// miss is an error, sequenced after the rhs like every undefined-target store)
 	if (ins.c & compound_flag_global_only) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Undefined variable '{0}'", sym);
+			environment_->undefined_text(sym), sym);
 	}
 	script_value* frame_this = current_this(f);
 	if (!frame_this || !frame_this->is_object()) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Undefined variable '{0}' (no 'this' in scope)", sym);
+			environment_->undefined_text(sym, "Undefined variable '{0}' (no 'this' in scope)"), sym);
 	}
 
 	script_value this_val = *frame_this;
@@ -4430,7 +4430,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 
 	if (!instance || !instance->has_field(sym)) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Undefined variable '{0}' (not a field of 'this')", sym);
+			environment_->undefined_text(sym, "Undefined variable '{0}' (not a field of 'this')"), sym);
 	}
 	if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
 		VM_TRY(detail::enforce_member_access(field_class, sym, frame_access_context(f)));
@@ -4645,7 +4645,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 	// ::name targets never reach the implicit this.member fallback
 	if (ins.c & incdec_flag_global_only) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Undefined variable '{0}'", sym);
+			environment_->undefined_text(sym), sym);
 	}
 	script_value* frame_this = current_this(f);
 	if (frame_this && frame_this->is_object()) {
@@ -4701,7 +4701,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		}
 	}
 	return raise_(make_error_code(runtime_error_code::undefined_variable),
-		"Undefined variable '{0}'", sym);
+		environment_->undefined_text(sym), sym);
 }
 
 op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
@@ -4824,7 +4824,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
 			return &binding_value(*g, observed);
 		}
-		raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
+		raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 		return nullptr;
 	}
 	if (operand.slot != k_invalid_u32 && f.locals && !f.top_level) {
@@ -4915,7 +4915,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			        : environment_->get_value_ptr(sym)) {
 				return &binding_value(*beyond, observed);
 			}
-			raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
+			raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 			return nullptr;
 		}
 	}
@@ -4970,7 +4970,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			}
 		}
 	}
-	raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}'", sym);
+	raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
 	return nullptr;
 }
 
@@ -11220,7 +11220,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			return define_decl_value(f, decl->name_id, decl->slot_index, std::move(minted->value()));
 		}
 		VM_TRY(frame_bare_member_access(f, target_sym));
-		return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
+		return raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(target_sym, "Cannot take reference of undefined variable"), target_sym);
 	}
 
 	if (targetPtr->is_reference()) {
@@ -12719,7 +12719,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 				// might return false
 				if (!environment_->contains(this_id_) && !environment_->get(this_id_)) {
 					return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
-						"Cannot capture undefined variable '{0}'", capture.symbol_id);
+						environment_->undefined_text(capture.symbol_id, "Cannot capture undefined variable '{0}'"), capture.symbol_id);
 				}
 				if (capture.by_reference) {
 					script_value* targetPtr = environment_->get_value_ptr(this_id_);
@@ -12747,7 +12747,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			auto src = detail::resolve_capture_source(slot_val, environment_.get(), scope, capture.symbol_id);
 			if (!src.is_variable()) {
 				return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
-					"Cannot capture undefined variable '{0}'", capture.symbol_id);
+					environment_->undefined_text(capture.symbol_id, "Cannot capture undefined variable '{0}'"), capture.symbol_id);
 			}
 			if (capture.by_reference && src.global) { continue; }   // [&g] of a global: the lambda reads it when it runs
 			if (capture.by_reference) {
@@ -15467,18 +15467,11 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		"No constructor found for class '{0}'", expr->type->id);
 }
 
-// extern names a shared global: the unit binds to the visible one instead of owning a cell, and the shared
-// global comes into being here when no unit has declared the name (a typed null placeholder; a function
-// extern declares nothing). KEEP BYTE-PARALLEL with interpreter::visit_extern_decl.
+// extern declares nothing: the name resolves to whatever defines it, and a use while nothing does raises the
+// extern's own text. KEEP BYTE-PARALLEL with interpreter::visit_extern_decl.
 op_status vm_backend::exec_extern_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<extern_decl*>(f.code->nodes[ins.a].get());
-	if (decl->is_function) { return {}; }
-	auto global = engine_->get_global_environment();
-	if (!global->get_value_ptr(decl->name_id)) {
-		script_value placeholder = make_null();
-		if (decl->type) { placeholder.set_type_info(decl->type); }
-		global->define_shared(decl->name_id, std::move(placeholder));
-	}
+	environment_->note_extern(decl->name_id, decl->is_function);
 	return {};
 }
 
@@ -17477,7 +17470,7 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 			return {};
 		}
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Cannot take reference of undefined variable", symbol_id);
+			environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
 	}
 	script_value* storage = nullptr;
 	if (ins.a != k_invalid_u32 && f.locals) {
@@ -17510,7 +17503,7 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 	if (!storage) {
 		VM_TRY(frame_bare_member_access(f, symbol_id));
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
-			"Cannot take reference of undefined variable", symbol_id);
+			environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
 	}
 	stack_.push_back(share_env_ref(*storage));
 	return {};
@@ -17559,7 +17552,7 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 				if (!global_only) { auto b = bind_bare_cpp_property_ref(f, target_sym); if (b) { minted.emplace(std::move(*b)); } }
 				if (!minted) {
 					VM_TRY(frame_bare_member_access(f, target_sym));
-					return raise_(make_error_code(runtime_error_code::undefined_variable), "Cannot take reference of undefined variable", target_sym);
+					return raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(target_sym, "Cannot take reference of undefined variable"), target_sym);
 				}
 				if (!*minted) {
 					return raise_from(*minted);
@@ -17675,10 +17668,17 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_extern_decl: return exec_extern_decl(f, ins);
 		case opcode::op_decl_keep: {
 			auto* decl = static_cast<const variable_decl*>(f.code->nodes[ins.a].get());
+			if (decl->is_inline) {
+				stack_.push_back(script_value(environment_->get_own_value_ptr(decl->name_id) != nullptr, engine_));
+				return {};
+			}
 			const script_value* cell = environment_->get_parent() ? nullptr : environment_->same_unit_cell(decl->name_id);
 			stack_.push_back(script_value(cell && detail::redeclaration_keeps_value(*decl, *cell), engine_));
 			return {};
 		}
+		case opcode::op_decl_share:
+			environment_->share(static_cast<const variable_decl*>(f.code->nodes[ins.a].get())->name_id);
+			return {};
 		case opcode::op_throw: return exec_throw(f, ins);
 		case opcode::op_try_push: return exec_try_push(f, ins);
 		case opcode::op_try_pop: return exec_try_pop(f, ins);
@@ -19033,6 +19033,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_enum_decl:
 			case opcode::op_extern_decl:
 			case opcode::op_decl_keep:
+			case opcode::op_decl_share:
 			case opcode::op_throw:
 			case opcode::op_try_push:
 			case opcode::op_try_pop:
@@ -20708,7 +20709,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						if (!g) {
 							return raise_(
 								make_error_code(runtime_error_code::undefined_variable),
-								"Cannot take reference of undefined variable");
+								environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
 						}
 						VM_TRY(bind_reference_to_storage(*g, callee, param.slot_index));
 						continue;
@@ -20782,7 +20783,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						}
 						return raise_(
 							make_error_code(runtime_error_code::undefined_variable),
-							"Cannot take reference of undefined variable");
+							member_shadowed ? std::string_view("Cannot take reference of undefined variable")
+							                : environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id);
 					}
 					VM_TRY(bind_reference_to_storage(*argPtr, callee, param.slot_index));
 				} else if (arg.is_reference() && arg.get_reference_holder()) {

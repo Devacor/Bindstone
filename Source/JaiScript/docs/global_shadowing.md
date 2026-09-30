@@ -133,14 +133,15 @@ f();       // 7
 G;         // 5
 ```
 
-`extern var G;` is how a unit shares a global instead of owning one: the unit binds to the visible
-global (a declaration would shadow it), and when no unit has declared the name yet the extern
-brings the shared global into being as a null placeholder of the declared type, so a program that
-spells `extern int Score;` works alone and shares `Score` with every other unit that declares or
-externs it: the first unit that declares the name adopts the shared cell in place, so the
-externing units, the declaring unit and the host keep one cell. A strict-checked unit reads a
-name only a later unit declares the same way
-(`docs/static_checking.md`, escape hatches).
+`extern var G;` is how a unit uses a global instead of owning one: the unit resolves the name to
+the visible global (a declaration would shadow it) and declares nothing, so a use while no unit and
+no host defines the name raises `'G' is declared extern but never defined (an 'inline' declaration
+creates it)`. `inline int Score;` is the C++17 inline variable: one variable shared by every unit
+that declares it. The first to run creates it (its initializer, else the type's default, owned by no
+unit); every later inline declaration adopts it without running its initializer, and the first unit
+that declares the name without `inline` adopts the cell in place, so the inline units, the declaring
+unit and the host keep one cell. A strict-checked unit reads a name only a later unit declares the
+same way (`docs/static_checking.md`, escape hatches).
 
 ## Cost
 

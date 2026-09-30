@@ -344,15 +344,17 @@ extern config;                     // untyped: var, reads and stores are dynamic
 int report() { return G.hp; }      // checks; runs only if the host bound G
 try { spawn_on_network(1, 2); } catch (e) { print(e); }
 try { print(report()); } catch (e) { print(e); }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Undefined variable 'spawn_on_network'
-Undefined variable 'G'</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">'spawn_on_network' is declared extern but never defined
+'G' is declared extern but never defined (an 'inline' declaration creates it)</code></pre></div>
 <p>An <code>extern</code> name counts as declared, and a program's closure carries it to every unit like any
 top-level name. The typed form gives the name that certain type: member checks, assignment checks and proofs
 flow exactly as for a declared variable (<code>G.mana</code> above would be the load error <code>no member
-'mana' in class 'Game'</code>). At run time the declaration is a no-op on both backends. The name resolves
-dynamically as before, and a name still missing when used raises the ordinary <code>Undefined variable</code>
-error, which is what the output shows: nobody bound <code>G</code> or <code>spawn_on_network</code> in that run.
-It is also the right spelling for a shared leaf that calls into a module only some programs import: the leaf
+'mana' in class 'Game'</code>). At run time an extern declares nothing: the name resolves when it is used
+(a declaration in any unit, the host's <code>add_global</code> or a host function defines it), and a use while
+nothing defines it raises the catchable text the output shows: nobody bound <code>G</code> or
+<code>spawn_on_network</code> in that run. <code>inline T name;</code> (the C++17 inline variable) is the
+spelling that creates the variable when no unit has: one variable shared by every unit that declares it, the
+first to run creating it with its initializer or its type's default. It is also the right spelling for a shared leaf that calls into a module only some programs import: the leaf
 declares the names it reaches for, and in a program that imports the module too the declaration is inert.</p>
 <h3 id="warn-mode-and-strict-mode"><code>[[warn_mode]]</code> and <code>[[strict_mode]]</code><a class="hlink" href="#warn-mode-and-strict-mode" aria-label="link">&#8203;</a></h3>
 <p>These set the checker's mode for a region of one unit. They compose, innermost wins, and the engine's mode

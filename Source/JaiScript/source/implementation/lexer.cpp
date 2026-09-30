@@ -60,6 +60,7 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"nocopy", token_type::nocopy_keyword},
     {"cast", token_type::cast_keyword},
     {"extern", token_type::extern_keyword},
+    {"inline", token_type::inline_keyword},
 };
 
 lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename)

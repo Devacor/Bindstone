@@ -175,7 +175,7 @@ inline const std::vector<std::string_view>& language_keywords() {
 		"int", "map", "array", "namespace", "null", "override", "private", "public", "return", "static", "string",
 		"this", "true", "void", "while", "auto", "var", "super", "weak_ptr", "shared_ptr", "try", "catch", "throw",
 		"switch", "case", "default", "fallthrough", "include", "import", "coroutine", "yield", "enum", "new",
-		"protected", "parallel_for", "nocopy", "cast", "extern", "double", "utf8_string"
+		"protected", "parallel_for", "nocopy", "cast", "extern", "inline", "double", "utf8_string"
 	};
 	return words;
 }

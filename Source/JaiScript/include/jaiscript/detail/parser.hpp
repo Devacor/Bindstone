@@ -104,6 +104,8 @@ namespace jai {
         checked_result<declaration_ptr> import_declaration();
         checked_result<expression_ptr> import_call(const source_location& at);
         checked_result<declaration_ptr> extern_declaration();
+        checked_result<declaration_ptr> inline_variable_declaration();
+        bool untyped_declaration_ahead() const;   // IDENT followed by ';' or '='
         checked_result<uint8_t> check_mode_attribute();
         std::optional<std::string> parse_operator_method_symbol();
         

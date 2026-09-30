@@ -139,7 +139,7 @@ script layer has been extended over it. A member the checker cannot find on such
 error; the ones it <em>can</em> find are still typed and still checked.</p>
 <p>What it does still gate is the name itself. Under the strict default a handle the host injects is an
 undeclared identifier, so scripts like the two above declare it: <code>extern self;</code>,
-<code>extern raw;</code>. The declaration is a no-op at run time. It only tells the checker the name
+<code>extern raw;</code>. The declaration defines nothing at run time. It only tells the checker the name
 arrives from outside the program. The typed form, <code>extern shared_ptr&lt;Creature&gt; raw;</code>, buys
 member checking against <code>Creature</code> for everything the checker can still see; a name passed to
 <code>extend</code> stays open either way.</p>

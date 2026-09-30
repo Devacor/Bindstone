@@ -455,10 +455,15 @@ engine stays usable", not by `check_throws`.
   compiler change: every field, exact constant bits).
 - **Escape hatches** (`docs/static_checking.md` "Escape hatches"): `extern [type|function] name;`
   declares a name defined outside the program (checker: a declared global, typed -> checked and
-  proven; both backends: the unit SHARES the visible global instead of declaring its own, and creates
-  the shared global as a typed null placeholder when no unit has declared it, which the first declaring
-  unit then adopts in place, Dev ruling 2026-09-12;
-  a function extern declares nothing); `[[warn_mode]]` / `[[strict_mode]]`
+  proven; both backends define nothing - the unit uses the visible global, and a read/store/call while
+  no unit and no host defines the name raises `'G' is declared extern but never defined (an 'inline'
+  declaration creates it)` (function form: no parenthesis), Dev ruling 2026-09-30; the text comes from
+  `environment::undefined_text` at every undefined-variable site, the extern record lives on the root
+  env, so defined lookups pay nothing). `inline T x [= init];` / `inline x;` (program scope and
+  namespaces; `variable_decl::is_inline`, `.jaibite` 28) is the C++17 inline variable: the first to run
+  creates it (initializer or type default, a program-scope cell owned by no unit, `environment::share`),
+  later ones adopt it without running the initializer (vm `op_decl_keep` + `op_decl_share`), and the first
+  plain declaration adopts the cell in place. `[[warn_mode]]` / `[[strict_mode]]`
   set the checker's mode for a unit (first declaration), a block (first statement) or one
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
   mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.

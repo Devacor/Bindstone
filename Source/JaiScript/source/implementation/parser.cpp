@@ -526,6 +526,9 @@ namespace {
                 case node_type::include_expr:
                     walk_expr(static_cast<include_expr*>(e)->path_expr.get());
                     break;
+                case node_type::import_expr:
+                    walk_args(static_cast<import_expr*>(e)->path_exprs);
+                    break;
                 case node_type::ternary_expr: {
                     auto* t = static_cast<ternary_expr*>(e);
                     walk_expr(t->condition.get());
@@ -1190,6 +1193,14 @@ checked_result<expression_ptr> parser::primary() {
             return make_error_code(parse_error_code::unexpected_token);
         }
         return std::make_shared<include_expr>(includeToken.location, path);
+    }
+
+    // import(...) in expression position: true when a module (re)ran (`if (import(MODULES)) { ... }`)
+    if (check(token_type::import_keyword) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren) {
+        advance();
+        const source_location at = previous().location;
+        advance();
+        return import_call(at);
     }
 
     // new T(args) / new T{args}: pure sugar for shared_ptr<T>(args) construction —
@@ -4244,15 +4255,58 @@ checked_result<declaration_ptr> parser::include_declaration() {
     return std::make_shared<include_decl>(previous().location, path);
 }
 
-checked_result<declaration_ptr> parser::import_declaration() {
-    // import "path" or import <path> or import(expr)
+// The call form's arguments after `import(`: paths or arrays of paths, then an optional jai::force (a `jai::` name
+// in the last position is a directive, so a misspelled one fails the load naming it)
+checked_result<expression_ptr> parser::import_call(const source_location& at) {
+    auto call = std::make_shared<import_expr>(at);
+    std::vector<expression_ptr> args;
+    if (!check(token_type::right_paren)) {
+        do {
+            if (check(token_type::identifier) && peek().lexeme == "jai" && current_ + 2 < stream_->size() &&
+                (*stream_)[current_ + 1].type == token_type::colon_colon && (*stream_)[current_ + 2].type == token_type::identifier &&
+                current_ + 3 < stream_->size() && (*stream_)[current_ + 3].type == token_type::right_paren) {
+                const token first = peek();
+                const std::string directive = "jai::" + std::string((*stream_)[current_ + 2].lexeme);
+                if (directive != "jai::force") {
+                    report_error("Unknown import directive '" + directive + "' (the directive is jai::force)", first);
+                    return make_error_code(parse_error_code::unexpected_token);
+                }
+                advance();
+                advance();
+                advance();
+                call->force = true;
+                break;
+            }
+            JAISCRIPT_TRY_ASSIGN(expression_ptr arg, expression());
+            args.push_back(std::move(arg));
+        } while (match(token_type::comma));
+    }
+    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after import paths"));
+    if (args.empty()) {
+        report_error("import(...) needs at least one path", previous());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    bool literal = true;
+    for (const auto& a : args) {
+        literal = literal && a->get_type() == node_type::literal_expr &&
+                  static_cast<literal_expr*>(a.get())->value.raw_storage_index() == script_value::TYPEID_STRING;
+    }
+    if (literal) {
+        for (const auto& a : args) { call->paths.push_back(static_cast<literal_expr*>(a.get())->value.unchecked_as_string()); }
+    } else {
+        call->path_exprs = std::move(args);
+    }
+    return expression_ptr(call);
+}
 
-    // Check for function-style syntax: import(expr)
+checked_result<declaration_ptr> parser::import_declaration() {
+    // import "path" or import <path> or import(paths...)
+
+    // The call form is an expression whose value a statement discards
     if (match(token_type::left_paren)) {
-        // Parse the expression inside parentheses
-        JAISCRIPT_TRY_ASSIGN(expression_ptr path_expr, expression());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after import expression"));
-        return std::make_shared<import_decl>(previous().location, path_expr);
+        const source_location at = previous().location;
+        JAISCRIPT_TRY_ASSIGN(expression_ptr call, import_call(at));
+        return declaration_ptr(std::make_shared<expression_decl>(at, std::move(call)));
     }
 
     // Original literal syntax

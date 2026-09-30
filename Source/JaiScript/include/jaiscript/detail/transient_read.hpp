@@ -241,6 +241,9 @@ namespace jai::detail {
                 case node_type::include_expr:
                     walk_expr(static_cast<include_expr*>(e)->path_expr.get(), false);
                     return;
+                case node_type::import_expr:
+                    for (const auto& a : static_cast<import_expr*>(e)->path_exprs) walk_expr(a.get(), false);
+                    return;
                 case node_type::ternary_expr: {
                     auto* t = static_cast<ternary_expr*>(e);
                     walk_expr(t->condition.get(), true);   // consumed before either branch runs

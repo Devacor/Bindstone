@@ -2463,6 +2463,15 @@ private:
 				if (inc->path_expr) { infer(inc->path_expr.get()); }
 				return ctype::make(ctype::unknown);   // include's value is the file's result
 			}
+			case node_type::import_expr: {
+				for (const auto& a : static_cast<import_expr*>(e)->path_exprs) {
+					const ctype t = infer(a.get());
+					if (!t.is_unknown() && t.kind != ctype::string_k && t.kind != ctype::utf8_k && t.kind != ctype::array_k) {
+						diag(diag_level::error, a->location, "an import path is a string or an array of strings, got '" + ctype_name(t) + "'");
+					}
+				}
+				return ctype::make(ctype::bool_k);   // true when a module (re)ran
+			}
 			case node_type::ternary_expr: {
 				auto* t = static_cast<ternary_expr*>(e);
 				infer(t->condition.get());
@@ -3973,6 +3982,13 @@ void static_checker::collect_names_expr(const expression* e) {
         case node_type::include_expr:
             collect_names_expr(static_cast<const include_expr*>(e)->path_expr.get());
             break;
+        case node_type::import_expr: {
+            auto* imp = static_cast<const import_expr*>(e);
+            has_includes_ = true;
+            if (!imp->path_exprs.empty()) { has_dynamic_includes_ = true; }   // literal paths are closure units (collect_unit_imports)
+            for (const auto& a : imp->path_exprs) { collect_names_expr(a.get()); }
+            break;
+        }
         case node_type::ternary_expr: {
             auto* t = static_cast<const ternary_expr*>(e);
             collect_names_expr(t->condition.get());
@@ -4091,6 +4107,9 @@ struct import_path_walker {
             case node_type::throw_expr: expr(static_cast<const throw_expr*>(e)->value.get()); break;
             case node_type::cast_expr: expr(static_cast<const cast_expr*>(e)->operand.get()); break;
             case node_type::yield_expr: expr(static_cast<const yield_expr*>(e)->value.get()); break;
+            case node_type::import_expr:
+                for (const auto& p : static_cast<const import_expr*>(e)->paths) { out.push_back(p); }
+                break;
             default: break;
         }
     }

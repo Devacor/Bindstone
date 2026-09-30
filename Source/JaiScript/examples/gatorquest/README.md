@@ -158,16 +158,17 @@ jaiscript scripts/gatorquest.jai -- dev
 Edit any `gq_*.jai` script while playing and save it: on the next frame it re-runs in place, and the HUD says what
 was reloaded (or why the edit was rejected, with the file and line). The world, your gator and every monster carry on.
 
-Dev mode reaches every module's `import` again each frame. An import re-runs its module only when the file changed,
-and checks it (with the modules it imports) before any of it runs, so a mistake is rejected and the running code
-stays as it was. When it re-runs, functions pick up their new bodies everywhere, classes gain or lose fields with live
+Dev mode imports the whole module list once per frame, as one group: `import(DEV_MODULES)`. The engine looks at the
+files in check passes (at most every 0.2 seconds; between passes the import costs nanoseconds), so a frame sees all of
+your saved edits or none of them. Every changed module is parsed and checked, knowing what the others declare, before
+any of them runs: a mistake anywhere is rejected as one error, nothing applies, and the running code stays as it was
+until the file is fixed. When they re-run, functions pick up their new bodies everywhere, classes gain or lose fields with live
 instances migrating, and enums take their new members. A top-level declaration with an initializer takes its new
 value (change a monster's line in `gq_data.jai` and the next spawn has the new stats); one without an initializer
 keeps what it holds. That is the whole convention: state is declared without an initializer. `gq_state.jai` and
 `gq_cstate.jai` declare nothing else, so they reload too; the starting values that are not a type's default live in
 `client_state_init()` and `sim_reset()`. A run-time error while a module re-runs is reported as well, and the
-declarations above the failing line have already taken effect; saving the fixed file re-runs it whole. With nothing
-edited, the check costs about 0.4 ms per frame for the game's 34 modules.
+declarations above the failing line have already taken effect; saving the fixed file re-runs it whole.
 
 ## Headless modes (tests and captures)
 

@@ -87,18 +87,36 @@ import &quot;mod_count.jai&quot;
 import &quot;mod_count.jai&quot;
 print(&quot;import caches (default: re-run only if the file changed): load_count = {}&quot;, load_count);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">import caches (default: re-run only if the file changed): load_count = 1</code></pre></div>
-<p>And import is <strong>not an expression</strong>. It never yields a value:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto x = import &quot;mod_math.jai&quot;;</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:10: Expected expression</code></pre></div>
+<p>The statement form yields nothing (<code>auto x = import &quot;mod_math.jai&quot;;</code> does not parse). The call form <code>import(&quot;file.jai&quot;)</code> is an expression: <code>true</code> when the module ran on this reach, <code>false</code> when it had nothing to do:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">bool first = import(&quot;mod_math.jai&quot;);
+bool again = import(&quot;mod_math.jai&quot;);
+print(&quot;first reach ran it: {}, the next one: {}&quot;, first, again);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">first reach ran it: true, the next one: false</code></pre></div>
 <h3 id="reloading-from-a-running-program">Reloading from a running program<a class="hlink" href="#reloading-from-a-running-program" aria-label="link">&#8203;</a></h3>
 <p>An import re-checks its file each time it is reached, so a running program reloads the modules it is working on by reaching their imports again. A game loop that keeps its module list in one file includes that list where the reload should happen:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript &mdash; modules.jai</span><pre><code class="lang-jai">import &quot;rules.jai&quot;;
 import &quot;monsters.jai&quot;;</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void tick() {
+<div class="codeblock cb-jai" data-host="the game&#x27;s loop (DEV_MODE, step_world)"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void tick() {
     if (DEV_MODE) { include &quot;modules.jai&quot;; }   // each import re-runs only a module whose file changed
     step_world();
 }</code></pre></div>
 <p>An unchanged module costs its stamp check. A touched one is parsed and checked, together with the modules it imports, before any of it runs: a mistake raises a catchable error naming the file and line, and the program keeps the code it had. When the checks pass the module runs as its own unit: its functions and classes replace the old ones in place (live instances migrate, callers see the new bodies), and its top-level statements run again. A variable it declares with an initializer (<code>int spawn_rate = 3;</code>) takes the new value; one declared without (<code>int kills;</code>, <code>array&lt;Item&gt; pack;</code>) keeps the value it holds, unless its declared type changed, which resets it to the new type&#x27;s default. So state lives in a reloaded module simply by being declared without an initializer.</p>
+<p><strong>An import in a game loop costs nanoseconds, and a frame sees all of its edits or none.</strong> Asking the filesystem for a module&#x27;s stamp takes microseconds, so imports check in passes. At most once per <code>import_recheck_interval</code> (0.2 seconds by default) the first import reached opens a check pass, and every import reached during the pass asks for its modules&#x27; stamps, each module once. The pass closes when an import reaches a module it already checked in this pass (the frame loop came around) or when the call from the host returns. Between passes an import does nothing: a counter, a comparison against a coarse clock the engine refreshes every 16 import reaches and at each call from the host, and a branch. One frame therefore checks every import it reaches and the frames after it check none, so a touched file is picked up within about 0.2 seconds, and never half of a set of edits in one frame and the rest in the next. <code>import_recheck_interval(seconds)</code> sets the window from a script (the host spells it <code>engine::import_recheck_interval</code>), <code>import_recheck_interval()</code> reads it, and 0 checks on every reach. A module that has never run loads when it is first reached, pass or not.</p>
+<p>Modules that must change together go in one import: <code>import(&quot;rules.jai&quot;, &quot;monsters.jai&quot;)</code>, or <code>import(MODULES)</code> with an array of paths. The group is one decision. Every changed module is read, parsed and checked, together with the modules it imports and knowing the names the others declare, before any of them runs: a mistake anywhere is one catchable error and nothing is applied, and the edits then wait until a file that failed changes again. When every check passes the changed modules run in the listed order, and the value is <code>true</code> when any of them ran. This is the guarded reload a game loop makes once per frame:</p>
+<div class="codeblock cb-jai" data-host="the game&#x27;s loop (DEV_MODE, step_world)"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; MODULES = [&quot;rules.jai&quot;, &quot;monsters.jai&quot;, &quot;items.jai&quot;];
+void tick() {
+    if (DEV_MODE) {
+        try {
+            if (import(MODULES)) { print(&quot;reloaded&quot;); }
+        } catch (e) {
+            print(&quot;reload failed: {}&quot;, e);   // the program keeps the code it had
+        }
+    }
+    step_world();
+}</code></pre></div>
+<p>A reload trigger that fires now and then (an F5 key, an editor&#x27;s ping) asks for a pass at once with the <code>jai::force</code> directive, the last argument of the call form:</p>
+<div class="codeblock cb-jai" data-host="the game&#x27;s input (key_pressed)"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">if (key_pressed(F5)) { import(MODULES, jai::force); }   // checks now: touched files re-run, unchanged ones do nothing</code></pre></div>
+<p>A forced import opens a pass whatever the window: a moved stamp re-runs its module with the usual checks first, an unchanged file does not re-run. <code>import(&quot;rules.jai&quot;)</code> loads exactly like <code>import &quot;rules.jai&quot;;</code> and also yields its value, and a directive other than <code>jai::force</code> fails the load with a parse error naming it.</p>
 <h3 id="import-modes-engine-import-behavior">Import modes (<code>engine::import_behavior</code>)<a class="hlink" href="#import-modes-engine-import-behavior" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>Mode</th><th>Behavior</th></tr></thead><tbody><tr><td><code>file_timestamp</code> (<strong>default</strong>)</td><td>Re-imports only when the file&#x27;s mtime changed since it was last imported. The hot-reload-friendly default.</td></tr><tr><td><code>once</code></td><td>Import exactly once; ignore later file changes.</td></tr><tr><td><code>always</code></td><td>Treat <code>import</code> as <code>include</code> (runs every time).</td></tr></tbody></table></div>
 <p>Set with <code>engine-&gt;set_import_behavior(engine::import_behavior::once);</code>.</p>

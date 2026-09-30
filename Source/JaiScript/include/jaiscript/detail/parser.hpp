@@ -96,6 +96,7 @@ namespace jai {
         bool paren_group_ends_statement(size_t lparen) const;   // `name(...)` followed by ';': an object declaration, never a function
         checked_result<declaration_ptr> include_declaration();
         checked_result<declaration_ptr> import_declaration();
+        checked_result<expression_ptr> import_call(const source_location& at);
         checked_result<declaration_ptr> extern_declaration();
         checked_result<uint8_t> check_mode_attribute();
         std::optional<std::string> parse_operator_method_symbol();

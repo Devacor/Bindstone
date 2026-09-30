@@ -235,7 +235,9 @@ FOUNDRY_REGISTER(my_tests)
 Assertions: `check`, `check_eq(expected,actual)`, `check_ne`, `check_near(exp,act,tol)`,
 `check_throws([]{...})`, `check_true/false`, `check_null/not_null`, `check_gt/lt/ge/le`.
 Tests auto-register and run via `main_test_runner.cpp`. Add tests to an EXISTING suite file
-when possible (no reconfigure); a new file needs a CMake reconfigure.
+when possible (no reconfigure); a new file needs a CMake reconfigure. `make_engine()` (the runner's factory) sets
+`import_recheck_interval(0)` so a test that touches a file and imports it again sees the change at once; an engine
+from `engine::make()` keeps the 0.2 s default and must set 0 itself for that pattern.
 
 When a parse error is recoverable the parser *synchronizes* and `execute()` may return null
 (NOT throw) — so "deeply nested input doesn't crash" is tested by "execute returns and the
@@ -475,7 +477,22 @@ engine stays usable", not by `check_throws`.
   the host's `execute_file` of the same file, a re-executed string, a top-level include run again) keeps a program-scope
   variable declared WITHOUT an initializer (`int kills;`, `var loose;`) unless its declared type changed (then the new
   type's default, like a class field on hot reload); a declaration that assigns re-runs its initializer (Dev ruling
-  2026-09-27; `detail/redeclaration.hpp`, vm `op_decl_keep`, `.jaibite` version 22). The host reads and
+  2026-09-27; `detail/redeclaration.hpp`, vm `op_decl_keep`, `.jaibite` version 22). Imports check in ENGINE-WIDE PASSES
+  (Dev ruling 2026-09-28): at most once per `import_recheck_interval` (default 0.2 s; `engine::import_recheck_interval`,
+  script `import_recheck_interval(seconds)`, 0 = every reach) the first import reached opens a pass
+  (`execution_limits::import_pass_open`), every import reached in it stats its modules once (`import_record::checked_pass`),
+  and the pass closes when a site reaches a path it already checked in this pass (the frame loop came around; a nested
+  import inside a re-running module never closes it) or at the next top-level execute/resume (`reset_for_execute`); between
+  passes an import is a counter, a compare against the coarse clock and a branch (`engine::import_skips`; a computed site
+  also hashes its paths against the ones it ran), so a frame checks every import or none. A module that never ran loads
+  on first reach, pass or not. The call form `import(...)` is an EXPRESSION (`import_expr`, `.jaibite` 26): true when a
+  module (re)ran; its arguments are paths or arrays of paths (one = the plain load; more, or an array, = a GROUP: one
+  decision, every changed module parsed + checked with the others' names published before any runs, one catchable error
+  applies nothing, a module that failed at its current stamp holds the group quietly until it changes, then the changed
+  ones run in order); a trailing `jai::force` opens a pass now. `engine::import_modules` is the one step both backends
+  call; `engine::import_stat_count()` counts its filesystem queries (0 per idle import, 1 per module per pass). The
+  resolution key caches the working directory (refreshed when a pass opens). Foundry's `make_engine()` sets the window to
+  0 (tests touch and re-import at once). The host reads and
   assigns the newest cell. Zero cost
   on the VM's armed lookup paths (`string_symbolizer::shadow_count`, `environment::define_variable`), and zero
   per-call cost until the first shadow: the running unit is derived from the executing frame and the ambient

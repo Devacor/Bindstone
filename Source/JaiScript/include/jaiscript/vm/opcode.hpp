@@ -89,7 +89,7 @@ namespace jai::vm {
 
         op_yield,           // a=has value (pops it); suspends the active fiber, resume value is null
         op_include,         // a=literal path message index (k_invalid_u32 = expr), b=path-is-expr; pushes result
-        op_import,          // a=literal path message index (k_invalid_u32 = expr), b=path-is-expr; pushes result
+        op_import,          // a=node index of the site (import_decl or import_expr), b=computed path values popped, c=1: pushes whether a module (re)ran
 
         op_fused_cmp_jump,  // a=jump-if-false target, b=fused_binary_proto index (comparison),
                             // c=condition proved bool; BINARY_FUSED+JUMP_IF_FALSE superinstruction

@@ -11,6 +11,7 @@
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/string_element.hpp>
+#include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
@@ -2267,7 +2268,7 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
     fs::path p(path);
     std::string key;
     if (engine_ptr) {
-        key = engine::resolution_key(path, from_file);
+        key = engine_ptr->resolution_key(path, from_file);
         if (const std::string* remembered = engine_ptr->remembered_resolution(key)) { return *remembered; }
     }
     std::vector<std::string> misses;
@@ -8720,6 +8721,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             } else if (e->get_type() == node_type::include_expr) {
                 auto* ie = static_cast<include_expr*>(e);
                 if (ie->path_expr) find_identifiers(ie->path_expr.get());
+            } else if (e->get_type() == node_type::import_expr) {
+                for (const auto& a : static_cast<import_expr*>(e)->path_exprs) find_identifiers(a.get());
             } else if (e->get_type() == node_type::cast_expr) {
                 find_identifiers(static_cast<cast_expr*>(e)->operand.get());
             }
@@ -8945,6 +8948,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             case node_type::include_expr:
                 if (static_cast<include_expr*>(e)->path_expr)
                     collect_outer_slots_expr(static_cast<include_expr*>(e)->path_expr.get());
+                break;
+            case node_type::import_expr:
+                for (const auto& a : static_cast<import_expr*>(e)->path_exprs) collect_outer_slots_expr(a.get());
                 break;
             case node_type::cast_expr:
                 collect_outer_slots_expr(static_cast<cast_expr*>(e)->operand.get());
@@ -12875,50 +12881,51 @@ checked_result<void> interpreter::visit_include_expr(include_expr* expr) {
     return include_into_value_stack(expr->path_expr.get(), expr->path);
 }
 
-checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
-    // Get the engine reference
-    auto engine_ptr = engine_;
-    if (!engine_ptr) {
-        // [ErrorText] Engine reference expired during import processing
+// The import step both forms take (KEEP BYTE-PARALLEL with vm_backend::exec_import): the engine's check pass decides
+// whether this reach looks at the disk; the value is whether a module (re)ran (the statement form's is null)
+checked_result<void> interpreter::import_step(import_site& site, const std::vector<std::string>& literal,
+                                              const std::vector<expression_ptr>& computed, bool force, bool yields) {
+    if (!engine_) {
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-
-    // Get the path either from literal or expression
-    std::string path;
-    if (decl->path_expr) {
-        // Evaluate the expression to get the path
-        JAISCRIPT_TRY(dispatch_expr(decl->path_expr.get()));
-        script_value path_value = pop_value();
-
-        // Convert to string
-        if (path_value.type() != script_value_type::jai_string_type) {
-            // [ErrorText] Import path expression must evaluate to a string
-            return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+    std::vector<std::string> paths;
+    if (!computed.empty()) {
+        for (const auto& arg : computed) {
+            JAISCRIPT_TRY(dispatch_expr(arg.get()));
+            script_value value = pop_value();
+            JAISCRIPT_TRY(detail::append_import_paths(value, paths, engine_));
         }
-        path = path_value.as<std::string>();
+        if (!force && engine_->import_skips(site, paths)) {
+            push_value(yields ? make_value(false) : make_value());
+            return {};
+        }
     } else {
-        // Use the literal path
-        path = decl->path;
+        if (!force && engine_->import_skips(site)) {
+            push_value(yields ? make_value(false) : make_value());
+            return {};
+        }
+        paths = literal;
     }
-    if (engine_ptr->import_is_idle(path)) {   // the stamp check alone (KEEP BYTE-PARALLEL with vm_backend::exec_import)
-        push_value(make_value());
-        return {};
-    }
-
-    // Resolve the file path
-    auto resolve_result = resolve_include_path(path, engine_ptr);
-    if (!resolve_result) {
-        return resolve_result.error_value();
-    }
-    std::string resolved_path = std::move(resolve_result.value());
-
     nested_failure_.parked = false;
     try {
-        push_value(engine_ptr->execute_import(resolved_path));
+        auto ran = engine_->import_modules(site, paths, force);
+        if (!ran) { return ran.error_value(); }
+        push_value(yields ? make_value(ran.value()) : make_value());
     } catch (const std::exception& e) {
         return raise_nested_failure(e);
     }
     return {};
+}
+
+checked_result<void> interpreter::visit_import_decl(import_decl* decl) {
+    if (decl->path_expr) {
+        return import_step(decl->site, {}, std::vector<expression_ptr>{decl->path_expr}, false, false);
+    }
+    return import_step(decl->site, std::vector<std::string>{decl->path}, {}, false, false);
+}
+
+checked_result<void> interpreter::visit_import_expr(import_expr* expr) {
+    return import_step(expr->site, expr->paths, expr->path_exprs, expr->force, true);
 }
 
 // Execute a method AST with a given environment
@@ -15181,6 +15188,8 @@ checked_result<void> interpreter::dispatch_expr(expression* expr) {
             return visit_new_expr(static_cast<new_expr*>(expr));
         case node_type::include_expr:
             return visit_include_expr(static_cast<include_expr*>(expr));
+        case node_type::import_expr:
+            return visit_import_expr(static_cast<import_expr*>(expr));
         case node_type::ternary_expr:
             return visit_ternary_expr(static_cast<ternary_expr*>(expr));
         case node_type::array_literal_expr:
@@ -15219,6 +15228,10 @@ void interpreter::capture_stack_trace() {
         top_level_node_ ? top_level_node_->location.line : 0
     });
     trace_captured_ = true;
+}
+
+void interpreter::note_coarse_clock(std::chrono::steady_clock::time_point now) {
+    if (engine_ && !engine_->parallel_region_active()) { engine_->execution_limits().coarse_now = now.time_since_epoch().count(); }
 }
 
 // KEEP BYTE-PARALLEL with vm_backend::park_nested_failure / absorb_nested_trace

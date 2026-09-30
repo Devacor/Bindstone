@@ -1163,6 +1163,7 @@ namespace jai::vm {
         void capture_stack_trace();
         void absorb_nested_trace();
         op_status raise_nested_failure(const std::exception& e);
+        op_status raise_nested_failure_statement(const std::exception& e);
 
         script_value make_null() const;
         bool is_truthy(const script_value& value);

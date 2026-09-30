@@ -16,6 +16,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace jai {
@@ -94,6 +95,14 @@ public:
     void post_command(std::function<void()> fn);       // run on the parked thread; wakes it
     void detach();                                     // force-resume + disarm (disconnect/shutdown)
     void set_on_stopped(std::function<void(const stop_info&)> cb) { on_stopped_ = std::move(cb); }
+    // Whether a source-path breakpoint on `path` can bind: "<script>", or a unit the engine has
+    // parsed under that path (spelled as given, or normalized like set_source_breakpoints does).
+    bool source_known(const std::string& path) const;
+    // Fires on the script thread the first time the engine parses a unit under a new path.
+    void set_on_source_loaded(std::function<void(const std::string&)> cb);
+
+    // ---- script thread: the engine reports each unit's path as it is parsed or reused ----
+    void note_source(const std::string& path);
 
     // ---- inspection: call ONLY on the parked script thread (via post_command) ----
     script_value get_variable(const std::string& name) const;   // live scope at the stop
@@ -175,6 +184,12 @@ private:
     bool in_command_ = false;   // reentrancy guard (touched only on the parked thread)
 
     std::function<void(const stop_info&)> on_stopped_;
+
+    // Paths of the units the engine has attributed, for source_known (any thread, under sources_mtx_).
+    mutable std::mutex sources_mtx_;
+    std::unordered_set<std::string> sources_;
+    std::function<void(const std::string&)> on_source_loaded_;
+    std::atomic<bool> normalize_sources_{true};   // the engine's filesystem grant as of the script thread's last note/sync
     stop_info current_stop_;   // last stop; read only on the parked script thread
 };
 

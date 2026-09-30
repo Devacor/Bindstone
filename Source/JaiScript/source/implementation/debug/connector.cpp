@@ -40,6 +40,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -297,6 +298,13 @@ struct debug_connector::impl {
     std::string in_buf_;
     std::string send_buf_;
 
+    // Breakpoints answered unverified because no loaded unit carries their path yet; a
+    // `breakpoint` event verifies them when the engine parses that path (script thread).
+    struct pending_breakpoint { int id; int line; };
+    std::mutex pending_mtx_;
+    std::unordered_map<std::string, std::vector<pending_breakpoint>> pending_bps_;
+    int next_bp_id_ = 1;   // connector thread only
+
     std::mutex out_mtx_;
     std::deque<std::string> out_q_;
     std::atomic<int> out_seq_{1};
@@ -398,6 +406,7 @@ struct debug_connector::impl {
         engine_ = eng;
         ctrl_ = &eng->debugger();
         ctrl_->set_on_stopped([this](const stop_info& si) { on_stop(si); });
+        ctrl_->set_on_source_loaded([this](const std::string&) { verify_pending(); });
         if (!open_listener()) return;
         if (!make_wake_pair(wake_r_, wake_w_)) { close_sock(listener_); listener_ = kInvalid; return; }
         running_.store(true, std::memory_order_release);
@@ -412,7 +421,28 @@ struct debug_connector::impl {
         running_.store(false, std::memory_order_release);
         poke_wake();
         if (thread_.joinable()) thread_.join();
+        if (ctrl_) ctrl_->set_on_source_loaded(nullptr);
         started_ = false;
+    }
+
+    void verify_pending() {
+        if (!running_.load(std::memory_order_acquire)) return;
+        std::vector<pending_breakpoint> ready;
+        {
+            std::lock_guard<std::mutex> lk(pending_mtx_);
+            for (auto it = pending_bps_.begin(); it != pending_bps_.end();) {
+                if (ctrl_->source_known(it->first)) {
+                    ready.insert(ready.end(), it->second.begin(), it->second.end());
+                    it = pending_bps_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        for (const auto& bp : ready) {
+            enqueue(make_event("breakpoint", "{\"reason\":\"changed\",\"breakpoint\":{\"id\":" + std::to_string(bp.id)
+                + ",\"verified\":true,\"line\":" + std::to_string(bp.line) + "}}"));
+        }
     }
 
     void end_session() {
@@ -618,13 +648,26 @@ struct debug_connector::impl {
                     for (const auto& l : lv->arr) lines.push_back(l.as_int());
         }
         ctrl_->set_source_breakpoints(path, lines);
+        const bool known = ctrl_->source_known(path);
+        std::vector<pending_breakpoint> answered;
         std::string arr = "[";
         for (size_t i = 0; i < lines.size(); ++i) {
+            const int id = next_bp_id_++;
+            answered.push_back({id, lines[i]});
             if (i) arr += ",";
-            arr += "{\"verified\":true,\"line\":" + std::to_string(lines[i]) + "}";
+            arr += "{\"id\":" + std::to_string(id) + ",\"verified\":" + (known ? "true" : "false")
+                + ",\"line\":" + std::to_string(lines[i]);
+            if (!known) arr += ",\"message\":\"" + json_escape("no loaded script has this path yet: " + path) + "\"";
+            arr += "}";
         }
         arr += "]";
+        {
+            std::lock_guard<std::mutex> lk(pending_mtx_);
+            if (known || answered.empty()) pending_bps_.erase(path);
+            else pending_bps_[path] = std::move(answered);
+        }
         enqueue(make_response(req_seq, "setBreakpoints", true, "{\"breakpoints\":" + arr + "}"));
+        if (!known) verify_pending();   // a unit that loaded between the check and the record
     }
 
     // ---- park-only replies (run on the parked script thread) ----

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/debug/controller.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 
 #include <atomic>
 #include <condition_variable>
@@ -9,6 +10,7 @@
 #include <chrono>
 #include <future>
 #include <filesystem>
+#include <fstream>
 
 using namespace jai::foundry;
 
@@ -376,6 +378,35 @@ public:
             check_eq(1, stops[0].line);
             check_eq(canonical, stops[1].file);
             check_eq(2, stops[1].line);
+        });
+
+        test("execute_file_attributes_the_canonical_path_so_source_breakpoints_bind", [this]() {
+            auto dir = jai::foundry::test_temp_directory() / "execute_file_canonical";
+            std::filesystem::create_directories(dir);
+            { std::ofstream(dir / "mixed.jai") << "var a = 1;\nvar b = 2;\n"; }
+            const std::string canonical = std::filesystem::canonical(dir / "mixed.jai").string();
+            const std::string mixed = dir.generic_string() + "/./" + "mixed.jai";   // forward slashes and a dot segment
+            auto eng = make_engine();
+            eng->jaibite_cache(false);
+            auto& dbg = eng->debugger();
+            std::vector<jai::debug::stop_info> stops;
+            dbg.set_on_stopped([&](const jai::debug::stop_info& info) {
+                stops.push_back(info);
+                dbg.resume();
+            });
+            set_source_breakpoints_for_test(dbg, canonical, {2});
+            dbg.set_enabled(true);
+            eng->execute_file(mixed);
+            dbg.set_enabled(false);
+            check_eq(size_t(1), stops.size(), "a breakpoint set on the canonical path binds a file run through another spelling");
+            if (!stops.empty()) { check_eq(canonical, stops[0].file); }
+            { std::ofstream(dir / "throws.jai") << "function f() { throw \"x\"; }\nf();\n"; }
+            try {
+                eng->execute_file(dir.generic_string() + "/./throws.jai");
+            } catch (...) {}
+            auto trace = eng->last_stack_trace();
+            check_false(trace.empty());
+            if (!trace.empty()) { check_eq(std::filesystem::canonical(dir / "throws.jai").string(), trace[0].file); }
         });
 
         test("native_breakpoint_labels_survive_disable_and_rearm", [this]() {

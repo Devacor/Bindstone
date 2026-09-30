@@ -504,86 +504,9 @@ namespace jai::detail {
 		return ref_non_lvalue_error();   // unreachable: step_count >= 1
 	}
 
-	// ---- Constrained store-through enforcement (typed element/field refs) ----
-	// ELEMENT refs mirror the backends' direct subscript-assign twins VERBATIM
-	// (vm_is_element_type_compatible / vm_value_type_name are the source of truth; keep
-	// in sync): the same store into the same typed array must pass or fail with the
-	// same text whether spelled a[i] = v or written through a bound ref. FIELD refs
-	// have no direct enforcement counterpart (direct field writes accept anything), so
-	// their constraint is looser: actual-class resolution, subtypes, and raw instances
-	// into shared_ptr-tagged fields are accepted.
-
-	// Field constraints render shared_ptr tags in full: their type_name alone is the
-	// pointee class, which made "Cannot assign 'S' to field of type 'S'" possible
-	inline std::string ref_field_constraint_name(type_info_ptr info) {
-		if (info && info->base_type == script_value_type::jai_shared_ptr_type && !info->type_name.empty()) {
-			return "shared_ptr<" + info->type_name + ">";
-		}
-		return type_info_display_name(info);
-	}
-
-	// Object constraints resolve the ACTUAL instance class (a var local's tag is 'any';
-	// shared_ptr values wrap the same object_holder) and accept subtypes - mirrors
-	// try_convert_for_parameter's acceptance for typed class parameters.
-	inline bool ref_object_constraint_accepts(const script_value& actual, type_info_ptr constraint, engine* eng) {
-		auto holder = actual.get_object_holder();
-		if (!holder) {
-			return false;
-		}
-		if (constraint->type_name.empty()) {
-			return true;
-		}
-		const class_definition* class_def = nullptr;
-		std::shared_ptr<class_definition> engine_def;
-		if (holder->is_class_instance_wrapper && holder->data) {
-			auto instance = std::static_pointer_cast<class_instance>(holder->data);
-			class_def = instance->get_class_definition();
-		} else if (eng) {
-			engine_def = holder->type_id != UINT64_MAX ? eng->get_class_definition(holder->type_id)
-			                                           : eng->get_class_definition(std::string(holder->type_name));
-			class_def = engine_def.get();
-		}
-		if (class_def && class_def->is_subtype_of(constraint->type_name)) {
-			return true;
-		}
-		if (holder->type_name == constraint->type_name) {
-			return true;
-		}
-		auto tag = actual.get_type_info();
-		return tag && tag->base_type != script_value_type::jai_any_type &&
-		       tag->type_name == constraint->type_name;
-	}
-
-	inline bool ref_container_kind_compatible(const script_value& actual_element, type_info_ptr element_type,
-	                                          script_value_type elem_type, script_value_type target_type) {
-		if (target_type == script_value_type::jai_array_type && elem_type == script_value_type::jai_array_type) {
-			auto inner_target = element_type->element_type();
-			auto elem_type_info = actual_element.get_type_info();
-			auto inner_elem = elem_type_info ? elem_type_info->element_type() : nullptr;
-			if (inner_target && inner_elem) {
-				return inner_target->base_type == inner_elem->base_type;
-			}
-			if (inner_target && !inner_elem) {
-				return false;
-			}
-			return true;
-		}
-		if (target_type == script_value_type::jai_map_type && elem_type == script_value_type::jai_map_type) {
-			auto target_key = element_type->key_type();
-			auto target_val = element_type->value_type();
-			auto elem_type_info = actual_element.get_type_info();
-			auto elem_key = elem_type_info ? elem_type_info->key_type() : nullptr;
-			auto elem_val = elem_type_info ? elem_type_info->value_type() : nullptr;
-			if (target_key && elem_key && target_key->base_type != elem_key->base_type) {
-				return false;
-			}
-			if (target_val && elem_val && target_val->base_type != elem_val->base_type) {
-				return false;
-			}
-			return true;
-		}
-		return false;
-	}
+	// ---- Constrained store-through enforcement ----
+	// An element reference runs the direct subscript store's kernel and a field reference the direct field store's table
+	// (Dev ruling 2026-09-30): the same store passes or fails with one text whether spelled directly or through a bound ref.
 
 	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02; same symbol as container_enforce.hpp)
 	bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
@@ -594,51 +517,7 @@ namespace jai::detail {
 		return container_element_compatible(element, element_type, eng);
 	}
 
-	inline bool ref_field_constraint_compatible(const script_value& element, type_info_ptr element_type, engine* eng) {
-		const script_value& actual_element = element.is_reference() ? element.deref() : element;
-		if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
-			return true;
-		}
-		auto elem_type = actual_element.type();
-		auto target_type = element_type->base_type;
-		if (target_type == script_value_type::jai_object_type) {
-			if (ref_object_constraint_accepts(actual_element, element_type, eng)) {
-				return true;
-			}
-			if (elem_type == target_type) {
-				// Preserve the permissive fallback for untagged/unnamed values
-				auto elem_type_info = actual_element.get_type_info();
-				return !elem_type_info || element_type->type_name.empty();
-			}
-			return false;
-		}
-		if (elem_type == target_type) {
-			return true;
-		}
-		if (target_type == script_value_type::jai_shared_ptr_type) {
-			// Dynamic (var) tags hide the shared_ptr marker behind current_type();
-			// the holder is the ground truth (name laxity matches the tagged path)
-			auto tag = actual_element.get_type_info();
-			if ((!tag || tag->base_type == script_value_type::jai_any_type) &&
-			    actual_element.get_object_holder() != nullptr) {
-				return true;
-			}
-			// A raw same-class/subtype instance is accepted into a shared_ptr-tagged
-			// field: every direct field-write path accepts it (it clones in as object)
-			if (ref_object_constraint_accepts(actual_element, element_type, eng)) {
-				return true;
-			}
-		}
-		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
-			return true;
-		}
-		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
-			return true;
-		}
-		return ref_container_kind_compatible(actual_element, element_type, elem_type, target_type);
-	}
-
-	inline checked_result<script_value> ref_convert_for_constraint(engine* eng, const script_value& element, type_info_ptr element_type, bool is_field) {
+	inline checked_result<script_value> ref_convert_for_element(engine* eng, const script_value& element, type_info_ptr element_type) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 		auto actual_type_info = actual_element.get_type_info();
 		if (actual_type_info && actual_type_info->base_type == script_value_type::jai_shared_ptr_type) {
@@ -647,52 +526,29 @@ namespace jai::detail {
 		if (!element_type || element_type->base_type == script_value_type::jai_any_type) {
 			return actual_element.clone();
 		}
-		auto elem_type = actual_element.type();
-		auto target_type = element_type->base_type;
-		// an element takes the direct store's rows: the class copy and tag, int/float/bool conversions, the byte range (a bool
-		// buffer handed an int through a reference read the int as a bool payload)
-		if (!is_field && ((target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) ||
-		                  target_type == script_value_type::jai_int_type || target_type == script_value_type::jai_float_type ||
-		                  target_type == script_value_type::jai_bool_type)) {
+		const auto elem_type = actual_element.type();
+		const auto target_type = element_type->base_type;
+		// the direct store's rows: the class copy and tag, int/float/bool conversions, the byte range
+		if ((target_type == script_value_type::jai_object_type && elem_type == script_value_type::jai_object_type) ||
+		    target_type == script_value_type::jai_int_type || target_type == script_value_type::jai_float_type ||
+		    target_type == script_value_type::jai_bool_type) {
 			return convert_container_element(eng, actual_element, element_type);
-		}
-		if (target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_float_type) {
-			auto converted = checked_float_to_integer(actual_element.unchecked_as_float());   // the scalar slot's kernel
-			if (!converted) { return converted.error_value(); }
-			return script_value(converted.value(), eng);
-		}
-		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
-			return script_value(static_cast<script_float>(actual_element.unchecked_as_int()), eng);
 		}
 		return actual_element.clone();
 	}
 
-	inline bool ref_constraint_compatible(const script_value& value, type_info_ptr constraint,
-	                                      engine* eng, bool is_field) {
-		return is_field ? ref_field_constraint_compatible(value, constraint, eng)
-		                : ref_element_constraint_compatible(value, constraint, eng);
-	}
-
-	inline checked_result<void> ref_constraint_error(string_symbolizer* symbolizer, const script_value& value,
-	                                                 type_info_ptr constraint, bool is_field) {
+	inline checked_result<void> ref_element_error(string_symbolizer* symbolizer, const script_value& value, type_info_ptr constraint) {
 		uint64_t value_type_id = symbolizer->intern(container_value_type_name(value));
-		uint64_t expected_type_id = symbolizer->intern(is_field ? ref_field_constraint_name(constraint)
-		                                                        : type_info_display_name(constraint));
-		return checked_result<void>(
-			make_error_code(is_field ? runtime_error_code::type_mismatch
-			                         : runtime_error_code::array_element_type_mismatch),
-			is_field ? "Cannot assign '{0}' to field of type '{1}'"
-			         : "Cannot assign '{0}' to element of type '{1}'",
-			value_type_id, expected_type_id);
+		uint64_t expected_type_id = symbolizer->intern(type_info_display_name(constraint));
+		return checked_result<void>(make_error_code(runtime_error_code::array_element_type_mismatch),
+			"Cannot assign '{0}' to element of type '{1}'", value_type_id, expected_type_id);
 	}
 
-	// Typed OBJECT fields stay nullable through a reference: the declaration idiom is
-	// `TreeNode left = null`, so null must round-trip (elements keep their stricter
-	// existing semantics - this branch is field-only).
-	inline bool ref_field_accepts_null(const script_value& value, type_info_ptr constraint) {
-		return value.deref().is_null() &&
-		       (constraint->base_type == script_value_type::jai_object_type ||
-		        constraint->base_type == script_value_type::jai_shared_ptr_type);
+	// A field reference stores what the direct field store stores, with its text
+	inline checked_result<script_value> ref_field_store(const auto& holder, const script_value& value, engine* eng) {
+		const class_definition* owner = holder.owner_instance ? holder.owner_instance->get_class_definition() : nullptr;
+		return field_store_convert(clone_for_assignment(value), holder.container_element_type, eng,
+		                           holder.field_id == UINT64_MAX ? 0 : holder.field_id, owner);
 	}
 
 	// Typed reference-return epilogue (int& f() / -> auto&): the result passes through
@@ -775,15 +631,16 @@ namespace jai::detail {
 			return {};
 		}
 		type_info_ptr constraint = holder->container_element_type;
-		const bool is_field = holder->owner_instance != nullptr;
-		if (is_field && ref_field_accepts_null(value, constraint)) {
-			ref_write_through(refLocal, clone_for_assignment(value));
+		if (holder->owner_instance) {
+			auto stored = ref_field_store(*holder, value, eng);
+			if (!stored) { return stored.error_value(); }
+			ref_write_through(refLocal, std::move(stored.value()));
 			return {};
 		}
-		if (!ref_constraint_compatible(value, constraint, eng, is_field)) {
-			return ref_constraint_error(symbolizer, value, constraint, is_field);
+		if (!ref_element_constraint_compatible(value, constraint, eng)) {
+			return ref_element_error(symbolizer, value, constraint);
 		}
-		auto converted = ref_convert_for_constraint(eng, value, constraint, is_field);
+		auto converted = ref_convert_for_element(eng, value, constraint);
 		if (!converted) { return converted.error_value(); }
 		ref_write_through(refLocal, std::move(converted.value()));
 		return {};
@@ -867,12 +724,16 @@ namespace jai::detail {
 		}
 		const auto* holder = refLocal.get_reference_holder();
 		type_info_ptr constraint = holder ? holder->container_element_type : nullptr;
-		const bool is_field = holder && holder->owner_instance != nullptr;
-		if (!ref_constraint_compatible(resultValue, constraint, eng, is_field)) {
-			auto err = ref_constraint_error(symbolizer, resultValue, constraint, is_field);
-			return err.error_value();
+		if (holder && holder->owner_instance) {
+			auto stored = ref_field_store(*holder, resultValue, eng);
+			if (!stored) { return stored.error_value(); }
+			ref_write_through(refLocal, std::move(stored.value()));
+			return resultValue;
 		}
-		auto converted = ref_convert_for_constraint(eng, resultValue, constraint, is_field);
+		if (!ref_element_constraint_compatible(resultValue, constraint, eng)) {
+			return ref_element_error(symbolizer, resultValue, constraint).error_value();
+		}
+		auto converted = ref_convert_for_element(eng, resultValue, constraint);
 		if (!converted) { return converted.error_value(); }
 		ref_write_through(refLocal, std::move(converted.value()));
 		return resultValue;

@@ -200,7 +200,7 @@ engine.add_variadic_function("print", [](const std::vector<script_value>& a){ /*
 engine.add_global("PI", script_value(3.14159, &engine));
 engine.add_global_ref("hp", hpFloat);               // binds a live C++ variable (cpp_bound)
 engine.execution_budget(1.0/60);   // wall-clock seconds per execute()/resume(); overrun raises a
-                                   // catchable runtime error. 0 = unlimited. DEFAULT: 1.0 second.
+                                   // catchable runtime error. 0 = unlimited. DEFAULT: 5.0 seconds.
                                    // Checked at loop back-edges + call entry (clock sampled every
                                    // 1024 ticks — no measurable hot-path cost).
 ```

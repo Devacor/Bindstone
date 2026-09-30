@@ -332,7 +332,7 @@ struct engine::implementation {
     detail::parameter_storage* current_parameter_storage = nullptr;
 
     // Script execution budget in seconds (0 = unlimited); mirrored into the backend
-    double execution_budget_seconds_ = 1.0;
+    double execution_budget_seconds_ = 5.0;
 
     // Per-engine execution-limit state (terminal latch, memory accounting): the active
     // backend caches a pointer, so reentrant executes share one instance

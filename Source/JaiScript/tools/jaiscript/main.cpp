@@ -122,7 +122,7 @@ struct options {
 	uint32_t miss_every = 0;               // --miss-every=<n>: the miss injection lever (a build with JAISCRIPT_MISS_INJECTION)
 	std::string check = "strict";          // static checker mode (the engine default); warn = load anyway, report
 	double budget = 0.0;                   // seconds per execute; 0 = unlimited (runner default —
-	                                       // the ENGINE default is 1.0s, deliberately overridden:
+	                                       // the ENGINE default is 5.0s, deliberately overridden:
 	                                       // long-running scripts are the user's business here)
 	bool watch = false;
 	bool time_runs = false;
@@ -205,7 +205,7 @@ void print_usage() {
 		"                        names fail the load; warn loads anyway and prints them; off skips)\n"
 		"  --budget=N            execution budget in seconds per execute; overruns raise a script\n"
 		"                        error (default 0 = unlimited - infinite loops are your business;\n"
-		"                        the embedded-engine default of 1.0s is deliberately lifted here)\n"
+		"                        the embedded-engine default of 5.0s is deliberately lifted here)\n"
 		"  --time                print wall time for each run\n"
 		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
 		"  --no-debug            do not stand up the DAP debug listener\n"

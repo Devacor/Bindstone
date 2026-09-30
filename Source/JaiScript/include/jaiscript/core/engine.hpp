@@ -366,7 +366,7 @@ namespace jai {
         // fine — e.g. 1.0/60 for a frame). A script exceeding it raises a TERMINAL
         // runtime error (execution_budget_exceeded): script catch handlers are skipped
         // and execute() reports the failure to the host — a script can never swallow a
-        // timeout. Zero disables the limit. Default 1. Checked at loop back-edges and
+        // timeout. Zero disables the limit. Default 5. Checked at loop back-edges and
         // call entry, so straight-line C++ bindings are never interrupted mid-call.
         void execution_budget(double seconds);
         double execution_budget() const;

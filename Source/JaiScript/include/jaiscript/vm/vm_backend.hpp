@@ -940,7 +940,7 @@ namespace jai::vm {
         std::function<checked_result<script_value>(const std::vector<script_value>&)> subscript_resolver_;
         std::function<std::shared_ptr<class_definition>(const std::string&)> class_lookup_;
 
-        std::chrono::nanoseconds execution_budget_{std::chrono::seconds(1)};
+        std::chrono::nanoseconds execution_budget_{std::chrono::seconds(5)};
         std::chrono::steady_clock::time_point execution_deadline_{};
         uint32_t budget_tick_ = 0;
         bool budget_active_ = false;

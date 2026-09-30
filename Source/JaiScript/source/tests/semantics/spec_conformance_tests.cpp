@@ -164,6 +164,7 @@ public:
 		handle_field_admission();
 		reentrant_destructors_and_operand_order();
 		handle_admission();
+		recursion_depth_parity();
 #ifdef JAISCRIPT_SPEC_KNOWN_BUGS
 		known_bugs();
 #endif
@@ -2339,6 +2340,38 @@ private:
 				return e.execute(P + "function f() { shared_ptr<B> s = new D(); ns::nd = s; }"
 				                     " string r = \"loaded|\"; try { f(); r += \"+\"; } catch (ex) { r += \"-\"; } r;").as_string();
 			}, check_mode::warn);
+		});
+	}
+
+	// guide ch.6 "Recursion": each engine owns its call-depth caps (defaults 256 on the interpreter, 10,000 on the vm); under
+	// equal caps both backends raise the same catchable error at the same call (fuzz seed 28571 compared the defaults)
+	void recursion_depth_parity() {
+		test("equal_call_depth_caps_raise_at_the_same_call_on_both_backends", [this]() {
+			struct row { const char* label; const char* src; const char* expected; };
+			const row rows[] = {
+				{"self at program scope", "function rec6(int n) -> int { if (n <= 0) { return 0; } return n + rec6(n - 1); }\n"
+				 "string s = \"\"; for (int k = 250; k <= 258; k++) { try { rec6(k); s += \"+\"; } catch (e) { s += \"-\"; } } s;", "++++++---"},
+				{"self inside a function", "function rec6(int n) -> int { if (n <= 0) { return 0; } return n + rec6(n - 1); }\n"
+				 "function run() -> string { string s = \"\"; for (int k = 250; k <= 258; k++) { try { rec6(k); s += \"+\"; } catch (e) { s += \"-\"; } } return s; } run();", "+++++----"},
+				{"nested in an argument", "function rec6(int n) -> int { if (n <= 0) { return 0; } return n + rec6(n - 1); }\n"
+				 "string s = \"\"; for (int k = 18; k <= 24; k++) { try { rec6(rec6(k)); s += \"+\"; } catch (e) { s += \"-\"; } } s;", "+++++--"},
+				{"a method", "class R { int go(int n) { if (n <= 0) { return 0; } return 1 + go(n - 1); } }\n"
+				 "R r = R(); string s = \"\"; for (int k = 250; k <= 258; k++) { try { r.go(k); s += \"+\"; } catch (e) { s += \"-\"; } } s;", "++++++---"},
+				{"a lambda through a global", "var f = null; f = [](int n) -> int { if (n <= 0) { return 0; } return 1 + f(n - 1); };\n"
+				 "string s = \"\"; for (int k = 250; k <= 258; k++) { try { f(k); s += \"+\"; } catch (e) { s += \"-\"; } } s;", "++++++---"},
+				{"mutual", "function a(int n) -> int { if (n <= 0) { return 0; } return b(n - 1) + 1; } function b(int n) -> int { if (n <= 0) { return 0; } return a(n - 1) + 1; }\n"
+				 "string s = \"\"; for (int k = 250; k <= 258; k++) { try { a(k); s += \"+\"; } catch (e) { s += \"-\"; } } s;", "++++++---"},
+				{"the fuzz seed's shape", "function rec6(int n7) -> int { if (n7 <= 0) { return 0; } return n7 + rec6(n7 - 1); }\n"
+				 "string s = \"\"; try { s += \"\" + rec6(rec6(41)); } catch (e) { s += \"caught\"; } try { s += \"|\" + rec6(9223372036854775807); } catch (e) { s += \"|caught\"; } s;",
+				 "caught|caught"},
+			};
+			for (const auto& r : rows) {
+				every_config(r.label, r.expected, [&](engine& e) {
+					e.max_call_depth(backend_type::interpreter, 256);
+					e.max_call_depth(backend_type::vm, 256);
+					return spec::render(e.execute(r.src));
+				}, check_mode::off);
+			}
 		});
 	}
 

@@ -212,6 +212,9 @@ namespace jai::fuzz {
 		run_outcome out;
 		auto eng = jai::engine::make();
 		if (cfg.use_vm) eng->set_backend(jai::backend_type::vm);
+		// both backends run under one call-depth cap (the interpreter's): the documented defaults differ (256 / 10,000),
+		// and the contract compared here is that equal caps raise the same catchable error at the same call
+		eng->max_call_depth(jai::backend_type::vm, eng->max_call_depth(jai::backend_type::interpreter));
 		eng->type_proofs(cfg.proofs);
 		eng->parameter_alias(cfg.param_alias);
 		eng->ir_passes(cfg.passes);
@@ -364,16 +367,13 @@ namespace jai::fuzz {
 			// (fix in flight; not observed since - matcher kept for the campaign).
 			{"KD-ORDERING-THROW", "throw inside operator< swallowed by one backend",
 				{"operator<"}, {"op-lt-boom"}},
-			// Deep-but-legal recursion (within the configured VM call-depth cap): the
-			// interpreter's ENVIRONMENT recursion guard fires first, the vm's in-loop
-			// frames sail through and error later (or succeed). Pre-existing recursion-
-			// limit parity gap, NOT a Stage-2 regression (A/B verified at 71e93709,
-			// seed 2072, previously masked by 250ms budget-skips). Needs its own pass.
-			{"KD-ENV-RECURSION-LIMIT", "interp env recursion guard fires before vm on deep legal recursion",
+			// Both backends run under the interpreter's call-depth cap (run_program), so a deep recursion raises at the same
+			// call on both; what remains of this accepted class (Dev rulings 2026-07-09 / 2026-07-14) is the vm's bare self
+			// tail call, which reuses its frame (guide ch.6, G06-080) and completes where the interpreter raises
+			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's depth cap raises",
 				{}, {"Maximum environment recursion depth exceeded"}},
-			// Same class when the guard's error is CAUGHT and printed: only the outer
-			// message reaches the output (seed 13066 at depth 5, 2026-09-02).
-			{"KD-ENV-RECURSION-LIMIT", "interp env recursion guard fires before vm on deep legal recursion (caught)",
+			// Same class when the error is CAUGHT and printed: only the outer message reaches the output
+			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's depth cap raises (caught)",
 				{}, {"Maximum recursion depth exceeded"}},
 			// The 2026-07 FZ-* matchers (typed-fn-no-return, undef-var eval order,
 			// neg-zero, overflow op names, float divzero text, recursion text,
@@ -567,6 +567,7 @@ namespace jai::fuzz {
 		os << "\tfor (bool use_vm : {false, true}) {\n";
 		os << "\t\tauto e = jai::engine::make();\n";
 		os << "\t\tif (use_vm) { e->set_backend(jai::backend_type::vm); }\n";
+		os << "\t\te->max_call_depth(jai::backend_type::vm, e->max_call_depth(jai::backend_type::interpreter));\n";
 		os << "\t\te->static_checking(jai::check_mode::warn);\n";
 		os << "\t\te->execution_budget(0);\n";
 		for (size_t i = 0; i < p.segments.size(); ++i) {

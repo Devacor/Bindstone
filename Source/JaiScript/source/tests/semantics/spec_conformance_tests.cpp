@@ -2288,15 +2288,34 @@ private:
 					function in_lambda() { var f = [this]() { heal(); return hp; }; return f(); }
 					static int twice(int x) { return x * 2; }
 					function static_value() { var f = twice; return f(4); }
+					function ref_decl() { auto& r = heal; return 1; }
+					function var_ref_decl() { var& r = heal; return 1; }
+					function cast_ref() { return cast<int&>(heal); }
+					function ref_return() -> int& { return heal; }
 				}
 				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
 				Player q;
 				"" + q.call_it() + " " + q.local_wins() + " " + q.param_wins(3) + " " + q.in_lambda() + " " + q.static_value() + "|" +
-				    t([]() { Player p; var f = p.get(); return 1; });
-			)", "6 7 3 7 8|'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")", check_mode::off);
+				    t([]() { Player p; var f = p.get(); return 1; }) + "|" + t([]() { Player p; return p.ref_decl(); }) + "|" +
+				    t([]() { Player p; return p.var_ref_decl(); }) + "|" + t([]() { Player p; return p.cast_ref(); }) + "|" + t([]() { Player p; return p.ref_return(); });
+			)", "6 7 3 7 8|'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
+			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
+			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
+			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
+			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")", check_mode::off);
 			every_config("bare method value at load", "rejected", [&](engine& e) {
 				try {
 					e.execute("class Player { void heal() {} function get() { return heal; } }");
+					return std::string("loaded");
+				} catch (const std::exception& ex) {
+					const std::string what = ex.what();
+					return what.find("'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")") != std::string::npos
+					    ? std::string("rejected") : what;
+				}
+			});
+			every_config("reference to a bare method at load", "rejected", [&](engine& e) {
+				try {
+					e.execute("class Player { void heal() {} function get() { auto& r = heal; return 1; } }");
 					return std::string("loaded");
 				} catch (const std::exception& ex) {
 					const std::string what = ex.what();

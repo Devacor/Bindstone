@@ -23,6 +23,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/scalar_ops.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/string_element.hpp>
@@ -2727,6 +2728,7 @@ checked_result<script_value> vm_backend::handle_spaceship(const script_value& le
 	if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
 		script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 		script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+		if (lf != lf || rf != rf) [[unlikely]] { return detail::nan_order_error<checked_result<script_value>>(); }   // IEEE: NaN is unordered (KEEP BYTE-PARALLEL with detail::binary_spaceship)
 		auto cmp = lf <=> rf;
 		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
 	}

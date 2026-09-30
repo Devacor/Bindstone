@@ -29,7 +29,6 @@ namespace jai::detail {
                                                      size_t& depth, EqualFn&& eq) {
         const script_array* a = lv.deref().unchecked_array_node();
         const script_array* b = rv.deref().unchecked_array_node();
-        if (a == b) { return script_value(true, eng); }
         const size_t n = a->size();
         if (n != b->size()) { return script_value(false, eng); }
         if (depth >= k_structural_equality_max_depth) {
@@ -85,7 +84,6 @@ namespace jai::detail {
                                                    size_t& depth, EqualFn&& eq) {
         const script_map& a = lv.deref().unchecked_as_map();
         const script_map& b = rv.deref().unchecked_as_map();
-        if (&a == &b) { return script_value(true, eng); }
         if (a.size() != b.size()) { return script_value(false, eng); }
         if (depth >= k_structural_equality_max_depth) {
             return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), structural_equality_depth_text);
@@ -116,7 +114,6 @@ namespace jai::detail {
         const auto& lh = l.unchecked_object_handle();
         const auto& rh = r.unchecked_object_handle();
         if (!lh || !rh || !lh->is_class_instance_wrapper || !rh->is_class_instance_wrapper || !lh->data || !rh->data) { return std::nullopt; }
-        if (lh.get() == rh.get()) { return checked_result<script_value>(script_value(true, eng)); }
         const auto* a = static_cast<const class_instance*>(lh->data.get());
         const auto* b = static_cast<const class_instance*>(rh->data.get());
         const class_definition* ca = a->get_class_definition();

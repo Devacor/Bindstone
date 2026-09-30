@@ -277,6 +277,7 @@ namespace jai::detail {
 		if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
 			const script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			const script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
+			if (lf != lf || rf != rf) [[unlikely]] { return nan_order_error<checked_result<script_value>>(); }   // IEEE: NaN is unordered (Dev ruling 2026-09-30)
 			return sign(lf <=> rf);
 		}
 		if (left.is_string() && right.is_string()) { return sign(left.unchecked_as_string().compare(right.unchecked_as_string())); }

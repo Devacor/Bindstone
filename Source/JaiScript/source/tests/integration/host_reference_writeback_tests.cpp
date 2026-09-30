@@ -31,6 +31,11 @@ namespace writeback_hosts {
         made() = default;
         explicit made(int64_t& seed) : n(seed) { seed *= 10; }
     };
+    // a stateful functor: the direct lane and the ordinary call must reach one object
+    struct counter {
+        mutable int64_t n = 0;
+        int64_t operator()(gate&) const { return ++n; }
+    };
 }
 JAI_BIND_VEC2((writeback_hosts::flat2), x, y)
 
@@ -71,6 +76,7 @@ public:
 			.method("add", &gate::add)
 			.method("peek", &gate::peek)
 			.method("reset_into", [](gate& self, int64_t& target) { target = self.count; self.count = 0; })
+			.method("tick", counter{})
 			.method("cycle", [](gate&, mode& m) { m = m == mode::off ? mode::on : mode::dim; })
 			.static_method("twice", [](int64_t& x) { x *= 2; })
 			.build();
@@ -160,6 +166,10 @@ public:
 
 		test("builtin_callbacks_bind_nothing", [expect]() {
 			expect("var arr = [3, 1, 2]; var cmp = mut_less; arr.sort(cmp); arr.join(\",\") + type_of(cmp)", "1,2,3function", "a comparator's writes stay in its own arguments");
+		});
+
+		test("direct_lane_and_ordinary_call_share_one_functor", [expect]() {
+			expect("var gt = Gate(); gt.tick(); gt.tick(); var t = reflect::bind(gt, \"tick\"); to_string(t())", "3", "one functor behind both calls");
 		});
 	}
 };

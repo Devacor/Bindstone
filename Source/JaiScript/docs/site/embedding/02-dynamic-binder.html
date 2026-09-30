@@ -370,7 +370,8 @@ If you register none, <code>build()</code> adds a default constructor for defaul
 ignores the instance. Same-arity overloads of one name resolve by C++ parameter signature: registering
 <code>set(double, double)</code> after <code>set(int64_t, int64_t)</code> adds an overload rather than
 clobbering it. Passing a member <em>data</em> pointer here is a compile error that tells you to use
-<code>.property()</code>.</li>
+<code>.property()</code>. The ordinary call and the VM&#x27;s direct lane invoke one copy of the lambda, so a
+stateful functor keeps one state.</li>
 <li>A non-const <code>T&amp;</code> parameter of a method, a static method or a constructor writes the callee&#x27;s
 final value back into the script argument, exactly as for <code>add_function</code> (see
 <a href="01-embedding-quickstart.html#the-exact-width-as-aliasing-rules">the quickstart</a>): <code>gate.add(total, 5)</code>

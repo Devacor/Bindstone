@@ -155,7 +155,7 @@ and never claim a sub-µs win from it — anything under ~1 µs needs a dedicate
   A uniform `auto` literal infers its element type. There is no flag and no Debug/Release
   difference; converting between forms is an explicit assignment, nothing demotes silently.
 - The tag is the node kind: `as_array()` / `checked_as_array()` are the `array<var>` view and
-  return ONE consistent error on a typed node (`typed_array_vector_view_message`). Readers use
+  return ONE consistent error on a typed node (`typed_array_vector_view_message(kind)`, naming the element type). Readers use
   `script_array::for_each` / `get`; writers use `set` / `push`; `bound_array<T>&` mutates the
   buffer in place and binds only element types that fit the kind.
 - A raw fast lane tests the KIND it was written for (`kind() == i64 || kind() == f64`), never

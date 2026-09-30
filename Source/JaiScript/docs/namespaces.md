@@ -74,6 +74,19 @@ the stdlib's `string::` and `time::` entries are checked. A host class registere
 and `cast<time::date>(x)` all spell it, and the namespace entry of the same bare name (`time::date()`) holds its
 constructor.
 
+## Using declarations
+
+`using ns::name;` (or a comma list, `using math::vec3, math::dot;`) at the start of a statement makes `name` stand
+for `ns::name` in the rest of the source text of the unit it appears in: an executed string, an imported module or an
+included file's own text. It is a parse-time rewrite of that unit's tokens (Dev ruling 2026-09-30), so the checker, both
+backends and `.jaibite` see only the qualified name and nothing runs for it. It is not transitive: a file that includes or
+imports this one does not inherit its using declarations, and a file this one includes does not see them. Any
+namespace works, a nested path too (`using a::b::c;`); `using namespace` does not exist.
+
+The name is read as the qualified one wherever it stands - a type, a call, a value, a template string's splice - except
+after `.`, `?.`, `::` or a member `->` (a member name). It cannot be declared again in that unit: a variable,
+parameter, member, function, class or enum of that name, and a second using of the same name, are parse errors.
+
 ## Reserved names
 
 `reflect` and `jai` (and every `reflect::...` / `jai::...`) are the engine's: a script cannot declare or

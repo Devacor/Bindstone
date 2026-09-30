@@ -288,6 +288,12 @@ namespace jai::vm {
         op_velem_load,      // a = velem_protos index, b = frame slot (a compiler temp): the component of a vector buffer's element into the temp, else the element's member read
         op_velem_store,     // a = velem_protos index: `a[i].x = v;` / `a[i].x op= v;` in statement position into a vector buffer's words, else the general member store
         op_ref_target_store, // a = node index (the assignment_expr): stack [value, reference] -> the expression's value; cast<T&>(e) = v, op= v, ++ and -- store through the reference (detail::ref_target_assign)
+        // pinned arithmetic by kind: a = dst cell, b = left cell, c = right cell (the k forms: c = a constant index of the operation's kind);
+        // every operand is pinned to the kind, so the operation reads no kind; an int overflow misses
+        op_c_add_ff, op_c_sub_ff, op_c_mul_ff, op_c_add_ffk, op_c_sub_ffk, op_c_mul_ffk,
+        op_c_add_ii, op_c_sub_ii, op_c_add_iik, op_c_sub_iik,
+        op_c_mov_p,         // a = dst cell, b = src cell: a move between cells pinned to one kind (the landing's rules keep the value as it is)
+        op_c_mov_k,         // a = dst cell, b = constant index: a constant of the dst's pinned kind
         op_halt,
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
@@ -604,6 +610,18 @@ namespace jai::vm {
             case opcode::op_c_size: return "C_SIZE";
             case opcode::op_c_ret: return "C_RET";
             case opcode::op_c_boundary: return "C_BOUNDARY";
+            case opcode::op_c_add_ff: return "C_ADD_FF";
+            case opcode::op_c_sub_ff: return "C_SUB_FF";
+            case opcode::op_c_mul_ff: return "C_MUL_FF";
+            case opcode::op_c_add_ffk: return "C_ADD_FFK";
+            case opcode::op_c_sub_ffk: return "C_SUB_FFK";
+            case opcode::op_c_mul_ffk: return "C_MUL_FFK";
+            case opcode::op_c_add_ii: return "C_ADD_II";
+            case opcode::op_c_sub_ii: return "C_SUB_II";
+            case opcode::op_c_add_iik: return "C_ADD_IIK";
+            case opcode::op_c_sub_iik: return "C_SUB_IIK";
+            case opcode::op_c_mov_p: return "C_MOV_P";
+            case opcode::op_c_mov_k: return "C_MOV_K";
             case opcode::op_cells_resume: return "CELLS_RESUME";
             case opcode::op_ref_target_store: return "REF_TARGET_STORE";
             case opcode::op_halt: return "HALT";

@@ -167,6 +167,8 @@ namespace {
 			case opcode::op_c_guard:
 			case opcode::op_c_arith_any:
 			case opcode::op_c_mov:
+			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
+			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -360,6 +362,8 @@ namespace {
 			case opcode::op_c_guard:
 			case opcode::op_c_arith_any:
 			case opcode::op_c_mov:
+			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
+			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -2478,6 +2482,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return o;
 		}
 	};
+	auto cell_arith_by_kind = [](opcode fast, bool konst) {   // the pinned operation's own opcode, op_halt where C_ARITH_P keeps it
+		switch (fast) {
+		case opcode::op_t_add_ff: return konst ? opcode::op_c_add_ffk : opcode::op_c_add_ff;
+		case opcode::op_t_sub_ff: return konst ? opcode::op_c_sub_ffk : opcode::op_c_sub_ff;
+		case opcode::op_t_mul_ff: return konst ? opcode::op_c_mul_ffk : opcode::op_c_mul_ff;
+		case opcode::op_t_add_ii: return konst ? opcode::op_c_add_iik : opcode::op_c_add_ii;
+		case opcode::op_t_sub_ii: return konst ? opcode::op_c_sub_iik : opcode::op_c_sub_ii;
+		default: return opcode::op_halt;
+		}
+	};
 	auto commutative_fast = [](opcode o) {
 		switch (o) {
 		case opcode::op_t_add_ii: case opcode::op_t_mul_ii: case opcode::op_t_and_ii: case opcode::op_t_or_ii: case opcode::op_t_xor_ii:
@@ -4135,12 +4149,22 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 				if (fast != opcode::op_halt) {
 					const uint8_t k = fast <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-					append(vm_instruction{pinned_operand(b2, k) && pinned_operand(c2, k) ? opcode::op_c_arith_p : opcode::op_c_arith, (static_cast<uint32_t>(fast) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip);
+					const bool pinned = pinned_operand(b2, k) && pinned_operand(c2, k);
+					const opcode direct = pinned ? cell_arith_by_kind(fast, (c2 & k_typed_const_bit) != 0) : opcode::op_halt;
+					if (direct != opcode::op_halt) { append(vm_instruction{direct, dst_of(op.a), b2, c2 & ~k_typed_const_bit}, ip); }
+					else { append(vm_instruction{pinned ? opcode::op_c_arith_p : opcode::op_c_arith, (static_cast<uint32_t>(fast) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); }
 				}
 				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok != 0 ? op.tok : arith_token_of(op.fast)) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); }
 				break;
 			}
-			case ir::mov: append(vm_instruction{opcode::op_c_mov, dst_of(op.a), cell_of(op.b), op.tok}, ip); break;
+			case ir::mov: {
+				const uint32_t src = cell_of(op.b), dst = dst_of(op.a);
+				const uint8_t k = dst < cells.size() ? cells[dst].kind : 0;
+				const bool scalar = k == static_cast<uint8_t>(script_value::TYPEID_INT) || k == static_cast<uint8_t>(script_value::TYPEID_FLOAT) || k == static_cast<uint8_t>(script_value::TYPEID_BOOL);
+				if (scalar && op.tok != 1 && pinned_operand(src, k)) { append(vm_instruction{(src & k_typed_const_bit) ? opcode::op_c_mov_k : opcode::op_c_mov_p, dst, src & ~k_typed_const_bit, 0}, ip); }   // a pinned dst takes the value as it is
+				else { append(vm_instruction{opcode::op_c_mov, dst, src, op.tok}, ip); }
+				break;
+			}
 			case ir::cmp: {
 				const uint32_t bits = op.sense ? 0x80000000u : 0u;
 				if (!op.head) { fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 1, op.target, bits }); }   // an interior target: patched to its copy position
@@ -4324,6 +4348,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
 				const uint8_t kint2 = static_cast<uint8_t>(script_value::TYPEID_INT), kflt2 = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 				if (op.tok == static_cast<uint8_t>(token_type::plus) && op.a == op.b) {
+					if (!(b2 & k_typed_const_bit) && pinned_operand(b2, kint2) && pinned_operand(c2, kint2)) { append(vm_instruction{(c2 & k_typed_const_bit) ? opcode::op_c_add_iik : opcode::op_c_add_ii, dst_of(op.a), b2, c2 & ~k_typed_const_bit}, ip); break; }
+					if (!(b2 & k_typed_const_bit) && pinned_operand(b2, kflt2) && pinned_operand(c2, kflt2)) { append(vm_instruction{(c2 & k_typed_const_bit) ? opcode::op_c_add_ffk : opcode::op_c_add_ff, dst_of(op.a), b2, c2 & ~k_typed_const_bit}, ip); break; }
 					if (pinned_operand(b2, kint2) && pinned_operand(c2, kint2)) { append(vm_instruction{opcode::op_c_arith_p, (static_cast<uint32_t>(opcode::op_t_add_ii) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); break; }
 					if (pinned_operand(b2, kflt2) && pinned_operand(c2, kflt2)) { append(vm_instruction{opcode::op_c_arith_p, (static_cast<uint32_t>(opcode::op_t_add_ff) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); break; }
 				}

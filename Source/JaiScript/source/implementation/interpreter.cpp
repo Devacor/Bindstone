@@ -7425,7 +7425,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     const auto* callee_thunk = func.target<script_callable_thunk>();
     const bool direct_script_call = callee_thunk && callee_thunk->eng == engine_ &&
         callee_thunk->payload.kind == script_callable::kind_type::function && callee_thunk->payload.fn;
-    detail::call_site_context ctx{&expr->arguments, expr};
+    detail::call_site_context ctx{&expr->arguments, expr, &arguments};
     const detail::call_site_context* saved_ctx = pending_call_ctx_;
     pending_call_ctx_ = expr->arguments.empty() ? saved_ctx : &ctx;
     std::optional<checked_result<script_value>> callOutcome;
@@ -9050,7 +9050,7 @@ template<bool Replaying>
 checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_point* rs) {
     // A new expression is a call boundary too: preserve its source expressions for reference parameters.
     auto invoke_constructor = [&](const script_function& function, const std::vector<script_value>& args) {
-        detail::call_site_context ctx{&expr->arguments, nullptr};
+        detail::call_site_context ctx{&expr->arguments, nullptr, &args};
         struct restore_context {
             const detail::call_site_context*& slot;
             const detail::call_site_context* previous;
@@ -13421,22 +13421,6 @@ script_value interpreter::bind_parameter(
     return (semantics == parameter_semantics::value) ? clone_for_assignment(arg) : arg;
 }
 
-// Ref-param bind against the caller's variable storage: shares an existing reference
-// holder (cells alias), or boxes the value on demand (cell) when the variable predates
-// its escape mark. KEEP BYTE-PARALLEL with vm_backend::bind_reference_to_storage.
-checked_result<void> interpreter::bind_reference_to_storage(script_value& storage, size_t frame_index, size_t param_slot) {
-    if (storage.is_reference() && !storage.get_reference_holder()) {
-        return checked_result<void>(
-            make_error_code(runtime_error_code::invalid_reference),
-            "Reference target is null");
-    }
-    // Share the holder (zero alloc; cells alias the same box, element/field refs keep
-    // their container/instance re-resolution), boxing on demand when the variable
-    // predates its escape mark (cross-execute global, C++ define, dynamic shape)
-    call_stack_[frame_index].set_local(param_slot, share_boxed_env_storage(storage, engine_));
-    return {};
-}
-
 // KEEP BYTE-PARALLEL with vm_backend::bind_bare_cpp_property_ref: the member scope's
 // receiver, else the env's 'this' (lambdas made in methods reach it through the chain).
 // `env` = a CALLER env at a ref-arg bind (the current frame's scope is the callee's).
@@ -13458,27 +13442,18 @@ std::optional<checked_result<script_value>> interpreter::bind_bare_cpp_property_
     return detail::bind_cpp_property_ref(*this_ptr, symbol_id, engine_, string_symbolizer_);
 }
 
-// Stateless ref-param binding straight from the call-site arg expression. Kept out of
-// call_function so its locals stay off the per-recursion-level native frame (Debug
-// stack ceiling). KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch.
-checked_result<void> interpreter::bind_reference_parameter(const parameter& param, size_t frame_index,
-                                                           const expression* argExpr,
-                                                           const std::shared_ptr<environment>& caller_env,
-                                                           const script_value* evaluated_arg,
-                                                           unit_stamp caller_unit,
-                                                           const script_defined_function* callee, size_t param_index) {
-    // the argument is the caller's code: its identifier resolves under the caller's unit (docs/global_shadowing.md); the
-    // callee's unit, entered by the call ahead of the binding, resumes when the binding returns
-    unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
-    enter_unit(caller_unit);
-    call_frame* caller_locals = frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr;
-
+// Resolves a call-site argument expression to the reference a T& binds: a static, a variable (its cell), a member of the
+// caller's scope, a field/subscript/chain lvalue or a C++ property. False: the argument names none of those (the caller
+// decides between an evaluated reference, a temporary and the non-lvalue error). KEEP BYTE-PARALLEL with
+// vm_backend::bind_site_reference.
+checked_result<bool> interpreter::bind_site_reference(const expression* argExpr, call_frame* caller_locals,
+                                                      const std::shared_ptr<environment>& caller_env, script_value& out) {
     // C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
     if (argExpr && argExpr->get_type() == node_type::member_expr && caller_env) {
         if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(argExpr), *caller_env, *string_symbolizer_,
                                                      caller_env->find_access_context())) {
             if (!*cell) { return cell->error_value(); }
-            return bind_reference_to_storage(*cell->value(), frame_index, param.slot_index);
+            return reference_to_storage(*cell->value(), out);
         }
     }
 
@@ -13494,19 +13469,19 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         if (identExpr->global_qualified) {
             script_value* g = get_global_environment()->get_value_ptr(symbol_id);
             if (!g) {
-                return checked_result<void>(
+                return checked_result<bool>(
                     make_error_code(runtime_error_code::undefined_variable),
                     environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id
                 );
             }
-            return bind_reference_to_storage(*g, frame_index, param.slot_index);
+            return reference_to_storage(*g, out);
         }
 
         // Caller frame-slot local (env lookup can't see slot locals and would walk to
         // an unrelated same-named outer variable)
         if (identExpr->slot_index != SIZE_MAX && caller_locals) {
             if (script_value* slotPtr = caller_locals->get_local(identExpr->slot_index)) {
-                return bind_reference_to_storage(*slotPtr, frame_index, param.slot_index);
+                return reference_to_storage(*slotPtr, out);
             }
         }
 
@@ -13521,7 +13496,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
             if (script_value* own = caller_env
                     ? detail::own_scope_lookup(caller_env.get(), caller_locals->scope_floor, symbol_id)
                     : nullptr) {
-                return bind_reference_to_storage(*own, frame_index, param.slot_index);
+                return reference_to_storage(*own, out);
             }
             auto member = detail::probe_member_scope(caller_state, caller_locals->scope_this,
                                                      caller_locals->scope_static, symbol_id,
@@ -13531,7 +13506,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
                                                          caller_env ? caller_env->find_access_context() : nullptr));
             }
             if (member.value_ptr) {
-                return bind_reference_to_storage(*member.value_ptr, frame_index, param.slot_index);
+                return reference_to_storage(*member.value_ptr, out);
             }
             // A C++ property binds the member itself / its accessors (reference_model.md)
             if (member.what == detail::member_probe_hit::kind::cpp_property) {
@@ -13539,13 +13514,13 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
                 if (!minted) {
                     return minted.error_value();
                 }
-                call_stack_[frame_index].set_local(param.slot_index, std::move(minted.value()));
-                return {};
+                out = std::move(minted.value());
+                return true;
             }
             // A member METHOD shadows (never a global)
             if (detail::member_scope_has_method(caller_state, caller_locals->scope_this,
                                                 caller_locals->scope_static, symbol_id)) {
-                return checked_result<void>(
+                return checked_result<bool>(
                     make_error_code(runtime_error_code::undefined_variable),
                     "Cannot take reference of undefined variable"
                 );
@@ -13554,12 +13529,12 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
                 ? caller_locals->scope_floor->get_value_ptr(symbol_id)
                 : (caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr);
             if (!beyond) {
-                return checked_result<void>(
+                return checked_result<bool>(
                     make_error_code(runtime_error_code::undefined_variable),
                     environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id
                 );
             }
-            return bind_reference_to_storage(*beyond, frame_index, param.slot_index);
+            return reference_to_storage(*beyond, out);
         }
 
         script_value* argPtr = caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr;
@@ -13570,15 +13545,15 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
                 if (!*minted) {
                     return minted->error_value();
                 }
-                call_stack_[frame_index].set_local(param.slot_index, std::move(minted->value()));
-                return {};
+                out = std::move(minted->value());
+                return true;
             }
-            return checked_result<void>(
+            return checked_result<bool>(
                 make_error_code(runtime_error_code::undefined_variable),
                 environment_->undefined_text(symbol_id, "Cannot take reference of undefined variable"), symbol_id
             );
         }
-        return bind_reference_to_storage(*argPtr, frame_index, param.slot_index);
+        return reference_to_storage(*argPtr, out);
     }
 
     // Field/subscript/chain lvalue argument: resolve through the shared helper into
@@ -13587,8 +13562,8 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         auto resolved = detail::resolve_ref_lvalue(argExpr, detail::caller_frame_view{caller_locals},
                                                    caller_env.get(), engine_, string_symbolizer_);
         if (resolved) {
-            call_stack_[frame_index].set_local(param.slot_index, std::move(resolved.value()));
-            return {};
+            out = std::move(resolved.value());
+            return true;
         }
         // The kernel's generic non-lvalue verdict falls through to Tier 2 (identifier-
         // keyed map entries classify Tier 1 but only evaluation can resolve them);
@@ -13596,6 +13571,47 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
             return resolved.error_value();
         }
+    }
+
+    return false;
+}
+
+checked_result<bool> interpreter::reference_to_storage(script_value& storage, script_value& out) {
+    if (storage.is_reference() && !storage.get_reference_holder()) {
+        return checked_result<bool>(
+            make_error_code(runtime_error_code::invalid_reference),
+            "Reference target is null");
+    }
+    // Share the holder (zero alloc; cells alias the same box, element/field refs keep
+    // their container/instance re-resolution), boxing on demand when the variable
+    // predates its escape mark (cross-execute global, C++ define, dynamic shape)
+    out = share_boxed_env_storage(storage, engine_);
+    return true;
+}
+
+// Stateless ref-param binding straight from the call-site arg expression. Kept out of
+// call_function so its locals stay off the per-recursion-level native frame (Debug
+// stack ceiling). KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch.
+checked_result<void> interpreter::bind_reference_parameter(const parameter& param, size_t frame_index,
+                                                           const expression* argExpr,
+                                                           const std::shared_ptr<environment>& caller_env,
+                                                           const script_value* evaluated_arg,
+                                                           unit_stamp caller_unit,
+                                                           const script_defined_function* callee, size_t param_index) {
+    // the argument is the caller's code: its identifier resolves under the caller's unit (docs/global_shadowing.md); the
+    // callee's unit, entered by the call ahead of the binding, resumes when the binding returns
+    unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
+    enter_unit(caller_unit);
+    call_frame* caller_locals = frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr;
+
+    script_value bound(std::monostate{}, engine_);
+    auto site = bind_site_reference(argExpr, caller_locals, caller_env, bound);
+    if (!site) {
+        return site.error_value();
+    }
+    if (site.value()) {
+        call_stack_[frame_index].set_local(param.slot_index, std::move(bound));
+        return {};
     }
 
     // Tier 2 (general lvalues; Dev ruling 2026-07-12): the argument already evaluated
@@ -13622,6 +13638,50 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         make_error_code(runtime_error_code::invalid_reference),
         "Cannot pass non-lvalue to reference parameter"
     );
+}
+
+// A host callable's T& argument (execution_backend::host_reference_argument): the argument the call in flight passed, when
+// the callable received it (a callback a builtin makes with its own arguments did not), resolved as a T& parameter binds it
+checked_result<script_value> interpreter::host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
+                                                                  int& component) {
+    component = -1;
+    script_value none(std::monostate{}, engine_);
+    const detail::call_site_context* ctx = pending_call_ctx_;
+    if (!ctx || !ctx->values || !ctx->arg_exprs || ctx->values->size() != ctx->arg_exprs->size() ||
+        ctx->values->size() + offset != args.size() || index >= ctx->values->size()) {
+        return none;
+    }
+    const script_value& passed = (*ctx->values)[index];
+    if (ctx->values != &args && !detail::same_argument(passed, args[index + offset])) {
+        return none;
+    }
+    const expression* argExpr = (*ctx->arg_exprs)[index].get();
+    call_frame* caller_locals = call_stack_.empty() ? nullptr : &call_stack_.back();
+    script_value bound(std::monostate{}, engine_);
+    auto site = bind_site_reference(argExpr, caller_locals, environment_, bound);
+    if (!site) {
+        return site.error_value();
+    }
+    if (site.value()) {
+        return bound;
+    }
+    if (argExpr && argExpr->get_type() == node_type::member_expr) {
+        auto part = detail::math::component_argument(static_cast<const member_expr*>(argExpr), component,
+            [this](const identifier_expr* id) { return resolve_local_or_env(id->slot_index, id->symbol_id, id->global_qualified); },
+            [this](const member_expr* m) {
+                return detail::math::static_component_cell(m, *engine_, *environment_, *string_symbolizer_, environment_->find_access_context());
+            },
+            [this](script_value& storage) { return share_boxed_env_storage(storage, engine_); },
+            detail::caller_frame_view{caller_locals}, environment_.get(), engine_, string_symbolizer_);
+        if (!part || component >= 0) {
+            return part;
+        }
+    }
+    if (const auto* holder = detail::deferred_argument(passed)) {
+        const script_value& lvalue = holder->argument_source->lvalue;
+        return lvalue.is_reference() && lvalue.get_reference_holder() ? lvalue : none;
+    }
+    return passed.is_reference() && passed.get_reference_holder() ? passed : none;
 }
 
 // Function call implementation - returns checked_result for consistent error handling

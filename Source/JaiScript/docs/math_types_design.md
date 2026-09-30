@@ -677,8 +677,9 @@ JAI_BIND_VEC3((MV::Point<float>), x, y, z)   // at global scope, beside the host
 ```
 
 What an adapted type does today:
-- **Parameters and returns** cross as math values: by value, `const T&` and `T&`. A `T&` parameter gets a private copy,
-  the rule plain values already follow for `int&`. The copy is a pooled vector node; no class instance is created.
+- **Parameters and returns** cross as math values: by value, `const T&` and `T&`. A `T&` parameter gets a copy whose
+  final value is stored back into the argument's lvalue, the rule every value kind follows (Dev ruling 2026-09-30). The
+  copy is a pooled vector node; no class instance is created.
 - **Overloads.** The overload scorer takes an adapted parameter's own kind exactly and the other precision at a
   conversion cost.
 - **Members.** `dynamic_binder::property` members and getter/setter properties read a copy and store through the
@@ -750,7 +751,7 @@ today:
 | `detail::value_converter<T>::from/to` (by value) | decode the script value to `native_type` then `from_native`; `to` builds a boxed vector (one pooled node), with no `make_shared`, `class_instance` or holders; a statically resolved call exchanges components with slots instead |
 | `value_converter<const T&>::from` | decode into a parameter-storage temporary (12 bytes), as primitives do today |
 | `value_converter<T&>::to` (a `T&` return) | v1: by value. Aliasing reaches C++ memory only through `.property` members and `add_global_ref`, whose lifetimes are pinned or host-guaranteed |
-| `FunctionBinder::create_argument` (non-const `T&` parameter) | a host-aliased box passes the live host object; a plain script value passes a private copy, today's `ref_or_copy_argument` rule for `int&` (`function_binder.hpp:818-887`). **[Dev]** Should host `T&` parameters write back into script storage? One ruling covers every value kind (`int&`, `float&`, `vec3&`) |
+| `FunctionBinder::create_argument` (non-const `T&` parameter) | a host-aliased box passes the live host object; a plain script value passes a copy whose final value is stored back into the argument's lvalue after the call (Dev ruling 2026-09-30, every value kind: `int&`, `float&`, `vec3&`; `detail::host_writes_back`), a component argument (`v.x`) through the component store |
 | `dynamic_binder::property_impl` | `cpp_bound_encoding<P>::capable` is true for an aliasable adapted `P`, so the member binds CPP-MEMBER (write-through, receiver pinned; `docs/reference_model.md`); reads return a boxed copy (components at a lowered site); stores convert with the typed-slot table. A non-aliasable `P` registers getter and setter only, so references bind PROPERTY: the proxy |
 | `property(name, getter, setter)` | PROPERTY: `obj.prop.x = 5` is getter, component store, setter |
 | reflected `JAI_PROPERTY` / `JAI_NAMED_PROPERTY` of an adapted type (`auto_bind`, which every registrar runs) | PROPERTY with no per-property binding: the schema entry carries a `math_property_bridge` (`math_bridge_of<T>()`, filled by the macros), the getter reads the member into a vector, and whole, component and compound stores assign through the property's own assignment, so an observable property notifies. A method bound on the class under the property's script name (Palette's `color()` / `color(c)`) is the class's spelling: the property is reached through it and no accessor is registered |
@@ -1044,8 +1045,8 @@ whole-program regression.
    5.3), or always truthy.
 7. **Mutating methods** (6): keep `set` / `translate` / `scale` / `normalize` / `clear` under the string mutator
    receiver rule (recommended; MV's vocabulary), or ship the pure API only.
-8. **Host `T&` parameters** (8.3): today a plain script value passes a private copy with no write-back (`int&`). Keep
-   that for every value kind (recommended for v1), or rule write-back for all value kinds.
+8. **Host `T&` parameters** (8.3): ruled 2026-09-30: every value kind writes the callee's final value back into the
+   argument's lvalue (C++ semantics); a temporary stays a copy.
 9. **Assignment to a member of a temporary** (5.5, 10): make it an error on both backends and in the checker, for math
    and class values alike (recommended, C++'s rule; today it is silent).
 10. **Bare names** (10): `math::` qualified only (recommended; bare `color` collides with MV's methods and common

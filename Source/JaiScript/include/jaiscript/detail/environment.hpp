@@ -535,6 +535,7 @@ namespace jai {
         struct call_site_context {
             const std::vector<expression_ptr>* arg_exprs = nullptr;
             const call_expr* site = nullptr;   // parse-time argument proofs (static_arg_proofs / proven_callee_body)
+            const std::vector<script_value>* values = nullptr;   // the arguments as passed (a host callable's T& resolution)
         };
     }
 

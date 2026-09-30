@@ -3099,6 +3099,8 @@ namespace detail { struct argument_capture_storage; }
         return a < b;
     }
 
+    inline checked_result<script_value> host_writeback_function::operator()(const std::vector<script_value>& args) const { return fn(args); }
+
 } // namespace jai
 
 #include "script_map.hpp"

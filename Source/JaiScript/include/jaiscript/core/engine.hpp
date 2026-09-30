@@ -665,6 +665,9 @@ namespace jai {
             // Wrap the function to handle type conversion for return values
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
             wrappedFunc = guard_function(std::move(wrappedFunc), std::move(required));
+            if constexpr (constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value; writeback != 0) {
+                wrappedFunc = host_writeback_function{ std::move(wrappedFunc), writeback };
+            }
             
             std::vector<param_type_info> paramTypes = extract_parameter_types_with_info<Func>();
 
@@ -1123,6 +1126,16 @@ namespace jai {
         // (C++) invocation of a script function - see external_call_guard below.
         void push_external_call_scope();
         void pop_external_call_scope();
+
+        // An overloaded host function name's callable: the overload the arguments select
+        struct overload_dispatch {
+            engine* eng;
+            uint64_t name_id;
+            std::string name;
+            checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+            // how the overloads taking argc arguments bind argument i (detail::arg_binding bits)
+            uint8_t argument_binding(size_t i, size_t argc) const;
+        };
 
         // RAII scope for C++ code invoking script functions directly (converted callbacks,
         // signal receivers): without it, reference parameters would bind against whatever

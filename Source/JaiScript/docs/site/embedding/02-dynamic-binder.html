@@ -371,6 +371,10 @@ ignores the instance. Same-arity overloads of one name resolve by C++ parameter 
 <code>set(double, double)</code> after <code>set(int64_t, int64_t)</code> adds an overload rather than
 clobbering it. Passing a member <em>data</em> pointer here is a compile error that tells you to use
 <code>.property()</code>.</li>
+<li>A non-const <code>T&amp;</code> parameter of a method, a static method or a constructor writes the callee&#x27;s
+final value back into the script argument, exactly as for <code>add_function</code> (see
+<a href="01-embedding-quickstart.html#the-exact-width-as-aliasing-rules">the quickstart</a>): <code>gate.add(total, 5)</code>
+with <code>void add(int64_t&amp; target, int64_t by)</code> leaves the sum in <code>total</code>.</li>
 <li><code>.method("+", ...)</code>: operator overloading by token, <code>+ - * / % == != &lt; &lt;= &gt;
 &gt;= &lt;=&gt;</code> and <code>[]</code>. Script classes can overload operators from the other side, so a
 type can start in script and graduate to C++ without call sites changing.</li>

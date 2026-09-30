@@ -1450,9 +1450,9 @@ public:
 
         // The string copy-on-write gate at the host boundary (docs/invariants.md 11): a
         // script_value copy the host keeps is a VALUE - a later script mutation of the
-        // variable never reaches it; a host std::string& over a plain argument stays a
-        // private copy (the S9/12.4 confinement pin in test_cpp_bound); a bound global
-        // keeps write-through; the unshare charges the memory cap like any internal clone.
+        // variable never reaches it; a host std::string& writes back into its argument's
+        // variable alone (a copy that shared its text keeps it); a bound global keeps
+        // write-through; the unshare charges the memory cap like any internal clone.
         test("string_cow_host_boundary", [this]() {
             for (bool use_vm : {false, true}) {
                 const std::string tag = use_vm ? "vm: " : "interp: ";
@@ -1465,8 +1465,8 @@ public:
                 check_eq(std::string("x"), held.as<std::string>(), tag + "a host-held copy keeps its value");
                 check_eq(std::string("X!"), e->execute("a").as<std::string>(), tag + "the variable took both writes");
                 e->add_function("up", [](std::string& s) { s += "!"; });
-                check_eq(std::string("y|y"), e->execute("string p = \"y\"; string q = p; up(q); p + \"|\" + q").as<std::string>(),
-                         tag + "host std::string& over a plain argument stays a private copy");
+                check_eq(std::string("y|y!"), e->execute("string p = \"y\"; string q = p; up(q); p + \"|\" + q").as<std::string>(),
+                         tag + "host std::string& writes back into q alone");
                 std::string live = "b";
                 e->add_global_ref("live", live);
                 e->execute("live.to_upper(); up(live);");

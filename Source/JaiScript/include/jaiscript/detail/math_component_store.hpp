@@ -132,6 +132,50 @@ namespace jai::detail::math {
 		return stored;
 	}
 
+	// A component argument (`h(v.x)` for a host T&, core/function_binder.hpp): a reference to the math value the
+	// component is part of, and in c the component (-1 and a non-reference when the argument is none). The base resolves
+	// as a component store's does; share turns an identifier's or a static's storage into a reference that outlives the call.
+	template <typename IdentCell, typename StaticCell, typename Share>
+	inline checked_result<script_value> component_argument(const member_expr* m, int& c, IdentCell&& ident_cell, StaticCell&& static_cell,
+	                                                       Share&& share, const caller_frame_view& caller, environment* caller_env,
+	                                                       engine* eng, string_symbolizer* symbolizer) {
+		c = -1;
+		script_value none(std::monostate{}, eng);
+		const expression* base_expr = m ? m->object.get() : nullptr;
+		if (!base_expr || m->is_static || m->null_safe || m->is_arrow || !any_component_name(m->member)) {
+			return none;
+		}
+		script_value base(std::monostate{}, eng);
+		if (base_expr->get_type() == node_type::member_expr && static_cast<const member_expr*>(base_expr)->is_static) {
+			auto cell = static_cell(static_cast<const member_expr*>(base_expr));
+			if (!cell) {
+				return cell.error_value();
+			}
+			base = share(*cell.value());
+		} else if (base_expr->get_type() == node_type::identifier_expr) {
+			script_value* cell = ident_cell(static_cast<const identifier_expr*>(base_expr));
+			if (!cell) {
+				return none;
+			}
+			base = share(*cell);
+		} else if (is_ref_bindable_lvalue(base_expr)) {
+			auto resolved = resolve_ref_lvalue(base_expr, caller, caller_env, eng, symbolizer);
+			if (!resolved) {
+				return resolved.error() == make_error_code(runtime_error_code::invalid_reference) ? checked_result<script_value>(none) : resolved;
+			}
+			base = std::move(resolved.value());
+		}
+		if (!base.is_reference()) {
+			return none;
+		}
+		auto value = ref_checked_deref(base);
+		if (!value || !is_kind(value.value().raw_storage_index())) {
+			return none;
+		}
+		c = component_of(value.value().unchecked_vec_kind(), m->member);
+		return c < 0 ? none : base;
+	}
+
 } // namespace jai::detail::math
 
 #endif // __JAISCRIPT_DETAIL_MATH_COMPONENT_STORE_HPP__

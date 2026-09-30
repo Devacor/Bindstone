@@ -16,6 +16,9 @@
 #include <jaiscript/detail/binary_data.hpp>
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/arg_capture.hpp>
+#include <jaiscript/detail/math_component_store.hpp>
 #include <charconv>
 #include <iostream>
 #include <fstream>
@@ -1621,30 +1624,93 @@ detail::math_rng_state& engine::math_rng() {
 
 void engine::implementation::updateOverloadedFunction(const std::string& name, engine* engine_ptr) {
     // Create a dispatch function that selects the right overload
-    // Make a copy of the name to ensure it survives the lambda lifetime
-    std::string functionName = name;
-    uint64_t name_id = string_symbolizer_.intern(name);
-    script_function dispatcher = [this, functionName, name_id, engine_ptr](const std::vector<script_value>& args) -> checked_result<script_value> {
-        auto it = overloadedFunctions.find(functionName);
-        if (it == overloadedFunctions.end()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
-                "Overloaded function '{0}' not found", name_id);
-        }
-
-        script_value bestMatch = it->second.findBestMatch(args);
-        if (bestMatch.is_null()) {
-            return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
-                name_id, args.data(), args.size(), engine_ptr);
-        }
-
-        const script_function& func = bestMatch.as_function();
-        return func(args);
-    };
+    script_function dispatcher = engine::overload_dispatch{ engine_ptr, string_symbolizer_.intern(name), name };
     
     // Update in global environment
     script_value dispatcherValue = script_value::make_function(dispatcher, engine_ptr);
     global_environment_->define(name, dispatcherValue);
     if (engine_ptr) { engine_ptr->bump_definition_epoch(); }
+}
+
+checked_result<script_value> engine::overload_dispatch::operator()(const std::vector<script_value>& args) const {
+    auto it = eng->impl->overloadedFunctions.find(name);
+    if (it == eng->impl->overloadedFunctions.end()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
+            "Overloaded function '{0}' not found", name_id);
+    }
+
+    script_value bestMatch = it->second.findBestMatch(args);
+    if (bestMatch.is_null()) {
+        return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
+            name_id, args.data(), args.size(), eng);
+    }
+
+    const script_function& func = bestMatch.as_function();
+    return func(args);
+}
+
+uint8_t engine::overload_dispatch::argument_binding(size_t i, size_t argc) const {
+    uint8_t bits = 0;
+    if (auto it = eng->impl->overloadedFunctions.find(name); it != eng->impl->overloadedFunctions.end()) {
+        for (const auto& overload : it->second.overloads) {
+            if (argc != SIZE_MAX && overload.argCount != argc) { continue; }
+            bits |= static_cast<uint8_t>(detail::callee_binding(overload.function, i, false, argc));
+        }
+    }
+    return bits ? bits : static_cast<uint8_t>(detail::arg_binding::opaque);
+}
+
+checked_result<script_value> execution_backend::host_reference_argument(const std::vector<script_value>&, size_t, size_t, int& component) {
+    component = -1;
+    return script_value(std::monostate{}, nullptr);
+}
+
+namespace detail {
+
+host_reference host_reference_argument(engine* eng, const std::vector<script_value>& args, size_t index, size_t offset) {
+    host_reference ref{ script_value(std::monostate{}, eng), script_value(std::monostate{}, eng) };
+    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+    if (!backend || eng->get_symbolizer()->frozen()) {
+        return ref;   // parallel workers never write through a host reference
+    }
+    int component = -1;
+    auto target = backend->host_reference_argument(args, index, offset, component);
+    if (!target) {
+        throw runtime_error(format_error_message_numeric(target.message(), target.symbol_id(), target.symbol_id2()));
+    }
+    if (!target.value().is_reference()) {
+        return ref;
+    }
+    auto current = ref_checked_deref(target.value());
+    if (!current) {
+        throw runtime_error(format_error_message_numeric(current.message(), current.symbol_id(), current.symbol_id2()));
+    }
+    ref.value = component >= 0 ? math::component_value(current.value(), static_cast<size_t>(component), eng) : std::move(current.value());
+    ref.target = std::move(target.value());
+    ref.component = component;
+    return ref;
+}
+
+checked_result<void> host_reference_store(engine* eng, script_value& target, int component, script_value&& value) {
+    if (component < 0) {
+        return ref_store_through(target, value, eng, eng->get_symbolizer());
+    }
+    // a component: the store `v.x = value` makes, into the value the reference names now
+    script_value* storage = math::final_referent(target);
+    if (!math::is_kind(storage->raw_storage_index())) {
+        return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to member of non-object type");
+    }
+    const script_value& rhs = value.deref();
+    auto stored = rhs.raw_storage_index() == script_value::TYPEID_CPP_BOUND
+        ? math::store_component(*storage, component, rhs.bound_decoded_temp(), eng)
+        : math::store_component(*storage, component, rhs, eng);
+    if (!stored) {
+        return stored.error_value();
+    }
+    if (auto* sr = target.scratch_ref_holder()) { sr->commit_scratch(); }
+    return {};
+}
+
 }
 
 engine::engine() : impl(std::make_unique<implementation>()) {}

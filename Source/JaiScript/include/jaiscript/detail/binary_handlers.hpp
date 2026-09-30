@@ -17,7 +17,7 @@
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/lexer.hpp>
-#include <jaiscript/detail/integer_ops.hpp>
+#include <jaiscript/detail/scalar_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
@@ -76,51 +76,31 @@ namespace jai::detail {
 		else { return "Invalid operands for % operator"; }
 	}
 	template <arith_op Op>
-	constexpr const char* arith_overflow_text() {
-		if constexpr (Op == arith_op::add) { return "Integer overflow in '+'"; }
-		else if constexpr (Op == arith_op::sub) { return "Integer overflow in '-'"; }
-		else if constexpr (Op == arith_op::mul) { return "Integer overflow in '*'"; }
-		else { return "Integer overflow in '/'"; }
+	constexpr token_type arith_token() {
+		if constexpr (Op == arith_op::add) { return token_type::plus; }
+		else if constexpr (Op == arith_op::sub) { return token_type::minus; }
+		else if constexpr (Op == arith_op::mul) { return token_type::star; }
+		else if constexpr (Op == arith_op::div) { return token_type::slash; }
+		else { return token_type::percent; }
 	}
 
 	// Numbers (and a string on either side of +); nullopt for anything else
 	template <arith_op Op, class Host>
 	inline std::optional<checked_result<script_value>> arithmetic_on_values(Host& h, const script_value& l, const script_value& r, size_t li, size_t ri) {
+		constexpr token_type op = arith_token<Op>();
 		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-			const script_int a = l.unchecked_as_int(), b = r.unchecked_as_int();
 			script_int out;
-			if constexpr (Op == arith_op::mod) {
-				if (b == 0) { return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in integer operation"); }
-				return h.make_int(ints::mod(a, b));   // a % -1 == 0, no trap
-			} else {
-				bool fits;
-				if constexpr (Op == arith_op::add) { fits = ints::try_add(a, b, out); }
-				else if constexpr (Op == arith_op::sub) { fits = ints::try_sub(a, b, out); }
-				else if constexpr (Op == arith_op::mul) { fits = ints::try_mul(a, b, out); }
-				else {
-					if (b == 0) { return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in integer operation"); }
-					fits = ints::try_div(a, b, out);   // INT64_MIN / -1
-				}
-				if (!fits) { return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand), arith_overflow_text<Op>()); }
-				return h.make_int(out);
+			if (const auto fault = int_arith(op, l.unchecked_as_int(), r.unchecked_as_int(), out); fault != scalar_fault::none) {
+				return scalar_fault_error<checked_result<script_value>>(op, fault, false);
 			}
+			return h.make_int(out);
 		}
 		if (numeric_storage(li) && numeric_storage(ri)) {
-			if constexpr (Op == arith_op::div || Op == arith_op::mod) {
-				const script_float rf = as_script_float(r, ri);
-				if (rf == 0.0) {
-					if constexpr (Op == arith_op::div) { return checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero in float operation"); }
-					else { return checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero in float operation"); }
-				}
-				const script_float lf = as_script_float(l, li);
-				if constexpr (Op == arith_op::div) { return h.make_float(lf / rf); }
-				else { return h.make_float(std::fmod(lf, rf)); }
-			} else {
-				const script_float lf = as_script_float(l, li), rf = as_script_float(r, ri);
-				if constexpr (Op == arith_op::add) { return h.make_float(lf + rf); }
-				else if constexpr (Op == arith_op::sub) { return h.make_float(lf - rf); }
-				else { return h.make_float(lf * rf); }
+			script_float out;
+			if (const auto fault = float_arith(op, as_script_float(l, li), as_script_float(r, ri), out); fault != scalar_fault::none) {
+				return scalar_fault_error<checked_result<script_value>>(op, fault, true);
 			}
+			return h.make_float(out);
 		}
 		if constexpr (Op == arith_op::add) {
 			if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) { return h.concat(l, r); }

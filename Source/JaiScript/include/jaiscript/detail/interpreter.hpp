@@ -661,6 +661,9 @@ namespace jai {
         bool can_use_fast_path(token_type op) const {
             return !has_custom_numeric_ops_ && is_numeric_op(op);
         }
+        // An operand-shape fast lane: numbers (and, with concat, two strings under +) push their result; true = handled,
+        // false = the general handlers take it
+        checked_result<bool> scalar_lane(token_type op, const script_value& left, const script_value& right, bool concat);
         
         bool is_numeric_op(token_type op) const {
             switch (op) {

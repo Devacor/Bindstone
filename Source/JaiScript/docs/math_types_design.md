@@ -302,10 +302,10 @@ rewrites.
 
 #### 4.3.1 Fields
 
-A vector field is one cell of the instance's flat field storage holding the boxed node. Whole-value operations on it cost
-about what a float field's do; a component store on it (`pos.x += v`) resolves the field and writes the node in place,
-which requires that no evaluated copy of the base still shares the node (the component store releases its evaluated base
-before it writes; otherwise every store would copy the node).
+A vector field is one cell of the instance's flat field storage holding the boxed node. A whole-value operation on it
+costs about 20% more than a float field's; a component store on it (`pos.x += v`) runs the member-compound ladder and the
+component kernel, about 2.8 times a float field's store (a method body measured on the VM, 1030 against 370 ns per call
+of four such stores).
 
 Scalar replacement of a field changes what the instance holds, and every observer of an instance's fields reads that:
 the text of an instance, `to_json`/`from_json`, the binary archive, `reflect::` (field lists, reads and writes by name),

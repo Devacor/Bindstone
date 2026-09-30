@@ -497,7 +497,17 @@ int run_perf(script_adapter& adapter, const host_options& opt) {
 		std::printf("\n%-12s | %2s | %-12s | %9s | %8s | %s\n", "backend", "#", "scene", "ms/frame", "KB/frame", "scene hash");
 		std::printf("-------------+----+--------------+-----------+----------+-----------------\n");
 		double total = 0.0;
-		for (int64_t s = 0; s < n; ++s) {
+		if (opt.scene >= n) { throw std::runtime_error("perf scene index is out of range"); }
+		const int64_t first = opt.scene < 0 ? 0 : opt.scene;
+		const int64_t end = opt.scene < 0 ? n : opt.scene + 1;
+		for (int64_t s = first; s < end; ++s) {
+			if (opt.perf_warmup > 0) {
+				sl.session->boot(w, h, opt.seed, sl.name, false, false);
+				sl.session->jump(s, opt.perf_at);
+				for (int64_t f = 0; f < opt.perf_warmup; ++f) {
+					(void)sl.session->frame(headless_args(opt.perf_at + f * dt, dt));
+				}
+			}
 			sl.session->boot(w, h, opt.seed, sl.name, false, false);
 			sl.session->jump(s, opt.perf_at);
 			std::string scene = sl.session->scene_name();
@@ -527,8 +537,8 @@ int run_perf(script_adapter& adapter, const host_options& opt) {
 				    << scene << ',' << ms << ',' << (bytes / static_cast<uint64_t>(opt.perf)) << ',' << hex64(hash) << '\n';
 			}
 		}
-		std::printf("%-12s | mean %.3f ms/frame over %lld scenes\n", sl.name.c_str(), total / static_cast<double>(n),
-			static_cast<long long>(n));
+		std::printf("%-12s | mean %.3f ms/frame over %lld scenes\n", sl.name.c_str(), total / static_cast<double>(end - first),
+			static_cast<long long>(end - first));
 	}
 	return 0;
 }
@@ -731,6 +741,50 @@ int run_interactive(script_adapter& adapter, const host_options& opt) {
 }
 
 void print_usage(script_adapter& adapter) {
+#ifdef DEMOREEL_LAYOUT_PADDING
+	volatile uint64_t padding = 1;
+	padding = (padding * 3ull) ^ 17ull;
+	padding = (padding * 5ull) ^ 7936ull;
+	padding = (padding * 7ull) ^ 15855ull;
+	padding = (padding * 9ull) ^ 23774ull;
+	padding = (padding * 11ull) ^ 31693ull;
+	padding = (padding * 13ull) ^ 39612ull;
+	padding = (padding * 15ull) ^ 47531ull;
+	padding = (padding * 17ull) ^ 55450ull;
+	padding = (padding * 19ull) ^ 63369ull;
+	padding = (padding * 21ull) ^ 71288ull;
+	padding = (padding * 23ull) ^ 79207ull;
+	padding = (padding * 25ull) ^ 87126ull;
+	padding = (padding * 27ull) ^ 95045ull;
+	padding = (padding * 29ull) ^ 102964ull;
+	padding = (padding * 31ull) ^ 110883ull;
+	padding = (padding * 33ull) ^ 118802ull;
+	padding = (padding * 35ull) ^ 126721ull;
+	padding = (padding * 37ull) ^ 134640ull;
+	padding = (padding * 39ull) ^ 142559ull;
+	padding = (padding * 41ull) ^ 150478ull;
+	padding = (padding * 43ull) ^ 158397ull;
+	padding = (padding * 45ull) ^ 166316ull;
+	padding = (padding * 47ull) ^ 174235ull;
+	padding = (padding * 49ull) ^ 182154ull;
+	padding = (padding * 51ull) ^ 190073ull;
+	padding = (padding * 53ull) ^ 197992ull;
+	padding = (padding * 55ull) ^ 205911ull;
+	padding = (padding * 57ull) ^ 213830ull;
+	padding = (padding * 59ull) ^ 221749ull;
+	padding = (padding * 61ull) ^ 229668ull;
+	padding = (padding * 63ull) ^ 237587ull;
+	padding = (padding * 65ull) ^ 245506ull;
+	padding = (padding * 67ull) ^ 253425ull;
+	padding = (padding * 69ull) ^ 261344ull;
+	padding = (padding * 71ull) ^ 269263ull;
+	padding = (padding * 73ull) ^ 277182ull;
+	padding = (padding * 75ull) ^ 285101ull;
+	padding = (padding * 77ull) ^ 293020ull;
+	padding = (padding * 79ull) ^ 300939ull;
+	padding = (padding * 81ull) ^ 308858ull;
+	(void)padding;
+#endif
 	std::string backends;
 	for (const std::string& b : adapter.backends()) { backends += (backends.empty() ? "" : " | ") + b; }
 	std::printf("%s - the demoscene tech reel (%s)\n", adapter.program_name().c_str(), adapter.language().c_str());
@@ -745,13 +799,14 @@ void print_usage(script_adapter& adapter) {
 		"  --expect HEX     smoke: required frame-stream hash (exit 1 on mismatch)\n"
 		"  --perf N         headless: N frames of every scene mid-flight, ms/frame + scene hash\n"
 		"  --perf-at T      perf: scene time the measured frames start from (default 3.0)\n"
+		"  --perf-warmup N  untimed frames on the same runtime before each measured scene\n"
 		"  --csv P          perf: also write rows to file P\n"
 		"  --workers N      parallel width (-1 engine default, 1 serial; ports always serial)\n"
 		"  --capture I      print scene I as a plain-text frame and exit\n"
 		"  --reload-test    headless hot-reload + backend-swap self-test\n"
 		"  --scenes DIR     override the scenes directory\n"
 		"  --bench N        run N frames of the real loop, report sim/write split, exit\n"
-		"  --scene I        jump to scene I after boot (bench targeting)\n"
+		"  --scene I        select one zero-based scene for --perf or --bench\n"
 		"  --bench-out P    also write the bench report to file P\n"
 		"  --truecolor      24-bit output with tolerance run-merging (default off conhost)\n"
 		"  --256color       xterm-256 output (short escapes, long runs; conhost default)\n"
@@ -785,6 +840,7 @@ int run_demoreel(int argc, char** argv, script_adapter& adapter) {
 		else if (a == "--frames") { opt.frames = std::stoll(next_arg("--frames")); }
 		else if (a == "--expect") { opt.expect = next_arg("--expect"); }
 		else if (a == "--perf") { opt.perf = std::stoll(next_arg("--perf")); }
+		else if (a == "--perf-warmup") { opt.perf_warmup = std::stoll(next_arg("--perf-warmup")); }
 		else if (a == "--perf-at") { opt.perf_at = std::stod(next_arg("--perf-at")); }
 		else if (a == "--csv") { opt.csv = next_arg("--csv"); }
 		else if (a == "--workers") { opt.workers = std::stoll(next_arg("--workers")); }
@@ -814,6 +870,7 @@ int run_demoreel(int argc, char** argv, script_adapter& adapter) {
 			i += used - 1;
 		}
 	}
+	if (opt.perf_warmup < 0 || opt.scene < -1) { std::fprintf(stderr, "invalid perf warmup or scene index\n"); return 2; }
 	if (opt.backend.empty()) { opt.backend = adapter.default_backend(); }
 	opt.backend = adapter.normalize_backend(opt.backend);
 	bool known = false;

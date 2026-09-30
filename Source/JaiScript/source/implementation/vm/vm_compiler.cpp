@@ -4355,7 +4355,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			else if (fx.field == 1) { code[fx.at].c = to | fx.bits; }
 			else { code[fx.at].b = fx.bits | ((to - loop.copy_head) << 9); }
 		}
-		loop.live_temps = live_temps(region, cells, loop.slot_to_cell, defs, copy_at, loop.copy_head, loop.origin.size());   // liveness of compiler values per copy instruction (region_ir.hpp)
+		bool inside_graft = false;   // a block inside a graft's body: the graft's code after a miss (the rest of the caller's statement) reads its values
+		for (const chunk::inline_site& s : c.inline_sites) { if (head > s.guard_ip && head < s.join_ip) { inside_graft = true; } }
+		loop.live_temps = live_temps(region, cells, loop.slot_to_cell, defs, copy_at, loop.copy_head, loop.origin.size(),
+		                             inside_graft ? static_cast<uint32_t>(c.local_count) : 0u);   // liveness of compiler values per copy instruction (region_ir.hpp)
 		// an alias is a local the general continuation may read anywhere after its declaration (a return inside the body, a bail, a
 		// miss), never a statement's value: live from its rebind to the end of the copy, so every flush after the rebind materializes it
 		for (const chunk::cell_loop::rebind& rb : loop.rebinds) { for (size_t m = rb.copy_ip - loop.copy_head; m < loop.live_temps.size(); ++m) { loop.live_temps[m].set(rb.cell); } }

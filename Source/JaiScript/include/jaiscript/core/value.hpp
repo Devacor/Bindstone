@@ -2589,6 +2589,18 @@ namespace detail { struct argument_capture_storage; }
             return holder && holder->container ? holder->container_index : SIZE_MAX;
         }
 
+        // Destroying this value runs no code: a string only frees memory, and an object, array or map another handle
+        // still owns only loses a count (a value holding the last one may run script destructors)
+        bool release_runs_no_code() const noexcept {
+            switch (raw_storage_index()) {
+                case TYPEID_STRING: case TYPEID_UTF8_STRING: return true;
+                case TYPEID_OBJECT: { const auto* h = storage_.get_if<TYPEID_OBJECT>(); return h && h->use_count() > 1; }
+                case TYPEID_ARRAY: { const auto* h = storage_.get_if<TYPEID_ARRAY>(); return h && h->use_count() > 1; }
+                case TYPEID_MAP: { const auto* h = storage_.get_if<TYPEID_MAP>(); return h && h->use_count() > 1; }
+                default: return false;
+            }
+        }
+
         // Check if array/map has unique ownership (for COW optimization)
         bool is_unique_reference() const {
             if (type() == script_value_type::jai_array_type) {

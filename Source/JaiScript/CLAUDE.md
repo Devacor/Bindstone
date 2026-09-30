@@ -388,6 +388,14 @@ engine stays usable", not by `check_throws`.
   generic call, the vm's `park_callee`, `exec_probe_member`, the stack and member call ops), so ordinary calls compile and
   run unchanged; a `function` slot still takes only a function or null (wrap an instance in a lambda). Unary `+` is the
   number itself, a char promotes.
+- **Builtin methods as values** (Dev ruling 2026-09-30, R-q5): `var f = arr.push;`, `m.clear`, `co.resume`, `s.size` bind their
+  receiver like a user method taken as a value (the receiver's object, kept alive; a later reassignment of the variable leaves
+  the bound one on the old object). Open: a string MUTATOR taken as a value works on a copy (strings are values), with Dev.
+- **Stores through references** (Dev ruling 2026-09-30, R-q7): `auto& r = o.f; r = v` (and `r op= v`) runs the direct field
+  store's table and text (`detail::field_store_convert` via `ref_field_store`); an element reference runs the direct subscript
+  store's kernel. There is no second, narrower reference table.
+- **NaN** (Dev ruling 2026-09-30, R-q8): `== != < <= > >=` follow IEEE on every lane (a NaN operand compares false, and unequal);
+  `<=>` with a NaN operand raises `Cannot order NaN with <=>` (`detail::nan_order_error`); map keys keep their total strong order.
 - **User accessors** `_get_x` / `_set_x`: member access `expr.x` (any receiver, `this.x`
   included) reads through the nearest USER `_get_x` in the class chain and stores through the
   nearest USER `_set_x` (compound assigns and `++`/`--` read then write through them); the

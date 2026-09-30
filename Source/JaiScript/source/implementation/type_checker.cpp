@@ -2441,8 +2441,6 @@ private:
 					                  : el.kind == ctype::int_k ? operand_class_int_int
 					                  : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;
 					stamp(b->static_operand_class, cls, operand_class_unknown);
-					const uint8_t receiver = cont.tentative ? 0 : cont.kind == ctype::string_k ? 1 : cont.kind == ctype::array_k ? 2 : cont.kind == ctype::map_k ? 3 : 0;
-					stamp(b->subscript_receiver, receiver, uint8_t(0));
 					return el;
 				}
 				stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only

@@ -222,11 +222,6 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			if (raw) { out << ", raw " << raw; }
 			out << ")";
 		}
-		if (!loop.boundaries.empty()) {
-			out << " (boundaries";
-			for (const auto& bd : loop.boundaries) { out << " " << bd.start << ".." << bd.end; if (bd.define != 0xFFFFFFFFu) { out << " defines c" << bd.define; } }
-			out << ")";
-		}
 		out << " cells";
 		for (const auto& cl : loop.cells) { out << " " << (cl.env_operand != k_invalid_u32 ? "env" : cl.temp ? "t" : "s") << cl.slot << ":" << static_cast<unsigned>(cl.kind); }   // slot:kind (kinds: 0 adopted, 1 int, 2 float, 5 bool)
 		out << "\n";

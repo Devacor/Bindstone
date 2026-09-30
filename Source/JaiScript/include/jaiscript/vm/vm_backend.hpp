@@ -67,7 +67,6 @@ namespace jai::vm {
         uint64_t coarse_ecells_ = 0, coarse_esites_ = 0, coarse_eguards_ = 0, coarse_ncells_ = 0, coarse_nenv_ = 0, coarse_nsites_ = 0, coarse_unused_ = 0;
         uint64_t coarse_enter_ = 0, coarse_enters_ = 0, coarse_flush_ = 0, coarse_flushes_ = 0, coarse_miss_ = 0, coarse_misses_ = 0, coarse_land_ = 0, coarse_lands_ = 0;   // inside the block bucket
 #endif
-        cell_counters cells_counters() const override { return cells_counters_; }
 #ifdef JAISCRIPT_VM_PROFILE
         ~vm_backend() override { dump_opcode_profile(); }
         void dump_opcode_profile() const;
@@ -526,15 +525,8 @@ namespace jai::vm {
             // the refusal valve: loops (by index, below 64) whose entry a container site refused in this call; container bindings
             // do not change within a call, so the entry is not attempted again until the next call
             uint64_t refused_loops = 0;
-            // a parked block (a boundary operation): the general form runs a statement and the block resumes where it ends (park_at, a general
-            // ip) when nothing entered another block of this frame since (entry_serial, counted by every entry)
-            uint32_t park_at = k_invalid_u32;
-            uint32_t park_loop = k_invalid_u32;
-            uint32_t park_boundary = 0;
-            uint32_t park_serial = 0;
-            uint32_t entry_serial = 0;
             void reset() { loop = k_invalid_u32; dirty.reset(); }
-            void reset_call() { reset(); refused_loops = 0; park_at = k_invalid_u32; }
+            void reset_call() { reset(); refused_loops = 0; }
         };
 
         struct frame_guard;
@@ -857,11 +849,10 @@ namespace jai::vm {
         // call); truncated on every unwind exactly like the value stack (try records,
         // record pops, native-entry cleanups).
         struct pending_callee {
-            script_value value{std::monostate{}, nullptr};   // opaque/default-arg path; a sibling method's dispatcher
+            script_value value{std::monostate{}, nullptr};   // opaque/default-arg path
             const script_defined_function* fn = nullptr;     // direct path
             strong_ptr<script_function> pin;
             const std::vector<uint32_t>* staged_slots = nullptr;
-            const script_method_dispatch* method = nullptr;   // a bare sibling method of this frame's class: value is its dispatcher, the receiver the frame's this
         };
         std::vector<pending_callee> pending_callees_;
 
@@ -1693,8 +1684,6 @@ namespace jai::vm {
         // the method in-loop; every other caller gets make_bound_method's exact
         // behavior from script_callable_thunk::operator().
         script_value make_bound_method_thunk(const script_value& this_val, script_value method);
-        bool park_sibling_method(frame& f, const call_site& site);   // the sibling IC's hit: the class's method and this frame's receiver
-        void arm_sibling_method(frame& f, const call_site& site, const script_value& resolved);
         // ONE native boundary for the direct dispatches (builtin methods, coroutine
         // resume): routine errors travel as checked_result -> raise_from; the catch is
         // last-ditch armor for callees that physically throw C++ (host-bound methods,
@@ -1882,28 +1871,9 @@ namespace jai::vm {
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
-        op_status cells_run_frame(frame*& fp, const chunk::cell_loop& entry_loop);
-        // a raw switch the running frame-program loop takes in place: the next frame is a frame program with its cells live (fp, the loop
-        // and cells_frame_ follow it); false leaves the switch to the raw chain
-        bool raw_follow(frame*& fp, const chunk::cell_loop*& lp, op_status st) noexcept {
-            frame* const next = raw_switch_;
-            if (st == op_status::failed || !next->cells || next->cells->loop == k_invalid_u32) return false;
-            const chunk::cell_loop& nl = next->code->cell_loops[next->cells->loop];
-            if (!nl.frame_program) return false;
-            raw_switch_ = nullptr;
-            if (switch_to_ == next) { switch_to_ = nullptr; }
-            fp = next; cells_frame_ = next; lp = &nl;
-            return true;
-        }
+        op_status cells_run_frame(frame& f, const chunk::cell_loop& loop);
         op_status cells_run_raw(frame& entry, op_status st, bool run_first);   // the raw chain from a block run (run_first false: the block already ran and switched)
         op_status cells_resume(frame& f, const vm_instruction& ins);   // the dispatcher's entry after a callee returned to the parked caller
-        // boundary operations (docs/typed_regions_design.md "Boundary operations"): the block parks for a statement the general form runs, and a
-        // CELLS_RESUME or a block's back-edge entry at the statement's end resumes it; the re-read is cells_resync
-        void cells_writeback(frame& f, const chunk::cell_loop& loop);   // every dirty cell a statement may read back to its slot or binding; the cells stay valid
-        const chunk::cell_loop* cells_unpark(frame& f);   // a block parked for a statement ending at f.ip, resumed (f.ip its resume copy ip); nullptr = the general form continues
-        bool cells_resync(frame& f, const chunk::cell_loop& loop);   // after a statement on the general form: the slot cells it changed, then the landing's checks
-        bool cells_reland_effects(frame& f, const chunk::cell_loop& loop);   // cells_reland's checks after user code ran, without an argument's slot
-        op_status exec_cells_resume(frame& f, const vm_instruction& ins);
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
         const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site);
@@ -2132,7 +2102,6 @@ namespace jai::vm {
         // re-validates its caller when the epoch moved during the raw call. Odd on the main backend, even on a worker (never equal: a worker
         // never plans, and a plan written by the main thread never matches a worker's epoch)
         uint64_t raw_epoch_ = 1;
-        cell_counters cells_counters_{};   // entries, boundaries, resumes, misses (engine::cells_counters)
         void raw_epoch_advance() { raw_epoch_ += 2; }
     };
 

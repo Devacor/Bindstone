@@ -857,36 +857,6 @@ one construct without one drops the whole loop to the general form. Raw frames a
   host function costs its own general dispatch plus boxing the typed values it touches, where it occurs, and nowhere else. Taking
   a typed local's address (`&`) or capturing it takes that one slot out of the raw form.
 
-### Boundary operations
-
-A statement the translation does not take (an expression statement, a declaration or an expression declaration whose jumps stay
-inside it and which holds no loop or frame control) does not refuse its loop: it is a boundary operation of the block.
-
-- **Park.** At the boundary the block writes its dirty cells back (the statement reads the frame and the environment exactly as the
-  general form leaves them; a range-for's iteration state names the next element), and the frame records the parked loop, the
-  boundary and the block entry count. The general form runs the statement from its first instruction with the stack it expects,
-  so its order, its errors and its texts are the general form's.
-- **Resume.** The statement's end resumes the block: a `CELLS_RESUME` placed there (the instruction it replaces moves to a
-  trampoline ahead of a jump to the next one, and any path reaching the end without a parked block runs the trampoline), or, for a
-  statement that ends the body, the loop's own back-edge entry. The resume re-reads every slot cell by the entry's guard (the
-  statement may have written a local, a callee may have written one through a reference) and runs the landing's checks after user
-  code (environment values, strings, container sites, element aliases, grafts, stdlib aliases). A slot whose kind no longer fits
-  its cell, another block entered in this frame in between, the debugger or a numeric operator leaves the block closed, and the
-  general form continues from the end; an unwind drops the park.
-- **Spans.** Consecutive such statements are one boundary, and a statement whose end no trampoline can carry takes the next
-  statement with it. A container the checker proves a map is no element site: a statement that reads or writes one is a boundary
-  rather than a site whose container the entry would refuse at run time.
-- **Declarations.** A boundary statement that declares one `int`, `float` or `bool` local defines that local's cell: the resume
-  reads it from its slot (its declared kind, or the block stays closed), so the statements after it read a defined cell rather
-  than an adopted one the entry would have to guard.
-- **Worth.** A block keeps its boundaries only while its own work (the arithmetic, loads, stores and compares it runs in cells)
-  is at least two operations per boundary and the boundaries' instructions are at most four times that work. Otherwise the loop
-  is translated again without boundaries: it closes with its bails, or stays general as it would have before.
-
-The statement costs its own general execution, one write-back of the dirty cells and one re-read of the slot cells; every other
-statement of the loop stays in cells, and the loop enters once. `engine::cells_counters()` (entries, boundaries, resumes, misses)
-is the testing lever that pins the shape.
-
 ### The call floor
 
 A call that stays a call pays for bookkeeping, not for work: on `fib_recursive` the general call costs about 245 cycles to
@@ -915,15 +885,6 @@ the run time keeps only the guards that keep those decisions safe against rebind
 - **Callbacks and host calls.** A builtin that calls script repeatedly (a sort comparator, a `map`/`filter` lambda) runs the
   callee on one reused frame, re-binding only the arguments; a host function whose signature is scalar is called through a
   typed thunk that takes and returns raw values, with no `script_value` built on either side.
-- **Sibling methods.** A bare call of a method of the frame's own class (`step(i)`, `down(n - 1)` inside a method) caches, per
-  site, the class and its method epoch with the class's dispatcher: a hit (the receiver's class and epoch unchanged, no field and
-  no local of the name) parks the dispatcher and the frame's receiver and enters the method as the bound method it would have
-  minted; a miss runs the member ladder. The method micro (a recursive method kept a call) went from 32.6 to 9.8 ms.
-- **Host methods.** `dynamic_binder::method` derives a direct lane (`class_definition::native_lane`) from each binding whose
-  parameters are values that convert without failing (bool, integers in range, numbers for a floating parameter, strings, any
-  `script_value`): the vm calls the bound method with the ordinary conversions, the receiver and the arguments read in place, no
-  bound method minted and no argument vector built. An argument of another kind or count declines to the ordinary call; an
-  overloaded name, a guarded binding (a privilege) or a class parameter has no lane; a field of the name keeps the ordinary call.
 
 The target is a typed call and return within about 1.5x of Lua's. The scoreboard, each increment measured interleaved
 against master and compared with Lua where a port exists: `fib_recursive` typed and dynamic, `tree`, a method-call micro, a

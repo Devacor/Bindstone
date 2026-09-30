@@ -22,10 +22,10 @@
 namespace jai::vm {
 
 	// probe: the callee resolved at its own place, ahead of the argument values; push: recv.push(v) onto a frame-slot array
-	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe, push, bail, rebind, range, size, ret, boundary };   // ret: a frame program's return (no successor); range: a range-for's head (the index against the container's live size, the exit on exhaustion); rebind: an element alias's declaration (its source table's element becomes the container of the alias's sites); bail: a planned miss at its own origin inside a conditional span; boundary: a statement the general form runs while the block stays parked (its successor the statement's end, target)
+	enum class ir : uint8_t { arith, mov, cmp, load, store, math, jump, guard, placeholder, neg, bnot, call, land, skip, lnot, cmpval, exit, append, probe, push, bail, rebind, range, size, ret };   // ret: a frame program's return (no successor); range: a range-for's head (the index against the container's live size, the exit on exhaustion); rebind: an element alias's declaration (its source table's element becomes the container of the alias's sites); bail: a planned miss at its own origin inside a conditional span
 
 	inline const char* ir_name(ir k) {
-		static const char* const names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe", "push", "bail", "rebind", "range", "size", "ret", "boundary" };
+		static const char* const names[] = { "arith", "mov", "cmp", "load", "store", "math", "jump", "guard", "placeholder", "neg", "bnot", "call", "land", "skip", "lnot", "cmpval", "exit", "append", "probe", "push", "bail", "rebind", "range", "size", "ret" };
 		return names[static_cast<size_t>(k)];
 	}
 

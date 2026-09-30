@@ -299,9 +299,6 @@ namespace jai {
         void cells_miss_every(uint32_t n);
         uint32_t cells_miss_every() const;
         static bool miss_injection_available();
-        // The vm's cell block counters since the engine was made (block entries, boundary operations, resumed blocks, misses): a
-        // testing lever, counted on those paths only; zeros on the interpreter
-        cell_counters cells_counters() const;
         // === THE LISTING SINK (`jaiscript --disasm=<file>`; out/fable/plan_row125_ir_module.md) ===
         // Unset by default. When set, every chunk the VM compiles from here on (a program, a function at its
         // define, a standalone expression or declaration) is disassembled as it is compiled, with the regions'

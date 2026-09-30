@@ -549,91 +549,6 @@ public:
         return *this;
     }
 
-    // The direct lane a bound method's C++ signature allows (class_definition::native_lane): the vm calls the method it bound with the
-    // ordinary call's conversions, reading the receiver and the arguments in place, for arguments whose conversion cannot fail (a bool,
-    // an int in the parameter's range, a number for a floating parameter, a string, any value for a script_value parameter); any other
-    // argument declines to the ordinary call. A signature with another parameter kind, a guarded method or an overload has no lane.
-    template<typename P>
-    static constexpr bool lane_param() {
-        using D = std::remove_cvref_t<P>;
-        if constexpr (std::is_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>) { return false; }
-        else if constexpr (std::is_same_v<D, bool> || std::is_same_v<D, std::string> || std::is_same_v<D, script_value> || std::is_floating_point_v<D>) { return true; }
-        else if constexpr (std::is_integral_v<D>) {
-            return !std::is_same_v<D, char> && !std::is_same_v<D, signed char> && !std::is_same_v<D, unsigned char> && !std::is_same_v<D, wchar_t> &&
-                   !std::is_same_v<D, char8_t> && !std::is_same_v<D, char16_t> && !std::is_same_v<D, char32_t>;
-        } else { return false; }
-    }
-    // a result the ordinary call anchors to its receiver (a reference or a pointer into an object) keeps the ordinary call
-    template<typename R>
-    static constexpr bool lane_result() {
-        using D = std::remove_cvref_t<R>;
-        return !(std::is_reference_v<R> && std::is_class_v<D>) && !std::is_pointer_v<D>;
-    }
-    template<typename P>
-    static bool lane_arg(const script_value& a) {
-        using D = std::remove_cvref_t<P>;
-        const size_t k = a.raw_storage_index();
-        if constexpr (std::is_same_v<D, script_value>) { return true; }
-        else if constexpr (std::is_same_v<D, bool>) { return k == script_value::TYPEID_BOOL; }
-        else if constexpr (std::is_integral_v<D>) { return k == script_value::TYPEID_INT && std::in_range<D>(a.unchecked_as_int()); }
-        else if constexpr (std::is_floating_point_v<D>) { return k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT; }
-        else { return k == script_value::TYPEID_STRING; }
-    }
-    template<typename... Args, size_t... Is>
-    static bool lane_args(const script_value* args, std::index_sequence<Is...>) { return (lane_arg<Args>(args[Is]) && ...); }
-    template<typename Requirements>
-    static bool lane_unguarded(const Requirements& required) {
-        if constexpr (std::is_same_v<std::decay_t<Requirements>, privilege>) { return required == privilege::none; }
-        else { return false; }
-    }
-    template<typename Method>
-    struct lane_state { Method method; engine* eng; };
-    template<typename Self, typename R, typename Method, typename... Args, size_t... Is>
-    static void lane_call(Self* obj, const lane_state<Method>& st, const script_value* args, script_value& out, std::index_sequence<Is...>) {
-        detail::parameter_storage storage;
-        detail::parameter_storage::scope_guard guard(st.eng, &storage);
-        if constexpr (std::is_void_v<R>) {
-            (obj->*st.method)(detail::value_converter<Args>::from(args[Is], st.eng)...);
-            out = script_value(std::monostate{}, st.eng);
-        } else {
-            R result = (obj->*st.method)(detail::value_converter<Args>::from(args[Is], st.eng)...);
-            out = detail::value_converter<R>::to(result, st.eng);
-        }
-    }
-    template<typename Self, typename R, typename Method, typename... Args>
-    static bool member_lane(const void* state, void* self, const script_value&, const script_value* args, size_t argc, script_value& out) {
-        if (argc != sizeof...(Args) || !lane_args<Args...>(args, std::index_sequence_for<Args...>{})) { return false; }
-        lane_call<Self, R, Method, Args...>(static_cast<Self*>(self), *static_cast<const lane_state<Method>*>(state), args, out, std::index_sequence_for<Args...>{});
-        return true;
-    }
-    template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static bool self_lane_call(const void* state, void* self, const script_value& receiver, const script_value* args, script_value& out, std::index_sequence<Is...>) {
-        const lane_state<Callable>& st = *static_cast<const lane_state<Callable>*>(state);
-        detail::parameter_storage storage;
-        detail::parameter_storage::scope_guard guard(st.eng, &storage);
-        T& obj = *static_cast<T*>(self);
-        if constexpr (std::is_void_v<R>) {
-            st.method(obj, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is], st.eng)...);
-            out = script_value(std::monostate{}, st.eng);
-        } else if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
-            st.method(obj, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is], st.eng)...);
-            out = receiver;
-        } else {
-            R result = st.method(obj, detail::value_converter<std::tuple_element_t<Is + 1, ArgsTuple>>::from(args[Is], st.eng)...);
-            out = detail::value_converter<R>::to(result, st.eng);
-        }
-        return true;
-    }
-    template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static bool self_lane_args(const script_value* args, std::index_sequence<Is...>) { return (lane_arg<std::tuple_element_t<Is + 1, ArgsTuple>>(args[Is]) && ...); }
-    template<typename R, typename ArgsTuple, typename Callable, size_t N>
-    static bool self_lane(const void* state, void* self, const script_value& receiver, const script_value* args, size_t argc, script_value& out) {
-        if (argc != N || !self_lane_args<R, ArgsTuple, Callable>(args, std::make_index_sequence<N>{})) { return false; }
-        return self_lane_call<R, ArgsTuple, Callable>(state, self, receiver, args, out, std::make_index_sequence<N>{});
-    }
-    template<typename ArgsTuple, size_t... Is>
-    static constexpr bool self_lane_params(std::index_sequence<Is...>) { return (lane_param<std::tuple_element_t<Is + 1, ArgsTuple>>() && ...); }
-
     // Add method binding - member function pointer version
     template<typename R, typename... Args, typename Requirements = privilege>
     dynamic_binder& method(const std::string& name, R(T::*method)(Args...), Requirements required = privilege::none) {
@@ -660,18 +575,9 @@ public:
         // Add method to the class definition (for object.method() calls), carrying the C++
         // parameter signature so same-arity overloads (e.g. set(float...) vs set(int...)) resolve
         // by argument type instead of the last registration silently winning.
-        const bool unguarded = lane_unguarded(required);
         class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
-        using Method = R(T::*)(Args...);
-        if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
-            if (unguarded) {
-                class_def_->add_native_lane(engine_.symbolize(name), &member_lane<T, R, Method, Args...>,
-                    std::make_shared<const lane_state<Method>>(lane_state<Method>{ method, &engine_ }));
-                return *this;
-            }
-        }
-        class_def_->withdraw_native_lane(engine_.symbolize(name));
+
         return *this;
     }
 
@@ -700,18 +606,9 @@ public:
 
         // Add method to the class definition with its C++ parameter signature (see non-const
         // overload) so same-arity const overloads resolve by argument type.
-        const bool unguarded = lane_unguarded(required);
         class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), sizeof...(Args),
             std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<std::decay_t<Args>>()... }, result_info<R>());
-        using Method = R(T::*)(Args...) const;
-        if constexpr (lane_result<R>() && (lane_param<Args>() && ...)) {
-            if (unguarded) {
-                class_def_->add_native_lane(engine_.symbolize(name), &member_lane<const T, R, Method, Args...>,
-                    std::make_shared<const lane_state<Method>>(lane_state<Method>{ method, &engine_ }));
-                return *this;
-            }
-        }
-        class_def_->withdraw_native_lane(engine_.symbolize(name));
+
         return *this;
     }
 
@@ -733,16 +630,7 @@ public:
         constexpr bool has_self_param = traits::arity > 0 &&
             (std::is_same_v<std::tuple_element_t<0, args_tuple>, T&> ||
              std::is_same_v<std::tuple_element_t<0, args_tuple>, const T&>);
-        using CallableType = std::decay_t<Callable>;
-        std::shared_ptr<const lane_state<CallableType>> lane;
-        if constexpr (has_self_param && std::is_copy_constructible_v<CallableType>) {
-            using R = typename traits::return_type;
-            if constexpr (self_lane_params<args_tuple>(std::make_index_sequence<traits::arity - 1>{}) &&
-                          (lane_result<R>() || std::is_same_v<std::remove_reference_t<R>, T>)) {
-                if (lane_unguarded(required)) { lane = std::make_shared<const lane_state<CallableType>>(lane_state<CallableType>{ callable, &engine_ }); }
-            }
-        }
-
+        
         auto method_func = [callable = std::forward<Callable>(callable), has_self_param, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> script_value {
             if (has_self_param) {
                 // Lambda expects T& as first parameter, we need to extract it from args[0]
@@ -787,13 +675,7 @@ public:
         constexpr size_t self_offset = has_self_param ? 1 : 0;
         class_def_->add_method(name, engine_.guard_function(std::move(method_func), std::move(required)), script_arity,
             param_sig_from_tuple<args_tuple, self_offset, script_arity>(), result_info<typename traits::return_type>());
-        if constexpr (has_self_param) {
-            if (lane) {
-                class_def_->add_native_lane(engine_.symbolize(name), &self_lane<typename traits::return_type, args_tuple, CallableType, script_arity>, std::move(lane));
-                return *this;
-            }
-        }
-        class_def_->withdraw_native_lane(engine_.symbolize(name));
+
         return *this;
     }
     

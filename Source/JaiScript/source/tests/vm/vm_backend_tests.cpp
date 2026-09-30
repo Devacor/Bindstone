@@ -106,16 +106,35 @@ public:
 				"coroutine g() { yield 1 + 2; } for (int k = 0; k < 3; k++) { var v = cast<int>(a[k] + 0.5) >> 1; } switch (i) { case 1: i = i ^ 2; break; default: i--; }",
 				"var z = math::max(math::abs(i), 3) + math::random(); var w = f(i, f(i, i)); var t = [a[0], m[\"k\"]]; var u = {\"a\": a[1]};",
 			};
+			// examples/ from the JaiScript folder the build names, else the first ancestor of the working directory holding it
 			namespace fs = std::filesystem;
 			std::error_code ec;
-			if (fs::is_directory("examples", ec)) {
-				for (auto it = fs::recursive_directory_iterator("examples", ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+			std::vector<fs::path> searched;
+#ifdef JAISCRIPT_TESTS_SOURCE_ROOT
+			searched.push_back(fs::path(JAISCRIPT_TESTS_SOURCE_ROOT) / "examples");
+#endif
+			for (fs::path dir = fs::current_path(ec); !ec && !dir.empty(); dir = dir.parent_path()) {
+				searched.push_back(dir / "examples");
+				searched.push_back(dir / "Source" / "JaiScript" / "examples");
+				if (dir == dir.parent_path()) { break; }
+			}
+			fs::path examples;
+			for (const auto& candidate : searched) {
+				if (fs::exists(candidate / "gloom" / "gloom.jai", ec)) { examples = candidate; break; }
+			}
+			size_t example_files = 0;
+			if (!examples.empty()) {
+				for (auto it = fs::recursive_directory_iterator(examples, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
 					if (it->is_regular_file(ec) && it->path().extension() == ".jai") {
 						std::ifstream in(it->path(), std::ios::binary);
 						corpus.push_back(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
+						++example_files;
 					}
 				}
 			}
+			std::string searched_text;
+			for (const auto& candidate : searched) { searched_text += "\n  " + candidate.string(); }
+			check_gt(example_files, (size_t)0, "the examples corpus (examples/**/*.jai, found by examples/gloom/gloom.jai) was searched in:" + searched_text);
 			auto e = vm_engine();
 			size_t nodes = 0, gated_runs = 0, strict_extra = 0, mismatches = 0;
 			for (const auto& src : corpus) {
@@ -142,7 +161,7 @@ public:
 				}
 			}
 			check_eq((size_t)0, mismatches, "effect summary disagreements");
-			check_gt(nodes, (size_t)200, "corpus nodes walked");
+			check_gt(nodes, (size_t)200, "corpus nodes walked (examples from " + examples.string() + ")");
 			check_gt(gated_runs, (size_t)0, "some nodes run user code");
 			check_gt(strict_extra, (size_t)0, "strict counts unproven operators");
 		});

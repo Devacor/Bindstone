@@ -1852,7 +1852,10 @@ private:
         switch (fn) {
             case math_fn::itrunc: case math_fn::ifloor:
             case math_fn::wrap_add_: case math_fn::wrap_sub_: case math_fn::wrap_mul_:
+            case math_fn::i32_: case math_fn::vop_:
                 return ctype::make(ctype::int_k);
+            case math_fn::cstore_: case math_fn::vcomp_:
+                return {};   // the call site reads the kind from its literal code (math_step_result)
             case math_fn::abs_: case math_fn::min_: case math_fn::max_: case math_fn::clamp_:
                 if (all(ctype::int_k)) { return ctype::make(ctype::int_k); }
                 if (all(ctype::float_k)) { return ctype::make(ctype::float_k); }
@@ -2983,6 +2986,15 @@ private:
 			if (m->is_static) {
 				// math:: intrinsics take the kernel lane (same shape gate as both backends)
 				const math_fn fn = math_intrinsic_for_call(m);
+				if ((fn == math_fn::cstore_ || fn == math_fn::vcomp_) && !c->arguments.empty()) {
+					// the lowering's steps: the component type follows from the literal kind (cstore$) or code (vcomp$)
+					const expression* lit = c->arguments[fn == math_fn::cstore_ ? c->arguments.size() - 1 : 0].get();
+					if (lit->get_type() == node_type::literal_expr && static_cast<const literal_expr*>(lit)->value.raw_storage_index() == script_value::TYPEID_INT) {
+						const script_int code = static_cast<const literal_expr*>(lit)->value.unchecked_as_int();
+						const bool integral = fn == math_fn::cstore_ ? detail::math::integral(static_cast<script_value_type>(code)) : (code & detail::k_vcomp_exact) != 0;
+						return ctype::make(integral ? ctype::int_k : ctype::float_k);
+					}
+				}
 				if (fn != math_fn::none && args.size() <= 8) { return math_intrinsic_result(fn, args); }
 				if (ctype t; library_namespace_call(c, m, args, t)) { return t; }
 				if (namespace_path_receiver(m)) { return check_namespace_entry(m, args, c->location); }

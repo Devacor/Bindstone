@@ -248,29 +248,57 @@ switches, and no scalar path changes.
 
 ### 4.3 Compile-time aggregates: scalar replacement
 
-The checker has proven every typed vector's kind before execution, so a post-check rewrite of the AST replaces typed
-vectors with their components, and both backends run the lowered tree identically (the precedent is the parse-time
-`++` desugar). The rewrite:
+A post-check rewrite of the AST (`detail/aggregate_lowering.hpp`) replaces typed math locals of function and lambda
+bodies with their components, and both backends run the lowered tree (the precedent is the parse-time `++` desugar).
+It needs no checker results: the declared kinds, the literals and the scalar locals' declared types type everything it
+rewrites.
 
-- **Locals.** A typed local `math::vec3 p` becomes three float slots `p$x`, `p$y`, `p$z` (an `ivec` local, int slots).
-  Construction assigns the slots; `p.x` reads a slot; `p.x = e` and `p.x += e` are slot stores with the component's
-  narrowing (5.1).
-- **Operators.** Vector arithmetic, negation, comparison and compound assignment become their component operations,
-  each with the binary32 or checked-int32 landing the kernel applies, so the lowered program computes the kernel's bits.
-- **Parameters.** A by-value vector parameter becomes component parameters, and raw typed frames pass them unboxed.
-- **Fields.** A class field `math::vec3 pos` becomes typed fields `pos$x`, `pos$y`, `pos$z` (flat storage).
-- **Returns.** A vector result boxes, unless the call is grafted (then the box vanishes). Multi-cell raw returns are a
-  later option.
-- **Boundaries.** A boxed vector entering a typed vector slot unpacks; a lowered vector escaping to a dynamic context
-  (`var`, a container, a dynamic call, printing) boxes, one node at the boundary.
-- **Escape.** Conservative at first: a local whose reference is taken, that is bound to a reference, or that a `[&]`
-  lambda captures stays boxed.
-- **Kill switch.** `engine::aggregate_lowering(false)` leaves every vector boxed. The fuzz math band runs with lowering on
-  and off and requires byte-identical output and error texts, as the proofs on/off gate does.
-- **Source view.** Error texts and the debugger's locals view show the source-level `math::vec3`: the rewrite records a
-  slot map (`p` -> `p$x`, `p$y`, `p$z`) that the debugger walk and the diagnostics use.
-- **Hot reload.** Functions recompile; instance migration maps `pos$x`... by name.
-
+- **Locals.** A typed local `math::vec3 p` becomes three float slots `p$x`, `p$y`, `p$z` (an `ivec` local, int slots;
+  a color `p$r` ... `p$a`), declared where `p` was. `p.x` reads a slot; `p.x = e` and `p.x op= e` store the narrowed
+  value through the component store's own kernel (5.1: `f32$` for a number, `i32$` for an ivec, `cstore$` with the
+  kind's text for a value of unknown type).
+- **Parameters.** A by-value vector parameter unpacks into its slots at the body's entry when the body stores it, reads
+  it in a loop, or reads it more often than it has components; otherwise it stays boxed.
+- **Operators.** `+ - * / %` over vectors and scalars, unary `-`, `==` and `!=` become component expressions: a binary32
+  row computes in binary64 and lands through `f32$` (for `+ - * /` of two binary32 values one rounding to binary32 is
+  the binary32 operation, so the bits agree), an ivec row runs `vop$` (the kernel's exact int64 step, int32 narrowing
+  and texts), a scalar operand narrows as the kernel narrows it.
+- **The libraries.** The component-wise family runs `vcomp$` per component, the kernel's own per-component step
+  (`vec_component_value`, `vec_component_exact`), so the boxed call and the lowered form share one kernel. The geometry
+  rows `dot`, `length`, `length_squared`, `distance`, `distance_squared`, `normalize`, `cross` and `perpendicular`, as
+  free functions or methods, become component arithmetic in the kernel's order of operations; an ivec argument widens
+  exactly wherever the kernel reads doubles. `reflect`, `project`, `angle_between`, `rotate` and the OKLab mixes run
+  boxed on rebuilt values.
+- **Constructors and conversions.** `math::K(...)`, the extension forms and the typed-slot conversions between kinds
+  lower to their narrowed components.
+- **Values.** A vector the program needs as a value (a call argument of a lowered expression, a container element, a
+  return, a string concatenation) is rebuilt with the constructor from its components, one node at that point.
+- **Evaluation order.** Component expressions evaluate component by component where the boxed kernel evaluates
+  operation by operation, so an inline form admits at most one node that may raise or run an effect; a store whose
+  value reads its own target or may raise midway lands through temporaries, so a raising store leaves the target as it
+  was. A shared subexpression (a length, a normalize's divisor) is hoisted into a temporary ahead of the statement only
+  when the statement stores nothing, calls nothing but the math kernel and reads no object member.
+- **Escape.** A local stays boxed when its storage could be named: a call or constructor argument (a reference
+  parameter could bind it), a component passed as an argument, a reference cast, a range-for container, an increment,
+  a store in expression position (a loop update included), an explicit capture or any use inside a nested lambda,
+  function or parallel body, a loop-head declaration. Coroutine bodies and parallel bodies are not lowered.
+- **Fallback.** A store the inline forms cannot express (a value of unknown kind, a compound store whose right side
+  stores first) goes through the source slot, which keeps its typed conversion and its texts, and the components
+  unpack from it.
+- **Where it runs.** The default follows the backend: the VM lowers (its typed rows and cells run component slots at
+  the float-local floor), the interpreter stays boxed (its per-node dispatch runs a scalarized vector slower than the
+  boxed kernel: 1.9 µs against 1.0 µs per step of the integrator of section 9.3). `engine::aggregate_lowering(bool)` (set
+  before the first execute) forces either on both backends.
+- **Gates.** The default interpreter-against-VM run is itself the lowering's differential (boxed against lowered), on
+  the whole fuzz and the math band; `jaiscript_fuzz --no-lowering` runs both boxed and `--lowered-interp` both lowered,
+  so lowered and boxed agree on both backends. Suite `Math Types` runs every row lowered and boxed on both backends.
+  `engine::aggregate_lowered_locals()` counts what was lowered, and the fuzz summary reports it.
+- **Source view.** Each lowered site keeps its parsed body: the checker's diagnostics and the `.jaibite` writer see it,
+  the proof pass and both backends the lowered one. The debugger's locals view folds `p$x`, `p$y`, `p$z` back into `p`
+  and drops the rewrite's temporaries. Error texts never name a component slot: every lowered store is of the slot's
+  own type, and the fallback stores name the source local.
+- **Later.** Class fields (`pos$x` ... with flat storage, instance migration by name), multi-cell returns at grafted
+  calls, component parameters on raw typed frames, and the remaining geometry rows.
 ### 4.4 Typed vector buffers
 
 `array<math::vec3>` and the other vector kinds are typed buffers with a stride equal to the component count (5.6):
@@ -930,7 +958,7 @@ whole-program regression.
 | 1c. `math::color` | 6.3's color as a sixth boxed kind (the same node, r g b a channels, opaque white by default, straight alpha), `math::mix` and the eased mixes in OKLab on colors, `math::mix_rgb`, `math::mix_hsv`; a color never converts to or equals a vec4 | the 6.3 reference values on both backends |
 | 1d. The geometry library | 6.1's geometry library (`dot`, `cross`, `length`, `length_squared`, `normalize`, `distance` and `distance_squared` over vectors, `reflect`, `project`, `angle_between`, `perpendicular`, `rotate`) and the methods (`length`, `length_squared`, `normalized`, `dot`, `cross`, `distance_to`, `rotated`) on the boxed path, one kernel (`eval_geometry`); the checker types the results and a method's arity | pinned values, exact ivec results and the zero-vector rules on both backends; the math band draws the functions and the methods, and colors |
 | 1e. Matrices and quaternions (design) | 6.4 and 6.5: `mat3`, `mat4`, `quat` and the transform helpers as node kinds | design only here; built after step 2 |
-| 2. Aggregate lowering | 4.3: the post-check rewrite (locals, operators, parameters, fields, boundaries, conservative escape), `engine::aggregate_lowering`, the slot map for diagnostics and the debugger, hot-reload field mapping | the lowering differential fuzz (math band, lowering on and off, byte-identical); whole-program A/B plus a vector-heavy microbenchmark and a no-cliff pair: the same loop over a `var` vector and a typed vector, with the ratio reported (node pooling is the first mitigation if it is above 3x) |
+| 2. Aggregate lowering | 4.3: the post-check rewrite (locals, parameters, operators, constructors, the component-wise family and the geometry rows, boundaries, conservative escape), `engine::aggregate_lowering`, the source view for diagnostics, `.jaibite` and the debugger; fields and their hot-reload mapping in a later increment | the lowering differential fuzz (math band, lowering on and off, byte-identical); whole-program A/B plus a vector-heavy microbenchmark and a no-cliff pair: the same loop over a `var` vector and a typed vector, with the ratio reported (node pooling is the first mitigation if it is above 3x) |
 | 3. Typed buffers | 4.4 and 5.6: the vector buffer kinds, element stores and unpacking reads | typed-kind fuzz for the vector kinds; the element-argument band |
 | 4. Host adapters | section 8: `jai::vec_adapter`, component exchange at statically resolved binder call sites, boxed values at dynamic ones; MV's vector-shaped bindings through adapters (Bindstone scripts at scale only with Dev) | suite `Math Adapters`; MutedVision builds from the CLI; `mv_tests`; the Bindstone client gates of section 11 |
 | 5. User classes (design) | the same lowering for user by-value classes with typed scalar fields; user operator bodies grafted | design document only |

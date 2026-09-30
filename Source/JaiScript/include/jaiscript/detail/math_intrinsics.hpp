@@ -49,6 +49,11 @@ namespace jai::detail {
         color_, mix_rgb_, mix_hsv_,
         // the geometry library on vectors (docs/math_types_design.md 6.1; distance and distance_squared take two vectors too)
         dot_, cross_, length_, length_squared_, normalize_, reflect_, project_, angle_between_, perpendicular_, rotate_,
+        // the aggregate lowering's component steps (detail/aggregate_lowering.hpp), spelled with a `$` no source can write:
+        // f32$(x) a binary32 component's value, i32$(x) an int32 component's, cstore$(x, kind) a component store's
+        // narrowing, vop$(code, a, b) one ivec operator component, vcomp$(code, ...) one component of the component-wise
+        // family
+        f32_, i32_, cstore_, vop_, vcomp_,
         count,
         none = count
     };
@@ -66,6 +71,7 @@ namespace jai::detail {
                 if (name == "clamp") return math_fn::clamp_;
                 if (name == "color") return math_fn::color_;
                 if (name == "cross") return math_fn::cross_;
+                if (name == "cstore$") return math_fn::cstore_;
                 return math_fn::none;
             case 'd':
                 if (name == "distance") return math_fn::distance;
@@ -76,17 +82,22 @@ namespace jai::detail {
             case 'n':
                 return name == "normalize" ? math_fn::normalize_ : math_fn::none;
             case 'f':
-                return name == "floor" ? math_fn::floor_ : math_fn::none;
+                if (name == "floor") return math_fn::floor_;
+                if (name == "f32$") return math_fn::f32_;
+                return math_fn::none;
             case 'i':
                 if (name == "itrunc") return math_fn::itrunc;
                 if (name == "ifloor") return math_fn::ifloor;
                 if (name == "ivec2") return math_fn::ivec2_;
                 if (name == "ivec3") return math_fn::ivec3_;
+                if (name == "i32$") return math_fn::i32_;
                 return math_fn::none;
             case 'v':
                 if (name == "vec2") return math_fn::vec2_;
                 if (name == "vec3") return math_fn::vec3_;
                 if (name == "vec4") return math_fn::vec4_;
+                if (name == "vop$") return math_fn::vop_;
+                if (name == "vcomp$") return math_fn::vcomp_;
                 return math_fn::none;
             case 'l':
                 if (name == "lerp") return math_fn::lerp_;
@@ -387,6 +398,33 @@ namespace jai::detail {
         return math::make(script_value_type::jai_color_type, out, unused, eng);
     }
 
+    // One component of the component-wise family: x holds the component's operands in argument order (a scalar argument
+    // repeated), widened to binary64 (the float rows) or kept as ints (abs, min, max and clamp over integral operands)
+    inline script_float vec_component_value(math_fn fn, const script_float* x) noexcept {
+        const script_float a = x[0];
+        switch (fn) {
+            case math_fn::floor_: return std::floor(a);
+            case math_fn::ceil_: return std::ceil(a);
+            case math_fn::round_: return std::round(a);
+            case math_fn::abs_: return std::fabs(a);
+            case math_fn::min_: return a <= x[1] ? a : x[1];
+            case math_fn::max_: return a >= x[1] ? a : x[1];
+            case math_fn::clamp_: return a < x[1] ? x[1] : (a > x[2] ? x[2] : a);
+            case math_fn::lerp_: case math_fn::mix_: return (x[2] * (x[1] - a)) + a;
+            case math_fn::unmix_: return (x[1] == a) ? 0.0 : (x[2] - a) / (x[1] - a);
+            case math_fn::remap_: return remap_value(a, x[1], x[2], x[3], x[4]);
+            default: return eased_value(fn, a, x[1], x[2], x[3]);
+        }
+    }
+    inline script_int vec_component_exact(math_fn fn, const script_int* x) noexcept {
+        switch (fn) {
+            case math_fn::abs_: return x[0] < 0 ? -x[0] : x[0];
+            case math_fn::min_: return x[0] <= x[1] ? x[0] : x[1];
+            case math_fn::max_: return x[0] >= x[1] ? x[0] : x[1];
+            default: return x[0] < x[1] ? x[1] : (x[0] > x[2] ? x[2] : x[0]);
+        }
+    }
+
     // The vector rows of the component-wise family (floor, ceil, round, abs, min, max, clamp, lerp, mix, unmix, remap and
     // the eased mixes): reached only when a scalar row found an operand that is not a number. Every vector operand has the
     // same dimensions; a scalar operand applies to every component (a vector t gives each component its own). Each component
@@ -458,36 +496,18 @@ namespace jai::detail {
         int32_t out[math::k_max_dims] = {0, 0, 0, 0};
         if (exact_family && all_integral) {
             for (size_t c = 0; c < dims; ++c) {
-                script_int r = 0;
-                switch (fn) {
-                    case math_fn::abs_: r = ops[0].i[c] < 0 ? -ops[0].i[c] : ops[0].i[c]; break;
-                    case math_fn::min_: r = ops[0].i[c] <= ops[1].i[c] ? ops[0].i[c] : ops[1].i[c]; break;
-                    case math_fn::max_: r = ops[0].i[c] >= ops[1].i[c] ? ops[0].i[c] : ops[1].i[c]; break;
-                    default: r = ops[0].i[c] < ops[1].i[c] ? ops[1].i[c] : (ops[0].i[c] > ops[2].i[c] ? ops[2].i[c] : ops[0].i[c]); break;
-                }
-                auto narrowed = math::to_i32(r);
+                script_int x[k_max_args] = {0, 0, 0, 0, 0};
+                for (size_t a = 0; a < argc; ++a) { x[a] = ops[a].i[c]; }
+                auto narrowed = math::to_i32(vec_component_exact(fn, x));
                 if (!narrowed) { return narrowed.error_value(); }
                 out[c] = narrowed.value();
             }
             return math::make(math::family_kind(true, dims), f, out, eng);
         }
         for (size_t c = 0; c < dims; ++c) {
-            const script_float a = ops[0].f[c];
-            script_float r = 0.0;
-            switch (fn) {
-                case math_fn::floor_: r = std::floor(a); break;
-                case math_fn::ceil_: r = std::ceil(a); break;
-                case math_fn::round_: r = std::round(a); break;
-                case math_fn::abs_: r = std::fabs(a); break;
-                case math_fn::min_: r = a <= ops[1].f[c] ? a : ops[1].f[c]; break;
-                case math_fn::max_: r = a >= ops[1].f[c] ? a : ops[1].f[c]; break;
-                case math_fn::clamp_: r = a < ops[1].f[c] ? ops[1].f[c] : (a > ops[2].f[c] ? ops[2].f[c] : a); break;
-                case math_fn::lerp_: case math_fn::mix_: r = (ops[2].f[c] * (ops[1].f[c] - a)) + a; break;
-                case math_fn::unmix_: r = (ops[1].f[c] == a) ? 0.0 : (ops[2].f[c] - a) / (ops[1].f[c] - a); break;
-                case math_fn::remap_: r = remap_value(a, ops[1].f[c], ops[2].f[c], ops[3].f[c], ops[4].f[c]); break;
-                default: r = eased_value(fn, a, ops[1].f[c], ops[2].f[c], ops[3].f[c]); break;
-            }
-            f[c] = math::to_f32(r);
+            script_float x[k_max_args] = {0, 0, 0, 0, 0};
+            for (size_t a = 0; a < argc; ++a) { x[a] = ops[a].f[c]; }
+            f[c] = math::to_f32(vec_component_value(fn, x));
         }
         return math::make(any_color ? script_value_type::jai_color_type : math::family_kind(false, dims), f, out, eng);
     }
@@ -802,15 +822,98 @@ namespace jai::detail {
             default: return 1;
         }
     }
-    JAI_MATH_COLD inline checked_result<script_value> call_vec_method(math_fn fn, const script_value& receiver, const std::vector<script_value>& args, engine* eng) {
+    JAI_MATH_COLD inline checked_result<script_value> call_vec_method(math_fn fn, const script_value& receiver, const script_value* args, size_t argc, engine* eng) {
         const script_value_type kind = receiver.unchecked_vec_kind();
-        if (args.size() != vec_method_arity(fn, kind)) {
+        if (argc != vec_method_arity(fn, kind)) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), vec_method_arity_text(fn, kind));
         }
         const script_value* view[3] = {&receiver, nullptr, nullptr};
-        for (size_t k = 0; k < args.size(); ++k) { view[k + 1] = &args[k].deref(); }
-        return eval_geometry(fn, view, args.size() + 1, eng);
+        for (size_t k = 0; k < argc; ++k) { view[k + 1] = &args[k].deref(); }
+        return eval_geometry(fn, view, argc + 1, eng);
     }
+    inline checked_result<script_value> call_vec_method(math_fn fn, const script_value& receiver, const std::vector<script_value>& args, engine* eng) {
+        return call_vec_method(fn, receiver, args.data(), args.size(), eng);
+    }
+    // ---- the aggregate lowering's component steps (detail/aggregate_lowering.hpp) ------------------------------------------
+    // vop$'s code: the operator row (bop, or k_vop_negate), and which side is a scalar the row narrows to int32 first
+    inline constexpr int k_vop_negate = 5, k_vop_scalar_right = 8, k_vop_scalar_left = 16;
+    // vcomp$'s code: the math_fn of the component-wise family, and whether the component is the exact int row
+    inline constexpr int k_vcomp_exact = 0x100;
+    inline const char* lowering_step_text() noexcept { return "a lowered math component received a value of another type (internal)"; }
+    // a scalar operand of an ivec row: an int or a bool narrowed to int32 (math_values.hpp binary), else the row's text
+    inline checked_result<int64_t> vop_scalar(const script_value& v, math::bop op) {
+        const math::scalar s = math::read_scalar(v);
+        if (!s.ok || !s.is_int) { return checked_result<int64_t>(make_error_code(runtime_error_code::type_mismatch), math::invalid_operands_text(op)); }
+        auto n = math::to_i32(s.i);
+        if (!n) { return n.error_value(); }
+        return static_cast<int64_t>(n.value());
+    }
+    JAI_MATH_COLD inline checked_result<script_value> eval_lowering_step(math_fn fn, const script_value* const* args, size_t argc, engine* eng) {
+        auto internal = [&] { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), lowering_step_text()); };
+        switch (fn) {
+            case math_fn::f32_:
+            case math_fn::i32_: {
+                if (argc != 1) { return internal(); }
+                const math::scalar s = math::read_scalar(*args[0]);
+                if (!s.ok) { return internal(); }
+                if (fn == math_fn::f32_) { return script_value(static_cast<script_float>(math::scalar_f32(s)), eng); }
+                auto n = math::scalar_i32(s);
+                if (!n) { return n.error_value(); }
+                return script_value(static_cast<script_int>(n.value()), eng);
+            }
+            case math_fn::cstore_: {
+                if (argc != 2 || args[1]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
+                uint32_t bits = 0;
+                return math::narrow_component(static_cast<script_value_type>(args[1]->unchecked_as_int()), *args[0], bits, eng);
+            }
+            case math_fn::vop_: {
+                if (argc != 3 || args[0]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
+                const int code = static_cast<int>(args[0]->unchecked_as_int());
+                if ((code & 7) == k_vop_negate) {
+                    if (args[1]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
+                    auto r = math::int_component_negate(static_cast<int32_t>(args[1]->unchecked_as_int()));
+                    if (!r) { return r.error_value(); }
+                    return script_value(static_cast<script_int>(r.value()), eng);
+                }
+                const math::bop op = static_cast<math::bop>(code & 7);
+                int64_t a = 0, b = 0;
+                if (code & k_vop_scalar_left) { auto s = vop_scalar(*args[1], op); if (!s) { return s.error_value(); } a = s.value(); }
+                else if (args[1]->raw_storage_index() == script_value::TYPEID_INT) { a = args[1]->unchecked_as_int(); }
+                else { return internal(); }
+                if (code & k_vop_scalar_right) { auto s = vop_scalar(*args[2], op); if (!s) { return s.error_value(); } b = s.value(); }
+                else if (args[2]->raw_storage_index() == script_value::TYPEID_INT) { b = args[2]->unchecked_as_int(); }
+                else { return internal(); }
+                auto r = math::int_component(op, a, b);
+                if (!r) { return r.error_value(); }
+                return script_value(static_cast<script_int>(r.value()), eng);
+            }
+            default: {   // vcomp$
+                constexpr size_t k_max_args = 5;
+                if (argc < 2 || argc > k_max_args + 1 || args[0]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
+                const int code = static_cast<int>(args[0]->unchecked_as_int());
+                const math_fn row = static_cast<math_fn>(code & 0xFF);
+                if (code & k_vcomp_exact) {
+                    script_int x[k_max_args] = {0, 0, 0, 0, 0};
+                    for (size_t a = 1; a < argc; ++a) {
+                        if (args[a]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
+                        x[a - 1] = args[a]->unchecked_as_int();
+                    }
+                    auto n = math::to_i32(vec_component_exact(row, x));
+                    if (!n) { return n.error_value(); }
+                    return script_value(static_cast<script_int>(n.value()), eng);
+                }
+                script_float x[k_max_args] = {0, 0, 0, 0, 0};
+                for (size_t a = 1; a < argc; ++a) {
+                    const size_t raw = args[a]->raw_storage_index();
+                    if (raw == script_value::TYPEID_INT) { x[a - 1] = static_cast<script_float>(args[a]->unchecked_as_int()); }
+                    else if (raw == script_value::TYPEID_FLOAT) { x[a - 1] = args[a]->unchecked_as_float(); }
+                    else { return internal(); }
+                }
+                return script_value(static_cast<script_float>(math::to_f32(vec_component_value(row, x))), eng);
+            }
+        }
+    }
+
     // A method named on a vector, as the function value a member read yields: the receiver is copied (a vector is a value)
     inline script_value vec_bound_method(math_fn fn, const script_value& receiver, engine* eng) {
         script_function bound = [fn, recv = receiver, eng](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1096,6 +1199,12 @@ namespace jai::detail {
             case math_fn::perpendicular_:
             case math_fn::rotate_:
                 return eval_geometry(fn, args, argc, eng);
+            case math_fn::f32_:
+            case math_fn::i32_:
+            case math_fn::cstore_:
+            case math_fn::vop_:
+            case math_fn::vcomp_:
+                return eval_lowering_step(fn, args, argc, eng);
 
             case math_fn::round_: {
                 if (argc != 1) return bad_arity("math::round expects 1 argument");

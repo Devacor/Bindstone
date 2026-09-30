@@ -21,6 +21,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/utf8_text.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/aggregate_lowering.hpp>
 #include <jaiscript/detail/math_component_store.hpp>   // math-value component stores (interp parity)
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
@@ -643,6 +644,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 		if (!v) { continue; }                            // reserved capacity only: not live yet
 		out.emplace_back(std::string(name), *v);
 	}
+	detail::fold_lowered_locals(out, engine_);
 	return out;
 }
 
@@ -5139,6 +5141,18 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 		v = &popped;
 	}
 	v = &v->deref();
+	if (fn == detail::math_fn::f32_ || fn == detail::math_fn::i32_) {
+		// the lowering's component narrowing on a number (math_values.hpp to_f32 / to_i32); anything else is the kernel's
+		const size_t raw = v->raw_storage_index();
+		const uint32_t dst = ins.b | (k_typed_dst_temp << k_typed_dst_shift);
+		if (fn == detail::math_fn::f32_) {
+			if (raw == script_value::TYPEID_FLOAT) { typed_land_float(f, dst, static_cast<script_float>(detail::math::to_f32(v->unchecked_as_float()))); return {}; }
+			if (raw == script_value::TYPEID_INT) { typed_land_float(f, dst, static_cast<script_float>(detail::math::to_f32(v->unchecked_as_int()))); return {}; }
+		} else if (raw == script_value::TYPEID_INT) {
+			const script_int i = v->unchecked_as_int();
+			if (i >= INT32_MIN && i <= INT32_MAX) { typed_land_int(f, dst, i); return {}; }
+		}
+	}
 	if (v->raw_storage_index() == script_value::TYPEID_FLOAT) {
 		const script_float x = v->unchecked_as_float();
 		if (fn == detail::math_fn::itrunc) {
@@ -9407,6 +9421,21 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction
 	case detail::math_fn::tan_: bits = cell_bits_of_float(std::tan(xd)); break;
 	case detail::math_fn::radians_to_degrees: bits = cell_bits_of_float(xd * (180.0 / 3.14159265358979323846)); break;
 	case detail::math_fn::degrees_to_radians: bits = cell_bits_of_float(xd * (3.14159265358979323846 / 180.0)); break;
+	case detail::math_fn::f32_:   // an int converts in one rounding (math_values.hpp to_f32), never through the double
+		bits = cell_bits_of_float(static_cast<script_float>(int_arg ? detail::math::to_f32(xi) : detail::math::to_f32(xd)));
+		break;
+	case detail::math_fn::i32_: {
+		kind = static_cast<uint8_t>(script_value::TYPEID_INT);
+		script_int n = xi;
+		if (!int_arg) {
+			auto r = detail::checked_float_to_integer(xd);
+			if (!r) return miss();
+			n = r.value();
+		}
+		if (n < INT32_MIN || n > INT32_MAX) return miss();
+		bits = static_cast<int64_t>(n);
+		break;
+	}
 	default: return miss();
 	}
 	if (!cell_land(f, loop, dk, kind, bits)) return miss();
@@ -14546,6 +14575,17 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 					else { ++profile_slice_gate_[3]; }   // mic guard failed (unarmed/epoch/class/field)
 #endif
+				}
+			} else if (detail::math::is_kind(receiver_type)) {
+				// a vector's method (detail/math_intrinsics.hpp call_vec_method): the receiver and arguments read in place,
+				// no bound function; the texts are the bound method's
+				const detail::math_fn vm = detail::vec_method_fn(objd.unchecked_vec_kind(), member->member);
+				if (vm != detail::math_fn::none) {
+					auto r = detail::call_vec_method(vm, objd, stack_.data() + args_base, argc, engine_);
+					stack_.truncate(args_base - 1);
+					if (!r) return raise_from(r);
+					stack_.push_back(std::move(r.value()));
+					return {};
 				}
 			} else if (receiver_type == script_value::TYPEID_ARRAY && argc == 1 &&
 			           f.code->builtin_indexed &&

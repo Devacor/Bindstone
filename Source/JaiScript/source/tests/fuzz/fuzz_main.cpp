@@ -23,6 +23,9 @@
 //   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
 //   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false)
 //   jaiscript_fuzz --no-passes              run both backends with engine::ir_passes(false)
+//   jaiscript_fuzz --no-lowering            run both backends with engine::aggregate_lowering(false) (by default the interpreter
+//                                           runs boxed and the vm lowered, so every run is the lowering's differential)
+//   jaiscript_fuzz --lowered-interp         run both backends lowered (the interpreter's lowered tree against the vm's)
 //   jaiscript_fuzz --element-band           prepend the element-argument band to every program (default: its own roll, ~30%)
 //   jaiscript_fuzz --no-element-band        never prepend it (the programs of the generator before the band)
 //   jaiscript_fuzz --math-band              prepend the math band (math::vec2/vec3/ivec2/ivec3 through every lvalue kind) to every
@@ -79,6 +82,8 @@ namespace {
 		bool proofs = true;
 		bool param_alias = true;
 		bool passes = true;
+		int lowering = 0;   // compare_program's: 0 each backend's default, 1 both boxed, 2 both lowered
+		mutable uint64_t lowered_locals = 0, lowered_programs = 0;   // the census: what the vm side lowered
 		uint32_t miss_every = 0;
 		band_mode band = band_mode::sometimes;
 		band_mode math_band = band_mode::sometimes;
@@ -112,6 +117,8 @@ namespace {
 			else if (a == "--no-proofs") { opt.proofs = false; }
 			else if (a == "--no-param-alias") { opt.param_alias = false; }
 			else if (a == "--no-passes") { opt.passes = false; }
+			else if (a == "--no-lowering") { opt.lowering = 1; }
+			else if (a == "--lowered-interp") { opt.lowering = 2; }
 			else if (a == "--element-band") { opt.band = band_mode::always; }
 			else if (a == "--no-element-band") { opt.band = band_mode::never; }
 			else if (a == "--math-band") { opt.math_band = band_mode::always; }
@@ -164,7 +171,9 @@ namespace {
 	verdict run_seed(const options& opt, uint64_t seed, bool verbose) {
 		program p = generate_program(seed, opt.max_depth, opt.band, opt.math_band);
 		double budget_seconds = opt.timeout_ms / 1000.0;
-		compare_result cr = compare_program(p, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
+		compare_result cr = compare_program(p, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
+		opt.lowered_locals += cr.vm.lowered_locals;
+		if (cr.vm.lowered_locals) ++opt.lowered_programs;
 
 		if (cr.kind == compare_result::budget_skip) {
 			if (verbose || cr.budget_suspect) {
@@ -198,13 +207,13 @@ namespace {
 			auto still = [&](const program& cand) {
 				// Any divergence keeps the reduction: drifting into a KNOWN shape is
 				// handled by re-matching suppressions on the minimized form below.
-				return compare_program(cand, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every).kind == compare_result::diverge;
+				return compare_program(cand, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering).kind == compare_result::diverge;
 			};
 			minimized = minimize(p, still, stats);
 			have_min = true;
 			std::cout << "--- minimized (" << stats.reductions << " reductions, " << stats.checks << " checks) ---\n";
 			std::cout << minimized.joined() << "\n";
-			compare_result mc = compare_program(minimized, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
+			compare_result mc = compare_program(minimized, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
 			std::cout << "--- minimized diff ---\n" << mc.diff;
 			// Some shapes only become recognizable after minimization (e.g. an
 			// eval-order divergence buried under printed-output noise): re-match
@@ -259,8 +268,8 @@ namespace {
 	verdict run_order_seed(const options& opt, uint64_t seed, bool verbose, order_stats& st) {
 		const order::generated g = order::generate(seed, opt.order_args);
 		const double budget_seconds = opt.timeout_ms / 1000.0;
-		const compare_result a = compare_program(g.original, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
-		const compare_result b = compare_program(g.variant, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
+		const compare_result a = compare_program(g.original, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
+		const compare_result b = compare_program(g.variant, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
 		if (a.kind == compare_result::budget_skip || b.kind == compare_result::budget_skip) {
 			if (verbose) std::cout << "[seed " << seed << "] budget-skip\n";
 			return verdict::budget_skip;
@@ -354,6 +363,8 @@ namespace {
 		if (!opt.proofs) cmd += " --no-proofs";
 		if (!opt.param_alias) cmd += " --no-param-alias";
 		if (!opt.passes) cmd += " --no-passes";
+		if (opt.lowering == 1) cmd += " --no-lowering";
+		if (opt.lowering == 2) cmd += " --lowered-interp";
 		if (opt.band == band_mode::always) cmd += " --element-band";
 		if (opt.band == band_mode::never) cmd += " --no-element-band";
 		if (opt.math_band == band_mode::always) cmd += " --math-band";
@@ -415,7 +426,7 @@ int main(int argc, char** argv) {
 			p.segments.push_back(text.substr(pos, hit - pos));
 			pos = hit + marker.size();
 		}
-		compare_result cr = compare_program(p, opt.timeout_ms / 1000.0, opt.proofs, opt.param_alias, opt.passes, opt.miss_every);
+		compare_result cr = compare_program(p, opt.timeout_ms / 1000.0, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
 		if (cr.kind == compare_result::diverge) {
 			std::cout << "DIVERGE\n" << cr.diff;
 			for (size_t i = 0; i < cr.interp.segment_results.size(); ++i)
@@ -477,7 +488,8 @@ int main(int argc, char** argv) {
 				          << "reproduce: jaiscript_fuzz --jaibite-mutate --seed " << seed
 				          << " --max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms
 				          << (opt.proofs ? "" : " --no-proofs")
-				          << (opt.param_alias ? "" : " --no-param-alias") << (opt.passes ? "" : " --no-passes") << "\n";
+				          << (opt.param_alias ? "" : " --no-param-alias") << (opt.passes ? "" : " --no-passes")
+				          << (opt.lowering == 1 ? " --no-lowering" : opt.lowering == 2 ? " --lowered-interp" : "") << "\n";
 				std::cout.flush();
 			}
 		}
@@ -564,6 +576,7 @@ int main(int argc, char** argv) {
 		for (auto s : suppressed_seeds) std::cout << " " << s;
 	}
 	std::cout << "\nbudget-skips:   " << budget << "\n";
+	std::cout << "lowered locals: " << opt.lowered_locals << " in " << opt.lowered_programs << " programs (vm side)\n";
 	std::cout << "crashes:        " << crashes;
 	if (!crash_seeds.empty()) {
 		std::cout << "  seeds:";

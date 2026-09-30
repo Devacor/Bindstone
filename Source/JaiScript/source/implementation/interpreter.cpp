@@ -7,6 +7,7 @@
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
+#include <jaiscript/detail/aggregate_lowering.hpp>
 #include <jaiscript/detail/redeclaration.hpp>
 #include <jaiscript/detail/math_component_store.hpp>   // math-value component stores (vm parity)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
@@ -13632,6 +13633,7 @@ std::vector<std::pair<std::string, script_value>> interpreter::get_current_frame
         if (!v) continue;                                // reserved capacity only: not live yet
         out.emplace_back(std::string(name), *v);
     }
+    detail::fold_lowered_locals(out, engine_);
     return out;
 }
 

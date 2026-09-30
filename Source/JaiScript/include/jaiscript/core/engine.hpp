@@ -281,6 +281,15 @@ namespace jai {
         // execute). Proofs are never serialized - a loaded jaibite re-derives them.
         void type_proofs(bool on);
         bool type_proofs() const;
+        // === THE AGGREGATE LOWERING (docs/math_types_design.md 4.3) ===
+        // Typed math locals of function and lambda bodies run as their component slots (detail/aggregate_lowering.hpp);
+        // off, every vector stays one boxed value, observationally identical. The default follows the backend: on for the
+        // vm (its typed rows and cells run the slots at the float-local floor), off for the interpreter (whose per-node
+        // dispatch runs the boxed kernel faster), so the default interpreter-against-vm fuzz is itself the lowering's
+        // differential. Set before the first execute, like the backend; the getter answers the effective setting.
+        void aggregate_lowering(bool on);
+        bool aggregate_lowering() const;
+        uint64_t aggregate_lowered_locals() const;   // the typed locals and parameters lowered so far (a coverage count for the gates)
         // === THE MIDDLE END'S SWITCH (docs/typed_regions_design.md, the pinned forms onward) ===
         // On by default. The VM's proof-based elisions and passes over closed regions (the forms
         // that skip a check the region analysis proved redundant, the passes that rewrite a region)

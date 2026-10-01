@@ -2159,10 +2159,19 @@ void engine::initialize_engine_reference() {
     
     // Add built-in functions
     add_variadic_function("print", [engine_weak](const std::vector<script_value>& args) -> checked_result<script_value> {
-        auto& out = engine_weak->get_output_stream();
+        std::string line;
         for (const auto& arg : args) {
-            out << arg.to_string();
+            if (arg.deref().type() != script_value_type::jai_object_type) {
+                line += arg.to_string();
+                continue;
+            }
+            auto text = engine_weak->text_of(arg);   // a class's own to_string() speaks for its instances
+            if (!text) { return text.error_value(); }
+            if (engine_weak->backend_unwinding()) { return script_value(std::monostate{}, engine_weak); }
+            line += text.value();
         }
+        auto& out = engine_weak->get_output_stream();
+        out << line;
         out << std::endl;
         return script_value(std::monostate{}, engine_weak);
     });

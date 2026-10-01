@@ -218,7 +218,22 @@ namespace stdlib {
         //   print("Line 1", skip_newline)             // Output: Line 1 (no newline)
         //   print("Debug: ", value, skip_flush)       // Output: Debug: <value> (no newline/flush)
         //
-        eng_ref.add_variadic_function("print", [eng](const std::vector<script_value>& args) -> script_value {
+        eng_ref.add_variadic_function("print", [eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+            // a class's own to_string() speaks for its instances, as in to_string(x) and `${x}`; such a text is never a format string
+            std::vector<script_value> shown;
+            const bool first_was_object = !raw_args.empty() && raw_args[0].deref().type() == script_value_type::jai_object_type;
+            for (size_t i = 0; i < raw_args.size() && eng; ++i) {
+                const script_value& a = raw_args[i];
+                if (a.deref().type() != script_value_type::jai_object_type) { continue; }
+                auto control = a.get_type_info();
+                if (control && (control->type_name == "skip_newline_t" || control->type_name == "skip_flush_t")) { continue; }
+                if (shown.empty()) { shown = raw_args; }
+                auto text = eng->text_of(a);
+                if (!text) { return text.error_value(); }
+                if (eng->backend_unwinding()) { return script_value(std::monostate{}, eng); }
+                shown[i] = script_value(std::move(text.value()), eng);
+            }
+            const std::vector<script_value>& args = shown.empty() ? raw_args : shown;
             std::ostream& out = eng ? eng->get_output_stream() : std::cout;
 
             if (args.empty()) {
@@ -267,7 +282,7 @@ namespace stdlib {
             }
 
             std::string first_str = args[0].to_string();
-            bool has_format_specs = has_format_placeholders(first_str);
+            bool has_format_specs = !first_was_object && has_format_placeholders(first_str);
 
             if (!has_format_specs) {
                 for (size_t i = 0; i < effective_args; ++i) {

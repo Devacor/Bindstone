@@ -18,6 +18,7 @@
 #include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
+#include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
@@ -12872,7 +12873,8 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
 checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
-                                             bool skip_parent_recursion) {
+                                             bool skip_parent_recursion,
+                                             const detail::aggregate_plan* aggregate) {
     const unit_stamp class_unit = class_def->unit();   // the initializers are the class's code (no frame of their own)
     unit_override_scope unitScope(this, &class_unit);
     // First, evaluate parent class field initializers (if any)
@@ -12883,7 +12885,7 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
             auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
             if (parent_script_class) {
                 // Recursively evaluate parent field initializers
-                auto initialized = evaluate_field_initializers(instance, parent_script_class, init_env, false);
+                auto initialized = evaluate_field_initializers(instance, parent_script_class, init_env, false, aggregate);
                 if (!initialized) { return initialized.error_value(); }
             }
         }
@@ -12914,25 +12916,29 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
         member_scope_.floor = init_env->parent_raw();
     }
 
+    auto initialize_field = [&](uint64_t field_id, const expression_ptr& initializer_ast) -> checked_result<void> {
+        auto result = dispatch_expr(initializer_ast.get());
+        if (!result) {
+            if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+                return result.error_value();
+            }
+            throw runtime_error("Failed to evaluate field initializer for '" + std::string(string_symbolizer_->get_string(field_id)) + "'");
+        }
+        script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
+        if (!field_value.has_valid_engine() && engine_) {
+            field_value.set_engine(engine_);
+        }
+        instance->set_field(field_id, field_value);
+        return {};
+    };
+
+    if (aggregate) [[unlikely]] {
+        return detail::aggregate_fill_own_fields(*instance, *class_def, *aggregate, engine_, initialize_field);
+    }
     for (const auto& [field_id, initializer_ast] : field_initializers) {
         if (initializer_ast) {
-            // Evaluate the initializer expression
-            auto result = dispatch_expr(initializer_ast.get());
-            if (!result) {
-                if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-                    return result.error_value();
-                }
-                throw runtime_error("Failed to evaluate field initializer for '" + std::string(string_symbolizer_->get_string(field_id)) + "'");
-            }
-            script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
-
-            // Ensure the field value has an engine reference
-            if (!field_value.has_valid_engine() && engine_) {
-                field_value.set_engine(engine_);
-            }
-
-            // Set the field on the instance using the field_id directly
-            instance->set_field(field_id, field_value);
+            auto initialized = initialize_field(field_id, initializer_ast);
+            if (!initialized) { return initialized; }
         }
     }
 
@@ -13480,10 +13486,11 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
 checked_result<script_value> interpreter::construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                       const std::vector<script_value>& args) {
 
-    // a class without a constructor takes no arguments: family C's constructor text, the checker's too
+    // arguments to a class without a constructor: a copy, or aggregate initialization (KEEP BYTE-PARALLEL with the vm)
+    detail::aggregate_plan aggregate;
     if (!args.empty()) {
-        return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-            class_def->get_type_id(), args.data(), args.size(), engine_, true);
+        aggregate = detail::plan_aggregate(*class_def, args);
+        if (!aggregate.fills()) { return detail::aggregate_answer(aggregate, *class_def, args, engine_); }
     }
 
     if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
@@ -13518,11 +13525,11 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
     auto global_env = current_env ? current_env : environment_;
 
     // Evaluate field initializers with a regular environment that has 'this'
-    if (!instance->seeded_from_plan() || !class_def->chain_initializers_all_literal()) {
+    if (aggregate.fills() || !instance->seeded_from_plan() || !class_def->chain_initializers_all_literal()) {
         auto init_env = std::make_shared<environment>(global_env, string_symbolizer_);
         init_env->define("this", this_value);
         init_env->set_access_context(class_def.get());
-        auto initialized = evaluate_field_initializers(instance, class_def, init_env);
+        auto initialized = evaluate_field_initializers(instance, class_def, init_env, false, aggregate.fills() ? &aggregate : nullptr);
         if (!initialized) { return initialized.error_value(); }
     }
 

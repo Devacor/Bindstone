@@ -3000,14 +3000,26 @@ private:
 
 	void ruling_constructorless_call_text() {
 		test("a_constructorless_class_called_with_arguments_has_one_text", [this]() {
+			// an aggregate takes at most one initializer per field; a class with a private field is no aggregate
 			expect("runtime text", R"(
 				class Bare { int v = 1; }
 				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
 				var one = 1; var two = "s";
 				t([]() { var b = Bare(one, two); });
-			)", "No constructor of 'Bare' takes (int, string)", check_mode::warn);
-			every_config("checker text", "No constructor of 'Bare' takes (int, string)", [](engine& e) {
+			)", "Too many initializers for 'Bare': it has 1 field, got 2", check_mode::warn);
+			every_config("checker text", "Too many initializers for 'Bare': it has 1 field, got 2", [](engine& e) {
 				auto r = e.check("class Bare { int v = 1; } var b = Bare(1, \"s\");");
+				for (const auto& d : r.diagnostics) { if (d.message.find("initializers") != std::string::npos) { return d.message; } }
+				return std::string("no diagnostic");
+			});
+			expect("runtime text, not an aggregate", R"(
+				class Hidden { private: int v = 1; }
+				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+				var one = 1; var two = "s";
+				t([]() { var b = Hidden(one, two); });
+			)", "No constructor of 'Hidden' takes (int, string)", check_mode::warn);
+			every_config("checker text, not an aggregate", "No constructor of 'Hidden' takes (int, string)", [](engine& e) {
+				auto r = e.check("class Hidden { private: int v = 1; } var b = Hidden(1, \"s\");");
 				for (const auto& d : r.diagnostics) { if (d.message.find("constructor") != std::string::npos) { return d.message; } }
 				return std::string("no diagnostic");
 			});

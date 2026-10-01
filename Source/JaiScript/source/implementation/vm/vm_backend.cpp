@@ -34,6 +34,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
+#include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the interpreter)
 #include <jaiscript/vm/disassembler.hpp>  // the listing sink's text
@@ -16698,50 +16699,59 @@ checked_result<script_value> vm_backend::execute_method_ast(const std::shared_pt
 checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                              std::shared_ptr<script_class_definition> class_def,
                                              std::shared_ptr<environment> init_env,
-                                             bool skip_parent_recursion) {
+                                             bool skip_parent_recursion,
+                                             const detail::aggregate_plan* aggregate) {
 	const unit_stamp class_unit = class_def->unit();   // the initializers are the class's code (no frame of their own)
 	unit_override_scope unitScope(this, &class_unit);
 	if (!skip_parent_recursion) {
 		for (const auto& parent : class_def->get_parent_classes()) {
 			auto parent_script_class = std::dynamic_pointer_cast<script_class_definition>(parent);
 			if (parent_script_class) {
-				auto initialized = evaluate_field_initializers(instance, parent_script_class, init_env, false);
+				auto initialized = evaluate_field_initializers(instance, parent_script_class, init_env, false, aggregate);
 				if (!initialized) { return initialized.error_value(); }
 			}
 		}
 	}
 
-	const auto& field_initializers = class_def->get_field_initializer_asts();
-	for (const auto& [field_id, initializer_ast] : field_initializers) {
+	auto initialize_field = [&](uint64_t field_id, const expression_ptr& initializer_ast) -> checked_result<void> {
+		// Scalar-literal initializers stamp the literal through materialize_constant
+		// (op_const's exact kernel, so the value carries the same engine + type
+		// stamps the eval below would produce - auto-field INFERENCE reads them) at
+		// the SAME stamp point and order (a super-ctor body that reads this field
+		// beforehand sees null either way), minus the whole eval_expression
+		// machinery. Scalars only: no shared nodes to alias.
+		if (initializer_ast->get_type() == node_type::literal_expr) {
+			const auto* lit = static_cast<const literal_expr*>(initializer_ast.get());
+			const size_t li = lit->value.raw_storage_index();
+			if (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT ||
+			    li == script_value::TYPEID_BOOL || li == script_value::TYPEID_CHAR ||
+			    li == script_value::TYPEID_NULL) {
+				instance->set_field(field_id, materialize_constant(lit->value));
+				return {};
+			}
+		}
+		auto result = eval_expression(initializer_ast, init_env);
+		if (!result) {
+			if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
+				return result.error_value();
+			}
+			throw runtime_error("Failed to evaluate field initializer for '" + std::string(symbolizer_->get_string(field_id)) + "'");
+		}
+		script_value field_value = initializer_store_value(std::move(result.value()), initializer_ast.get());
+		if (!field_value.has_valid_engine() && engine_) {
+			field_value.set_engine(engine_);
+		}
+		instance->set_field(field_id, field_value);
+		return {};
+	};
+
+	if (aggregate) [[unlikely]] {
+		return detail::aggregate_fill_own_fields(*instance, *class_def, *aggregate, engine_, initialize_field);
+	}
+	for (const auto& [field_id, initializer_ast] : class_def->get_field_initializer_asts()) {
 		if (initializer_ast) {
-			// Scalar-literal initializers stamp the literal through materialize_constant
-			// (op_const's exact kernel, so the value carries the same engine + type
-			// stamps the eval below would produce - auto-field INFERENCE reads them) at
-			// the SAME stamp point and order (a super-ctor body that reads this field
-			// beforehand sees null either way), minus the whole eval_expression
-			// machinery. Scalars only: no shared nodes to alias.
-			if (initializer_ast->get_type() == node_type::literal_expr) {
-				const auto* lit = static_cast<const literal_expr*>(initializer_ast.get());
-				const size_t li = lit->value.raw_storage_index();
-				if (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT ||
-				    li == script_value::TYPEID_BOOL || li == script_value::TYPEID_CHAR ||
-				    li == script_value::TYPEID_NULL) {
-					instance->set_field(field_id, materialize_constant(lit->value));
-					continue;
-				}
-			}
-			auto result = eval_expression(initializer_ast, init_env);
-			if (!result) {
-				if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
-					return result.error_value();
-				}
-				throw runtime_error("Failed to evaluate field initializer for '" + std::string(symbolizer_->get_string(field_id)) + "'");
-			}
-			script_value field_value = initializer_store_value(std::move(result.value()), initializer_ast.get());
-			if (!field_value.has_valid_engine() && engine_) {
-				field_value.set_engine(engine_);
-			}
-			instance->set_field(field_id, field_value);
+			auto initialized = initialize_field(field_id, initializer_ast);
+			if (!initialized) { return initialized; }
 		}
 	}
 	return {};
@@ -17305,9 +17315,11 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 
 checked_result<script_value> vm_backend::construct_default_instance(std::shared_ptr<script_class_definition> class_def,
                                                                     const std::vector<script_value>& args) {
-	if (!args.empty()) {   // family C's constructor text, the checker's too (KEEP BYTE-PARALLEL with the interpreter)
-		return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
-			class_def->get_type_id(), args.data(), args.size(), engine_, true);
+	// arguments to a class without a constructor: a copy, or aggregate initialization (KEEP BYTE-PARALLEL with the interpreter)
+	detail::aggregate_plan aggregate;
+	if (!args.empty()) {
+		aggregate = detail::plan_aggregate(*class_def, args);
+		if (!aggregate.fills()) { return detail::aggregate_answer(aggregate, *class_def, args, engine_); }
 	}
 
 	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
@@ -17319,7 +17331,7 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 
 	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
-	if (class_def->chain_initializers_all_literal()) {
+	if (!aggregate.fills() && class_def->chain_initializers_all_literal()) {
 		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(instance, class_def, false); }
 		return this_value;
 	}
@@ -17333,7 +17345,7 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 	auto init_env = std::make_shared<environment>(global_env, symbolizer_);
 	init_env->define(symbolizer_->get_this_id(), this_value);
 	init_env->set_access_context(class_def.get());
-	auto initialized = evaluate_field_initializers(instance, class_def, init_env);
+	auto initialized = evaluate_field_initializers(instance, class_def, init_env, false, aggregate.fills() ? &aggregate : nullptr);
 	if (!initialized) { return initialized.error_value(); }
 
 	return this_value;

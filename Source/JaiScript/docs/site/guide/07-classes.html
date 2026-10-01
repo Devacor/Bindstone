@@ -87,6 +87,17 @@ pay(price);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">paid 7.0
 paid 5.0</code></pre></div>
 <p>Two deliberate C++ divergences keep this predictable. A constructor that reaches one parameter only through defaults (<code>Money(float a, int _ignored = 0)</code>) is <em>not</em> converting, so a defaulted sentinel is how you opt out, and there is no <code>explicit</code> keyword to remember. And conversion is always a single step: the argument must fit the constructor&#x27;s parameter directly, never <code>x.to_int()</code> first and <code>Money(int)</code> second.</p>
+<h2 id="aggregate-initialization">Aggregate initialization<a class="hlink" href="#aggregate-initialization" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cell { int row; int col; }
+class Move { Cell from; Cell to; int cost = 1; string note = &quot;step&quot;; }
+Cell a{1, 2};                     // fields in declaration order
+auto b = Cell(3, 4);              // parentheses work too, as in C++20
+Move m{a, b};                     // cost and note keep their initializers
+print(&quot;{} {} -&gt; {} {}, cost {}, {}&quot;, m.from.row, m.from.col, m.to.row, m.to.col, m.cost, m.note);
+Move{a, b, 5}.cost;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 -&gt; 3 4, cost 1, step
+== result: 5</code></pre></div>
+<p>A class that declares no constructor is an aggregate, as in C++: <code>T x{a, b}</code>, <code>T{a, b}</code>, <code>T x(a, b)</code> and <code>T(a, b)</code> fill its instance fields in declaration order, base classes&#x27; fields first, each initializer converting through its field&#x27;s typed slot like a field store. Fields past the last initializer run their own initializers, in order, so a later initializer reads the earlier fields; an initialized field&#x27;s own initializer never runs. One argument of the class itself (or a subclass) copies it instead. More initializers than fields raise <code>Too many initializers for &#x27;Cell&#x27;: it has 2 fields, got 3</code>. A class is no aggregate when a class in its chain declares a constructor or is a C++ class, or an instance field is <code>private:</code> or a reference; those keep the constructor text <code>No constructor of &#x27;T&#x27; takes (int)</code>. Methods never disqualify a class (script methods dispatch dynamically without a <code>virtual</code> keyword). Nested braces (<code>Move m{{1, 2}, {3, 4}}</code>) are not part of it: spell each member&#x27;s type, <code>Move m{Cell{1, 2}, Cell{3, 4}}</code>.</p>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;

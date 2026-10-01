@@ -70,6 +70,16 @@ print(&quot;after p.set(42):    p.x = {}&quot;, p.x);</code></pre></div>
 after try_mutate(p): p.x = 1
 after p.set(42):    p.x = 42</code></pre></div>
 <p>So: <strong>methods mutate their receiver; free functions receive copies.</strong> When a mutation &quot;doesn&#x27;t stick&quot;, check whether you passed the object by value.</p>
+<p>Returns follow the same rule. A function that returns by value hands back a value that aliases nothing the function could name: a global, a field or an element it returns is copied (a local or a parameter simply moves out), so changing the result never reaches the callee&#x27;s storage. A <code>-&gt; T&amp;</code> or <code>T&amp; name()</code> return is the alias:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; stock = [1, 2, 3];
+array&lt;int&gt; get_stock() { return stock; }          // by value: the caller gets a copy
+array&lt;int&gt;&amp; stock_ref() { return stock; }         // by reference: the caller names stock
+get_stock().push(4);
+print(&quot;after get_stock().push(4): {}&quot;, stock.size());
+stock_ref().push(4);
+print(&quot;after stock_ref().push(4): {}&quot;, stock.size());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after get_stock().push(4): 3
+after stock_ref().push(4): 4</code></pre></div>
 <h2 id="escape-hatch-1-reference-parameters">Escape hatch 1: <code>&amp;</code> reference parameters<a class="hlink" href="#escape-hatch-1-reference-parameters" aria-label="link">&#8203;</a></h2>
 <p>Declare a parameter with <code>&amp;</code> and the callee binds the <em>caller&#x27;s</em> variable. Works with explicit types (<code>int&amp; x</code>) and with <code>auto&amp;</code> (any type):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }         // typed by-ref parameter
@@ -114,7 +124,7 @@ auto scores = [4, 5];
 print(&quot;total(scores) = {}&quot;, total(scores));          // the variable binds, no copy</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total([1, 2, 3]) = 6
 total(scores) = 9</code></pre></div>
-<p>A write is an assignment, a compound assignment or <code>++</code>/<code>--</code> on the parameter or anything inside it (also through a reference alias such as <code>auto&amp; r = xs;</code> or <code>for (auto&amp; x : xs)</code>), a method call on it (on an array, map or string, the library&#x27;s reading methods such as <code>size</code>, <code>find</code> and <code>keys</code> are reads), passing it on to an <code>&amp;</code> parameter that writes (followed through the calls), to a <code>shared_ptr</code> parameter, a constructor or a function the checker cannot see (a lambda, a host function, a method; <code>print</code>, <code>to_string</code>, <code>math::</code>, <code>string::</code> and the container methods take copies), or returning it by reference. For a method, every override in a class derived from the receiver&#x27;s counts. A parameter that is written keeps needing a variable, and a literal argument fails the load with the write&#x27;s line, <code>&#x27;inc&#x27; writes through parameter &#x27;value&#x27; (line 12); pass a variable</code>; at run time a temporary raises <code>Cannot pass non-lvalue to reference parameter</code>. A lambda called through a variable and a host function keep needing a variable too.</p>
+<p>A write is an assignment, a compound assignment or <code>++</code>/<code>--</code> on the parameter or anything inside it (also through a reference alias such as <code>auto&amp; r = xs;</code> or <code>for (auto&amp; x : xs)</code>), a method call on it (on an array, map or string, the library&#x27;s reading methods such as <code>size</code>, <code>find</code> and <code>keys</code> are reads), passing it on to an <code>&amp;</code> parameter that writes (followed through the calls), to a <code>shared_ptr</code> parameter, a constructor or a function the checker cannot see (a lambda, a host function, a method; <code>print</code>, <code>to_string</code>, <code>math::</code>, <code>string::</code> and the container methods take copies), or returning it by reference. For a method, every override in a class derived from the receiver&#x27;s counts. A parameter that is written keeps needing a variable, and a literal argument fails the load with the write&#x27;s line, <code>&#x27;inc&#x27; writes through parameter &#x27;value&#x27; (line 12); pass a variable</code>; at run time a temporary raises <code>Cannot pass non-lvalue to reference parameter</code>. A lambda called through a variable keeps needing a variable too. A host function is the other way round: its non-const <code>T&amp;</code> parameter takes a literal or a temporary as a copy, and writes its final value back only into an lvalue argument (<a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a>).</p>
 <p>The body becomes part of the interface: adding a write to a function that callers pass literals to breaks those calls loudly, at the next load or hot reload (which checks them again), instead of letting the write vanish into a temporary. A <code>string&amp;</code> is the exception, because a string temporary is written on purpose: a function that edits a name in place serves a variable and a literal alike.</p>
 <h2 id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments">Escape hatch 2: field and element lvalues as ref arguments<a class="hlink" href="#escape-hatch-2-field-and-element-lvalues-as-ref-arguments" aria-label="link">&#8203;</a></h2>
 <p>You can pass <code>obj.field</code> or <code>arr[i]</code> straight into a <code>&amp;</code> parameter. Element references re-resolve <strong>through the container</strong>, so they stay correct even if the array reallocates its storage:</p>
@@ -133,8 +143,15 @@ print(&quot;arr[1] after realloc = {}&quot;, arr[1]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">h.hp = 11
 arr[1] = 7
 arr[1] after realloc = 8</code></pre></div>
-<p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. This one is not catchable: it is an invariant of the reference model, not a script error.</p>
-<p>A vector or color component is an lvalue too, as a struct member is in C++: <code>f(v.x)</code> with <code>void f(float&amp; a)</code>, <code>auto&amp; r = pos.y;</code>, <code>cast&lt;float&amp;&gt;(v.x)</code> and a <code>-&gt; float&amp;</code> return of a component all bind it. Writes land in the vector the component belongs to (a local, a field, an element of an <code>array&lt;math::vec2&gt;</code>, a C++ property through its setter), with the same narrowing as <code>v.x = value</code>.</p>
+<p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. The error is catchable, and the store it interrupted writes nothing.</p>
+<p>A vector or color component (<a href="15-math.html">Math</a>) is an lvalue too, as a struct member is in C++: <code>f(v.x)</code> with <code>void f(float&amp; a)</code>, <code>auto&amp; r = pos.y;</code>, <code>cast&lt;float&amp;&gt;(v.x)</code> and a <code>-&gt; float&amp;</code> return of a component all bind it. Writes land in the vector the component belongs to (a local, a field, an element of an <code>array&lt;math::vec2&gt;</code>, a C++ property through its setter), with the same narrowing as <code>v.x = value</code>.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void scale(float&amp; a) { a *= 2.0; }
+math::vec2 v = math::vec2(1.5, 2.0);
+scale(v.x);            // the component binds float&amp;
+auto&amp; r = v.y;         // and an auto&amp; declaration
+r = 9;
+print(v);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(3.0, 9.0)</code></pre></div>
 <h2 id="escape-hatch-3-reference-declarations-auto">Escape hatch 3: reference declarations (<code>auto&amp;</code>)<a class="hlink" href="#escape-hatch-3-reference-declarations-auto" aria-label="link">&#8203;</a></h2>
 <p><code>auto&amp; r = x;</code> declares an alias. References chain, and element references survive reallocation just like ref params:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 1;
@@ -167,6 +184,24 @@ print(&quot;[{}]&quot;, s);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after e = 9.7: [9,2,3]
 caught: Cannot assign &#x27;string&#x27; to element of type &#x27;int&#x27;
 [hello]</code></pre></div>
+<h3 id="a-reference-binds-only-its-type">A reference binds only its type<a class="hlink" href="#a-reference-binds-only-its-type" aria-label="link">&#8203;</a></h3>
+<p>A <code>T&amp;</code> refers to a <code>T</code>, as in C++. An <code>int&amp;</code> parameter or declaration binds an <code>int</code> variable, element or field, and a <code>var</code> only while it holds an <code>int</code>; a reference to a class <code>T</code> binds a <code>T</code> or a subclass. A float never binds an <code>int&amp;</code>: the checker rejects one it can see at load (<code>argument 1 of &#x27;bump&#x27;: cannot bind &#x27;float&#x27; to &#x27;n&#x27; declared &#x27;int&amp;&#x27;</code>), and a <code>var</code> holding the wrong kind raises when the call binds it. The other direction holds too: a store through any reference obeys the declared type of the variable it names, so <code>var&amp; r = hp;</code> over an <code>int hp</code> stores ints:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; n) { n += 1; }
+var count = 4;                 // a var holding an int binds an int&amp;
+bump(count);
+print(&quot;count = {}&quot;, count);
+var label = &quot;four&quot;;            // a var holding a string does not
+try { bump(label); } catch (err) { print(&quot;caught: {}&quot;, err); }
+
+int hp = 10;
+var&amp; r = hp;                   // the reference names an int variable
+r = 7.9;                       // so the store converts as hp = 7.9 would
+print(&quot;hp = {}&quot;, hp);
+try { r = &quot;full&quot;; } catch (err) { print(&quot;caught: {}&quot;, err); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 5
+caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;bump&#x27; (declared int)
+hp = 7
+caught: Cannot assign string to a variable declared int</code></pre></div>
 <h2 id="escape-hatch-4-range-for-with-auto">Escape hatch 4: range-for with <code>auto&amp;</code><a class="hlink" href="#escape-hatch-4-range-for-with-auto" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
 for (auto x : nums) { x *= 2; }       // copies: original unchanged
@@ -196,7 +231,7 @@ auto l = w.lock();
 l.x;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">expired: false
 == result: 3</code></pre></div>
-<p>Note the guard rail: <code>P p = P(); weak_ptr&lt;P&gt; w = p;</code> raises at run time: a value has no shared owner to observe, so only a <code>shared_ptr</code> (or <code>new P()</code>) can seed a <code>weak_ptr</code>. A <code>weak_ptr&lt;P&gt;</code> field or static takes a shared handle the same way a declaration does.</p>
+<p>Note the guard rail: <code>P p = P(); weak_ptr&lt;P&gt; w = p;</code> is rejected (a load error when the checker sees the value, a catchable run-time error otherwise): a value has no shared owner to observe, so only a <code>shared_ptr</code> (or <code>new P()</code>) can seed a <code>weak_ptr</code>. A <code>weak_ptr&lt;P&gt;</code> field or static takes a shared handle the same way a declaration does.</p>
 <p>The handle keeps sharing inside a copy, exactly as a <code>std::shared_ptr</code> member does in C++. Copying a class instance, an array or a map copies every value member and element and shares every <code>shared_ptr</code> and <code>weak_ptr</code> one:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 1; }
 class Holder { shared_ptr&lt;Node&gt; link; Node own; Holder() { link = new Node(); own = Node(); } }
@@ -241,6 +276,23 @@ after write:  5
 via handle:   77
 original:     77  copy: 0</code></pre></div>
 <p>The reference form is itself an lvalue, as in C++: <code>cast&lt;Derived&amp;&gt;(h) = d</code> assigns the object <code>h</code> holds, and <code>cast&lt;int&amp;&gt;(n) += 2.5</code> or <code>cast&lt;int&amp;&gt;(n)++</code> stores an int into <code>n</code>, as <code>int&amp; r = n; r += 2.5;</code> would, even when <code>n</code> is a <code>var</code>. Every C++ lvalue is assignable the same way: a function or method returning <code>T&amp;</code> (<code>first() = 5</code>), a conditional whose arms are lvalues (<code>(useA ? a : b) = 5</code>), <code>(a = b) = c</code> and <code>++x = v</code>.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; slots = [1, 2, 3];
+int&amp; first() { return slots[0]; }
+int a = 1;
+int b = 2;
+bool use_a = false;
+first() = 5;                   // a call returning int&amp; names slots[0]
+(use_a ? a : b) = 9;           // a conditional of two lvalues names one of them
+(a = b) = 7;                   // an assignment yields its left side
+var n = 3;
+cast&lt;int&amp;&gt;(n) += 2.5;          // stores an int into the var, as int&amp; r = n would
+print(&quot;{} {} {} {}&quot;, slots[0], a, b, n);
+int count() { return 3; }
+var f = count;                 // called through a var, so only the run time sees it
+try { f() = 4; } catch (err) { print(&quot;caught: {}&quot;, err); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5 7 9 5
+caught: Cannot assign to a call result: &#x27;f&#x27; returns by value</code></pre></div>
+<p>Anything else names no storage, and the error says what was written: <code>Cannot assign to a literal</code>, <code>Cannot assign to x++: it yields the old value</code>, <code>Cannot assign to the result of &#x27;+&#x27;: it is a temporary value</code>, <code>Cannot assign to the result of cast&lt;int&gt;(x): it is a temporary value (cast&lt;int&amp;&gt;(x) names the variable)</code>, <code>Cannot assign to a conditional: its arm &#x27;5&#x27; names no storage</code>. The checker reports the same text at load (with a lowercase first letter) wherever it can see the target; a call is the one target only the call can judge, so the call and the right side run first and a by-value result raises after them.</p>
 <p>Two things to keep in mind. The value form applied to a handle or a reference still copies, and because that is almost never what you meant, the checker warns about it (<code>cast&lt;C&gt;(h) copies the instance - use cast&lt;C&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;C&gt;&gt;(h) to share it</code>). And a cast to an unrelated class raises the catchable <code>Cannot cast &#x27;X&#x27; to &#x27;T&#x27;</code> at run time; the checker never second-guesses the operand, since saying <code>cast</code> is how you tell it you know better. The primitive forms, the char rules and the full contract are in <a href="02-type-ladder.html#cast-the-explicit-boundary">the Type Ladder</a>.</p>
 <h2 id="what-each-strategy-costs">Choosing a strategy<a class="hlink" href="#what-each-strategy-costs" aria-label="link">&#8203;</a></h2>
 <p>The short version: passing by value pays for a deep copy that grows with the payload; <code>&amp;</code> and <code>shared_ptr</code> alias the same object at essentially the same cost. All three strategies are quantified side by side in <a href="../embedding/11-performance.html#value-strategy-costs">Performance</a>.</p>
@@ -256,7 +308,7 @@ original:     77  copy: 0</code></pre></div>
 <li>A <strong>handle</strong> on the right (<code>p = new Foo();</code>) <strong>rebinds</strong> <code>p</code>.</li>
 <li>A <strong>value of a compatible class</strong> (the held class or a subclass) <strong>assigns into</strong> the shared object, so every alias sees it, exactly what a <code>shared_ptr&lt;Foo&gt;</code> variable does. <code>Foo()</code> is a value, <code>new Foo()</code> is a handle: the same distinction the typed rungs draw.</li>
 <li>A <strong>value of an unrelated class, or a primitive</strong> (<code>p = Bar();</code>, <code>p = 5;</code>) <strong>rebinds</strong> <code>p</code> to an independent copy. This is the one move <code>var</code> adds, and it sits precisely where a typed holder would raise.</li>
-<li><code>auto q = p;</code> taken from a var-held handle locks <code>q</code> as a <code>shared_ptr&lt;Foo&gt;</code>; the typed rungs themselves are unchanged.</li>
+<li><code>auto q = p;</code> takes the static type of <code>p</code>, which is <code>var</code>, so <code>q</code> is a <code>var</code> too (it shares the handle); spell <code>shared_ptr&lt;Foo&gt; q = p;</code> to lock it.</li>
 </ul>
 <p>The same four moves, in order, with <code>alias</code> watching. <code>same_as</code> asks whether two handles point at one object; the general form is <code>same_object(x, y)</code>, which answers identity for handles, references, containers and instances alike, because <code>==</code> compares values memberwise (see <a href="../guide/04-operators.html#equality">Equality</a>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Foo { int x = 1; }

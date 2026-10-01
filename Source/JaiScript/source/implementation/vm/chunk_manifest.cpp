@@ -116,7 +116,7 @@ namespace {
 			out << pre << "closure_protos " << ch.closure_protos.size() << "\n";
 			for (size_t i = 0; i < ch.closure_protos.size(); ++i) {
 				const closure_proto& p = ch.closure_protos[i];
-				out << pre << " " << i << " lambda=" << node(p.lambda.get()) << " default_capture=" << static_cast<int>(p.default_capture) << " this=" << b(p.captures_this) << " outer=[";
+				out << pre << " " << i << " lambda=" << node(p.lambda.get()) << " default_capture=" << static_cast<int>(p.default_capture) << " this=" << b(p.captures_this) << " instance=" << b(p.uses_instance) << " outer=[";
 				for (const auto& o : p.outer_slot_plan) { out << "(" << id(o.first) << " " << o.second << ")"; }
 				out << "] used=[";
 				for (uint64_t v : p.used_variables) { out << id(v) << " "; }

@@ -254,11 +254,14 @@ auto inc = [&amp;counter]() { counter++; };
 inc(); inc(); inc();
 print(&quot;counter = {}&quot;, counter);
 
-auto a = 2; auto b = 3;
-auto sum_all = [=]() { return a + b; };
-auto set_a = [&amp;]() { a = 100; };
-set_a();
-print(&quot;a = {}, sum_all() = {} (captured before set_a)&quot;, a, sum_all());</code></pre></div>
+function snapshot() {
+    auto a = 2; auto b = 3;
+    auto sum_all = [=]() { return a + b; };
+    auto set_a = [&amp;]() { a = 100; };
+    set_a();
+    print(&quot;a = {}, sum_all() = {} (captured before set_a)&quot;, a, sum_all());
+}
+snapshot();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">add(5, 3) = 8
 scale(4) = 40
 counter = 3

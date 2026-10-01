@@ -12719,13 +12719,14 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const bool has_default_capture = proto.default_capture != static_cast<uint8_t>(lambda_expr::capture_default::none);
 	const bool capture_by_ref_default = proto.default_capture == static_cast<uint8_t>(lambda_expr::capture_default::by_reference);
 
-	const bool uses_instance = std::find(proto.used_variables.begin(), proto.used_variables.end(), this_id_) != proto.used_variables.end();
+	const bool uses_instance = proto.uses_instance;
 	const bool captures_this = proto.captures_this || (has_default_capture && uses_instance);
 	if (uses_instance && !captures_this) {
 		return raise_(make_error_code(runtime_error_code::capture_undefined_variable), "Lambda capture list does not capture 'this'; use [this], [=] or [&]");
 	}
-	// A capture list names everything the lambda captures (KEEP BYTE-PARALLEL with interpreter::visit_lambda_expr)
-	if (!has_default_capture) {
+	// A capture list names everything the lambda captures, checked at the node's first creation (KEEP BYTE-PARALLEL with
+	// interpreter::visit_lambda_expr): the parser already rejected an unlisted frame local, this is the environment and member half
+	if (!has_default_capture && !proto.lambda->capture_list_verified) {
 		auto listed = [&](uint64_t id) {
 			return std::any_of(proto.captures.begin(), proto.captures.end(), [id](const auto& c) { return c.symbol_id == id; });
 		};
@@ -12751,6 +12752,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
 				"Lambda capture list does not capture enclosing name '{0}'; name it, or use [this], [=] or [&]", id);
 		}
+		if (!engine_->parallel_region_active()) { proto.lambda->capture_list_verified = true; }
 	}
 	// A closure's parent is its program scope (a namespace keeps its live variables), never the creating frame
 	const environment* program_scope_raw = detail::program_scope_of(closure_env.get());

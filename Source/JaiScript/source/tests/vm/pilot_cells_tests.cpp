@@ -1759,7 +1759,7 @@ function swap_d(int i) -> void { if (i == 3) { D = E; } }
 function swap_d2(int i) -> void { if (i == 3) { D2 = [10, 20, 30, 40, 50, 60, 70, 80]; } }
 function bump_g(int i) -> void { G = G + i; }
 function grow_w(int i) -> void { if (i == 2) { W.push(1000); W.push(2000); } }
-function env_callee(int i) -> int { var f = function() { return i * 2; }; return f(); }
+function env_callee(int i) -> int { var f = [=]() { return i * 2; }; return f(); }
 var through_ref = function(int n) { var& d = D; int acc = 0; for (int i = 0; i < n; ++i) { swap_d(i); acc = acc + d[i]; } return acc; };
 var by_name = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { swap_d(i); acc = acc + D[i]; } return acc; };
 var through_ref2 = function(int n) { var& d = D2; int acc = 0; for (int i = 0; i < n; ++i) { swap_d2(i); acc = acc + d[i]; } return acc; };

@@ -12699,19 +12699,22 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	const bool uses_instance = std::find(proto.used_variables.begin(), proto.used_variables.end(), this_id_) != proto.used_variables.end();
 	const bool captures_this = proto.captures_this || (has_default_capture && uses_instance);
 	if (uses_instance && !captures_this) {
-		return raise_(make_error_code(runtime_error_code::capture_undefined_variable), "Lambda instance access requires [this], [=], or [&]");
+		return raise_(make_error_code(runtime_error_code::capture_undefined_variable), "Lambda capture list does not capture 'this'; use [this], [=] or [&]");
 	}
+	auto program_scope = detail::lambda_parent_scope(closure_env);
+	// A capture list names everything the lambda captures (KEEP BYTE-PARALLEL with interpreter::visit_lambda_expr)
 	if (!has_default_capture) {
+		auto listed = [&](uint64_t id) {
+			return std::any_of(proto.captures.begin(), proto.captures.end(), [id](const auto& c) { return c.symbol_id == id; });
+		};
 		for (const auto& [sym, slot] : outer_refs) {
-			bool listed = std::any_of(proto.captures.begin(), proto.captures.end(),
-				[&](const auto& a_capture) { return a_capture.symbol_id == sym; });
-			if (!listed) { return raise_(make_error_code(runtime_error_code::capture_undefined_variable), "Lambda capture list does not capture enclosing local '{0}'", sym); }
+			if (!listed(sym)) {
+				return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
+					"Lambda capture list does not capture enclosing local '{0}'; name it or use [=] or [&]", sym);
+			}
 		}
 		for (uint64_t id : proto.used_variables) {
-			if (id == this_id_ && captures_this) { continue; }
-			bool listed = std::any_of(proto.captures.begin(), proto.captures.end(),
-				[&](const auto& a_capture) { return a_capture.symbol_id == id; });
-			if (listed) { continue; }
+			if (id == this_id_ || listed(id)) { continue; }
 			detail::member_scope_ctx scope;
 			if (f.locals && !f.top_level) {
 				ensure_frame_member_scope(f, environment_.get());
@@ -12721,11 +12724,12 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			if (source.global || source.what == detail::capture_source::kind::miss) { continue; }
 			if (captures_this && (source.what == detail::capture_source::kind::member ||
 				source.what == detail::capture_source::kind::cpp_property || source.what == detail::capture_source::kind::shadow)) { continue; }
-			return raise_(make_error_code(runtime_error_code::capture_undefined_variable), "Lambda capture list does not capture enclosing name '{0}'", id);
+			return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
+				"Lambda capture list does not capture enclosing name '{0}'; name it, or use [this], [=] or [&]", id);
 		}
 	}
-	auto program_scope = detail::lambda_parent_scope(closure_env);
-	const bool needs_capture_env = has_explicit_captures || (has_default_capture && !proto.used_variables.empty()) ||
+	// A closure's parent is its program scope (a namespace keeps its live variables), never the creating frame
+	const bool needs_capture_env = has_explicit_captures || !outer_refs.empty() || (has_default_capture && !proto.used_variables.empty()) ||
 		(program_scope && program_scope != engine_->get_global_environment());
 
 	std::shared_ptr<environment> final_closure_env;
@@ -12736,7 +12740,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		++profile_env_births_[4];
 #endif
 
-		if (captures_this && has_default_capture && uses_instance) {
+		if (captures_this && has_default_capture) {
 			auto result = environment_->get(this_id_);
 			if (!result) { return raise_from(result); }
 			captureEnv->define(this_id_, script_value(result.value().deref()));
@@ -12889,7 +12893,7 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			}
 			script_value this_obj = std::move(this_result.value());
 
-			auto method_env = std::make_shared<environment>(program_scope, symbolizer_, this_obj);
+			auto method_env = std::make_shared<environment>(closure_env, symbolizer_, this_obj);
 			method_env->define(this_id_, this_obj);
 
 			// The capture env's OWN storage only, never a global behind its parent

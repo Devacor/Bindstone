@@ -14,8 +14,8 @@ namespace jai::detail {
 	struct body_walker {
 		std::function<void(identifier_expr*)> on_identifier;
 		std::function<void(uint64_t)> on_declared;
-		std::function<void()> on_instance;
 		string_symbolizer* symbolizer;
+		std::function<void()> on_instance;
 
 		void expr(const expression_ptr& e) const {
 			if (!e) return;

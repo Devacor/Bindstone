@@ -725,13 +725,13 @@ public:
         // ---- #41 reference into an array survives reallocation (no heap corruption) ----
         // ---- #20 closure capture of enclosing function locals (all forms) ----
         test("closure_capture_local_auto_no_capture", [this]() {
-            // [] lambda (no explicit capture) must still see enclosing locals
-            // via the automatic-local-capture feature.
+            // [] captures nothing: an enclosing local needs its name in the list
             auto e = make_engine();
+            check_throws([&]() { e->execute("auto make() -> auto { auto local = 7; return []() -> auto { return local + 1; }; } make()();"); });
             auto r = e->execute(R"(
                 auto make() -> auto {
                     auto local = 7;
-                    return []() -> auto { return local + 1; };
+                    return [local]() -> auto { return local + 1; };
                 }
                 auto f = make();
                 f()
@@ -955,6 +955,7 @@ public:
         });
         test("fuzz_typed_fn_falls_off_end_returns_null", [this]() {
             auto e = make_engine();
+            e->static_checking(check_mode::warn);   // strict rejects the missing return at load
             auto r = e->execute(R"(
                 function f(int p) -> string { int g = 0; while (++g < 4) {} }
                 f(1);
@@ -2237,12 +2238,12 @@ public:
                     int q = 3;
                     W() : super() {}
                     int a() { auto f = [this]() { return value; }; return f(); }
-                    int b() { auto f = []() { return value + 1; }; return f(); }
-                    int bq() { auto f = []() { return q + 1; }; return f(); }
-                    int b0() { auto f = []() { return value; }; return f(); }
-                    int b1() { auto f = []() { int k = 1; return value + k; }; return f(); }
-                    int b2() { auto f = []() { return this.value + 1; }; return f(); }
-                    int b3() { auto f = []() { return 1 + value; }; return f(); }
+                    int b() { auto f = [this]() { return value + 1; }; return f(); }
+                    int bq() { auto f = [this]() { return q + 1; }; return f(); }
+                    int b0() { auto f = [this]() { return value; }; return f(); }
+                    int b1() { auto f = [this]() { int k = 1; return value + k; }; return f(); }
+                    int b2() { auto f = [this]() { return this.value + 1; }; return f(); }
+                    int b3() { auto f = [this]() { return 1 + value; }; return f(); }
                     int a1() { auto f = [this]() { return value + 1; }; return f(); }
                     void c() { auto f = [this]() { value = 9; }; f(); }
                     int d() { auto f = [=]() { return value; }; return f(); }
@@ -2257,13 +2258,13 @@ public:
                 catch (const std::exception& ex) { check_true(false, std::string(label) + ": " + ex.what()); return -1; }
             };
             check_eq((int64_t)5, run_int("w.a()", "[this] lambda read"), "[this] lambda reads the property");
-            check_eq((int64_t)4, run_int("w.bq()", "bare lambda field read"), "bare lambda reads a script field (baseline)");
-            check_eq((int64_t)5, run_int("w.b0()", "bare lambda plain property read"));
-            check_eq((int64_t)6, run_int("w.b1()", "bare lambda property + local"));
-            check_eq((int64_t)6, run_int("w.b2()", "bare lambda this.property + 1"));
-            check_eq((int64_t)6, run_int("w.b3()", "bare lambda 1 + property"));
+            check_eq((int64_t)4, run_int("w.bq()", "[this] lambda field read"), "[this] lambda reads a script field (baseline)");
+            check_eq((int64_t)5, run_int("w.b0()", "[this] lambda plain property read"));
+            check_eq((int64_t)6, run_int("w.b1()", "[this] lambda property + local"));
+            check_eq((int64_t)6, run_int("w.b2()", "[this] lambda this.property + 1"));
+            check_eq((int64_t)6, run_int("w.b3()", "[this] lambda 1 + property"));
             check_eq((int64_t)6, run_int("w.a1()", "[this] lambda property + 1"));
-            check_eq((int64_t)6, run_int("w.b()", "bare lambda property read"), "bare lambda reads the property");
+            check_eq((int64_t)6, run_int("w.b()", "[this] lambda property read"), "[this] lambda reads the property");
             check_eq((int64_t)9, run_int("w.c(); w.value", "[this] lambda store"), "[this] lambda store writes through");
             check_eq((int64_t)3, run_int("w.dq()", "[=] field snapshot"), "[=] snapshots a script field (baseline)");
             check_eq((int64_t)9, run_int("w.d()", "[=] property snapshot"), "[=] snapshots the property like a field");
@@ -2866,7 +2867,7 @@ public:
             }
         });
         test("property_refs_inside_lambdas_and_cast", [this, propref_engine, caught]() {
-            // Bare lambdas made in a hybrid method reach the property through the env's
+            // [this] lambdas made in a hybrid method reach the property through the env's
             // 'this' for every ref spelling; cast<int&> binds it too. Explicit [&name] /
             // [name] captures of a property keep today's undefined-capture text (they have
             // no member rung - unchanged, byte-identical).
@@ -2879,8 +2880,8 @@ public:
                     void by_ref(int& p) { p += 1; }
                     class W : HybridProbe {
                         W() : super() {}
-                        void lam_arg() { auto f = []() { by_ref(value); }; f(); }
-                        void lam_decl() { auto f = []() { auto& r = value; r += 1; }; f(); }
+                        void lam_arg() { auto f = [this]() { by_ref(value); }; f(); }
+                        void lam_decl() { auto f = [this]() { auto& r = value; r += 1; }; f(); }
                         void cast_ref() { auto& r = cast<int&>(value); r = 40; }
                         int ex_ref() { auto f = [&value]() { return value; }; return f(); }
                         int ex_val() { auto f = [value]() { return value; }; return f(); }

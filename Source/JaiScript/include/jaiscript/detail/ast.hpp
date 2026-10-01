@@ -429,6 +429,10 @@ namespace jai {
         mutable std::vector<std::pair<uint64_t, size_t>> outer_slot_plan;
         mutable bool outer_slot_plan_built = false;
 
+        // the interpreter's free names of the body (this_id for this/super), the vm proto's used_variables
+        mutable std::vector<uint64_t> free_names;
+        mutable bool free_names_built = false;
+
         // the lambda as a declaration for a call of the local it initializes (the checker's proofs, the inliner's leaf graft)
         mutable std::shared_ptr<class function_decl> graft_decl;
         mutable std::vector<const class function_decl*> graft_overloads;

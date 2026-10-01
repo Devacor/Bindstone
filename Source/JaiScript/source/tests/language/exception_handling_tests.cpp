@@ -951,6 +951,7 @@ public:
 
         test("bare_return_in_typed_fn_inside_try_caught", [this]() {
             auto engine = make_engine();
+            engine->static_checking(check_mode::warn);   // strict rejects the bare return at load
             script_value result = engine->execute(
                 "int f() {\n"
                 "  try { return; } catch (e) { return -1; }\n"
@@ -958,6 +959,7 @@ public:
                 "f()\n");
             check_eq((int64_t)-1, result.as_int());
             auto plain = make_engine();
+            plain->static_checking(check_mode::warn);
             const char* src =
                 "int f() {\n"                 // 1
                 "  return;\n"                 // 2

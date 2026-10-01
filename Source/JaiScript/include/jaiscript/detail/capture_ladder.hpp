@@ -41,12 +41,12 @@ inline bool owned_by_root(environment* from, uint64_t sym) {
     return false;
 }
 
-// A closure retains its namespace/global scope, never a creating function frame.
-inline std::shared_ptr<environment> lambda_parent_scope(std::shared_ptr<environment> a_current) {
-    while (a_current && !a_current->is_program_scope()) {
-        a_current = a_current->get_parent();
+// A closure parents on its program scope (the global environment or a namespace's), never a creating frame
+inline std::shared_ptr<environment> lambda_parent_scope(std::shared_ptr<environment> env) {
+    while (env && !env->is_program_scope()) {
+        env = env->get_parent();
     }
-    return a_current;
+    return env;
 }
 
 inline capture_source resolve_capture_source(script_value* frame_slot_cell,

@@ -218,7 +218,7 @@ public:
             )");
             check_eq((int64_t)12, mixed.as_int());
             auto bare = eng->execute(R"(
-                function f3(int k) -> int { var g = []() -> int { var h = []() -> int { return k; }; return h(); }; return g(); }
+                function f3(int k) -> int { var g = [k]() -> int { var h = [k]() -> int { return k; }; return h(); }; return g(); }
                 f3(4)
             )");
             check_eq((int64_t)4, bare.as_int());
@@ -285,11 +285,11 @@ public:
         });
 
         test("bare_capture_local_over_same_named_global", [expect, with_global, report]() {
-            const std::string f = "int f() { int a = 1; auto lam = []() { return a * 10; }; a = 11; return lam(); }";
-            expect(with_global + f + report, "10|5", "[] snapshots the local, not the global");
-            expect(f + " to_string(f())", "10", "[] without a global");
-            const std::string f2 = "int f() { int a = 1; auto lam = []() { return a * 10; }; return lam(); }";
-            expect(with_global + f2 + report, "10|5", "[] without a later mutation");
+            const std::string f = "int f() { int a = 1; auto lam = [=]() { return a * 10; }; a = 11; return lam(); }";
+            expect(with_global + f + report, "10|5", "[=] snapshots the local, not the global");
+            expect(f + " to_string(f())", "10", "[=] without a global");
+            const std::string f2 = "int f() { int a = 1; auto lam = [=]() { return a * 10; }; return lam(); }";
+            expect(with_global + f2 + report, "10|5", "[=] without a later mutation");
         });
 
         test("explicit_captures_local_over_same_named_global", [expect, with_global, report]() {
@@ -302,7 +302,7 @@ public:
         });
 
         test("captured_parameter_shadows_global", [expect, with_global]() {
-            const std::string f = "int f(int a) { auto r = [&]() { return a * 10; }; auto v = [=]() { return a * 10; }; auto b = []() { return a * 10; }; return r() * 10000 + v() * 100 + b(); }";
+            const std::string f = "int f(int a) { auto r = [&]() { return a * 10; }; auto v = [=]() { return a * 10; }; auto b = [a]() { return a * 10; }; return r() * 10000 + v() * 100 + b(); }";
             expect(with_global + f + " to_string(f(2)) + \"|\" + to_string(a)", "202020|5", "a parameter is captured over the global");
             expect(f + " to_string(f(2))", "202020", "a parameter without a global");
         });
@@ -310,13 +310,13 @@ public:
         test("nested_lambdas_capture_local_over_global", [expect, with_global, report]() {
             const std::string rr = "int f() { int a = 1; auto outer = [&]() { auto inner = [&]() { return a * 10; }; return inner(); }; a = 11; return outer(); }";
             const std::string vv = "int f() { int a = 1; auto outer = [=]() { auto inner = [=]() { return a * 10; }; return inner(); }; a = 11; return outer(); }";
-            const std::string bb = "int f() { int a = 1; auto outer = []() { auto inner = []() { return a * 10; }; return inner(); }; a = 11; return outer(); }";
+            const std::string bb = "int f() { int a = 1; auto outer = [a]() { auto inner = [a]() { return a * 10; }; return inner(); }; a = 11; return outer(); }";
             const std::string xr = "int f() { int a = 1; auto outer = [&a]() { auto inner = [&]() { return a * 10; }; return inner(); }; a = 11; return outer(); }";
             const std::string mut = "int f() { int a = 1; auto outer = [&]() { auto inner = [&]() { a = a + 1; return a; }; inner(); return a; }; int r = outer(); return r * 100 + a; }";
             const std::string own = "int f() { int a = 1; auto outer = [&]() { auto inner = [&]() { int b = 2; return a * 10 + b; }; return inner(); }; return outer(); }";
             expect(with_global + rr + report, "110|5", "[&] through two levels");
             expect(with_global + vv + report, "10|5", "[=] through two levels");
-            expect(with_global + bb + report, "10|5", "[] through two levels");
+            expect(with_global + bb + report, "10|5", "[a] through two levels");
             expect(with_global + xr + report, "110|5", "[&a] outer, [&] inner");
             expect(with_global + mut + report, "202|5", "nested mutation lands in the local, the global is untouched");
             expect(with_global + own + report, "12|5", "the inner lambda's own local stays its own");
@@ -331,13 +331,13 @@ public:
                 "  int a = 7; int g = 70;\n"
                 "  int m() { int a = 1; auto lam = [&]() { a = a + 1; return a; }; int r = lam(); return r * 1000 + a * 10 + this.a; }\n"
                 "  int mv() { int a = 1; auto lam = [=]() { return a; }; a = 11; return lam() * 10 + this.a; }\n"
-                "  int mb() { int a = 1; auto lam = []() { return a; }; a = 11; return lam() * 10 + this.a; }\n"
+                "  int mb() { int a = 1; auto lam = [a]() { return a; }; a = 11; return lam() * 10 + this.a; }\n"
                 "  int p(int a) { auto lam = [&]() { return a; }; return lam(); }\n"
                 "  int gg() { int g = 1; auto lam = [&]() { g = g + 1; return g; }; int r = lam(); return r * 1000 + g * 10; }\n"
                 "}\n";
             expect(cls + "to_string(C().m()) + \"|\" + to_string(a)", "2027|5", "[&] local over field over global");
             expect(cls + "to_string(C().mv()) + \"|\" + to_string(a)", "17|5", "[=] local over field");
-            expect(cls + "to_string(C().mb()) + \"|\" + to_string(a)", "17|5", "[] local over field");
+            expect(cls + "to_string(C().mb()) + \"|\" + to_string(a)", "17|5", "[a] local over field");
             expect(cls + "to_string(C().p(3)) + \"|\" + to_string(a)", "3|5", "[&] parameter over field");
             expect(cls + "C c = C(); to_string(c.gg()) + \"|\" + to_string(c.g) + \"|\" + to_string(g)", "2020|70|500", "[&] local over field over global, all three untouched");
         });
@@ -361,7 +361,7 @@ public:
                    "Cannot capture undefined variable 'g'|500", "[g] names a member: not capturable, global untouched");
             expect(cls + "string m = \"\"; try { C().fexr(); } catch (e) { m = e; } m + \"|\" + to_string(g)",
                    "Cannot capture undefined variable 'g'|500", "[&g] names a member: not capturable, global untouched");
-            const std::string no_global = "class C { int g = 70; int fex() { auto l = [g]() { return g; }; return l(); } }\n";
+            const std::string no_global = "[[warn_mode]];\nclass C { int g = 70; int fex() { auto l = [g]() { return g; }; return l(); } }\n";
             expect(no_global + "string m = \"\"; try { C().fex(); } catch (e) { m = e; } m",
                    "Cannot capture undefined variable 'g'", "[g] of a field without a global keeps its text");
         });

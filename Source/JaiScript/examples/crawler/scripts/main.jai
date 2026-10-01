@@ -15,20 +15,15 @@ import "view.jai";
 import "ui.jai";
 import "game.jai";
 
-// Re-execute every rule file mid-run ('R' with --dev). Classes hot-reload with
-// instance migration; live coroutines keep their old bodies until rebuilt.
-// G and RNG live in state.jai, which is deliberately skipped.
+// Re-run every rule file mid-run ('R' with --dev). An import is program scope wherever
+// it stands, so functions and classes replace in place (instances migrate) and each
+// file's top-level declarations re-run; the host's import_behavior::always re-runs them
+// on every R, edited or not. The group is parsed and checked before any of it runs, so
+// a broken edit raises and changes nothing. Live coroutines keep their old bodies until
+// rebuilt. G and RNG live in state.jai, which is deliberately skipped. (An include here
+// would paste the files into this function: their functions would be its nested ones.)
 function reload_scripts() -> void {
-	include "util.jai";
-	include "data.jai";
-	include "entities.jai";
-	include "dungeon.jai";
-	include "items.jai";
-	include "combat.jai";
-	include "ai.jai";
-	include "view.jai";
-	include "ui.jai";
-	include "game.jai";
+	import("util.jai", "data.jai", "entities.jai", "dungeon.jai", "items.jai", "combat.jai", "ai.jai", "view.jai", "ui.jai", "game.jai");
 }
 
 function creation_screen() -> var {

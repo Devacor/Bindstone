@@ -405,6 +405,15 @@ Each is recognized only in that position, so a script using one of these words a
 | `A map entry binds two names, the key and the value: for (auto [k, v] : m)` | parse error: another count of names |
 | `a structured binding takes a map's entries, its key and value: cannot bind 'array' to [k, v]` | checker (load error) when the container's static type is not a map; a dynamic container that is not a map raises the member text of `.first` when the loop runs |
 
+## Includes inside a function body
+
+A literal include inside a function body is the function's own text (Dev ruling 2026-10-01): a class the included file
+declares there is a parse error, `an include inside a function body cannot declare class 'K' (a class is a program-scope
+type and the included text is the function's own); import 'k.jai' instead` (the include's path as written, located at the
+class in the included file); a function it declares is a nested function, and when the program scope names it too the strict
+checker warns at warning severity, at the enclosing body: `inc.jai:1:10: function 'helper' from the include in function 'reload' is local to it and hides the
+program-scope 'helper' there without replacing it; import the file to replace program-scope functions` (`in a lambda`).
+
 ## Untouched families (one-line recommendation each)
 
 | family | representative texts | recommendation |

@@ -466,6 +466,25 @@ private:
              top != enums_.end() ? top->second->location.line : 0, top != enums_.end() ? top->second->location.column : 0);
     }
 
+    // An include inside a function body is the function's own text, so a function it declares is a nested one: when the
+    // program scope names it too, the include hides that function for the body and replaces nothing - the likely mistake
+    void warn_spliced_function(const function_decl* fn) {
+        if (fn_stack_.empty() || !fn_stack_.back().file || *fn_stack_.back().file == fn->location.filename) { return; }
+        const std::string name(fn->name);
+        auto top = functions_.find(fn->name);
+        const bool program_has = top != functions_.end() || (program_functions_ && program_functions_->count(name)) || eng_.has_variable(name);
+        if (!program_has) { return; }
+        const std::string where = fn_stack_.back().name == "lambda" ? std::string("a lambda") : "function '" + std::string(fn_stack_.back().name) + "'";
+        // the listing renders this unit's text: the warning stands at the enclosing body and names the included file's place
+        source_location at = fn->location;
+        at.line = fn_stack_.back().line;
+        at.column = fn_stack_.back().column;
+        diag(diag_level::warning, at, fn->location.to_string() + ": function '" + name + "' from the include in " + where +
+             " is local to it and hides the program-scope '" + name + "' there without replacing it; import the file to replace program-scope functions",
+             top != functions_.end() && !top->second.empty() ? top->second.front()->location.line : 0,
+             top != functions_.end() && !top->second.empty() ? top->second.front()->location.column : 0);
+    }
+
     // Live lambda bodies: a name declared below base is the lambda's own; above it the capture list must admit it
     struct capture_ctx {
         size_t base = 0;
@@ -489,6 +508,7 @@ private:
         std::unordered_set<std::string_view> globals_used;
         uint8_t inferred_return = 0;      // auto: the kind every return so far certainly yields (1 int, 2 float, 3 bool)
         bool inferred_mixed = false;      // auto: a return of another kind, of an uncertain kind, or without a value
+        const std::string* file = nullptr;   // the file the body is written in (a declaration from another one was spliced by an include)
     };
     std::vector<fn_ctx> fn_stack_;
     sclass* class_ctx_ = nullptr;
@@ -3894,6 +3914,7 @@ private:
             case node_type::function_decl: {
                 auto* fn = static_cast<function_decl*>(d);
                 if (scopes_.size() > 1) {
+                    warn_spliced_function(fn);
                     // nested function: visible from here on (top-level ones were pre-collected)
                     var_entry entry;
                     entry.type = ctype::make(ctype::function_k);
@@ -4167,6 +4188,7 @@ private:
                    fn->location.line, fn->location.column};
         ctx.sees_fields = class_ctx_ != nullptr;
         ctx.is_static_method = fn->is_static;
+        ctx.file = &fn->location.filename;
         // Constructor params shadowing the field they initialize (C(int hp) { this.hp = hp; })
         // is the established idiom - no field-shadow warnings on ctor params.
         bool is_ctor = class_ctx_ && fn->name == class_ctx_name_;
@@ -4311,6 +4333,7 @@ private:
         scopes_.emplace_back();
         fn_ctx ctx{l->return_type.get(), /*is_coroutine=*/false, "lambda",
                    l->location.line, l->location.column};
+        ctx.file = &l->location.filename;
         // Only a [this] capture reaches fields from a lambda body (bare [=]/[&] do not)
         for (const auto& cap : l->captures) {
             if (cap.name == "this") { ctx.sees_fields = class_ctx_ != nullptr; break; }

@@ -3565,10 +3565,17 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     ++splice_depth_; splice_active_.push_back(resolved.value());
     while (!is_at_end()) {
         const size_t errors_before = errors_.size();
+        const token at = peek();
         auto d = declaration();
         if (!d) {
             if (errors_.size() == errors_before && d.error() != std::error_code()) { report_error(format_error(d, *symbolizer_), peek()); }
             synchronize();
+            continue;
+        }
+        // pasted text cannot make a class local: a class is a program-scope type (Dev ruling 2026-10-01)
+        if (d.value() && d.value()->get_type() == node_type::class_decl) {
+            report_error("an include inside a function body cannot declare class '" + std::string(static_cast<const class_decl*>(d.value().get())->name) +
+                         "' (a class is a program-scope type and the included text is the function's own); import '" + path + "' instead", at);
             continue;
         }
         if (d.value() && !splice_include(d.value(), out)) { out.push_back(std::move(d.value())); }

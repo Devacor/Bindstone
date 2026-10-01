@@ -129,9 +129,13 @@ public:
             expect("math::vec2 v = math::vec2(1, 2); auto& r = v.y; v.y = 7; to_string(r)", "7.0", "a read through the reference sees the current component");
             expect("math::vec3 v = math::vec3(1, 2, 3); auto& r = cast<float&>(v.x); r = 8; to_string(v)", "(8.0, 2.0, 3.0)", "cast<float&>(v.x)");
             expect("class H { math::vec2 p = math::vec2(1, 2); } float& px(H& h) { return h.p.x; } var h = H(); auto& r = px(h); r = 5; to_string(h.p)", "(5.0, 2.0)", "a -> float& return of a component");
+            expect("class H { math::vec2 p = math::vec2(1, 2); float& px() { return p.x; } } var h = H(); auto& r = h.px(); r = 5; to_string(h.p)", "(5.0, 2.0)", "a float& method returning a field's component");
             expect(fns + "class B { math::vec3 pos = math::vec3(1, 1, 1); } var b = B(); f(b.pos.x); to_string(b.pos)", "(10.0, 1.0, 1.0)", "a field's component");
             expect(fns + "class B { math::vec3 pos = math::vec3(1, 1, 1); void go() { f(pos.y); f(this.pos.z); } } var b = B(); b.go(); to_string(b.pos)", "(1.0, 10.0, 10.0)", "a bare field and this.field in a method");
             expect(fns + "array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4)]; int i = 1; f(a[i].y); f(a[0].x); to_string(a[0]) + to_string(a[1])", "(10.0, 2.0)(3.0, 40.0)", "an element of a typed vector buffer");
+            expect(fns + "array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4), math::vec2(5, 6)]; int i = 0; f(a[i + 1].x); auto& r = a[i + 2].y; r = 7; auto& c = cast<float&>(a[2 - i].x); c = 9; to_string(a[1]) + to_string(a[2])", "(30.0, 4.0)(9.0, 7.0)", "components behind a computed subscript");
+            expect(fns + "var b = [math::vec2(1, 2), math::vec2(3, 4)]; int j = 0; f(b[j + 1].y); to_string(b[1])", "(3.0, 40.0)", "a computed subscript of a var array");
+            expect("var b = [math::vec2(1, 2)]; int j = 0; float& pick(array<math::vec2>& a, int k) { return a[k + 0].y; } auto& r = pick(b, j); r = 8; to_string(b[0])", "(1.0, 8.0)", "a -> float& return behind a computed subscript");
             expect(fns + "class S { static math::vec2 v = math::vec2(1, 2); } f(S::v.y); to_string(S::v)", "(1.0, 20.0)", "a static's component");
             expect("void h(float& c) { c = 0.5; } math::color col = math::color(1, 1, 1, 1); h(col.g); to_string(col)", "(1.0, 0.5, 1.0, 1.0)", "a color channel");
             expect(fns + "math::ivec2 q = math::ivec2(1, 1); math::ivec2 d = math::ivec2(1, 1); string a = \"\"; string b = \"\"; try { d.x = 2.7; } catch (e) { a = e; } try { g(q.x); } catch (e) { b = e; } to_string(a == b && to_string(q) == to_string(d))", "true", "the store narrows as v.x = value does");

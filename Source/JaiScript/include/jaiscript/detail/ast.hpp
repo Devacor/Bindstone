@@ -380,6 +380,9 @@ namespace jai {
         // resolved, 254 = resolved-not-an-intrinsic, else detail::math_fn. Name-based,
         // engine-independent - safe to share across engines like the other AST caches.
         mutable uint8_t math_intrinsic_cache = 255;
+        // A math component a reference binds over an evaluated base (`f(a[i+1].x)`): the read hands back a COMPONENT reference
+        // when the base evaluates to a reference (transient_read_marker stamps it; detail/math_component_store.hpp)
+        mutable bool component_lvalue = false;
 
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}

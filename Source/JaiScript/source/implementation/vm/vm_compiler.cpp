@@ -6511,6 +6511,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 // and a shape the cell translation takes (a truth test, a compound operand, a declaration's move)
 void vm_compiler::member_tail_into_temp(const expression* e) {
 	if (!e || !member_temp_operand(e)) return;
+	if (e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->component_lvalue) return;   // the read hands back a reference
 	auto& code = chunk_->code;
 	const size_t n = code.size();
 	if (elem_member_operand(e)) {
@@ -6543,7 +6544,7 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 		emit(opcode::op_get_static, add_node(expr));
 		return;
 	}
-	if (velem_operand(expr.get())) {
+	if (velem_operand(expr.get()) && !expr->component_lvalue) {
 		fused_operand t;
 		compile_member_into_temp(expr, t);
 		emit(opcode::op_load, t.slot, temp_symbol_index(), 0);

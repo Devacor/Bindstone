@@ -53,8 +53,10 @@ allocates except the first boxing of a variable.
 - **Math components** (`v.x`, `pos.y`, `a[i].z`, `obj.pos.x`, `S::v.x`, `col.g`; Dev ruling 2026-09-30) mint a
   COMPONENT ref over the base's own reference (an identifier boxes its variable, the rest resolve as above) wherever
   a reference binds: ref args, `var&`/`T&` declarations, `cast<T&>`, ref returns
-  (`detail/math_component_store.hpp` `component_reference`, both backends). A vector local whose component is bound
-  that way stays boxed (the aggregate lowering's escape rule).
+  (`detail/math_component_store.hpp` `component_reference`, both backends). A component over a base only evaluation
+  names (`f(a[i+1].x)`) reads as a COMPONENT ref over the evaluated element reference: the parse-time pass stamps such
+  reads in those positions (`member_expr::component_lvalue`), so the index runs once. A vector local whose component
+  is bound that way stays boxed (the aggregate lowering's escape rule).
 - **C++ properties** (`obj.prop`, `this.prop`, the bare `prop` inside a hybrid's methods and
   lambdas, chains ending in one, `[&]` captures of one) mint CPP-MEMBER / PROPERTY refs on
   every receiver kind: hybrid layers, script-constructed C++ objects, plain wrappers of

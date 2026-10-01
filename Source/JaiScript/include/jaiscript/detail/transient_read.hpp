@@ -5,6 +5,7 @@
 
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/lvalue_shape.hpp>
 
 namespace jai::detail {
 
@@ -167,6 +168,18 @@ namespace jai::detail {
             }
         }
 
+        // A reference binds this expression (an argument, a reference declaration's initializer, a cast<T&> operand, a
+        // reference return): a math component over a base only evaluation names (a computed subscript) reads as a reference.
+        // A structural chain binds at the bind point instead (detail/math_component_store.hpp component_reference).
+        static void stamp_component_lvalue(expression* e) {
+            if (!e || e->get_type() != node_type::member_expr) return;
+            auto* m = static_cast<member_expr*>(e);
+            if (m->is_static || m->null_safe || m->is_arrow || !m->object || !math::any_component_name(m->member)) return;
+            const node_type t = m->object->get_type();
+            if (t == node_type::identifier_expr || t == node_type::this_expr || is_ref_bindable_lvalue(e)) return;
+            m->component_lvalue = true;
+        }
+
         // transient_ctx: this expression's RESULT is consumed as a transient value by its parent.
         void walk_expr(expression* e, bool transient_ctx) {
             if (!e) {
@@ -214,6 +227,7 @@ namespace jai::detail {
                     walk_expr(c->callee.get(), false);
                     for (const auto& arg : c->arguments) {
                         walk_expr(arg.get(), false);       // ref-params: always mint
+                        stamp_component_lvalue(arg.get());
                     }
                     stamp_arg_captures(c->arguments, c->arg_captures);
                     return;
@@ -234,6 +248,7 @@ namespace jai::detail {
                     auto* n = static_cast<new_expr*>(e);
                     for (const auto& arg : n->arguments) {
                         walk_expr(arg.get(), false);
+                        stamp_component_lvalue(arg.get());
                     }
                     stamp_arg_captures(n->arguments, n->arg_captures);
                     return;
@@ -270,6 +285,7 @@ namespace jai::detail {
                     return;
                 case node_type::cast_expr:
                     walk_expr(static_cast<cast_expr*>(e)->operand.get(), false);   // cast<T&> needs the mint
+                    if (static_cast<cast_expr*>(e)->by_reference) { stamp_component_lvalue(static_cast<cast_expr*>(e)->operand.get()); }
                     return;
                 default:
                     return;   // literal/identifier/this/super: leaves
@@ -324,6 +340,7 @@ namespace jai::detail {
                 }
                 case node_type::return_stmt:
                     walk_expr(static_cast<return_stmt*>(s)->value.get(), false);   // ref-returns: mint
+                    if (static_cast<return_stmt*>(s)->binds_reference) { stamp_component_lvalue(static_cast<return_stmt*>(s)->value.get()); }
                     return;
                 case node_type::try_stmt: {
                     auto* t = static_cast<try_stmt*>(s);
@@ -373,6 +390,7 @@ namespace jai::detail {
                          d->type->base_type == script_value_type::jai_bool_type ||
                          d->type->base_type == script_value_type::jai_char_type);
                     walk_expr(d->initializer.get(), hard_scalar);
+                    if (d->type && d->type->base_type == script_value_type::jai_reference_type) { stamp_component_lvalue(d->initializer.get()); }
                     return;
                 }
                 case node_type::function_decl: {

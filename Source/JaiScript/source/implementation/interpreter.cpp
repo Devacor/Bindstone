@@ -7809,6 +7809,13 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
         push_value(make_value());
         return {};
     }
+    if (expr->component_lvalue) [[unlikely]] {
+        script_value part = detail::math::evaluated_component_reference(objectValue, expr, engine_);
+        if (part.is_reference()) {
+            push_value(std::move(part));
+            return {};
+        }
+    }
     return member_read_on(expr, std::move(objectValue), as_callee);
 }
 

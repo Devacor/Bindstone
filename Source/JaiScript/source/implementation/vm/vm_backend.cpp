@@ -13746,6 +13746,13 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	profile_get_member_paths_[2]++;
 #endif
+	if (expr->component_lvalue) [[unlikely]] {
+		script_value part = detail::math::evaluated_component_reference(object, expr, engine_);
+		if (part.is_reference()) {
+			stack_.push_back(std::move(part));
+			return {};
+		}
+	}
 	script_value out = make_null();
 	VM_TRY(member_access_value(f, object, expr, out));
 	stack_.push_back(std::move(out));

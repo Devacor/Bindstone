@@ -2636,6 +2636,85 @@ private:
 	// Dev's rulings of 2026-10-01
 	void rulings_2026_10_01() {
 		comparison_rewriting();
+		host_global_references();
+	}
+
+	struct ref_player { int64_t hp = 0; std::string tag; };
+
+	void host_global_references() {
+		// Dev ruling 2026-10-01: a reference to an add_global_ref variable aliases the C++ storage: a store through it (=, op=,
+		// ++, a script T& parameter that writes) converts through the bound type and writes C++, and the name stays bound
+		test("a_reference_to_a_host_bound_int_stores_through_to_cpp", [this]() {
+			int64_t hp = 0;
+			every_config("int", "5 42,42 43 44 45 145 7 3 9 2 11 same 11", [&](engine& e) {
+				hp = 10;
+				e.add_global_ref("hp", hp);
+				std::string out;
+				e.execute("auto& r = hp; r = 5;"); out += std::to_string(hp);
+				hp = 42; out += " " + spec::render(e.execute("\"\" + hp + \",\" + r;"));
+				e.execute("r += 1;"); out += " " + std::to_string(hp);
+				e.execute("++r;"); out += " " + std::to_string(hp);
+				e.execute("r++;"); out += " " + std::to_string(hp);
+				e.execute("function bump(int& x) { x += 100; } bump(hp);"); out += " " + std::to_string(hp);
+				e.execute("hp = 7;"); out += " " + std::to_string(hp);
+				e.execute("function set3(int& x) { x = 3; } set3(r);"); out += " " + std::to_string(hp);
+				hp = 9; out += " " + spec::render(e.execute("to_string(r);"));
+				e.execute("int& typed = hp; typed = 2.9;"); out += " " + std::to_string(hp);
+				e.execute("function local_ref() { auto& lr = hp; lr = 11; } local_ref();"); out += " " + std::to_string(hp);
+				out += " " + spec::render(e.execute(R"(
+					string a = ""; try { hp = "x"; } catch (err) { a = err; }
+					string b = ""; try { r = "x"; } catch (err) { b = err; }
+					a == b ? "same" : a + " vs " + b;
+				)"));
+				return out + " " + std::to_string(hp);
+			}, check_mode::warn);
+		});
+		test("a_reference_to_a_host_bound_float_stores_through_to_cpp", [this]() {
+			double speed = 0;
+			float scale = 0;
+			every_config("float", "5.000000 1.25 0.625 0.750000 2.000000", [&](engine& e) {
+				speed = 0; scale = 0;
+				e.add_global_ref("speed", speed);
+				e.add_global_ref("scale", scale);
+				std::string out;
+				e.execute("auto& s = speed; s = 2.5; s *= 2;"); out += std::to_string(speed);
+				speed = 1.25; out += " " + spec::render(e.execute("to_string(s);"));
+				e.execute("function half(float& x) { x /= 2; } half(speed);"); out += " " + spec::render(e.execute("to_string(speed);"));
+				e.execute("auto& k = scale; k = 0.5; k += 0.25;"); out += " " + std::to_string(scale);
+				e.execute("half(k); k = k * 4 + 0.5;"); out += " " + std::to_string(scale);
+				return out;
+			}, check_mode::warn);
+		});
+		test("a_reference_to_a_host_bound_string_stores_through_to_cpp", [this]() {
+			std::string name;
+			every_config("string", "abc zz zz! zz!! zz!!? set", [&](engine& e) {
+				name = "";
+				e.add_global_ref("name", name);
+				std::string out;
+				e.execute("auto& n = name; n = \"ab\"; n += \"c\";"); out += name;
+				name = "zz"; out += " " + spec::render(e.execute("n;"));
+				e.execute("function shout(string& t) { t += \"!\"; } shout(name);"); out += " " + name;
+				e.execute("shout(n);"); out += " " + name;
+				e.execute("string& sn = name; sn += \"?\";"); out += " " + name;
+				name = "set"; out += " " + spec::render(e.execute("name;"));
+				return out;
+			}, check_mode::warn);
+		});
+		test("a_reference_to_a_bound_class_field_stores_through_to_cpp", [this]() {
+			ref_player player;
+			every_config("class field", "6 106 8 xy 9", [&](engine& e) {
+				player = ref_player{};
+				dynamic_binder<ref_player>(e, "RefPlayer").property("hp", &ref_player::hp).property("tag", &ref_player::tag).build();
+				e.add_global_ref("player", player);
+				std::string out;
+				e.execute("auto& h = player.hp; h = 5; h += 1;"); out += std::to_string(player.hp);
+				e.execute("function bump(int& x) { x += 100; } bump(player.hp);"); out += " " + std::to_string(player.hp);
+				e.execute("auto& pl = player; pl.hp = 8;"); out += " " + std::to_string(player.hp);
+				e.execute("auto& t = player.tag; t = \"x\"; t += \"y\";"); out += " " + player.tag;
+				player.hp = 9; out += " " + spec::render(e.execute("to_string(h);"));
+				return out;
+			}, check_mode::warn);
+		});
 	}
 
 	void comparison_rewriting() {

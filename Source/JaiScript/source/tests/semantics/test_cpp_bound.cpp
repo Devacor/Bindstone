@@ -556,12 +556,12 @@ public:
                 check_eq((int64_t)106, bg2, tag + "++ through ref decl writes through");
                 eng->execute("var fcap = [&bg2]() { bg2 += 4; }; fcap();");
                 check_eq((int64_t)110, bg2, tag + "compound through by-ref capture writes through");
-                // Plain '=' THROUGH a ref replaces the slot with a detached value (ref_store_through
-                // clones into the target) - the binding drops and C++ stays put. Pinned as-is.
+                // Plain '=' through a ref stores into the C++ variable and the name stays bound (Dev ruling 2026-10-01)
                 eng->execute("auto& rr3 = bg2; rr3 = rr3 + 4;");
-                check_eq((int64_t)110, bg2, tag + "plain assign through ref detaches (C++ untouched)");
-                check_eq((int64_t)114, eng->execute("bg2").as_int(), tag + "slot holds the detached result");
-                check_false(eng->execute("bg2").is_cpp_bound(), tag + "binding dropped by ref-mediated plain assign");
+                check_eq((int64_t)114, bg2, tag + "plain assign through ref writes through");
+                bg2 = 200;
+                check_eq((int64_t)200, eng->execute("bg2").as_int(), tag + "the name still reads C++");
+                check_eq((int64_t)200, eng->execute("rr3").as_int(), tag + "the reference still reads C++");
             };
             runMatrix(false);
             runMatrix(true);

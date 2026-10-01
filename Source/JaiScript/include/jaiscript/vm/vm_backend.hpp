@@ -528,6 +528,7 @@ namespace jai::vm {
             std::vector<const script_value*> env_ptr;
             const environment* env_of = nullptr;
             uint64_t env_serial = 0;
+            const void* env_loop = nullptr;   // the loop whose entry recorded env_ptr in this call (its next entry re-reads them while the environment holds)
             // the refusal valve: loops (by index, below 64) whose entry a container site refused in this call; container bindings
             // do not change within a call, so the entry is not attempted again until the next call
             uint64_t refused_loops = 0;
@@ -539,7 +540,7 @@ namespace jai::vm {
             uint32_t park_serial = 0;
             uint32_t entry_serial = 0;
             void reset() { loop = k_invalid_u32; dirty.reset(); }
-            void reset_call() { reset(); refused_loops = 0; park_at = k_invalid_u32; }
+            void reset_call() { reset(); refused_loops = 0; park_at = k_invalid_u32; env_loop = nullptr; }
         };
 
         struct frame_guard;

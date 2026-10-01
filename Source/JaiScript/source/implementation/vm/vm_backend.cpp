@@ -8151,6 +8151,7 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_ret:
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
+	case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
 		return true;
 	default:
 		return false;
@@ -8232,6 +8233,9 @@ next_frame:
 			break;
 		}
 		case opcode::op_c_mov_p: regs.payload[ci.a] = regs.payload[ci.b]; regs.kinds[ci.a] = regs.kinds[ci.b]; regs.dirty->set(ci.a); ++ip; break;
+		case opcode::op_c_sin_f: cell_put_float(regs, ci.a, std::sin(cell_float_of_bits(regs.payload[ci.b]))); ++ip; break;
+		case opcode::op_c_cos_f: cell_put_float(regs, ci.a, std::cos(cell_float_of_bits(regs.payload[ci.b]))); ++ip; break;
+		case opcode::op_c_sqrt_f: cell_put_float(regs, ci.a, std::sqrt(cell_float_of_bits(regs.payload[ci.b]))); ++ip; break;
 		case opcode::op_c_mov_k: {
 			const script_value& rc = regs.consts[ci.b];
 			const uint8_t k = static_cast<uint8_t>(rc.raw_storage_index());

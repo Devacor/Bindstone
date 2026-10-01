@@ -3178,8 +3178,20 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		};
 		std::vector<chunk::cell_loop::cell> snap_cells; size_t snap_env = 0, snap_defs = 0, snap_calls = 0, snap_ip = first, last_ip = first; uint32_t snap_arg = 0; size_t snap_alias = 0; const ast_node* snap_stmt = nullptr;
 		size_t resume_from = first;
+		// the value of a && / || chain (chunk::logical_values) between its producers and its consumer: a value cell with a synthetic slot,
+		// never flushed; vdepth1 holds the ips a jump reached with the value pending (the chain's consumer)
+		uint32_t vslot = k_invalid_u32; bool vlive = false; std::vector<uint32_t> vdepth1;
+		auto chain_consumed_at = [&](size_t at) -> uint32_t { for (const auto& lv : c.logical_values) { if (lv.second == at && lv.first >= first) return lv.first; } return k_invalid_u32; };
+		auto inside_chain = [&](size_t at) { for (const auto& lv : c.logical_values) { if (at >= lv.first && at < lv.second && lv.first >= first) return true; } return false; };
+		auto bool_const = [&](bool v) -> uint32_t {
+			for (size_t k = 0; k < c.constants.size() && k < k_typed_slot_mask; ++k) { if (c.constants[k].raw_storage_index() == script_value::TYPEID_BOOL && c.constants[k].unchecked_as_bool() == v) return static_cast<uint32_t>(k); }
+			c.constants.push_back(script_value(v, static_cast<engine*>(nullptr)));
+			return static_cast<uint32_t>(c.constants.size() - 1);
+		};
 		for (;;) {
+		vslot = k_invalid_u32; vlive = false; vdepth1.clear();
 		for (size_t ip = resume_from; ip < back && refusal == chunk::cell_refusal_none; ++ip) {
+			if (std::find(vdepth1.begin(), vdepth1.end(), static_cast<uint32_t>(ip)) != vdepth1.end()) { vlive = true; }
 			last_ip = ip;
 			if (ip == resume_from || stmt_of(ip) != stmt_of(ip - 1)) { snap_cells = cells; snap_env = env_ops.size(); snap_defs = defs.size(); snap_calls = calls.size(); snap_arg = arg_temp_next; snap_alias = alias_slots.size(); snap_ip = ip; snap_stmt = stmt_of(ip); }
 			const vm_instruction st = code[ip].op == opcode::op_cells_resume ? code[code[ip].a] : code[ip];   // an inner block's boundary end: the instruction it replaced
@@ -3343,6 +3355,63 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(st.a, head_kind, false, 0, nullptr, ip); use_slot(st.b, head_kind, false, 0, nullptr, ip);
 					op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
 				}
+			} else if (vlive && st.op == opcode::op_jump) {
+				// the chain's value carried to its consumer
+				if (!(st.a > ip && st.a <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }
+				op.kind = ir::jump; op.target = st.a;
+				vdepth1.push_back(st.a); vlive = false;   // the next instruction is reached from its own edges
+			} else if (vlive) {
+				// the chain's consumer: a truth jump, a scalar declaration or a no-result frame-slot store; a miss re-runs the chain from its first
+				// instruction (the general stack holds the value here), so the consumer reads every slot the chain read
+				const uint32_t start = chain_consumed_at(ip);
+				if (start == k_invalid_u32) { refuse(chunk::cell_refusal_translation, ip); break; }
+				if (st.op == opcode::op_jump_if_false || st.op == opcode::op_jump_if_true) {
+					if (!(st.a > ip && st.a <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }
+					op.kind = ir::cmp; op.tok = static_cast<uint8_t>(token_type::bang); op.a = vslot; op.b = k_typed_const_bit; op.target = st.a; op.sense = st.op == opcode::op_jump_if_true;
+				} else if (st.op == opcode::op_decl_var && st.b != 0 && st.a < c.nodes.size()) {
+					auto* decl = static_cast<const variable_decl*>(c.nodes[st.a].get());
+					type_info* stamp = decl->type.get();
+					if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store || decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
+					if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
+					{ const uint8_t ld = decl_landing(static_cast<uint32_t>(decl->slot_index)); use_slot(static_cast<uint32_t>(decl->slot_index), stamp_kind(stamp), true, ld, ld == k_typed_dst_temp ? nullptr : stamp, ip); }
+					op.kind = ir::mov; op.a = static_cast<uint32_t>(decl->slot_index); op.writes = op.a; op.b = vslot;
+				} else if (st.op == opcode::op_store && st.b != k_invalid_u32 && st.b < k_typed_slot_mask && !(st.c & (store_flag_ref_alias | store_flag_global_only)) && (st.c & store_flag_no_result)) {
+					use_slot(st.b, 0, true, k_typed_dst_store, nullptr, ip);
+					op.kind = ir::mov; op.a = st.b; op.writes = st.b; op.b = vslot;
+				} else { refuse(chunk::cell_refusal_of(st.op), ip); break; }
+				slot_read(op, vslot);
+				auto written_in_chain = [&](uint32_t s) { for (size_t k = start - first; k < ops.size(); ++k) { if (ops[k].writes == s) return true; } return false; };   // the re-run computes those again
+				for (size_t k = start - first; k < ops.size(); ++k) {
+					for (uint8_t r = 0; r < ops[k].nreads; ++r) {
+						const uint32_t s = ops[k].reads[r];
+						if (written_in_chain(s) || std::find(op.reads, op.reads + op.nreads, s) != op.reads + op.nreads) continue;
+						if (op.nreads == 8) { refuse(chunk::cell_refusal_translation, ip); break; }
+						op.reads[op.nreads++] = s;
+					}
+				}
+				if (refusal != chunk::cell_refusal_none) break;
+				op.origin = start; vlive = false; vslot = k_invalid_u32;
+			} else if (st.op == opcode::op_binary_fused && ip + 1 < back && code[ip + 1].op == opcode::op_to_bool && st.a < c.fused_binary_protos.size() && cmp_tok(c.fused_binary_protos[st.a].op) && inside_chain(ip)) {
+				// the right side of a && / || chain as a value: the comparison into the chain's value cell; the TO_BOOL has no copy
+				const fused_binary_proto& bp = c.fused_binary_protos[st.a];
+				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if ((bp.typed_class == 1 || bp.typed_class == 2) && !(op.b & k_ir_env_bit) && !(op.c & k_ir_env_bit)) {
+					const opcode fast = arith_op(static_cast<token_type>(bp.op), bp.typed_class);
+					if (fast != opcode::op_halt) { op.fast = fast; const uint8_t tk = bp.typed_class == 1 ? kint : kflt; use_slot(op.b, tk, false, 0, nullptr, ip); use_slot(op.c, tk, false, 0, nullptr, ip); }
+				}
+				if (vslot == k_invalid_u32) { vslot = arg_temp_next++; }
+				use_slot(vslot, kbool, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::cmpval; op.tok = bp.op; op.a = vslot; op.writes = vslot;
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::skip;   // the TO_BOOL's place
+				++ip;
+				vlive = true;
+			} else if ((st.op == opcode::op_true || st.op == opcode::op_false) && chain_consumed_at(ip + 1) != k_invalid_u32) {
+				// the short-circuit edge's value of a && / || chain
+				if (vslot == k_invalid_u32) { vslot = arg_temp_next++; }
+				use_slot(vslot, kbool, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::mov; op.a = vslot; op.writes = vslot; op.b = k_typed_const_bit | bool_const(st.op == opcode::op_true);
+				vlive = true;
 			} else if (st.op >= opcode::op_t_add_ii && st.op <= opcode::op_t_mod_ff) {
 				const uint8_t kind = st.op <= opcode::op_t_shr_ii ? kint : kflt;
 				uint8_t landing = static_cast<uint8_t>(st.a >> k_typed_dst_shift);
@@ -5823,6 +5892,7 @@ size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_
 
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
+		const uint32_t first_ip = static_cast<uint32_t>(chunk_->code.size());
 		compile_expression(expr->left);
 		if (expr->op.type == token_type::ampersand_ampersand) {
 			size_t jump_false = emit(opcode::op_jump_if_false, k_invalid_u32, 0);
@@ -5841,6 +5911,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			emit(opcode::op_true);
 			patch_jump(jump_end, chunk_->code.size());
 		}
+		chunk_->logical_values.emplace_back(first_ip, static_cast<uint32_t>(chunk_->code.size()));   // a block holds the value in a cell (lower_typed_ops)
 		return;
 	}
 

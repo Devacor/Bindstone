@@ -3096,6 +3096,7 @@ inline std::string slot_description(const slot_site& site, const type_info& targ
             return out + " (declared " + declared + ")";
         }
         case slot_kind::return_value:
+        case slot_kind::yield_value:
             return callee_spelling(site.owner) + " (declared -> " + declared + ")";
         case slot_kind::field:
         case slot_kind::static_field: {
@@ -3113,6 +3114,7 @@ inline std::string_view slot_rejection_message(slot_kind kind) {
     switch (kind) {
         case slot_kind::parameter: return "Cannot pass {0} to {1}";
         case slot_kind::return_value: return "Cannot return {0} from {1}";
+        case slot_kind::yield_value: return "Cannot yield {0} from {1}";
         case slot_kind::declaration: return "Cannot initialize {1} with {0}";
         default: return "Cannot assign {0} to {1}";
     }
@@ -3125,6 +3127,7 @@ inline std::string_view slot_rejection_message_unnamed(slot_kind kind, std::stri
     switch (kind) {
         case slot_kind::parameter: return vowel ? "Cannot pass {0} to an {1} parameter" : "Cannot pass {0} to a {1} parameter";
         case slot_kind::return_value: return "Cannot return {0} from a function declared -> {1}";
+        case slot_kind::yield_value: return "Cannot yield {0} from a coroutine declared -> {1}";
         case slot_kind::declaration: return "Cannot initialize a variable declared {1} with {0}";
         case slot_kind::field: return "Cannot assign {0} to a field declared {1}";
         case slot_kind::static_field: return "Cannot assign {0} to a static declared {1}";
@@ -3133,7 +3136,7 @@ inline std::string_view slot_rejection_message_unnamed(slot_kind kind, std::stri
 }
 
 inline bool slot_site_named(const slot_site& site) {
-    return site.kind == slot_kind::return_value ? !site.owner.empty() : !site.name.empty();
+    return site.kind == slot_kind::return_value || site.kind == slot_kind::yield_value ? !site.owner.empty() : !site.name.empty();
 }
 
 inline error_propagator typed_slot_rejection(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {

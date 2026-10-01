@@ -19795,6 +19795,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// run_fiber entry frames — in-loop callees are always popped before this op.
 			case opcode::op_yield:
 				assert(call_records_top_ == records_base);
+				if (ins.a && f.return_conv_class != 0) {
+					VM_TRY_OP(exec_yield_convert(f));
+					if (is_unwinding_) [[unlikely]] { break; }   // a converting ctor / to_X() threw: the loop bottom unwinds
+				}
 				exec_yield(f, ins);
 				return {};
 
@@ -21364,6 +21368,27 @@ op_status vm_backend::exec_return_convert(frame& f, const vm_instruction& ins) {
 		return {};   // the conversion threw: the loop bottom unwinds with this frame's record live
 	}
 	stack_.back() = std::move(converted.value());
+	return {};
+}
+
+// KEEP BYTE-PARALLEL with the interpreter's visit_yield_expr_t
+op_status vm_backend::exec_yield_convert(frame& f) {
+	auto conv = static_cast<return_conv>(f.return_conv_class);
+	if (conv == return_conv::unclassified) { conv = classify_return_conv(f.return_type); }
+	if (conv == return_conv::none || conv == return_conv::ref) { return {}; }
+	script_value value = std::move(stack_.back());
+	if (value.is_reference()) { value = value.deref(); }
+	if (detail::return_conv_identity(conv, value)) {
+		stack_.back() = std::move(value);
+		return {};
+	}
+	auto converted = try_convert_for_parameter(value, f.return_type,
+		detail::slot_site{detail::slot_kind::yield_value, {}, f.code->function_name});
+	if (!converted) {
+		stack_.back() = std::move(value);
+		return raise_from(converted);
+	}
+	stack_.back() = is_unwinding_ ? std::move(value) : std::move(converted.value());
 	return {};
 }
 

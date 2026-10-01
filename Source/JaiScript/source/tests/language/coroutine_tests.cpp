@@ -863,12 +863,12 @@ public:
                 to_string(a) + "|" + to_string(b) + "|" + w.extra
             )", "40|41|e", "field added mid-suspension: old body continues on stable storage");
             check_both(R"(
-                class W { int v = 1; coroutine int gen() { yield v; yield v + 1; return 0; } }
+                class W { int v = 1; coroutine var gen() { yield v; yield v + 1; return 0; } }
                 var w = W();
                 w.v = 40;
                 var h = w.gen();
                 var a = h.resume();
-                class W { string v = ""; coroutine int gen() { yield 8; return 0; } }
+                class W { string v = ""; coroutine var gen() { yield 8; return 0; } }
                 var b = to_string(h.resume());
                 to_string(a) + "|" + b + "|" + w.v
             )", "40|401|40", "retype mid-suspension: old body sees the converted value");
@@ -1037,7 +1037,7 @@ public:
             both_drained("coroutine function g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine function g()");
             both_drained("coroutine var g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine var g()");
             both_drained("coroutine auto g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine auto g()");
-            both_drained("coroutine string g() { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine string g(): the completion value converts, yields do not");
+            both_drained("coroutine string g() { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine string g(): the yields and the completion value convert");
             both_drained("coroutine void g() { yield; yield; }\n" + drive, "null|null|null#true", "coroutine void g()");
         });
 
@@ -1105,7 +1105,7 @@ public:
                 "1|7|0", "yield inside a constructor argument");
             both_drained("class B { int tick(int x) { return x * 2; } }\nclass D : B { coroutine int g() { yield super::tick((yield 1) == null ? 3 : 0); return 0; } }\nauto d = D(); auto h = d.g(); drain(h)",
                 "1|6|0", "yield inside a super method call's argument");
-            both_drained("coroutine int g() { yield to_string((yield 1) == null ? 4 : 0) + \"x\"; return 0; }\nauto h = g(); drain(h)",
+            both_drained("coroutine var g() { yield to_string((yield 1) == null ? 4 : 0) + \"x\"; return 0; }\nauto h = g(); drain(h)",
                 "1|4x|0", "yield inside a host call's argument");
             both_drained("coroutine int inner() { yield 1; return 2; }\ncoroutine int g() { auto i = inner(); yield i.resume() + ((yield 10) == null ? 100 : 0); return 0; }\nauto h = g(); drain(h)",
                 "10|101|0", "another handle's resume as the sibling operand of a yield runs once");
@@ -1130,7 +1130,7 @@ public:
                 "5|Cannot resume a completed coroutine|true", "resume after completion");
             both_drained("coroutine int g() { throw \"x\"; }\nauto h = g(); string t = \"\"; try { h.resume(); } catch (e) { } try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
                 "Cannot resume a completed coroutine|true", "resume after failure");
-            both_drained("var self = null;\ncoroutine int g() { string t = \"\"; try { self.resume(); } catch (e) { t = to_string(e); } yield t; return 0; }\nself = g(); to_string(self.resume())",
+            both_drained("var self = null;\ncoroutine var g() { string t = \"\"; try { self.resume(); } catch (e) { t = to_string(e); } yield t; return 0; }\nself = g(); to_string(self.resume())",
                 "Coroutine is already running", "a coroutine resuming itself");
             both_drained("coroutine int g() { for (int i = 0; i < 2; i++) { yield i; } int j = 0; while (j < 2) { yield 10 + j; j++; } for (auto x : [20, 21]) { yield x; } return 0; }\nauto h = g(); drain(h)",
                 "0|1|10|11|20|21|0", "yields per iteration in for, while and range-for");
@@ -1156,13 +1156,31 @@ public:
 
         test("typed_completion_values", [this, both_drained]() {
             both_drained("coroutine int g() { yield 1.5; return 2.7; }\nauto h = g(); var a = h.resume(); var b = h.resume(); type_of(a) + \":\" + to_string(a) + \"|\" + type_of(b) + \":\" + to_string(b)",
-                "float:1.5|int:2", "yields are unconverted, the completion value converts to the declared type");
+                "int:1|int:2", "the yields and the completion value convert to the declared type");
             both_drained("coroutine string g() { yield 1; return 2; }\nauto h = g(); h.resume(); var b = h.resume(); type_of(b) + \":\" + b",
                 "string:2", "string completion converts");
             both_drained("coroutine int g() { yield 1; var x = \"s\"; return x; }\nauto h = g(); h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
                 "Cannot return string from 'g' (declared -> int)|true", "a var-sourced wrong completion type raises the same text; the handle is done");
             both_drained("class C { coroutine int g() { yield 1; var x = [1]; return x; } }\nauto h = C().g(); h.resume(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t",
                 "Cannot return array from 'g' (declared -> int)", "method coroutine completion mismatch text");
+        });
+
+        test("yields_take_the_declared_type", [this, both_drained]() {
+            // a yield hands out the declared type like a return: the slot table converts, a mismatch raises the yield's text
+            both_drained("coroutine int g() { yield 2.9; yield true; return 0; }\nauto h = g(); var a = h.resume(); var b = h.resume(); type_of(a) + \":\" + to_string(a) + \"|\" + type_of(b) + \":\" + to_string(b)",
+                "int:2|int:1", "a float and a bool convert into int");
+            both_drained("coroutine string g() { yield 1; return \"x\"; }\nauto h = g(); var a = h.resume(); type_of(a) + \":\" + a",
+                "string:1", "an int converts into string");
+            both_drained("coroutine float g() { yield 1; yield 2; return 0.0; }\nstring s = \"\"; for (auto v : g()) { s += type_of(v); } s",
+                "floatfloat", "a range-for drive sees the converted values");
+            both_drained("coroutine int g() { yield \"s\"; yield 2.9; return 0; }\nauto h = g(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
+                "Cannot yield string from 'g' (declared -> int)|true", "a mismatch raises at the resume; the handle is done");
+            both_drained("coroutine int g() { var s = \"s\"; try { yield s; } catch (e) { yield 7; } return 0; }\nauto h = g(); drain(h)",
+                "7|0", "a catch around the yield sees its failure");
+            both_drained("class C { coroutine int g() { yield [1]; return 0; } }\nauto h = C().g(); string t = \"\"; try { h.resume(); } catch (e) { t = to_string(e); } t",
+                "Cannot yield array from 'g' (declared -> int)", "a method coroutine's mismatch text");
+            both_drained("coroutine var g() { yield \"s\"; yield 2.9; return 0; }\nauto h = g(); drain(h)",
+                "s|2.9|0", "a var coroutine yields as is");
         });
 
         test("range_for_break_leaves_handle_suspended", [this, both_drained]() {
@@ -1364,7 +1382,7 @@ public:
                 "1|42", "yield inside a cast operand");
             both_drained("int nz(var v) { return v == null ? 1 : 0; }\ncoroutine int gen() { string t = \"\"; try { throw nz(yield 1) * 9; } catch (e) { t = to_string(e); } return t == \"9\" ? 5 : 0; }\nauto h = gen(); drain(h)",
                 "1|5", "yield inside a throw operand");
-            both_drained("coroutine int gen() { var v = yield (yield 1); return v == null ? 7 : 0; }\nauto h = gen(); drain(h)",
+            both_drained("coroutine var gen() { var v = yield (yield 1); return v == null ? 7 : 0; }\nauto h = gen(); drain(h)",
                 "1|null|7", "a yield nested inside another yield operand");
         });
 

@@ -10169,6 +10169,23 @@ checked_result<void> interpreter::visit_yield_expr_t(yield_expr* expr, const rep
     if (expr->value) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
         value = pop_value();
+        // A yield hands out the declared type like a return (the return's table and identity lanes, the yield's text).
+        // KEEP BYTE-PARALLEL with the vm's exec_yield_convert.
+        if (!is_unwinding_ && !call_stack_.empty()) {
+            if (const script_defined_function* fn = call_stack_.back().function) {
+                const auto conv = detail::return_conv_of(*fn);
+                if (conv != detail::return_conv::none && conv != detail::return_conv::ref) {
+                    if (value.is_reference()) { value = value.deref(); }
+                    if (!detail::return_conv_identity(conv, value)) {
+                        auto converted = try_convert_for_parameter(value, fn->return_type,
+                            detail::slot_site{detail::slot_kind::yield_value, {}, fn->name});
+                        if (!converted) { return converted.error_value(); }
+                        if (is_unwinding_) [[unlikely]] { return {}; }
+                        value = std::move(converted.value());
+                    }
+                }
+            }
+        }
     }
 
     // Publish the value and suspend HERE: the signal unwinds the enclosing expression (each

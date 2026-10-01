@@ -1149,6 +1149,8 @@ namespace jai::vm {
         // Return-site conversion (op_return_convert inside try regions) and the
         // native-entry / fiber completion door; both run convert_return_at_site
         op_status exec_return_convert(frame& f, const vm_instruction& ins);
+        // A yielded value takes the coroutine's declared type (the return's table, the yield's text)
+        op_status exec_yield_convert(frame& f);
         op_status entry_return_finish(frame& f, script_value result, uint32_t mode);
         // By-value return materialization (detail/return_conv.hpp), run by every return
         // door BEFORE the typed conversion: the callee's own slot moves out, other lvalue

@@ -13,7 +13,7 @@
 
 namespace jai::detail {
 
-    enum class slot_kind : uint8_t { none, parameter, return_value, assignment, declaration, field, static_field };
+    enum class slot_kind : uint8_t { none, parameter, return_value, yield_value, assignment, declaration, field, static_field };
 
     struct slot_site {
         slot_kind kind = slot_kind::assignment;

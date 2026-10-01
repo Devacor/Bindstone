@@ -12,21 +12,6 @@
 
 namespace jai {
 
-inline std::optional<bool> spaceship_rewritten(token_type op, const script_value& result) {
-    const script_value& r = result.deref();
-    double cmp = 0.0;
-    if (r.is_int()) { cmp = static_cast<double>(r.as_int()); }
-    else if (r.is_float()) { cmp = r.as_float(); }
-    else { return std::nullopt; }
-    switch (op) {
-        case token_type::less: return cmp < 0;
-        case token_type::less_equal: return cmp <= 0;
-        case token_type::greater: return cmp > 0;
-        case token_type::greater_equal: return cmp >= 0;
-        default: return std::nullopt;
-    }
-}
-
 // Trailing-default arity window (the parser enforces defaults are trailing): a callable
 // with N params of which K have defaults accepts N-K..N arguments. The binding layer on
 // BOTH backends already evaluates missing defaults; these gates decide VIABILITY only -
@@ -56,6 +41,23 @@ inline bool declares_unary_operator(const class_definition* def, uint64_t name_i
         }
     }
     return !script_declared && def && def->get_method(name_id, false).is_function();
+}
+
+// C++20 comparison rewriting (Dev ruling 2026-10-01): with no operator< in the chain, a < b is (a <=> b) < 0, and so on for
+// <= > >=; the left operand's operator<=> result compares with zero (a NaN compares false), anything but a number is no answer
+inline std::optional<bool> spaceship_rewritten(token_type op, const script_value& result) {
+    const script_value& r = result.deref();
+    double cmp = 0.0;
+    if (r.is_int()) { cmp = static_cast<double>(r.as_int()); }
+    else if (r.is_float()) { cmp = r.as_float(); }
+    else { return std::nullopt; }
+    switch (op) {
+        case token_type::less: return cmp < 0;
+        case token_type::less_equal: return cmp <= 0;
+        case token_type::greater: return cmp > 0;
+        case token_type::greater_equal: return cmp >= 0;
+        default: return std::nullopt;
+    }
 }
 
 // Shared script-overload scorer used by method, static-method and constructor dispatch.

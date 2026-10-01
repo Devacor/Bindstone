@@ -12,6 +12,7 @@
 //   std::optional<checked_result<script_value>> object_arithmetic(l, r, uint64_t method_id)
 //   std::optional<checked_result<bool>> object_comparison(l, r, uint64_t method_id)
 //   std::optional<checked_result<bool>> object_equality(l, r); bool defines_custom_equality(const script_value&)
+//   std::optional<checked_result<bool>> object_inequality(l, r)   // a declared operator!=, ahead of !(l == r)
 //   bool unwinding(); bool parallel_worker(); size_t& equality_depth()
 //   checked_result<script_value> equal(l, r)   // the backend's == entry, for memberwise element comparison
 
@@ -271,6 +272,10 @@ namespace jai::detail {
 	template <class Host>
 	checked_result<script_value> binary_not_equal(Host& h, const script_value& left, const script_value& right) {
 		if (auto expired = weak_equals_null(left, right)) { return h.make_bool(!*expired); }
+		if (auto custom = h.object_inequality(left, right)) {
+			if (!*custom) { return custom->error_value(); }
+			return h.make_bool(custom->value());
+		}
 		auto equal = h.equal(left, right);
 		if (!equal) [[unlikely]] { return equal.error_value(); }
 		return h.make_bool(!equal.value().unchecked_as_bool());

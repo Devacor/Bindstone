@@ -42,6 +42,7 @@ struct interpreter::binary_host {
     std::optional<checked_result<script_value>> object_arithmetic(const script_value& l, const script_value& r, uint64_t id) { return in.object_arithmetic_via_method(l, r, id); }
     std::optional<checked_result<bool>> object_comparison(const script_value& l, const script_value& r, uint64_t id) { return in.object_comparison_via_method(l, r, id); }
     std::optional<checked_result<bool>> object_equality(const script_value& l, const script_value& r) { return in.object_equality_via_method(l, r); }
+    std::optional<checked_result<bool>> object_inequality(const script_value& l, const script_value& r) { return in.object_inequality_via_method(l, r); }
     bool defines_custom_equality(const script_value& v) const { return in.object_defines_custom_equality(v); }
     bool unwinding() const noexcept { return in.is_unwinding_; }
     bool parallel_worker() const noexcept { return in.parallel_worker_; }

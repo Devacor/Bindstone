@@ -48,6 +48,13 @@ namespace jai {
     namespace debug { class controller; class transport; }
     struct script_namespace_data;
 
+    // engine::vm_coverage_summary: the report's class totals as numbers, for a harness that aggregates many runs
+    struct vm_coverage_totals {
+        uint64_t operations = 0, cells = 0, cells_closed = 0, cells_straight = 0, cells_frame = 0, block_entry = 0, typed = 0, untyped = 0;
+        uint64_t closed_entered = 0;   // closed loops (not straight regions or frame programs) entered at least once
+        std::vector<std::pair<std::string, uint64_t>> reasons;   // the general form's operations by the report's reason, most first
+    };
+
     namespace detail {
         struct execution_limits;
         struct parallel_engine_state;
@@ -339,6 +346,7 @@ namespace jai {
         static bool vm_coverage_available();
         void vm_coverage_reset();
         std::string vm_coverage_report(size_t top = 25) const;
+        vm_coverage_totals vm_coverage_summary() const;
 #ifdef JAISCRIPT_VM_COVERAGE
         void vm_coverage_adopt(std::shared_ptr<vm::coverage_tables> tables);   // a vm backend's tables, kept past the backend
 #endif

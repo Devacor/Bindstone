@@ -15,6 +15,7 @@
 #include "fuzz_harness.hpp"
 #include "fuzz_math_band.hpp"
 #include "fuzz_callargs_band.hpp"
+#include "fuzz_block_band.hpp"
 
 #include <string>
 #include <vector>
@@ -375,8 +376,9 @@ namespace jai::fuzz {
 	class generator {
 	public:
 		generator(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never, band_mode math_mode = band_mode::never,
-		          band_mode call_args_mode = band_mode::never)
-			: rng_(mix64(seed + 0xD1B54A32D192ED03ULL)), max_depth_(max_expr_depth), seed_(seed), band_(band), math_(math_mode), call_args_(call_args_mode) {}
+		          band_mode call_args_mode = band_mode::never, band_mode blocks_mode = band_mode::never)
+			: rng_(mix64(seed + 0xD1B54A32D192ED03ULL)), max_depth_(max_expr_depth), seed_(seed), band_(band), math_(math_mode), call_args_(call_args_mode),
+			  blocks_(blocks_mode), block_(seed) {}
 
 		program generate() {
 			program p;
@@ -390,23 +392,36 @@ namespace jai::fuzz {
 
 			int n_classes = pick_weighted({55, 30, 15}); // 0,1,2
 			for (int i = 0; i < n_classes; ++i) emit_class();
+			const bool block_roll = block_.roll();
+			blocks_on_ = blocks_ == band_mode::always || (blocks_ == band_mode::sometimes && block_roll);
 			int n_funcs = pick_weighted({25, 35, 25, 15}); // 0..3
 			for (int i = 0; i < n_funcs; ++i) emit_function();
 
+			const size_t stmt_begin = begin_statements();
 			int n_stmts = static_cast<int>(rng_.range(4, 12));
 			for (int i = 0; i < n_stmts; ++i) emit_stmt(0);
 
 			// Final expression: the program's result value.
-			lines_.push_back(expr(random_value_type(), max_depth_) + ";");
+			end_statements(stmt_begin, "zbmain", expr(random_value_type(), max_depth_));
 			element_arg_band band(seed_);
-			if (band.wanted(band_)) p.segments.push_back(band.emit());
+			if (band.wanted(band_)) { p.segments.push_back(band.emit()); p.labels.push_back("element"); }
 			math_band mband(seed_);
 			const bool math_roll = mband.roll();
-			if (math_ == band_mode::always || (math_ == band_mode::sometimes && math_roll)) p.segments.push_back(mband.emit());
+			if (math_ == band_mode::always || (math_ == band_mode::sometimes && math_roll)) {
+				std::string text = mband.emit();
+				if (blocks_on_) {   // a lowered-math loop function joins the band's result
+					const size_t last = text.rfind('\n', text.size() - 2) + 1;
+					const std::string tail = text.substr(last, text.size() - last - 2);   // the result expression without ";\n"
+					text = text.substr(0, last) + block_.math_function("zbm0") + "[" + tail + ", zbm0()];\n";
+				}
+				p.segments.push_back(std::move(text));
+				p.labels.push_back("math");
+			}
 			call_args_band cband(seed_);
 			const bool call_args_roll = cband.roll();
-			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && call_args_roll)) p.segments.push_back(cband.emit());
+			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && call_args_roll)) { p.segments.push_back(cband.emit()); p.labels.push_back("call-args"); }
 			p.segments.push_back(join());
+			p.labels.push_back("main");
 
 			// Hot-reload shape: a second execute() on the same engine that
 			// redefines a function or class, then uses surviving state.
@@ -414,10 +429,12 @@ namespace jai::fuzz {
 				lines_.clear();
 				if (n_classes > 0 && rng_.chance(60)) emit_class_redefinition();
 				else if (n_funcs > 0) emit_function_redefinition();
+				const size_t stmt_begin = begin_statements();
 				int extra = static_cast<int>(rng_.range(1, 4));
 				for (int i = 0; i < extra; ++i) emit_stmt(0);
-				lines_.push_back(expr(random_value_type(), max_depth_) + ";");
+				end_statements(stmt_begin, "zbreload", expr(random_value_type(), max_depth_));
 				p.segments.push_back(join());
+				p.labels.push_back("reload");
 			}
 			return p;
 		}
@@ -430,6 +447,11 @@ namespace jai::fuzz {
 		band_mode band_;
 		band_mode math_;
 		band_mode call_args_;
+		band_mode blocks_;
+		block_band block_;
+		bool blocks_on_ = false;
+		bool wrapped_ = false;
+		size_t prelude_emitted_ = 0;
 		int names_ = 0;
 		std::vector<class_info> classes_;
 		std::vector<func_info> funcs_;
@@ -1359,7 +1381,43 @@ namespace jai::fuzz {
 		}
 
 		// ---------- statements ----------
+		// block shapes: the statements run inside a function (the vm translates no program-scope loop); their declarations stay
+		// out of the global scope, so no read takes the ::name spelling
+		size_t begin_statements() {
+			wrapped_ = blocks_on_;
+			if (wrapped_) scopes_.push_back({});
+			return lines_.size();
+		}
+		void end_statements(size_t begin, const char* fn, const std::string& result) {
+			if (wrapped_) {
+				lines_.push_back("return " + result + ";");
+				const std::vector<std::string> first = block_.loop({});   // ahead of the statements: a program that raises early (many do) still runs a block
+				lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(begin), first.begin(), first.end());
+				lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(begin), std::string("function ") + fn + "() {");
+				lines_.push_back("}");
+				lines_.push_back(std::string(fn) + "();");
+				scopes_.pop_back();
+				wrapped_ = false;
+			} else {
+				lines_.push_back(result + ";");
+			}
+			if (blocks_on_) {   // the program-scope declarations this segment's loops added
+				const auto& pre = block_.prelude();
+				lines_.insert(lines_.begin(), pre.begin() + static_cast<std::ptrdiff_t>(prelude_emitted_), pre.end());
+				prelude_emitted_ = pre.size();
+			}
+		}
+
+		void emit_block_loop() {
+			std::vector<std::string> outer;
+			for (const auto& scope : scopes_)
+				for (const auto& v : scope)
+					if (v.type == vt::i && !v.is_var_decl) outer.push_back(v.name);
+			for (auto& l : block_.loop(outer)) lines_.push_back(std::move(l));
+		}
+
 		void emit_stmt(int nesting) {
+			if (blocks_on_ && (in_function_ || wrapped_) && block_.loop_here()) emit_block_loop();
 			if (nesting > 3) { emit_leaf_stmt(); return; }
 			switch (pick_weighted({26, 12, 8, 7, 7, 6, 6, 5, 5, 5, 4, 4, 5})) {
 				case 0: emit_leaf_stmt(); break;
@@ -1845,8 +1903,8 @@ namespace jai::fuzz {
 	};
 
 	inline program generate_program(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never, band_mode math_mode = band_mode::never,
-	                                band_mode call_args_mode = band_mode::never) {
-		return generator(seed, max_expr_depth, band, math_mode, call_args_mode).generate();
+	                                band_mode call_args_mode = band_mode::never, band_mode blocks_mode = band_mode::never) {
+		return generator(seed, max_expr_depth, band, math_mode, call_args_mode, blocks_mode).generate();
 	}
 
 } // namespace jai::fuzz

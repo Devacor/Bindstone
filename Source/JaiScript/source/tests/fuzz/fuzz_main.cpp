@@ -33,6 +33,10 @@
 //   jaiscript_fuzz --call-args-band         prepend the call-argument band (typed arrays read by index as the arguments of one kept call
 //                                           in a counted loop, two to four from different arrays, mixed with locals) to every program
 //                                           (default: its own roll, ~25%); --no-call-args-band never prepends it
+//   jaiscript_fuzz --block-shapes           block shapes in every program (default: their own roll, ~50%): the main program's
+//                                           statements run inside a function among closable counted loops (typed locals, typed local
+//                                           and program-scope arrays at plain [i], branches, math intrinsics, nested loops, grafted and
+//                                           kept helper calls), and the math band gains a lowered-math loop; --no-block-shapes never
 //   jaiscript_fuzz --order-band             ordering programs (writing calls beside reads of what they write), three oracles: the
 //                                           backends agree, the program agrees with its metamorphic variant (operands evaluated into
 //                                           locals left to right), and every run prints what the generator's spec model computes
@@ -40,12 +44,18 @@
 //                                           model captures each by-value argument where it is evaluated)
 //   jaiscript_fuzz --miss-every N           the vm side misses at every Nth plain cell instruction (a build with
 //                                           JAISCRIPT_MISS_INJECTION defined: the flush and the continuation contract at every position)
+//   jaiscript_fuzz --census                the block census instead of the differential: per segment label (each band, the main
+//                                           program, the reload; --order-band / --order-args for the ordering programs) the share of
+//                                           programs that compiled a closed loop, entered a block and entered a closed block, the refused
+//                                           loops by class and instruction, and in a JAISCRIPT_VM_COVERAGE build the executed operations
+//                                           in cells and the general form's reasons (vm side only; the band flags pick the segments)
 //   jaiscript_fuzz --jaibite-mutate --iterations 10000
 //                                         isolated loader-only byte mutants, BOTH backends
 //                                         (0 accepted, 24 clean rejection, 20 finding, 23 hang)
 //
 // Exit code: 0 = no new divergences, 1 = new divergences found, 20/21 = child verdicts.
 
+#include "fuzz_census.hpp"
 #include "fuzz_generator.hpp"
 #include "fuzz_harness.hpp"
 #include "fuzz_jaibite.hpp"
@@ -91,9 +101,11 @@ namespace {
 		band_mode band = band_mode::sometimes;
 		band_mode math_band = band_mode::sometimes;
 		band_mode call_args_band = band_mode::sometimes;
+		band_mode blocks = band_mode::sometimes;
 		bool order = false;
 		bool order_args = false;
 		bool jaibite_mutate = false;
+		bool census = false;
 		std::string run_file; // triage: compare an on-disk program instead of a generated one
 		std::string exe_path;
 	};
@@ -129,6 +141,9 @@ namespace {
 			else if (a == "--no-math-band") { opt.math_band = band_mode::never; }
 			else if (a == "--call-args-band") { opt.call_args_band = band_mode::always; }
 			else if (a == "--no-call-args-band") { opt.call_args_band = band_mode::never; }
+			else if (a == "--census") { opt.census = true; }
+			else if (a == "--block-shapes") { opt.blocks = band_mode::always; }
+			else if (a == "--no-block-shapes") { opt.blocks = band_mode::never; }
 			else if (a == "--order-band") { opt.order = true; }
 			else if (a == "--order-args") { opt.order = true; opt.order_args = true; }
 			else if (a == "--miss-every") { const char* v = next("--miss-every"); if (!v) return false; opt.miss_every = static_cast<uint32_t>(std::stoul(v)); }
@@ -175,7 +190,7 @@ namespace {
 	enum class verdict { agree, diverge_new, diverge_suppressed, budget_skip };
 
 	verdict run_seed(const options& opt, uint64_t seed, bool verbose) {
-		program p = generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band);
+		program p = generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
 		double budget_seconds = opt.timeout_ms / 1000.0;
 		compare_result cr = compare_program(p, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
 		opt.lowered_locals += cr.vm.lowered_locals;
@@ -359,6 +374,51 @@ namespace {
 		return 20;
 	}
 
+	bool read_program_file(const options& opt, program& p) {
+		std::ifstream f(opt.run_file);
+		if (!f) { std::cerr << "cannot open " << opt.run_file << "\n"; return false; }
+		std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+		p.stdlib_math = opt.order;
+		const std::string marker = "// --- next execute() on same engine ---";
+		size_t pos = 0;
+		while (true) {
+			size_t hit = text.find(marker, pos);
+			if (hit == std::string::npos) { p.segments.push_back(text.substr(pos)); break; }
+			p.segments.push_back(text.substr(pos, hit - pos));
+			pos = hit + marker.size();
+		}
+		return true;
+	}
+
+	int run_census(const options& opt, uint64_t begin, uint64_t end) {
+		std::vector<std::pair<std::string, census::band_stats>> bands;
+		program from_file;
+		if (!opt.run_file.empty()) {
+			if (!read_program_file(opt, from_file)) return 2;
+			begin = 0; end = 1;
+		}
+		for (uint64_t seed = begin; seed < end; ++seed) {
+			if ((seed - begin) % 500 == 0 && seed != begin) { std::cout << "[census] seed " << seed << "\n"; std::cout.flush(); }
+			program p = !opt.run_file.empty() ? from_file : opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
+			if (opt.order && opt.run_file.empty()) p.labels = { opt.order_args ? "order-args" : "order" };
+			bool budget_hit = false;
+			for (const auto& f : census::measure(p, opt.timeout_ms / 1000.0, opt.proofs, opt.miss_every, &budget_hit)) {
+				if (opt.seed_given || !opt.run_file.empty()) {
+					std::cout << "[" << f.label << "] loops " << f.loops << " regions " << f.regions << " entries " << f.entries << " misses " << f.misses
+					          << (f.census ? " closed entered " + std::to_string(f.totals.closed_entered) + " ops " + std::to_string(f.totals.operations) + " cells " + std::to_string(f.totals.cells) : std::string());
+					for (const auto& o : f.open) std::cout << " | open: " << o;
+					std::cout << "\n";
+				}
+				auto it = std::find_if(bands.begin(), bands.end(), [&](const auto& b) { return b.first == f.label; });
+				if (it == bands.end()) { bands.emplace_back(f.label, census::band_stats{}); it = bands.end() - 1; }
+				it->second.add(f, budget_hit);
+			}
+		}
+		std::cout << "===== block census: seeds " << begin << ".." << (end - 1) << (jai::engine::vm_coverage_available() ? " (coverage build)" : " (listing + counters; a JAISCRIPT_VM_COVERAGE build adds operations)") << " =====\n";
+		std::cout << census::report(bands);
+		return 0;
+	}
+
 	int run_isolated(const options& opt, uint64_t seed) {
 		std::string cmd = "\"" + opt.exe_path + "\" --child --seed " + std::to_string(seed) +
 			" --max-depth " + std::to_string(opt.max_depth) +
@@ -377,6 +437,8 @@ namespace {
 		if (opt.math_band == band_mode::never) cmd += " --no-math-band";
 		if (opt.call_args_band == band_mode::always) cmd += " --call-args-band";
 		if (opt.call_args_band == band_mode::never) cmd += " --no-call-args-band";
+		if (opt.blocks == band_mode::always) cmd += " --block-shapes";
+		if (opt.blocks == band_mode::never) cmd += " --no-block-shapes";
 		if (opt.order) cmd += opt.order_args ? " --order-args" : " --order-band";
 		if (opt.miss_every) cmd += " --miss-every " + std::to_string(opt.miss_every);
 		if (opt.jaibite_mutate) cmd += " --jaibite-mutate";
@@ -415,25 +477,16 @@ int main(int argc, char** argv) {
 	}
 
 	if (opt.dump) {
-		program p = generate_program(opt.seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band);
+		program p = generate_program(opt.seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
 		std::cout << p.joined();
 		return 0;
 	}
 
+	if (!opt.run_file.empty() && opt.census) return run_census(opt, 0, 1);
+
 	if (!opt.run_file.empty()) {
-		std::ifstream f(opt.run_file);
-		if (!f) { std::cerr << "cannot open " << opt.run_file << "\n"; return 2; }
-		std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 		program p;
-		p.stdlib_math = opt.order;
-		const std::string marker = "// --- next execute() on same engine ---";
-		size_t pos = 0;
-		while (true) {
-			size_t hit = text.find(marker, pos);
-			if (hit == std::string::npos) { p.segments.push_back(text.substr(pos)); break; }
-			p.segments.push_back(text.substr(pos, hit - pos));
-			pos = hit + marker.size();
-		}
+		if (!read_program_file(opt, p)) return 2;
 		compare_result cr = compare_program(p, opt.timeout_ms / 1000.0, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
 		if (cr.kind == compare_result::diverge) {
 			std::cout << "DIVERGE\n" << cr.diff;
@@ -473,6 +526,7 @@ int main(int argc, char** argv) {
 
 	uint64_t begin = opt.seed_given ? opt.seed : opt.seed_start;
 	uint64_t end = opt.seed_given ? opt.seed + 1 : opt.seed_start + opt.iterations;
+	if (opt.census) return run_census(opt, begin, end);
 
 	if (opt.jaibite_mutate) {
 		uint64_t accepted = 0, rejected = 0, findings = 0, crashes = 0, hangs = 0;
@@ -517,7 +571,7 @@ int main(int argc, char** argv) {
 		{
 			// Parse-validity metric (jaibite throws on hard parse errors; recoverable
 			// ones synchronize silently, so this is a lower bound on brokenness only).
-			program p = opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band);
+			program p = opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
 			bool ok = true;
 			try {
 				auto probe = jai::engine::make();

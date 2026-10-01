@@ -2657,6 +2657,17 @@ std::string engine::vm_coverage_report(size_t top) const {
 #endif
 }
 
+vm_coverage_totals engine::vm_coverage_summary() const {
+#ifdef JAISCRIPT_VM_COVERAGE
+    std::lock_guard<std::mutex> lock(impl->coverage_mutex_);
+    vm_coverage_totals out;
+    vm::coverage_summary(impl->coverage_tables_, out);
+    return out;
+#else
+    throw std::logic_error("engine::vm_coverage_summary: this build carries no coverage counters (define JAISCRIPT_VM_COVERAGE)");
+#endif
+}
+
 #ifdef JAISCRIPT_VM_COVERAGE
 void engine::vm_coverage_adopt(std::shared_ptr<vm::coverage_tables> tables) {
     std::lock_guard<std::mutex> lock(impl->coverage_mutex_);

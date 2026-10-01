@@ -757,77 +757,66 @@ public:
         using traits = detail::function_traits<std::decay_t<Callable>>;
         using args_tuple = typename traits::argument_types;
         
-        // Check if the first parameter is a reference to T (the self parameter)
-        // Support both T& and const T& for lambda methods
-        constexpr bool has_self_param = traits::arity > 0 &&
-            (std::is_same_v<std::tuple_element_t<0, args_tuple>, T&> ||
-             std::is_same_v<std::tuple_element_t<0, args_tuple>, const T&>);
+        constexpr bool has_self_param = first_param_is_self<args_tuple>();
         using CallableType = std::decay_t<Callable>;
-        // the one callable object the ordinary call and the direct lane both invoke
-        auto owned = std::make_shared<CallableType>(std::forward<Callable>(callable));
-        std::shared_ptr<const callable_lane_state<CallableType>> lane;
-        if constexpr (has_self_param) {
+        if constexpr (!has_self_param) {
+            // a callable without a T& / const T& first parameter is a method that ignores its receiver
+            return method(name, receiver_ignoring<typename traits::return_type>(
+                std::make_shared<CallableType>(std::forward<Callable>(callable)), static_cast<args_tuple*>(nullptr)), required);
+        } else {
+            // the one callable object the ordinary call and the direct lane both invoke
+            auto owned = std::make_shared<CallableType>(std::forward<Callable>(callable));
             using R = typename traits::return_type;
+            std::shared_ptr<const callable_lane_state<CallableType>> lane;
             if constexpr (self_lane_params<args_tuple>(std::make_index_sequence<traits::arity - 1>{}) &&
                           (lane_result<R>() || std::is_same_v<std::remove_reference_t<R>, T>)) {
                 if (lane_unguarded(required)) { lane = std::make_shared<const callable_lane_state<CallableType>>(callable_lane_state<CallableType>{ owned, &engine_ }); }
             }
-        }
 
-        constexpr uint64_t writeback = detail::tuple_writeback_mask<args_tuple, has_self_param ? 1 : 0>::value;
-        auto method_func = [owned, has_self_param, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
-            CallableType& callable = *owned;
-            if (has_self_param) {
-                // Lambda expects T& as first parameter, we need to extract it from args[0]
-                // args[0] is the class_instance, remaining args are the actual parameters
+            constexpr uint64_t writeback = detail::tuple_writeback_mask<args_tuple, 1>::value;
+            auto method_func = [owned, engine_ptr = &engine_, native_type_id = class_def_->get_type_id()](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
+                CallableType& callable = *owned;
+                // args[0] is the receiver, the rest are the script arguments
                 if (args.empty()) {
                     throw runtime_error("Method called without 'this' object");
                 }
-                
-                // Expected argument count is arity - 1 (excluding self) + 1 (for 'this')
                 if (args.size() != traits::arity) {
                     throw runtime_error("Method expects " + std::to_string(traits::arity - 1) +
                                      " arguments, got " + std::to_string(args.size() - 1));
                 }
-
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
-
-                // Call the lambda with the C++ object as first argument and remaining args
                 if (auto eng = engine_ptr) {
-                    return callLambdaWithSelf<typename traits::return_type, args_tuple>(
-                        callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, eng);
+                    return callLambdaWithSelf<R, args_tuple>(callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, eng);
                 }
                 throw runtime_error("Engine no longer exists");
-            } else {
-                // Regular lambda without self parameter
-                if (args.size() != traits::arity) {
-                    throw runtime_error("Method expects " + std::to_string(traits::arity) + 
-                                     " arguments, got " + std::to_string(args.size()));
-                }
-                
-                // Call the lambda with unpacked arguments
-                if (auto eng = engine_ptr) {
-                    return callCallableImpl<typename traits::return_type, args_tuple>(callable, args, std::make_index_sequence<traits::arity>{}, eng);
-                }
-                throw runtime_error("Engine no longer exists");
-            }
-        };
+            };
 
-        // Add method to the class definition (for object.method() calls), with the C++ parameter
-        // signature (skipping the leading self parameter) so same-arity lambda overloads resolve by
-        // argument type. Arity from script perspective excludes self.
-        constexpr size_t script_arity = has_self_param ? traits::arity - 1 : traits::arity;
-        constexpr size_t self_offset = has_self_param ? 1 : 0;
-        class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), script_arity,
-            param_sig_from_tuple<args_tuple, self_offset, script_arity>(), result_info<typename traits::return_type>());
-        if constexpr (has_self_param) {
+            // the C++ parameter signature after the self parameter, so same-arity lambda overloads resolve by argument type
+            constexpr size_t script_arity = traits::arity - 1;
+            class_def_->add_method(name, writeback_tagged<writeback>(engine_.guard_function(std::move(method_func), std::move(required))), script_arity,
+                param_sig_from_tuple<args_tuple, 1, script_arity>(), result_info<R>());
             if (lane) {
-                class_def_->add_native_lane(engine_.symbolize(name), &self_lane<typename traits::return_type, args_tuple, CallableType, script_arity>, std::move(lane));
+                class_def_->add_native_lane(engine_.symbolize(name), &self_lane<R, args_tuple, CallableType, script_arity>, std::move(lane));
                 return *this;
             }
+            class_def_->withdraw_native_lane(engine_.symbolize(name));
+            return *this;
         }
-        class_def_->withdraw_native_lane(engine_.symbolize(name));
-        return *this;
+    }
+
+    template<typename Tuple>
+    static constexpr bool first_param_is_self() {
+        if constexpr (std::tuple_size_v<Tuple> == 0) {
+            return false;
+        } else {
+            using First = std::tuple_element_t<0, Tuple>;
+            return std::is_same_v<First, T&> || std::is_same_v<First, const T&>;
+        }
+    }
+
+    template<typename R, typename C, typename... Args>
+    static auto receiver_ignoring(std::shared_ptr<C> callable, std::tuple<Args...>*) {
+        return [callable](const T&, Args... args) -> R { return (*callable)(std::forward<Args>(args)...); };
     }
     
     template<typename Callable>
@@ -1211,25 +1200,10 @@ public:
     }
     
     // Add static property binding - for simple variable access
+    // the live variable: script reads and stores reach *static_var through _get_/_set_ (no copy taken at registration)
     template<typename P>
     dynamic_binder& static_property(const std::string& name, P* static_var) {
-        // Convert name to ID
-        uint64_t name_id = engine_.symbolize(name);
-
-        // Add static field with getter for the variable
-        class_def_->add_static_field(name_id, script_value(*static_var, &engine_));
-
-        // Add getter method for read access
-        std::string getter_name = "_get_" + name;
-        uint64_t getter_id = engine_.symbolize(getter_name);
-        class_def_->add_static_method(getter_id, [static_var, engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (auto eng = engine_ptr) {
-                return script_value(*static_var, eng);
-            }
-            throw runtime_error("Engine no longer exists");
-        });
-
-        return *this;
+        return static_property(name, [static_var]() -> P { return *static_var; }, [static_var](const P& value) { *static_var = value; });
     }
     
     // Add static property with lambda getter/setter
@@ -1245,9 +1219,16 @@ public:
             throw runtime_error("Engine no longer exists");
         });
 
-        // Note: setter parameter kept for API compatibility but not registered as setX()
-        // Static property assignment uses set_static_field() directly in the interpreter
-        (void)setter;  // Suppress unused warning
+        using setter_traits = detail::function_traits<std::decay_t<Setter>>;
+        static_assert(setter_traits::arity == 1, "static_property: the setter takes the one new value");
+        using SetterArg = std::decay_t<std::tuple_element_t<0, typename setter_traits::argument_types>>;
+        class_def_->add_static_method(engine_.symbolize("_set_" + name), [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+            if (args.size() != 1) {
+                throw runtime_error("Static property setter expects 1 argument, got " + std::to_string(args.size()));
+            }
+            setter(detail::value_converter<SetterArg>::from(args[0], engine_ptr));
+            return script_value(std::monostate{}, engine_ptr);
+        });
 
         return *this;
     }

@@ -1068,6 +1068,16 @@ private:
                 engine_member_access(*def, id, h);
                 return h;
             }
+            // a host static property: _get_x reads it, _set_x (when bound) stores it
+            auto* sym = eng_.get_symbolizer();
+            const bool static_getter = def->has_static_method(sym->get_getter_id_with_view(id).first);
+            const bool static_setter = def->has_static_method(sym->get_setter_id_with_view(id).first);
+            if (static_getter || static_setter) {
+                member_hit h{true, true, nullptr, nullptr};
+                h.read_only = closed && !static_setter;
+                engine_member_access(*def, id, h);
+                return h;
+            }
         } else {
             uint64_t getter_id = eng_.symbolize("_get_" + std::string(member));
             if (engine_instance_member(*def, id, getter_id)) {

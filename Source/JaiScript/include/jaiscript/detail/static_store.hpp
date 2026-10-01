@@ -85,9 +85,30 @@ namespace jai::detail {
 		return std::nullopt;
 	}
 
+	// A host static property (dynamic_binder::static_property with a setter): the store runs _set_x and reads back through
+	// _get_x when there is one; nullopt when the class has no static setter for the name
+	inline std::optional<checked_result<script_value>> store_static_accessor(class_definition& cls, uint64_t member_id, const script_value& incoming) {
+		engine* eng = cls.get_engine();
+		if (!eng) { return std::nullopt; }
+		string_symbolizer* symbols = eng->get_symbolizer();
+		script_value setter = cls.static_method_in_chain(symbols->get_setter_id_with_view(member_id).first);
+		if (!setter.is_function()) { return std::nullopt; }
+		std::vector<script_value> argument{incoming};
+		auto set = setter.as_function()(argument);
+		if (!set) {
+			checked_result<script_value> failed = set.error_value();
+			return failed;
+		}
+		script_value getter = cls.static_method_in_chain(symbols->get_getter_id_with_view(member_id).first);
+		if (!getter.is_function()) { return checked_result<script_value>(incoming); }
+		std::vector<script_value> none;
+		return checked_result<script_value>(getter.as_function()(none));
+	}
+
 	// Presence, the field ladder, the write; the stored value is the expression result.
 	inline checked_result<script_value> store_static_member(class_definition& cls, uint64_t member_id, script_value incoming) {
 		if (!cls.has_static_field(member_id)) {
+			if (auto accessed = store_static_accessor(cls, member_id, incoming)) { return std::move(*accessed); }
 			return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
 				"Cannot assign to static member: field '{0}' not found", member_id);
 		}

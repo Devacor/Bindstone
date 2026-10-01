@@ -29,6 +29,38 @@ public:
             check_eq(std::string("floats"), eng->execute("pick(1.5, 2.5)").as<std::string>());
         });
 
+        // A set remembers the overload an argument shape selected; an overload added later forgets it
+        test("resolution_follows_argument_types_and_added_overloads", [this]() {
+            auto eng = make_engine();
+            eng->add_function("rc", [](double a) -> std::string { (void)a; return "f"; });
+            eng->add_function("rc", [](const std::string& a) -> std::string { (void)a; return "s"; });
+            const char* loop = "string out = \"\"; for (int i = 0; i < 3; i++) { out += rc(1.5) + rc(\"x\") + rc(2) + \"|\"; } out";
+            check_eq(std::string("fsf|fsf|fsf|"), eng->execute(loop).as<std::string>());
+            eng->add_function("rc", [](script_int a) -> std::string { (void)a; return "i"; });
+            check_eq(std::string("fsi|fsi|fsi|"), eng->execute(loop).as<std::string>(), "the added int overload wins for an int");
+        });
+
+        test("one_overload_rejects_with_the_set_text", [this]() {
+            auto eng = make_engine();
+            eng->add_function("one", [](double a) -> double { return a; });
+            check_eq(std::string("No viable candidates for function call"),
+                     eng->execute("string m = \"\"; var s = \"x\"; try { one(s); } catch (e) { m = e; } m").as<std::string>());
+            check_near(2.5, eng->execute("one(2.5)").as_float(), 1e-12);
+        });
+
+        // A call site's cached host callee follows the name: a re-registration or a script definition takes over
+        test("host_callee_cache_follows_rebinding", [this]() {
+            auto eng = make_engine();
+            eng->add_function("hx", [](script_int a) -> script_int { return a + 1; });
+            eng->execute("function run() -> int { int s = 0; for (int i = 0; i < 3; i++) { s += hx(i); } return s; }");
+            check_eq((int64_t)6, eng->execute("run()").as_int());
+            check_eq((int64_t)6, eng->execute("run()").as_int(), "a second run hits the cache");
+            eng->add_function("hx", [](script_int a) -> script_int { return a * 10; });
+            check_eq((int64_t)30, eng->execute("run()").as_int(), "the re-registered host function");
+            eng->execute("function hx(int a) -> int { return 100; }");
+            check_eq((int64_t)300, eng->execute("run()").as_int(), "a script function of the name");
+        });
+
         test("free_fn_distinct_arity", [this]() {
             auto eng = make_engine();
             eng->add_function("g", [](int a) -> int { return a; });

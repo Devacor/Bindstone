@@ -132,6 +132,7 @@ public:
 			expect("var gt = Gate(); add_i64(gt.level, 6); add_i64(gt.level, 1); to_string(gt.level)", "7", "a host getter/setter property (through the setter)");
 			expect("math::vec2 v = math::vec2(1, 2); halve(v.x); set_f32(v.y); to_string(v)", "(0.5, 1.25)", "a math component");
 			expect("class Holder { math::vec2 pos = math::vec2(4, 8); } var h = Holder(); halve(h.pos.y); to_string(h.pos)", "(4.0, 4.0)", "a math component of a field");
+			expect("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4)]; int i = 0; halve(a[i + 1].y); to_string(a[1])", "(3.0, 2.0)", "a math component behind a computed subscript");
 			expect("var a = [1, 2]; var& r = a[1]; add_i64(r, 5); a.join(\",\")", "1,7", "a reference");
 			expect("class K { static int s = 1; } add_i64(K::s, 1); to_string(K::s)", "2", "a static");
 			expect("int x = 1; int y = 2; swap_ab(x, y); to_string(x) + to_string(y)", "21", "two T& parameters");

@@ -194,6 +194,21 @@ namespace jai::detail::math {
 		return script_value::make_component_reference(base, static_cast<size_t>(c), eng);
 	}
 
+	// A stamped component read (member_expr::component_lvalue) whose base evaluated to a reference: the COMPONENT reference
+	// over that reference, else a non-reference and the ordinary read
+	inline script_value evaluated_component_reference(const script_value& object, const member_expr* m, engine* eng) {
+		script_value none(std::monostate{}, eng);
+		if (!object.is_reference() || !object.get_reference_holder()) {
+			return none;
+		}
+		auto value = ref_checked_deref(object);
+		if (!value || !is_kind(value.value().raw_storage_index())) {
+			return none;
+		}
+		const int c = component_of(value.value().unchecked_vec_kind(), m->member);
+		return c < 0 ? none : script_value::make_component_reference(object, static_cast<size_t>(c), eng);
+	}
+
 } // namespace jai::detail::math
 
 #endif // __JAISCRIPT_DETAIL_MATH_COMPONENT_STORE_HPP__

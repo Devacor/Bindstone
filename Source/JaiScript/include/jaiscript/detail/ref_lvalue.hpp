@@ -13,6 +13,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/lvalue_shape.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/operator_table.hpp>
@@ -33,59 +34,10 @@ namespace jai::detail {
 			is_string_reference_temporary(param, value) ? clone_for_assignment(value) : script_value(value.deref()), eng);
 	}
 
-	// Structural classifier for ref-bindable lvalue arguments: chains of plain member
-	// steps (no ::, ?., ->) and subscripts with int-literal or identifier indices over
-	// an identifier or `this` base, at least one step deep. Bare identifiers keep the
-	// existing slot/env metadata path; everything else keeps the non-lvalue error.
-	inline bool is_ref_bindable_lvalue(const expression* e) {
-		bool has_step = false;
-		while (e) {
-			const node_type t = e->get_type();
-			if (t == node_type::member_expr) {
-				const auto* m = static_cast<const member_expr*>(e);
-				if (m->is_static || m->null_safe || m->is_arrow) {
-					return false;
-				}
-				e = m->object.get();
-				has_step = true;
-			} else if (t == node_type::binary_expr) {
-				const auto* b = static_cast<const binary_expr*>(e);
-				if (b->op.type != token_type::left_bracket || !b->right) {
-					return false;
-				}
-				const node_type it = b->right->get_type();
-				if (it == node_type::literal_expr) {
-					if (static_cast<const literal_expr*>(b->right.get())->value.raw_storage_index() != script_value::TYPEID_INT) {
-						return false;
-					}
-				} else if (it != node_type::identifier_expr) {
-					return false;
-				}
-				e = b->left.get();
-				has_step = true;
-			} else if (t == node_type::identifier_expr || t == node_type::this_expr) {
-				return has_step;
-			} else {
-				return false;
-			}
-		}
-		return false;
-	}
-
 	inline checked_result<script_value> ref_non_lvalue_error() {
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::invalid_reference),
 			"Cannot pass non-lvalue to reference parameter");
-	}
-
-	// Member-FINAL subset of the classifier: the ref-DECL gate (var&/auto& = obj.field
-	// chains). Field reads evaluate to COPIES, so member-final initializers need the
-	// kernel resolve; subscript-final initializers stay on the evaluation path - their
-	// rhs-lvalue reads already mint owner-pinned references with full index generality,
-	// and routing them through the kernel would change inner-reference-element aliasing
-	// (see the element-share branch in resolve_ref_lvalue).
-	inline bool is_member_final_ref_lvalue(const expression* e) {
-		return e && e->get_type() == node_type::member_expr && is_ref_bindable_lvalue(e);
 	}
 
 	// A fields_ node is the member's TRUTH only for script-declared fields. C++

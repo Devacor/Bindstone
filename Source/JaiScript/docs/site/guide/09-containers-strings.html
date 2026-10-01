@@ -37,7 +37,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <h2 id="the-builtin-method-registry">The builtin method registry<a class="hlink" href="#the-builtin-method-registry" aria-label="link">&#8203;</a></h2>
 <p><strong>Array methods (20):</strong> <code>size</code> <code>push</code> <code>pop</code> <code>empty</code> <code>clear</code> <code>front</code> <code>back</code> <code>index_of</code> <code>has</code> <code>contains</code> <code>first</code> <code>last</code> <code>length</code> <code>slice</code> <code>filter</code> <code>sort</code> <code>reverse</code> <code>remove</code> <code>remove_if</code> <code>join</code></p>
 <p><strong>Map methods (14):</strong> <code>size</code> <code>empty</code> <code>clear</code> <code>contains</code> <code>erase</code> <code>keys</code> <code>values</code> <code>has</code> <code>get</code> <code>length</code> <code>remove</code> <code>remove_if</code> <code>filter</code> <code>to_array</code></p>
-<p><strong>String methods (52):</strong> <code>length</code> <code>size</code> <code>byte_size</code> <code>empty</code> <code>at</code> <code>front</code> <code>back</code> <code>substr</code> <code>find</code> <code>rfind</code> <code>find_first_of</code> <code>find_last_of</code> <code>find_first_not_of</code> <code>find_last_not_of</code> <code>contains</code> <code>starts_with</code> <code>ends_with</code> <code>count</code> <code>compare</code> <code>to_int</code> <code>to_float</code> <code>split</code> <code>lines</code> <code>partition</code> <code>is_digit</code> <code>is_alpha</code> <code>is_alnum</code> <code>is_space</code> <code>is_upper</code> <code>is_lower</code> <code>utf8_chars</code> <code>utf8_length</code> <code>is_valid_utf8</code> <code>code</code> <code>to_utf8</code>, and the <strong>in-place mutators</strong> <code>to_lower</code> <code>to_upper</code> <code>trim</code> <code>trim_left</code> <code>trim_right</code> <code>pad_left</code> <code>pad_right</code> <code>pad_center</code> <code>replace_first</code> <code>replace_last</code> <code>replace_all</code> <code>insert</code> <code>erase</code> <code>remove_prefix</code> <code>remove_suffix</code> <code>reverse</code> <code>repeat</code></p>
+<p><strong>String methods (55):</strong> <code>length</code> <code>size</code> <code>byte_size</code> <code>empty</code> <code>at</code> <code>front</code> <code>back</code> <code>substr</code> <code>find</code> <code>rfind</code> <code>find_first_of</code> <code>find_last_of</code> <code>find_first_not_of</code> <code>find_last_not_of</code> <code>contains</code> <code>starts_with</code> <code>ends_with</code> <code>count</code> <code>compare</code> <code>to_int</code> <code>to_float</code> <code>split</code> <code>explode</code> <code>lines</code> <code>partition</code> <code>is_digit</code> <code>is_alpha</code> <code>is_alnum</code> <code>is_space</code> <code>is_upper</code> <code>is_lower</code> <code>utf8_chars</code> <code>utf8_length</code> <code>is_valid_utf8</code> <code>code</code> <code>to_utf8</code> <code>to_bytes</code> <code>reader</code>, and the <strong>in-place mutators</strong> <code>to_lower</code> <code>to_upper</code> <code>trim</code> <code>trim_left</code> <code>trim_right</code> <code>pad_left</code> <code>pad_right</code> <code>pad_center</code> <code>replace_first</code> <code>replace_last</code> <code>replace_all</code> <code>insert</code> <code>erase</code> <code>remove_prefix</code> <code>remove_suffix</code> <code>reverse</code> <code>repeat</code></p>
 <p><strong>weak_ptr methods (4):</strong> <code>lock</code> <code>expired</code> <code>reset</code> <code>same_as</code> <strong>shared_ptr methods (5):</strong> <code>reset</code> <code>use_count</code> <code>cpp_ref_count</code> <code>unique</code> <code>same_as</code></p>
 <h2 id="arrays">Arrays<a class="hlink" href="#arrays" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [4, 1, 3, 2];
@@ -67,7 +67,7 @@ slice(1, 3) = [3,2] (a new array)
 evens: [4,2], original intact: [4,3,2,1]
 after remove_if(&gt;2): [2,1]
 == result: a-b-c</code></pre></div>
-<p>Mutators: <code>push pop clear sort reverse remove remove_if</code>. Everything else returns information or a new array. <code>pop</code> on an empty array raises a catchable error.</p>
+<p>Mutators: <code>push pop clear sort reverse remove remove_if</code>. Everything else returns information or a new array. <code>remove(i)</code> erases the element at index <code>i</code> and returns <code>true</code>, or returns <code>false</code> and changes nothing when <code>i</code> is out of range; <code>remove_if(pred)</code> erases every element the predicate accepts. <code>pop</code>, <code>front</code>, <code>back</code>, <code>first</code> and <code>last</code> on an empty array raise a catchable error (<code>Cannot pop from empty array</code>). <code>contains</code>, <code>has</code> and <code>index_of</code> compare with the language&#x27;s <code>==</code>, so <code>[1, 2].contains(2.0)</code> is true and an array of class instances finds an element its <code>operator==</code> accepts; <code>sort()</code> without a comparator orders instances by their <code>operator&lt;</code>. A <code>slice</code> keeps the receiver&#x27;s element type: a slice of an <code>array&lt;int&gt;</code> is an <code>array&lt;int&gt;</code>.</p>
 <p>One thing to notice about the first line: <code>auto nums = [4, 1, 3, 2]</code> is an <code>array&lt;int&gt;</code>. <code>auto</code> infers the element type from a uniform literal and then enforces it, so <code>nums.push(&quot;x&quot;)</code> would raise. When you want a mixed bag, say so: <code>var</code> or <code>array&lt;var&gt;</code>. The details are under <a href="#typed-containers">Typed containers</a>.</p>
 <h2 id="maps">Maps<a class="hlink" href="#maps" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto inventory = {&quot;sword&quot;: 1, &quot;potion&quot;: 3};
@@ -94,7 +94,7 @@ missing key read: true
 == result: [[&quot;gold&quot;,250],[&quot;potion&quot;,3]]</code></pre></div>
 <p>Notes: writing <code>m[key] = v</code> inserts; <strong>reading a missing key returns <code>null</code> and does NOT insert</strong>. <code>get(key, default)</code> is the explicit fallback form. Keys are ordered (a <code>var</code> map takes any script value as a key; the total ordering of <code>&lt;=&gt;</code> guarantees it), so iteration order is deterministic: range-<code>for</code>, <code>keys()</code>, <code>values()</code> and serialization walk keys in order on every platform, whatever order they were inserted in. Lookups are hashed, and the order is produced only when something iterates; a loop that inserts a key ahead of its position visits it, and one that erases entries skips them. Note that <code>auto inventory = {…}</code> inferred <code>map&lt;string, int&gt;</code> from its literal, exactly as <code>auto</code> does for arrays, so <code>inventory[5]</code> would raise; see <a href="#key-types">Key types</a>. Map <code>filter</code>&#x27;s predicate takes <code>(key, value)</code>.</p>
 <h2 id="typed-containers">Typed containers<a class="hlink" href="#typed-containers" aria-label="link">&#8203;</a></h2>
-<p><code>array&lt;T&gt;</code> and <code>map&lt;K,V&gt;</code> enforce their element types. A push or a store converts when the value is compatible (int to float, say) and rejects otherwise, with an error that names the container:</p>
+<p><code>array&lt;T&gt;</code> and <code>map&lt;K,V&gt;</code> enforce their element types. A push or a store converts when the value is compatible (int to float, say) and rejects otherwise, with an error that names the container (the sample below).</p>
 <p>Elements and map values convert between <code>bool</code> and <code>int</code>: false becomes 0, true becomes 1, and an int becomes false only when it is zero. Int/float conversion also applies. Int-to-string requires an explicit <code>to_string(value)</code> or <code>cast&lt;string&gt;(value)</code>; float/bool conversion stays rejected. Map keys never coerce.</p>
 <p><code>shared_ptr&lt;T&gt;</code> and <code>weak_ptr&lt;T&gt;</code> elements admit <code>null</code>. A shared-handle element also takes a live instance of T or a subclass and checks the class of a shared handle. Class values, primitive values and nested containers remain non-nullable.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
@@ -115,7 +115,7 @@ caught: Cannot push &#x27;string&#x27; to array&lt;int&gt;
 grid[1][0] + ages[bo] = 47</code></pre></div>
 <p>The <a href="13-strict-checking.html">checker</a> checks known literal elements and keys, nested literals, typed push arguments and typed subscript stores. A subscript on a declared <code>array&lt;T&gt;</code> or <code>map&lt;K,V&gt;</code> carries its element type into later typed assignments. A <code>var</code>-sourced value is checked at run time and its error is catchable, as above. Bounds, missing keys and computed numeric range failures remain runtime checks. <code>[[warn_mode]]</code> is the explicit way to downgrade a static diagnostic.</p>
 <h3 id="representation-follows-the-declared-type">Representation follows the declared type<a class="hlink" href="#representation-follows-the-declared-type" aria-label="link">&#8203;</a></h3>
-<p>The declared element type is not just a check; it is the storage. <code>array&lt;int&gt;</code> and <code>array&lt;float&gt;</code> are raw int64 and double buffers, always; <code>bool</code>, <code>char</code>, <code>string</code> and class element types get packed buffers of their own. <code>array&lt;var&gt;</code>, and a literal without a spelled element type, is the one form that holds a vector of dynamic values. Moving between the two is an explicit assignment, and a typed array keeps its constraint when a push is rejected. Copying it into <code>array&lt;var&gt;</code> explicitly creates a dynamic copy. A <code>var</code> holding a copy keeps the typed array (<code>var v = ints; v.push(&quot;s&quot;)</code> raises like <code>ints.push(&quot;s&quot;)</code>) while the variable itself stays a <code>var</code> (<code>v = &quot;hello&quot;</code> is fine).</p>
+<p>The declared element type is not just a check; it is the storage. <code>array&lt;int&gt;</code> and <code>array&lt;float&gt;</code> are raw int64 and double buffers, always; <code>bool</code>, <code>char</code>, <code>string</code> and class element types get packed buffers of their own. <code>array&lt;var&gt;</code>, and a literal without a spelled element type, is the one form that holds a vector of dynamic values. Moving between the two is an explicit assignment, and a typed array keeps its constraint when a push is rejected. Copying it into <code>array&lt;var&gt;</code> explicitly creates a dynamic copy. A <code>var</code> holding a copy keeps the typed array (<code>var v = ints; v.push(&quot;s&quot;)</code> raises like <code>ints.push(&quot;s&quot;)</code>) while the variable itself stays a <code>var</code> (<code>v = &quot;hello&quot;</code> is fine). The math types are element types of the same kind: <code>array&lt;math::vec3&gt;</code> stores its vectors&#x27; components in one buffer (<a href="15-math.html">Math</a>).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];         // a raw int buffer
 array&lt;var&gt; copy = nums;              // the explicit step to the dynamic form: a copy
 copy.push(4);
@@ -131,7 +131,7 @@ print(&quot;loose: {}&quot;, to_json(loose));</code></pre></div>
 widened: [1.0,2.0,3.0]
 caught: Cannot push &#x27;string&#x27; to array&lt;int&gt;
 loose: [1,2,3,&quot;s&quot;]</code></pre></div>
-<p>Three spellings, three intents: <code>array&lt;int&gt;</code> when you know, <code>auto</code> when the literal says it for you (a mixed literal under <code>auto</code> raises <code>Array &#x27;auto&#x27; requires homogeneous elements</code>), and <code>var</code> or <code>array&lt;var&gt;</code> when the elements genuinely vary. This is the contract behind the &quot;typed arrays&quot; bullet in the <a href="../embedding/11-performance.html">performance notes</a>: a typed loop reads a raw buffer, and a C++ binding can take the buffer without boxing.</p>
+<p>Three spellings, three intents: <code>array&lt;int&gt;</code> when you know, <code>auto</code> when the literal says it for you (a mixed literal under <code>auto</code> raises <code>Array &#x27;auto&#x27; requires homogeneous elements - type mismatch at index 1</code>), and <code>var</code> or <code>array&lt;var&gt;</code> when the elements genuinely vary. This is the contract behind the &quot;typed arrays&quot; bullet in the <a href="../embedding/11-performance.html">performance notes</a>: a typed loop reads a raw buffer, and a C++ binding can take the buffer without boxing.</p>
 <p><strong>Byte arrays.</strong> <code>array&lt;uint8&gt;</code> (0 to 255) and <code>array&lt;int8&gt;</code> (-128 to 127) hold one byte per element. An element reads as an <code>int</code>, and every store runs the range: <code>Cannot store 256 in array&lt;uint8&gt; (0..255)</code>, whether it comes from <code>=</code>, a compound assignment, <code>++</code>, <code>push</code>, a reference or a conversion. A float element converts like it does into an <code>int</code> first (<code>7.9</code> stores <code>7</code>), and a <code>bool</code> stores 0 or 1; a <code>char</code> needs <code>cast&lt;int&gt;</code>. <code>array&lt;int&gt; x = bytes;</code> and <code>array&lt;uint8&gt; b = ints;</code> convert by value (the second checks every element), and <code>array&lt;var&gt; v = bytes;</code> is the dynamic copy. <code>uint8</code> and <code>int8</code> name array elements only: a single byte is an <code>int</code>, so <code>uint8 x = 5;</code> is a parse error that says so.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;uint8&gt; pixels = [0, 128, 255];   // three bytes
 pixels[1] += 100;
@@ -161,7 +161,7 @@ promoted: 2
 caught: Cannot push &#x27;Rock&#x27; to array&lt;Unit&gt;</code></pre></div>
 <p>(<code>type_of</code> and <code>reflect::type_name</code> both name the class an element actually holds: <a href="12-reflection.html">Chapter 12</a>.)</p>
 <h3 id="key-types">Key types<a class="hlink" href="#key-types" aria-label="link">&#8203;</a></h3>
-<p>A map checks its declared key type on every direct store, and keys never coerce: <code>map&lt;string, int&gt;</code> rejects <code>m[5]</code> rather than turning <code>5</code> into <code>&quot;5&quot;</code>. <code>map&lt;var, V&gt;</code> takes any key. <code>map&lt;auto, V&gt;</code> infers the key type from a uniform literal, and plain <code>auto</code> infers both sides (<code>auto m = {&quot;a&quot;: 1}</code> is a <code>map&lt;string, int&gt;</code>); a mixed literal raises <code>Map &#x27;auto&#x27; requires homogeneous keys</code>. One gotcha worth knowing before it costs you ten minutes: a typed map declared <em>without</em> an initializer is a typed null, not an empty map, so <code>m[k] = v</code> fails until you assign it <code>{}</code>.</p>
+<p>A map checks its declared key type on every direct store, and keys never coerce: <code>map&lt;string, int&gt;</code> rejects <code>m[5]</code> rather than turning <code>5</code> into <code>&quot;5&quot;</code>. <code>map&lt;var, V&gt;</code> takes any key. <code>map&lt;auto, V&gt;</code> infers the key type from a uniform literal, and plain <code>auto</code> infers both sides (<code>auto m = {&quot;a&quot;: 1}</code> is a <code>map&lt;string, int&gt;</code>); a mixed literal raises <code>Map &#x27;auto&#x27; requires homogeneous keys</code>. A typed map declared without an initializer is an empty map of its declared type, ready for <code>m[k] = v</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; ages = {&quot;ana&quot;: 31};
 try { ages[5] = 1; } catch (e) { print(&quot;caught: {}&quot;, e); }     // keys never coerce
 map&lt;var, int&gt; anything = {};                                   // any key
@@ -180,6 +180,47 @@ caught: Cannot use &#x27;string&#x27; as a key of type &#x27;int&#x27;
 empty.size(): 0
 after assigning a literal: {&quot;x&quot;:1}</code></pre></div>
 <p>Every typed declaration without an initializer takes its type&#x27;s default: containers start empty, numbers at zero, strings empty, and a class type default-constructs (<a href="02-type-ladder.html#declarations-without-an-initializer">the Type Ladder</a> has the table).</p>
+<p>A compound assignment on a missing key starts from the value type&#x27;s default, as C++&#x27;s <code>operator[]</code> does: <code>m[k] += 1</code> on a <code>map&lt;string, int&gt;</code> counts from 0, <code>+=</code> on a <code>map&lt;string, string&gt;</code> appends to <code>&quot;&quot;</code>, and <code>++</code> works the same way. A plain read still inserts nothing, and a <code>var</code>-valued map has no default to start from, so there the compound raises:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; hits = {};
+for (auto name : [&quot;orc&quot;, &quot;elf&quot;, &quot;orc&quot;]) { hits[name] += 1; }   // a missing key counts from 0
+hits[&quot;troll&quot;]++;
+map&lt;string, string&gt; log = {};
+log[&quot;turn1&quot;] += &quot;moved&quot;;                                       // appends to &quot;&quot;
+print(&quot;{} {}&quot;, to_json(hits), to_json(log));
+var loose = {};
+try { loose[&quot;q&quot;] += 1; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;elf&quot;:1,&quot;orc&quot;:2,&quot;troll&quot;:1} {&quot;turn1&quot;:&quot;moved&quot;}
+caught: Cannot apply &#x27;+=&#x27; to null and int</code></pre></div>
+<h2 id="json">JSON<a class="hlink" href="#json" aria-label="link">&#8203;</a></h2>
+<p><code>to_json(x)</code> writes any value as compact JSON text and <code>to_json(x, n)</code> pretty-prints it with <code>n</code> spaces per level (0 is compact). <code>from_json(text)</code> reads it back: objects become maps, arrays become arrays, numbers keep int or float, and a malformed text raises a catchable error. A class instance writes its class name under <code>_type_</code> and its fields; <code>from_json</code> rebuilds the instance when the class exists, and a typed declaration takes it directly (<code>Hero h = from_json(text);</code>). The values JSON has no spelling for round-trip through tagged objects: a map whose keys are not strings is <code>{&quot;$map&quot;: [[key, value], ...]}</code> and a char is <code>{&quot;$char&quot;: 65}</code>, so both come back as what they were. Floats are written with every digit they need to read back exactly.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var save = {&quot;name&quot;: &quot;orc&quot;, &quot;hp&quot;: [10, 20], &quot;pos&quot;: {&quot;x&quot;: 1.5}};
+print(to_json(save));
+print(to_json(save, 2));
+map&lt;int, string&gt; slots = {1: &quot;sword&quot;, 2: &quot;rope&quot;};
+var back = from_json(to_json(slots));                 // int keys survive the round trip
+print(&quot;{} {} {}&quot;, to_json(slots), back[1], type_of(from_json(to_json(cast&lt;char&gt;(65)))));
+class Hero { string name = &quot;Vex&quot;; int hp = 30; }
+Hero h;
+h.hp = 12;
+string text = to_json(h);
+Hero copy = from_json(text);
+print(&quot;{} -&gt; {} {}&quot;, text, copy.name, copy.hp);
+try { from_json(&quot;{bad&quot;); } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;hp&quot;:[10,20],&quot;name&quot;:&quot;orc&quot;,&quot;pos&quot;:{&quot;x&quot;:1.5}}
+{
+  &quot;hp&quot;: [
+    10,
+    20
+  ],
+  &quot;name&quot;: &quot;orc&quot;,
+  &quot;pos&quot;: {
+    &quot;x&quot;: 1.5
+  }
+}
+{&quot;$map&quot;:[[1,&quot;sword&quot;],[2,&quot;rope&quot;]]} sword char
+{&quot;_type_&quot;:&quot;Hero&quot;,&quot;name&quot;:&quot;Vex&quot;,&quot;hp&quot;:12} -&gt; Vex 12
+caught: Expected &#x27;&quot;&#x27; in JSON</code></pre></div>
+<p>Map keys come out in key order (maps are ordered), so the same data always writes the same text. The C++ side (JSON and binary archives for host objects) is in <a href="../embedding/08-serialization.html">Serialization</a>.</p>
 <h2 id="strings-observers-vs-mutators">Strings: observers vs mutators<a class="hlink" href="#strings-observers-vs-mutators" aria-label="link">&#8203;</a></h2>
 <p>This is the part that surprises people: JaiScript string methods split into two camps, and the mutating camp <strong>modifies the receiver in place and returns self for chaining</strong>, deliberately:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// OBSERVERS return information and leave the string alone:
@@ -307,6 +348,16 @@ print(&quot;{} bytes, {} characters&quot;, s.size(), s.utf8_length());
 for (string ch : s.utf8_chars()) { print(&quot;[{}]&quot;, ch); }   // each UTF-8 character, as a string
 print(&quot;{} {}&quot;, &quot;é&quot;.code(), string::from_code(233));    // Python ord / chr
 print(s.is_valid_utf8());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">11 bytes, 7 characters
+[h]
+[é]
+[l]
+[l]
+[o]
+[ ]
+[🙂]
+233 é
+true</code></pre></div>
 <p><code>utf8_chars()</code> never loses text: a byte that starts no valid sequence comes back as its own one-byte element, and <code>is_valid_utf8()</code> (or <code>string::is_valid_utf8(s)</code>) checks first. <code>code()</code> needs a string of exactly one UTF-8 character; <code>string::from_code(n)</code> raises for a surrogate or a value past U+10FFFF.</p>
 <h3 id="utf8-string">utf8_string: text by character<a class="hlink" href="#utf8-string" aria-label="link">&#8203;</a></h3>
 <p><code>utf8_string</code> holds the same bytes as a string and has the same library, but every position is a character: <code>size()</code>, <code>length()</code>, <code>u[i]</code>, <code>at</code>, <code>substr</code>, <code>find</code>, <code>insert</code>, <code>erase</code>, the pads, <code>reverse</code>, <code>split("")</code> and range-<code>for</code> count and return characters. A character comes back as a one-character <code>utf8_string</code>; <code>byte_size()</code> still counts bytes.</p>
@@ -317,6 +368,15 @@ for (auto c : name) { print(c); }   // Z, o, ë, space, 🙂
 print(name.byte_size());            // 9: the bytes underneath
 string raw = name;                  // the same bytes, counted as bytes
 print(name == raw);                 // true</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5
+ë
+Z
+o
+ë
+ 
+🙂
+9
+true</code></pre></div>
 <p>Make one by declaring the type, with <code>utf8_string(x)</code>, or with <code>s.to_utf8()</code>; a <code>string</code> slot takes a <code>utf8_string</code> back as its bytes. It compares and orders by bytes, so <code>u == s</code> holds for the same text, but as a map key it keeps its own kind (like <code>1</code> and <code>1.0</code>). A <code>+</code> with a <code>utf8_string</code> on either side makes a <code>utf8_string</code>, and every method or <code>string::</code> function that returns text returns the receiver's kind. <code>u[i] = text</code> replaces character <code>i</code> whatever its byte width (<code>u[1] = &quot;日&quot;</code> in <code>&quot;abc&quot;</code> gives <code>&quot;a日c&quot;</code>, three characters in five bytes), <code>u[i] += text</code> appends to it, and a range-<code>for</code> takes characters by value. Case mapping and the character classes stay ASCII, as on a string.</p>
 <p>Character positions are cheap in practice: an all-ASCII text indexes like bytes, the character count is remembered, the last two positions are remembered so a loop over <code>u[i]</code> steps one character at a time, and a long text read at random positions builds a table of every 64th character once. Any write clears these. Parallel bodies read them without writing them.</p>
 <h2 id="strings-and">Strings and <code>+</code><a class="hlink" href="#strings-and" aria-label="link">&#8203;</a></h2>
@@ -377,7 +437,7 @@ for (auto&amp; s : samples) { print(`${s.pos:.1f} ${s.moving}`); }</code></pre><
 29.5 true
 40.0 false
 50.5 true</code></pre></div>
-<p>Arrays of different length, the range itself as a zipped array, or a non-array are load-time errors: <code>parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same length)</code>.</p>
+<p>Arrays of different length, the range itself as a zipped array, or a non-array raise a catchable error when the statement is reached, before any element runs: <code>parallel_for: zipped array 2 has 1 elements, the range has 3 (zipped arrays must have the same length)</code>, <code>parallel_for: zipped array 2 is the range itself</code>, <code>parallel_for: zipped array 2 is not an array</code>.</p>
 <p><strong><code>parallel_transform</code> is that zip.</strong> <code>parallel_transform(xs, fn)</code> is <code>parallel_for (auto&amp; x, auto&amp; o : xs, out) { o = fn(x); }</code> over a fresh output of <code>xs.size()</code> slots, and it costs exactly that loop plus the output. When <code>fn</code> only reads its parameter, its body runs inlined in the loop with the parameter bound to the element in place, so there is no call and no copy per element. A <code>fn</code> that mutates its parameter works on a private copy, so the source array is never touched either way. Any result type works, objects included: the returned array holds copies that alias nothing.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
 array&lt;Body&gt; bodies = [];
@@ -401,7 +461,7 @@ float w(string s) { return s.size(); }               // heavier strings, fatter 
 var parsed = parallel_transform(texts, parse_one, w);
 print(&quot;parsed: {}&quot;, to_json(parsed));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parsed: [7,42,1999,3,250]</code></pre></div>
-<p><strong>Control flow in the body.</strong> The body is the loop&#x27;s body: <code>continue</code> moves to the next element, and so does a <code>return</code> written at the body&#x27;s top level (iterations are independent, there is nothing to return to). A loop-level <code>break</code> is rejected at load time with <code>parallel_for: &#x27;break&#x27; is not allowed in a parallel body (iterations are independent; use &#x27;continue&#x27; for the next element)</code>. Inside a nested loop or <code>switch</code>, <code>break</code> and <code>continue</code> keep their usual meaning.</p>
+<p><strong>Control flow in the body.</strong> The body is the loop&#x27;s body: <code>continue</code> moves to the next element, and so does a <code>return</code> written at the body&#x27;s top level (iterations are independent, there is nothing to return to). A loop-level <code>break</code> is rejected when the statement is reached, before any element runs, with <code>parallel_for: &#x27;break&#x27; is not allowed in a parallel body (iterations are independent; use &#x27;continue&#x27; for the next element)</code>. Inside a nested loop or <code>switch</code>, <code>break</code> and <code>continue</code> keep their usual meaning.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var words = [&quot;keep&quot;, &quot;&quot;, &quot;skip&quot;, &quot;keep&quot;, &quot;&quot;, &quot;keep&quot;];
 array&lt;int&gt; kept = [0, 0, 0, 0, 0, 0];
 parallel_for (auto&amp; w, auto&amp; k : words, kept) {

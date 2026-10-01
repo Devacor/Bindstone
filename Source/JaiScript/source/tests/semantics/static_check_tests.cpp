@@ -313,16 +313,39 @@ public:
             check_eq((size_t)0, error_count(e->check("string f() { return 5; } f();")));   // to_string
             check_eq((size_t)1, error_count(e->check("int f() { return \"s\"; } f();")));
             check_eq((size_t)1, error_count(e->check("void f() { return 5; } f();")));
-            // typed fn falling off the end: warning severity in v1
+            // A structurally reachable fall-through violates a required result.
             auto falls = e->check("int f() { if (false) { return 1; } } f();");
-            check_eq((size_t)0, error_count(falls));
-            check_ge(warning_count(falls), (size_t)1);
+            check_eq((size_t)1, error_count(falls));
             auto clean = e->check("int f() { if (false) { return 1; } return 2; } f();");
             check_eq((size_t)0, clean.diagnostics.size());
             // while(true) loops that can only exit via return don't warn
             auto spin = e->check("int f() { while (true) { return 1; } } f();");
             check_eq((size_t)0, spin.diagnostics.size());
         });
+
+		test("required_results_are_checked_before_execution", [this]() {
+			for (bool vm : {false, true}) {
+				for (bool proofs : {false, true}) {
+					auto e = engine::make();
+					if (vm) { e->set_backend(backend_type::vm); }
+					e->type_proofs(proofs);
+					check_true(e->check("int bad() {}").has_errors());
+					check_true(e->check("bool bad() { return; }").has_errors());
+					check_true(e->check("int& bad() {}").has_errors());
+					check_false(e->check("int good() { if (true) { return 1; } }").has_errors());
+					check_false(e->check("int good() { for (;;) {} }").has_errors());
+					check_false(e->check("int good(int x) { switch (x) { case 0: fallthrough; default: return 1; } }").has_errors());
+					check_true(e->check("int bad(int x) { switch (x) { case 0: break; return 1; default: return 2; } }").has_errors());
+					e->execute("int runs = 0;");
+					check_throws([&]() { e->execute("runs += 1; int incomplete() {}"); });
+					check_eq(int64_t{0}, e->get_variable("runs").as_int());
+					e->static_checking(check_mode::warn);
+					check_true(e->execute("int unchecked() {} unchecked();").is_null(), "warn mode preserves existing completion behavior");
+					e->static_checking(check_mode::off);
+					check_true(e->execute("int unchecked2() {} unchecked2();").is_null(), "off mode deliberately opts out of the return check");
+				}
+			}
+		});
 
         test("coroutines_stay_lenient", [this]() {
             auto e = make_engine();

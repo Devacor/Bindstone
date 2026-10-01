@@ -26,6 +26,7 @@
 #include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/lvalue_shape.hpp>
 #include <cctype>
+#include <jaiscript/detail/return_flow.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -3608,8 +3609,8 @@ private:
 		if (!r->value) {
 			// Runtime returns null here (typed-return conversion skipped for bare returns
 			// per HEAD behavior): warning severity, matching the fall-off-the-end rule.
-			diag(diag_level::warning, r->location, "'" + std::string(fn.name) + "' declared to return '" +
-				 fn.ret->canonical_name() + "' returns no value here (returns null)", fn.line, fn.column);
+			diag(requires_return_value(fn.ret) ? diag_level::error : diag_level::warning, r->location, "'" + std::string(fn.name) + "' declared to return '" +
+				 fn.ret->canonical_name() + "' returns no value here", fn.line, fn.column);
 			return;
 		}
 		if (!assignable(value, ret)) {
@@ -4073,100 +4074,24 @@ private:
         capture_stack_.pop_back();
     }
 
-    // ---------------------------------------------------- fall-off-the-end warning
+	// Unknown exception paths remain advisory; structurally reachable fall-through violates a required result.
+	void check_falls_off_end(const function_decl* a_function) {
+		if (!a_function->return_type || a_function->is_coroutine || !a_function->body) { return; }
+		ctype ret = ctype_from_type_info(a_function->return_type.get());
+		if ((ret.is_unknown() && !requires_return_value(a_function->return_type.get())) || ret.kind == ctype::null_k) { return; }
+		auto flow = ReturnFlow(a_function->return_type.get()).analyze(a_function->body.get());
+		if (!(flow.paths & (ReturnFlow::NORMAL | ReturnFlow::MAYBE_NORMAL))) { return; }
+		const bool definite = (flow.paths & ReturnFlow::NORMAL) != 0;
+		diag(definite && requires_return_value(a_function->return_type.get()) ? diag_level::error : diag_level::warning,
+			a_function->location, "'" + std::string(a_function->name) + "' declared to return '" +
+			a_function->return_type->canonical_name() + "' may reach the end of its body without returning a value");
+	}
 
-    void check_falls_off_end(const function_decl* fn) {
-        if (!fn->return_type || fn->is_coroutine || !fn->body) { return; }
-        ctype ret = ctype_from_type_info(fn->return_type.get());
-        if (ret.is_unknown() || ret.kind == ctype::null_k) { return; }
-        if (guarantees_exit_block(fn->body->declarations)) { return; }
-        diag(diag_level::warning, fn->location, "'" + std::string(fn->name) + "' declared to return '" +
-             fn->return_type->canonical_name() + "' may reach the end of its body without returning (returns null)");
-    }
+	bool guarantees_exit_block(const std::vector<declaration_ptr>& a_declarations) {
+		auto result = ReturnFlow{}.sequence(a_declarations);
+		return !(result.paths & (ReturnFlow::NORMAL | ReturnFlow::MAYBE_NORMAL));
+	}
 
-    bool guarantees_exit_block(const std::vector<declaration_ptr>& decls) {
-        for (const auto& d : decls) {
-            if (d && guarantees_exit(d.get())) { return true; }
-        }
-        return false;
-    }
-
-    bool guarantees_exit(const statement* s) {
-        if (!s) { return false; }
-        switch (s->get_type()) {
-            case node_type::return_stmt: return true;
-            case node_type::expression_stmt: {
-                auto* e = static_cast<const expression_stmt*>(s)->expression.get();
-                return e && e->get_type() == node_type::throw_expr;
-            }
-            case node_type::expression_decl: {
-                auto* e = static_cast<const expression_decl*>(s)->expression.get();
-                return e && e->get_type() == node_type::throw_expr;
-            }
-            case node_type::block_stmt:
-                return guarantees_exit_block(static_cast<const block_stmt*>(s)->declarations);
-            case node_type::statement_decl:
-                return guarantees_exit(static_cast<const statement_decl*>(s)->statement.get());
-            case node_type::if_stmt: {
-                auto* i = static_cast<const if_stmt*>(s);
-                return i->else_statement && guarantees_exit(i->then_statement.get()) &&
-                       guarantees_exit(i->else_statement.get());
-            }
-            case node_type::try_stmt: {
-                auto* t = static_cast<const try_stmt*>(s);
-                return guarantees_exit(t->try_block.get()) && guarantees_exit(t->catch_block.get());
-            }
-            case node_type::while_stmt: {
-                // while(true) without a break can only leave via return/throw
-                auto* w = static_cast<const while_stmt*>(s);
-                if (!w->condition || w->condition->get_type() != node_type::literal_expr) { return false; }
-                auto* lit = static_cast<const literal_expr*>(w->condition.get());
-                return lit->value.is_bool() && lit->value.unchecked_as_bool() && !contains_break(w->body.get());
-            }
-            case node_type::switch_stmt: {
-                auto* sw = static_cast<const switch_stmt*>(s);
-                if (!sw->default_case) { return false; }
-                for (const auto& cs : sw->cases) {
-                    bool exits = false;
-                    for (const auto& st : cs->body) {
-                        if (guarantees_exit(st.get())) { exits = true; break; }
-                    }
-                    if (!exits) { return false; }
-                }
-                for (const auto& st : sw->default_case->body) {
-                    if (guarantees_exit(st.get())) { return true; }
-                }
-                return false;
-            }
-            default:
-                return false;
-        }
-    }
-
-    // break at this loop's own level (nested loops swallow their breaks)
-    bool contains_break(const statement* s) {
-        if (!s) { return false; }
-        switch (s->get_type()) {
-            case node_type::break_stmt: return true;
-            case node_type::block_stmt:
-                for (const auto& d : static_cast<const block_stmt*>(s)->declarations) {
-                    if (contains_break(d.get())) { return true; }
-                }
-                return false;
-            case node_type::statement_decl:
-                return contains_break(static_cast<const statement_decl*>(s)->statement.get());
-            case node_type::if_stmt: {
-                auto* i = static_cast<const if_stmt*>(s);
-                return contains_break(i->then_statement.get()) || contains_break(i->else_statement.get());
-            }
-            case node_type::try_stmt: {
-                auto* t = static_cast<const try_stmt*>(s);
-                return contains_break(t->try_block.get()) || contains_break(t->catch_block.get());
-            }
-            default:
-                return false;   // nested loops/switches own their breaks
-        }
-    }
 };
 
 // Safety-net sweep: every declared name at any depth (see all_names_ comment).

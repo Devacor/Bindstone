@@ -1,3 +1,4 @@
+#include <jaiscript/detail/return_flow.hpp>
 // Inlined leaves (docs/typed_regions_design.md, "Inlined leaves"): a plain identifier call the checker resolved to one small free
 // script function compiles at its call site as the callee's body. The call becomes a temp: the operands the statement evaluates
 // before the call go into typed temps first, in program order (the spill), then the graft declares the result temp (a guard on
@@ -849,6 +850,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
 	const type_info* rt = fn->return_type.get();
+	if (detail::requires_return_value(rt) && !detail::has_complete_return(*fn)) return "a callee with an incomplete required return";
 	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0) || (any_type(rt) && untyped_result_kind(call, fn, frame) != script_value_type::jai_null_type))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {

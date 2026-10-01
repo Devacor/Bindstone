@@ -320,8 +320,9 @@ namespace jai::detail {
 				if (auto instance = const_cast<script_value*>(tp)->get_class_instance()) {
 					script_value& field_ref = instance->get_field(symbol_id, false);
 					if (!field_ref.is_invalid()) { return &field_ref; }
-					if (auto cd = instance->get_class_definition()) {
-						if (script_value* sp = cd->get_static_field_ptr(symbol_id)) { return sp; }
+					class_definition* declaring = caller.metadata && caller.metadata->is_method ? caller.metadata->scope_static : nullptr;
+					if (class_definition* owner = bare_static_owner(declaring, instance->get_class_definition(), symbol_id)) {
+						return owner->get_static_field_ptr(symbol_id);
 					}
 				}
 			}

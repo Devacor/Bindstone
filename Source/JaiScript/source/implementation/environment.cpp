@@ -33,6 +33,11 @@ inline jai::checked_result<void> receiver_member_access(const jai::environment& 
     if (!def || !def->chain_has_nonpublic()) [[likely]] { return {}; }
     return jai::detail::enforce_member_access(def, id, env.find_access_context());
 }
+
+inline jai::script_value* method_static_cell(jai::class_definition* declaring, const jai::class_instance& instance, uint64_t id) {
+    jai::class_definition* owner = jai::detail::bare_static_owner(declaring, instance.get_class_definition(), id);
+    return owner ? owner->get_static_field_ptr(id) : nullptr;
+}
 }
 
 namespace jai {
@@ -250,9 +255,8 @@ checked_result<script_value> environment::get(uint64_t id) const {
                 }
 
                 // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def && class_def->has_static_field(id)) {
-                    return class_def->get_static_field(id);
+                if (script_value* static_ptr = method_static_cell(access_context_, *instance, id)) {
+                    return *static_ptr;
                 }
             }
         }
@@ -261,13 +265,13 @@ checked_result<script_value> environment::get(uint64_t id) const {
     // Kind-specific fallback: check static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
         // Check static fields
-        if (class_def_->has_static_field(id)) {
-            return class_def_->get_static_field(id);
+        if (script_value* static_ptr = class_def_->find_static_field_in_chain(id)) {
+            return *static_ptr;
         }
 
         // Check static methods (for calling other static methods)
-        if (class_def_->has_static_method(id)) {
-            return class_def_->get_static_method(id);
+        if (const script_value* method = class_def_->find_static_method_in_chain(id)) {
+            return *method;
         }
     }
 
@@ -496,12 +500,8 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
                 }
 
                 // Try to get static field from class definition (return const reference)
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    const script_value* field_ptr = class_def->get_static_field_ptr(id);
-                    if (field_ptr) {
-                        return std::cref(*field_ptr);
-                    }
+                if (const script_value* field_ptr = method_static_cell(access_context_, *instance, id)) {
+                    return std::cref(*field_ptr);
                 }
             }
         }
@@ -509,7 +509,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 
     // Kind-specific fallback: check static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
-        const script_value* field_ptr = class_def_->get_static_field_ptr(id);
+        const script_value* field_ptr = class_def_->find_static_field_in_chain(id);
         if (field_ptr) {
             return std::cref(*field_ptr);
         }
@@ -575,12 +575,8 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
                 }
 
                 // Try to get static field from class definition (return non-const reference)
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    script_value* field_ptr = class_def->get_static_field_ptr(id);
-                    if (field_ptr) {
-                        return std::ref(*field_ptr);
-                    }
+                if (script_value* field_ptr = method_static_cell(access_context_, *instance, id)) {
+                    return std::ref(*field_ptr);
                 }
             }
         }
@@ -588,7 +584,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 
     // Kind-specific fallback: check static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(id);
+        script_value* field_ptr = class_def_->find_static_field_in_chain(id);
         if (field_ptr) {
             return std::ref(*field_ptr);
         }
@@ -663,12 +659,12 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
 
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
-        if (class_def_->has_static_field(id)) {
-            auto enforced = class_def_->enforce_static_write(id, clone_for_assignment(value));
+        if (class_definition* owner = detail::bare_static_owner(class_def_.get(), nullptr, id)) {
+            auto enforced = owner->enforce_static_write(id, clone_for_assignment(value));
             if (!enforced) {
                 return enforced.error_value();
             }
-            if (class_def_->set_static_field(id, std::move(enforced.value()))) {
+            if (owner->set_static_field(id, std::move(enforced.value()))) {
                 return {};
             }
         }
@@ -736,12 +732,12 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
 
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
-        if (class_def_->has_static_field(id)) {
-            auto enforced = class_def_->enforce_static_write(id, std::move(value));
+        if (class_definition* owner = detail::bare_static_owner(class_def_.get(), nullptr, id)) {
+            auto enforced = owner->enforce_static_write(id, std::move(value));
             if (!enforced) {
                 return enforced.error_value();
             }
-            if (class_def_->set_static_field(id, std::move(enforced.value()))) {
+            if (owner->set_static_field(id, std::move(enforced.value()))) {
                 return {};
             }
         }
@@ -987,12 +983,8 @@ script_value* environment::get_value_ptr(uint64_t id) {
                 }
 
                 // Try to get static field from class definition
-                auto class_def = instance->get_class_definition();
-                if (class_def) {
-                    script_value* static_ptr = class_def->get_static_field_ptr(id);
-                    if (static_ptr) {
-                        return static_ptr;
-                    }
+                if (script_value* static_ptr = method_static_cell(access_context_, *instance, id)) {
+                    return static_ptr;
                 }
             }
         }
@@ -1000,7 +992,7 @@ script_value* environment::get_value_ptr(uint64_t id) {
 
     // Kind-specific fallback: check static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
-        script_value* field_ptr = class_def_->get_static_field_ptr(id);
+        script_value* field_ptr = class_def_->find_static_field_in_chain(id);
         if (field_ptr) {
             return field_ptr;
         }

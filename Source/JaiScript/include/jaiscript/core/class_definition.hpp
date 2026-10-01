@@ -971,6 +971,43 @@ public:
 
     bool has_static_method_with_arity(uint64_t name_id, size_t arity) const;
 
+    // C++ name lookup of a static through the inheritance chain: this class, then its
+    // bases depth-first; an instance member of the name at a level hides the bases' statics.
+    // The class that declares it (owner) is the one stores convert through.
+    bool declares_instance_member(uint64_t id) const {
+        return methods_.find(id) != methods_.end() || field_defaults_.find(id) != field_defaults_.end();
+    }
+
+    script_value* find_static_field_in_chain(uint64_t id, class_definition** owner = nullptr) {
+        if (auto it = static_field_values_.find(id); it != static_field_values_.end()) {
+            if (owner) { *owner = this; }
+            return &it->second;
+        }
+        if (declares_instance_member(id)) { return nullptr; }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (script_value* found = parent->find_static_field_in_chain(id, owner)) { return found; }
+            }
+        }
+        if (cpp_base_class_) { return cpp_base_class_->find_static_field_in_chain(id, owner); }
+        return nullptr;
+    }
+
+    const script_value* find_static_method_in_chain(uint64_t id, class_definition** owner = nullptr) {
+        if (auto it = static_methods_.find(id); it != static_methods_.end()) {
+            if (owner) { *owner = this; }
+            return &it->second;
+        }
+        if (declares_instance_member(id)) { return nullptr; }
+        for (const auto& parent : parent_classes_) {
+            if (parent) {
+                if (const script_value* found = parent->find_static_method_in_chain(id, owner)) { return found; }
+            }
+        }
+        if (cpp_base_class_) { return cpp_base_class_->find_static_method_in_chain(id, owner); }
+        return nullptr;
+    }
+
     std::vector<std::string_view> get_static_field_names() const {
         std::vector<std::string_view> names;
         names.reserve(static_fields_.size());

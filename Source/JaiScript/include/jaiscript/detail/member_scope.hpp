@@ -45,7 +45,7 @@ struct member_scope_ctx {
     member_scope_state state = member_scope_state::none;
     environment* floor = nullptr;
     script_value* this_storage = nullptr;
-    class_definition* statics = nullptr;
+    class_definition* statics = nullptr;   // static scope: its class; instance scope: the declaring class (null = the receiver's)
 
     bool active() const {
         return state == member_scope_state::instance || state == member_scope_state::statics;
@@ -274,6 +274,46 @@ inline script_value* own_scope_lookup(environment* current, const environment* f
     return nullptr;
 }
 
+// A bare static name inside a class's code: the declaring class's chain (C++ lookup, whatever
+// the receiver's dynamic class), then the receiver's own chain (its subclass statics stay visible)
+inline bool probe_static_chain(member_probe_hit& hit, class_definition* origin, uint64_t sym, bool want_methods) {
+    class_definition* owner = nullptr;
+    if (script_value* static_ptr = origin->find_static_field_in_chain(sym, &owner)) {
+        hit.what = member_probe_hit::kind::static_field;
+        hit.value_ptr = static_ptr;
+        hit.class_def = owner;
+        return true;
+    }
+    if (want_methods) {
+        if (const script_value* method = origin->find_static_method_in_chain(sym, &owner)) {
+            hit.what = member_probe_hit::kind::method;
+            hit.method_value = *method;
+            hit.class_def = owner;
+            return true;
+        }
+    }
+    return false;
+}
+
+inline void probe_scope_statics(member_probe_hit& hit, class_definition* declaring, class_definition* dynamic,
+                                uint64_t sym, bool want_methods) {
+    if (declaring && probe_static_chain(hit, declaring, sym, want_methods)) { return; }
+    if (dynamic && dynamic != declaring) { probe_static_chain(hit, dynamic, sym, want_methods); }
+}
+
+// The class a bare static store lands on (it converts through that class's declared type)
+inline class_definition* bare_static_owner(class_definition* declaring, class_definition* dynamic, uint64_t sym) {
+    class_definition* owner = nullptr;
+    if (declaring && declaring->find_static_field_in_chain(sym, &owner)) return owner;
+    if (dynamic && dynamic != declaring && dynamic->find_static_field_in_chain(sym, &owner)) return owner;
+    return nullptr;
+}
+
+inline bool scope_statics_have_method(class_definition* declaring, class_definition* dynamic, uint64_t sym) {
+    if (declaring && declaring->find_static_method_in_chain(sym)) { return true; }
+    return dynamic && dynamic != declaring && dynamic->find_static_method_in_chain(sym);
+}
+
 // Phase 3: the boundary probe. Field -> method -> static (the same surface and
 // relative order the old post-walk fallbacks answered). want_methods=false lets
 // pointer-only resolvers (fast binary operands, store targets) skip the mint rung;
@@ -342,43 +382,11 @@ inline member_probe_hit probe_member_scope(member_scope_state state,
                 return hit;
             }
         }
-        if (class_definition* class_def = instance->get_class_definition()) {
-            if (script_value* static_ptr = class_def->get_static_field_ptr(sym)) {
-                hit.what = member_probe_hit::kind::static_field;
-                hit.value_ptr = static_ptr;
-                hit.class_def = class_def;
-                return hit;
-            }
-            if (want_methods) {
-                auto& statics = class_def->static_method_values();
-                auto it = statics.find(sym);
-                if (it != statics.end()) {
-                    hit.what = member_probe_hit::kind::method;
-                    hit.method_value = it->second;
-                    hit.class_def = class_def;
-                    return hit;
-                }
-            }
-        }
+        probe_scope_statics(hit, scope_static, instance->get_class_definition(), sym, want_methods);
         return hit;
     }
     if (state == member_scope_state::statics && scope_static) {
-        if (script_value* static_ptr = scope_static->get_static_field_ptr(sym)) {
-            hit.what = member_probe_hit::kind::static_field;
-            hit.value_ptr = static_ptr;
-            hit.class_def = scope_static;
-            return hit;
-        }
-        if (want_methods) {
-            auto& statics = scope_static->static_method_values();
-            auto it = statics.find(sym);
-            if (it != statics.end()) {
-                hit.what = member_probe_hit::kind::method;
-                hit.method_value = it->second;
-                hit.class_def = scope_static;
-                return hit;
-            }
-        }
+        probe_scope_statics(hit, scope_static, nullptr, sym, want_methods);
     }
     return hit;
 }
@@ -406,15 +414,20 @@ inline bool member_scope_has_method(member_scope_state state,
         if (!instance) return false;
         script_value method = instance->get_method(sym, false);
         if (!method.is_invalid()) return true;
-        if (class_definition* class_def = instance->get_class_definition()) {
-            return class_def->static_method_values().count(sym) > 0;
-        }
-        return false;
+        return scope_statics_have_method(scope_static, instance->get_class_definition(), sym);
     }
     if (state == member_scope_state::statics && scope_static) {
-        return scope_static->static_method_values().count(sym) > 0;
+        return scope_statics_have_method(scope_static, nullptr, sym);
     }
     return false;
+}
+
+// The class whose code a lexical chain runs (its method/static/initializer env's access context)
+inline class_definition* lexical_access_class(environment* from) {
+    for (environment* e = from; e; e = e->parent_raw()) {
+        if (class_definition* cls = e->get_access_context()) return cls;
+    }
+    return nullptr;
 }
 
 // Lazy scope compute from frame ingredients (the vm path; the interpreter stamps at
@@ -428,6 +441,7 @@ inline void compute_member_scope(call_frame& locals,
     if (locals.is_method && locals.this_object_ptr) {
         locals.scope_this = locals.this_object_ptr.get();
         locals.scope_state = static_cast<uint8_t>(member_scope_state::instance);
+        if (!locals.scope_static) { locals.scope_static = lexical_access_class(entry_env); }   // a lazy push stamps it
         if (!entry_env) {
             locals.scope_floor = current_env;                       // lazy method body
         } else if (entry_env->is_method_env()) {
@@ -455,6 +469,7 @@ inline void compute_member_scope(call_frame& locals,
     if (boundary->is_method_env()) {
         if (script_value* this_storage = boundary->method_this_storage()) {
             locals.scope_this = this_storage;
+            locals.scope_static = boundary->get_access_context();
             locals.scope_floor = floor;
             locals.scope_state = static_cast<uint8_t>(member_scope_state::instance);
         }

@@ -1711,10 +1711,16 @@ namespace jai::vm {
             if (detail::cpp_property_getter_id(instance.get(), sym)) { return nullptr; }
             script_value& field_ref = instance->get_field(sym, false);
             if (!field_ref.is_invalid()) { return &field_ref; }
-            if (auto class_def = instance->get_class_definition()) {
-                return class_def->get_static_field_ptr(sym);
+            if (class_definition* owner = detail::bare_static_owner(frame_declaring_class(f), instance->get_class_definition(), sym)) {
+                return owner->get_static_field_ptr(sym);
             }
             return nullptr;
+        }
+        // The class whose code the frame runs (a bare static's lookup origin): stamped on method
+        // frames, else the lexical access context
+        class_definition* frame_declaring_class(const frame& f) const {
+            if (f.locals && f.locals->is_method && f.locals->scope_static) { return f.locals->scope_static; }
+            return detail::lexical_access_class(environment_.get());
         }
         // A reference to a bare member out of reach names the access text, never the undefined one
         checked_result<void> frame_bare_member_access(frame& f, uint64_t sym) {

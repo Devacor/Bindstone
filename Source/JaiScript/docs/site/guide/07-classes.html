@@ -263,10 +263,10 @@ try { Registry.count; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.0, last_id = 0
 caught: Cannot assign string to static &#x27;count&#x27; of Registry (declared int)
 caught: function has no member &#x27;count&#x27;</code></pre></div>
-<p>(<code>Registry::count = &quot;many&quot;;</code> written as a literal is the load error <code>cannot assign &#x27;string&#x27; to field &#x27;count&#x27; declared &#x27;int&#x27;</code>.) Statics are <strong>not inherited</strong>: a derived class neither sees them bare nor answers to <code>Derived::count</code>. Qualify with the declaring class:</p>
+<p>(<code>Registry::count = &quot;many&quot;;</code> written as a literal is the load error <code>cannot assign &#x27;string&#x27; to field &#x27;count&#x27; declared &#x27;int&#x27;</code>.) A class&#x27;s code sees its own and its bases&#x27; statics bare, and a base method running for a subclass instance reads its own class&#x27;s statics. From outside, qualify with the declaring class: <code>Derived::count</code> names no static:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { static int count = 0; static int bump() { count += 1; return count; } }
 class Derived : Base {
-    auto bump_twice() { Base::bump(); return Base::bump(); }   // qualify with the declaring class
+    auto bump_twice() { bump(); return bump(); }   // a base&#x27;s statics by bare name
 }
 print(Derived().bump_twice());
 try { Derived::count; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
@@ -279,7 +279,7 @@ caught: class Derived has no static member &#x27;count&#x27;</code></pre></div>
 <li>the active <strong>catch variable</strong> (innermost <code>catch</code>)</li>
 <li><strong>locals and parameters</strong> of the current function, including range-for variables, <code>auto&amp;</code> reference declarations, and constructor parameters (declaration-point scoped: a use <em>before</em> the local&#x27;s declaration resolves outward)</li>
 <li><strong>enclosing scopes / explicit lambda captures</strong></li>
-<li><strong>class members</strong>: instance fields (implicit <code>this</code>, including inherited), then instance methods (as bound methods), then static fields and static methods (inside a static method, the statics of the class)</li>
+<li><strong>class members</strong>: instance fields (implicit <code>this</code>, including inherited), then instance methods (as bound methods), then static fields and static methods (those of the class whose code runs and its bases, then the receiver&#x27;s own class)</li>
 <li><strong>globals</strong> (variables and free functions)</li>
 </ol>
 <p>Three consequences are worth knowing.</p>

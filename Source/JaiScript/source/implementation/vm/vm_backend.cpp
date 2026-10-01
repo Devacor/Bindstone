@@ -3520,9 +3520,8 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 					stack_.push_back(make_bound_method_thunk(this_val, std::move(method)));
 					return {};
 				}
-				auto class_def = instance->get_class_definition();
-				if (class_def && class_def->has_static_field(sym)) {
-					stack_.push_back(class_def->get_static_field(sym));
+				if (class_definition* owner = detail::bare_static_owner(frame_declaring_class(f), instance->get_class_definition(), sym)) {
+					stack_.push_back(owner->get_static_field(sym));
 					return {};
 				}
 			}
@@ -4051,8 +4050,8 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 						assigned_to_member = true;
 					}
 				} else {
-					auto class_def = instance->get_class_definition();
-					if (class_def && class_def->has_static_field(sym)) {
+					class_definition* class_def = detail::bare_static_owner(frame_declaring_class(f), instance->get_class_definition(), sym);
+					if (class_def) {
 						// All-detach (#12): implicit static store snapshots too
 						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 							value = value.detached_for_store();
@@ -4083,18 +4082,18 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	// (same set_static_field kernel as the instance tail above).
 	if (!assigned_to_member && frame_scope_state(f) == detail::member_scope_state::statics &&
 	    f.locals && f.locals->scope_static) {
-		if (f.locals->scope_static->has_static_field(sym)) {
+		if (class_definition* static_owner = detail::bare_static_owner(f.locals->scope_static, nullptr, sym)) {
 			if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 				value = value.detached_for_store();
 			}
 			if (rhs_lvalue) {
-				auto stored = detail::store_static_member(*f.locals->scope_static, sym, clone_for_assignment(value));
+				auto stored = detail::store_static_member(*static_owner, sym, clone_for_assignment(value));
 				if (!stored) {
 					return raise_from(stored);
 				}
 				if (assignment_result_used(f)) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
 			} else {
-				auto stored = detail::store_static_member(*f.locals->scope_static, sym, std::move(value));
+				auto stored = detail::store_static_member(*static_owner, sym, std::move(value));
 				if (!stored) {
 					return raise_from(stored);
 				}
@@ -5031,9 +5030,8 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					scratch.emplace(make_bound_method_thunk(this_val, std::move(method)));
 					return &scratch.value();
 				}
-				auto class_def = instance->get_class_definition();
-				if (class_def && class_def->has_static_field(sym)) {
-					scratch.emplace(class_def->get_static_field(sym));
+				if (class_definition* owner = detail::bare_static_owner(frame_declaring_class(f), instance->get_class_definition(), sym)) {
+					scratch.emplace(owner->get_static_field(sym));
 					return &scratch.value();
 				}
 			}
@@ -20210,6 +20208,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
+	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
 	rec.cells.reset_call();
 	rec.f.cells = &rec.cells;
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
@@ -20373,6 +20372,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
+	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
 	rec.cells.reset_call();
 	rec.f.cells = &rec.cells;
 	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park

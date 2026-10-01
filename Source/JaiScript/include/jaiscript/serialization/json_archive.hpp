@@ -200,6 +200,10 @@ public:
     }
 
     void write_value(const script_value& value) {
+        if (value.is_reference()) [[unlikely]] {
+            write_value(value.deref());
+            return;
+        }
         // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
 
@@ -211,7 +215,17 @@ public:
                 auto weak = value.get_weak_ptr();
                 auto shared = weak.lock();  // Try to lock to get shared_ptr<object_holder>
 
-                if (!shared) {
+                if (indent_ > 0) {
+                    open_value('{');
+                    auto [id, is_new] = shared ? track_shared_ptr(shared.get()) : std::pair<uint32_t, bool>{0, false};
+                    write_value_key("$weak_ptr_id", false);
+                    oss_ << id;
+                    if (is_new) {
+                        write_value_key("$weak_ptr_data", true);
+                        write_value(weak_target_value(shared));
+                    }
+                    close_value('}', false);
+                } else if (!shared) {
                     // Expired or null weak_ptr
                     oss_ << "{\"$weak_ptr_id\": 0}";
                 } else {
@@ -229,53 +243,53 @@ public:
                 }
                 break;
             }
-            
+
             case script_value_type::jai_array_type: {
                 const script_array* node = value.unchecked_array_node();
                 if (!node) { throw runtime_error("script_value is not an array"); }
-                oss_ << '[';
+                open_value('[');
                 size_t i = 0;
                 node->for_each(value.get_engine(), [&](const script_value& elem) {
-                    if (i++ > 0) oss_ << ',';
+                    write_value_separator(i++ > 0);
                     write_value(elem);  // Recursive call handles shared_ptrs
                 });
-                oss_ << ']';
+                close_value(']', i == 0);
                 break;
             }
-            
+
             case script_value_type::jai_map_type: {
                 const auto& map = value.as_map();
                 if (map_needs_tag(value)) {
-                    oss_ << "{\"$map\":[";
+                    open_value('{');
+                    write_value_key("$map", false);
+                    open_value('[');
                     bool first_pair = true;
                     for (const auto& [k, v] : map) {
-                        if (!first_pair) oss_ << ',';
+                        write_value_separator(!first_pair);
                         first_pair = false;
-                        oss_ << '[';
+                        open_value('[');
+                        write_value_separator(false);
                         write_value(k);
-                        oss_ << ',';
+                        write_value_separator(true);
                         write_value(v);
-                        oss_ << ']';
+                        close_value(']', false);
                     }
-                    oss_ << "]}";
+                    close_value(']', first_pair);
+                    close_value('}', false);
                     break;
                 }
-                oss_ << '{';
+                open_value('{');
                 bool first = true;
                 for (const auto& [k, v] : map) {
-                    if (!first) oss_ << ',';
-                    first = false;
-                    
                     if (k.is_string()) {
-                        oss_ << '"' << escape_json_string_local(k.as_string()) << '"';
+                        write_value_key(k.as_string(), !first);
                     } else {
-                        oss_ << '"' << escape_json_string_local(k.to_string()) << '"';
+                        write_value_key(k.to_string(), !first);
                     }
-                    
-                    oss_ << ':';
+                    first = false;
                     write_value(v);  // Recursive call handles shared_ptrs
                 }
-                oss_ << '}';
+                close_value('}', first);
                 break;
             }
             
@@ -304,21 +318,17 @@ public:
                             type_name = class_def->get_name();
                         }
 
-                        oss_ << '{';
-                        bool first = true;
-
-                        // Add _type_ field
-                        oss_ << "\"_type_\":\"" << escape_json_string_local(type_name) << "\"";
-                        first = false;
+                        open_value('{');
+                        write_value_key("_type_", false);
+                        oss_ << '"' << escape_json_string_local(type_name) << '"';
 
                         if (class_def) {
                             const bool completed = for_each_serialized_property(value, class_def, eng, [&](const auto& prop_name, script_value&& prop_value) {
-                                if (!first) oss_ << ',';
-                                first = false;
-                                oss_ << "\"" << escape_json_string_local(prop_name) << "\":";
+                                write_value_key(prop_name, true);
                                 write_value(std::move(prop_value));
                             });
                             if (!completed) {
+                                --json_depth_;
                                 return;
                             }
                         } else {
@@ -328,14 +338,12 @@ public:
                                 std::string field_name = std::string(eng->get_symbolizer()->get_string(field_id));
                                 if (field_name == class_constants::CPP_OBJECT_FIELD) return;
 
-                                if (!first) oss_ << ',';
-                                first = false;
-                                oss_ << "\"" << escape_json_string_local(field_name) << "\":";
+                                write_value_key(field_name, true);
                                 write_value(field_val);
                             });
                         }
 
-                        oss_ << '}';
+                        close_value('}', false);
                         break;
                     }
                 }
@@ -359,7 +367,33 @@ private:
     enum class ContainerType { Object, Array };
     
     // Local helper functions to avoid circular includes
-    std::string escape_json_string_local(const std::string& str) {
+    // write_value's layout: compact (indent_ <= 0) or one member per line, indent_ spaces per level
+    void open_value(char bracket) {
+        oss_ << bracket;
+        ++json_depth_;
+    }
+
+    void close_value(char bracket, bool empty) {
+        --json_depth_;
+        if (indent_ > 0 && !empty) {
+            oss_ << '\n' << std::string(static_cast<size_t>(json_depth_) * static_cast<size_t>(indent_), ' ');
+        }
+        oss_ << bracket;
+    }
+
+    void write_value_separator(bool comma) {
+        if (comma) oss_ << ',';
+        if (indent_ > 0) {
+            oss_ << '\n' << std::string(static_cast<size_t>(json_depth_) * static_cast<size_t>(indent_), ' ');
+        }
+    }
+
+    void write_value_key(std::string_view key, bool comma) {
+        write_value_separator(comma);
+        oss_ << '"' << escape_json_string_local(key) << (indent_ > 0 ? "\": " : "\":");
+    }
+
+    std::string escape_json_string_local(std::string_view str) {
         // Build into a std::string instead of constructing a fresh std::ostringstream
         // (heavy: stringbuf + locale imbue) for every key and every string value in the
         // document. Also avoids the std::hex/setw/setfill stream-state churn for control

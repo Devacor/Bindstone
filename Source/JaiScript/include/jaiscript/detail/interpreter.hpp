@@ -1091,6 +1091,12 @@ namespace jai {
             return hit ? detail::bare_member_access(hit, symbol_id, environment_->find_access_context()) : checked_result<void>{};
         }
 
+        // The class whose code is running, for a bare static name off the member-scope ladder
+        class_definition* bare_declaring_class() const noexcept {
+            if (member_scope_.state == detail::member_scope_state::instance && member_scope_.statics) { return member_scope_.statics; }
+            return detail::lexical_access_class(environment_.get());
+        }
+
         // The non-slot rungs of the member-scope ladder (member_scope_.active() only).
         script_value* scoped_env_lookup(uint64_t symbol_id) noexcept {
             if (script_value* own = detail::own_scope_lookup(environment_.get(), member_scope_.floor, symbol_id)) {

@@ -185,6 +185,7 @@ namespace jai::vm {
         std::vector<explicit_capture> captures;
         uint8_t default_capture = 0;                       // lambda_expr::capture_default
         bool captures_this = false;
+        bool uses_instance = false;                        // this/super in the body
     };
 
     struct destructure_proto {

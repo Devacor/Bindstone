@@ -837,6 +837,13 @@ public:
 				e->set_backend(backend);
 				check_eq(std::string("VALUE 4"), outcome(*e,
 					"auto f() { int x = 3; auto g = [&]() { x += 1; return x; }; g(); return x; } f()"));
+				auto off = make_engine();
+				off->set_backend(backend);
+				off->static_checking(check_mode::off);
+				check_eq(std::string("VALUE 12|33"), outcome(*off,
+					"class C { int x = 1; auto f() { return []() { return x; }; } auto g(int k) { return [k]() { return k; }; } } C c = C(); string m = \"\"; "
+					"try { c.f(); } catch (e) { m += \"1\"; } try { c.f(); } catch (e) { m += \"2\"; } m + \"|\" + c.g(3)() + c.g(3)()"),
+					"an unverified capture list raises at every creation; a verified one is checked once");
 			}
 		});
 

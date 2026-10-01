@@ -432,6 +432,9 @@ namespace jai {
         // the interpreter's free names of the body (this_id for this/super), the vm proto's used_variables
         mutable std::vector<uint64_t> free_names;
         mutable bool free_names_built = false;
+        mutable bool uses_instance = false;
+        // the capture list was checked against the creating scope once (both backends); later creations skip it
+        mutable bool capture_list_verified = false;
 
         // the lambda as a declaration for a call of the local it initializes (the checker's proofs, the inliner's leaf graft)
         mutable std::shared_ptr<class function_decl> graft_decl;

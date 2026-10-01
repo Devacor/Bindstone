@@ -128,7 +128,7 @@ narrow after script += 7: 12</code></pre></div>
 <p>The same rules apply to <strong>non-const <code>T&amp;</code> parameters</strong> of <code>add_function</code> bindings: a bound argument of exactly-matching width aliases the live variable (the callee&#x27;s writes land in C++). A <em>plain</em> script argument works as in C++: the callee gets a copy of the value the argument names, and when it returns (or throws) its final value is stored back into that argument with the store a script <code>=</code> makes, so the variable&#x27;s declared type converts or rejects it with the usual text.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_function(&quot;heal&quot;, [](int64_t&amp; hp, int64_t amount) { hp = std::min&lt;int64_t&gt;(hp + amount, 100); });
 eng-&gt;add_function(&quot;tag&quot;, [](std::string&amp; name) { name += &quot; (healed)&quot;; });</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hp = 40;
+<div class="codeblock cb-jai" data-host="heal / tag registration"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">int hp = 40;
 heal(hp, 25);             // hp is 65
 var party = [10, 20];
 heal(party[1], 90);       // party[1] is 100

@@ -8491,10 +8491,11 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         for (uint64_t sym : expr->chained_outer_names) {
             if (!declared.count(sym) && seen.insert(sym).second) { expr->free_names.push_back(sym); }
         }
+        expr->uses_instance = seen.count(this_id) != 0;
         expr->free_names_built = true;
     }
     const std::vector<uint64_t>& free_names = expr->free_names;
-    const bool uses_instance = std::find(free_names.begin(), free_names.end(), this_id) != free_names.end();
+    const bool uses_instance = expr->uses_instance;
     bool captures_this = has_default_capture && uses_instance;
     for (const auto& capture : expr->captures) {
         if (capture.symbol_id == this_id) {
@@ -8782,8 +8783,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         expr->outer_slot_plan_built = true;
     }
 
-    // A capture list names everything the lambda captures (KEEP BYTE-PARALLEL with vm_backend::exec_closure)
-    if (!has_default_capture) {
+    // A capture list names everything the lambda captures, checked at the node's first creation (KEEP BYTE-PARALLEL with
+    // vm_backend::exec_closure): the parser already rejected an unlisted frame local, this is the environment and member half
+    if (!has_default_capture && !expr->capture_list_verified) {
         auto listed = [&](uint64_t id) {
             return std::any_of(expr->captures.begin(), expr->captures.end(), [id](const auto& c) { return c.symbol_id == id; });
         };
@@ -8802,6 +8804,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
                 "Lambda capture list does not capture enclosing name '{0}'; name it, or use [this], [=] or [&]", id);
         }
+        if (!engine_->parallel_region_active()) { expr->capture_list_verified = true; }
     }
     // A closure's parent is its program scope (a namespace keeps its live variables), never the creating frame
     const environment* program_scope_raw = detail::program_scope_of(closure_env.get());

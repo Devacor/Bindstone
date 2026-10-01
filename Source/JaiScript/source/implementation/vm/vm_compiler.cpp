@@ -6806,6 +6806,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 			if (seen.insert(this_id).second) { proto.used_variables.push_back(this_id); }
 		};
 		walker.stmt(proto.body);
+		proto.uses_instance = seen.count(this_id) != 0;
 		for (uint64_t sym : expr->chained_outer_names) {
 			if (!param_ids.count(sym) && seen.insert(sym).second) proto.used_variables.push_back(sym);
 		}

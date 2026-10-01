@@ -3582,6 +3582,38 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "a call's result as a branch under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("an_enums_values_read_by_name_run_in_blocks", [this]() {
+			// `Fac.monster` (an enum value read by name) lands in a temp through an environment cell for the member, read at entry and after every
+			// call; both backends, proofs off, the middle end off and miss injection
+			const std::string prelude =
+				"enum Fac { player, npc, monster, guard }\n"
+				"array<int> FACS = [0, 2, 3, 2, 1, 2, 0, 3];\n"
+				"int count_mon(int k) { int n = 0; for (int i = 0; i < k; ++i) { int f = FACS[i % 8]; if (f == Fac.monster || f == Fac.guard) { n = n + 1; } if (f != Fac.player) { n = n + 100; } } return n; }\n"
+				"int helper(int i) { string why = \"z\"; return i % 3; }\n"
+				"int with_calls(int k) { int n = 0; for (int i = 0; i < k; ++i) { int f = FACS[i % 8]; if (helper(i) == 1) { n = n + 1000; } if (f == Fac.monster) { n = n + 1; } } return n; }\n"
+				"void poke(int i) { string why = \"q\"; if (i == 10) { Fac[\"monster\"] = 3; } }\n"
+				"int with_poke(int k) { int n = 0; for (int i = 0; i < k; ++i) { int f = FACS[i % 8]; poke(i); if (f == Fac.monster) { n = n + 1; } } return n; }\n";
+			const std::string body = "to_string(count_mon(40)) + \"|\" + to_string(with_calls(40)) + \"|\" + to_string(with_poke(40)) + \"|\" + to_string(count_mon(40));";
+			both(prelude + body, "", "enum values read by name");
+			both(prelude + body, "", "enum values read by name, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			const size_t at = l.find("== count_mon ");
+			const size_t end = at == std::string::npos ? at : l.find("\n== ", at + 1);
+			check_true(at != std::string::npos && l.substr(at, end == std::string::npos ? std::string::npos : end - at).find("-- cell loop") != std::string::npos, "count_mon's loop closes\n" + l);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "enum values read by name under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

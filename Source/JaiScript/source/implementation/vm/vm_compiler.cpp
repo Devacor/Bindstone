@@ -3426,11 +3426,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				} else { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.container = mp.base; op.member = mp.node;
 			} else if (st.op == opcode::op_size_temp && st.a < k_typed_slot_mask && st.b < c.call_sites.size()) {
-				// the size of an array held in a frame slot: a site whose node the entry resolves, read live (a push inside the body grows it)
+				// the size of an array held in a frame slot or the environment: a site whose node the entry resolves, read live (a push inside the
+				// body grows it); an environment receiver's site carries the general instruction's ip (its lookup's cache slot) and its call site
 				const call_site& cs2 = c.call_sites[st.b];
-				if (st.c != 2 || cs2.receiver_slot == k_invalid_u32 || cs2.receiver_slot >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (st.c != 2 || (cs2.receiver_slot != k_invalid_u32 && cs2.receiver_slot >= k_typed_slot_mask)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(st.a, kint, true, k_typed_dst_temp, nullptr, ip);
-				op.kind = ir::size; op.a = st.a; op.writes = st.a; op.container = cs2.receiver_slot;
+				op.kind = ir::size; op.a = st.a; op.writes = st.a; op.container = cs2.receiver_slot; op.proto = st.b;
 			} else if (st.op == opcode::op_member_temp && st.c != k_invalid_u32 && st.c < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
 				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a
@@ -4504,7 +4505,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				loop.boundaries.push_back(chunk::cell_loop::boundary{ op.a, op.target, 0, op.writes != k_invalid_u32 ? cell_of(op.writes) : k_invalid_u32 });
 				break;
 			case ir::ret: ret_pads.push_back({ static_cast<uint32_t>(code.size()), op.proto, op.origin }); append(vm_instruction{opcode::op_c_ret, cell_of(op.a), 0, op.origin}, ip); break;   // the pad is patched after the copy
-			case ir::size: append(vm_instruction{opcode::op_c_size, dst_of(op.a), op.container, 0}, ip); break;   // the array site's live size
+			case ir::size:   // the array site's live size; an environment receiver: b = its general ip | k_typed_const_bit, c = its call site
+				append(vm_instruction{opcode::op_c_size, dst_of(op.a), op.container != k_invalid_u32 ? op.container : (static_cast<uint32_t>(ip) | k_typed_const_bit), op.proto}, ip); break;
 			case ir::append: {
 				// a plus onto a cell pinned to int or float with an operand of the same pinned kind is the typed add (no string row can apply)
 				const uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
@@ -5401,7 +5403,8 @@ bool vm_compiler::elem_member_operand(const expression* e) const {
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
 	return slot != k_invalid_u32 && slot < k_typed_slot_mask;
 }
-// s.size() / s.length() on a receiver the checker proved (a string, an array or a map) held in a frame slot: a value that lands in a temp
+// s.size() / s.length() on a receiver the checker proved (a string, an array or a map) held in a frame slot or the environment: a value that
+// lands in a temp
 bool vm_compiler::size_temp_operand(const expression* e) const {
 	if (!builtins_ || !typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
 	if (!e || e->get_type() != node_type::call_expr) return false;
@@ -5413,7 +5416,7 @@ bool vm_compiler::size_temp_operand(const expression* e) const {
 	auto* id = static_cast<identifier_expr*>(m->object.get());
 	if (id->global_qualified) return false;
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
-	return slot != k_invalid_u32 && slot < k_typed_slot_mask;
+	return slot == k_invalid_u32 || slot < k_typed_slot_mask;   // k_invalid_u32: an environment receiver, read through its lookup like a load
 }
 // The member read lands in a fresh compiler temp (op_member_temp: op_get_member's kernel, the value into the temp); `out`
 // becomes the direct temp operand. The read keeps its place: it is emitted where the operand is evaluated.
@@ -5428,6 +5431,7 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 		site.call_node = add_node(call);
 		site.receiver_symbol = recv->symbol_id;
 		site.receiver_slot = identifier_slot_operand(recv);
+		if (site.receiver_slot == k_invalid_u32) { site.callee = make_fused_operand(recv); }   // an environment receiver: its operand, resolved like op_load
 		auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {
 			auto it = index.find(member->member_id);
 			return it != index.end() ? it->second : builtin_method_registries::k_no_builtin;

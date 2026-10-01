@@ -13560,7 +13560,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
     bool delegated_to_this = false;
 
     // Process constructor initializers (: super(args), : this(args))
-    for (const auto& initializer : matching_ctor->initializers) {
+    for (const auto& initializer : class_def->effective_initializers(*matching_ctor)) {
         if (initializer.target == "super") {
             // Call base class constructor
             if (class_def->get_parent()) {
@@ -13608,6 +13608,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                 parent_defaults = ctor_ast->parameters.size() - init_args.size();
                             }
                         }
+                        if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
+                            parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the vm
+                        }
 
                         if (parent_ctor) {
                             // === Multi-level inheritance support ===
@@ -13643,7 +13646,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                 }
 
                                 // Look for super() in this constructor's initializers
-                                for (const auto& init : entry.ctor->initializers) {
+                                for (const auto& init : entry.script_class->effective_initializers(*entry.ctor)) {
                                     if (init.target == "super") {
                                         auto ancestor = entry.script_class->get_parent();
                                         if (ancestor) {
@@ -13681,9 +13684,13 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                         ancestor_defaults = ac->parameters.size() - ancestor_args.size();
                                                     }
                                                 }
+                                                if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
+                                                    ancestor_ctor = ancestor_script->implicit_default_constructor();
+                                                }
                                                 if (ancestor_ctor) {
                                                     ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
                                                 } else if (!ancestor_ctors.empty()) {
+                                                    if (ancestor_args.empty()) { return detail::no_default_constructor(ancestor_script->get_type_id()); }
                                                     return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
                                                         ancestor_script->get_type_id(), ancestor_args.data(), ancestor_args.size(), engine_, true);
                                                 }
@@ -13691,9 +13698,15 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                 // Ancestor is a C++ class - call its constructor NOW
                                                 auto cpp_name = ancestor->get_name();
                                                 auto cpp_ctor_result = environment_->get(cpp_name);
+                                                if ((!cpp_ctor_result || !cpp_ctor_result.value().is_function()) && ancestor_args.empty()) {
+                                                    return detail::no_default_constructor(ancestor->get_type_id());
+                                                }
                                                 if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
                                                     auto cpp_result = cpp_ctor_result.value().as_function()(ancestor_args);
                                                     if (!cpp_result) {
+                                                        if (ancestor_args.empty() && detail::is_constructor_miss(cpp_result.error())) {
+                                                            return detail::no_default_constructor(ancestor->get_type_id());
+                                                        }
                                                         return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
                                                             "Failed to call C++ ancestor constructor");
                                                     }
@@ -13768,6 +13781,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                             // and super() called with no arguments - this is valid, nothing to do
                             // The parent fields will be initialized with their default values
                         } else {
+                            if (init_args.empty()) { return detail::no_default_constructor(parent_script_class->get_type_id()); }
                             return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
                                 "No matching parent constructor found for super()");
                         }
@@ -13777,12 +13791,17 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                             // Get the C++ class constructor function
                             auto parent_name = parent_class->get_name();
                             auto ctor_result = environment_->get(parent_name);
+                            if ((!ctor_result || !ctor_result.value().is_function()) && init_args.empty()) {
+                                return detail::no_default_constructor(parent_class->get_type_id());
+                            }
                             if (ctor_result && ctor_result.value().is_function()) {
                                 script_value cpp_ctor = std::move(ctor_result.value());
                                 // Call C++ constructor with init_args
                                 auto result = cpp_ctor.as_function()(init_args);
                                 if (!result) {
-                                    // Constructor failed - propagate error
+                                    if (init_args.empty() && detail::is_constructor_miss(result.error())) {
+                                        return detail::no_default_constructor(parent_class->get_type_id());
+                                    }
                                     return result.error_value();
                                 }
                                 script_value cpp_obj = std::move(result.value());
@@ -13984,8 +14003,26 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
     if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
         return detail::raise_call_depth();
     }
+    if (!aggregate.fills() && class_def->base_needs_construction()) {
+        // C++: the implicit default constructor constructs the base ahead of the fields (KEEP BYTE-PARALLEL with the vm)
+        std::optional<detail::call_depth_guard> member_depth;
+        member_depth.emplace(current_call_depth_);
+        struct construction_env_restore {
+            interpreter* self;
+            std::shared_ptr<environment> previous_env;
+            ~construction_env_restore() { self->environment_ = std::move(previous_env); }
+        } env_restore{this, environment_};
+        auto instance = class_def->create_instance();
+        instance->construction_pending(true);
+        auto this_value = script_value::make_class_object(*class_def, instance, engine_);
+        auto members = initialize_members(class_def, get_global_environment(), instance, this_value, class_def->implicit_default_constructor(),
+                                          args, member_depth, 0, nullptr);
+        if (!members) { return members; }
+        if (!is_unwinding_) { instance->construction_pending(false); }
+        return this_value;
+    }
     detail::call_depth_guard initializer_depth(current_call_depth_);
-    
+
     // Create instance using inherited create_instance()!
     auto instance = class_def->create_instance();
     // Default constructor instance created
@@ -13994,7 +14031,6 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
     // Use class_def's registered name and type_id to handle namespaces correctly
     // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
     auto this_value = script_value::make_class_object(*class_def, instance, engine_);
-    JAISCRIPT_TRY(detail::construct_cpp_base_default(*instance, *class_def, engine_));
 
     // Find the root (global) environment with cycle detection
     std::unordered_set<environment*> visited;

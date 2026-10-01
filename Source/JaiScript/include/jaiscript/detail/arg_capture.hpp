@@ -227,7 +227,7 @@ namespace jai::detail {
 
     // the construction runs code ahead of the body (an initializer list, a non-literal field initializer)
     inline bool construction_runs_code(const script_class_definition& cls, const function_decl& ctor) {
-        return !ctor.initializers.empty() || !cls.chain_initializers_all_literal();
+        return !ctor.initializers.empty() || !cls.chain_initializers_all_literal() || cls.base_needs_construction();
     }
 
     // a parameter's conversion that may run user code (a converting constructor, an object's to_int/to_float, a class element

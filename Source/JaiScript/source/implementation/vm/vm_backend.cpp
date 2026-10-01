@@ -17057,7 +17057,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 	// The init env serves initializer-list arguments and non-literal field
 	// initializers; a literal-only chain with no initializer list never reads it
 	std::shared_ptr<environment> init_env;
-	if (!matching_ctor->initializers.empty() || !class_def->chain_initializers_all_literal()) {
+	if (!class_def->effective_initializers(*matching_ctor).empty() || !class_def->chain_initializers_all_literal()) {
 		init_env = std::make_shared<environment>(definition_env, symbolizer_);
 		init_env->define(symbolizer_->get_this_id(), this_value);
 		init_env->set_access_context(class_def.get());   // field initializers are class-body code
@@ -17083,7 +17083,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 	// delegating ctor must not re-run field initializers afterward
 	bool delegated_to_this = false;
 
-	for (const auto& initializer : matching_ctor->initializers) {
+	for (const auto& initializer : class_def->effective_initializers(*matching_ctor)) {
 		if (initializer.target == "super") {
 			if (class_def->get_parent()) {
 				std::vector<script_value> init_args;
@@ -17118,6 +17118,9 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 								parent_defaults = ctor_ast->parameters.size() - init_args.size();
 							}
 						}
+						if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
+							parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the interpreter
+						}
 
 						if (parent_ctor) {
 							struct ctor_chain_entry {
@@ -17140,7 +17143,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 									level_env->define(std::string(entry.ctor->parameters[pi].name), entry.args[pi]);
 								}
 
-								for (const auto& init : entry.ctor->initializers) {
+								for (const auto& init : entry.script_class->effective_initializers(*entry.ctor)) {
 									if (init.target == "super") {
 										auto ancestor = entry.script_class->get_parent();
 										if (ancestor) {
@@ -17172,18 +17175,28 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 														ancestor_defaults = ac->parameters.size() - ancestor_args.size();
 													}
 												}
+												if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
+													ancestor_ctor = ancestor_script->implicit_default_constructor();
+												}
 												if (ancestor_ctor) {
 													ctor_chain.push_back({ancestor_script, ancestor_ctor, std::move(ancestor_args)});
 												} else if (!ancestor_ctors.empty()) {
+													if (ancestor_args.empty()) { return detail::no_default_constructor(ancestor_script->get_type_id()); }
 													return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
 														ancestor_script->get_type_id(), ancestor_args.data(), ancestor_args.size(), engine_, true);
 												}
 											} else {
 												auto cpp_name = ancestor->get_name();
 												auto cpp_ctor_result = environment_->get(cpp_name);
+												if ((!cpp_ctor_result || !cpp_ctor_result.value().is_function()) && ancestor_args.empty()) {
+													return detail::no_default_constructor(ancestor->get_type_id());
+												}
 												if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
 													auto cpp_result = cpp_ctor_result.value().as_function()(ancestor_args);
 													if (!cpp_result) {
+														if (ancestor_args.empty() && detail::is_constructor_miss(cpp_result.error())) {
+															return detail::no_default_constructor(ancestor->get_type_id());
+														}
 														return checked_result<script_value>(make_error_code(runtime_error_code::constructor_failed),
 															"Failed to call C++ ancestor constructor");
 													}
@@ -17241,6 +17254,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 						} else if (parent_ctor_asts.empty() && init_args.empty()) {
 							// Parent only has the default constructor - nothing to do
 						} else {
+							if (init_args.empty()) { return detail::no_default_constructor(parent_script_class->get_type_id()); }
 							return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
 								"No matching parent constructor found for super()");
 						}
@@ -17248,10 +17262,16 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 						try {
 							auto parent_name = parent_class->get_name();
 							auto ctor_result = environment_->get(parent_name);
+							if ((!ctor_result || !ctor_result.value().is_function()) && init_args.empty()) {
+								return detail::no_default_constructor(parent_class->get_type_id());
+							}
 							if (ctor_result && ctor_result.value().is_function()) {
 								script_value cpp_ctor = std::move(ctor_result.value());
 								auto result = cpp_ctor.as_function()(init_args);
 								if (!result) {
+									if (init_args.empty() && detail::is_constructor_miss(result.error())) {
+										return detail::no_default_constructor(parent_class->get_type_id());
+									}
 									return result.error_value();
 								}
 								script_value cpp_obj = std::move(result.value());
@@ -17568,12 +17588,25 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
 		return detail::raise_call_depth();
 	}
+	if (!aggregate.fills() && class_def->base_needs_construction()) {
+		// C++: the implicit default constructor constructs the base ahead of the fields (KEEP BYTE-PARALLEL with the interpreter)
+		std::optional<detail::call_depth_guard> member_depth;
+		member_depth.emplace(current_call_depth_);
+		auto instance = class_def->create_instance();
+		instance->construction_pending(true);
+		auto this_value = script_value::make_class_object(*class_def, instance, engine_);
+		auto definition_env = engine_ ? engine_->get_global_environment() : environment_;
+		auto members = initialize_members(class_def, definition_env, instance, this_value, class_def->implicit_default_constructor(),
+		                                  args, member_depth, 0, nullptr);
+		if (!members) { return members; }
+		construction_completed(this_value);
+		return this_value;
+	}
 	detail::call_depth_guard initializer_depth(current_call_depth_);
 
 	auto instance = class_def->create_instance();
 
 	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
-	JAISCRIPT_TRY(detail::construct_cpp_base_default(*instance, *class_def, engine_));
 
 	if (!aggregate.fills() && class_def->chain_initializers_all_literal()) {
 		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(instance, class_def, false); }

@@ -62,7 +62,8 @@ self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };</code></p
 <em>Voidling</em>, not a sliced view of its base. That is C++'s own rule, "a base pointer to a derived object is
 the derived object", carried across the boundary. The object is a <strong>hybrid</strong>: one script instance
 that owns or references the C++ object through a private <code>_cpp_object</code> field and carries the script
-layer (fields, overrides) on top.</p>
+layer (fields, overrides) on top. Overrides dispatch wherever script calls the method; a call C++ makes on the
+object (<code>creature-&gt;tick(dt)</code>, or a bound C++ method that calls a virtual) runs the C++ body.</p>
 
 <h2 id="extend-object-class">extend(object, Class)<a class="hlink" href="#extend-object-class" aria-label="link">&#8203;</a></h2>
 <p><code>extend</code> is an engine-core builtin (every engine has it, sandboxes included). <code>Class</code> is
@@ -152,11 +153,12 @@ Under multiple inheritance the first extensible base's slot is the one used, re-
 <code>jai_script_slot()</code>. The host surface is small:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto creature = std::make_shared&lt;Creature&gt;();          // C++ constructs and owns, as always
 
-script_value layer = eng-&gt;extend(creature, "Voidkin");  // the same thing the builtin does
-eng-&gt;add_global_extended("hero", creature, "Voidkin");    // extend-on-bind: handed over already extended
+jai::script_value layer = eng-&gt;extend(creature, "Voidkin");  // the same thing the builtin does
+eng-&gt;add_global_extended("hero", creature, "Voidkin");        // extend-on-bind: handed over already extended
+eng-&gt;execute("hero.chomp = 17;");
 
-std::shared_ptr&lt;class_instance&gt; live = eng-&gt;script_layer(*creature);   // the live layer, or null
-std::string state = creature-&gt;script_layer_to_json();   // {"$type":"Voidkin","$script":{"chomp":17}}
+std::shared_ptr&lt;jai::class_instance&gt; live = eng-&gt;script_layer(*creature);   // the live layer, or null
+std::string state = creature-&gt;script_layer_to_json();   // {"$script":{"chomp":17,...},"$type":"Voidkin"}
 creature-&gt;script_layer_from_json(state);                 // hydrate in place (re-derives on another $type)
 
 std::string fields = eng-&gt;script_layer_detach(creature); // the fields as JSON; the object carries no layer now</code></pre></div>
@@ -186,14 +188,14 @@ By-value capture (<code>[=]</code>) shares a hybrid, like any engine object.</p>
 field, a container, a save file) the writer emits <code>$type</code> = the script class name,
 <code>$script</code> = the script-level fields, and <code>$val</code> = the C++ base's ordinary payload; the
 reader rebuilds the C++ object through the base's registered load, extends it with the script class, hydrates
-the fields, and calls <code>post_load</code> if the class defines one (<code>void post_load(int version)</code>: define it on the script class to fix up fields after a load; <code>version</code> is the archive&#x27;s version stamp, <code>1</code> today). JSON and binary, back-references
+the fields, and calls <code>post_load</code> if the class defines one (<code>void post_load(int version)</code>: define it on the script class to fix up fields after a load; <code>version</code> is the archive&#x27;s version stamp). JSON and binary, back-references
 included, and the script-level <code>to_json(v)</code> / <code>from_json(s)</code> do the same for a script
 value. Because extension runs field initializers before hydration, a field that was never written during play
 still loads with its declared default. The archive framework itself (dispatch order, the binder chain as the
 polymorphism declaration, the security posture) is the <a href="08-serialization.html">Serialization</a>
 chapter.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Creature&gt; original = eng-&gt;execute("v").as&lt;std::shared_ptr&lt;Creature&gt;&gt;();
-auto loaded = roundtrip_binary(*eng, original);           // a fresh object...
+auto loaded = jai::from_binary&lt;std::shared_ptr&lt;Creature&gt;&gt;(*eng, jai::to_binary(*eng, original));   // a fresh object...
 eng-&gt;script_layer(*loaded) != nullptr;                    // ...carrying its Voidkin layer</code></pre></div>
 
 <h2 id="moving-a-layer-between-engines">Moving a layer between engines<a class="hlink" href="#moving-a-layer-between-engines" aria-label="link">&#8203;</a></h2>
@@ -209,8 +211,7 @@ another's lookup. Layers are movable, never shared between threads: the same rul
 the object's class, the argument is not a class, arity) and <code>script_layer_retired</code> (a detached,
 moved, or outlived layer reached for its object), so script catches them like any runtime error; the C++
 <code>engine::extend</code> throws at its boundary.</p>
-<p>The lookup that hands script the layer is a pointer read on the object's slot; it replaces the wrapper the
-boundary used to allocate on every crossing. In a creature-simulation workload the class-based scripts measured a few
+<p>The lookup that hands script the layer is a pointer read on the object's slot (no allocation per crossing). In a creature-simulation workload the class-based scripts measured a few
 percent faster than the same logic kept in host-side maps, with byte-identical outcomes.</p>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/12-debugging.html"><span>&larr; previous</span>Debugging</a><a class="next" rel="next" href="../embedding/14-language-server.html"><span>next &rarr;</span>Editor Support: the Language Server</a></nav></article>
 </main>

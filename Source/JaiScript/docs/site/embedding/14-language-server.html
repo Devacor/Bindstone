@@ -58,7 +58,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </tbody></table></div>
 <p>Scripts written for another host (a game engine with its own bound classes) have two routes. Names the host provides can be declared in the scripts with <code>extern</code>, which the checker, and therefore the server, reads as declarations (<a href="06-static-checking.html">Static Checking</a>). Or the host builds its own server: the server is six source files over the library, and <code>runner_host.cpp</code> is the one that registers the surface; a host replaces it with a file that calls its own registration function.</p>
 <h2 id="building">Building the server<a class="hlink" href="#building" aria-label="link">&#8203;</a></h2>
-<p>The server is the <code>jaiscript_lsp</code> CMake target (<code>JAISCRIPT_BUILD_LSP</code>, on by default). It has no dependency beyond the library and what the runner links.</p>
+<p>The server is the <code>jaiscript_lsp</code> CMake target (<code>JAISCRIPT_BUILD_LSP</code>, on by default when JaiScript is the top-level CMake project and off as a subproject). It has no dependency beyond the library and what the runner links.</p>
 <div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cmake --build build --target jaiscript_lsp       # -&gt; build/bin/jaiscript_lsp(.exe)
 
 jaiscript_lsp --host=runner|stdlib|bare   # the host profile (default runner)

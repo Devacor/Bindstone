@@ -1776,6 +1776,59 @@ public:
             check_eq(std::string("t"), v[2].as<std::string>(), "a var field takes anything");
         });
 
+        // C++ implicit base construction: a constructor naming no `: super(...)`, and a class declaring no constructor,
+        // default-construct the base (its constructor runs) ahead of the derived class's fields
+        test("a_constructor_without_super_default_constructs_its_base", [this, ints]() {
+            auto e = make_engine();
+            ints(e->execute(R"(
+                class A { int a = 1; int log = 0; A() { log = 10; } }
+                class B : A { int b = 2; int seen = this.log; B() { b = log + 5; } }
+                B x = B();
+                class Opt { int v = 0; Opt(int given = 4) { v = given; } }
+                class UsesOpt : Opt { UsesOpt() {} }
+                UsesOpt o = UsesOpt();
+                return [x.log, x.b, x.seen, o.v];
+            )"), {10, 15, 10, 4}, "the base constructor ran before the derived fields and body; a defaulted parameter is a default constructor");
+        });
+
+        test("a_constructorless_class_runs_its_base_default_constructor", [this, ints]() {
+            auto e = make_engine();
+            ints(e->execute(R"(
+                class A { int log = 0; A() { log = 10; } }
+                class C : A { int c = 3; int seen = this.log; }
+                C y = C();
+                class D : C { D() {} }
+                D z = D();
+                class E : C { }
+                E w = E();
+                return [y.log, y.c, y.seen, z.log, z.seen, w.log];
+            )"), {10, 3, 10, 10, 10, 10}, "through constructor-less levels, base first");
+        });
+
+        test("a_base_without_a_default_constructor_raises", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                [[warn_mode]]
+                function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+                class P { int v = 0; P(int given) { v = given; } }
+                class Q : P { Q() {} }
+                class R : P { }
+                class S : R { S() {} }
+                class Fine : P { Fine() : super(7) {} }
+                return [t([]() { var q = Q(); }), t([]() { var r = R(); }), t([]() { var s = S(); }), t([]() { var f = Fine(); })];
+            )");
+            const auto& v = r.as_array();
+            const std::string text = "Base 'P' has no default constructor; call super(...)";
+            check_eq(text, v[0].as<std::string>(), "a constructor without super()");
+            check_eq(text, v[1].as<std::string>(), "a constructor-less class");
+            check_eq(text, v[2].as<std::string>(), "through a constructor-less level");
+            check_eq(std::string("none"), v[3].as<std::string>(), "an explicit super(...) is untouched");
+            auto checked = e->check("class P { P(int given) {} } class Q : P { Q() {} } class R : P { } var r = R();");
+            size_t found = 0;
+            for (const auto& d : checked.diagnostics) { if (d.message == text) { ++found; } }
+            check_eq((size_t)2, found, "the checker reports the constructor and the construction");
+        });
+
         test("aggregate_initialization_errors", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(

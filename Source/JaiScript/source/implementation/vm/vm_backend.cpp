@@ -8043,6 +8043,9 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 		const iter_state& st = iter_states_.back();
 		if (st.is_map || st.is_string || st.coroutine || st.env_pushed || !st.container || !st.container->is_array()) { JAI_CELLS_COUNT(1); return false; }
 	}
+	// this loop's environment bindings from its last entry in this call still answer while the environment and its epoch hold (the lookup cache's rule)
+	const bool env_reuse = cs.env_loop == &loop && cs.env_of == environment_.get() && cs.env_serial == env_symbolizer_->env_epoch();
+	cs.env_loop = nullptr;
 	cs.env_of = environment_.get(); cs.env_serial = env_symbolizer_->env_epoch();
 	cs.raw_landing = 0; cs.raw_call = 0;   // no raw call is in flight at a block's entry (an earlier run may have ended in a C++ exception or an unwind)
 	++cs.entry_serial;   // a block parked in this frame for a statement does not resume over this entry's cells
@@ -8071,6 +8074,15 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	for (const uint32_t k : loop.entry_cells) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		if (cl.env_operand != k_invalid_u32) {
+			if (env_reuse && cs.env_ptr[k]) {
+				const script_value* v = cs.env_ptr[k];
+				const uint8_t vk = static_cast<uint8_t>(v->raw_storage_index());
+				if ((vk == kint || vk == kflt || vk == kbool || vk == kstr) && (cl.kind == 0 || vk == cl.kind)) {
+					cs.payload[k] = vk == kint ? static_cast<int64_t>(v->unchecked_as_int()) : vk == kflt ? cell_bits_of_float(v->unchecked_as_float()) : vk == kstr ? reinterpret_cast<int64_t>(v->unchecked_string_handle().get()) : (v->unchecked_as_bool() ? 1 : 0);
+					cs.kind[k] = vk; cs.stamp[k] = const_cast<type_info*>(v->type_info_raw());
+					continue;
+				}
+			}
 			// an environment scalar: resolved through the nullable fast head, an int or the block is refused
 			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
 			const env_lookup_cache_entry* ce = er.cache_slot < f.code->env_lookup_cache.size() ? &f.code->env_lookup_cache[er.cache_slot] : nullptr;
@@ -8131,6 +8143,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); refuse_container_site(f, loop); return false; } }   // a stdlib alias's name rebound: the general form makes the real call
 	++cells_counters_.entries;
+	cs.env_loop = &loop;
 	return true;
 }
 

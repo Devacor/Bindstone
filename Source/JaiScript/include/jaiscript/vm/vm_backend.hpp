@@ -284,7 +284,7 @@ namespace jai::vm {
         void begin_host_call() override;
         void pop_external_call_scope() override;
         checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                             int& component, host_slot& slot) override;
+                                                             host_slot& slot) override;
         checked_result<void> host_slot_store(const host_slot& slot, script_value& value) override;
         bool has_variable(const std::string& name) const override;
 
@@ -1177,6 +1177,8 @@ namespace jai::vm {
         // reference holder (cells alias), or boxes the value on demand (cell) when the
         // variable predates its escape mark
         op_status reference_to_storage(script_value& storage, script_value& out, bool& bound);
+        // `v.x` where a reference binds: a COMPONENT reference (detail/math_component_store.hpp), else a non-reference
+        checked_result<script_value> component_reference(frame* caller_frame, const expression* e, const std::shared_ptr<environment>& caller_env);
         op_status bind_site_reference(size_t i, const call_site& site, frame* caller_frame, chunk* caller_code,
                                       const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound,
                                       host_slot* slot_out = nullptr);

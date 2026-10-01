@@ -458,6 +458,7 @@ place:
 | hetero element | the boxed element |
 | reference (`var& r = v; r.x = 1`) | resolved by mode; scratch-backed modes (typed element, PROPERTY) commit afterwards, as string mutators do (invariant 11) |
 | CPP-MEMBER box (`node.pos.x = 1`) | the host memory at the component's offset |
+| component reference (`auto& r = v.x; r = 1`, `f(v.x)` with `float&`; Dev ruling 2026-09-30) | the COMPONENT holder over the base's reference: the same component store into the value the base names, then the base's commit (`docs/reference_model.md`) |
 | PROPERTY (`obj.prop.x = 1`, getter/setter) | getter into scratch, component store, setter (the copy-in/write-back proxy) |
 | temporary (`f().x = 1`, `node.position().x = 1`) | error: `Cannot assign to a member of a temporary` (C++ [expr.ass] rejects assignment to a member of a class prvalue) |
 

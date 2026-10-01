@@ -326,6 +326,9 @@ namespace detail { struct argument_capture_storage; }
         // to the string's storage, `index` a byte of a string or a character of a utf8_string;
         // deref reads that character, stores replace it (detail/string_element.hpp)
         static script_value make_string_element_reference(const script_value& pin, size_t index, engine* eng);
+        // COMPONENT reference (`v.x` of a math value, Dev ruling 2026-09-30): pin is the reference to the vector's storage
+        // (a cell, a field, an element, a property), component the component it names
+        static script_value make_component_reference(const script_value& pin, size_t component, engine* eng);
         static script_value make_function(const script_function& func, engine* eng);
         // Rvalue mint: moves the std::function into its strong_ptr box (every backend
         // mint passes a temporary - the copy was pure churn)
@@ -2068,10 +2071,17 @@ namespace detail { struct argument_capture_storage; }
             strong_ptr<reference_holder> string_base;
             bool string_element() const noexcept { return static_cast<bool>(string_base); }
             const script_value& materialize_string_element(engine* eng);   // value.cpp; throws when the character is gone
-            // Scratch-backed modes (typed element, PROPERTY, STRING-ELEMENT): deref() hands
+            // COMPONENT mode: component_base pins the math value's storage (another holder), container_index names the
+            // component; deref() materializes it into the inline scratch, stores go through the component store
+            // (detail/math_values.hpp store_component) into the value the base names, then commit the base.
+            strong_ptr<reference_holder> component_base;
+            bool component_element() const noexcept { return static_cast<bool>(component_base); }
+            const script_value& materialize_component(engine* eng);   // value.cpp; throws when the base is no math value
+            void store_component(const script_value& value, engine* eng);   // value.cpp; throws the component store's text
+            // Scratch-backed modes (typed element, PROPERTY, STRING-ELEMENT, COMPONENT): deref() hands
             // back the holder's inline scratch, so in-place mutators (++/--) must
             // commit_scratch() after writing - the buffer store / the setter call.
-            bool scratch_backed() const noexcept { return typed_element() || property_ref() || string_element(); }
+            bool scratch_backed() const noexcept { return typed_element() || property_ref() || string_element() || component_element(); }
             void commit_scratch();
 
             // Mode-based write-target resolution for the immediate-use assignment
@@ -2549,6 +2559,8 @@ namespace detail { struct argument_capture_storage; }
 
         // A STRING-ELEMENT holder's pin as a reference value (value.cpp)
         static script_value make_string_element_pin(const reference_holder& holder, engine* eng);
+        // A COMPONENT holder's pin as a reference value (value.cpp)
+        static script_value make_component_pin(const reference_holder& holder, engine* eng);
 
         // Non-null iff *this is a reference whose deref() hands back the holder's inline
         // scratch (a TYPED array element, a C++ PROPERTY or a STRING-ELEMENT): in-place

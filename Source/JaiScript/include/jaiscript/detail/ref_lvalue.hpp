@@ -166,6 +166,13 @@ namespace jai::detail {
 				}
 				return holder->read_property(v.get_engine(), /*bind_point*/ true);
 			}
+			if (holder->component_base) {
+				try {
+					return script_value(const_cast<std::remove_const_t<std::remove_reference_t<decltype(*holder)>>*>(holder)->materialize_component(v.get_engine()));
+				} catch (const std::exception&) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a component of a value that is no longer a vector");
+				}
+			}
 			// unreachable: every factory sets a mode
 			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Null reference");
 		}
@@ -231,6 +238,79 @@ namespace jai::detail {
 		}
 	};
 
+	// The storage a bare identifier names at a reference bind point: the caller's frame slot, its member scope (a field or
+	// static outranks a same-named global), its environment, a method-lazy caller's receiver field. Null when out of reach;
+	// an access failure lands in access_error.
+	inline const script_value* ref_identifier_storage(const identifier_expr* ident, const caller_frame_view& caller,
+	                                                  environment* caller_env, engine* eng, string_symbolizer* symbolizer,
+	                                                  std::optional<checked_result<void>>& base_access_error) {
+		if (ident->slot_index != SIZE_MAX) {
+			if (const script_value* slot_ptr = caller.slot(ident->slot_index)) {
+				return slot_ptr;
+			}
+		}
+		uint64_t symbol_id = ident->symbol_id;
+		if (symbol_id == UINT64_MAX) {
+			symbol_id = symbolizer->intern(ident->name);
+			const_cast<identifier_expr*>(ident)->symbol_id = symbol_id;
+		}
+		// ::name bases resolve against the GLOBAL env only
+		if (ident->global_qualified) {
+			return eng ? eng->get_global_environment()->get_value_ptr(symbol_id) : nullptr;
+		}
+		// Caller member scope (call_frame stamp): fields/statics outrank globals
+		// between the function's own scopes and the definition/global chain
+		const auto scope_state = caller.metadata
+			? static_cast<member_scope_state>(caller.metadata->scope_state)
+			: member_scope_state::none;
+		if (scope_state == member_scope_state::instance ||
+		    scope_state == member_scope_state::statics) {
+			if (caller_env) {
+				if (script_value* own = own_scope_lookup(caller_env, caller.metadata->scope_floor, symbol_id)) {
+					return own;
+				}
+			}
+			auto member = probe_member_scope(scope_state, caller.metadata->scope_this,
+			                                 caller.metadata->scope_static, symbol_id,
+			                                 /*want_methods*/ false);
+			if (member) {
+				if (auto access = bare_member_access(member, symbol_id, caller_env ? caller_env->find_access_context() : nullptr); !access) {
+					base_access_error = std::move(access);
+					return nullptr;
+				}
+			}
+			if (member.value_ptr) { return member.value_ptr; }
+			if (member_scope_has_method(scope_state, caller.metadata->scope_this,
+			                            caller.metadata->scope_static, symbol_id)) {
+				return nullptr;   // a member METHOD shadows: never fall past the class scope
+			}
+			if (caller.metadata->scope_floor) {
+				return caller.metadata->scope_floor->get_value_ptr(symbol_id);
+			}
+			return caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr;
+		}
+		if (caller_env) {
+			if (const script_value* env_ptr = caller_env->get_value_ptr(symbol_id)) {
+				return env_ptr;
+			}
+		}
+		// Method-LAZY caller frames carry no method env: bare field names resolve
+		// through the frame's receiver (twin of environment::get_value_ptr's
+		// method-kind fallback — env-resolved eager frames never reach this)
+		if (const script_value* tp = caller.this_ptr()) {
+			if (tp->is_object() && !tp->is_null()) {
+				if (auto instance = const_cast<script_value*>(tp)->get_class_instance()) {
+					script_value& field_ref = instance->get_field(symbol_id, false);
+					if (!field_ref.is_invalid()) { return &field_ref; }
+					if (auto cd = instance->get_class_definition()) {
+						if (script_value* sp = cd->get_static_field_ptr(symbol_id)) { return sp; }
+					}
+				}
+			}
+		}
+		return nullptr;
+	}
+
 	// Binds a field/subscript/chain lvalue argument to a reference parameter. Resolution
 	// is pure pointer/value chasing over already-evaluated state - it never runs script,
 	// never throws, and never mutates the instance (a NATIVE property getter may run for
@@ -273,71 +353,7 @@ namespace jai::detail {
 
 		std::optional<checked_result<void>> base_access_error;   // a bare base out of reach (bare_member_access)
 		auto resolve_identifier_ptr = [&](const identifier_expr* ident) -> const script_value* {
-			if (ident->slot_index != SIZE_MAX) {
-				if (const script_value* slot_ptr = caller.slot(ident->slot_index)) {
-					return slot_ptr;
-				}
-			}
-			uint64_t symbol_id = ident->symbol_id;
-			if (symbol_id == UINT64_MAX) {
-				symbol_id = symbolizer->intern(ident->name);
-				const_cast<identifier_expr*>(ident)->symbol_id = symbol_id;
-			}
-			// ::name bases resolve against the GLOBAL env only
-			if (ident->global_qualified) {
-				return eng ? eng->get_global_environment()->get_value_ptr(symbol_id) : nullptr;
-			}
-			// Caller member scope (call_frame stamp): fields/statics outrank globals
-			// between the function's own scopes and the definition/global chain
-			const auto scope_state = caller.metadata
-				? static_cast<member_scope_state>(caller.metadata->scope_state)
-				: member_scope_state::none;
-			if (scope_state == member_scope_state::instance ||
-			    scope_state == member_scope_state::statics) {
-				if (caller_env) {
-					if (script_value* own = own_scope_lookup(caller_env, caller.metadata->scope_floor, symbol_id)) {
-						return own;
-					}
-				}
-				auto member = probe_member_scope(scope_state, caller.metadata->scope_this,
-				                                 caller.metadata->scope_static, symbol_id,
-				                                 /*want_methods*/ false);
-				if (member) {
-					if (auto access = bare_member_access(member, symbol_id, caller_env ? caller_env->find_access_context() : nullptr); !access) {
-						base_access_error = std::move(access);
-						return nullptr;
-					}
-				}
-				if (member.value_ptr) { return member.value_ptr; }
-				if (member_scope_has_method(scope_state, caller.metadata->scope_this,
-				                            caller.metadata->scope_static, symbol_id)) {
-					return nullptr;   // a member METHOD shadows: never fall past the class scope
-				}
-				if (caller.metadata->scope_floor) {
-					return caller.metadata->scope_floor->get_value_ptr(symbol_id);
-				}
-				return caller_env ? caller_env->get_value_ptr(symbol_id) : nullptr;
-			}
-			if (caller_env) {
-				if (const script_value* env_ptr = caller_env->get_value_ptr(symbol_id)) {
-					return env_ptr;
-				}
-			}
-			// Method-LAZY caller frames carry no method env: bare field names resolve
-			// through the frame's receiver (twin of environment::get_value_ptr's
-			// method-kind fallback — env-resolved eager frames never reach this)
-			if (const script_value* tp = caller.this_ptr()) {
-				if (tp->is_object() && !tp->is_null()) {
-					if (auto instance = const_cast<script_value*>(tp)->get_class_instance()) {
-						script_value& field_ref = instance->get_field(symbol_id, false);
-						if (!field_ref.is_invalid()) { return &field_ref; }
-						if (auto cd = instance->get_class_definition()) {
-							if (script_value* sp = cd->get_static_field_ptr(symbol_id)) { return sp; }
-						}
-					}
-				}
-			}
-			return nullptr;
+			return ref_identifier_storage(ident, caller, caller_env, eng, symbolizer, base_access_error);
 		};
 
 		// A bare C++ property as the chain's BASE (f(child.x) inside a hybrid method): no
@@ -595,9 +611,9 @@ namespace jai::detail {
 	// matches deref's own re-resolve error.
 	inline void ref_write_through(script_value& refLocal, script_value&& v) {
 		const auto* holder = refLocal.get_reference_holder();
-		if (holder && holder->property) [[unlikely]] {
+		if (holder && (holder->property || holder->component_base)) [[unlikely]] {
 			// CPP-MEMBER writes the box's memory (a deref()= would replace the box and
-			// detach); PROPERTY runs the setter (its deref is a scratch)
+			// detach); PROPERTY runs the setter and COMPONENT the component store (their deref is a scratch)
 			refLocal.assign_through(std::move(v));
 			return;
 		}

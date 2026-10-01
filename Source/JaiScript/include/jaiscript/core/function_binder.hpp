@@ -580,11 +580,10 @@ class engine;
         struct host_reference {
             script_value target;
             script_value value;
-            int component = -1;   // a math component argument (v.x): the component the store writes in target's value
             host_slot slot;       // an unboxed frame-slot local: the store re-finds it (no target)
         };
         host_reference host_reference_argument(engine* eng, const std::vector<script_value>& args, size_t index, size_t offset);
-        checked_result<void> host_reference_store(engine* eng, const host_slot& slot, script_value& target, int component, script_value&& value);
+        checked_result<void> host_reference_store(engine* eng, const host_slot& slot, script_value& target, script_value&& value);
 
         template<uint64_t Mask>
         using host_call_result_t = std::conditional_t<Mask != 0, checked_result<script_value>, script_value>;
@@ -594,7 +593,6 @@ class engine;
             T* live = nullptr;
             std::optional<T> owned;
             script_value target;
-            int component = -1;
             host_slot slot;
             operator T&() { return live ? *live : *owned; }
         };
@@ -619,7 +617,7 @@ class engine;
         // An exact-width host variable (a cpp_bound argument) is the callee's object itself
         template<typename T>
         writeback_argument<T> make_writeback_argument(const std::vector<script_value>& args, size_t index, size_t offset, engine* eng) {
-            writeback_argument<T> a{ nullptr, std::nullopt, script_value(std::monostate{}, eng), -1, {} };
+            writeback_argument<T> a{ nullptr, std::nullopt, script_value(std::monostate{}, eng), {} };
             script_value& actual = const_cast<script_value&>(args[index + offset].deref());
             if constexpr (std::is_arithmetic_v<T> || std::is_same_v<T, std::string>) {
                 if (actual.is_cpp_bound()) {
@@ -629,7 +627,6 @@ class engine;
             }
             host_reference ref = host_reference_argument(eng, args, index, offset);
             a.target = std::move(ref.target);
-            a.component = ref.component;
             a.slot = ref.slot;
             a.owned.emplace(writeback_decode<T>(a.target.is_reference() || a.slot.frame ? ref.value : actual, eng));
             return a;
@@ -638,7 +635,7 @@ class engine;
         template<typename T>
         checked_result<void> commit_writeback(writeback_argument<T>& a, engine* eng) {
             if (a.live || (!a.target.is_reference() && !a.slot.frame)) { return {}; }
-            return host_reference_store(eng, a.slot, a.target, a.component, writeback_encode<T>(*a.owned, eng));
+            return host_reference_store(eng, a.slot, a.target, writeback_encode<T>(*a.owned, eng));
         }
         template<typename T>
         checked_result<void> commit_writeback(T&, engine*) { return {}; }

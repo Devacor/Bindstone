@@ -6275,7 +6275,6 @@ void vm_compiler::record_argument_source(call_site& site, const expression_ptr& 
 		if (jai::detail::is_ref_bindable_lvalue(arg.get()) || static_member_arg(arg.get()) || component) {
 			site.arg_lvalue_nodes.resize(argc, k_invalid_u32);
 			site.arg_lvalue_nodes[index] = add_node(arg);
-			if (component) { note_component_base(site.arg_lvalue_nodes[index], static_cast<const member_expr*>(arg.get())); }   // a host T& stores back into v.x
 		}
 	}
 }

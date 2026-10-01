@@ -7,7 +7,7 @@ load-bearing rules live in `invariants.md` §3, the runtime shapes in
 ## A reference is an owner-pinned handle
 
 `script_value` variant index 10 holds `strong_ptr<reference_holder>` (value.hpp). The
-holder is in exactly ONE of six modes, each of which OWNS or PINS what it refers to —
+holder is in exactly ONE of seven modes, each of which OWNS or PINS what it refers to —
 there is no raw-pointer mode and no "is my target still alive?" question:
 
 | mode | pin | resolution per touch |
@@ -18,6 +18,7 @@ there is no raw-pointer mode and no "is my target still alive?" question:
 | MAP-ENTRY | `strong_ptr` to the owning map + key in the inline storage | `find(key)` (erased entry errors) |
 | CPP-MEMBER | the receiver handle + the C++ object (`_cpp_object`, an extended object's weak handle locked, a raw holder's data or anchor) | the inline storage holds a `cpp_bound` box aimed at the C++ member itself: reads decode it live, writes are the box's typed memory store |
 | PROPERTY | the receiver handle + the property's field id | the getter, re-run into the inline scratch (`materialize_property`); assignment re-resolves and runs the setter - for a read-only property that setter IS the rejection, `Cannot assign to 'x': it is read-only`, exactly what `obj.name = v` raises |
+| COMPONENT | `strong_ptr` to the holder of the math value's storage (any of the modes above) + the component index | the component read into the inline scratch (`materialize_component`); assignment is the component store `v.x = value` makes (`store_component`: the component's narrowing and texts) into the value the base names now, then the base commits its own scratch (a typed vector element, a PROPERTY's setter) |
 
 CPP-MEMBER / PROPERTY are the two shapes a `dynamic_binder` `.property()` binds to
 (`detail/ref_lvalue.hpp` `bind_cpp_property_ref`, one kernel for both backends). A
@@ -49,6 +50,11 @@ allocates except the first boxing of a variable.
 - **`arr[i]` / `obj.field` / chains** resolve to ELEMENT/FIELD refs via the shared
   `detail/ref_lvalue.hpp` resolver (ref args, ref returns) or the subscript-lvalue
   paths. **`m[k]`** lvalues mint MAP-ENTRY refs.
+- **Math components** (`v.x`, `pos.y`, `a[i].z`, `obj.pos.x`, `S::v.x`, `col.g`; Dev ruling 2026-09-30) mint a
+  COMPONENT ref over the base's own reference (an identifier boxes its variable, the rest resolve as above) wherever
+  a reference binds: ref args, `var&`/`T&` declarations, `cast<T&>`, ref returns
+  (`detail/math_component_store.hpp` `component_reference`, both backends). A vector local whose component is bound
+  that way stays boxed (the aggregate lowering's escape rule).
 - **C++ properties** (`obj.prop`, `this.prop`, the bare `prop` inside a hybrid's methods and
   lambdas, chains ending in one, `[&]` captures of one) mint CPP-MEMBER / PROPERTY refs on
   every receiver kind: hybrid layers, script-constructed C++ objects, plain wrappers of

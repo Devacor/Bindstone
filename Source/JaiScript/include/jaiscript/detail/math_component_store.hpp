@@ -132,32 +132,47 @@ namespace jai::detail::math {
 		return stored;
 	}
 
-	// A component argument (`h(v.x)` for a host T&, core/function_binder.hpp): a reference to the math value the
-	// component is part of, and in c the component (-1 and a non-reference when the argument is none). The base resolves
-	// as a component store's does; share turns an identifier's or a static's storage into a reference that outlives the call.
-	template <typename IdentCell, typename StaticCell, typename Share>
-	inline checked_result<script_value> component_argument(const member_expr* m, int& c, IdentCell&& ident_cell, StaticCell&& static_cell,
-	                                                       Share&& share, const caller_frame_view& caller, environment* caller_env,
-	                                                       engine* eng, string_symbolizer* symbolizer) {
-		c = -1;
+	// `v.x` where a reference binds (Dev ruling 2026-09-30: a component is an lvalue, as in C++): a COMPONENT reference over
+	// the storage the vector lives in. The base binds as a reference base does - a bare identifier's variable (share turns
+	// its storage into a reference: the backend's cell), a static's cell, the pure lvalue path (a field, an element, a C++
+	// property). A non-reference when the expression is no component of a math value.
+	template <typename Share>
+	inline checked_result<script_value> component_reference(const expression* e, const caller_frame_view& caller, environment* caller_env,
+	                                                        const class_definition* access, engine* eng, string_symbolizer* symbolizer,
+	                                                        Share&& share) {
 		script_value none(std::monostate{}, eng);
-		const expression* base_expr = m ? m->object.get() : nullptr;
+		if (!e || e->get_type() != node_type::member_expr || symbolizer->frozen()) {
+			return none;
+		}
+		const auto* m = static_cast<const member_expr*>(e);
+		const expression* base_expr = m->object.get();
 		if (!base_expr || m->is_static || m->null_safe || m->is_arrow || !any_component_name(m->member)) {
 			return none;
 		}
 		script_value base(std::monostate{}, eng);
-		if (base_expr->get_type() == node_type::member_expr && static_cast<const member_expr*>(base_expr)->is_static) {
-			auto cell = static_cell(static_cast<const member_expr*>(base_expr));
-			if (!cell) {
-				return cell.error_value();
+		if (base_expr->get_type() == node_type::identifier_expr) {
+			std::optional<checked_result<void>> access_error;
+			const script_value* storage = ref_identifier_storage(static_cast<const identifier_expr*>(base_expr), caller, caller_env, eng,
+			                                                     symbolizer, access_error);
+			if (access_error) {
+				return access_error->error_value();
 			}
-			base = share(*cell.value());
-		} else if (base_expr->get_type() == node_type::identifier_expr) {
-			script_value* cell = ident_cell(static_cast<const identifier_expr*>(base_expr));
+			if (!storage) {
+				return none;
+			}
+			base = share(*const_cast<script_value*>(storage));
+		} else if (base_expr->get_type() == node_type::member_expr && static_cast<const member_expr*>(base_expr)->is_static) {
+			if (!caller_env) {
+				return none;
+			}
+			auto cell = static_member_lvalue(*eng, static_cast<const member_expr*>(base_expr), *caller_env, *symbolizer, access);
 			if (!cell) {
 				return none;
 			}
-			base = share(*cell);
+			if (!*cell) {
+				return cell->error_value();
+			}
+			base = share(*cell->value());
 		} else if (is_ref_bindable_lvalue(base_expr)) {
 			auto resolved = resolve_ref_lvalue(base_expr, caller, caller_env, eng, symbolizer);
 			if (!resolved) {
@@ -165,15 +180,18 @@ namespace jai::detail::math {
 			}
 			base = std::move(resolved.value());
 		}
-		if (!base.is_reference()) {
+		if (!base.is_reference() || !base.get_reference_holder()) {
 			return none;
 		}
 		auto value = ref_checked_deref(base);
 		if (!value || !is_kind(value.value().raw_storage_index())) {
 			return none;
 		}
-		c = component_of(value.value().unchecked_vec_kind(), m->member);
-		return c < 0 ? none : base;
+		const int c = component_of(value.value().unchecked_vec_kind(), m->member);
+		if (c < 0) {
+			return none;
+		}
+		return script_value::make_component_reference(base, static_cast<size_t>(c), eng);
 	}
 
 } // namespace jai::detail::math

@@ -4114,7 +4114,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		// reach the setter.
 		if (varPtr->is_reference()) {
 			const auto* refHolder = varPtr->get_reference_holder();
-			if (refHolder && (refHolder->container_element_type || refHolder->property_ref())) {
+			if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
 				const token_type op = compound_kind_token(kind);
 				const char* opName = detail::binary_op_name(op);
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
@@ -11288,6 +11288,14 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			return define_decl_value(f, decl, std::move(aliased.value()));
 		}
 	}
+	// A math component binds a COMPONENT reference (KEEP BYTE-PARALLEL with the interpreter's define_component_reference)
+	auto part = component_reference(&f, decl->initializer.get(), environment_);
+	if (!part) {
+		return raise_from(part);
+	}
+	if (part.value().is_reference()) {
+		return define_decl_value(f, decl, std::move(part.value()));
+	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),
 		"Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
@@ -17692,6 +17700,14 @@ op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins
 		static_cast<const expression*>(f.code->nodes[ins.a].get()),
 		caller_view(&f), environment_.get(), engine_, symbolizer_);
 	if (!resolved) {
+		// a math component returns a COMPONENT reference; anything else keeps the kernel's verdict
+		if (resolved.error() == make_error_code(runtime_error_code::invalid_reference)) {
+			auto part = component_reference(&f, static_cast<const expression*>(f.code->nodes[ins.a].get()), environment_);
+			if (part && part.value().is_reference()) {
+				stack_.push_back(std::move(part.value()));
+				return {};
+			}
+		}
 		return raise_from(resolved);
 	}
 	stack_.push_back(std::move(resolved.value()));
@@ -17757,7 +17773,15 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 				if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
 					return raise_from(resolved);
 				}
-				return raise_(make_error_code(runtime_error_code::invalid_reference), detail::cast_non_lvalue_text);
+				auto part = component_reference(&f, expr->operand.get(), environment_);
+				if (!part) {
+					return raise_from(part);
+				}
+				if (!part.value().is_reference()) {
+					return raise_(make_error_code(runtime_error_code::invalid_reference), detail::cast_non_lvalue_text);
+				}
+				operand = std::move(part.value());
+				break;
 			}
 			operand = std::move(resolved.value());
 			break;
@@ -20834,6 +20858,18 @@ op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame
 			return raise_from(resolved);
 		}
 	}
+	if (lvalue_node != k_invalid_u32 && caller_code) {
+		// A math component (f(v.x)) binds a COMPONENT reference over the vector's storage
+		auto part = component_reference(caller_frame, static_cast<const expression*>(caller_code->nodes[lvalue_node].get()), caller_env);
+		if (!part) {
+			return raise_from(part);
+		}
+		if (part.value().is_reference()) {
+			out = std::move(part.value());
+			bound = true;
+			return {};
+		}
+	}
 
 	if (symbol_id != UINT64_MAX && caller_env) {
 		// ::name ref args bind against the GLOBAL env only
@@ -20929,6 +20965,15 @@ checked_result<void> vm_backend::host_slot_store(const host_slot& slot, script_v
 	return detail::variable_store(*storage, value, engine_);
 }
 
+checked_result<script_value> vm_backend::component_reference(frame* caller_frame, const expression* e, const std::shared_ptr<environment>& caller_env) {
+	if (caller_frame) {
+		ensure_frame_member_scope(*caller_frame, caller_env.get());   // the identifier ladder reads the frame's member scope
+	}
+	return detail::math::component_reference(e, caller_view(caller_frame), caller_env.get(),
+		caller_frame ? frame_access_context(*caller_frame) : (caller_env ? caller_env->find_access_context() : nullptr),
+		engine_, symbolizer_, [this](script_value& storage) { return share_env_ref(storage); });
+}
+
 op_status vm_backend::reference_to_storage(script_value& storage, script_value& out, bool& bound) {
 	if (storage.is_reference() && !storage.get_reference_holder()) {
 		return raise_(
@@ -20946,8 +20991,7 @@ op_status vm_backend::reference_to_storage(script_value& storage, script_value& 
 // A host callable's T& argument (execution_backend::host_reference_argument): the argument the call in flight passed, when
 // the callable received it (a callback a builtin makes with its own arguments did not), resolved as a T& parameter binds it
 checked_result<script_value> vm_backend::host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                                 int& component, host_slot& slot) {
-	component = -1;
+                                                                 host_slot& slot) {
 	slot = {};
 	const pending_call_site ctx = pending_site_ctx_;
 	if (!ctx.site || !ctx.arguments || ctx.arguments->size() + offset != args.size() || index >= ctx.arguments->size()) {
@@ -20964,24 +21008,6 @@ checked_result<script_value> vm_backend::host_reference_argument(const std::vect
 	}
 	if (bound) {
 		return site_ref;
-	}
-	const uint32_t lvalue_node = index < ctx.site->arg_lvalue_nodes.size() ? ctx.site->arg_lvalue_nodes[index] : k_invalid_u32;
-	if (lvalue_node != k_invalid_u32 && ctx.caller_code && ctx.caller_frame &&
-	    ctx.caller_code->nodes[lvalue_node]->get_type() == node_type::member_expr) {
-		frame& caller = *ctx.caller_frame;
-		auto part = detail::math::component_argument(static_cast<const member_expr*>(ctx.caller_code->nodes[lvalue_node].get()), component,
-			[&](const identifier_expr* id) -> script_value* {
-				if (id->global_qualified) { return engine_->get_global_environment()->get_value_ptr(id->symbol_id); }
-				return resolve_local_or_env(caller, ctx.caller_code->component_base_slot(lvalue_node), id->symbol_id);
-			},
-			[&](const member_expr* m) {
-				return detail::math::static_component_cell(m, *engine_, *environment_, *symbolizer_, frame_access_context(caller));
-			},
-			[this](script_value& storage) { return share_env_ref(storage); },
-			caller_view(&caller), environment_.get(), engine_, symbolizer_);
-		if (!part || component >= 0) {
-			return part;
-		}
 	}
 	if (const auto* holder = detail::deferred_argument(passed)) {
 		const script_value& lvalue = holder->argument_source->lvalue;

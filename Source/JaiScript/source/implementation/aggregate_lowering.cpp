@@ -278,7 +278,9 @@ struct analysis {
 		switch (d->get_type()) {
 			case node_type::variable_decl: {
 				auto* v = static_cast<const variable_decl*>(d);
-				expr(v->initializer.get());
+				// a reference declaration binds its initializer (`auto& r = v.x` names v's storage)
+				const bool binds = v->type && v->type->base_type == script_value_type::jai_reference_type;
+				expr(v->initializer.get(), binds ? pos::ref_cast : pos::value);
 				int cand = -1;
 				if (nested == 0 && math_kind_type(v->type.get()) && !v->ref_escaping && !v->is_static && v->slot_index != SIZE_MAX && v->name_id != UINT64_MAX) {
 					candidate c;
@@ -386,7 +388,11 @@ struct analysis {
 				--nested;
 				break;
 			}
-			case node_type::return_stmt: expr(static_cast<const return_stmt*>(s)->value.get()); break;
+			case node_type::return_stmt: {
+				auto* r = static_cast<const return_stmt*>(s);
+				expr(r->value.get(), r->binds_reference ? pos::ref_cast : pos::value);   // a reference return names the storage
+				break;
+			}
 			case node_type::try_stmt: {
 				auto* t = static_cast<const try_stmt*>(s);
 				scopes.emplace_back(); stmt(t->try_block.get()); scopes.pop_back();

@@ -130,8 +130,11 @@ namespace jai::vm {
         bool observing_hoist_in(const expression* e);  // a subtree holding a hoisted read that may run user code
         bool env_reference_candidate(const expression* e);   // an environment name this unit does not declare as a value: its read may run a getter (a reference to a property) or raise
         bool hoist_in(const expression* e);            // a subtree holding a hoisted read, intrinsic or unary, quiet or not
-        // a call to a one-argument math:: intrinsic whose result a compiler temp can carry (none = not one)
+        // a call to a one-argument math:: intrinsic, or a scalar pair row, whose result a compiler temp can carry (none = not one)
         detail::math_fn math_temp_operand(const expression* e) const;
+        detail::math_fn math_pair_operand(const call_expr* call);   // math::min(a, b) and the other scalar pair rows over operand shapes
+        bool math_pair_argument(const expression* e);
+        void compile_math_argument(const expression_ptr& arg, fused_operand& out);
         detail::math_fn math_alias_operand(const call_expr* call) const;   // a bare call to a stdlib math alias (none = not one)
         static bool math_alias_call(const expression* e);                  // a math temp spelled as a bare call: its callee resolves at run time
         void compile_math_into_temp(const expression_ptr& e, fused_operand& out);

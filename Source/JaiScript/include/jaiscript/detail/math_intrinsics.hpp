@@ -232,6 +232,41 @@ namespace jai::detail {
     // the one-argument float family, whose stdlib (script_float) -> script_float bodies are these expressions verbatim, so an
     // int or float argument yields the same bits either way (abs is the stdlib's float abs: an int argument converts first, unlike
     // math::abs)
+    // the math:: rows over two scalars a compiler temp carries (and a cell block runs): min, max, pow, atan2, fmod, hypot and the wrap family
+    inline bool math_scalar_pair(math_fn fn) noexcept {
+        switch (fn) {
+        case math_fn::min_: case math_fn::max_: case math_fn::pow_: case math_fn::atan2_: case math_fn::fmod_: case math_fn::hypot_:
+        case math_fn::wrap_add_: case math_fn::wrap_sub_: case math_fn::wrap_mul_:
+            return true;
+        default: return false;
+        }
+    }
+    // a scalar pair row on two numbers (an int or a float each): min and max pick an operand (an int pair compares exactly, a mixed
+    // pair as doubles) and keep its kind, pow, atan2, fmod and hypot compute in doubles, the wrap family takes ints only (false: not this row's
+    // operands, the kernel answers with its text)
+    struct scalar_num { bool is_int = false; script_int i = 0; script_float f = 0.0; script_float d() const noexcept { return is_int ? static_cast<script_float>(i) : f; } };
+    inline bool eval_scalar_pair(math_fn fn, const scalar_num& a, const scalar_num& b, scalar_num& out) noexcept {
+        switch (fn) {
+        case math_fn::min_: case math_fn::max_: {
+            const bool pick_a = a.is_int && b.is_int ? (fn == math_fn::min_ ? a.i <= b.i : a.i >= b.i)
+                                                     : (fn == math_fn::min_ ? a.d() <= b.d() : a.d() >= b.d());
+            out = pick_a ? a : b;
+            return true;
+        }
+        case math_fn::pow_: out.is_int = false; out.f = std::pow(a.d(), b.d()); return true;
+        case math_fn::atan2_: out.is_int = false; out.f = std::atan2(a.d(), b.d()); return true;
+        case math_fn::fmod_: out.is_int = false; out.f = std::fmod(a.d(), b.d()); return true;
+        case math_fn::hypot_: out.is_int = false; out.f = std::hypot(a.d(), b.d()); return true;
+        case math_fn::wrap_add_: case math_fn::wrap_sub_: case math_fn::wrap_mul_: {
+            if (!a.is_int || !b.is_int) return false;
+            const uint64_t ua = static_cast<uint64_t>(a.i), ub = static_cast<uint64_t>(b.i);
+            out.is_int = true;
+            out.i = static_cast<script_int>(fn == math_fn::wrap_add_ ? ua + ub : fn == math_fn::wrap_sub_ ? ua - ub : ua * ub);
+            return true;
+        }
+        default: return false;
+        }
+    }
     inline bool math_alias_kernel(math_fn fn) noexcept {
         switch (fn) {
         case math_fn::floor_: case math_fn::ceil_: case math_fn::sqrt_: case math_fn::sin_: case math_fn::cos_: case math_fn::tan_:
@@ -1067,6 +1102,11 @@ namespace jai::detail {
         auto bad_type = [&](const char* text) {
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), text);
         };
+        auto scalar_pair_value = [&](math_fn row, const num& a, const num& b) {
+            scalar_num r;
+            eval_scalar_pair(row, scalar_num{a.is_int, a.i, a.f}, scalar_num{b.is_int, b.i, b.f}, r);
+            return r.is_int ? checked_result<script_value>(script_value(r.i, eng)) : checked_result<script_value>(script_value(r.f, eng));
+        };
 
         switch (fn) {
             case math_fn::trunc_: {
@@ -1161,7 +1201,7 @@ namespace jai::detail {
                 if (!math_arity_accepts(fn, argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]), b = read(*args[1]);
                 if (!a.ok || !b.ok) { return bad_type("math scalar helper expects numeric arguments"); }
-                return script_value(fn == math_fn::fmod_ ? std::fmod(a.d(), b.d()) : std::hypot(a.d(), b.d()), eng);
+                return scalar_pair_value(fn, a, b);
             }
             case math_fn::wrap_: {
                 if (!math_arity_ok<math_fn::wrap_>(argc)) { return bad_arity(math_arity_of(fn).text); }
@@ -1211,7 +1251,7 @@ namespace jai::detail {
                 if (!math_arity_ok<math_fn::pow_>(argc)) return bad_arity(math_arity_of(math_fn::pow_).text);
                 const num a = read(*args[0]), b = read(*args[1]);
                 if (!a.ok || !b.ok) return bad_type("math::pow expects numeric arguments");
-                return checked_result<script_value>(script_value(std::pow(a.d(), b.d()), eng));
+                return scalar_pair_value(fn, a, b);
             }
             case math_fn::abs_: {
                 if (!math_arity_ok<math_fn::abs_>(argc)) return bad_arity(math_arity_of(math_fn::abs_).text);
@@ -1232,13 +1272,7 @@ namespace jai::detail {
                 if (!math_arity_ok<math_fn::min_>(argc)) return bad_arity(math_arity_of(fn).text);
                 const num a = read(*args[0]), b = read(*args[1]);
                 if (!a.ok || !b.ok) return eval_vec_math(fn, args, argc, eng, fn == math_fn::min_ ? "math::min expects numeric arguments" : "math::max expects numeric arguments");
-				// Integer pairs stay exact above 2^53; mixed pairs keep double promotion.
-				const bool pick_a = a.is_int && b.is_int
-					? (fn == math_fn::min_ ? a.i <= b.i : a.i >= b.i)
-					: (fn == math_fn::min_ ? a.d() <= b.d() : a.d() >= b.d());
-                const num& p = pick_a ? a : b;
-                if (p.is_int) return checked_result<script_value>(script_value(p.i, eng));
-                return checked_result<script_value>(script_value(p.f, eng));
+                return scalar_pair_value(fn, a, b);
             }
             case math_fn::clamp_: {
                 if (!math_arity_ok<math_fn::clamp_>(argc)) return bad_arity(math_arity_of(math_fn::clamp_).text);
@@ -1271,7 +1305,7 @@ namespace jai::detail {
                 if (!math_arity_ok<math_fn::atan2_>(argc)) return bad_arity(math_arity_of(math_fn::atan2_).text);
                 const num y = read(*args[0]), x = read(*args[1]);
                 if (!y.ok || !x.ok) return bad_type("math::atan2 expects numeric arguments");
-                return checked_result<script_value>(script_value(std::atan2(y.d(), x.d()), eng));
+                return scalar_pair_value(fn, y, x);
             }
             case math_fn::distance:
             case math_fn::distance_squared: {
@@ -1346,11 +1380,7 @@ namespace jai::detail {
                                   : fn == math_fn::wrap_sub_ ? "math::wrap_sub expects integer arguments"
                                                              : "math::wrap_mul expects integer arguments");
                 }
-                const uint64_t ua = static_cast<uint64_t>(a.i), ub = static_cast<uint64_t>(b.i);
-                const uint64_t r = fn == math_fn::wrap_add_ ? ua + ub
-                                 : fn == math_fn::wrap_sub_ ? ua - ub
-                                                            : ua * ub;
-                return checked_result<script_value>(script_value(static_cast<script_int>(r), eng));
+                return scalar_pair_value(fn, a, b);
             }
 
             // ---- interpolation family (formulas verbatim from the stdlib registrations) ----

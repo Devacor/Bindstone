@@ -5386,6 +5386,7 @@ op_status vm_backend::exec_operand_temp(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 	if (ins.c > 0xFF) return exec_math_alias(f, ins);
 	const detail::math_fn fn = static_cast<detail::math_fn>(ins.c);
+	if (detail::math_scalar_pair(fn)) return exec_math_pair(f, ins, fn);
 	std::optional<script_value> scratch;
 	script_value popped(std::monostate{}, engine_);
 	const script_value* v;
@@ -5433,6 +5434,37 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 	if (!result) {
 		return raise_from(result);
 	}
+	frame_slot_set(f, ins.b, std::move(result.value()));
+	return {};
+}
+
+// A scalar pair row (math::min(a, b), max, pow, atan2, the wrap family) into a compiler temp: each operand read as the general op reads
+// its argument (a constant, a slot, an environment value), two numbers through the kernel's own pair rule landed raw, anything else the
+// kernel's value and text
+op_status vm_backend::exec_math_pair(frame& f, const vm_instruction& ins, detail::math_fn fn) {
+	const fused_binary_proto& p = f.code->fused_binary_protos[ins.a];
+	std::optional<script_value> scratch_l, scratch_r;
+	const script_value* l = p.left.const_index != k_invalid_u32 ? &f.code->constants[p.left.const_index] : fused_subscript_value(f, p.left, scratch_l, f.ip * 3);
+	if (!l) return op_status::failed;
+	script_value held = l->deref();   // the second read may resolve a name that moves the first's storage
+	const script_value* r = p.right.const_index != k_invalid_u32 ? &f.code->constants[p.right.const_index] : fused_subscript_value(f, p.right, scratch_r, f.ip * 3 + 1);
+	if (!r) return op_status::failed;
+	const script_value& rv = r->deref();
+	auto num = [](const script_value& v, detail::scalar_num& n) {
+		const size_t raw = v.raw_storage_index();
+		if (raw == script_value::TYPEID_INT) { n.is_int = true; n.i = v.unchecked_as_int(); return true; }
+		if (raw == script_value::TYPEID_FLOAT) { n.is_int = false; n.f = v.unchecked_as_float(); return true; }
+		return false;
+	};
+	detail::scalar_num a, b, out;
+	const uint32_t dst = ins.b | (k_typed_dst_temp << k_typed_dst_shift);
+	if (num(held, a) && num(rv, b) && detail::eval_scalar_pair(fn, a, b, out)) {
+		if (out.is_int) { typed_land_int(f, dst, out.i); } else { typed_land_float(f, dst, out.f); }
+		return {};
+	}
+	const script_value* argp[2] = { &held, &rv };
+	auto result = detail::eval_math_intrinsic(fn, argp, 2, engine_, engine_->math_rng());
+	if (!result) return raise_from(result);
 	frame_slot_set(f, ins.b, std::move(result.value()));
 	return {};
 }
@@ -9872,6 +9904,28 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction
 	const detail::math_fn fn = static_cast<detail::math_fn>(tok & ~k_cell_math_float_arg);
 	const uint32_t dk = ins.a & k_cell_index_mask;
 	auto miss = [&]() -> op_status { cells_miss(f, loop, loop.origin[f.ip - loop.copy_head], 1); return {}; };
+	if (detail::math_scalar_pair(fn)) {
+		// two operands, each a cell or a constant: two numbers take the kernel's pair rule; anything else is the general op's
+		auto operand = [&](uint32_t o, detail::scalar_num& n) {
+			uint8_t k; uint64_t bits;
+			if (o & k_typed_const_bit) {
+				const script_value& v = cr.consts[o & ~k_typed_const_bit];
+				k = static_cast<uint8_t>(v.raw_storage_index());
+				if (k == static_cast<uint8_t>(script_value::TYPEID_INT)) { n.is_int = true; n.i = v.unchecked_as_int(); return true; }
+				if (k == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { n.is_int = false; n.f = v.unchecked_as_float(); return true; }
+				return false;
+			}
+			k = cr.kinds[o]; bits = cr.payload[o];
+			if (k == static_cast<uint8_t>(script_value::TYPEID_INT)) { n.is_int = true; n.i = static_cast<script_int>(bits); return true; }
+			if (k == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { n.is_int = false; n.f = cell_float_of_bits(bits); return true; }
+			return false;
+		};
+		detail::scalar_num a, b, out;
+		if (!operand(ins.b, a) || !operand(ins.c, b) || !detail::eval_scalar_pair(fn, a, b, out)) return miss();
+		if (!cell_land(f, loop, dk, static_cast<uint8_t>(out.is_int ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT), out.is_int ? static_cast<int64_t>(out.i) : cell_bits_of_float(out.f))) return miss();
+		++f.ip;
+		return {};
+	}
 	const uint8_t sk = cr.kinds[ins.b];
 	const bool int_arg = sk == static_cast<uint8_t>(script_value::TYPEID_INT);
 	if (!int_arg && sk != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();

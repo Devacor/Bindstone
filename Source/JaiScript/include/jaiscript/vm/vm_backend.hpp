@@ -1796,7 +1796,8 @@ namespace jai::vm {
         // the method in-loop; every other caller gets make_bound_method's exact
         // behavior from script_callable_thunk::operator().
         script_value make_bound_method_thunk(const script_value& this_val, script_value method);
-        bool park_sibling_method(frame& f, const call_site& site);   // the sibling IC's hit: the class's method and this frame's receiver
+        bool park_sibling_method(frame& f, const call_site& site);
+        op_status exec_math_pair(frame& f, const vm_instruction& ins, detail::math_fn fn);   // the sibling IC's hit: the class's method and this frame's receiver
         void arm_sibling_method(frame& f, const call_site& site, const script_value& resolved);
         // ONE native boundary for the direct dispatches (builtin methods, coroutine
         // resume): routine errors travel as checked_result -> raise_from; the catch is

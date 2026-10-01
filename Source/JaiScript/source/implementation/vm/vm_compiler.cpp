@@ -3663,6 +3663,18 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!value(op, c.fused_binary_protos[st.a].left, 0, static_cast<uint32_t>(ip * 3), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(st.b, tk == token_type::tilde ? kint : tk == token_type::bang ? kbool : 0, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = tk == token_type::minus ? ir::neg : tk == token_type::tilde ? ir::bnot : ir::lnot; op.a = st.b; op.writes = st.b;
+			} else if (st.op == opcode::op_math_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask && st.c <= 0xFF &&
+			           detail::math_scalar_pair(static_cast<detail::math_fn>(st.c))) {
+				// a scalar pair row of two values (a cell, a literal, an environment value): min and max land the picked operand's kind, pow and
+				// atan2, fmod and hypot a float, the wrap family an int of int operands
+				const detail::math_fn fn = static_cast<detail::math_fn>(st.c);
+				const bool wrap = fn == detail::math_fn::wrap_add_ || fn == detail::math_fn::wrap_sub_ || fn == detail::math_fn::wrap_mul_;
+				const uint8_t ak = wrap ? kint : 0;
+				const fused_binary_proto& pp = c.fused_binary_protos[st.a];
+				if (!value(op, pp.left, ak, static_cast<uint32_t>(ip * 3), ip, op.b) || !value(op, pp.right, ak, static_cast<uint32_t>(ip * 3 + 1), ip, op.c)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if ((op.b & k_typed_const_bit) && (op.c & k_typed_const_bit)) { refuse(chunk::cell_refusal_translation, ip); break; }   // two literals: nothing for a cell to hold
+				use_slot(st.b, wrap ? kint : (fn == detail::math_fn::pow_ || fn == detail::math_fn::atan2_ || fn == detail::math_fn::fmod_ || fn == detail::math_fn::hypot_) ? kflt : 0, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::math; op.tok = static_cast<uint8_t>(fn); op.a = st.b; op.writes = st.b;
 			} else if (st.op == opcode::op_math_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask) {
 				// math: a pure one-argument intrinsic of a value into a compiler value (the kernel's rows run in the block): itrunc
 				// and ifloor land an int, abs the argument's kind (the stdlib alias a float), the float family a float; a stdlib alias
@@ -4192,7 +4204,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			// literals or a literal argument have no encoding
 			const ir_op& o = ops[k];
 			if ((o.kind == ir::cmp && (o.a & k_typed_const_bit) && (o.b & k_typed_const_bit)) || (o.kind == ir::cmpval && (o.b & k_typed_const_bit) && (o.c & k_typed_const_bit)) ||
-			    (o.kind == ir::math && (o.b & k_typed_const_bit))) { refuse(chunk::cell_refusal_translation, first + k); }
+			    (o.kind == ir::math && (o.b & k_typed_const_bit) && !detail::math_scalar_pair(static_cast<detail::math_fn>(o.tok & ~k_cell_math_float_arg)))) { refuse(chunk::cell_refusal_translation, first + k); }
 		}
 		if (line && refusal == chunk::cell_refusal_none && !ops.empty() && ops[0].kind == ir::exit) { continue; }   // a region that leaves at its first operation runs nothing
 		for (const uint32_t si : loop_inline_sites) {   // a method graft's guard runs at the entry and after each call: its receiver stays put for the block
@@ -4542,7 +4554,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const opcode direct = !(src & k_typed_const_bit) && pinned_operand(src, kf) && dst < cells.size() && cells[dst].kind == kf
 					? (fn == detail::math_fn::sin_ ? opcode::op_c_sin_f : fn == detail::math_fn::cos_ ? opcode::op_c_cos_f : fn == detail::math_fn::sqrt_ ? opcode::op_c_sqrt_f : opcode::op_halt) : opcode::op_halt;
 				if (direct != opcode::op_halt) { append(vm_instruction{direct, dst, src, 0}, ip); }   // a float into a float cell: the landing stores it as it is
-				else { append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst, src, 0}, ip); }
+				else { append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst, src, detail::math_scalar_pair(fn) ? cell_of(op.c) : 0}, ip); }
 				break;
 			}
 			case ir::jump:
@@ -5099,7 +5111,12 @@ bool vm_compiler::quiet_read(const expression* e) {
 	const expression* arg = nullptr;
 	if (math_temp_operand(e) != detail::math_fn::none) {
 		if (math_alias_call(e)) return false;   // the name may bind user code by run time
-		arg = static_cast<const call_expr*>(e)->arguments[0].get();
+		const auto& args = static_cast<const call_expr*>(e)->arguments;
+		for (size_t k = 0; k + 1 < args.size(); ++k) {
+			const expression* a = args[k].get();
+			if (!(a->get_type() == node_type::literal_expr || primitive_local(a) || quiet_read(a))) return false;
+		}
+		arg = args.back().get();
 	} else if (unary_temp_operand(e)) { arg = static_cast<const unary_expr*>(e)->operand.get(); }
 	if (!arg) return false;
 	return arg->get_type() == node_type::literal_expr || primitive_local(arg) || quiet_read(arg);
@@ -5158,7 +5175,9 @@ detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
 	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return detail::math_fn::none;
 	if (!e || e->get_type() != node_type::call_expr) return detail::math_fn::none;
 	auto* call = static_cast<const call_expr*>(e);
-	if (call->arguments.size() != 1 || !call->callee) return detail::math_fn::none;
+	if (!call->callee) return detail::math_fn::none;
+	if (call->arguments.size() == 2) return const_cast<vm_compiler*>(this)->math_pair_operand(call);
+	if (call->arguments.size() != 1) return detail::math_fn::none;
 	if (call->callee->get_type() == node_type::identifier_expr) return math_alias_operand(call);
 	if (call->callee->get_type() != node_type::member_expr) return detail::math_fn::none;
 	const detail::math_fn fn = detail::math_intrinsic_for_call(static_cast<const member_expr*>(call->callee.get()));
@@ -5171,6 +5190,48 @@ detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
 		return fn;
 	default: return detail::math_fn::none;
 	}
+}
+
+// an argument of a scalar pair row that becomes an operand of the op: a literal, a name, or a value that lands in a temp in source order
+bool vm_compiler::math_pair_argument(const expression* e) {
+	if (!e) return false;
+	if (e->get_type() == node_type::literal_expr) return true;
+	if (e->get_type() == node_type::identifier_expr) return !static_cast<const identifier_expr*>(e)->global_qualified;
+	if (fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e)) return true;
+	return e->get_type() == node_type::binary_expr && binary_lands_fused(static_cast<binary_expr*>(const_cast<expression*>(e)));
+}
+
+// `math::min(a, b)` (min, max, pow, atan2, the wrap family) whose arguments are operand shapes: the second argument lands ahead of the
+// op, so a name in the first place (read at the op) must be one the second's evaluation cannot write - the binary's partner rules
+detail::math_fn vm_compiler::math_pair_operand(const call_expr* call) {
+	if (call->callee->get_type() != node_type::member_expr) return detail::math_fn::none;
+	const detail::math_fn fn = detail::math_intrinsic_for_call(static_cast<const member_expr*>(call->callee.get()));
+	if (!detail::math_scalar_pair(fn)) return detail::math_fn::none;
+	const expression* a0 = call->arguments[0].get();
+	const expression* a1 = call->arguments[1].get();
+	if (!math_pair_argument(a0) || !math_pair_argument(a1)) return detail::math_fn::none;
+	if (a0->get_type() == node_type::identifier_expr && a1->get_type() != node_type::literal_expr && a1->get_type() != node_type::identifier_expr) {
+		const bool hoisted = fusable_index_expr(a1) || math_temp_operand(a1) != detail::math_fn::none || unary_temp_operand(a1) || member_temp_operand(a1) || ternary_temp_operand(a1);
+		const bool held = hoisted ? (quiet_partner(a0) || env_identifier(a0)) : (private_local(a0) && !read_ahead_of(a0, a1));
+		if (!held) return detail::math_fn::none;
+	}
+	return fn;
+}
+
+void vm_compiler::compile_math_argument(const expression_ptr& arg, fused_operand& out) {
+	if (arg->get_type() == node_type::identifier_expr || arg->get_type() == node_type::literal_expr) { out = make_fused_operand(arg); return; }
+	if (compile_value_into_temp(arg, 0xFF, out)) return;
+	compile_expression(arg);
+	const uint32_t t = static_cast<uint32_t>(temp_next_);
+	++temp_next_;
+	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+	vm_instruction& last = chunk_->code.back();
+	if (last.op == opcode::op_binary_fused) { last.op = opcode::op_binary_fused_temp; last.b = t; }
+	else { emit(opcode::op_call_temp, t); }   // a value the stack holds (a subscript the temp form declined)
+	out = fused_operand{};
+	out.slot = t;
+	out.symbol = temp_symbol_index();
+	out.direct = true;
 }
 
 // `sqrt(x)` naming a registered stdlib alias from outside the frame: a math temp whose op checks at run time that the name
@@ -5323,6 +5384,21 @@ void vm_compiler::compile_unary_into_temp(const expression_ptr& e, fused_operand
 void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand& out) {
 	auto* call = static_cast<call_expr*>(e.get());
 	const detail::math_fn fn = math_temp_operand(e.get());
+	if (call->arguments.size() == 2) {   // a scalar pair row: each argument an operand, in source order
+		fused_binary_proto p;
+		compile_math_argument(call->arguments[0], p.left);
+		compile_math_argument(call->arguments[1], p.right);
+		chunk_->fused_binary_protos.push_back(std::move(p));
+		const uint32_t t = static_cast<uint32_t>(temp_next_);
+		++temp_next_;
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		emit(opcode::op_math_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t, static_cast<uint32_t>(fn));
+		out = fused_operand{};
+		out.slot = t;
+		out.symbol = temp_symbol_index();
+		out.direct = true;
+		return;
+	}
 	const expression_ptr& arg = call->arguments[0];
 	uint32_t alias_site = k_invalid_u32, alias_temp = k_invalid_u32;
 	uint32_t args_begin = 0;

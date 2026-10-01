@@ -170,6 +170,7 @@ namespace {
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
+			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -366,6 +367,7 @@ namespace {
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
+			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -4628,6 +4630,39 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// fused pairs (row 150): the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the
 		// pair's opcode and keeps its word, the second keeps both (a jump into it dispatches it alone); greedy left to right, a pair's second
 		// instruction starts no pair; the sites, the origins, the site rows and the liveness are per instruction and stand as they are
+		if (ir_passes_) {
+			// pinned reads and compares by kind: a float element read into a float cell through a pinned int index (no fold) and a pinned
+			// compare-jump name their operation in the opcode; the site rows, origins and liveness stand as they are
+			const uint8_t kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT), ki = static_cast<uint8_t>(script_value::TYPEID_INT);
+			for (uint32_t ip2 = loop.copy_head; ip2 < loop.copy_back; ++ip2) {
+				vm_instruction& ins = code[ip2];
+				if (ins.op == opcode::op_c_load && ip2 < c.typed_sites.size()) {
+					const chunk::typed_site& site = c.typed_sites[ip2];
+					const uint32_t ix = site.operands[0];
+					if (site.fold_count == 0 && site.decl_expect == kf && site.cont_slot != chunk::k_iter_container && !(ix & k_typed_const_bit) && ix < loop.cells.size() && loop.cells[ix].kind == ki) {
+						ins.op = opcode::op_c_load_f; ins.b = ix;
+					}
+					continue;
+				}
+				if (ins.op != opcode::op_c_jcmp_p) continue;
+				const opcode cmp = static_cast<opcode>(ins.a >> k_cell_op_shift);
+				const bool konst = (ins.b & k_typed_const_bit) != 0;
+				opcode direct = opcode::op_halt;
+				switch (cmp) {
+				case opcode::op_t_jlt_ff: direct = konst ? opcode::op_c_jlt_ffk : opcode::op_c_jlt_ff; break;
+				case opcode::op_t_jle_ff: direct = konst ? opcode::op_c_jle_ffk : opcode::op_c_jle_ff; break;
+				case opcode::op_t_jgt_ff: direct = konst ? opcode::op_c_jgt_ffk : opcode::op_c_jgt_ff; break;
+				case opcode::op_t_jge_ff: direct = konst ? opcode::op_c_jge_ffk : opcode::op_c_jge_ff; break;
+				case opcode::op_t_jlt_ii: direct = konst ? opcode::op_c_jlt_iik : opcode::op_c_jlt_ii; break;
+				case opcode::op_t_jle_ii: direct = konst ? opcode::op_c_jle_iik : opcode::op_c_jle_ii; break;
+				case opcode::op_t_jgt_ii: direct = konst ? opcode::op_c_jgt_iik : opcode::op_c_jgt_ii; break;
+				case opcode::op_t_jge_ii: direct = konst ? opcode::op_c_jge_iik : opcode::op_c_jge_ii; break;
+				default: break;
+				}
+				if (direct == opcode::op_halt) continue;
+				ins.op = direct; ins.a &= k_cell_index_mask; ins.b &= ~k_typed_const_bit;
+			}
+		}
 		if (ir_passes_) {   // the middle end's switch: off, the pairs stay two instructions (jaiscript_fuzz --no-passes compares)
 			for (uint32_t ip2 = loop.copy_head; ip2 + 1 < loop.copy_back; ++ip2) {
 				const opcode a1 = code[ip2].op, b1 = code[ip2 + 1].op;

@@ -7679,7 +7679,7 @@ static opcode cell_first_op(opcode op) {
 	switch (op) {
 	case opcode::op_c_arith2: case opcode::op_c_arith_load: case opcode::op_c_arith_jump: return opcode::op_c_arith_p;
 	case opcode::op_c_jcmp2: return opcode::op_c_jcmp_p;
-	case opcode::op_c_load2: case opcode::op_c_load_jcmp: return opcode::op_c_load;
+	case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_load_f: return opcode::op_c_load;
 	default: return op;
 	}
 }
@@ -8152,6 +8152,7 @@ static bool cells_miss_plain(opcode op) {
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
 	case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
+	case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 		return true;
 	default:
 		return false;
@@ -8234,6 +8235,29 @@ next_frame:
 		}
 		case opcode::op_c_mov_p: regs.payload[ci.a] = regs.payload[ci.b]; regs.kinds[ci.a] = regs.kinds[ci.b]; regs.dirty->set(ci.a); ++ip; break;
 		case opcode::op_c_sin_f: cell_put_float(regs, ci.a, std::sin(cell_float_of_bits(regs.payload[ci.b]))); ++ip; break;
+		case opcode::op_c_load_f: {   // a float buffer's element in place; any other container kind or index runs C_LOAD's rows
+			const script_array* node = cs.site_node[ip - loop.copy_head];
+			const uint64_t at = static_cast<uint64_t>(regs.payload[ci.b]);
+			if (node && node->kind() == script_array::kind_t::f64 && at < node->size()) { cell_put_float(regs, ci.a, node->floats()[at]); ++ip; break; }
+			st = exec_c_load(f, ip, ci, regs, false);
+			break;
+		}
+		case opcode::op_c_jlt_ff: if ((cell_float_of_bits(regs.payload[ci.a]) < cell_float_of_bits(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jle_ff: if ((cell_float_of_bits(regs.payload[ci.a]) <= cell_float_of_bits(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jgt_ff: if ((cell_float_of_bits(regs.payload[ci.a]) > cell_float_of_bits(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jge_ff: if ((cell_float_of_bits(regs.payload[ci.a]) >= cell_float_of_bits(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jlt_ffk: if ((cell_float_of_bits(regs.payload[ci.a]) < regs.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jle_ffk: if ((cell_float_of_bits(regs.payload[ci.a]) <= regs.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jgt_ffk: if ((cell_float_of_bits(regs.payload[ci.a]) > regs.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jge_ffk: if ((cell_float_of_bits(regs.payload[ci.a]) >= regs.consts[ci.b].unchecked_as_float()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jlt_ii: if ((static_cast<script_int>(regs.payload[ci.a]) < static_cast<script_int>(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jle_ii: if ((static_cast<script_int>(regs.payload[ci.a]) <= static_cast<script_int>(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jgt_ii: if ((static_cast<script_int>(regs.payload[ci.a]) > static_cast<script_int>(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jge_ii: if ((static_cast<script_int>(regs.payload[ci.a]) >= static_cast<script_int>(regs.payload[ci.b])) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jlt_iik: if ((static_cast<script_int>(regs.payload[ci.a]) < regs.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jle_iik: if ((static_cast<script_int>(regs.payload[ci.a]) <= regs.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jgt_iik: if ((static_cast<script_int>(regs.payload[ci.a]) > regs.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
+		case opcode::op_c_jge_iik: if ((static_cast<script_int>(regs.payload[ci.a]) >= regs.consts[ci.b].unchecked_as_int()) != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; } break;
 		case opcode::op_c_cos_f: cell_put_float(regs, ci.a, std::cos(cell_float_of_bits(regs.payload[ci.b]))); ++ip; break;
 		case opcode::op_c_sqrt_f: cell_put_float(regs, ci.a, std::sqrt(cell_float_of_bits(regs.payload[ci.b]))); ++ip; break;
 		case opcode::op_c_mov_k: {

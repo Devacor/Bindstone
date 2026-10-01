@@ -170,6 +170,7 @@ namespace jai {
         // Consumes an optional '&' after a return type and wraps it as a reference
         // return (int& f() / -> int& / auto&). No-op when the next token isn't '&'.
         type_info_ptr wrap_reference_return_type(type_info_ptr return_type);
+        bool reference_method_head() const;
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);

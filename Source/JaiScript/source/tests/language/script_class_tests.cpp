@@ -1664,6 +1664,23 @@ public:
             check_eq(err[0], err[1], "backends agree on typed-arg decline outcome");
         });
 
+        // C++ spells a reference-returning method with the reference on the leading type, in a class body too
+        test("leading_reference_return_type_on_methods", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                const std::string tag = use_vm ? " (vm)" : " (interpreter)";
+                auto run = [&](const char* src) {
+                    try { return e->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+                };
+                check_eq(std::string("5"), run("class Counter { int n = 0; int& slot() { return n; } } var c = Counter(); auto& r = c.slot(); r = 5; to_string(c.n)"), "int& method" + tag);
+                check_eq(std::string("9"), run("class Box { int v = 1; Box& pick(Box& other) { return other; } } var a = Box(); var b = Box(); auto& r = a.pick(b); r.v = 9; to_string(b.v)"), "a method returning its own class by reference" + tag);
+                check_eq(std::string("3"), run("class V { int x = 3; int& operator[](int i) { return x; } } var v = V(); to_string(v[0])"), "an operator returning a reference" + tag);
+                check_eq(std::string("7"), run("class W { static int& first(array<int>& a) { return a[0]; } } var xs = [1, 2]; auto& r = W::first(xs); r = 7; to_string(xs[0])"), "a static method" + tag);
+            }
+        });
+
         test("member_access_hot_reload_and_host_api", [this]() {
             // Hot reload is permissive: enforcement consults the CURRENT class_definition
             // at access time — instances keep working, new accesses follow new labels.

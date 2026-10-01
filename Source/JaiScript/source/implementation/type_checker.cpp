@@ -3632,6 +3632,10 @@ private:
             case node_type::range_for_stmt: {
                 auto* f = static_cast<range_for_stmt*>(s);
                 const ctype container = infer(f->container.get());
+                if (f->variable_name == "entry#" && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k) {   // for (auto [k, v] : x)
+                    diag(diag_level::error, f->container->location, "a structured binding takes a map's entries, its key and value: cannot bind '" +
+                         ctype_name(container) + "' to [k, v]");
+                }
                 // the elements' static type: an array's element type, a string's char; a var container, an array<var> or anything
                 // else has none (Dev ruling 2026-09-28)
                 ctype elem{};

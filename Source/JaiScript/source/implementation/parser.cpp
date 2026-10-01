@@ -3718,6 +3718,57 @@ checked_result<statement_ptr> parser::for_statement() {
             is_reference = true;
         }
 
+        // for (auto [k, v] : m): the entry's key and value by name, C++17's structured binding. The loop walks a hidden pair
+        // variable and each name is a reference to its half, so by value they name the iteration's copy and with auto& the
+        // value aliases the map's entry
+        const token_type spelled = (*stream_)[savedPosition + (is_const ? 1 : 0)].type;
+        if (check(token_type::left_bracket) && (spelled == token_type::auto_keyword || spelled == token_type::var_keyword)) {
+            const token bracket = advance();
+            const bool auto_spelled = !element_type;
+            std::vector<token> names;
+            do {
+                JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected a name in the structured binding", "variable"));
+                names.push_back(name);
+            } while (match(token_type::comma));
+            JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after the structured binding's names"));
+            if (names.size() != 2) {
+                report_error("A map entry binds two names, the key and the value: for (auto [k, v] : m)", bracket);
+                return make_error_code(parse_error_code::unexpected_token);
+            }
+            JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after the structured binding"));
+            JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
+            JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after range expression"));
+
+            block_scope_guard loop_var_scope(*this);
+            const auto [pair_id, pair_name] = hidden_name("entry");
+            const size_t pair_slot = in_function_scope() ? allocate_slot(pair_id) : SIZE_MAX;
+            std::vector<declaration_ptr> bindings;
+            const char* halves[2] = {"first", "second"};
+            for (size_t i = 0; i < 2; ++i) {
+                // the key is a copy (a map key is read-only, as std::map's const Key is); the value names the pair's half
+                type_info_ptr binding_type = element_type;
+                if (i == 1) {
+                    type_info ref_type(script_value_type::jai_reference_type);
+                    ref_type.type_name = auto_spelled ? "auto&" : element_type->type_name + "&";
+                    ref_type.type_params.push_back(element_type);
+                    ref_type.id = symbolizer_->intern(ref_type.canonical_name());
+                    binding_type = store_type_info(std::move(ref_type));
+                }
+                auto [half_id, half_view] = symbolizer_->intern_with_view(halves[i]);
+                auto half = std::make_shared<member_expr>(names[i].location, hidden_identifier(pair_id, pair_name, names[i].location), half_view, half_id, false);
+                auto binding = std::make_shared<variable_decl>(names[i].location, binding_type, names[i].lexeme,
+                                                               get_symbol_id(names[i]), half);
+                if (in_function_scope()) { binding->slot_index = allocate_slot(binding->name_id); }
+                bindings.push_back(std::move(binding));
+            }
+            JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
+            bindings.push_back(std::make_shared<statement_decl>(body->location, body));
+            auto block = std::make_shared<block_stmt>(body->location, std::move(bindings));
+            auto result = std::make_shared<range_for_stmt>(forToken.location, element_type, pair_name, pair_id, is_reference, is_const, container, block);
+            result->variable_slot_index = pair_slot;
+            return result;
+        }
+
         // Must have an identifier
         if (check(token_type::identifier)) {
             token varName = advance();

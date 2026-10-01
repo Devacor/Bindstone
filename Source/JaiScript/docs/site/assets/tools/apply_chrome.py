@@ -114,7 +114,7 @@ SECTION_INDEX_DESC = {
     "embedding/index.html":
         "Fifteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, and host math types.",
     "examples/index.html":
-        "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel - and what each one proves.",
+        "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel, an online RPG and a DOOM port - and what each one proves.",
     "reference/index.html":
         "Quick-lookup tables distilled from the guide and embedding chapters: operators, types, conversions, the host API, and rules of thumb.",
     "index.html":

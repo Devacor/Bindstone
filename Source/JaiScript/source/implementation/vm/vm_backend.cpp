@@ -12923,24 +12923,22 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 			auto method_env = std::make_shared<environment>(closure_env, symbolizer_, this_obj);
 			method_env->define(this_id_, this_obj);
 
-			// The capture env's OWN storage only, never a global behind its parent
-			for (const auto& capture : proto.captures) {
-				if (capture.symbol_id == this_id_) continue;
-				if (script_value* captured = captureEnv->get_own_value_ptr(capture.symbol_id)) {
-					method_env->define(capture.symbol_id, *captured);
+			// The other captures sit in front of the instance scope - the capture env's OWN storage only, never a global behind
+			// its parent - so a call sees them ahead of the members (KEEP BYTE-PARALLEL with interpreter::visit_lambda_expr)
+			std::shared_ptr<environment> carrier;
+			auto carry = [&](uint64_t var_id) {
+				if (var_id == this_id_) { return; }
+				if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
+					if (!carrier) { carrier = std::make_shared<environment>(method_env, symbolizer_); }
+					carrier->define(var_id, *captured);
 				}
-			}
-
+			};
+			for (const auto& capture : proto.captures) { carry(capture.symbol_id); }
 			if (has_default_capture) {
-				for (uint64_t var_id : proto.used_variables) {
-					if (var_id == this_id_) continue;
-					if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
-						method_env->define(var_id, *captured);
-					}
-				}
+				for (uint64_t var_id : proto.used_variables) { carry(var_id); }
 			}
 
-			final_closure_env = method_env;
+			final_closure_env = carrier ? carrier : method_env;
 		} else {
 			final_closure_env = captureEnv;
 		}

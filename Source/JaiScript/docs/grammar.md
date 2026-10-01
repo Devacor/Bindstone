@@ -628,9 +628,10 @@ function f = [](x) { return x * 2; };       // top level, function bodies, names
 function g;                                 // starts null; assign later: g = f;
 class K { function cb = [](){ return 1; }; }   // fields too
 
-var d = function(x) { return x * 2; };      // anonymous function EXPRESSION - a
-apply(function(v) { return v + 1; }, 41);   // no-capture lambda; legal anywhere an
-function(a, b) { return a * b; }(6, 7);     // expression is, incl. args and IIFE
+var d = function(x) { return x * 2; };      // anonymous function EXPRESSION - the
+apply(function(v) { return v + 1; }, 41);   // JavaScript form: a [&] lambda; legal anywhere
+function(a, b) { return a * b; }(6, 7);     // an expression is, incl. args and IIFE
+var adder = function(x) { return function(y) { return x + y; }; };   // adder(2)(3) is 5
 ```
 
 Parameters and defaults:
@@ -768,7 +769,8 @@ auto h = [&, multiplier]() { counter += multiplier; }; // by-ref default, one by
 auto m = [this]() { return health; };                  // inside a method
 
 // An empty [] captures nothing, and a named list captures only what it names:
-// a lambda that reads an enclosing local lists it or takes a default.
+// a lambda that reads an enclosing local lists it or takes a default. An anonymous
+// function(...) expression is the JavaScript form: it closes over its scope as [&] does.
 function make() {
     int base = 10;
     auto n = [base]() { return base + 1; };            // 11

@@ -9001,26 +9001,23 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             auto method_env = get_pooled_method_environment(closure_env, this_obj);
             method_env->define(this_id, this_obj);
 
-            // Copy all captured variables (except 'this') into the method_environment -
-            // the capture env's OWN storage only, never a global behind its parent
-            for (const auto& capture : expr->captures) {
-                if (capture.symbol_id == this_id) continue;
-                if (script_value* captured = captureEnv->get_own_value_ptr(capture.symbol_id)) {
-                    method_env->define(capture.symbol_id, *captured);
+            // The other captures sit in an environment in front of the instance scope - the capture env's OWN storage only,
+            // never a global behind its parent - so a call sees them ahead of the members, as a lambda's own names
+            // (a method env as the closure is replaced by the call's own; KEEP BYTE-PARALLEL with vm_backend::exec_closure)
+            std::shared_ptr<environment> carrier;
+            auto carry = [&](uint64_t var_id) {
+                if (var_id == this_id) { return; }
+                if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
+                    if (!carrier) { carrier = std::make_shared<environment>(method_env, string_symbolizer_); }
+                    carrier->define(var_id, *captured);
                 }
-            }
-
-            // Also copy default-captured variables
+            };
+            for (const auto& capture : expr->captures) { carry(capture.symbol_id); }
             if (has_default_capture) {
-                for (uint64_t var_id : free_names) {
-                    if (var_id == this_id) continue;
-                    if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
-                        method_env->define(var_id, *captured);
-                    }
-                }
+                for (uint64_t var_id : free_names) { carry(var_id); }
             }
 
-            final_closure_env = method_env;
+            final_closure_env = carrier ? carrier : method_env;
         } else {
             final_closure_env = captureEnv;
         }

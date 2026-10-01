@@ -2516,34 +2516,30 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     return bite;
 }
 
-void engine::record_field_migration(std::string_view a_className, uint64_t a_fieldId,
-	field_migration_outcome a_outcome, const script_value* a_before, const script_value* a_after) {
-	if (!hot_reload_reporting_) { return; }
-	auto type_name = [this](const script_value* a_value) -> std::string {
-		if (!a_value) { return "<absent>"; }
-		const auto& value = a_value->deref();
-		if (value.is_null()) { return "null"; }
-		if (auto type = value.get_type_info(); type && type->base_type != script_value_type::jai_any_type && type->type_name != "auto") {
-			return type->canonical_name();
-		}
-		return detail::slot_source_type_name(value, this);
-	};
-	const std::string old_type = type_name(a_before);
-	const std::string new_type = type_name(a_after);
-	// An identity conversion preserves storage's value/type; it is not a retype.
-	if (a_outcome == field_migration_outcome::converted && old_type == new_type) {
-		a_outcome = field_migration_outcome::preserved;
-	}
-	const std::string_view field_name = get_symbolizer()->get_string(a_fieldId);
-	for (auto& report : hot_reload_reports_) {
-		if (report.class_name == a_className && report.field_name == field_name &&
-			report.old_type == old_type && report.new_type == new_type && report.outcome == a_outcome) {
-			++report.count;
-			return;
-		}
-	}
-	hot_reload_reports_.push_back(field_migration_report{
-		std::string(a_className), std::string(field_name), old_type, new_type, a_outcome, 1});
+void engine::record_field_migration(std::string_view class_name, uint64_t field_id, field_migration_outcome outcome,
+                                    const script_value* before, const script_value* after) {
+    if (!hot_reload_reporting_) { return; }
+    auto type_name = [this](const script_value* stored) -> std::string {
+        if (!stored) { return "<absent>"; }
+        const auto& value = stored->deref();
+        if (value.is_null()) { return "null"; }
+        if (auto type = value.get_type_info(); type && type->base_type != script_value_type::jai_any_type && type->type_name != "auto") {
+            return type->canonical_name();
+        }
+        return detail::slot_source_type_name(value, this);
+    };
+    const std::string old_type = type_name(before);
+    const std::string new_type = type_name(after);
+    if (outcome == field_migration_outcome::converted && old_type == new_type) { outcome = field_migration_outcome::preserved; }
+    const std::string_view field_name = get_symbolizer()->get_string(field_id);
+    for (auto& report : hot_reload_reports_) {
+        if (report.class_name == class_name && report.field_name == field_name &&
+            report.old_type == old_type && report.new_type == new_type && report.outcome == outcome) {
+            ++report.count;
+            return;
+        }
+    }
+    hot_reload_reports_.push_back(field_migration_report{std::string(class_name), std::string(field_name), old_type, new_type, outcome, 1});
 }
 
 void engine::static_checking(check_mode mode) {

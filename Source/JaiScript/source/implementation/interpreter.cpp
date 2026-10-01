@@ -8461,27 +8461,52 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     bool has_default_capture = (expr->default_capture != lambda_expr::capture_default::none);
     
     
-	// Analyze free uses once at closure creation; named lists must be exhaustive.
-	std::unordered_set<std::string> used_variables;
-	std::unordered_set<uint64_t> own_names;
-	for (const auto& parameter : expr->parameters) { own_names.insert(parameter.symbol_id); }
-	for (const auto& capture : expr->captures) {
-		if (capture.initializer) { own_names.insert(capture.symbol_id); }
-	}
-	detail::body_walker walker;
-	walker.symbolizer = string_symbolizer_;
-	walker.on_declared = [&](uint64_t a_id) { own_names.insert(a_id); };
-	walker.stmt(expr->body);
-	walker.on_declared = {};
-	walker.on_identifier = [&](identifier_expr* a_identifier) {
-		if (!a_identifier->global_qualified && !own_names.count(a_identifier->symbol_id)) {
-			used_variables.insert(std::string(a_identifier->name));
-		}
-	};
-	bool uses_instance = false;
-	walker.on_instance = [&]() { uses_instance = true; };
-	walker.stmt(expr->body);
-	auto program_scope = detail::lambda_parent_scope(closure_env);
+    const uint64_t this_id = string_symbolizer_->get_this_id();
+    for (auto& capture : expr->captures) {
+        if (capture.symbol_id == UINT64_MAX) {
+            capture.symbol_id = string_symbolizer_->intern(capture.name);
+        }
+    }
+    // The body's free names, once per node (KEEP BYTE-PARALLEL with vm_compiler::compile_lambda's used_variables)
+    if (!expr->free_names_built) {
+        std::unordered_set<uint64_t> declared;
+        for (const auto& p : expr->parameters) {
+            declared.insert(p.symbol_id != UINT64_MAX ? p.symbol_id : string_symbolizer_->intern(p.name));
+        }
+        detail::body_walker walker;
+        walker.symbolizer = string_symbolizer_;
+        walker.on_declared = [&declared](uint64_t id) { declared.insert(id); };
+        walker.stmt(expr->body);
+        walker.on_declared = {};
+        std::unordered_set<uint64_t> seen;
+        walker.on_identifier = [&](identifier_expr* ident) {
+            if (!ident->global_qualified && !declared.count(ident->symbol_id) && seen.insert(ident->symbol_id).second) {
+                expr->free_names.push_back(ident->symbol_id);
+            }
+        };
+        walker.on_instance = [&]() {
+            if (seen.insert(this_id).second) { expr->free_names.push_back(this_id); }
+        };
+        walker.stmt(expr->body);
+        for (uint64_t sym : expr->chained_outer_names) {
+            if (!declared.count(sym) && seen.insert(sym).second) { expr->free_names.push_back(sym); }
+        }
+        expr->free_names_built = true;
+    }
+    const std::vector<uint64_t>& free_names = expr->free_names;
+    const bool uses_instance = std::find(free_names.begin(), free_names.end(), this_id) != free_names.end();
+    bool captures_this = has_default_capture && uses_instance;
+    for (const auto& capture : expr->captures) {
+        if (capture.symbol_id == this_id) {
+            captures_this = true;
+            break;
+        }
+    }
+    if (uses_instance && !captures_this) {
+        return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+            "Lambda capture list does not capture 'this'; use [this], [=] or [&]");
+    }
+    auto program_scope = detail::lambda_parent_scope(closure_env);
 
     // ----------------------------------------------------------------
     // OUTER-LOCAL SLOT CAPTURE
@@ -8758,61 +8783,30 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         expr->outer_slot_plan_built = true;
     }
 
-	// A named list does not acquire unlisted outer slots as a fallback.
-	if (!has_default_capture) {
-		for (const auto& ref : outer_slot_refs) {
-			bool listed = std::any_of(expr->captures.begin(), expr->captures.end(),
-				[&](const auto& a_capture) { return a_capture.symbol_id == ref.symbol_id; });
-			if (!listed) {
-				return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
-					"Lambda capture list does not capture enclosing local '{0}'", ref.symbol_id);
-			}
-		}
-		for (const auto& name : used_variables) {
-			const uint64_t id = string_symbolizer_->intern(name);
-			bool listed = std::any_of(expr->captures.begin(), expr->captures.end(),
-				[&](const auto& a_capture) { return a_capture.symbol_id == id; });
-			bool this_listed = std::any_of(expr->captures.begin(), expr->captures.end(),
-				[](const auto& a_capture) { return a_capture.name == "this"; });
-			if (listed) { continue; }
-			auto source = detail::resolve_capture_source(nullptr, environment_.get(), member_scope_, id);
-			if (source.global || source.what == detail::capture_source::kind::miss) { continue; }
-			if (this_listed && (source.what == detail::capture_source::kind::member ||
-				source.what == detail::capture_source::kind::cpp_property || source.what == detail::capture_source::kind::shadow)) { continue; }
-			return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
-				"Lambda capture list does not capture enclosing name '{0}'", id);
-		}
-	}
-	if (has_default_capture) {
-		for (uint64_t chained : expr->chained_outer_names) {
-			used_variables.insert(std::string(string_symbolizer_->get_string(chained)));
-		}
-	}
-	bool needs_capture_env = has_explicit_captures || (has_default_capture && (!used_variables.empty() || uses_instance));
-	// Namespace variables remain live program bindings without a value capture.
-	needs_capture_env = needs_capture_env || (program_scope && program_scope != get_global_environment());
-
-    // Pre-cache capture symbol IDs for optimization
-    uint64_t this_id = string_symbolizer_->get_this_id();
-    for (auto& capture : expr->captures) {
-        if (capture.symbol_id == UINT64_MAX) {
-            capture.symbol_id = string_symbolizer_->intern(capture.name);
+    // A capture list names everything the lambda captures (KEEP BYTE-PARALLEL with vm_backend::exec_closure)
+    if (!has_default_capture) {
+        auto listed = [&](uint64_t id) {
+            return std::any_of(expr->captures.begin(), expr->captures.end(), [id](const auto& c) { return c.symbol_id == id; });
+        };
+        for (const auto& ref : outer_slot_refs) {
+            if (!listed(ref.symbol_id)) {
+                return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+                    "Lambda capture list does not capture enclosing local '{0}'; name it or use [=] or [&]", ref.symbol_id);
+            }
+        }
+        for (uint64_t id : free_names) {
+            if (id == this_id || listed(id)) { continue; }
+            auto source = detail::resolve_capture_source(nullptr, environment_.get(), member_scope_, id);
+            if (source.global || source.what == detail::capture_source::kind::miss) { continue; }
+            if (captures_this && (source.what == detail::capture_source::kind::member ||
+                source.what == detail::capture_source::kind::cpp_property || source.what == detail::capture_source::kind::shadow)) { continue; }
+            return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+                "Lambda capture list does not capture enclosing name '{0}'; name it, or use [this], [=] or [&]", id);
         }
     }
-
-    // Check if [this] is captured - we'll need special handling
-    bool captures_this = has_default_capture && uses_instance;
-    for (const auto& capture : expr->captures) {
-        if (capture.symbol_id == this_id) {
-            captures_this = true;
-            break;
-        }
-    }
-
-	if (uses_instance && !captures_this) {
-		return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
-			"Lambda instance access requires [this], [=], or [&]");
-	}
+    // A closure's parent is its program scope (a namespace keeps its live variables), never the creating frame
+    const bool needs_capture_env = has_explicit_captures || !outer_slot_refs.empty() || (has_default_capture && !free_names.empty()) ||
+        (program_scope && program_scope != get_global_environment());
     std::shared_ptr<environment> final_closure_env;
 
     if (needs_capture_env) {
@@ -8830,19 +8824,19 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // global env gives correct semantics without the lifecycle hazard.
         auto captureEnv = std::make_shared<environment>(program_scope, string_symbolizer_);
         
-		if (captures_this && has_default_capture && uses_instance) {
-			auto result = environment_->get(this_id);
-			if (!result) { return result.error_value(); }
-			captureEnv->define(this_id, script_value(result.value().deref()));
-		}
+        if (captures_this && has_default_capture) {
+            auto result = environment_->get(this_id);
+            if (!result) { return result.error_value(); }
+            captureEnv->define(this_id, script_value(result.value().deref()));
+        }
         // Process default captures first ([=] or [&])
-        if (has_default_capture && !used_variables.empty()) {
+        if (has_default_capture && !free_names.empty()) {
             bool capture_by_ref = (expr->default_capture == lambda_expr::capture_default::by_reference);
-            
-            for (const auto& varName : used_variables) {
+
+            for (uint64_t var_id : free_names) {
+                if (var_id == this_id) { continue; }
                 // Check if this variable is explicitly overridden in the capture list
                 bool is_overridden = false;
-                uint64_t var_id = string_symbolizer_->intern(varName);
                 for (const auto& capture : expr->captures) {
                     if (capture.symbol_id == var_id) {
                         is_overridden = true;
@@ -9001,10 +8995,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             // Create a method_environment with the captured 'this' object
             // The parent is closure_env (the environment where the lambda was defined)
             // Use pooled environment to avoid creating infinite parent chains
-            auto method_env = get_pooled_method_environment(
-                closure_env,
-                this_obj
-            );
+            auto method_env = get_pooled_method_environment(closure_env, this_obj);
             method_env->define(this_id, this_obj);
 
             // Copy all captured variables (except 'this') into the method_environment -
@@ -9018,8 +9009,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
 
             // Also copy default-captured variables
             if (has_default_capture) {
-                for (const auto& varName : used_variables) {
-                    uint64_t var_id = string_symbolizer_->intern(varName);
+                for (uint64_t var_id : free_names) {
                     if (var_id == this_id) continue;
                     if (script_value* captured = captureEnv->get_own_value_ptr(var_id)) {
                         method_env->define(var_id, *captured);

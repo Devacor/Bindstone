@@ -1,4 +1,3 @@
-#include <jaiscript/detail/return_flow.hpp>
 // Inlined leaves (docs/typed_regions_design.md, "Inlined leaves"): a plain identifier call the checker resolved to one small free
 // script function compiles at its call site as the callee's body. The call becomes a temp: the operands the statement evaluates
 // before the call go into typed temps first, in program order (the spill), then the graft declares the result temp (a guard on
@@ -8,6 +7,7 @@
 // replaced by their temps. The caller's AST is never changed: the interpreter walks it, and the fallback compiles it.
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/return_flow.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/transient_read.hpp>
@@ -850,9 +850,9 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
 	const type_info* rt = fn->return_type.get();
-	if (detail::requires_return_value(rt) && !detail::has_complete_return(*fn)) return "a callee with an incomplete required return";
 	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0) || (any_type(rt) && untyped_result_kind(call, fn, frame) != script_value_type::jai_null_type))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
+	if (detail::requires_return_value(rt) && !detail::has_complete_return(*fn)) return "a callee with an incomplete required return";
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
 		const expression* a = call->arguments[i].get();
@@ -864,15 +864,15 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get()) || typed_to_name) || p.ref_escaping) return "a reference parameter that is not a var&";   // `var& p` (the parser keeps the referent's type and the reference flag apart)
 			if (a->get_type() == node_type::identifier_expr) {
 				const auto* identifier = static_cast<const identifier_expr*>(a);
-				if (p.type && p.type->base_type != script_value_type::jai_any_type && p.type->type_name != "auto") {
+				if (identifier->global_qualified) return "a reference argument spelled ::name";
+				if (identifier->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
+				if (p.type && !any_type(p.type.get()) && p.type->type_name != "auto") {   // the alias skips the bind's admission check: a local declared another type (var included) binds through the call
 					const type_info* actual = nullptr;
 					if (frame && identifier->slot_index < frame->size()) { actual = (*frame)[identifier->slot_index]; }
 					else if (auto found = callable_.slot_types.find(static_cast<uint32_t>(identifier->slot_index)); found != callable_.slot_types.end()) { actual = found->second; }
 					if (actual && actual->is_reference()) { actual = actual->element_type().get(); }
-					if (!actual || !actual->equals(*p.type)) { return "a typed reference that needs its ordinary binding check"; }
+					if (actual && !actual->equals(*p.type)) return "a typed reference argument of another declared type";
 				}
-				if (static_cast<const identifier_expr*>(a)->global_qualified) return "a reference argument spelled ::name";
-				if (static_cast<const identifier_expr*>(a)->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
 				continue;
 			}
 			if (a->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(a)->op.type == token_type::left_bracket) {

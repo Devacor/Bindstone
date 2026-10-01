@@ -1487,12 +1487,15 @@ private:
 				every_config(r.label, std::to_string(r.errors), [&](engine& e) { return std::to_string(e.check(r.src).error_count()); });
 			}
 		});
-		test("a_bare_return_in_a_typed_function_is_a_warning_not_an_error", [this]() {
-			every_config("bare return", "0|1", [](engine& e) {
-				const auto rep = e.check("function f() -> int { return; }");
-				size_t warnings = 0;
-				for (const auto& d : rep.diagnostics) { if (d.severity != check_diagnostic::level::error) { ++warnings; } }
-				return std::to_string(rep.error_count()) + "|" + std::to_string(warnings > 0 ? 1 : 0);
+		test("a_bare_return_is_an_error_where_the_result_holds_no_null", [this]() {
+			every_config("bare return", "1|0 0|1", [](engine& e) {
+				auto shape = [&](const char* src) {
+					const auto rep = e.check(src);
+					size_t warnings = 0;
+					for (const auto& d : rep.diagnostics) { if (d.severity != check_diagnostic::level::error) { ++warnings; } }
+					return std::to_string(rep.error_count()) + "|" + std::to_string(warnings > 0 ? 1 : 0);
+				};
+				return shape("function f() -> int { return; }") + " " + shape("class P {} function g() -> P { return; }");
 			});
 		});
 		test("a_host_global_types_its_uses", [this]() {

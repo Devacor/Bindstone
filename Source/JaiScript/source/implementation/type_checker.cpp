@@ -465,10 +465,11 @@ private:
              top != enums_.end() ? top->second->location.line : 0, top != enums_.end() ? top->second->location.column : 0);
     }
 
-	struct capture_ctx {
-		size_t base = 0;
-		const lambda_expr* lambda = nullptr;
-	};
+    // Live lambda bodies: a name declared below base is the lambda's own; above it the capture list must admit it
+    struct capture_ctx {
+        size_t base = 0;
+        const lambda_expr* lambda = nullptr;
+    };
     std::vector<capture_ctx> capture_stack_;
 
     struct fn_ctx {
@@ -2361,7 +2362,6 @@ private:
             case script_value_type::jai_object_type:
             case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
             case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type: case script_value_type::jai_color_type:
-            case script_value_type::jai_function_type:
                 return reference_type_compatible(arg, ctype_from_type_info(p.type.get()));
             case script_value_type::jai_array_type: case script_value_type::jai_map_type:
             case script_value_type::jai_shared_ptr_type: case script_value_type::jai_weak_ptr_type:
@@ -2684,7 +2684,7 @@ private:
 			case node_type::this_expr:
 				if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
 					capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
-					diag(diag_level::error, e->location, "lambda instance access requires [this], [=], or [&]");
+					diag(diag_level::error, e->location, "lambda capture list does not capture 'this'; use [this], [=] or [&]");
 				}
 				return class_ctx_ ? ctype::object(class_ctx_name_) : ctype{};
 			case node_type::super_expr:
@@ -2752,10 +2752,10 @@ private:
 					std::find(namespace_scopes_.begin(), namespace_scopes_.end(), scope_index) != namespace_scopes_.end();
 				if (program_scope || scope_index >= cap.base || cap.lambda->default_capture != lambda_expr::capture_default::none) { continue; }
 				bool listed = std::any_of(cap.lambda->captures.begin(), cap.lambda->captures.end(),
-					[&](const auto& a_capture) { return a_capture.name == id->name; });
+					[&](const auto& c) { return c.name == id->name; });
 				if (!listed) {
 					diag(diag_level::error, id->location, "lambda capture list does not capture enclosing local '" +
-						std::string(id->name) + "'; use [=], [&], or a named capture", local->line, local->column);
+						std::string(id->name) + "'; name it or use [=] or [&]", local->line, local->column);
 				}
 			}
 			return local->dynamic ? (local->alias.kind != ctype::unknown ? local->alias : ctype{}) : local->type;
@@ -2769,7 +2769,7 @@ private:
 				if (global_tier_name(id->name)) { return {}; }
 				if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
 					capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
-					diag(diag_level::error, id->location, "lambda capture list: instance member '" + std::string(id->name) + "' requires [this], [=], or [&]");
+					diag(diag_level::error, id->location, "lambda capture list does not capture 'this' for member '" + std::string(id->name) + "'; use [this], [=] or [&]");
 					return {};
 				}
 				if (access_denied(hit, id->name, id->location)) { return {}; }
@@ -3610,6 +3610,11 @@ private:
 			else { open.inferred_return = k; }
 		}
 		if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
+		if (!r->value && requires_return_value(fn.ret)) {
+			diag(diag_level::error, r->location, "'" + std::string(fn.name) + "' declared to return '" +
+				 fn.ret->canonical_name() + "' returns no value here", fn.line, fn.column);
+			return;
+		}
 		if (fn.ret->base_type == script_value_type::jai_reference_type && r->value) {
 			const type_info* referent = fn.ret->element_type().get();
 			if (referent && !reference_type_compatible(value, ctype_from_type_info(referent))) {
@@ -3629,10 +3634,9 @@ private:
 			return;
 		}
 		if (!r->value) {
-			// Runtime returns null here (typed-return conversion skipped for bare returns
-			// per HEAD behavior): warning severity, matching the fall-off-the-end rule.
-			diag(requires_return_value(fn.ret) ? diag_level::error : diag_level::warning, r->location, "'" + std::string(fn.name) + "' declared to return '" +
-				 fn.ret->canonical_name() + "' returns no value here", fn.line, fn.column);
+			// a nullable result (a class, a handle, a container) returns null here: warning severity, like falling off the end
+			diag(diag_level::warning, r->location, "'" + std::string(fn.name) + "' declared to return '" +
+				 fn.ret->canonical_name() + "' returns no value here (returns null)", fn.line, fn.column);
 			return;
 		}
 		if (!assignable(value, ret)) {
@@ -4063,7 +4067,7 @@ private:
             if (extra_globals_.count(name) || engine_knows_name(name)) { continue; }
             undeclared(l->location, cap.name);
         }
-		capture_stack_.push_back(capture_ctx{scopes_.size(), l});
+        capture_stack_.push_back(capture_ctx{scopes_.size(), l});
 
         scopes_.emplace_back();
         fn_ctx ctx{l->return_type.get(), /*is_coroutine=*/false, "lambda",
@@ -4076,17 +4080,17 @@ private:
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         define_params(l->parameters, l->location);
         for (const auto& cap : l->captures) {
-            if (!cap.initializer) {
-				if (var_entry* original = find_local(cap.name)) { scopes_.back().emplace(cap.name, *original); }
-				continue;
-			}
+            if (!cap.initializer) {   // a named capture is the lambda's own copy of the variable, typed as it
+                if (var_entry* original = find_local(cap.name)) { scopes_.back().emplace(cap.name, *original); }
+                continue;
+            }
             var_entry entry;
             entry.dynamic = true;   // the lambda's own copy, typed by the value it holds
             entry.line = l->location.line; entry.column = l->location.column;
             scopes_.back().emplace(cap.name, std::move(entry));
         }
         walk_stmt(l->body.get());
-		check_return_paths(l->return_type.get(), l->body.get(), l->location, "lambda");
+        check_falls_off_end(l->return_type.get(), l->body.get(), l->location, "lambda");
         {
             const fn_ctx& done = fn_stack_.back();
             const uint8_t kind = !l->return_type && !done.inferred_mixed && !has_includes_ ? done.inferred_return : uint8_t(0);
@@ -4097,29 +4101,25 @@ private:
         capture_stack_.pop_back();
     }
 
-	// Unknown exception paths remain advisory; structurally reachable fall-through violates a required result.
-	void check_falls_off_end(const function_decl* a_function) {
-		if (!a_function->return_type || a_function->is_coroutine || !a_function->body) { return; }
-		check_return_paths(a_function->return_type.get(), a_function->body.get(), a_function->location, a_function->name);
-	}
+    // ---------------------------------------------------- falling off the end
 
-	void check_return_paths(const type_info* a_returnType, const statement* a_body,
-		const source_location& a_location, std::string_view a_name) {
-		if (!a_returnType || !a_body) { return; }
-		ctype ret = ctype_from_type_info(a_returnType);
-		if ((ret.is_unknown() && !requires_return_value(a_returnType)) || ret.kind == ctype::null_k) { return; }
-		auto flow = ReturnFlow(a_returnType).analyze(a_body);
-		if (!(flow.paths & (ReturnFlow::NORMAL | ReturnFlow::MAYBE_NORMAL))) { return; }
-		const bool definite = (flow.paths & ReturnFlow::NORMAL) != 0;
-		diag(definite && requires_return_value(a_returnType) ? diag_level::error : diag_level::warning,
-			a_location, "'" + std::string(a_name) + "' declared to return '" +
-			a_returnType->canonical_name() + "' may reach the end of its body without returning a value");
-	}
+    void check_falls_off_end(const function_decl* fn) {
+        if (fn->is_coroutine) { return; }
+        check_falls_off_end(fn->return_type.get(), fn->body.get(), fn->location, fn->name);
+    }
 
-	bool guarantees_exit_block(const std::vector<declaration_ptr>& a_declarations) {
-		auto result = ReturnFlow{}.sequence(a_declarations);
-		return !(result.paths & (ReturnFlow::NORMAL | ReturnFlow::MAYBE_NORMAL));
-	}
+    // A result that holds no null is a load error when a path reaches the end of the body; the end reached only through
+    // a catch the analysis cannot prove runs, or a nullable result, stays a warning
+    void check_falls_off_end(const type_info* return_type, const statement* body, const source_location& location, std::string_view name) {
+        if (!return_type || !body) { return; }
+        ctype ret = ctype_from_type_info(return_type);
+        if ((ret.is_unknown() && !requires_return_value(return_type)) || ret.kind == ctype::null_k) { return; }
+        const auto flow = return_flow(return_type).analyze(body);
+        if (!(flow.paths & (return_flow::normal | return_flow::maybe_normal))) { return; }
+        const bool required = requires_return_value(return_type) && (flow.paths & return_flow::normal);
+        diag(required ? diag_level::error : diag_level::warning, location, "'" + std::string(name) + "' declared to return '" +
+             return_type->canonical_name() + "' may reach the end of its body without returning" + (required ? "" : " (returns null)"));
+    }
 
 };
 

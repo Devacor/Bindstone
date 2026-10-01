@@ -1634,6 +1634,8 @@ public:
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				check_true(e->check(src).has_errors(), "strict rejects the referent at load");
+				e->static_checking(jai::check_mode::off);
 				check_eq(std::string("Cannot return reference to 'float' from a function returning 'int&'"),
 				         e->execute(src).as<std::string>());
 			}

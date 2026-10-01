@@ -463,14 +463,14 @@ namespace jai {
         size_t hot_reload_field_migrations() const { return hot_reload_field_migrations_; }
         void count_hot_reload_field_migration() { ++hot_reload_field_migrations_; }
 
-		// Optional migration diagnostics. Poll after execute/import; reports aggregate
-		// until cleared. Disabled by default; ordinary field access does no report work.
-		void hot_reload_reporting(bool a_enabled) { hot_reload_reporting_ = a_enabled; }
-		bool hot_reload_reporting() const noexcept { return hot_reload_reporting_; }
-		const std::vector<field_migration_report>& hot_reload_reports() const noexcept { return hot_reload_reports_; }
-		void clear_hot_reload_reports() { hot_reload_reports_.clear(); }
-		void record_field_migration(std::string_view a_className, uint64_t a_fieldId,
-			field_migration_outcome a_outcome, const script_value* a_before, const script_value* a_after);
+        // Hot-reload migration reports (off by default): with reporting on, every automatic field operation a
+        // reload performs aggregates into hot_reload_reports() until cleared; off, migration records nothing.
+        void hot_reload_reporting(bool enabled) { hot_reload_reporting_ = enabled; }
+        bool hot_reload_reporting() const noexcept { return hot_reload_reporting_; }
+        const std::vector<field_migration_report>& hot_reload_reports() const noexcept { return hot_reload_reports_; }
+        void clear_hot_reload_reports() { hot_reload_reports_.clear(); }
+        void record_field_migration(std::string_view class_name, uint64_t field_id, field_migration_outcome outcome,
+                                    const script_value* before, const script_value* after);
 
         // Serializes IN-REGION chunk compiles engine-wide (unsafe-mode method dispatch
         // lazily compiles on worker threads; compilation copies AST literal strong_ptrs
@@ -1124,10 +1124,9 @@ namespace jai {
         // Cold class-reload boundary: recover surviving worker copies after a failed join.
         void recover_parallel_registrations();
 
-		// Signal receivers and other sink-based host boundaries report errors here.
-		// Converted std::function callbacks instead throw runtime_error on failure or
-		// uncaught script throws (engine_impl.hpp); hosts must handle that boundary.
-		// Default sink is std::cerr; messages include captured script stack traces.
+        // Script errors at a boundary with no error-value channel (signal receivers) route here; a converted
+        // std::function callback throws runtime_error to its host caller instead (engine_impl.hpp). Default sink
+        // is std::cerr; the message includes the script stack trace if captured.
         void set_script_error_handler(std::function<void(const std::string&)> a_handler);
         void report_script_error(const std::string& a_message, std::error_code a_code = {});
 
@@ -1259,8 +1258,8 @@ namespace jai {
         std::unique_ptr<implementation> impl;
 
         size_t hot_reload_field_migrations_ = 0;
-		bool hot_reload_reporting_ = false;
-		std::vector<field_migration_report> hot_reload_reports_;
+        bool hot_reload_reporting_ = false;
+        std::vector<field_migration_report> hot_reload_reports_;
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
         void register_privilege_builtins();
         void set_privileges(privilege flags, bool enabled);

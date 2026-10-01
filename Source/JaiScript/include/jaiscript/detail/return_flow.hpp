@@ -1,163 +1,181 @@
 #pragma once
 
+#ifndef __JAISCRIPT_DETAIL_RETURN_FLOW_HPP__
+#define __JAISCRIPT_DETAIL_RETURN_FLOW_HPP__
+
+// How a function body completes, for the checker's required-return rule and the vm's graft eligibility: a load-time AST
+// walk that adds nothing to a call or a return. A break or continue belongs to its enclosing loop or switch; a literal
+// condition decides its branch the way the runtime's truthiness does.
+
 #include <jaiscript/detail/ast.hpp>
-#include <jaiscript/detail/return_conv.hpp>
 #include <optional>
 
 namespace jai::detail {
 
-	// Completion paths, independent of optimizer reachability. Break/continue belong to their enclosing construct.
-	class ReturnFlow {
+	// A declared return type that holds no null: falling off the end, or a bare return, leaves it without a value
+	inline bool requires_return_value(const type_info* t) {
+		if (!t || t->type_name.empty() || t->type_name == "auto") { return false; }
+		switch (t->base_type) {
+			case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+			case script_value_type::jai_bool_type: case script_value_type::jai_char_type:
+			case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+			case script_value_type::jai_reference_type:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	class return_flow {
 	public:
-		enum : uint8_t { NORMAL = 1, RETURN = 2, THROW = 4, BREAK = 8, CONTINUE = 16, FALLTHROUGH = 32, BARE_RETURN = 64, MAYBE_NORMAL = 128 };
-		struct Result {
-			uint8_t paths{NORMAL};
-			bool mayThrow{false};
+		// maybe_normal: reaches the end only through a catch of an exception the analysis cannot prove is raised
+		enum : uint8_t { normal = 1, returns = 2, throws = 4, breaks = 8, continues = 16, falls_through = 32, bare_return = 64, maybe_normal = 128 };
+		struct result {
+			uint8_t paths = normal;
+			bool may_throw = false;
 		};
 
-		explicit ReturnFlow(const type_info* a_returnType = nullptr) : returnType(a_returnType) {}
+		explicit return_flow(const type_info* return_type = nullptr) : return_type_(return_type) {}
 
 		template <typename Statements>
-		Result sequence(const Statements& a_statements) const {
-			Result result;
-			for (const auto& statement : a_statements) {
-				if (!(result.paths & (NORMAL | MAYBE_NORMAL))) { break; }
-				auto next = analyze(statement.get());
-				const bool definite = (result.paths & NORMAL) != 0;
-				result.paths = static_cast<uint8_t>((result.paths & ~(NORMAL | MAYBE_NORMAL)) |
-					(definite ? next.paths : uncertainNormal(next.paths)));
-				result.mayThrow = result.mayThrow || next.mayThrow;
+		result sequence(const Statements& statements) const {
+			result r;
+			for (const auto& s : statements) {
+				if (!(r.paths & (normal | maybe_normal))) { break; }
+				result next = analyze(s.get());
+				const bool definite = (r.paths & normal) != 0;
+				r.paths = static_cast<uint8_t>((r.paths & ~(normal | maybe_normal)) | (definite ? next.paths : uncertain(next.paths)));
+				r.may_throw = r.may_throw || next.may_throw;
 			}
-			return result;
+			return r;
 		}
 
-		Result analyze(const statement* a_statement) const {
-			if (!a_statement) { return {}; }
-			switch (a_statement->get_type()) {
+		result analyze(const statement* s) const {
+			if (!s) { return {}; }
+			switch (s->get_type()) {
 				case node_type::return_stmt: {
-					const auto* value = static_cast<const return_stmt*>(a_statement);
-					if (!value->value) {
-						return {static_cast<uint8_t>(RETURN | BARE_RETURN), requires_return_value(returnType)};
-					}
-					bool safeLiteral = false;
-					if (!value->binds_reference && value->value->get_type() == node_type::literal_expr) {
-						const auto& literal = static_cast<const literal_expr*>(value->value.get())->value;
-						const auto kind = literal.current_type();
-						safeLiteral = (kind == script_value_type::jai_int_type || kind == script_value_type::jai_float_type ||
+					const auto* ret = static_cast<const return_stmt*>(s);
+					if (!ret->value) { return {static_cast<uint8_t>(returns | bare_return), requires_return_value(return_type_)}; }
+					bool converts_without_error = false;
+					if (!ret->binds_reference && ret->value->get_type() == node_type::literal_expr) {
+						const auto kind = static_cast<const literal_expr*>(ret->value.get())->value.current_type();
+						converts_without_error = (kind == script_value_type::jai_int_type || kind == script_value_type::jai_float_type ||
 							kind == script_value_type::jai_bool_type || kind == script_value_type::jai_char_type) &&
-							(!returnType || returnType->base_type == kind);
+							(!return_type_ || return_type_->base_type == kind);
 					}
-					return {RETURN, !safeLiteral};
+					return {returns, !converts_without_error};
 				}
-				case node_type::break_stmt: return {BREAK, false};
-				case node_type::continue_stmt: return {CONTINUE, false};
-				case node_type::fallthrough_stmt: return {FALLTHROUGH, false};
-				case node_type::block_stmt: return sequence(static_cast<const block_stmt*>(a_statement)->declarations);
-				case node_type::statement_decl: return analyze(static_cast<const statement_decl*>(a_statement)->statement.get());
+				case node_type::break_stmt: return {breaks, false};
+				case node_type::continue_stmt: return {continues, false};
+				case node_type::fallthrough_stmt: return {falls_through, false};
+				case node_type::block_stmt: return sequence(static_cast<const block_stmt*>(s)->declarations);
+				case node_type::statement_decl: return analyze(static_cast<const statement_decl*>(s)->statement.get());
 				case node_type::expression_stmt:
 				case node_type::expression_decl: {
-					const auto* value = a_statement->get_type() == node_type::expression_stmt
-						? static_cast<const expression_stmt*>(a_statement)->expression.get()
-						: static_cast<const expression_decl*>(a_statement)->expression.get();
-					if (value && value->get_type() == node_type::throw_expr) { return {THROW, true}; }
-					return {NORMAL, value && value->get_type() != node_type::literal_expr};
+					const expression* e = s->get_type() == node_type::expression_stmt ? static_cast<const expression_stmt*>(s)->expression.get()
+					                                                                   : static_cast<const expression_decl*>(s)->expression.get();
+					if (e && e->get_type() == node_type::throw_expr) { return {throws, true}; }
+					return {normal, e && e->get_type() != node_type::literal_expr};
 				}
 				case node_type::if_stmt: {
-					const auto* branch = static_cast<const if_stmt*>(a_statement);
-					if (auto condition = literalTruth(branch->condition.get())) {
-						return analyze(*condition ? branch->then_statement.get() : branch->else_statement.get());
+					const auto* branch = static_cast<const if_stmt*>(s);
+					if (auto taken = literal_truth(branch->condition.get())) {
+						return analyze(*taken ? branch->then_statement.get() : branch->else_statement.get());
 					}
-					auto left = analyze(branch->then_statement.get());
-					auto right = analyze(branch->else_statement.get());
-					return {static_cast<uint8_t>(left.paths | right.paths), true};
+					result then_r = analyze(branch->then_statement.get());
+					result else_r = analyze(branch->else_statement.get());
+					return {static_cast<uint8_t>(then_r.paths | else_r.paths), true};
 				}
 				case node_type::while_stmt: {
-					const auto* loop = static_cast<const while_stmt*>(a_statement);
-					return loopResult(loop->condition.get(), analyze(loop->body.get()));
+					const auto* loop = static_cast<const while_stmt*>(s);
+					return loop_result(loop->condition.get(), analyze(loop->body.get()));
 				}
 				case node_type::for_stmt: {
-					const auto* loop = static_cast<const for_stmt*>(a_statement);
-					auto result = analyze(loop->initializer.get());
-					if (!(result.paths & (NORMAL | MAYBE_NORMAL))) { return result; }
-					auto body = loopResult(loop->condition.get(), analyze(loop->body.get()));
-					result.paths = static_cast<uint8_t>((result.paths & ~(NORMAL | MAYBE_NORMAL)) | body.paths);
-					result.mayThrow = result.mayThrow || body.mayThrow || loop->update != nullptr;
-					return result;
+					const auto* loop = static_cast<const for_stmt*>(s);
+					result r = analyze(loop->initializer.get());
+					if (!(r.paths & (normal | maybe_normal))) { return r; }
+					result body = loop_result(loop->condition.get(), analyze(loop->body.get()));
+					r.paths = static_cast<uint8_t>((r.paths & ~(normal | maybe_normal)) | body.paths);
+					r.may_throw = r.may_throw || body.may_throw || loop->update != nullptr;
+					return r;
 				}
 				case node_type::range_for_stmt: {
-					auto body = analyze(static_cast<const range_for_stmt*>(a_statement)->body.get());
-					body.paths = static_cast<uint8_t>(NORMAL | (body.paths & (RETURN | THROW | BARE_RETURN)));
-					body.mayThrow = true;
+					result body = analyze(static_cast<const range_for_stmt*>(s)->body.get());
+					body.paths = static_cast<uint8_t>(normal | (body.paths & (returns | throws | bare_return)));
+					body.may_throw = true;
 					return body;
 				}
 				case node_type::try_stmt: {
-					const auto* attempt = static_cast<const try_stmt*>(a_statement);
-					auto result = analyze(attempt->try_block.get());
-					if (result.mayThrow || (result.paths & THROW)) {
-						auto caught = analyze(attempt->catch_block.get());
-						const uint8_t caughtPaths = (result.paths & THROW) ? caught.paths : uncertainNormal(caught.paths);
-						result.paths = static_cast<uint8_t>((result.paths & ~THROW) | caughtPaths);
-						result.mayThrow = caught.mayThrow;
+					const auto* attempt = static_cast<const try_stmt*>(s);
+					result r = analyze(attempt->try_block.get());
+					if (r.may_throw || (r.paths & throws)) {
+						result caught = analyze(attempt->catch_block.get());
+						r.paths = static_cast<uint8_t>((r.paths & ~throws) | ((r.paths & throws) ? caught.paths : uncertain(caught.paths)));
+						r.may_throw = caught.may_throw;
 					}
-					return result;
+					return r;
 				}
 				case node_type::switch_stmt: {
-					const auto* choice = static_cast<const switch_stmt*>(a_statement);
-					Result next = choice->default_case ? sequence(choice->default_case->body) : Result{};
-					Result result = next;
+					const auto* choice = static_cast<const switch_stmt*>(s);
+					result next = choice->default_case ? sequence(choice->default_case->body) : result{};
+					result r = next;
 					for (size_t i = choice->cases.size(); i-- > 0;) {
-						auto current = sequence(choice->cases[i]->body);
+						result current = sequence(choice->cases[i]->body);
 						uint8_t paths = current.paths;
-						if ((paths & FALLTHROUGH) || (choice->cases[i]->has_fallthrough && (paths & NORMAL))) {
-							paths = static_cast<uint8_t>((paths & ~(FALLTHROUGH | NORMAL)) | next.paths);
-							current.mayThrow = current.mayThrow || next.mayThrow;
+						if ((paths & falls_through) || (choice->cases[i]->has_fallthrough && (paths & normal))) {
+							paths = static_cast<uint8_t>((paths & ~(falls_through | normal)) | next.paths);
+							current.may_throw = current.may_throw || next.may_throw;
 						}
-						if (paths & BREAK) { paths = static_cast<uint8_t>((paths & ~BREAK) | NORMAL); }
+						if (paths & breaks) { paths = static_cast<uint8_t>((paths & ~breaks) | normal); }
 						current.paths = paths;
-						result.paths = static_cast<uint8_t>(result.paths | paths);
-						result.mayThrow = result.mayThrow || current.mayThrow;
+						r.paths = static_cast<uint8_t>(r.paths | paths);
+						r.may_throw = r.may_throw || current.may_throw;
 						next = current;
 					}
-					if (result.paths & BREAK) { result.paths = static_cast<uint8_t>((result.paths & ~BREAK) | NORMAL); }
-					result.mayThrow = true;
-					return result;
+					if (r.paths & breaks) { r.paths = static_cast<uint8_t>((r.paths & ~breaks) | normal); }
+					r.may_throw = true;
+					return r;
 				}
-				default: return {NORMAL, true};
+				default: return {normal, true};
 			}
 		}
 
 	private:
-		const type_info* returnType;
+		const type_info* return_type_;
 
-		static uint8_t uncertainNormal(uint8_t a_paths) {
-			return static_cast<uint8_t>((a_paths & ~NORMAL) | ((a_paths & NORMAL) ? MAYBE_NORMAL : 0));
+		static uint8_t uncertain(uint8_t paths) {
+			return static_cast<uint8_t>((paths & ~normal) | ((paths & normal) ? maybe_normal : 0));
 		}
 
-		static std::optional<bool> literalTruth(const expression* a_expression) {
-			if (!a_expression) { return true; }
-			if (a_expression->get_type() != node_type::literal_expr) { return std::nullopt; }
-			const auto& value = static_cast<const literal_expr*>(a_expression)->value;
-			if (value.is_bool()) { return value.unchecked_as_bool(); }
-			if (value.is_int()) { return value.unchecked_as_int() != 0; }
-			if (value.is_float()) { return value.unchecked_as_float() != 0.0; }
-			if (value.is_char()) { return true; }
-			if (value.is_string()) { return !value.unchecked_as_string().empty(); }
-			if (value.is_null()) { return false; }
+		// a char is truthy whatever its value (the runtime's is_truthy)
+		static std::optional<bool> literal_truth(const expression* e) {
+			if (!e) { return true; }
+			if (e->get_type() != node_type::literal_expr) { return std::nullopt; }
+			const auto& v = static_cast<const literal_expr*>(e)->value;
+			if (v.is_bool()) { return v.unchecked_as_bool(); }
+			if (v.is_int()) { return v.unchecked_as_int() != 0; }
+			if (v.is_float()) { return v.unchecked_as_float() != 0.0; }
+			if (v.is_char()) { return true; }
+			if (v.is_string()) { return !v.unchecked_as_string().empty(); }
+			if (v.is_null()) { return false; }
 			return std::nullopt;
 		}
 
-		Result loopResult(const expression* a_condition, Result a_body) const {
-			auto condition = literalTruth(a_condition);
-			if (condition && !*condition) { return {}; }
-			uint8_t paths = static_cast<uint8_t>(a_body.paths & (RETURN | THROW | BARE_RETURN));
-			if (!condition || (a_body.paths & BREAK)) { paths = static_cast<uint8_t>(paths | NORMAL); }
-			return {paths, a_body.mayThrow || !condition};
+		result loop_result(const expression* condition, result body) const {
+			auto always = literal_truth(condition);
+			if (always && !*always) { return {}; }
+			uint8_t paths = static_cast<uint8_t>(body.paths & (returns | throws | bare_return));
+			if (!always || (body.paths & breaks)) { paths = static_cast<uint8_t>(paths | normal); }
+			return {paths, body.may_throw || !always};
 		}
 	};
 
-	inline bool has_complete_return(const function_decl& a_function) {
-		if (!a_function.body) { return false; }
-		auto result = ReturnFlow(a_function.return_type.get()).analyze(a_function.body.get());
-		return !(result.paths & (ReturnFlow::NORMAL | ReturnFlow::MAYBE_NORMAL | ReturnFlow::BARE_RETURN));
+	inline bool has_complete_return(const function_decl& fn) {
+		if (!fn.body) { return false; }
+		const auto r = return_flow(fn.return_type.get()).analyze(fn.body.get());
+		return !(r.paths & (return_flow::normal | return_flow::maybe_normal | return_flow::bare_return));
 	}
+
 }
+
+#endif

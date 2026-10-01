@@ -894,18 +894,18 @@ public:
 
         test("anonymous_function_capture_matches_empty_lambda", [this]() {
             auto engine = make_engine();
-            // whatever [] auto-capture yields for enclosing locals, function() must match
+            // function() is [] - it captures nothing, so both spellings reject an enclosing local
+            check_throws([&]() { engine->execute("function outer() { int a = 1; var f = function() { return a; }; return f(); } outer();"); });
+            check_throws([&]() { engine->execute("function outer2() { int a = 1; var g = [](){ return a; }; return g(); } outer2();"); });
             auto r = engine->execute(R"(
-                function outer() {
+                function outer3() {
                     int a = 1;
-                    var f = function() { return a; };
-                    var g = [](){ return a; };
-                    a = 2;
-                    return f() * 10 + g();
+                    var f = function(int v) { return v; };
+                    var g = [](int v){ return v; };
+                    return f(a) * 10 + g(a);
                 }
-                outer();
+                outer3();
             )");
-            // 11 = both snapshot the enclosing local BY VALUE at creation ([] parity)
             check_eq(int64_t(11), r.as_int());
         });
 
@@ -918,7 +918,7 @@ public:
         test("anonymous_function_returned_and_nested", [this]() {
             auto engine = make_engine();
             check_eq(int64_t(5), engine->execute(
-                "var adder = function(x) { return function(y) { return x + y; }; };"
+                "var adder = function(x) { return [x](y) { return x + y; }; };"
                 "adder(2)(3);").as_int());
         });
 

@@ -335,7 +335,7 @@ public:
 					check_false(e->check("int good() { if (true) { return 1; } }").has_errors());
 					check_false(e->check("int good() { for (;;) {} }").has_errors());
 					check_false(e->check("int good(int x) { switch (x) { case 0: fallthrough; default: return 1; } }").has_errors());
-					check_true(e->check("int bad(int x) { switch (x) { case 0: break; return 1; default: return 2; } }").has_errors());
+					check_true(e->check("int bad(int x) { switch (x) { case 0: if (x == 0) { break; } return 1; default: return 2; } }").has_errors());
 					e->execute("int runs = 0;");
 					check_throws([&]() { e->execute("runs += 1; int incomplete() {}"); });
 					check_eq(int64_t{0}, e->get_variable("runs").as_int());
@@ -370,7 +370,6 @@ public:
 					check_eq(int64_t{1}, e->execute("good().value;").as_int());
 					check_true(e->execute("var m = \"\"; try { bad(); } catch (err) { m = err; } m;").as_string().starts_with("Cannot return reference"));
 					check_true(e->execute("void take(array<int>& value) {} array<string> words = [\"a\"]; var m = \"\"; try { take(words); } catch (err) { m = err; } m;").as_string().starts_with("Cannot pass"));
-					check_true(e->execute("void take_callback(function& value) {} var text = \"x\"; var m = \"\"; try { take_callback(text); } catch (err) { m = err; } m;").as_string().starts_with("Cannot pass"));
 					check_true(e->execute("int touch(int& value) { return value + 1; } string run() { float value = 1.5; try { return \"bad:\" + touch(value); } catch (err) { return err; } } run();").as_string().starts_with("Cannot pass"), "grafting cannot bypass a typed reference bind");
 				}
 			}

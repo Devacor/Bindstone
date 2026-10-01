@@ -35,46 +35,50 @@ namespace jai::detail {
 			is_string_reference_temporary(param, value) ? clone_for_assignment(value) : script_value(value.deref()), eng);
 	}
 
-	inline bool concrete_reference_type(const type_info* a_type) {
-		if (!a_type || a_type->base_type == script_value_type::jai_any_type || a_type->type_name.empty() || a_type->type_name == "auto") { return false; }
-		for (const auto& parameter : a_type->type_params) {
+	inline bool concrete_reference_type(const type_info* t) {
+		if (!t || t->base_type == script_value_type::jai_any_type || t->type_name.empty() || t->type_name == "auto") { return false; }
+		for (const auto& parameter : t->type_params) {
 			if (!concrete_reference_type(parameter.get())) { return false; }
 		}
 		return true;
 	}
 
-	// Reference binding never performs a conversion. Unknown container views retain legacy leniency.
-	inline bool reference_binding_admits(const type_info* a_declared, const script_value& a_current, engine* a_engine) {
-		if (!a_declared) { return true; }
-		const script_value& value = a_current.deref();
-		switch (a_declared->base_type) {
+	// A T& binds an lvalue that holds a T and never converts (Dev ruling 2026-09-28, C++): a primitive or math value its exact
+	// kind, a class T or a subclass (a typed null of one too), a container or handle exactly its type
+	// when both types are concrete; var& and auto& bind any lvalue, and a container of unknown element type stays lenient
+	inline bool reference_binding_admits(const type_info* declared, const script_value& current_in, engine* eng) {
+		if (!declared) { return true; }
+		const script_value* cur = &current_in;
+		for (int depth = 0; depth < 8 && cur->is_reference(); ++depth) { cur = &cur->deref(); }   // a property's value can be a reference
+		std::optional<script_value> decoded;
+		if (cur->raw_storage_index() == script_value::TYPEID_CPP_BOUND) { decoded.emplace(cur->bound_decoded_temp()); cur = &*decoded; }
+		const script_value& value = *cur;
+		switch (declared->base_type) {
 			case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
 			case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
 			case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
 			case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type: case script_value_type::jai_color_type:
-				return value.current_type() == a_declared->base_type;
+				return value.current_type() == declared->base_type;
 			case script_value_type::jai_object_type: {
-				if (a_declared->type_name.empty()) { return true; }
+				if (declared->type_name.empty()) { return true; }
 				if (value.is_null()) {
 					const auto* tag = value.get_type_info().get();
 					if (!tag || tag->base_type != script_value_type::jai_object_type || tag->type_name.empty()) { return true; }
-					return tag->type_name == a_declared->type_name || class_derives_from(a_engine, tag->id, a_declared->id);
+					return tag->type_name == declared->type_name || class_derives_from(eng, tag->id, declared->id);
 				}
 				if (!value.is_object()) { return false; }
-				auto view = resolve_slot_class(value, a_engine);
+				auto view = resolve_slot_class(value, eng);
 				if (!view.def) { return true; }
-				return view.def->get_name() == a_declared->type_name || class_derives_from(a_engine, view.def->get_type_id(), a_declared->id);
+				return view.def->get_name() == declared->type_name || class_derives_from(eng, view.def->get_type_id(), declared->id);
 			}
 			case script_value_type::jai_array_type:
 			case script_value_type::jai_map_type:
 			case script_value_type::jai_shared_ptr_type:
 			case script_value_type::jai_weak_ptr_type: {
 				const type_info* held = value.get_type_info().get();
-				if (!concrete_reference_type(a_declared) || !concrete_reference_type(held)) { return true; }
-				return held->equals(*a_declared);
+				if (!concrete_reference_type(declared) || !concrete_reference_type(held)) { return true; }
+				return held->equals(*declared);
 			}
-			case script_value_type::jai_function_type:
-				return value.is_function() || value.is_null();
 			default: return true;
 		}
 	}

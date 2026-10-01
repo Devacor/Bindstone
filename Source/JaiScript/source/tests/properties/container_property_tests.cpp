@@ -336,7 +336,7 @@ public:
             eng->execute(R"(
                 function bind() -> auto {
                     var pinned = who;
-                    holder.fn = []() { return pinned; };
+                    holder.fn = [pinned]() { return pinned; };
                     return 0;
                 }
                 bind();
@@ -346,13 +346,13 @@ public:
             check_eq(std::string("first"), holder->fn());
         });
 
-        test("bare_auto_capture_copies_at_creation", [this, makeHolderEngine]() {
+        test("named_capture_copies_at_creation", [this, makeHolderEngine]() {
             std::shared_ptr<hook_holder> holder;
             auto eng = makeHolderEngine(holder);
             eng->execute(R"(
                 function bind() -> auto {
                     var value = "before";
-                    holder.fn = []() { return value; };
+                    holder.fn = [value]() { return value; };
                     value = "after";
                     return 0;
                 }

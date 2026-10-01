@@ -1312,6 +1312,14 @@ checked_result<expression_ptr> parser::primary() {
         return parse_map_literal();
     }
 
+    if (arrow_function_ahead()) {
+        return arrow_function_expression();
+    }
+    if (check(token_type::function_keyword) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::star) {
+        report_foreign(detail::foreign_word::generator_function, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+
     // Anonymous function expression: `function (params) {...}` (a [&] lambda, the JavaScript closure).
     // `function name...` never reaches here (declaration() routes it first).
     if (check(token_type::function_keyword) &&
@@ -3061,7 +3069,50 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
             lambda->return_type = wrap_reference_return_type(lambda->return_type);
         }
     }
+    return finish_lambda_body(std::move(lambda), false);
+}
 
+bool parser::arrow_function_ahead() const {
+    const std::vector<token>& tokens = *stream_;
+    if (pushed_back_token_) return false;
+    if (check(token_type::identifier)) {
+        return current_ + 1 < tokens.size() && tokens[current_ + 1].type == token_type::fat_arrow;
+    }
+    if (!check(token_type::left_paren)) return false;
+    size_t depth = 0;
+    for (size_t i = current_; i < tokens.size(); ++i) {
+        const token_type t = tokens[i].type;
+        if (t == token_type::left_paren) {
+            ++depth;
+        } else if (t == token_type::right_paren) {
+            if (--depth == 0) return i + 1 < tokens.size() && tokens[i + 1].type == token_type::fat_arrow;
+        } else if (t == token_type::semicolon || t == token_type::left_brace || t == token_type::right_brace || t == token_type::eof) {
+            return false;
+        }
+    }
+    return false;
+}
+
+// (params) => expr / (params) => { body } / name => expr: the JavaScript and C# arrow function, a function expression that
+// closes over its scope by reference like function(...) does
+checked_result<expression_ptr> parser::arrow_function_expression() {
+    auto lambda = std::make_shared<lambda_expr>(peek().location);
+    lambda->default_capture = lambda_expr::capture_default::by_reference;
+    if (check(token_type::identifier)) {
+        token name = advance();
+        parameter param(nullptr, std::string(name.lexeme));
+        param.symbol_id = get_symbol_id(name);
+        lambda->parameters.push_back(std::move(param));
+    } else {
+        JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' for arrow function parameters"));
+        JAISCRIPT_TRY_ASSIGN(lambda->parameters, parse_parameter_list());
+        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after arrow function parameters"));
+    }
+    JAISCRIPT_TRY(consume(token_type::fat_arrow, "Expected '=>' after arrow function parameters"));
+    return finish_lambda_body(std::move(lambda), true);
+}
+
+checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda_expr> lambda, bool expression_body) {
     // Enter function scope for slot-based local variable tracking
     enter_function_scope(lambda.get());
 
@@ -3085,6 +3136,20 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
     in_coroutine_ = false;
     coroutine_scope ctor_scope{in_constructor_, in_constructor_};
     in_constructor_ = false;
+    if (expression_body && !check(token_type::left_brace)) {
+        const source_location at = peek().location;
+        auto value = expression();
+        if (!value) {
+            exit_function_scope();
+            return value.error_value();
+        }
+        std::vector<declaration_ptr> body;
+        auto ret = std::make_shared<return_stmt>(at, value.value());
+        body.push_back(std::make_shared<statement_decl>(at, ret));
+        lambda->body = std::make_shared<block_stmt>(at, std::move(body));
+        lambda->local_count = exit_function_scope();
+        return lambda;
+    }
     if (!match(token_type::left_brace)) {
         exit_function_scope();  // Clean up on error
         report_error("Expected '{' for lambda body", peek());

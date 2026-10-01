@@ -177,6 +177,12 @@ namespace jai {
         checked_result<expression_ptr> lambda_expression();
         checked_result<expression_ptr> anonymous_function_expression();
         checked_result<expression_ptr> finish_lambda_after_captures(std::shared_ptr<lambda_expr> lambda);
+        // the scope, the parameter slots and the body of a lambda whose parameters are parsed; an arrow function's body may
+        // be one expression, its value returned
+        checked_result<expression_ptr> finish_lambda_body(std::shared_ptr<lambda_expr> lambda, bool expression_body);
+        // (params) => expr, (params) => { body }, name => expr: a function expression, closing over its scope by reference
+        bool arrow_function_ahead() const;
+        checked_result<expression_ptr> arrow_function_expression();
         checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default>> parse_capture_list();
 
         // Helper for parsing function bodies

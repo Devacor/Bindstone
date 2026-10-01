@@ -237,6 +237,7 @@ token lexer::next_token() {
             
         case '=':
             if (match('=')) return make_token(token_type::equal_equal);
+            if (match('>')) return make_token(token_type::fat_arrow);
             return make_token(token_type::equal);
             
         case '<':
@@ -393,6 +394,9 @@ token lexer::make_token(token_type type) {
         case token_type::caret_equal: lexeme = "^="; break;
         case token_type::left_shift_equal: lexeme = "<<="; break;
         case token_type::right_shift_equal: lexeme = ">>="; break;
+        case token_type::question_question: lexeme = "??"; break;
+        case token_type::question_question_equal: lexeme = "??="; break;
+        case token_type::fat_arrow: lexeme = "=>"; break;
 
         default:
             // For other tokens like EOF, just leave empty
@@ -920,7 +924,8 @@ bool token::is_operator() const {
     return (type >= token_type::plus && type <= token_type::tilde) ||
            type == token_type::left_shift || type == token_type::right_shift ||
            type == token_type::spaceship ||
-           (type >= token_type::ampersand_equal && type <= token_type::right_shift_equal);
+           (type >= token_type::ampersand_equal && type <= token_type::right_shift_equal) ||
+           (type >= token_type::question_question && type <= token_type::fat_arrow);
 }
 
 bool token::is_literal() const {

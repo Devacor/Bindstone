@@ -53,7 +53,8 @@ namespace jai {
         error,
 
         ampersand_equal, pipe_equal, caret_equal, left_shift_equal, right_shift_equal,   // appended: .jaibite stores token numbers
-        inline_keyword
+        inline_keyword,
+        question_question, question_question_equal, fat_arrow
     };
     
     class string_symbolizer;

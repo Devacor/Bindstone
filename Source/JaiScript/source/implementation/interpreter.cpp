@@ -7576,7 +7576,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     try {
         if (direct_script_call) {
             callOutcome.emplace(call_function(*callee_thunk->payload.fn, arguments));
-        } else {
+        } else if (!call_static_method(func, arguments, callOutcome)) {
             callOutcome.emplace(func(arguments));
         }
     } catch (const std::exception& e) {
@@ -14936,6 +14936,22 @@ std::shared_ptr<environment> interpreter::get_pooled_method_environment(std::sha
         ++environment_pool_index_;
         return newEnv;
     }
+}
+
+bool interpreter::call_static_method(const script_function& callee, const std::vector<script_value>& arguments, std::optional<checked_result<script_value>>& out) {
+    if (parallel_worker_) return false;
+    const auto* dispatch = callee.target<script_static_method_dispatch>();
+    if (!dispatch || dispatch->eng != engine_ || !dispatch->cls || !dispatch->fallback) return false;
+    std::shared_ptr<function_decl> ast = dispatch->fallback;
+    const auto& table = dispatch->cls->script_static_method_overloads();
+    const auto it = table.find(dispatch->name_id);
+    if (it != table.end() && it->second.size() > 1) {
+        if (auto best = pick_best_overload(it->second, arguments)) { ast = std::move(best); }
+    }
+    if (!ast->body || ast->is_coroutine) return false;   // a coroutine mints a handle: the dispatcher's execute_callable
+    // the dispatcher's env exactly (its own, never pooled: what the body leaves in it dies with the call)
+    out.emplace(execute_method_ast(ast, std::make_shared<environment>(dispatch->definition_env, string_symbolizer_, dispatch->cls), arguments));
+    return true;
 }
 
 void interpreter::reset_environment_pool() {

@@ -2165,10 +2165,10 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		for (size_t k = 0; k < arr->elements.size(); ++k) {
 			compile_expression(arr->elements[k]);
 			for (size_t n = k + 1; n < arr->elements.size(); ++n) {
-				if (!detail::transient_read_marker::callout_free(arr->elements[n].get())) { deref_ahead_of(arr->elements[k].get(), arr->elements[n].get()); break; }
+				if (!detail::transient_read_marker::callout_free(arr->elements[n].get())) { copy_ahead_of(arr->elements[k].get(), arr->elements[n].get()); break; }
 			}
 		}
-		emit(opcode::op_array, static_cast<uint32_t>(arr->elements.size()));
+		emit(opcode::op_array, static_cast<uint32_t>(arr->elements.size()), add_node(expr));
 		return;
 	}
 	case node_type::map_literal_expr: {
@@ -2183,11 +2183,11 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		};
 		for (size_t k = 0; k < m->entries.size(); ++k) {
 			compile_expression(m->entries[k].first);
-			if (const expression* later = later_callout(k, false)) { deref_ahead_of(m->entries[k].first.get(), later); }
+			if (const expression* later = later_callout(k, false)) { copy_ahead_of(m->entries[k].first.get(), later); }
 			compile_expression(m->entries[k].second);
-			if (const expression* later = later_callout(k, true)) { deref_ahead_of(m->entries[k].second.get(), later); }
+			if (const expression* later = later_callout(k, true)) { copy_ahead_of(m->entries[k].second.get(), later); }
 		}
-		emit(opcode::op_map, static_cast<uint32_t>(m->entries.size()));
+		emit(opcode::op_map, static_cast<uint32_t>(m->entries.size()), add_node(expr));
 		return;
 	}
 	case node_type::member_expr:
@@ -5971,6 +5971,14 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	const int ln = lift_fusible_nodes(b->left.get());
 	const int rn = ln >= 0 ? lift_fusible_nodes(b->right.get()) : -1;
 	return lift_partners_ok(b) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16;
+}
+
+// a literal's existing object (a name, a member, an element) ahead of a later element that may write it: its copy is taken now, as the
+// interpreter copies an element before evaluating the next
+void vm_compiler::copy_ahead_of(const expression* pushed, const expression* later) {
+	if (!is_lvalue_shaped(pushed)) { deref_ahead_of(pushed, later); return; }
+	if (detail::transient_read_marker::callout_free(later)) return;
+	emit(opcode::op_deref_top, 1);
 }
 
 // an element read or a call's reference result pushed as a reference whose consumer reads it only after a later operand that may run user

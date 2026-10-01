@@ -4458,6 +4458,58 @@ class constructor_semantics_tests : public suite {
 public:
     constructor_semantics_tests() : suite("Constructor Semantics") {}
     void forge_tests() override {
+        test("every_copy_of_an_instance_runs_its_destructor", [this]() {
+            // C++: a copied value instance is an object of its own and runs its destructor at scope exit, whatever made the copy
+            const char* prelude = "var log = \"\"; class T { string n; T(string s) { n = s; } ~T() { log += n + \";\"; } } ";
+            const std::pair<const char*, const char*> rows[] = {
+                {"function f() { T a = T(\"a\"); T b = a; b.n = \"b\"; } f();", "a;b;"},
+                {"function f() { T a = T(\"a\"); T b = T(\"x\"); b = a; b.n = \"b\"; } f();", "x;a;b;"},
+                {"function h(T p) { p.n = \"p\"; } function f() { T a = T(\"a\"); h(a); } f();", "p;a;"},
+                {"function r() -> T { T a = T(\"r\"); return a; } function f() { T x = r(); x.n = \"x\"; } f();", "x;"},
+                {"function f() { T a = T(\"a\"); array<T> arr = [a]; arr[0].n = \"e\"; } f();", "a;e;"},
+                {"class H { T t = T(\"h\"); } function f() { H h1 = H(); H h2 = h1; h2.t.n = \"g\"; } f();", "h;g;"},
+                {"function f() { T a = T(\"a\"); var c = [=]() { return a.n; }; c(); } f();", "a;a;"},
+            };
+            for (bool vm : {false, true}) {
+                for (const auto& [src, expected] : rows) {
+                    auto e = make_engine();
+                    if (vm) { e->set_backend(backend_type::vm); }
+                    jai::stdlib::register_all(e);
+                    std::string got;
+                    try { e->execute(std::string(prelude) + src); got = e->execute("log").as_string(); } catch (const std::exception& ex) { got = std::string("ERROR: ") + ex.what(); }
+                    std::string sorted_got = got, sorted_expected = expected;
+                    check_eq(std::string(expected).size(), got.size(), std::string(vm ? "vm: " : "interp: ") + src + " -> " + got);
+                    std::vector<std::string> a_parts, b_parts;
+                    for (size_t s = 0, k; (k = got.find(';', s)) != std::string::npos; s = k + 1) { a_parts.push_back(got.substr(s, k - s)); }
+                    for (size_t s = 0, k; (k = sorted_expected.find(';', s)) != std::string::npos; s = k + 1) { b_parts.push_back(sorted_expected.substr(s, k - s)); }
+                    std::sort(a_parts.begin(), a_parts.end());
+                    std::sort(b_parts.begin(), b_parts.end());
+                    check_true(a_parts == b_parts, std::string(vm ? "vm: " : "interp: ") + src + " -> " + got + " (expected the destructors " + expected + ")");
+                }
+            }
+        });
+        test("a_container_literal_holds_copies", [this]() {
+            // C++ aggregate initialization copies its elements: a name, a member or an element in a literal is copied, a temporary moves
+            const std::pair<const char*, const char*> rows[] = {
+                {"class U { string n; U(string s) { n = s; } } U a = U(\"a\"); var arr = [a]; arr[0].n = \"e\"; a.n + arr[0].n", "ae"},
+                {"class U { string n; U(string s) { n = s; } } U a = U(\"a\"); array<U> arr = [a, a]; arr[0].n = \"e\"; a.n + arr[0].n + arr[1].n", "aea"},
+                {"class U { string n; U(string s) { n = s; } } U c = U(\"c\"); var m = {\"k\": c}; m[\"k\"].n = \"e\"; c.n + m[\"k\"].n", "ce"},
+                {"array<int> x = [1]; var arr = [x]; arr[0][0] = 9; to_string(x[0]) + to_string(arr[0][0])", "19"},
+                {"class U { string n; U(string s) { n = s; } } function f() -> string { U d = U(\"d\"); var arr = [d]; arr[0].n = \"e\"; return d.n + arr[0].n; } f()", "de"},
+                {"class U { string n; U(string s) { n = s; } } U a = U(\"a\"); function g() -> string { a.n = \"z\"; return \"g\"; } var arr = [a, g()]; arr[0].n + a.n", "az"},
+                {"class U { string n; U(string s) { n = s; } } shared_ptr<U> h = new U(\"h\"); var arr = [h]; arr[0].n = \"e\"; h.n", "e"},
+            };
+            for (bool vm : {false, true}) {
+                for (const auto& [src, expected] : rows) {
+                    auto e = make_engine();
+                    if (vm) { e->set_backend(backend_type::vm); }
+                    jai::stdlib::register_all(e);
+                    std::string got;
+                    try { got = e->execute(src).to_string(); } catch (const std::exception& ex) { got = std::string("ERROR: ") + ex.what(); }
+                    check_eq(std::string(expected), got, std::string(vm ? "vm: " : "interp: ") + src);
+                }
+            }
+        });
         test("ctor_falloff_returns_instance", [this]() {
             auto e = make_engine();
             check_eq((int64_t)5, e->execute("class A { int x = 1; A() { x = 5; } } auto a = A(); a.x").as_int());

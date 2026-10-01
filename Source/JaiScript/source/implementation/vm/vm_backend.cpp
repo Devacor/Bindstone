@@ -1729,12 +1729,14 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 	const size_t n = ins.a;
 	array.reserve(n);
 	const size_t base = stack_.size() - n;
+	const auto* literal = static_cast<const array_literal_expr*>(f.code->nodes[ins.b].get());
 	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
 	// bound primitives snapshot, and reference-wrapper reads normalize to VALUES like
 	// assignment (a literal never holds a live reference into its source; deref through
-	// a temp so the owning holder outlives the copy). (KEEP BYTE-PARALLEL with the
-	// interpreter array literal)
+	// a temp so the owning holder outlives the copy); an existing object is copied, the
+	// literal holding its own value. (KEEP BYTE-PARALLEL with the interpreter array literal)
 	for (size_t i = 0; i < n; ++i) {
+		const bool copy = stack_[base + i].is_reference() || is_lvalue_shaped_expr(literal->elements[i].get());
 		if (stack_[base + i].is_reference()) [[unlikely]] {
 			script_value derefed = stack_[base + i].deref();
 			stack_[base + i] = std::move(derefed);
@@ -1742,6 +1744,7 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			stack_[base + i] = stack_[base + i].detached_for_store();
 		}
+		if (copy) { array.push_back(detail::clone_for_literal(stack_[base + i], symbolizer_)); continue; }
 		array.push_back(std::move(stack_[base + i]));
 	}
 	stack_.truncate(base);
@@ -1753,10 +1756,13 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	auto& map = const_cast<script_map&>(mapValue.as_map());
 	const size_t n = ins.a;
 	const size_t base = stack_.size() - n * 2;
+	const auto* literal = static_cast<const map_literal_expr*>(f.code->nodes[ins.b].get());
 	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
 	// bound primitives snapshot, and reference-wrapper reads normalize to VALUES like
-	// assignment (see exec_array; KEEP BYTE-PARALLEL with the interpreter map literal)
+	// assignment, an existing object copies (see exec_array; KEEP BYTE-PARALLEL with the interpreter map literal)
 	for (size_t i = 0; i < n * 2; ++i) {
+		const auto& entry = literal->entries[i / 2];
+		const bool copy = stack_[base + i].is_reference() || is_lvalue_shaped_expr((i % 2 == 0 ? entry.first : entry.second).get());
 		if (stack_[base + i].is_reference()) [[unlikely]] {
 			script_value derefed = stack_[base + i].deref();
 			stack_[base + i] = std::move(derefed);
@@ -1764,6 +1770,7 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 		if (stack_[base + i].raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			stack_[base + i] = stack_[base + i].detached_for_store();
 		}
+		if (copy) { script_value copied = detail::clone_for_literal(stack_[base + i], symbolizer_); stack_[base + i] = std::move(copied); }
 	}
 	for (size_t i = 0; i < n; ++i) {
 		map.insert_or_assign(std::move(stack_[base + i * 2]), std::move(stack_[base + i * 2 + 1]));
@@ -19531,6 +19538,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			}
 			case opcode::op_deref_top:
+				if (ins.a) { script_value v = detail::clone_for_literal(stack_.back(), symbolizer_); stack_.back() = std::move(v); break; }
 				if (stack_.back().raw_storage_index() == script_value::TYPEID_REFERENCE) { script_value v = stack_.back().deref(); stack_.back() = std::move(v); }
 				break;
 

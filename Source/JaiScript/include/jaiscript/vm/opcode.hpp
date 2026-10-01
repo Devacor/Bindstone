@@ -279,7 +279,7 @@ namespace jai::vm {
         op_size_temp,       // a = frame slot (a compiler temp), b = call site (a slot receiver, no arguments), c = the proven kind (1 string, 2 array, 3 map): the receiver's size into the temp, else op_call_method's result
         op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
-        op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code
+        op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code; a = 1: its copy (a literal's existing object ahead of such a sibling)
         op_capture_arg,     // a = call site (new: expression node; stack: argument count), b = argument index, c = capture kind | form << 2: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
         op_c_ret,           // a = the value (a cell, or k_typed_const_bit | constant), b = the return pad (an op_return after the copy), c = the general ip of the return's tail: a frame program's return (raw into the caller's cell from a raw-entered frame, else boxed through the pad)
         op_take_temp,       // a = owned compiler argument slot: move it onto the operand stack and clear the slot

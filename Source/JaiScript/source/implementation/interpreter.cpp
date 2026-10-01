@@ -9865,6 +9865,7 @@ checked_result<void> interpreter::visit_array_literal_expr_t(array_literal_expr*
     for (size_t ei = element_start; ei < expr->elements.size(); ++ei) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->elements[ei].get(), rs, ei), expr, rp_operand, ei, (std::vector<script_value>{arrayValue}));
         script_value elem = pop_value();
+        const bool copy = elem.is_reference() || is_lvalue_shaped_expr(expr->elements[ei].get());   // an existing object: the literal holds its own copy
         if (elem.is_reference()) [[unlikely]] {
             script_value derefed = elem.deref();
             elem = std::move(derefed);
@@ -9872,6 +9873,7 @@ checked_result<void> interpreter::visit_array_literal_expr_t(array_literal_expr*
         if (elem.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             elem = elem.detached_for_store();
         }
+        if (copy) { elem = detail::clone_for_literal(elem, string_symbolizer_); }
         array.push_back(std::move(elem));
     }
 
@@ -9916,6 +9918,8 @@ checked_result<void> interpreter::visit_map_literal_expr_t(map_literal_expr* exp
         // Evaluate value
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(entry.second.get(), rs, 2 * ei + 1), expr, rp_operand, 2 * ei + 1, (std::vector<script_value>{mapValue, key}));
         script_value value = pop_value();
+        const bool copy_key = key.is_reference() || is_lvalue_shaped_expr(entry.first.get());   // existing objects: the literal holds its own copies
+        const bool copy_value = value.is_reference() || is_lvalue_shaped_expr(entry.second.get());
 
         // All-detach ruling (2026-07, #12): literal construction is a store boundary -
         // bound primitives snapshot, and reference-wrapper reads normalize to VALUES
@@ -9935,6 +9939,8 @@ checked_result<void> interpreter::visit_map_literal_expr_t(map_literal_expr* exp
         if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
             value = value.detached_for_store();
         }
+        if (copy_key) { key = detail::clone_for_literal(key, string_symbolizer_); }
+        if (copy_value) { value = detail::clone_for_literal(value, string_symbolizer_); }
 
         // Insert into map
         map.insert_or_assign(std::move(key), std::move(value));

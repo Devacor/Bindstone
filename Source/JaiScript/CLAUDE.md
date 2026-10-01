@@ -689,7 +689,7 @@ engine stays usable", not by `check_throws`.
   remaining/at_end`), `binary::writer w;` (the mirror writers; `text(s)` ends in a NUL, `text(s, n)` NUL-pads to n, a text of
   exactly n fills it, a longer text or a NUL inside raises; `bytes(b)` writes a string's or a byte array's bytes as they are;
   `seek` to patch, `to_string()`); width tokens `binary::int8 ... binary::float64`, `binary::text(n)` (= `r.text(n)` /
-  `w.text(s, n)`), `binary::bytes(n)` (= `r.bytes(n)` / `w.bytes(b)`, exactly n; Dev rulings 2026-09-28); `binary::layout(name, width, ...)`, `r.unpack(layout | pairs)`
+  `w.text(s, n)`), `binary::bytes(n)` (= `r.bytes(n)` / `w.bytes(b)`, exactly n; Dev rulings 2026-09-28); `binary::layout(field, width, field, width, ...)` (field-name/width pairs only, no layout name: `binary::layout("id", binary::uint16, "hp", binary::int32)`), `r.unpack(layout | pairs)`
   -> `map<string, var>`, `w.pack(layout, map)`, `r.read(Class, layout)` (fields in declaration order, bases first). A read
   past the end / a value that does not fit / a bad layout is catchable and moves nothing. Hot reader/writer members take the
   vm's `class_definition::native_method` lanes (declining shapes fall to the bound method); the strict checker knows the

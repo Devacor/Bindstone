@@ -989,8 +989,8 @@ namespace jai {
         // value (the bare class name in script) or a name. object a C++ wrapper or a layer:
         // Class must derive the object's C++ base; the current layer's class returns it
         // (idempotent), another class re-derives (fields carried where both classes have them,
-        // the old layer retired). object a pure script instance: Class must derive its class; a
-        // new instance with its fields copied returns (script objects are values). Field
+        // the old layer retired). object a pure script instance: Class must derive its class; the
+        // instance itself is re-derived in place (its fields carried) and returned. Field
         // initializers run, no constructor body. An extended object owns its layer for its
         // lifetime (slot types); a type without the slot keeps the layer engine-owned until
         // script_layer_detach. An object layered by another engine is moved here.

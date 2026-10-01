@@ -113,17 +113,18 @@ Deliberate boundaries:
 - Plain assignment (`x = r`, `m[k] = r`) stores a VALUE (deref + detach/clone rules) —
   script code cannot smuggle a raw reference into a container by assignment; aliasing
   is opt-in at declarations, params, captures, and returns.
-- `[&]` capture of a call-frame SLOT local snapshots by value (pinned:
-  `ref_escape_via_lambda_after_frame_death`); env-stored variables capture as live
-  cells. Unifying these is a possible stage D.
+- `[&]` and `[&x]` share boxed cells for frame-slot locals and environment variables.
+  Updates propagate both ways and the cell survives the creating frame. `[=]` and
+  `[x]` snapshot values; `[]` captures nothing.
 
 ## Constraint capture
 
 ELEMENT/FIELD/MAP-ENTRY refs carry their container's element / declared field / map
 value type as `container_element_type`; stores through the ref enforce it with the
 same text as the direct store (`ref_store_through`, route-independence). CELL refs of
-plain locals are unconstrained (plain-local parity); the typed enforcement for a boxed
-NAME rides the store path, not the holder. CPP-MEMBER refs are constrained by the box:
+plain locals enforce the stored variable's declared type through the shared typed-store
+table. `var&` permits a dynamic target to change type; it does not erase a typed target's
+constraint. A typed array held in a var also retains its element constraint. CPP-MEMBER refs are constrained by the box:
 a store converts with the bound-variable rules (`as<script_int>()` etc. — a mistyped
 store raises the same conversion text the direct `obj.prop = v` setter raises and
 leaves the member alone; narrow integer widths truncate like an `add_global_ref` int32

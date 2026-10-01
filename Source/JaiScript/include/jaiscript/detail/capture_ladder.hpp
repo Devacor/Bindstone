@@ -11,8 +11,8 @@
 // bind_cpp_property_ref / read_bare_cpp_property. An explicit [x]/[&x] takes variables
 // only (slot, own scope, chain): a member is not a capturable variable (C++: ill-formed),
 // so [field] keeps the undefined-capture text whether or not a global shares the name.
-// A program-scope (global) variable is never captured by default (Dev ruling 2026-09-27): [=], [&]
-// and bare [] leave it to resolve when the lambda runs, [&g] is the same as not listing it, and only
+// A program-scope (global or namespace) variable is never captured by default: [=], [&]
+// and capture-free [] resolve it when the lambda runs; [&g] is the same as not listing it, and only
 // an explicit [g] (or an init-capture [x = g]) copies it at creation.
 
 #include <jaiscript/detail/member_scope.hpp>

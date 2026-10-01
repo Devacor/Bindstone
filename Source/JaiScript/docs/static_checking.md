@@ -64,7 +64,7 @@ read around its errors.
 | `weak_ptr<T>` | null or a compatible shared/weak handle | same pointee or derived-to-base; unknown sources stay lenient |
 | `T&` declaration | T, or a derived class for a base-class reference | conversions do not make a mismatched reference binding valid; unknown sources stay lenient |
 | `function` variable or field | callable or null | calls through callable variables and function-typed parameters remain unchecked |
-| `var` | anything, forever | the dynamic escape: downstream types are unknown; copying a typed container into var drops the copy's element constraint, and crossing back into a typed container validates its contents |
+| `var` | anything, forever | the dynamic escape: downstream types are unknown; a typed container copied into var retains its element constraint; explicitly use array<var> for a dynamic-element copy, and crossing back into a typed container validates its contents |
 | `auto` + initializer | the initializer's static type, then enforced as that type | a `var` or unknown static type (a `var` local, an `array<var>` element, a `var`-returning call, a mixed-branch ternary other than int with float, whose static type is float) makes the slot a `var`: the unit's first proof pass writes that into the declaration in every mode (proofs on or off, any check mode, a `.jaibite` load), once, so the runtime never locks to a value's run-time type; a `null` initializer leaves it dynamic — null carries no type; the runtime locks at the first non-null store |
 | `auto` without initializer | dynamic (unchecked) | runtime locks at first assignment; the checker can't see branch order, so it opts out — documented leniency |
 

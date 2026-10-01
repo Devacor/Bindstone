@@ -140,7 +140,7 @@ namespace jai::detail {
 			if (value.is_bool()) { return value.unchecked_as_bool(); }
 			if (value.is_int()) { return value.unchecked_as_int() != 0; }
 			if (value.is_float()) { return value.unchecked_as_float() != 0.0; }
-			if (value.is_char()) { return value.unchecked_as_char() != '\0'; }
+			if (value.is_char()) { return true; }
 			if (value.is_string()) { return !value.unchecked_as_string().empty(); }
 			if (value.is_null()) { return false; }
 			return std::nullopt;

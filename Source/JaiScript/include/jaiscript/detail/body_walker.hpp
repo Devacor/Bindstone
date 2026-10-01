@@ -97,6 +97,16 @@ namespace jai::detail {
 		void stmt(const statement_ptr& s) const {
 			if (!s) return;
 			switch (s->get_type()) {
+			case node_type::function_decl: {
+				auto* value = static_cast<function_decl*>(s.get());
+				if (on_declared) { on_declared(value->name_id); }
+				return;
+			}
+			case node_type::enum_decl: {
+				auto* value = static_cast<enum_decl*>(s.get());
+				if (on_declared) { on_declared(value->name_id); }
+				return;
+			}
 			case node_type::expression_stmt:
 				expr(static_cast<expression_stmt*>(s.get())->expression);
 				return;

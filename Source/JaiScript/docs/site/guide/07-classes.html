@@ -284,11 +284,11 @@ caught: class Derived has no static member &#x27;count&#x27;</code></pre></div>
 </ol>
 <p>Three consequences are worth knowing.</p>
 <p>First, <strong>members shadow globals</strong>: if a class has a field or method <code>hp</code>, a bare <code>hp</code> in its methods reads and writes the member even when a global <code>hp</code> exists, and defining a new global <em>after</em> the class never steals the class&#x27;s bare-name member accesses. The shadow is by <strong>name</strong>, exactly like C++: a method <code>flavor()</code> hides a global <code>flavor(int)</code> entirely, so a bare <code>flavor(42)</code> in that class is an argument-count error rather than a silent call to the global. The escape hatch is also C++&#x27;s: <code>::flavor(42)</code> resolves against the <strong>global scope only</strong> (locals, captures, and members are all skipped) and works everywhere an identifier does (<code>::hp</code>, <code>::hp = 5</code>, <code>::hp += 1</code>, <code>::grid[i]</code>, <code>refill(::ammo)</code>). The global stays reachable outside the class, and the checker&#x27;s shadowing warnings (below) flag the declaration-side collisions.</p>
-<p>Second, <strong>lambdas created inside a method see fields too</strong>, at the same member step of the lookup as the method body. What differs is <em>when</em> the field is read: a bare <code>[]</code> lambda resolves the name when it is called, exactly like the method body; <code>[=]</code> captures the field&#x27;s <strong>value at creation</strong>; <code>[&amp;]</code> shares the live field, so writes through the capture land in the instance:</p>
+<p>Second, <strong>lambdas created inside a method see fields too</strong>, at the same member step of the lookup as the method body. What differs is <em>when</em> the field is read: a <code>[this]</code> lambda resolves the field when it is called; <code>[]</code> cannot reach instance state; <code>[=]</code> captures the field&#x27;s <strong>value at creation</strong>; <code>[&amp;]</code> shares the live field, so writes through the capture land in the instance:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tank {
     int hp = 7;
     auto probe() {
-        auto bare = []()  { return hp; };        // resolves hp when called, like the method body
+        auto bare = [this]() { return hp; };        // resolves hp when called, like the method body
         auto copy = [=]() { return hp; };        // captures the field&#x27;s value now
         auto live = [&amp;]() { hp += 1; return hp; }; // shares the live field
         print(&quot;bare {} copy {} live {}&quot;, bare(), copy(), live());
@@ -357,7 +357,7 @@ after reload:  v1 production retries=3
 </div>
 <footer class="site-footer">
 <p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
-<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-26</p>
+<p class="foot-note">draft contract update &middot; changed examples await both-backend validation</p>
 </footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>

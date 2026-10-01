@@ -1,6 +1,6 @@
 # Closures and captures: the two-tier model
 
-**Status: IMPLEMENTED — semantics pinned by tests on both backends** (`source/tests/properties/container_property_tests.cpp` "Lambda Capture Probes", `source/tests/language/function_tests.cpp`, `source/tests/language/test_lambda_captures.cpp`, `source/tests/vm/vm_backend_tests.cpp` ref-escape tests).
+**Status: explicit-capture contract draft; new regression cases await both-backend validation.** Previous capture semantics were pinned (`source/tests/properties/container_property_tests.cpp` "Lambda Capture Probes", `source/tests/language/function_tests.cpp`, `source/tests/language/test_lambda_captures.cpp`, `source/tests/vm/vm_backend_tests.cpp` ref-escape tests).
 
 Every free name a lambda body references is classified into exactly one of two tiers, and
 the tiers behave completely differently. Knowing which tier a name is in answers every
@@ -12,9 +12,11 @@ Names that live in a live call frame (declared with `var`/typed decls *inside a 
 or parameters — the parser assigns these `slot_index` storage) are **captured at lambda
 creation**:
 
-- **Bare `[]` (auto-capture): snapshot BY VALUE.** Equivalent to `[=]` for outer locals.
-  The closure holds a copy taken at creation; later assignments to the original are
-  invisible to it.
+- **Bare `[]`: capture nothing.** It may use its own parameters/locals and live program-scope
+  names. Enclosing locals and instance state require an explicit capture choice.
+- **`[=]` / `[x]`: snapshot by value.** Later assignments to the original are invisible.
+- A named list is exhaustive: `[x]` does not also capture `y`. Every intervening lambda
+  must admit a name needed by a nested closure, using a default or a named capture.
 - **`[&]` / `[&x]`: cell-share.** The local's storage is boxed into a shared cell; the
   closure and the original alias the same storage, writes are visible both ways, and the
   cell **outlives the frame** — escaping a `[&]` capture is legal and safe (no dangling,
@@ -53,7 +55,7 @@ the global environment directly, so these resolve **live, at call time**:
 - Exception: `execute()` called with `instance_variables` puts top-level `var`s in a
   temporary overlay that evaporates (see `docs/LOCAL_VARIABLES_BEHAVIOR.md`).
 
-This holds for every default capture (Dev ruling 2026-09-27): `[=]`, `[&]` and bare `[]` take no
+This holds for `[=]`, `[&]` and capture-free `[]`: all take no
 global, so a global named in the body is read, and written, when the lambda runs. `[&g]` is the
 same as not listing `g`.
 
@@ -73,17 +75,15 @@ the parse error `A reference capture takes no initializer`.
 
 | Case | C++ | JaiScript | Lua / Python | Obj-C blocks |
 |---|---|---|---|---|
-| Bare `[]` referencing a local | compile error | by-value snapshot | by-reference (upvalue/cell) | by-value snapshot |
+| Bare `[]` referencing a local | compile error | load error | by-reference (upvalue/cell) | by-value snapshot |
 | By-reference capture escaping the frame | dangling, UB | cell-boxed, safe | safe (cells) | `__block`, safe |
 | Explicit capture of a global | ill-formed | allowed (snapshots) | n/a | n/a |
 | Global referenced in body (`[=]`, `[&]`, `[]`) | live at call time | live at call time | live at call time | live at call time |
 | Init-capture `[x = e]` | copy of `e` | copy of `e` | n/a | n/a |
 
-C++ intuitions transfer with one exception: `[]` here means `[=]`, not "capture nothing".
-Where JaiScript differs from C++ it is strictly safer (`[&]` cannot dangle) or more
-permissive (globals may be explicitly captured). The by-value default also sidesteps
-Python's loop-variable gotcha: each lambda created in a loop snapshots the loop variable's
-current value.
+`[]` agrees with C++'s no-capture intent. Escaped reference captures retain shared cells,
+and explicit captures of program-scope names are permitted. To snapshot a loop variable
+on each iteration, use `[=]` or name the variable.
 
 ## The embedding footgun (hosts, read this)
 
@@ -102,10 +102,11 @@ execution. (Pinned by `module_scope_var_is_shared_across_executes` and
 
 ## Diagnostics
 
-Under `check_mode::warn`/`strict`, a bare `[]` lambda whose body reaches an
-enclosing-function local warns once: the capture happened implicitly (by value), and the
-intent should be spelled — `[=]` for a snapshot, `[&]` to share updates. Explicit capture
-lists of any spelling are silent, as are bare lambdas that touch only their own
-params/locals or globals. (Snapshot-then-keep-mutating is a legitimate idiom — e.g. each
-loop iteration's lambda pinning the current counter — so mutation after a value capture is
-deliberately NOT warned.)
+An unlisted enclosing frame local is a parse error, independent of check mode. The checker
+diagnoses unlisted enclosing names and instance members; closure construction also guards
+environment/member sources when checking is disabled or an AST is loaded. `this` and
+`super` require `[this]` or a default that admits instance capture. An anonymous
+`function(args) { ... }` expression is capture-free too; use a lambda spelling for captures.
+
+Namespaces are program scopes: a lambda made there continues to read their live variables.
+Named captures and init-captures still take the requested creation-time snapshot.

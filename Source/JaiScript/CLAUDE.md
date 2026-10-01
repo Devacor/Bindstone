@@ -4,7 +4,7 @@ High-performance, C++-like embedded scripting language with hot-reload. Snake_ca
 throughout. Used by the MutedVision (MV) engine / Bindstone via a header API + a static lib.
 
 **Key traits:** natural property access (`obj.property`), implicit `self` in methods,
-automatic lambda captures, `!= null` null checks, hot-reload of script classes, zero static
+explicit lambda captures, `!= null` null checks, hot-reload of script classes, zero static
 state (every `script_value` carries an engine reference → multi-engine + thread safe).
 
 ---
@@ -436,8 +436,8 @@ engine stays usable", not by `check_throws`.
   is the backing field (accessor bodies do not recurse). Such a field is off every member fast
   lane (vm member IC, field proofs — `class_definition::user_accessor`), is a non-lvalue to
   references, and adding/removing an accessor on hot reload takes effect for existing instances.
-- Functions & lambdas with captures (`[=]`/`[&]`, auto-capture), variadics, default args,
-  by-reference params. A default capture (`[=]`, `[&]`, bare `[]`) never captures a program-scope name: the
+- Functions & lambdas with captures (`[=]`/`[&]`, named or init-captures), variadics, default args,
+  by-reference params. A default capture (`[=]`, `[&]`) or capture-free `[]` never captures a program-scope name: the
   lambda reads it when it runs; `[g]` copies it at creation and an init-capture `[x = e]` copies `e` into the
   lambda's own `x` (Dev ruling 2026-09-27, `docs/closures_and_captures.md`, `.jaibite` version 23).
 - **Evaluation order** (Dev rulings 2026-09-27, C++17): arguments left to right after the callee, each taking

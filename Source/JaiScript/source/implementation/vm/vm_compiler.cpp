@@ -169,6 +169,7 @@ namespace {
 			case opcode::op_c_mov:
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
+			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -364,6 +365,7 @@ namespace {
 			case opcode::op_c_mov:
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
+			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
 			case opcode::op_c_cfor_back:
@@ -4261,6 +4263,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case opcode::op_c_math:   // the landing is the destination's own rule (a kind it does not take misses)
 				if ((pi.a & k_cell_index_mask) != t) return false;
 				pi.a = (pi.a & ~k_cell_index_mask) | d; return true;
+			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
+				if (k != kf || pi.a != t) return false;
+				pi.a = d; return true;
 			case opcode::op_c_mov_p: case opcode::op_c_mov_k:   // a chain of moves: the first one lands in the last one's destination
 				if (pi.a != t) return false;
 				pi.a = d; return true;
@@ -4386,7 +4391,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				append(vm_instruction{opcode::op_c_index_store, static_cast<uint32_t>(c.fused_index_protos.size() - 1), loop_index, static_cast<uint32_t>(ip)}, ip);
 				break;
 			}
-			case ir::math: append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst_of(op.a), cell_of(op.b), 0}, ip); break;
+			case ir::math: {
+				const uint32_t src = cell_of(op.b), dst = dst_of(op.a);
+				const uint8_t kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+				const detail::math_fn fn = static_cast<detail::math_fn>(op.tok & ~k_cell_math_float_arg);
+				const opcode direct = !(src & k_typed_const_bit) && pinned_operand(src, kf) && dst < cells.size() && cells[dst].kind == kf
+					? (fn == detail::math_fn::sin_ ? opcode::op_c_sin_f : fn == detail::math_fn::cos_ ? opcode::op_c_cos_f : fn == detail::math_fn::sqrt_ ? opcode::op_c_sqrt_f : opcode::op_halt) : opcode::op_halt;
+				if (direct != opcode::op_halt) { append(vm_instruction{direct, dst, src, 0}, ip); }   // a float into a float cell: the landing stores it as it is
+				else { append(vm_instruction{opcode::op_c_math, (static_cast<uint32_t>(op.tok) << k_cell_op_shift) | dst, src, 0}, ip); }
+				break;
+			}
 			case ir::jump:
 				if (ip >= first && elided_jump(ip - first)) break;   // onto the next instruction (a graft's return to its join): nothing to run
 				fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 0, op.target, 0 }); append(vm_instruction{opcode::op_c_jump, 0, 0, op.tok}, ip); break;   // c = 1: an inner loop's back edge

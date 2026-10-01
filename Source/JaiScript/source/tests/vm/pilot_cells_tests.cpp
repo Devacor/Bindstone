@@ -3397,7 +3397,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			const std::string l = listing_run(prelude + body);
 			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			check_true(count("C_MATH") >= 4, "the maths run in the blocks\n" + l);
+			check_true(count("C_SIN_F ") >= 1 && count("C_COS_F ") >= 2 && count("C_SQRT_F ") >= 1, "the maths run in the blocks as float intrinsics\n" + l);
 			{
 				// no math result is moved by the instruction after it: the math lands in the move's destination
 				std::vector<std::string> lines; for (size_t at = 0, nl; at < l.size(); at = nl + 1) { nl = l.find('\n', at); if (nl == std::string::npos) { nl = l.size(); } lines.push_back(l.substr(at, nl - at)); }
@@ -3409,6 +3409,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				for (size_t i = 0; i + 1 < lines.size(); ++i) {
 					uint64_t ma = 0, mb = 0, va = 0, vb = 0;
 					if (operands(lines[i], "C_MATH ", ma, mb) && operands(lines[i + 1], "C_MOV_P ", va, vb) && vb == (ma & 0xFFFFFFu)) { ++moved; }
+					for (const char* fop : { "C_SIN_F ", "C_COS_F ", "C_SQRT_F " }) { if (operands(lines[i], fop, ma, mb) && operands(lines[i + 1], "C_MOV_P ", va, vb) && vb == ma) { ++moved; } }
 				}
 				check_eq(static_cast<size_t>(0), moved, "the math results land in their locals\n" + l);
 			}

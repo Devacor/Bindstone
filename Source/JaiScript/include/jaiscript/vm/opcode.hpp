@@ -294,6 +294,7 @@ namespace jai::vm {
         op_c_add_ii, op_c_sub_ii, op_c_add_iik, op_c_sub_iik,
         op_c_mov_p,         // a = dst cell, b = src cell: a move between cells pinned to one kind (the landing's rules keep the value as it is)
         op_c_mov_k,         // a = dst cell, b = constant index: a constant of the dst's pinned kind
+        op_c_sin_f, op_c_cos_f, op_c_sqrt_f,   // a = dst cell, b = src cell: the intrinsic on a pinned float into a pinned float
         op_halt,
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
@@ -622,6 +623,9 @@ namespace jai::vm {
             case opcode::op_c_sub_iik: return "C_SUB_IIK";
             case opcode::op_c_mov_p: return "C_MOV_P";
             case opcode::op_c_mov_k: return "C_MOV_K";
+            case opcode::op_c_sin_f: return "C_SIN_F";
+            case opcode::op_c_cos_f: return "C_COS_F";
+            case opcode::op_c_sqrt_f: return "C_SQRT_F";
             case opcode::op_cells_resume: return "CELLS_RESUME";
             case opcode::op_ref_target_store: return "REF_TARGET_STORE";
             case opcode::op_halt: return "HALT";

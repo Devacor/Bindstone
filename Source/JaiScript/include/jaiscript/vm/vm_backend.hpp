@@ -1810,6 +1810,7 @@ namespace jai::vm {
         op_status exec_compound_store(frame& f, const vm_instruction& ins);
         op_status exec_incdec(frame& f, const vm_instruction& ins);
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
+        op_status bind_graft_parameter(frame& f, const variable_decl* decl);   // a graft's by-value parameter: bind_parameters's by-value lane over the popped argument
         op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);
         op_status exec_decl_ref_value(frame& f, const vm_instruction& ins);
         op_status exec_binary(frame& f, const vm_instruction& ins);

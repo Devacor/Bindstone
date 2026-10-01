@@ -304,8 +304,7 @@ public:
 
             eng->execute("auto obj = TrackedObject(42); auto arr = [obj, obj, obj];");
 
-            // Array literal elements are shallow handles and the literal itself is a
-            // temporary, so no element is cloned (unlike push()/element assignment)
+            // A C++-backed object in a literal is shared (the capture rule); a script value copies
             check_eq(0, TrackedObject::copy_count);
         });
 

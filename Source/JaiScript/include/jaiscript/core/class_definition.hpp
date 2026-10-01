@@ -1106,7 +1106,9 @@ public:
         instance_plan_version_ = want;
         return instance_plan_;
     }
-    std::shared_ptr<class_instance> create_instance() {
+    // An instance of this class, armed with the chain's script destructor when it declares one: every instance runs it,
+    // a minted one and every copy alike (C++)
+    std::shared_ptr<class_instance> allocate_instance() {
         std::shared_ptr<class_instance> instance;
         // Destructor probe memo: "~"+name_ alloc + symbolizer intern + has_method are
         // class-static facts, recomputed per MINT before this (measured 2026-07-12 in
@@ -1168,6 +1170,11 @@ public:
         } else {
             instance = std::make_shared<class_instance>(class_instance::interned_name_t{}, interned_name(), engine_);   // instance + control block, one allocation
         }
+        return instance;
+    }
+
+    std::shared_ptr<class_instance> create_instance() {
+        std::shared_ptr<class_instance> instance = allocate_instance();
 
         instance->set_class_definition(shared_from_this());
 
@@ -3341,6 +3348,20 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     return checked_result<void>();
 }
 
+// A literal's element taken from an existing object (a name, a member, an element): the capture rule - a script value copies,
+// a C++-backed object and a handle are shared (C++ aggregate initialization copies its elements)
+inline script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer);
+inline script_value clone_for_literal(const script_value& value, string_symbolizer* symbolizer) {
+    const script_value& target = value.deref();
+    switch (target.raw_storage_index()) {
+        case script_value::TYPEID_NULL: case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_STRING:
+        case script_value::TYPEID_CHAR: case script_value::TYPEID_BOOL:
+            return target;
+        default:
+            return clone_for_capture(target, symbolizer);
+    }
+}
+
 // A value capture: C++-backed objects (make_object wrappers, raw cpp holders, a class instance wrapping a C++ object) and
 // shared_ptr handles are reference types in script, so the capture shares them; a pure script value deep-copies
 inline script_value clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
@@ -3572,7 +3593,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
     if (class_def_ && class_def_->nocopy()) {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
-    auto new_instance = std::make_shared<class_instance>(interned_name_t{}, class_name_, engine_);
+    auto new_instance = class_def_ ? class_def_->allocate_instance() : std::make_shared<class_instance>(interned_name_t{}, class_name_, engine_);
 
     uint64_t cpp_obj_id = get_cpp_object_field_id();
     if (class_def_ && !overflow_fields_) {

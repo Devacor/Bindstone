@@ -1207,6 +1207,64 @@ public:
             }
         });
 
+        test("a_missing_import_file_raises_once_then_waits_for_it_to_return", [=, this]() {
+            // a module that ran before and whose file disappears raises once, then waits quietly like a failed stamp until a pass
+            // finds the file again, which re-runs it through the usual checks; direct or nested alike. A file that never loaded
+            // raises on every reach.
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 0;
+            auto write = [&](const char* name, const std::string& body) {
+                const auto path = dir / name;
+                put_file(path, body);
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            for (bool nested : {false, true}) {
+                const std::string label = nested ? " (nested)" : " (direct)";
+                write("ms_outer.jai", "outer_ran();\nimport \"ms_mod.jai\";\n");
+                write("ms_mod.jai", "mod_ran();\nint ms_value() { return 1; }\n");
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->add_include_path(dir.string());
+                int outer_runs = 0, mod_runs = 0;
+                eng->add_function("outer_ran", [&outer_runs]() { ++outer_runs; });
+                eng->add_function("mod_ran", [&mod_runs]() { ++mod_runs; });
+                eng->import_recheck_interval(1.0e6);
+                eng->execute(nested ? "void frame() { import(\"ms_outer.jai\"); }" : "void frame() { import(\"ms_mod.jai\"); }");
+                auto pass = [&]() {
+                    eng->import_recheck_interval(1.0e6);
+                    return eng->execute("var m = \"\";\ntry { frame(); } catch (e) { m = e; }\nm;").to_string();
+                };
+                check_eq(std::string(), pass(), "the first frame loads" + label);
+                check_eq(1, mod_runs, label);
+                std::filesystem::remove(dir / "ms_mod.jai");
+                std::filesystem::remove(dir / "ms_mod.jaibite");
+                const std::string first = pass();
+                check_true(first.find("Failed to open import file") != std::string::npos, "the pass that finds it gone raises: " + first + label);
+                for (int i = 0; i < 3; ++i) { check_eq(std::string(), pass(), "then it waits quietly" + label); }
+                check_eq(1, mod_runs, label);
+                check_eq(script_int(1), eng->execute("ms_value();").as_int(), "the program keeps the module it loaded" + label);
+                write("ms_mod.jai", "mod_ran();\nint ms_value() { return 2; }\n");
+                check_eq(std::string(), pass(), "the file is back" + label);
+                check_eq(2, mod_runs, "it re-runs once" + label);
+                check_eq(script_int(2), eng->execute("ms_value();").as_int(), label);
+                check_eq(std::string(), pass(), label);
+                check_eq(2, mod_runs, "and not again" + label);
+                check_eq(nested ? 1 : 0, outer_runs, "its importer does not re-run" + label);
+            }
+            auto eng = make_engine();
+            eng->add_include_path(dir.string());
+            for (int i = 0; i < 2; ++i) {
+                std::string text;
+                try { eng->execute("import(\"ms_never.jai\");"); } catch (const std::exception& e) { text = e.what(); }
+                check_false(text.empty(), "a file that never loaded raises on every reach");
+            }
+            for (const char* f : {"ms_outer.jai", "ms_mod.jai"}) {
+                std::filesystem::remove(dir / f);
+                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+            }
+        });
+
         test("an_import_runs_a_module_only_from_text_read_under_its_stamp", [=, this]() {
             // a save landing while a module is read (its stamp queried after the read disagrees with the one before) holds a
             // module that ran before until a pass reads it whole; a first load reads again at once. A saver thread moves the

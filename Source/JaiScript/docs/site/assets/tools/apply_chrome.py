@@ -19,7 +19,7 @@ SITE = pathlib.Path(__file__).resolve().parents[2]
 
 VERSION = "0.1.0"
 REPO = "https://github.com/Devacor/JaiScript"
-BUILD_DATE = "2026-09-26"
+BUILD_DATE = "2026-10-01"
 
 THEME_BOOTSTRAP = (
     '<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}\n'
@@ -41,7 +41,7 @@ GUIDE = [
     ("05-control-flow.html", "Control Flow",
      "if, while, both for forms, a switch that breaks by default, and try/catch/throw that unwinds loops correctly."),
     ("06-functions.html", "Functions &amp; Lambdas",
-     "Functions, lambdas with automatic captures, default arguments, variadics, and by-reference parameters."),
+     "Functions, lambdas with explicit captures, default arguments, variadics, and by-reference parameters."),
     ("07-classes.html", "Classes",
      "Fields in declaration order, constructor overloading and delegation, inheritance with super, statics, and hot reload with instance migration."),
     ("08-coroutines.html", "Coroutines",
@@ -91,9 +91,20 @@ EMBEDDING = [
      "jaiscript_lsp answers the editor from the engine's own parser and strict checker: diagnostics as you type across a whole program, definitions, references, hover, completion, rename."),
 ]
 
+BRIDGES = [
+    ("01-from-javascript.html", "From JavaScript",
+     "JavaScript beside JaiScript, idiom by idiom: what carries over, the habits that get a different answer (copies, ==, integer division, closures, map keys, array helpers), and a complete program."),
+    ("02-from-cpp.html", "From C++",
+     "C++ beside JaiScript, idiom by idiom: what carries over, what is absent (pointers, templates, const), what is guaranteed (evaluation order, checked overflow, no fallthrough), and a complete program."),
+    ("03-from-csharp.html", "From C#",
+     "C# beside JaiScript, idiom by idiom: classes as value types, var and auto, properties as accessors, loops for LINQ, coroutines for async, and a complete program."),
+]
+
 SECTION_INDEX_DESC = {
     "tour/index.html":
         "Ten minutes, one small game: value semantics, the strict checker, a swarm, coroutines, hot reload and parallel_for, every line run on both backends.",
+    "bridges/index.html":
+        "Three pages for programmers arriving from JavaScript, C++ or C#: the familiar spellings side by side, the habits that get a different answer, and a complete program for each.",
     "guide/index.html":
         "Fourteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
     "embedding/index.html":
@@ -108,7 +119,8 @@ SECTION_INDEX_DESC = {
         "What is settled in the language and the embedding API, and what a 0.x release may still change before 1.0.",
 }
 
-SECTION_TITLE = {"tour": "The Ten-Minute Tour", "guide": "The Language Guide", "embedding": "Embedding &amp; Engine Guide",
+SECTION_TITLE = {"tour": "The Ten-Minute Tour", "bridges": "Language Bridges",
+                 "guide": "The Language Guide", "embedding": "Embedding &amp; Engine Guide",
                  "examples": "The Example Games", "reference": "Reference"}
 
 # ---------------------------------------------------------------- chrome parts
@@ -150,7 +162,7 @@ def header(section, root):
         '<a class="brand" href="%sindex.html"><span class="rainbow">JaiScript</span>'
         '<span class="brand-sub">docs</span></a>' % root,
         '<nav class="site-nav" aria-label="Sections">'
-        + nav("tour", "Tour") + nav("guide", "Guide") + nav("embedding", "Embedding")
+        + nav("tour", "Tour") + nav("bridges", "Bridges") + nav("guide", "Guide") + nav("embedding", "Embedding")
         + nav("examples", "Examples") + nav("reference", "Reference") + "</nav>",
         '<div class="header-tools">',
         '<div class="search" role="search"><input id="search-box" type="search" '
@@ -165,7 +177,7 @@ def header(section, root):
 
 
 def chapter_sidebar(section, chapters, current, root):
-    label = "Guide" if section == "guide" else "Embedding"
+    label = {"guide": "Guide", "embedding": "Embedding", "bridges": "Language Bridges"}[section]
     items = []
     for name, title, _ in chapters:
         href = "%s%s/%s" % (root, section, name)
@@ -228,6 +240,14 @@ def build_pages():
 
     pages.append(("tour/index.html", "tour", "../", SECTION_INDEX_DESC["tour/index.html"], page_sidebar(True),
                   prevnext(None, ("../guide/01-hello.html", "next &middot; the guide", GUIDE[0][1]))))
+
+    bridges_index = ("../bridges/index.html", "bridges", SECTION_TITLE["bridges"])
+    pages.append(("bridges/index.html", "bridges", "../", SECTION_INDEX_DESC["bridges/index.html"],
+                  chapter_sidebar("bridges", BRIDGES, None, "../"), ""))
+    for name, title, desc in BRIDGES:
+        pages.append(("bridges/" + name, "bridges", "../", desc,
+                      chapter_sidebar("bridges", BRIDGES, name, "../"),
+                      prevnext(bridges_index, ("../guide/01-hello.html", "next &middot; the guide", GUIDE[0][1]))))
 
     guide_index = ("../guide/index.html", "guide", SECTION_TITLE["guide"])
     embed_index = ("../embedding/index.html", "embedding", SECTION_TITLE["embedding"])

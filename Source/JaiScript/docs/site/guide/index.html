@@ -22,7 +22,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
-<nav class="site-nav" aria-label="Sections"><a href="../tour/index.html">Tour</a><a href="../guide/index.html" class="active" aria-current="page">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../tour/index.html">Tour</a><a href="../bridges/index.html">Bridges</a><a href="../guide/index.html" class="active" aria-current="page">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
 <button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
@@ -33,6 +33,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1">
 <h1>The Language Guide</h1>
 <p>Fourteen chapters covering the whole core language. Every code sample was executed on <strong>both</strong> backends (tree-walking interpreter and bytecode VM); the output shown beneath each example is the real, verified output.</p>
+<p>Coming from JavaScript, C++ or C#? The <a href="../bridges/index.html">Language Bridges</a> map what you already know onto JaiScript, one page per language, and point back into these chapters.</p>
 <p>Follow along in a terminal. Drop a sample into <code>try.jai</code>, run <code>jaiscript try.jai</code> with the standalone runner, and you get what the page shows, with one small convention: the <code>== result:</code> line, explained in <a href="01-hello.html#try-it-from-a-terminal">Hello &amp; Basics</a> along with the two-minute setup.</p>
 <p>One thing to know before chapter&nbsp;1: the <strong>static checker is on, in strict mode, by default</strong>. A typed mistake the checker can see (a string into an <code>int</code>, a call with the wrong number of arguments, an undeclared name) fails the load, before a single statement runs. <a href="02-type-ladder.html#when-a-mismatch-is-caught">Chapter&nbsp;2</a> draws the line between those and the mistakes that still wait for run time; <a href="13-strict-checking.html">Chapter&nbsp;13</a> collects the whole story, escape hatches included.</p>
 <p>Which of these rules are settled for 1.0, and which may still change in a 0.x release, is on the <a href="../stability.html">Stability</a> page.</p>
@@ -56,7 +57,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 <footer class="site-footer">
 <p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
-<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-26</p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-10-01</p>
 </footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>

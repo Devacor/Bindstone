@@ -164,3 +164,5 @@ additionally rejects every mutation spelling on `kv.first` it can see (`cannot m
 'kv.first': map keys are read-only`, `docs/static_checking.md` Map keys). Bound
 (`cpp_bound`) strings are the live C++ member and keep write-through
 (`docs/invariants.md` 11).
+
+Typed reference boundary audit: parameters, range-for and reference returns use the same admission kernel. Primitive/math kinds match exactly; class references accept subclasses; known concrete container/handle types are invariant. No reference conversion or retagging occurs. Untyped container views retain existing leniency; enforcing a typed write view over dynamic storage is a separate compatibility decision, not introduced here.

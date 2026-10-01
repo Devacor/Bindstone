@@ -863,6 +863,14 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 			const bool typed_to_name = a->get_type() == node_type::identifier_expr;   // a typed one bound to a caller's local is that local: the declared type is the checker's (no bind or store checks it)
 			if (!(!p.type || any_type(p.type.get()) || var_reference(p.type.get()) || typed_to_name) || p.ref_escaping) return "a reference parameter that is not a var&";   // `var& p` (the parser keeps the referent's type and the reference flag apart)
 			if (a->get_type() == node_type::identifier_expr) {
+				const auto* identifier = static_cast<const identifier_expr*>(a);
+				if (p.type && p.type->base_type != script_value_type::jai_any_type && p.type->type_name != "auto") {
+					const type_info* actual = nullptr;
+					if (frame && identifier->slot_index < frame->size()) { actual = (*frame)[identifier->slot_index]; }
+					else if (auto found = callable_.slot_types.find(static_cast<uint32_t>(identifier->slot_index)); found != callable_.slot_types.end()) { actual = found->second; }
+					if (actual && actual->is_reference()) { actual = actual->element_type().get(); }
+					if (!actual || !actual->equals(*p.type)) { return "a typed reference that needs its ordinary binding check"; }
+				}
 				if (static_cast<const identifier_expr*>(a)->global_qualified) return "a reference argument spelled ::name";
 				if (static_cast<const identifier_expr*>(a)->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
 				continue;

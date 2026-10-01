@@ -117,7 +117,7 @@ methods, inherited fields) all check against the declared type.
 **Calls** — checked only when the callee resolves statically:
 - same-script functions/ctors/methods: arity (with defaults) + per-arg assignability
   (same conversion table, element boundary included — note a `string` parameter accepts anything). Overloads: error
-  only if NO overload matches. A reference parameter takes any argument type. A string
+  only if NO overload matches. A reference parameter aliases compatible storage without conversion: exact primitive/math kind, a compatible class, callable-or-null, and matching concrete container/handle types. Unknown container views remain lenient in this draft. A string
   literal for a viable `string&` overload is accepted whether or not the callee writes through
   the parameter (the runtime binds a private cell; a string variable still aliases). For other types, a literal
   (a number, string, char, bool or null literal, an array or map literal) where every viable

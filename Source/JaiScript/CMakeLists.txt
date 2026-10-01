@@ -38,6 +38,10 @@ option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)
 option(JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES "Enable debugging environment cycles" OFF)
 option(JAISCRIPT_NATIVE_ARCH "Tune Release builds for this machine's CPU (-march=native; non-portable binaries)" OFF)
 option(JAISCRIPT_ENABLE_LTO "Enable link-time optimization for GCC/Clang Release builds" OFF)
+option(JAISCRIPT_VM_COVERAGE "Diagnostic build: the vm counts every instruction where it runs and why (engine::vm_coverage_report, jaiscript --coverage)" OFF)
+if(JAISCRIPT_VM_COVERAGE)
+    add_compile_definitions(JAISCRIPT_VM_COVERAGE)
+endif()
 
 # Optimization settings for different build configurations
 if(MSVC)

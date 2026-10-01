@@ -44,7 +44,7 @@ namespace jai {
     class execution_backend;
     class string_symbolizer;
     struct import_site;
-    namespace vm { class vm_backend; }
+    namespace vm { class vm_backend; struct coverage_tables; }
     namespace debug { class controller; class transport; }
     struct script_namespace_data;
 
@@ -330,6 +330,18 @@ namespace jai {
         // per-script-function accounting here, so what the process prints at exit covers
         // the window from this call on. No effect in ordinary builds.
         void vm_profile_reset();
+        // === EXECUTION COVERAGE (a diagnostic build: JAISCRIPT_VM_COVERAGE; vm/coverage.hpp, docs/review-2026-10-01) ===
+        // The vm counts every instruction where it runs (a cell block, the general form typed or untyped) and, for the
+        // general form, the reason the compiler left it there, attributed to the function and the source line; the
+        // parallel workers' backends count too. vm_coverage_report ranks the reasons by executed operations with their top
+        // sites (top rows per table); vm_coverage_reset zeroes the counters (a warm-up drops out). A build without the
+        // define reports vm_coverage_available() false and throws std::logic_error from the other two.
+        static bool vm_coverage_available();
+        void vm_coverage_reset();
+        std::string vm_coverage_report(size_t top = 25) const;
+#ifdef JAISCRIPT_VM_COVERAGE
+        void vm_coverage_adopt(std::shared_ptr<vm::coverage_tables> tables);   // a vm backend's tables, kept past the backend
+#endif
         // Stamp counters from the most recent proof pass (tests assert proofs happened).
         const proof_stats& last_proof_stats() const;
 

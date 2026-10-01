@@ -19,6 +19,10 @@
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/arg_capture.hpp>
 #include <jaiscript/detail/math_component_store.hpp>
+#ifdef JAISCRIPT_VM_COVERAGE
+#include <jaiscript/vm/coverage.hpp>
+#include <mutex>
+#endif
 #include <charconv>
 #include <iostream>
 #include <fstream>
@@ -882,6 +886,10 @@ struct engine::implementation {
     bool type_proofs_ = true;
     bool ir_passes_ = true;
     uint32_t cells_miss_every_ = 0;   // the miss injection lever; the VM reads it at block entry under JAISCRIPT_MISS_INJECTION
+#ifdef JAISCRIPT_VM_COVERAGE
+    std::mutex coverage_mutex_;
+    std::vector<std::shared_ptr<vm::coverage_tables>> coverage_tables_;   // every vm backend's census tables (vm/coverage.hpp), the workers' included
+#endif
     engine::disassembly_sink_fn disassembly_sink_;   // the listing tool's sink; unset = no listing
     proof_stats last_proof_stats_;
 
@@ -2622,6 +2630,41 @@ const engine::disassembly_sink_fn& engine::disassembly_sink() const {
 void engine::vm_profile_reset() {
     if (impl && impl->backend) { impl->backend->profile_reset(); }
 }
+
+bool engine::vm_coverage_available() {
+#ifdef JAISCRIPT_VM_COVERAGE
+    return true;
+#else
+    return false;
+#endif
+}
+
+void engine::vm_coverage_reset() {
+#ifdef JAISCRIPT_VM_COVERAGE
+    std::lock_guard<std::mutex> lock(impl->coverage_mutex_);
+    for (const auto& t : impl->coverage_tables_) { t->reset(); }
+#else
+    throw std::logic_error("engine::vm_coverage_reset: this build carries no coverage counters (define JAISCRIPT_VM_COVERAGE)");
+#endif
+}
+
+std::string engine::vm_coverage_report(size_t top) const {
+#ifdef JAISCRIPT_VM_COVERAGE
+    std::lock_guard<std::mutex> lock(impl->coverage_mutex_);
+    return vm::coverage_report(impl->coverage_tables_, top);
+#else
+    (void)top;
+    throw std::logic_error("engine::vm_coverage_report: this build carries no coverage counters (define JAISCRIPT_VM_COVERAGE)");
+#endif
+}
+
+#ifdef JAISCRIPT_VM_COVERAGE
+void engine::vm_coverage_adopt(std::shared_ptr<vm::coverage_tables> tables) {
+    std::lock_guard<std::mutex> lock(impl->coverage_mutex_);
+    for (const auto& t : impl->coverage_tables_) { if (t == tables) return; }
+    impl->coverage_tables_.push_back(std::move(tables));
+}
+#endif
 
 const proof_stats& engine::last_proof_stats() const {
     return impl->last_proof_stats_;

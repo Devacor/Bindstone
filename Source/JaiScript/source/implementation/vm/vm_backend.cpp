@@ -52,6 +52,20 @@ namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; 
 #else
 #define JAI_CELL_COST(i)
 #endif
+#ifdef JAISCRIPT_VM_COVERAGE
+// the coverage census (vm/coverage.hpp): every instruction counted where it runs
+#define JAI_COVERAGE_GENERAL(f) coverage_general(f)
+#define JAI_COVERAGE_CELL(f, ip, ci) coverage_cell(f, ip, (ci).op); const size_t coverage_ip_ = ip; const vm_instruction coverage_ci_ = ci
+#define JAI_COVERAGE_CELL_AFTER(f, ip) if (coverage_ci_.op == opcode::op_c_jcmp2) { coverage_cell_pair(f, coverage_ip_, coverage_ci_, ip); }
+#define JAI_COVERAGE_ENTRY(f, loop, taken) coverage_entry(f, loop, taken)
+#define JAI_COVERAGE_MISS(f) coverage_miss(f)
+#else
+#define JAI_COVERAGE_GENERAL(f)
+#define JAI_COVERAGE_CELL(f, ip, ci)
+#define JAI_COVERAGE_CELL_AFTER(f, ip)
+#define JAI_COVERAGE_ENTRY(f, loop, taken)
+#define JAI_COVERAGE_MISS(f)
+#endif
 #ifdef JAISCRIPT_VM_PROFILE
 
 // Op-layer TRY twins: callees returning op_status pass through vm_check; fat-returning
@@ -375,6 +389,9 @@ vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environmen
 void vm_backend::set_engine_reference(engine* engine_ref) {
 	engine_ = engine_ref;
 	if (engine_) {
+#ifdef JAISCRIPT_VM_COVERAGE
+		engine_->vm_coverage_adopt(coverage_);
+#endif
 		ti_int_ = engine_->get_type_info_int(); ti_float_ = engine_->get_type_info_float(); ti_bool_ = engine_->get_type_info_bool(); ti_string_ = engine_->get_type_info_string();
 		symbolizer_ = engine_->get_symbolizer();
 		env_symbolizer_ = symbolizer_;
@@ -7510,6 +7527,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	JAI_CELL_COST(3)
 	JAI_COARSE(coarse_miss_, coarse_misses_)
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
+	JAI_COVERAGE_MISS(f);
 	++cells_counters_.misses;
 	park_raw_callee(f, loop);   // a miss inside a raw call's argument zone: the general form resumes with the callee parked
 #ifdef JAISCRIPT_VM_PROFILE
@@ -7595,7 +7613,8 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 		f.ip = p.exit_ip;
 		return {};
 	}
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { f.ip = p.body_ip; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = p.body_ip; return {}; }
+	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
 	cs.dirty.reset();
@@ -7620,7 +7639,8 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	// window-backed record frames only: a fiber frame is call_frame-backed and takes the general form; a
 	// frame copied into fiber state is default-constructed with a null area pointer; a record's pointer is
 	// rebound to its own area at every push, so a reused record never aliases another frame's cells
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { f.ip = loop.head; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = loop.head; return {}; }
+	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
 	cs.dirty.reset();
@@ -7634,7 +7654,8 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_cells_enter(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { f.ip = ins.b; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = ins.b; return {}; }
+	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
 	cs.dirty.reset();
@@ -8148,6 +8169,7 @@ next_frame:
 	size_t ip = f.ip;
 	for (;;) {
 		const vm_instruction& ci = regs.code[ip];
+		JAI_COVERAGE_CELL(f, ip, ci);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_cell_ops_[static_cast<size_t>(ci.op) & 0xFF];
 		const uint64_t prof_c0 = __rdtsc();
@@ -8263,6 +8285,7 @@ next_frame:
 			prof_prev_cell = prof_k;
 		}
 #endif
+		JAI_COVERAGE_CELL_AFTER(f, ip);
 		if (st == op_status::failed) { f.ip = ip; return st; }
 		if (cs.loop == k_invalid_u32) { f.ip = ip; return {}; }   // flushed at an exit or a miss: ip is the general form's
 	}
@@ -19111,6 +19134,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 		assert(f.ip < code.size());
 		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
 		const vm_instruction& ins = code[f.ip];
+		JAI_COVERAGE_GENERAL(f);
 #ifdef JAISCRIPT_VM_PROFILE
 		{
 			const uint64_t prof_now = __rdtsc();

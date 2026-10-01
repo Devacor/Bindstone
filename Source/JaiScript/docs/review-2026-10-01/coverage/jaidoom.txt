@@ -1,0 +1,594 @@
+script p10_timedemo.jai
+== VM execution coverage (operations: each cell instruction stands for one general instruction; a fused pair counts both halves)
+executed operations 1305.77M | cell dispatches 1075.36M | chunks 172
+
+-- classes
+(a) inside cell blocks                                  1189.98M   91.1%
+      closed loops                                      1164.49M   89.2%
+      straight-line regions                               25.49M    2.0%
+      frame programs                                           0    0.0%
+(a') block entries / resumes on the dispatcher           4517101    0.3%
+(b) typed op_t_* on the general form                      50.82M    3.9%
+(c) general form, untyped                                 60.45M    4.6%
+
+-- cell operations by family
+  cell arithmetic                                        440.45M   33.7%
+  cell compare / branch / back edge                      333.37M   25.5%
+  cell element load / store / push                       319.42M   24.5%
+  cell move                                               56.61M    4.3%
+  cell math intrinsic                                     37.51M    2.9%
+  cell call door (probe, args, call, land, ret)          2623923    0.2%
+
+-- general-form operations by instruction family (b typed | c untyped)
+  typed element (T_LOAD/T_PUSH)                           18.16M    1.4%   b 18.16M | c 0
+  untyped arithmetic / math / cast                        17.10M    1.3%   b 0 | c 17.10M
+  untyped load / store / declaration                      16.22M    1.2%   b 0 | c 16.22M
+  typed arithmetic (T_ADD..T_MOD)                         13.46M    1.0%   b 13.46M | c 0
+  typed compare-jump (T_J*)                               11.77M    0.9%   b 11.77M | c 0
+  untyped compare / branch                               8785604    0.7%   b 0 | c 8785604
+  typed move (T_DECL/T_STORE)                            7431540    0.6%   b 7431540 | c 0
+  call: function (probe, call, guard, temp)              6357785    0.5%   b 0 | c 6357785
+  element access / iteration                             4944705    0.4%   b 0 | c 4944705
+  return / frame exit                                    3746984    0.3%   b 0 | c 3746984
+  call: builtin method (container/string)                1245519    0.1%   b 0 | c 1245519
+  loop control (back edge, counted for)                  1243052    0.1%   b 0 | c 1243052
+  call: method                                            618151    0.0%   b 0 | c 618151
+  string concatenation                                    158575    0.0%   b 0 | c 158575
+  allocation (new, literal, closure)                       20544    0.0%   b 0 | c 20544
+  scope / try / throw / yield                               9740    0.0%   b 0 | c 9740
+  member access                                             4258    0.0%   b 0 | c 4258
+  program declarations                                       320    0.0%   b 0 | c 320
+
+-- general-form operations by reason (share of all operations; b typed | c untyped; top families)
+  closed loop: iterations before the block entry                                21.23M    1.6%   b 14.36M | c 6872523
+      typed arithmetic (T_ADD..T_MOD)  29.7%; typed compare-jump (T_J*)  15.9%; untyped arithmetic / math / cast  14.9%
+  straight-line: typed element (T_LOAD/T_PUSH)                                  14.85M    1.1%   b 14.85M | c 0
+      typed element (T_LOAD/T_PUSH) 100.0%
+  straight-line: scalar op, no span (no statement boundary or entry op)         14.64M    1.1%   b 6545340 | c 8093601
+      untyped arithmetic / math / cast  55.3%; typed compare-jump (T_J*)  26.0%; typed move (T_DECL/T_STORE)   9.8%
+  straight-line: span below the region minimum                                  13.85M    1.1%   b 8959606 | c 4889868
+      typed arithmetic (T_ADD..T_MOD)  32.1%; typed move (T_DECL/T_STORE)  23.3%; untyped arithmetic / math / cast  21.3%
+  straight-line: untyped load / store / declaration                             12.86M    1.0%   b 0 | c 12.86M
+      untyped load / store / declaration 100.0%
+  straight-line: call: function (probe, call, guard, temp)                     4882186    0.4%   b 0 | c 4882186
+      call: function (probe, call, guard, temp) 100.0%
+  straight-line: untyped compare / branch                                      4513787    0.3%   b 0 | c 4513787
+      untyped compare / branch 100.0%
+  loop refused: container element                                              4466335    0.3%   b 1597895 | c 2868440
+      untyped compare / branch  26.8%; typed compare-jump (T_J*)  24.6%; untyped arithmetic / math / cast  15.5%
+  closed loop: block entry refused at run time (refusal valve)                 3778043    0.3%   b 2662267 | c 1115776
+      typed compare-jump (T_J*)  28.2%; typed arithmetic (T_ADD..T_MOD)  27.0%; typed element (T_LOAD/T_PUSH)  15.0%
+  straight-line: element access / iteration                                    3417323    0.3%   b 0 | c 3417323
+      element access / iteration 100.0%
+  straight-line: return / frame exit                                           2978678    0.2%   b 0 | c 2978678
+      return / frame exit 100.0%
+  loop refused: loop head form                                                 2139026    0.2%   b 377839 | c 1761187
+      untyped load / store / declaration  36.1%; call: function (probe, call, guard, temp)  23.1%; untyped compare / branch   7.0%
+  loop refused: call boundary (function)                                       1614670    0.1%   b 1132218 | c 482452
+      typed compare-jump (T_J*)  59.2%; untyped compare / branch  14.9%; typed element (T_LOAD/T_PUSH)   8.7%
+  straight region: general form (entry refused or a miss)                      1405569    0.1%   b 286 | c 1405283
+      untyped load / store / declaration  49.3%; return / frame exit  48.7%; untyped compare / branch   1.9%
+  straight-line: call: builtin method (container/string)                       1134608    0.1%   b 0 | c 1134608
+      call: builtin method (container/string) 100.0%
+  straight-line: untyped arithmetic / math / cast                              1071798    0.1%   b 0 | c 1071798
+      untyped arithmetic / math / cast 100.0%
+  loop refused: translation gap                                                 861121    0.1%   b 133957 | c 727164
+      untyped compare / branch  30.2%; untyped arithmetic / math / cast  28.1%; untyped load / store / declaration  17.4%
+  loop refused: call boundary (method)                                          595236    0.0%   b 70580 | c 524656
+      untyped load / store / declaration  21.8%; call: method  19.7%; call: builtin method (container/string)  14.3%
+  straight-line: call: method                                                   349709    0.0%   b 0 | c 349709
+      call: method 100.0%
+  straight-line: loop control (back edge, counted for)                          322043    0.0%   b 0 | c 322043
+      loop control (back edge, counted for) 100.0%
+  loop refused: effect (call-argument order, an edge out, a global-only name)      151924    0.0%   b 86713 | c 65211
+      typed arithmetic (T_ADD..T_MOD)  27.9%; typed element (T_LOAD/T_PUSH)  18.0%; untyped arithmetic / math / cast  12.6%
+  loop refused: call boundary (builtin method)                                   74280    0.0%   b 33036 | c 41244
+      typed arithmetic (T_ADD..T_MOD)  25.2%; loop control (back edge, counted for)  19.7%; call: builtin method (container/string)  15.5%
+  straight-line: allocation (new, literal, closure)                              20289    0.0%   b 0 | c 20289
+      allocation (new, literal, closure) 100.0%
+  closed loop: boundary statement                                                19604    0.0%   b 0 | c 19604
+      untyped load / store / declaration  60.0%; untyped arithmetic / math / cast  20.0%; call: method  20.0%
+  region trampoline                                                              18986    0.0%   b 9493 | c 9493
+      untyped compare / branch  50.0%; typed element (T_LOAD/T_PUSH)  50.0%
+  straight-line: string concatenation                                            12437    0.0%   b 0 | c 12437
+      string concatenation 100.0%
+  straight-line: span refused (non-scalar or untyped operand)                     7676    0.0%   b 3838 | c 3838
+      untyped arithmetic / math / cast  50.0%; typed move (T_DECL/T_STORE)  50.0%
+  loop refused: scope / try / throw / yield                                       4166    0.0%   b 2161 | c 2005
+      typed compare-jump (T_J*)  25.1%; typed move (T_DECL/T_STORE)  22.3%; untyped compare / branch  10.8%
+  loop not attempted (back edge JUMP)                                             1284    0.0%   b 5 | c 1279
+      untyped load / store / declaration  39.7%; untyped compare / branch  28.6%; element access / iteration  11.1%
+  closed loop: block entry refused at run time (entry guard or container site)         608    0.0%   b 160 | c 448
+      call: function (probe, call, guard, temp)  36.2%; untyped load / store / declaration  28.9%; typed compare-jump (T_J*)  14.5%
+  loop refused: non-scalar or untyped operand                                      484    0.0%   b 21 | c 463
+      untyped load / store / declaration  42.8%; loop control (back edge, counted for)  13.6%; call: function (probe, call, guard, temp)  13.6%
+  straight-line: program declarations                                              320    0.0%   b 0 | c 320
+      program declarations 100.0%
+  closed loop: misses back to the general form                                     192    0.0%   b 119 | c 73
+      untyped compare / branch  33.3%; typed element (T_LOAD/T_PUSH)  28.6%; typed arithmetic (T_ADD..T_MOD)  28.6%
+  straight-line: member access                                                      15    0.0%   b 0 | c 15
+      member access 100.0%
+
+-- top sites per reason (function file:line of the attributed site, its detail)
+  closed loop: iterations before the block entry  (21.23M,   1.6%)
+         8926265    0.7%  draw_seg render.jai:L366  lines 366-465
+         1934064    0.1%  sector_at render.jai:L182  lines 182-184
+         1709136    0.1%  vid_row_half vid.jai:L199  lines 199-204
+         1566717    0.1%  draw_seg render.jai:L209  lines 209-218
+         1342886    0.1%  draw_patch hud.jai:L49  lines 49-53
+         1279050    0.1%  bsp_subsector render.jai:L473  lines 473-473
+         1052037    0.1%  draw_patch hud.jai:L45  lines 45-53
+          877026    0.1%  draw_sprite render.jai:L758  lines 758-801
+          541498    0.0%  draw_seg render.jai:L196  lines 196-200
+          440163    0.0%  draw_sky_col render.jai:L236  lines 236-239
+          282354    0.0%  draw_sprite render.jai:L720  lines 720-720
+          263943    0.0%  pos_ok_scan game.jai:L504  lines 504-511
+          151232    0.0%  draw_masked render.jai:L665  lines 665-705
+          138859    0.0%  draw_sprite render.jai:L797  lines 797-801
+           88985    0.0%  trace_block_dz things.jai:L325  lines 325-344
+           69562    0.0%  pos_ok_scan game.jai:L518  lines 518-529
+           52230    0.0%  pos_ok_scan game.jai:L501  lines 501-511
+           52049    0.0%  draw_things render.jai:L563  lines 563-578
+           43140    0.0%  draw_psprite render.jai:L833  lines 833-842
+           43088    0.0%  draw_sprite render.jai:L773  lines 773-775
+           41657    0.0%  cross_check spec.jai:L551  lines 551-578
+           39305    0.0%  mobj_pos_ok things.jai:L917  lines 917-945
+           38166    0.0%  lights_tic spec.jai:L194  lines 194-221
+           35779    0.0%  draw_things render.jai:L594  lines 594-597
+           34455    0.0%  cross_check spec.jai:L554  lines 554-565
+  straight-line: typed element (T_LOAD/T_PUSH)  (14.85M,   1.1%)
+         1546420    0.1%  draw_seg render.jai:L247
+         1546420    0.1%  draw_seg render.jai:L246
+         1546420    0.1%  draw_seg render.jai:L245
+         1546420    0.1%  draw_seg render.jai:L244
+          773210    0.1%  draw_seg render.jai:L256
+          546068    0.0%  point_side render.jai:L176
+          317346    0.0%  draw_sprite render.jai:L733
+          317346    0.0%  draw_sprite render.jai:L719
+          273034    0.0%  point_side render.jai:L175
+          273034    0.0%  point_side render.jai:L174
+          255810    0.0%  bsp_subsector render.jai:L472
+          255810    0.0%  bsp_subsector render.jai:L471
+          234574    0.0%  draw_sprite render.jai:L744
+          225818    0.0%  bar_patch hud.jai:L77
+          171695    0.0%  draw_seg render.jai:L309
+          168547    0.0%  draw_seg render.jai:L353
+          168547    0.0%  draw_seg render.jai:L352
+          168547    0.0%  draw_seg render.jai:L312
+          168547    0.0%  draw_seg render.jai:L307
+          168547    0.0%  draw_seg render.jai:L306
+          168547    0.0%  draw_seg render.jai:L298
+          168547    0.0%  draw_seg render.jai:L297
+          168547    0.0%  draw_seg render.jai:L296
+          168547    0.0%  draw_seg render.jai:L283
+          168547    0.0%  draw_seg render.jai:L282
+  straight-line: scalar op, no span (no statement boundary or entry op)  (14.64M,   1.1%)
+          819102    0.1%  point_side render.jai:L176
+          790363    0.1%  bar_patch hud.jai:L77
+          773210    0.1%  draw_seg render.jai:L247
+          773210    0.1%  draw_seg render.jai:L246
+          773210    0.1%  draw_seg render.jai:L245
+          773210    0.1%  draw_seg render.jai:L244
+          634692    0.0%  draw_sprite render.jai:L719
+          467572    0.0%  draw_patch hud.jai:L41
+          371124    0.0%  draw_seg render.jai:L309
+          338727    0.0%  bar_patch hud.jai:L74
+          338727    0.0%  bar_patch hud.jai:L73
+          337094    0.0%  draw_seg render.jai:L312
+          325620    0.0%  sprite_lookup things.jai:L87
+          317346    0.0%  draw_sprite render.jai:L732
+          301146    0.0%  draw_seg render.jai:L362
+          301146    0.0%  draw_seg render.jai:L361
+          296905    0.0%  draw_seg render.jai:L365
+          296905    0.0%  draw_seg render.jai:L364
+          273034    0.0%  point_side render.jai:L177
+          273034    0.0%  point_side render.jai:L175
+          273034    0.0%  point_side render.jai:L174
+          273034    0.0%  bsp_node render.jai:L483
+          269350    0.0%  tex_prepare tex.jai:L169
+          255810    0.0%  bsp_subsector render.jai:L472
+          255810    0.0%  bsp_node render.jai:L479
+  straight-line: span below the region minimum  (13.85M,   1.1%)
+         2726650    0.2%  draw_seg render.jai:L332  15 scalar ops, 15 to the last statement boundary
+         1428057    0.1%  draw_sprite render.jai:L712  9 scalar ops, 9 to the last statement boundary
+         1243008    0.1%  vid_row_half vid.jai:L193  8 scalar ops, 7 to the last statement boundary
+         1057688    0.1%  bsp_node render.jai:L478  2 scalar ops, 2 to the last statement boundary
+         1011282    0.1%  draw_seg render.jai:L285  4 scalar ops, 4 to the last statement boundary
+          952038    0.1%  draw_sprite render.jai:L721  6 scalar ops, 6 to the last statement boundary
+          767545    0.1%  draw_seg render.jai:L319  5 scalar ops, 5 to the last statement boundary
+          703445    0.1%  light_band render.jai:L167  10 scalar ops, 10 to the last statement boundary
+          627324    0.0%  sprite_lookup things.jai:L89  2 scalar ops, 2 to the last statement boundary
+          586840    0.0%  draw_seg render.jai:L310  2 scalar ops, 1 to the last statement boundary
+          342349    0.0%  draw_sky_col render.jai:L223  6 scalar ops, 6 to the last statement boundary
+          317346    0.0%  draw_sprite render.jai:L730  2 scalar ops, 2 to the last statement boundary
+          317346    0.0%  draw_sprite render.jai:L724  2 scalar ops, 2 to the last statement boundary
+          255810    0.0%  bsp_subsector render.jai:L473  1 scalar ops, 0 to the last statement boundary
+          245139    0.0%  draw_sky_col render.jai:L228  6 scalar ops, 6 to the last statement boundary
+          168547    0.0%  draw_seg render.jai:L366  1 scalar ops, 0 to the last statement boundary
+          157552    0.0%  draw_sprite render.jai:L743  2 scalar ops, 1 to the last statement boundary
+          116893    0.0%  draw_patch hud.jai:L45  1 scalar ops, 0 to the last statement boundary
+          112909    0.0%  bar_patch hud.jai:L75  3 scalar ops, 3 to the last statement boundary
+           78776    0.0%  draw_sprite render.jai:L758  1 scalar ops, 0 to the last statement boundary
+           78776    0.0%  draw_sprite render.jai:L747  1 scalar ops, 1 to the last statement boundary
+           52585    0.0%  draw_masked render.jai:L650  15 scalar ops, 15 to the last statement boundary
+           48907    0.0%  draw_sky_col render.jai:L236  1 scalar ops, 0 to the last statement boundary
+           48907    0.0%  draw_sky_col render.jai:L233  1 scalar ops, 1 to the last statement boundary
+           46056    0.0%  game_tic game.jai:L762  12 scalar ops, 12 to the last statement boundary
+  straight-line: untyped load / store / declaration  (12.86M,   1.0%)
+         1408664    0.1%  sprite_prepare things.jai:L54
+          819102    0.1%  bsp_node render.jai:L482
+          505641    0.0%  draw_seg render.jai:L363
+          505641    0.0%  draw_seg render.jai:L360
+          505641    0.0%  draw_seg render.jai:L357
+          476019    0.0%  draw_sprite render.jai:L718
+          381430    0.0%  lump_num wad.jai:L143
+          338727    0.0%  bar_patch hud.jai:L77
+          331599    0.0%  sprite_lookup things.jai:L88
+          317346    0.0%  draw_sprite render.jai:L722
+          273034    0.0%  point_side render.jai:L177
+          263736    0.0%  sector_at render.jai:L181
+          255810    0.0%  bsp_node render.jai:L480
+          254676    0.0%  draw_seg render.jai:L330
+          234453    0.0%  draw_sprite render.jai:L745
+          194209    0.0%  draw_seg render.jai:L300
+          191431    0.0%  draw_seg render.jai:L299
+          168547    0.0%  draw_seg render.jai:L356
+          168547    0.0%  draw_seg render.jai:L355
+          168547    0.0%  draw_seg render.jai:L354
+          168547    0.0%  draw_seg render.jai:L350
+          168547    0.0%  draw_seg render.jai:L349
+          168547    0.0%  draw_seg render.jai:L348
+          168547    0.0%  draw_seg render.jai:L347
+          168547    0.0%  draw_seg render.jai:L346
+  straight-line: call: function (probe, call, guard, temp)  (4882186,   0.4%)
+          546068    0.0%  bsp_node render.jai:L482
+          511620    0.0%  bsp_node render.jai:L479
+          325620    0.0%  sprite_lookup things.jai:L87
+          317346    0.0%  draw_sprite render.jai:L726
+          317346    0.0%  draw_sprite render.jai:L722
+          312604    0.0%  draw_sprite render.jai:L745
+          300418    0.0%  bsp_node render.jai:L484
+          277388    0.0%  bsp_node render.jai:L485
+          245650    0.0%  bsp_node render.jai:L487
+          233786    0.0%  draw_patch hud.jai:L38
+          226264    0.0%  bsp_node render.jai:L488
+          225818    0.0%  bar_patch hud.jai:L77
+          225818    0.0%  bar_patch hud.jai:L72
+          225818    0.0%  bar_patch hud.jai:L70
+          172258    0.0%  draw_seg render.jai:L330
+           51324    0.0%  draw_seg render.jai:L300
+           45768    0.0%  draw_seg render.jai:L299
+            9596    0.0%  pos_ok_from game.jai:L537
+            7968    0.0%  spec_tic spec.jai:L635
+            7968    0.0%  spec_tic spec.jai:L618
+            7968    0.0%  spec_tic spec.jai:L608
+            7968    0.0%  render_view render.jai:L547
+            7968    0.0%  render_view render.jai:L546
+            7968    0.0%  p_move game.jai:L575
+            7968    0.0%  p_move game.jai:L545
+  straight-line: untyped compare / branch  (4513787,   0.3%)
+          528844    0.0%  bsp_node render.jai:L477
+          469596    0.0%  sprite_prepare things.jai:L54
+          350679    0.0%  draw_patch hud.jai:L41
+          300418    0.0%  bsp_node render.jai:L485
+          234574    0.0%  draw_sprite render.jai:L744
+          190715    0.0%  lump_num wad.jai:L143
+          168547    0.0%  draw_seg render.jai:L330
+          168547    0.0%  draw_seg render.jai:L301
+          168547    0.0%  draw_seg render.jai:L300
+          168547    0.0%  draw_seg render.jai:L299
+          167488    0.0%  draw_seg render.jai:L293
+          162810    0.0%  sprite_lookup things.jai:L88
+          158673    0.0%  draw_sprite render.jai:L717
+          156831    0.0%  sprite_lookup things.jai:L90
+          134675    0.0%  tex_prepare tex.jai:L169
+          122825    0.0%  point_side render.jai:L177
+          122825    0.0%  bsp_node render.jai:L488
+           89586    0.0%  draw_seg render.jai:L359
+           89586    0.0%  draw_seg render.jai:L358
+           89586    0.0%  draw_seg render.jai:L357
+           40189    0.0%  draw_seg render.jai:L365
+           40189    0.0%  draw_seg render.jai:L364
+           40189    0.0%  draw_seg render.jai:L363
+           35948    0.0%  draw_seg render.jai:L362
+           35948    0.0%  draw_seg render.jai:L361
+  loop refused: container element  (4466335,   0.3%)
+         4452462    0.3%  things_tic things.jai:L1060  INDEX_FUSED MO_ANIM [translation] loop lines 1053-1068
+           13257    0.0%  sprites_init things.jai:L41  T_LOAD [representation] loop lines 40-48
+             479    0.0%  spec_tables spec.jai:L60  INDEX_FUSED li [translation] loop lines 60-60
+             137    0.0%  spec_tables spec.jai:L63  INDEX_FUSED si [translation] loop lines 63-63
+  closed loop: block entry refused at run time (refusal valve)  (3778043,   0.3%)
+         2837706    0.2%  tex_composite tex.jai:L157  lines 157-159
+          570348    0.0%  sprite_prepare things.jai:L74  lines 74-76
+          193942    0.0%  tex_masked tex.jai:L208  lines 208-210
+           70220    0.0%  tex_composite tex.jai:L153  lines 153-161
+           59640    0.0%  sprite_prepare things.jai:L70  lines 70-78
+           31100    0.0%  tex_composite tex.jai:L148  lines 148-161
+            7530    0.0%  tex_masked tex.jai:L204  lines 204-212
+            3920    0.0%  sprite_prepare things.jai:L67  lines 67-78
+            1848    0.0%  tex_composite tex.jai:L139  lines 139-161
+            1536    0.0%  tex_masked tex.jai:L199  lines 199-212
+             132    0.0%  tex_warm_map render.jai:L159  lines 159-162
+             121    0.0%  anim_init anim.jai:L46  lines 46-47
+  straight-line: element access / iteration  (3417323,   0.3%)
+          313630    0.0%  sprite_lookup things.jai:L90
+          234453    0.0%  draw_sprite render.jai:L745
+          190326    0.0%  lump_num wad.jai:L143
+          168547    0.0%  draw_seg render.jai:L363
+          168547    0.0%  draw_seg render.jai:L360
+          168547    0.0%  draw_seg render.jai:L357
+          168547    0.0%  draw_seg render.jai:L356
+          168547    0.0%  draw_seg render.jai:L355
+          168547    0.0%  draw_seg render.jai:L354
+          158673    0.0%  draw_sprite render.jai:L722
+          158673    0.0%  draw_sprite render.jai:L719
+          158673    0.0%  draw_sprite render.jai:L718
+          158673    0.0%  draw_sprite render.jai:L717
+          150209    0.0%  bsp_node render.jai:L484
+          138694    0.0%  bsp_node render.jai:L485
+          122825    0.0%  bsp_node render.jai:L487
+          116893    0.0%  draw_patch hud.jai:L42
+          113132    0.0%  bsp_node render.jai:L488
+           87912    0.0%  sector_at render.jai:L186
+           78776    0.0%  draw_sprite render.jai:L750
+           48907    0.0%  draw_sky_col render.jai:L232
+           48907    0.0%  draw_sky_col render.jai:L231
+           28536    0.0%  mobj_anim_tic things.jai:L964
+           17076    0.0%  mobj_anim_tic things.jai:L967
+           11958    0.0%  sprite_lookup things.jai:L88
+  straight-line: return / frame exit  (2978678,   0.2%)
+          469472    0.0%  sprite_prepare things.jai:L54
+          273034    0.0%  point_side render.jai:L177
+          273034    0.0%  bsp_node render.jai:L488
+          255810    0.0%  bsp_subsector render.jai:L473
+          255810    0.0%  bsp_node render.jai:L480
+          190326    0.0%  lump_num wad.jai:L143
+          168547    0.0%  draw_seg render.jai:L465
+          156815    0.0%  sprite_lookup things.jai:L90
+          155376    0.0%  vid_row_half vid.jai:L206
+          134675    0.0%  tex_prepare tex.jai:L169
+          116893    0.0%  draw_patch hud.jai:L53
+          112909    0.0%  bar_patch hud.jai:L77
+           87912    0.0%  sector_at render.jai:L186
+           78776    0.0%  draw_sprite render.jai:L801
+           48907    0.0%  draw_sky_col render.jai:L239
+           35856    0.0%  bar_num hud.jai:L92
+           28536    0.0%  mobj_anim_tic things.jai:L964
+            9347    0.0%  monster_tic things.jai:L907
+            5979    0.0%  sprite_lookup things.jai:L88
+            5631    0.0%  mobj_anim_tic things.jai:L986
+            4798    0.0%  pos_ok_from game.jai:L537
+            4068    0.0%  draw_psprite render.jai:L842
+            3984    0.0%  things_tic things.jai:L1068
+            3984    0.0%  spec_tic spec.jai:L635
+            3984    0.0%  render_view render.jai:L547
+  loop refused: loop head form  (2139026,   0.2%)
+         1826725    0.1%  bar_num hud.jai:L83  CONST head: CONST JUMP_IF_FALSE [head] loop lines 83-92
+          211660    0.0%  main p10_timedemo.jai:L87  PROBE_CALLEE demo_feed head: PROBE_CALLEE demo_feed CALL_FROM_SCRATCH demo_feed JUMP_IF_FALSE [head] loop lines 87-108 [call kept: a call in the body]
+           34326    0.0%  doors_tic game.jai:L636  LOAD i head: LOAD i LOAD DOORS CALL_METHOD size BINARY JUMP_IF_FALSE [head] loop lines 636-639
+           24294    0.0%  movers_tic spec.jai:L281  LOAD i head: LOAD i LOAD MOVERS CALL_METHOD size BINARY JUMP_IF_FALSE [head] loop lines 281-284
+           22048    0.0%  monster_brain things.jai:L850  CONST head: CONST JUMP_IF_FALSE [head] loop lines 850-898
+           19920    0.0%  anim_tic anim.jai:L83  LOAD i head: LOAD i LOAD BTN_LD CALL_BUILTIN size BINARY JUMP_IF_FALSE [head] loop lines 83-89
+              48    0.0%  main p10_timedemo.jai:L46  LOAD a head: LOAD a LOAD ARGS CALL_METHOD size BINARY JUMP_IF_FALSE [head] loop lines 46-55
+               5    0.0%  spec_tic spec.jai:L611  LOAD c head: LOAD c LOAD CLOSE30_SECS CALL_BUILTIN size BINARY JUMP_IF_FALSE [head] loop lines 611-611
+  loop refused: call boundary (function)  (1614670,   0.1%)
+         1614670    0.1%  projectile_tic things.jai:L697  CAPTURE_ARG [effect] loop lines 686-703
+  straight region: general form (entry refused or a miss)  (1405569,   0.1%)
+         1209326    0.1%  draw_seg render.jai:L257  lines 257-276
+          159794    0.0%  draw_sprite render.jai:L734  lines 734-740
+           34455    0.0%  game_tic game.jai:L814  lines 814-824
+            1734    0.0%  game_tic game.jai:L768  lines 768-788
+             260    0.0%  shoot_hitscan things.jai:L431  lines 431-453
+
+-- member and method operations on the general form by receiver
+  script class instance                                     9811    0.5% of member ops
+  host object                                              79555    4.3% of member ops
+  array                                                   327784   17.8% of member ops
+  map                                                     988053   53.5% of member ops
+  string                                                  439938   23.8% of member ops
+  other                                                        1    0.0% of member ops
+  instance receivers by class shape:
+    value class (strings / containers)                      8105    0.4%
+    flat scalar record                                      1310    0.1%
+    class with var / auto / handle fields                    396    0.0%
+  top classes:
+    Weapon (value class (strings / containers))                         8105    0.0%
+    Door (flat scalar record)                                           1310    0.0%
+    Mover (class with var / auto / handle fields)                        396    0.0%
+  top member sites:
+        469596    0.0%  sprite_prepare things.jai:L54  CALL_BUILTIN has
+        190715    0.0%  lump_num wad.jai:L143  CALL_BUILTIN has
+        162810    0.0%  sprite_lookup things.jai:L88  CALL_BUILTIN has
+        158673    0.0%  draw_sprite render.jai:L718  CALL_METHOD substr
+        158673    0.0%  draw_sprite render.jai:L717  CALL_METHOD size
+        156831    0.0%  sprite_lookup things.jai:L90  CALL_BUILTIN has
+        107568    0.0%  things_tic things.jai:L1060  CALL_METHOD size
+         87912    0.0%  sector_at render.jai:L181  CALL_BUILTIN size
+         23904    0.0%  demo_load demo.jai:L91  PROBE_MEMBER push
+         23904    0.0%  demo_load demo.jai:L91  CALL_BUILTIN push
+         17408    0.0%  set_palette_bank tex.jai:L47  PROBE_MEMBER push
+         17408    0.0%  set_palette_bank tex.jai:L47  CALL_BUILTIN push
+          9347    0.0%  monster_tic things.jai:L907  CALL_METHOD resume
+          9333    0.0%  monster_tic things.jai:L906  CALL_METHOD done
+          5692    0.0%  mobj_anim_tic things.jai:L967  CALL_METHOD size
+          5292    0.0%  doors_tic game.jai:L636  CALL_METHOD size
+          4380    0.0%  movers_tic spec.jai:L281  CALL_METHOD size
+          4070    0.0%  pos_ok_scan game.jai:L517  CALL_BUILTIN size
+          3985    0.0%  demo_feed demo.jai:L58  CALL_BUILTIN size
+          3984    0.0%  things_tic things.jai:L1052  CALL_BUILTIN size
+          3984    0.0%  render_view render.jai:L546  CALL_BUILTIN size
+          3984    0.0%  render_view render.jai:L529  CALL_BUILTIN size
+          3984    0.0%  render_view render.jai:L506  CALL_BUILTIN size
+          3984    0.0%  pickup_touch game.jai:L343  CALL_BUILTIN size
+          3984    0.0%  main p10_timedemo.jai:L97  GET_MEMBER spr
+
+-- untyped arithmetic and comparisons on the general form by operand kinds
+  int / int                                              5583762   44.3%
+  float / float                                          2614417   20.7%
+  int / float mixed                                      2129709   16.9%
+  bool                                                      3985    0.0%
+  string                                                 2255978   17.9%
+  object (operator overload)                                9333    0.1%
+  container                                                    1    0.0%
+  unknown (environment or element operand)                 16940    0.1%
+  scalar operands the checker proved (class 1/2), left general by the lowering's shape rules: 5629529
+  scalar operands the checker left unproven (class 0, BINARY, UNARY): 4702344
+  top proven scalar sites left general:
+        584183    0.0%  things_tic things.jai:L1063  BINARY_FUSED `local == literal` class 1
+        528844    0.0%  bsp_node render.jai:L477  FUSED_CMP_JUMP `global <= literal` class 1
+        350679    0.0%  draw_patch hud.jai:L41  BINARY_FUSED `local < literal` class 1
+        317346    0.0%  draw_sprite render.jai:L719  BINARY_FUSED `local - local` class 2
+        255810    0.0%  bsp_node render.jai:L479  BINARY_FUSED `local & literal` class 1
+        168547    0.0%  draw_seg render.jai:L333  BINARY_FUSED_DECL `literal / local` class 2
+        168547    0.0%  draw_seg render.jai:L332  BINARY_FUSED_DECL `literal / local` class 2
+        168547    0.0%  draw_seg render.jai:L285  BINARY_FUSED_DECL `local < literal` class 1
+        168547    0.0%  draw_seg render.jai:L283  BINARY_FUSED_DECL `local != literal` class 1
+        167488    0.0%  draw_seg render.jai:L293  BINARY_FUSED `local <= local` class 2
+        162810    0.0%  sprite_lookup things.jai:L87  BINARY_FUSED `local + literal` class 1
+        158673    0.0%  draw_sprite render.jai:L724  BINARY_FUSED_STORE `global + literal` class 1
+        150209    0.0%  bsp_node render.jai:L485  FUSED_CMP_JUMP `global > literal` class 1
+        134675    0.0%  tex_prepare tex.jai:L169  BINARY_FUSED `local < literal` class 1
+        122825    0.0%  bsp_node render.jai:L488  FUSED_CMP_JUMP `global > literal` class 1
+        120613    0.0%  projectile_tic things.jai:L687  BINARY_FUSED `local == local` class 1
+        116893    0.0%  draw_patch hud.jai:L51  FUSED_CMP_JUMP `local >= global` class 1
+        116893    0.0%  draw_patch hud.jai:L51  BINARY_FUSED `local < literal` class 1
+        116893    0.0%  draw_patch hud.jai:L47  FUSED_CMP_JUMP `local >= global` class 1
+        116893    0.0%  draw_patch hud.jai:L47  BINARY_FUSED `local < literal` class 1
+        112909    0.0%  bar_patch hud.jai:L77  BINARY_FUSED `local + local` class 1
+         84813    0.0%  draw_seg render.jai:L292  BINARY_FUSED_STORE `local != literal` class 1
+         82036    0.0%  arms_draw hud.jai:L168  BINARY_FUSED `local == literal` class 1
+         78776    0.0%  draw_sprite render.jai:L748  BINARY_FUSED_DECL `local == literal` class 1
+         78151    0.0%  light_band render.jai:L167  BINARY_FUSED_TEMP `literal - local` class 1
+  top scalar sites the checker left unproven:
+        546068    0.0%  point_side render.jai:L176  BINARY_FUSED_TEMP `local * local` class 0
+        317346    0.0%  draw_sprite render.jai:L721  BINARY_FUSED_TEMP `global / literal` class 0
+        273034    0.0%  point_side render.jai:L175  BINARY_FUSED_DECL `local - local` class 0
+        273034    0.0%  point_side render.jai:L174  BINARY_FUSED_DECL `local - local` class 0
+        175824    0.0%  sector_at render.jai:L176  BINARY_FUSED_TEMP `local * local` class 0
+        168547    0.0%  draw_seg render.jai:L341  FUSED_CMP_JUMP `local >= global` class 0
+        158673    0.0%  draw_sprite render.jai:L733  BINARY_FUSED_DECL `local + local` class 0
+        158673    0.0%  draw_sprite render.jai:L732  BINARY_FUSED_TEMP `local * local` class 0
+        158673    0.0%  draw_sprite render.jai:L721  BINARY_FUSED_TEMP `local / local` class 0
+        158673    0.0%  draw_sprite render.jai:L721  BINARY_FUSED_TEMP `local + local` class 0
+        158673    0.0%  draw_sprite render.jai:L719  BINARY
+        158673    0.0%  draw_sprite render.jai:L717  BINARY
+        158673    0.0%  draw_sprite render.jai:L714  BINARY_FUSED_DECL `global + local` class 0
+        146721    0.0%  draw_sky_col render.jai:L227  BINARY
+        123681    0.0%  draw_sprite render.jai:L720  BINARY_FUSED_STORE `local + global` class 0
+        112909    0.0%  bar_patch hud.jai:L77  BINARY_FUSED_TEMP `local * global` class 0
+        112909    0.0%  bar_patch hud.jai:L77  BINARY_FUSED `local * global` class 0
+        112909    0.0%  bar_patch hud.jai:L74  BINARY_FUSED_TEMP `local * global` class 0
+        112909    0.0%  bar_patch hud.jai:L73  BINARY_FUSED_TEMP `local * global` class 0
+        107568    0.0%  things_tic things.jai:L1060  BINARY
+         87912    0.0%  sector_at render.jai:L181  BINARY
+         87912    0.0%  sector_at render.jai:L175  BINARY_FUSED_DECL `local - local` class 0
+         87912    0.0%  sector_at render.jai:L174  BINARY_FUSED_DECL `local - local` class 0
+         71740    0.0%  draw_seg render.jai:L380  BINARY_FUSED_DECL `local / global` class 0
+         71740    0.0%  draw_seg render.jai:L377  BINARY_FUSED_TEMP `global - local` class 0
+  top string sites:
+        401238    0.0%  tex_composite tex.jai:L159  BINARY_FUSED_TEMP `local + literal` class 0
+        234574    0.0%  draw_sprite render.jai:L744  FUSED_CMP_JUMP `local != literal` class 0
+        162810    0.0%  sprite_lookup things.jai:L87  BINARY_FUSED `local + local` class 0
+        162810    0.0%  sprite_lookup things.jai:L87  BINARY
+        156831    0.0%  sprite_lookup things.jai:L89  BINARY_FUSED_TEMP `local + local` class 0
+        156831    0.0%  sprite_lookup things.jai:L89  BINARY_FUSED_STORE `local + literal` class 0
+        155376    0.0%  vid_row_half vid.jai:L206  BINARY_FUSED `local + global` class 0
+        155376    0.0%  vid_row_half vid.jai:L204  COMPOUND_FUSED
+        155376    0.0%  vid_row_half vid.jai:L203  COMPOUND_STORE row
+        155376    0.0%  vid_row_half vid.jai:L202  COMPOUND_STORE row
+        146138    0.0%  bar_num hud.jai:L84  CONCAT_APPEND
+         95058    0.0%  sprite_prepare things.jai:L76  BINARY_FUSED_TEMP `local + literal` class 0
+         27706    0.0%  tex_masked tex.jai:L210  BINARY_FUSED_TEMP `local + literal` class 0
+         23904    0.0%  arms_draw hud.jai:L170  BINARY_FUSED `literal + local` class 0
+         10450    0.0%  tex_composite tex.jai:L153  FUSED_CMP_JUMP `local != literal` class 0
+          9492    0.0%  sprite_prepare things.jai:L70  FUSED_CMP_JUMP `local != literal` class 0
+          7652    0.0%  face_name hud.jai:L130  CONCAT_APPEND
+          5572    0.0%  sprite_prepare things.jai:L72  BINARY_FUSED_DECL `local + literal` class 0
+          5572    0.0%  sprite_prepare things.jai:L71  BINARY_FUSED_DECL `local + literal` class 0
+          5480    0.0%  tex_composite tex.jai:L155  BINARY_FUSED_DECL `local + literal` class 0
+          5480    0.0%  tex_composite tex.jai:L154  BINARY_FUSED_DECL `local + literal` class 0
+          3984    0.0%  blit_half vid.jai:L216  COMPOUND_FUSED
+          3984    0.0%  blit_half vid.jai:L216  BINARY_FUSED_TEMP `local + literal` class 0
+          1992    0.0%  rgb_idx vid.jai:L74  CONCAT_APPEND
+          1992    0.0%  rgb_idx vid.jai:L73  CONCAT_APPEND
+
+-- calls made on the general form by callee (3560616 calls; the callee's own instructions count under their own reasons)
+        524860  bsp_node [call kept: a recursive call]
+        469596  sprite_prepare [call kept: a call in the body]
+        286179  size
+        273034  point_side [call kept: an unproven argument]
+        255810  draw_seg [call kept: a statement the block cannot land]
+        255810  bsp_subsector [call kept: a call in the body]
+        190015  lump_num [call kept: a parameter type the graft does not take]
+        162810  to_string [call kept: an unresolved callee]
+        162788  sprite_lookup [call kept: a parameter type the graft does not take]
+        158694  substr
+        134675  tex_prepare [call kept: a call in the body]
+        112909  draw_patch [call kept: an unproven argument]
+        112909  bar_patch [call kept: a parameter type the graft does not take]
+         86891  sector_at [call kept: an unproven argument]
+         78151  light_band
+         35856  bar_num [call kept: a parameter type the graft does not take]
+         34228  mobj_anim_tic [call kept: a call in the body]
+         15101  int16
+         11952  delta
+          9743  resume
+          9729  done
+          9403  monster_tic [call kept: a statement the block cannot land]
+          8749  uint16
+          7618  uint32
+          4798  pos_ok_scan [call kept: a reference declaration]
+
+-- blocks by general-form operations inside their span (cells = operations in the block)
+  draw_seg render.jai:L366-465                                 general    8926265  cells    601.82M  entries 151744  misses 0  refused 0
+  vid_row_half vid.jai:L199-204                                general    1709136  cells    176.71M  entries 155376  misses 0  refused 0
+  draw_patch hud.jai:L45-53                                    general    1052037  cells    111.25M  entries 46693  misses 0  refused 0
+  sector_at render.jai:L182-184                                general    1934064  cells     14.00M  entries 87912  misses 0  refused 0
+  draw_patch hud.jai:L49-53                                    general    1342886  cells    4171128  entries 116893  misses 0  refused 0
+  draw_seg render.jai:L257-276 [region]                        general    1209326  cells    9308103  entries 773210  misses 0  refused 0
+  bsp_subsector render.jai:L473-473                            general    1279050  cells    3360210  entries 255810  misses 0  refused 0
+  render_view vid.jai:L105-105                                 general       3984  cells     74.57M  entries 3984  misses 0  refused 0
+  draw_sprite render.jai:L758-801                              general     877026  cells     14.95M  entries 78776  misses 0  refused 0
+  draw_seg render.jai:L209-218                                 general     900131  cells    7899216  entries 33333  misses 0  refused 0
+  trace_block_dz things.jai:L325-344                           general      88985  cells     42.28M  entries 2523  misses 0  refused 0
+  draw_seg render.jai:L209-218                                 general     666586  cells    3939716  entries 24683  misses 0  refused 0
+  tex_composite tex.jai:L157-159                               general     651588  cells          0  entries 0  misses 0  refused 92114 (0/0/92114/0)
+  tex_composite tex.jai:L157-159                               general     633344  cells          0  entries 0  misses 0  refused 90560 (0/0/90560/0)
+  tex_composite tex.jai:L157-159                               general     583330  cells          0  entries 0  misses 0  refused 85446 (0/0/85446/0)
+  sprite_prepare things.jai:L74-76                             general     570348  cells          0  entries 0  misses 0  refused 89486 (0/0/89486/0)
+  draw_seg render.jai:L196-200                                 general     363992  cells     10.14M  entries 34574  misses 0  refused 0
+  draw_sky_col render.jai:L236-239                             general     440163  cells    4361047  entries 48907  misses 0  refused 0
+  draw_things render.jai:L563-578                              general      52049  cells     23.79M  entries 3984  misses 0  refused 0
+  draw_psprite render.jai:L833-842                             general      43140  cells     23.63M  entries 4068  misses 0  refused 0
+  tex_composite tex.jai:L157-159                               general     403200  cells          0  entries 0  misses 0  refused 56864 (0/0/56864/0)
+  draw_masked render.jai:L665-705                              general     151232  cells     16.01M  entries 3253  misses 0  refused 0
+  tex_composite tex.jai:L157-159                               general     356909  cells          0  entries 0  misses 0  refused 50475 (0/0/50475/0)
+  draw_sprite render.jai:L720-720                              general     282354  cells     141741  entries 123681  misses 0  refused 0
+  pos_ok_scan game.jai:L504-511                                general     263943  cells     679129  entries 3974  misses 0  refused 0
+
+-- top cell sites (operations in blocks, by origin line)
+       131.86M   10.1%  draw_seg render.jai:L218
+        88.69M    6.8%  draw_seg render.jai:L199
+        74.57M    5.7%  render_view vid.jai:L105
+        66.52M    5.1%  draw_seg render.jai:L200
+        51.39M    3.9%  vid_row_half vid.jai:L203
+        51.36M    3.9%  vid_row_half vid.jai:L202
+        46.71M    3.6%  draw_patch hud.jai:L53
+        44.35M    3.4%  draw_seg render.jai:L197
+        39.46M    3.0%  draw_patch hud.jai:L52
+        36.98M    2.8%  vid_row_half vid.jai:L204
+        26.37M    2.0%  draw_seg render.jai:L215
+        23.72M    1.8%  draw_seg render.jai:L196
+        22.54M    1.7%  draw_seg render.jai:L198
+        18.49M    1.4%  vid_row_half vid.jai:L201
+        18.49M    1.4%  vid_row_half vid.jai:L200
+        17.58M    1.3%  draw_seg render.jai:L214
+        17.58M    1.3%  draw_seg render.jai:L213
+        15.78M    1.2%  draw_patch hud.jai:L51
+        10.72M    0.8%  draw_seg render.jai:L209
+       9567216    0.7%  trace_block_dz things.jai:L333
+       8811116    0.7%  draw_seg render.jai:L216
+       8790620    0.7%  draw_seg render.jai:L217
+       8790620    0.7%  draw_seg render.jai:L212
+       8790620    0.7%  draw_seg render.jai:L211
+       8790620    0.7%  draw_seg render.jai:L210

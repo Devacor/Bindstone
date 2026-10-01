@@ -535,7 +535,11 @@ engine stays usable", not by `check_throws`.
   namespace body it is a parse error. It runs when first reached and, reached again, re-runs only when a stamp in its
   closure moved: the module's (mtime, size) and every file its last run included (top level, nested, spliced into a
   function body; `import_record::closure`, recorded through `engine::read_include_file`) (functions and classes replace in
-  place, instances migrate); the re-run parses and
+  place, instances migrate). A pass that checks a module unchanged also checks the modules its last run imported
+  (`import_record::children`, transitively, each once per pass with its own closure): a changed one re-runs ON ITS OWN, its
+  importer does not. The tree is what the last run executed, by resolved path (a conditional import only when its branch
+  ran, a computed one as it resolved; every import reached during a run is recorded, so none skips then); a re-run rebuilds
+  it (an import no longer reached drops out, its module stays loaded); the re-run parses and
   strict-checks the module and the modules it imports before any of it runs, so a check failure is a catchable error
   that leaves the program unchanged, and a run-time error in it is catchable too. A same-unit re-run (a module re-run,
   the host's `execute_file` of the same file, a re-executed string, a top-level include run again) keeps a program-scope
@@ -554,11 +558,11 @@ engine stays usable", not by `check_throws`.
   budget check's samples (every 1024 ticks, budget or not) and by a time:: read of the system clock; its staleness is
   bounded by those, and a window opening late by that much is fine for reloading. A module that never ran loads on first
   reach, pass or not. The call form `import(...)` is an EXPRESSION (`import_expr`, `.jaibite` 26): true when a
-  module (re)ran; its arguments are paths or arrays of paths (one = the plain load; more, or an array, = a GROUP: one
+  module of its tree (re)ran; its arguments are paths or arrays of paths (one = the plain load; more, or an array, = a GROUP: one
   decision, every changed module parsed + checked with the others' names published before any runs, one catchable error
   applies nothing, a module that failed at its current stamp holds the group quietly until it changes, then the changed
   ones run in order); a trailing `jai::force` opens a pass now. `engine::import_modules` is the one step both backends
-  call; `engine::import_stat_count()` counts its filesystem queries (0 per idle import, 1 per file of a module's closure per pass). The
+  call; `engine::import_stat_count()` counts its filesystem queries (0 per idle import, 1 per module of the import tree and per file of its closure per pass). The
   resolution key caches the working directory (refreshed when a pass opens). Foundry's `make_engine()` sets the window to
   0 (tests touch and re-import at once). The host reads and
   assigns the newest cell. Zero cost

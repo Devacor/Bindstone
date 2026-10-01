@@ -1205,7 +1205,8 @@ namespace jai {
         // Both backends' import step. import_skips: no pass is open, the window has not expired and the site has run its
         // modules before (compares against the clock sample and the site's memory; a computed site also hashes its paths).
         // import_modules: the reach the pass lets through - resolve, stat, parse and check every changed module before any
-        // runs, run them in order; true = a module (re)ran. Throws what a load or a run raises.
+        // runs, run them in order, then the changed modules the unchanged ones imported (each alone); true = a module of the
+        // tree (re)ran. Throws what a load or a run raises.
         bool import_skips(const import_site& site) noexcept;
         bool import_skips(const import_site& site, const script_value* const* args, size_t count);
         checked_result<bool> import_modules(import_site& site, const std::vector<std::string>& paths, bool force);

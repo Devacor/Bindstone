@@ -723,6 +723,8 @@ struct engine::implementation {
         // the rest of the module's closure: every file its last run included (top level, nested, spliced into a function
         // body), each stamped as it was read; a pass queries each like the module itself
         std::vector<closure_stamp> closure;
+        // the modules its last run imported: a pass that checks this module checks them too, and a changed one re-runs alone
+        std::vector<std::string> children;
     };
     std::unordered_map<std::string, import_record> import_cache;
     // the engine-wide import check pass (engine::import_recheck_interval): the window in steady ticks, the generation every
@@ -753,13 +755,17 @@ struct engine::implementation {
     std::unordered_map<std::string, resolution_entry> resolution_memo_;
     std::optional<std::array<std::unordered_set<uint64_t>, 4>> builtin_method_ids_;
     std::unordered_set<std::string> importing_;   // resolved paths mid-execution: a cyclic import's back edge is a no-op
-    std::vector<std::vector<closure_stamp>> import_closures_;   // per running import, innermost last: the files its run reads
+    struct import_frame {
+        std::vector<closure_stamp> files;    // the files its run included
+        std::vector<std::string> children;   // the modules its run imported
+    };
+    std::vector<import_frame> import_frames_;   // per running import, innermost last
 
     // a file the running import read: a second read under another stamp leaves a zero stamp, which the next pass sees moved
     void note_closure_file(const std::string& path, bool stamped, uint64_t mtime, uint64_t size) {
-        if (import_closures_.empty()) { return; }
+        if (import_frames_.empty()) { return; }
         if (!stamped) { mtime = 0; size = 0; }
-        auto& closure = import_closures_.back();
+        auto& closure = import_frames_.back().files;
         for (auto& s : closure) {
             if (s.path != path) { continue; }
             if (s.mtime != mtime || s.size != size) { s.mtime = 0; s.size = 0; }
@@ -767,19 +773,28 @@ struct engine::implementation {
         }
         closure.push_back({path, mtime, size});
     }
-    std::vector<closure_stamp> end_import_closure() {
-        std::vector<closure_stamp> closure = std::move(import_closures_.back());
-        import_closures_.pop_back();
-        return closure;
+    void note_import_child(const std::string& resolved) {
+        if (import_frames_.empty()) { return; }
+        auto& children = import_frames_.back().children;
+        if (std::find(children.begin(), children.end(), resolved) == children.end()) { children.push_back(resolved); }
+    }
+    import_frame end_import_frame() {
+        import_frame frame = std::move(import_frames_.back());
+        import_frames_.pop_back();
+        return frame;
     }
     // a run that failed keeps the closure it had and adds what it read, so fixing any file it touched re-runs it
-    void merge_import_closure(const std::string& resolved, const std::vector<closure_stamp>& read) {
+    void merge_import_frame(const std::string& resolved, const import_frame& read) {
         auto rec = import_cache.find(resolved);
         if (rec == import_cache.end()) { return; }
-        for (const auto& s : read) {
+        for (const auto& s : read.files) {
             bool known = false;
             for (auto& k : rec->second.closure) { if (k.path == s.path) { k = s; known = true; break; } }
             if (!known) { rec->second.closure.push_back(s); }
+        }
+        auto& children = rec->second.children;
+        for (const auto& c : read.children) {
+            if (std::find(children.begin(), children.end(), c) == children.end()) { children.push_back(c); }
         }
     }
     bool closure_moved(const import_record& record) {
@@ -4453,13 +4468,15 @@ namespace {
 bool engine::import_skips(const import_site& site) noexcept {
     const detail::execution_limits& limits = impl->limits_;
     return !limits.import_pass_open && site.seen_generation == impl->import_generation_ && limits.sampled_now < limits.import_window_until &&
-           impl->import_behavior != import_behavior::always && (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) != 0;
+           impl->import_behavior != import_behavior::always && (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) != 0 &&
+           impl->import_frames_.empty();   // a module's run records every import it reaches (its tree)
 }
 
 bool engine::import_skips(const import_site& site, const script_value* const* args, size_t count) {
     const detail::execution_limits& limits = impl->limits_;
     if (limits.import_pass_open || site.seen_paths_generation != impl->import_generation_ || limits.sampled_now >= limits.import_window_until ||
-        impl->import_behavior == import_behavior::always || (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) == 0) {
+        impl->import_behavior == import_behavior::always || (impl->privileges_ & static_cast<uint64_t>(privilege::filesystem)) == 0 ||
+        !impl->import_frames_.empty()) {
         return false;
     }
     for (size_t i = 0; i < count; ++i) {   // the paths hash straight off the argument values: a skip copies nothing
@@ -4624,6 +4641,32 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
 
     std::vector<size_t> changed;
     bool held = false;
+    // a module checked unchanged walks the modules it imported, each once per pass: a changed one re-runs on its own (its
+    // importer does not), an unchanged one walks its own; a changed module's re-run reaches its imports itself
+    std::vector<import_unit> nested_changed;
+    std::vector<std::string> walking;
+    const auto walk = [&](const implementation::import_record& from_record) {
+        walking.assign(from_record.children.rbegin(), from_record.children.rend());
+        while (!walking.empty()) {
+            const std::string child = std::move(walking.back());
+            walking.pop_back();
+            if (I.importing_.count(child)) { continue; }
+            auto crec = I.import_cache.find(child);
+            if (crec == I.import_cache.end() || crec->second.checked_pass == I.import_pass_id_) { continue; }
+            crec->second.checked_pass = I.import_pass_id_;
+            import_unit u;
+            u.resolved = child;
+            ++I.import_stats_;
+            u.stamped = implementation::stat_mtime_size(child, u.mtime, u.size);
+            const bool same = u.stamped && u.mtime == crec->second.mtime && u.size == crec->second.size;
+            if (same && !I.closure_moved(crec->second)) {
+                walking.insert(walking.end(), crec->second.children.rbegin(), crec->second.children.rend());
+                continue;
+            }
+            if (!same && crec->second.failed && u.mtime == crec->second.failed_mtime && u.size == crec->second.failed_size) { continue; }
+            nested_changed.push_back(std::move(u));
+        }
+    };
     for (size_t i = 0; i < mods.size(); ++i) {
         import_unit& m = mods[i];
         bool dup = false;
@@ -4648,10 +4691,11 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         }
         if (!m.stamped) { changed.push_back(i); continue; }
         const bool same = m.mtime == rec->second.mtime && m.size == rec->second.size;
-        if (same && !I.closure_moved(rec->second)) { continue; }
+        if (same && !I.closure_moved(rec->second)) { walk(rec->second); continue; }
         if (!same && rec->second.failed && m.mtime == rec->second.failed_mtime && m.size == rec->second.failed_size) { held = true; continue; }
         changed.push_back(i);
     }
+    for (const auto& m : mods) { I.note_import_child(m.resolved); }
 
     const auto mark_seen = [&] {
         bool all = true;
@@ -4662,7 +4706,6 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             if (I.import_cache.count(mods[i].resolved) && !import_hash_seen(site.seen_paths, mods[i].hash)) { site.seen_paths.push_back(mods[i].hash); }
         }
     };
-    if (changed.empty() || (held && mods.size() > 1)) { mark_seen(); return false; }
 
     const auto record_failure = [&](const import_unit& m) {
         auto rec = I.import_cache.find(m.resolved);
@@ -4671,110 +4714,128 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         rec->second.failed_mtime = m.mtime;
         rec->second.failed_size = m.size;
     };
-    // a module runs only from text read under its stamp: a save landing mid-read holds a module that ran before until the
-    // next pass (its record keeps the old stamp), and a first load reads again at once (bounded)
-    std::vector<std::string> contents(changed.size());
-    for (size_t k = 0; k < changed.size(); ++k) {
-        import_unit& m = mods[changed[k]];
-        const bool loaded_before = I.import_cache.count(m.resolved) != 0;
-        for (int attempt = 0; ; ++attempt) {
-            const auto read = implementation::read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, contents[k]);
-            if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
-            if (read == implementation::stamped_read::stable) { break; }
-            if (loaded_before) { mark_seen(); return false; }
-            if (attempt == 3) { break; }
-            ++I.import_stats_;
-            m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
-        }
-    }
-
-    // two or more: every one parsed and checked (the names they declare known to each other) before any runs
-    if (changed.size() > 1 && I.static_check_mode_ != check_mode::off) {
-        std::vector<std::shared_ptr<implementation::script_cache_entry>> entries(changed.size());
-        std::string failures;
-        size_t failed = 0;
-        std::exception_ptr first;
-        for (size_t k = 0; k < changed.size(); ++k) {
-            std::filesystem::path sibling;
-            bool fresh = false;
-            try {
-                entries[k] = I.acquire_entry(*this, contents[k], mods[changed[k]].resolved, sibling, fresh);
-            } catch (const std::exception& e) {
-                record_failure(mods[changed[k]]);
-                failures += std::string(failures.empty() ? "" : "\n") + e.what();
-                if (!failed++) { first = std::current_exception(); }
+    // reads, checks and runs units[idx...] as one decision; false = nothing ran (a module that ran before was saved mid-read)
+    const auto apply = [&](std::vector<import_unit>& units, const std::vector<size_t>& idx) -> bool {
+        // a module runs only from text read under its stamp: a save landing mid-read holds a module that ran before until
+        // the next pass (its record keeps the old stamp), and a first load reads again at once (bounded)
+        std::vector<std::string> contents(idx.size());
+        for (size_t k = 0; k < idx.size(); ++k) {
+            import_unit& m = units[idx[k]];
+            const bool loaded_before = I.import_cache.count(m.resolved) != 0;
+            for (int attempt = 0; ; ++attempt) {
+                const auto read = implementation::read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, contents[k]);
+                if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
+                if (read == implementation::stamped_read::stable) { break; }
+                if (loaded_before) { return false; }
+                if (attempt == 3) { break; }
+                ++I.import_stats_;
+                m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
             }
         }
-        for (size_t k = 0; k < changed.size(); ++k) {
-            if (!entries[k]) { continue; }
-            detail::collect_unit_names(entries[k]->declarations, I.program_names_);
-            detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
-            detail::collect_unit_functions(entries[k]->declarations, mods[changed[k]].resolved, I.program_functions_);
-            detail::collect_unit_globals(entries[k]->declarations, mods[changed[k]].resolved, I.program_globals_);
-        }
-        for (size_t k = 0; k < changed.size(); ++k) {
-            if (!entries[k]) { continue; }
-            const std::string& path = mods[changed[k]].resolved;
-            I.importing_.insert(path);
-            try {
-                I.gate_checked(I.checked_report(*this, *entries[k], true), contents[k], path);
-            } catch (const std::exception& e) {
-                record_failure(mods[changed[k]]);
-                failures += std::string(failures.empty() ? "" : "\n") + e.what();
-                if (!failed++) { first = std::current_exception(); }
-            }
-            I.importing_.erase(path);
-        }
-        if (failed == 1) { std::rethrow_exception(first); }
-        if (failed > 1) { throw static_check_error(failures); }
-    }
 
-    for (size_t k = 0; k < changed.size(); ++k) {
-        const import_unit& m = mods[changed[k]];
-        auto rec = I.import_cache.find(m.resolved);
-        if (rec != I.import_cache.end()) {   // stamped before it runs: a module that fails waits for its next change
-            rec->second.mtime = m.mtime;
-            rec->second.size = m.size;
-            rec->second.checked_pass = I.import_pass_id_;
+        // two or more: every one parsed and checked (the names they declare known to each other) before any runs
+        if (idx.size() > 1 && I.static_check_mode_ != check_mode::off) {
+            std::vector<std::shared_ptr<implementation::script_cache_entry>> entries(idx.size());
+            std::string failures;
+            size_t failed = 0;
+            std::exception_ptr first;
+            for (size_t k = 0; k < idx.size(); ++k) {
+                std::filesystem::path sibling;
+                bool fresh = false;
+                try {
+                    entries[k] = I.acquire_entry(*this, contents[k], units[idx[k]].resolved, sibling, fresh);
+                } catch (const std::exception& e) {
+                    record_failure(units[idx[k]]);
+                    failures += std::string(failures.empty() ? "" : "\n") + e.what();
+                    if (!failed++) { first = std::current_exception(); }
+                }
+            }
+            for (size_t k = 0; k < idx.size(); ++k) {
+                if (!entries[k]) { continue; }
+                detail::collect_unit_names(entries[k]->declarations, I.program_names_);
+                detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
+                detail::collect_unit_functions(entries[k]->declarations, units[idx[k]].resolved, I.program_functions_);
+                detail::collect_unit_globals(entries[k]->declarations, units[idx[k]].resolved, I.program_globals_);
+            }
+            for (size_t k = 0; k < idx.size(); ++k) {
+                if (!entries[k]) { continue; }
+                const std::string& path = units[idx[k]].resolved;
+                I.importing_.insert(path);
+                try {
+                    I.gate_checked(I.checked_report(*this, *entries[k], true), contents[k], path);
+                } catch (const std::exception& e) {
+                    record_failure(units[idx[k]]);
+                    failures += std::string(failures.empty() ? "" : "\n") + e.what();
+                    if (!failed++) { first = std::current_exception(); }
+                }
+                I.importing_.erase(path);
+            }
+            if (failed == 1) { std::rethrow_exception(first); }
+            if (failed > 1) { throw static_check_error(failures); }
         }
-        if (!I.importing_.insert(m.resolved).second) { continue; }
-        struct importing_scope {
-            std::unordered_set<std::string>& set;
-            const std::string& path;
-            ~importing_scope() { set.erase(path); }
-        } scope{I.importing_, m.resolved};
-        I.import_closures_.emplace_back();
-        try {
-            execute_source(contents[k], instance_variables{}, m.resolved);
-        } catch (const static_check_error&) {
-            I.merge_import_closure(m.resolved, I.end_import_closure());
-            record_failure(m);
-            throw;
-        } catch (const parse_error&) {
-            I.merge_import_closure(m.resolved, I.end_import_closure());
-            record_failure(m);
-            throw;
-        } catch (...) {
-            I.merge_import_closure(m.resolved, I.end_import_closure());
-            throw;
+
+        for (size_t k = 0; k < idx.size(); ++k) {
+            const import_unit& m = units[idx[k]];
+            auto rec = I.import_cache.find(m.resolved);
+            if (rec != I.import_cache.end()) {   // stamped before it runs: a module that fails waits for its next change
+                rec->second.mtime = m.mtime;
+                rec->second.size = m.size;
+                rec->second.checked_pass = I.import_pass_id_;
+            }
+            if (!I.importing_.insert(m.resolved).second) { continue; }
+            struct importing_scope {
+                std::unordered_set<std::string>& set;
+                const std::string& path;
+                ~importing_scope() { set.erase(path); }
+            } scope{I.importing_, m.resolved};
+            I.import_frames_.emplace_back();
+            try {
+                execute_source(contents[k], instance_variables{}, m.resolved);
+            } catch (const static_check_error&) {
+                I.merge_import_frame(m.resolved, I.end_import_frame());
+                record_failure(m);
+                throw;
+            } catch (const parse_error&) {
+                I.merge_import_frame(m.resolved, I.end_import_frame());
+                record_failure(m);
+                throw;
+            } catch (...) {
+                I.merge_import_frame(m.resolved, I.end_import_frame());
+                throw;
+            }
+            auto frame = I.end_import_frame();
+            I.restamp_deferred(*this);
+            if (rec == I.import_cache.end()) {
+                implementation::import_record record;
+                record.resolved_path = m.resolved;
+                record.mtime = m.mtime;
+                record.size = m.size;
+                record.checked_pass = I.import_pass_id_;
+                record.closure = std::move(frame.files);
+                record.children = std::move(frame.children);
+                I.import_cache[m.resolved] = std::move(record);
+            } else {
+                rec = I.import_cache.find(m.resolved);
+                if (rec != I.import_cache.end()) {
+                    rec->second.failed = false;
+                    rec->second.closure = std::move(frame.files);
+                    rec->second.children = std::move(frame.children);
+                }
+            }
         }
-        auto closure = I.end_import_closure();
-        I.restamp_deferred(*this);
-        if (rec == I.import_cache.end()) {
-            implementation::import_record record;
-            record.resolved_path = m.resolved;
-            record.mtime = m.mtime;
-            record.size = m.size;
-            record.checked_pass = I.import_pass_id_;
-            record.closure = std::move(closure);
-            I.import_cache[m.resolved] = std::move(record);
-        } else {
-            rec = I.import_cache.find(m.resolved);
-            if (rec != I.import_cache.end()) { rec->second.failed = false; rec->second.closure = std::move(closure); }
-        }
+        return true;
+    };
+
+    bool ran = false;
+    if (!changed.empty() && !(held && mods.size() > 1)) {
+        if (!apply(mods, changed)) { mark_seen(); return false; }
+        ran = true;
+    }
+    for (size_t k = 0; k < nested_changed.size(); ++k) {
+        ran = apply(nested_changed, {k}) || ran;
     }
     mark_seen();
-    return true;
+    return ran;
 }
 
 const std::string* engine::remembered_resolution(const std::string& key) {
@@ -4946,16 +5007,18 @@ script_value engine::execute_import(const std::string& resolved_path) {
         if (read != implementation::stamped_read::stable || !stamped) { record.mtime = 0; record.size = 0; }
 
         // Attribute the imported unit to its resolved path (stack traces / debugger).
-        impl->import_closures_.emplace_back();
+        impl->import_frames_.emplace_back();
         script_value result = [&] {
             try {
                 return execute_source(content, instance_variables{}, resolved_path);
             } catch (...) {
-                impl->merge_import_closure(resolved_path, impl->end_import_closure());
+                impl->merge_import_frame(resolved_path, impl->end_import_frame());
                 throw;
             }
         }();
-        record.closure = impl->end_import_closure();
+        auto frame = impl->end_import_frame();
+        record.closure = std::move(frame.files);
+        record.children = std::move(frame.children);
         impl->restamp_deferred(*this);   // the unit's classes exist now: the proofs that waited for them
         impl->import_cache[resolved_path] = std::move(record);
         

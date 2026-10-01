@@ -539,7 +539,9 @@ engine stays usable", not by `check_throws`.
   (`import_record::children`, transitively, each once per pass with its own closure): a changed one re-runs ON ITS OWN, its
   importer does not. The tree is what the last run executed, by resolved path (a conditional import only when its branch
   ran, a computed one as it resolved; every import reached during a run is recorded, so none skips then); a re-run rebuilds
-  it (an import no longer reached drops out, its module stays loaded); the re-run parses and
+  it (an import no longer reached drops out, its module stays loaded). A loaded module whose file disappears (direct or
+  nested) raises `Failed to open import file: <path>` once, then waits quietly (`import_record::missing`) until a check
+  finds the file again, which re-runs it through the usual check; a file that never loaded raises on every reach; the re-run parses and
   strict-checks the module and the modules it imports before any of it runs, so a check failure is a catchable error
   that leaves the program unchanged, and a run-time error in it is catchable too. A same-unit re-run (a module re-run,
   the host's `execute_file` of the same file, a re-executed string, a top-level include run again) keeps a program-scope

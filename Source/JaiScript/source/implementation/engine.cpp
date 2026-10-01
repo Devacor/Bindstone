@@ -720,6 +720,7 @@ struct engine::implementation {
         bool failed = false;
         uint64_t failed_mtime = 0;
         uint64_t failed_size = 0;
+        bool missing = false;   // its file was gone at a check (raised once): it waits until a check finds the file again
         // the rest of the module's closure: every file its last run included (top level, nested, spliced into a function
         // body), each stamped as it was read; a pass queries each like the module itself
         std::vector<closure_stamp> closure;
@@ -755,6 +756,7 @@ struct engine::implementation {
     std::unordered_map<std::string, resolution_entry> resolution_memo_;
     std::optional<std::array<std::unordered_set<uint64_t>, 4>> builtin_method_ids_;
     std::unordered_set<std::string> importing_;   // resolved paths mid-execution: a cyclic import's back edge is a no-op
+    std::unordered_map<std::string, std::string> import_vanished_;   // resolution key -> the module whose file the ladder lost
     struct import_frame {
         std::vector<closure_stamp> files;    // the files its run included
         std::vector<std::string> children;   // the modules its run imported
@@ -4590,23 +4592,37 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
 
     // an answer the ladder remembers from the asking folder itself stands unverified until the module's stamp query, which
     // verifies it (the file is gone: the full ladder); anything else takes the ladder now
-    struct import_unit { const std::string* path = nullptr; std::string resolved; uint64_t hash = 0; uint64_t mtime = 0, size = 0; bool stamped = false, remembered = false; };
+    // a module that loaded before and whose file the ladder no longer finds is missing: it raises once, then waits quietly
+    struct import_unit { const std::string* path = nullptr; std::string resolved; uint64_t hash = 0; uint64_t mtime = 0, size = 0; bool stamped = false, remembered = false, missing = false; };
     std::vector<import_unit> mods;
     mods.reserve(paths.size());
     const std::string from = current_source_file();
+    const auto lost_module = [&](const std::string& key, const std::string& last) -> std::string {
+        if (!last.empty() && I.import_cache.count(last)) { I.import_vanished_[key] = last; return last; }
+        auto it = I.import_vanished_.find(key);
+        return it != I.import_vanished_.end() && I.import_cache.count(it->second) ? it->second : std::string();
+    };
     for (const auto& path : paths) {
         import_unit m;
         m.path = &path;
         m.hash = import_path_hash(path);
-        auto memo = I.resolution_memo_.find(resolution_key(path, from));
+        const std::string key = resolution_key(path, from);
+        auto memo = I.resolution_memo_.find(key);
         if (memo != I.resolution_memo_.end() && memo->second.misses.empty()) {
             m.resolved = memo->second.resolved;
             m.remembered = true;
         } else {
+            const std::string last = memo != I.resolution_memo_.end() ? memo->second.resolved : std::string();
             ++I.import_stats_;
             auto resolved = resolve_include_path(path, this, from);
-            if (!resolved) { return resolved.error_value(); }
-            m.resolved = std::move(resolved.value());
+            if (!resolved) {
+                m.resolved = lost_module(key, last);
+                if (m.resolved.empty()) { return resolved.error_value(); }
+                m.missing = true;
+            } else {
+                m.resolved = std::move(resolved.value());
+                if (!I.import_vanished_.empty()) { I.import_vanished_.erase(key); }
+            }
         }
         mods.push_back(std::move(m));
     }
@@ -4641,6 +4657,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
 
     std::vector<size_t> changed;
     bool held = false;
+    std::string missing_now;   // the first module found gone in this reach: raised once, before anything runs
     // a module checked unchanged walks the modules it imported, each once per pass: a changed one re-runs on its own (its
     // importer does not), an unchanged one walks its own; a changed module's re-run reaches its imports itself
     std::vector<import_unit> nested_changed;
@@ -4658,7 +4675,13 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             u.resolved = child;
             ++I.import_stats_;
             u.stamped = implementation::stat_mtime_size(child, u.mtime, u.size);
-            const bool same = u.stamped && u.mtime == crec->second.mtime && u.size == crec->second.size;
+            if (!u.stamped) {
+                if (!crec->second.missing && missing_now.empty()) { missing_now = child; }
+                crec->second.missing = true;
+                continue;
+            }
+            if (crec->second.missing) { nested_changed.push_back(std::move(u)); continue; }
+            const bool same = u.mtime == crec->second.mtime && u.size == crec->second.size;
             if (same && !I.closure_moved(crec->second)) {
                 walking.insert(walking.end(), crec->second.children.rbegin(), crec->second.children.rend());
                 continue;
@@ -4679,17 +4702,28 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             changed.push_back(i);
             continue;
         }
-        if (always) { changed.push_back(i); continue; }
+        if (always && !m.missing) { changed.push_back(i); continue; }
         if (once || !checking || rec->second.checked_pass == I.import_pass_id_) { continue; }
         rec->second.checked_pass = I.import_pass_id_;
         const std::string before = m.resolved;
+        const auto gone = [&] {
+            if (!rec->second.missing && missing_now.empty()) { missing_now = before; }
+            rec->second.missing = true;
+        };
+        if (m.missing) { gone(); continue; }
         auto stamped = stamp(m);
-        if (!stamped) { return stamped.error_value(); }
+        if (!stamped) {
+            if (lost_module(resolution_key(*m.path, from), before).empty()) { return stamped.error_value(); }
+            m.resolved = before;
+            gone();
+            continue;
+        }
         if (m.resolved != before) {   // the remembered answer moved: the module the ladder finds now
             rec = I.import_cache.find(m.resolved);
             if (rec == I.import_cache.end()) { changed.push_back(i); continue; }
         }
         if (!m.stamped) { changed.push_back(i); continue; }
+        if (rec->second.missing) { changed.push_back(i); continue; }
         const bool same = m.mtime == rec->second.mtime && m.size == rec->second.size;
         if (same && !I.closure_moved(rec->second)) { walk(rec->second); continue; }
         if (!same && rec->second.failed && m.mtime == rec->second.failed_mtime && m.size == rec->second.failed_size) { held = true; continue; }
@@ -4706,6 +4740,8 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             if (I.import_cache.count(mods[i].resolved) && !import_hash_seen(site.seen_paths, mods[i].hash)) { site.seen_paths.push_back(mods[i].hash); }
         }
     };
+
+    if (!missing_now.empty()) { mark_seen(); throw runtime_error("Failed to open import file: " + missing_now); }
 
     const auto record_failure = [&](const import_unit& m) {
         auto rec = I.import_cache.find(m.resolved);
@@ -4781,6 +4817,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 rec->second.mtime = m.mtime;
                 rec->second.size = m.size;
                 rec->second.checked_pass = I.import_pass_id_;
+                rec->second.missing = false;
             }
             if (!I.importing_.insert(m.resolved).second) { continue; }
             struct importing_scope {

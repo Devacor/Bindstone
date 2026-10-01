@@ -150,7 +150,7 @@ auto s = &quot;hello&quot;;
 print(&quot;s?.length() = {}&quot;, s?.length());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">obj?.length() = null
 s?.length() = 5</code></pre></div>
-<p>Each <code>?.</code> guards its own link only. <code>a?.b?.c</code> is null when <code>a</code> or <code>b</code> is; <code>a?.b.c</code> still raises when <code>b</code> is null, unlike JavaScript and C#, where one <code>?.</code> skips the rest of the chain. Put a <code>?.</code> on every link that may be null:</p>
+<p>A null in front of a <code>?.</code> skips the rest of the chain, as in JavaScript and C#: <code>a?.b.c</code>, <code>a?.items[0]</code> and <code>a?.f().g()</code> are null when <code>a</code> is. Only the value in front of the <code>?.</code> is tested, so <code>a?.b.c</code> still raises when <code>a</code> is not null and <code>b</code> is; put a <code>?.</code> on every link that may be null. <code>??</code> supplies the default (<a href="04-operators.html#null-chains-and-defaults">Operators</a>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 3; shared_ptr&lt;Node&gt; next; }
 auto head = new Node();
 print(&quot;{} {}&quot;, head?.v, head?.next?.v);      // next is null: the second ?. yields null

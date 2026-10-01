@@ -125,6 +125,7 @@ b = 2.9;
 print(&quot;a = {} ({}), b = {} ({})&quot;, a, type_of(a), b, type_of(b));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a = now a string (string), b = 2 (int)</code></pre></div>
 <h2 id="var-is-genuinely-dynamic">var is genuinely dynamic<a class="hlink" href="#var-is-genuinely-dynamic" aria-label="link">&#8203;</a></h2>
+<p><code>let</code> is another spelling of <code>var</code>, everywhere a <code>var</code> declaration may stand (<code>let x = 5;</code>, <code>for (let i = 0; ...)</code>, <code>let&amp; r = x;</code>). Like every JaiScript declaration it is scoped to its block, as JavaScript's <code>let</code> is.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var y = 5;
 print(&quot;y is {} ({})&quot;, y, type_of(y));
 y = &quot;now a string&quot;;

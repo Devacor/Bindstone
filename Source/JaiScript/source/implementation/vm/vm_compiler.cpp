@@ -4089,7 +4089,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				continue;
 			}
 		}
-		if (refusal == chunk::cell_refusal_translation && snap_stmt && (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl)
+		// a call the door cannot land (its consumer is not a cell destination) bails like a translation gap: the general form takes the iteration there
+		const bool door_refusal = refusal == chunk::cell_refusal_effect && refusal_ip < code.size() && code[refusal_ip].op == opcode::op_probe_callee;
+		if ((refusal == chunk::cell_refusal_translation || door_refusal) && snap_stmt && (snap_stmt->get_type() == node_type::expression_stmt || snap_stmt->get_type() == node_type::variable_decl || snap_stmt->get_type() == node_type::expression_decl)
 		    && snap_ip >= first && (line || counted != k_invalid_u32 || snap_ip > cmp_ip) && last_ip >= snap_ip && refusal_ip >= snap_ip && ops.size() >= snap_ip - first) {
 			const uint32_t arm_end = arm_end_of(snap_ip);
 			if (arm_end != k_invalid_u32 && refusal_ip < arm_end && last_ip < arm_end) {

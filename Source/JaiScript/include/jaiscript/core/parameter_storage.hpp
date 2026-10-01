@@ -3,6 +3,7 @@
 #include <array>
 #include <any>
 #include <memory>
+#include <new>
 #include <stdexcept>
 
 namespace jai {
@@ -22,12 +23,17 @@ public:
     static constexpr size_t MAX_TEMPS = 32;
 
 private:
-    std::array<std::any, MAX_TEMPS> storage_;
+    // slots are constructed only by allocate (a call that binds no reference parameter builds none) and destroyed newest first
+    alignas(std::any) unsigned char storage_[MAX_TEMPS * sizeof(std::any)];
     size_t index_ = 0;
 
+    std::any* slot(size_t i) noexcept { return std::launder(reinterpret_cast<std::any*>(storage_) + i); }
+
 public:
-    parameter_storage() = default;
-    ~parameter_storage() = default;
+    parameter_storage() noexcept {}
+    ~parameter_storage() {
+        while (index_ > 0) { slot(--index_)->~any(); }
+    }
 
     // Non-copyable, non-movable (stack-based)
     parameter_storage(const parameter_storage&) = delete;
@@ -45,8 +51,8 @@ public:
             throw std::runtime_error("Parameter storage exhausted");
         }
 
-        storage_[index_] = T{};
-        T& result = std::any_cast<T&>(storage_[index_]);
+        std::any* held = ::new (static_cast<void*>(reinterpret_cast<std::any*>(storage_) + index_)) std::any(T{});
+        T& result = std::any_cast<T&>(*held);
         index_++;
         return result;
     }

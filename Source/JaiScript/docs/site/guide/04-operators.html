@@ -46,7 +46,7 @@ print(&quot;x++ = {}, then x = {}&quot;, x++, x);
 print(&quot;--x = {}&quot;, --x);
 -x;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7 / 2   = 3
-7.0 / 2 = 3.500000
+7.0 / 2 = 3.5
 7 % 3   = 1
 2 + 3 * 4 = 14
 x++ = 5, then x = 6
@@ -219,7 +219,7 @@ print(&quot;a * 3 = ({}, {})&quot;, d.x, d.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a + b = (4, 6)
 equals: true
 a * 3 = (3, 6)</code></pre></div>
-<p>The overloadable set is C++&#x27;s, less <code>&amp;&amp;</code>, <code>||</code>, the comma, <code>-&gt;</code> and <code>new</code>/<code>delete</code>: binary <code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; &lt; &gt; &lt;= &gt;= == != &lt;=&gt;</code>, unary <code>- + ~</code>, and <code>=</code>, <code>[]</code>, <code>()</code>. The parameter count tells a unary operator from a binary one, as in C++: <code>operator-()</code> negates, <code>operator-(Vec other)</code> subtracts. Your operator runs when its left operand (a unary operator&#x27;s only operand) is an instance of the class or a subclass; every other operand keeps the builtin meaning, and an operator the class does not declare raises the builtin text (<code>-v</code> without <code>operator-()</code> is <code>Unary minus requires numeric operand</code>). A compound assignment is the binary operator and a store: <code>a %= b</code> is <code>a = a % b</code> through your <code>operator%</code>, with no separate <code>operator%=</code>. There is no <code>operator!</code>: as with a C++ <code>operator bool</code>, <code>!v</code> and <code>if (v)</code> go through the one conversion, <code>to_bool()</code>, so <code>!v</code> is <code>!to_bool(v)</code> and the two never disagree. Declaring <code>operator!</code> is a parse error that says so.</p>
+<p>The overloadable set is C++&#x27;s, less <code>&amp;&amp;</code>, <code>||</code>, the comma, <code>-&gt;</code> and <code>new</code>/<code>delete</code>: binary <code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; &lt; &gt; &lt;= &gt;= == != &lt;=&gt;</code>, unary <code>- + ~</code>, and <code>=</code>, <code>[]</code>, <code>()</code>. The parameter count tells a unary operator from a binary one, as in C++: <code>operator-()</code> negates, <code>operator-(Vec other)</code> subtracts. Your operator runs when its left operand (a unary operator&#x27;s only operand) is an instance of the class or a subclass; every other operand keeps the builtin meaning, and an operator the class does not declare raises the builtin text (<code>-v</code> without <code>operator-()</code> is <code>Unary minus requires numeric operand</code>). A compound assignment is the binary operator and a store: <code>a %= b</code> is <code>a = a % b</code> through your <code>operator%</code>, with no separate <code>operator%=</code>. There is no <code>operator!</code>: as with a C++ <code>operator bool</code>, <code>!v</code> and <code>if (v)</code> go through the one conversion, <code>to_bool()</code>, so <code>!v</code> is <code>!to_bool(v)</code> and the two never disagree. Declaring <code>operator!</code> is a parse error that says so (<code>operator! cannot be declared: !v is !to_bool(v); declare bool to_bool()</code>). An instance of a class without <code>to_bool()</code> is truthy, like any non-null value.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Bits {
     int v = 0;
     Bits(int x) { v = x; }
@@ -238,7 +238,24 @@ print(&quot;{} {} {} {}&quot;, flags.v, (~flags).v, !Bits(0), (-flags).v);
 print(&quot;{}&quot;, Bits(3) &lt;=&gt; Bits(7));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">26 229 true -26
 -1</code></pre></div>
-<p>An <code>operator()</code> makes instances callable. A call whose callee holds such an instance runs it with the call&#x27;s arguments, at any arity and with overloads chosen as for any method, whether the instance sits in a local, a global, a field, an array element or a <code>shared_ptr</code>. It keeps its state between calls. See <a href="07-classes.html#callable-objects">Classes</a>.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/03-value-semantics.html"><span>&larr; previous</span>Value Semantics &amp; References</a><a class="next" rel="next" href="../guide/05-control-flow.html"><span>next &rarr;</span>Control Flow</a></nav></article>
+<p>An <code>operator()</code> makes instances callable. A call whose callee holds such an instance runs it with the call&#x27;s arguments, at any arity and with overloads chosen as for any method, whether the instance sits in a local, a global, a field, an array element or a <code>shared_ptr</code>. It keeps its state between calls (more in <a href="07-classes.html#callable-objects">Classes</a>). An <code>operator[]</code> that returns <code>T&amp;</code> makes the subscript an lvalue, so <code>g[i] = v</code> and <code>g[i] op= v</code> store through it; one that returns by value makes <code>g[i]</code> a read, and a store to it raises <code>Cannot assign to rvalue expression</code>:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Grid {
+    array&lt;int&gt; cells = [0, 0, 0, 0];
+    int&amp; operator[](int i) { return cells[i]; }   // a reference return: g[i] is an lvalue
+}
+Grid g;
+g[2] = 7;
+g[2] += 1;
+print(&quot;{} {}&quot;, g[2], to_json(g.cells));
+
+class Adder {
+    int calls = 0;
+    int operator()(int a, int b) { calls += 1; return a + b; }
+}
+Adder add;
+print(&quot;{} {} calls={}&quot;, add(2, 3), add(4, 5), add.calls);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">8 [0,0,8,0]
+5 9 calls=2</code></pre></div><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/03-value-semantics.html"><span>&larr; previous</span>Value Semantics &amp; References</a><a class="next" rel="next" href="../guide/05-control-flow.html"><span>next &rarr;</span>Control Flow</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

@@ -95,7 +95,7 @@ enchanted: 5
 fists: 1</code></pre></div>
 <p>Note <code>enchanted</code> alone gives <code>0 += 5</code> = 5, and no match lands in <code>default</code>. Switches nest, <code>return</code> works from inside a case, and <code>break</code>/<code>continue</code> in a loop-enclosed switch affect the loop, never leak into the switch.</p>
 <h2 id="try-catch-throw">try / catch / throw<a class="hlink" href="#try-catch-throw" aria-label="link">&#8203;</a></h2>
-<p>Any value can be thrown. <code>catch (e)</code> binds the error; <code>catch</code> without a variable is allowed; a bare <code>throw;</code> inside a catch re-throws. Uncaught script throws surface to the C++ host as exceptions (with a captured script stack trace).</p>
+<p>Any value can be thrown. <code>catch (e)</code> binds the error; <code>catch</code> without a variable is allowed; a bare <code>throw;</code> inside a catch re-throws, and one with no active exception raises the catchable <code>Bare throw with no active exception thrown.</code>; <code>throw</code> is an expression, so it composes (<code>x &gt; 0 ? x : throw &quot;negative&quot;</code>). Uncaught script throws surface to the C++ host as exceptions (with a captured script stack trace).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {
     throw &quot;something broke&quot;;
 } catch (e) {
@@ -124,7 +124,7 @@ outer caught: inner
 catch without a variable
 == result: done</code></pre></div>
 <p>Throws work mid-argument-evaluation, and C++ exceptions interop in both directions: a bound host function, method, operator or property accessor that throws surfaces as a catchable script error with the exception&#x27;s text where it was called, and an uncaught script throw reaches the host with its script stack trace attached. Inside a <code>catch</code>, <code>e</code> reads as the error text alone; when the same error escapes to the host, its <code>what()</code> appends the error's category (<code>&lt;text&gt;: &lt;category&gt;</code>).</p>
-<p><strong>A caught error is a value that knows where it came from.</strong> <code>e</code> behaves as its message string everywhere (printing it, <code>to_string(e)</code>, <code>e + &quot;...&quot;</code>, <code>e == &quot;text&quot;</code>, a <code>string</code> variable, the string methods), and it also answers <code>e.message</code>, <code>e.file</code>, <code>e.line</code>, <code>e.column</code> and <code>e.stack</code>, the script call stack at the error as <code>file:line</code> strings, innermost first. For a <code>throw</code> the place is the throw itself and <code>e.value</code> is the thrown value, with its type (a thrown object&#x27;s fields also read straight through <code>e</code>); for a run-time error the place is the statement that raised it and <code>e.value</code> is <code>null</code>. A copy of <code>e</code> answers the same; a new string built from it (<code>e + &quot;&quot;</code>) is just text.</p>
+<p><strong>A caught error is a value that knows where it came from.</strong> <code>e</code> behaves as its message string everywhere (printing it, <code>to_string(e)</code>, <code>e + &quot;...&quot;</code>, <code>e == &quot;text&quot;</code>, a <code>string</code> variable, the string methods), and it also answers <code>e.message</code>, <code>e.file</code>, <code>e.line</code>, <code>e.column</code> and <code>e.stack</code>, the script call stack at the error as <code>file:line</code> strings, one per frame, innermost first (below: <code>pick</code>&#x27;s line, then the top level&#x27;s). For a <code>throw</code> the place is the throw itself and <code>e.value</code> is the thrown value, with its type (a thrown object&#x27;s fields also read straight through <code>e</code>); for a run-time error the place is the statement that raised it and <code>e.value</code> is <code>null</code>. A copy of <code>e</code> answers the same; a new string built from it (<code>e + &quot;&quot;</code>) is just text.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int pick(array&lt;int&gt; xs, int i) {
     return xs[i];
 }
@@ -137,7 +137,7 @@ try {
 class Oops { int code = 7; }
 try { throw Oops(); } catch (e) { print(&quot;code {} at line {}&quot;, e.code, e.line); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Array index 7 out of bounds for array of size 3 (line 2, value null)
-stack depth: 3
+stack depth: 2
 code 7 at line 11</code></pre></div>
 <h2 id="what-a-catch-can-see">What a catch can see, and what never reaches one<a class="hlink" href="#what-a-catch-can-see" aria-label="link">&#8203;</a></h2>
 <p>The runtime's own errors are ordinary catchable values: a bad index, a division by zero, a failed <code>cast</code>, and a type mismatch the checker could not see coming because the value came out of a <code>var</code>:</p>

@@ -71,7 +71,7 @@ print(type_of(i), &quot; &quot;, type_of(f), &quot; &quot;, type_of(s), &quot; &
 print(&quot;hex: {}, binary: {}, exponent: {}&quot;, 0xFF, 0b1010, 2.5e3);
 i + f;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int float string char bool null
-hex: 255, binary: 10, exponent: 2500.000000
+hex: 255, binary: 10, exponent: 2500.0
 == result: 45.14</code></pre></div>
 <p>Integers are 64-bit (<code>int64</code>), floats are doubles. Hex (<code>0xFF</code>) and binary (<code>0b1010</code>) integer literals work, as do exponent floats (<code>2.5e3</code>). Strings support the usual escapes (<code>\n</code>, <code>\&quot;</code>, <code>\\</code>) plus <code>\xNN</code> byte escapes (see <a href="09-containers-strings.html#bytes-and-chars">Containers &amp; Strings</a>). Which rung each of these declarations sits on (and why <code>auto</code> here is not &quot;dynamic&quot;) is the <a href="02-type-ladder.html">next chapter</a>.</p>
 <h2 id="comments-and-the-implicit-result">Comments and the implicit result<a class="hlink" href="#comments-and-the-implicit-result" aria-label="link">&#8203;</a></h2>

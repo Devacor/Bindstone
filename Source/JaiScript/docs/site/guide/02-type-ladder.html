@@ -44,7 +44,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <tr><td>a class <code>T</code></td><td>default-constructed, as <code>T()</code></td></tr>
 <tr><td><code>var</code>, <code>shared_ptr&lt;T&gt;</code>, <code>weak_ptr&lt;T&gt;</code>, <code>function</code></td><td><code>null</code></td></tr>
 </tbody></table></div>
-<p>Parentheses and braces construct with arguments: <code>T x(args);</code> and <code>T x{args};</code> call a constructor, <code>T x();</code> and <code>T x{};</code> default-construct, and a primitive takes one value or its zero (<code>int lives{3};</code>).</p>
+<p>Parentheses and braces construct with arguments: <code>T x(args);</code> and <code>T x{args};</code> call a constructor, <code>T x();</code> and <code>T x{};</code> default-construct, and a primitive takes one value or its zero (<code>int lives{3};</code>). A class that declares no constructor takes its field values in declaration order instead (<code>Point p{1, 2};</code>, aggregate initialization, in <a href="07-classes.html">Classes</a>).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 { float x = 1.5; float y = 2.5; Vec2() {} Vec2(float a, float b) { x = a; y = b; } }
 int hits; float speed; bool alive; string name; array&lt;int&gt; scores; var anything; Vec2 home;
 print(&quot;hits={} speed={} alive={} name=[{}] scores={} anything={} home=({}, {})&quot;, hits, speed, alive, name, scores.size(), type_of(anything), home.x, home.y);
@@ -163,11 +163,12 @@ field:       5 (string)</code></pre></div>
 <tr><td><code>int</code> / <code>float</code></td><td>&hellip;but never a string</td><td><strong>error</strong>; there is no implicit parse. Use <code>&quot;42&quot;.to_int()</code></td></tr>
 <tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>element and key types are enforced at the element boundary when a value lands, not by the checker. See <a href="09-containers-strings.html">Containers &amp; Strings</a></td></tr>
 <tr><td>class <code>C</code></td><td><code>null</code></td><td>stores a <em>typed null</em></td></tr>
-<tr><td>class <code>C</code></td><td>the same class, or a subclass</td><td>upcast, by value. Parent &rarr; child, siblings, and same-shape unrelated classes are <strong>rejected</strong></td></tr>
-<tr><td>class <code>C</code></td><td><code>shared_ptr&lt;C&gt;</code>, or a handle to a subclass</td><td>copies the pointee into the value slot</td></tr>
+<tr><td>class <code>C</code></td><td>the same class, or a subclass</td><td>a copy that keeps its own class: a <code>Derived</code> in a <code>Base</code> slot is still a <code>Derived</code>, and its overrides run. Parent &rarr; child, siblings, and same-shape unrelated classes are <strong>rejected</strong></td></tr>
+<tr><td>class <code>C</code></td><td><code>shared_ptr&lt;C&gt;</code>, or a handle to a subclass</td><td>copies the pointee into the value slot (it keeps its class too)</td></tr>
 <tr><td>class <code>C</code></td><td>a value that exactly one one-argument constructor <code>C(src)</code> takes directly</td><td>converts through that constructor</td></tr>
 <tr><td>class <code>C</code></td><td>a class a user <code>operator=</code> of <code>C</code> accepts (plain assignment only)</td><td>runs your operator</td></tr>
-<tr><td><code>shared_ptr</code> / <code>weak_ptr</code> / <code>T&amp;</code></td><td>anything, checked when it lands</td><td><code>null</code> stores a typed null</td></tr>
+<tr><td><code>shared_ptr&lt;C&gt;</code> / <code>weak_ptr&lt;C&gt;</code></td><td>an instance or handle of <code>C</code> or a subclass, or <code>null</code></td><td>an instance becomes a new shared object; <code>null</code> stores a typed null; any other class is rejected</td></tr>
+<tr><td><code>T&amp;</code></td><td>an lvalue that holds a <code>T</code> (for a class: <code>T</code> or a subclass)</td><td>binds without a copy; anything else is an error (<a href="03-value-semantics.html">Value Semantics</a>)</td></tr>
 <tr><td><code>var</code></td><td>anything, forever</td><td>the opt-out, and everything computed from a <code>var</code> is invisible to the checker too</td></tr>
 </tbody></table></div>
 <p><strong>Conversions never chain.</strong> One step is the whole budget. A class with <code>to_int()</code> reaches an <code>int</code> slot, but it will not go through <code>to_int()</code> and <em>then</em> through some other class&#x27;s <code>C(int)</code> constructor to reach a <code>C</code> slot. And if a converting constructor or a <code>to_X()</code> throws on the way, you see its error, not the table&#x27;s.</p>
@@ -248,7 +249,7 @@ alias:  5
 shared: 42
 caught: Cannot cast &#x27;int&#x27; to &#x27;Base&#x27;</code></pre></div>
 <ul>
-<li><code>cast&lt;T&gt;(e)</code>: a <strong>value</strong>. A class that is <code>T</code> or derives from <code>T</code> becomes a copy tagged <code>T</code>.</li>
+<li><code>cast&lt;T&gt;(e)</code>: a <strong>value</strong>. A class that is <code>T</code> or derives from <code>T</code> becomes a copy, and the copy keeps its own class (a <code>cast&lt;Base&gt;</code> of a <code>Derived</code> is a <code>Derived</code> copy).</li>
 <li><code>cast&lt;T&amp;&gt;(e)</code>: a <strong>reference</strong> to the same object. Member reads and stores go through it, which makes it the strict-mode fix for reaching a subtype&#x27;s member on a base-typed receiver (see <a href="03-value-semantics.html#escape-hatch-6-cast-t-and-cast-shared-ptr-t">Value Semantics</a>).</li>
 <li><code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code>: a <strong>handle</strong> sharing the same object.</li>
 </ul>

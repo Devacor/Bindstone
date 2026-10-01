@@ -1525,13 +1525,15 @@ checked_result<expression_ptr> parser::primary() {
     if (match(token_type::identifier)) {
         token identToken = previous();
         
-        // Check if this might be a templated type like Point<int>
-        if (check(token_type::less)) {
+        // A host template's name followed by '<' may be a construction (Point<int>(1, 2)); a failed type parse is a comparison
+        if (check(token_type::less) && is_registered_template_type(std::string(identToken.lexeme))) {
             size_t savedPos = current_ - 1; // Save position including the identifier
             current_--; // Back up to re-parse as type
-            
+            const size_t errors_before = errors_.size();
+            const std::optional<token> pushed_before = pushed_back_token_;
+
             auto type_result = parse_type();
-            if (type_result) {
+            if (type_result && errors_.size() == errors_before) {
                 type_info_ptr type = std::move(type_result.value());
                 if (type && check(token_type::left_brace)) {
                     // This is a brace-initialized constructor like array<int>{}
@@ -1563,12 +1565,10 @@ checked_result<expression_ptr> parser::primary() {
                     JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
                     return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
                 }
-            } else {
-                // Not a valid template type, continue as regular identifier
             }
-            
-            // Not a constructor, restore position and continue
             current_ = savedPos + 1;
+            errors_.resize(errors_before);
+            pushed_back_token_ = pushed_before;
         }
 
         auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
@@ -1738,61 +1738,6 @@ checked_result<expression_ptr> parser::primary() {
         current_ = savedPos;
     }
     
-    // Check for custom type constructors (Point<int>(), SafeComponent<Button>(), etc.)
-    if (check(token_type::identifier)) {
-        size_t savedPos = current_;
-        advance(); // consume identifier
-
-        // A host template's name followed by '<' may be a construction (Point<int>(1, 2)); a failed type parse is a comparison
-        if (check(token_type::less) && is_registered_template_type(std::string(previous().lexeme))) {
-            current_ = savedPos;
-            const size_t errors_before = errors_.size();
-            const std::optional<token> pushed_before = pushed_back_token_;
-            auto type_result = parse_type();
-            if (type_result && errors_.size() == errors_before) {
-                type_info_ptr type = std::move(type_result.value());
-                if (type && check(token_type::left_brace)) {
-                    // This is a brace-initialized constructor expression like map<string, int>{}
-                    // Parse the arguments and create new_expr directly
-                    advance(); // consume '{'
-
-                    std::vector<expression_ptr> arguments;
-                    if (!check(token_type::right_brace)) {
-                        arguments.reserve(4);
-                        do {
-                            JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                            arguments.push_back(std::move(arg));
-                        } while (match(token_type::comma));
-                    }
-
-                    JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after constructor arguments"));
-
-                    // Create new_expr with the full type info preserved
-                    return std::make_shared<new_expr>((*stream_)[savedPos].location, type, std::move(arguments));
-                } else if (type && check(token_type::left_paren)) {
-                    // Parentheses constructor for template types
-                    advance(); // consume '('
-
-                    std::vector<expression_ptr> arguments;
-                    if (!check(token_type::right_paren)) {
-                        do {
-                            JAISCRIPT_TRY_ASSIGN(auto arg, expression());
-                            arguments.push_back(std::move(arg));
-                        } while (match(token_type::comma));
-                    }
-
-                    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after constructor arguments"));
-                    return std::make_shared<new_expr>((*stream_)[savedPos].location, type, std::move(arguments));
-                }
-            }
-            current_ = savedPos;
-            errors_.resize(errors_before);
-            pushed_back_token_ = pushed_before;
-        } else {
-            current_ = savedPos;
-        }
-    }
-
     // Super keyword
     if (match(token_type::super_keyword)) {
         return std::make_shared<super_expr>(previous().location);
@@ -3535,12 +3480,16 @@ traditional_for:
     bool identifier_declares = false;
     if (check(token_type::identifier)) {
         const size_t type_start = current_;
+        const size_t errors_before = errors_.size();
+        const std::optional<token> pushed_before = pushed_back_token_;
         auto type_probe = parse_type();
-        if (type_probe) {
+        if (type_probe && errors_.size() == errors_before) {
             match(token_type::ampersand);
             identifier_declares = check(token_type::identifier);
         }
         current_ = type_start;
+        errors_.resize(errors_before);
+        pushed_back_token_ = pushed_before;
     }
     if (match(token_type::semicolon)) {
         // No init

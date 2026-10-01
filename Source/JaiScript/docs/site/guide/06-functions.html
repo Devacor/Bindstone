@@ -336,6 +336,22 @@ print(add(2)(3));</code></pre></div>
 auto plus = make_adder(10)(5);
 print(&quot;plus() = {}&quot;, plus());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">plus() = 15</code></pre></div>
+<h2 id="arrow-functions">Arrow functions<a class="hlink" href="#arrow-functions" aria-label="link">&#8203;</a></h2>
+<p><code>(params) =&gt; expr</code> and <code>(params) =&gt; { body }</code> are function expressions, JavaScript's and C#'s arrow functions. The expression form returns its value; one untyped parameter may drop its parentheses (<code>x =&gt; x * 2</code>), and parameters may be typed (<code>(int a, int b) =&gt; a + b</code>, <code>(Unit&amp; u) =&gt; ...</code>). An arrow function closes over its scope by reference, as <code>function(...)</code> does: it is a <code>[&amp;]</code> lambda, so it reads and writes the locals around it and they outlive the function that made it.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto twice = (x) =&gt; x * 2;
+auto add = (int a, int b) =&gt; a + b;
+auto shout = name =&gt; { string s = name; return s.to_upper() + &quot;!&quot;; };
+function make_counter() {
+    int count = 0;
+    return () =&gt; { count += 1; return count; };   // shares count, as function(...) does
+}
+auto next = make_counter();
+next();
+print(twice(21), &quot; &quot;, add(2, 3), &quot; &quot;, shout(&quot;ada&quot;), &quot; &quot;, next());
+print(to_json([3, 1, 2].filter(x =&gt; x &gt; 1)));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">42 5 ADA! 2
+[3,2]</code></pre></div>
+<p>A parenthesized expression stays one: <code>(a + b) * 2</code> is arithmetic, because only a <code>)</code> followed by <code>=&gt;</code> makes the group a parameter list. An arrow function declares no return type; spell a lambda (<code>[&amp;](int x) -&gt; int { ... }</code>) when the type matters, for instance to make <code>map</code> return an <code>array&lt;int&gt;</code>.</p>
 <h2 id="functions-are-values-closures-outlive-their-frame">Functions are values; closures outlive their frame<a class="hlink" href="#functions-are-values-closures-outlive-their-frame" aria-label="link">&#8203;</a></h2>
 <p>Functions and lambdas can be stored in variables, arrays, and maps, passed as arguments, and returned. A method is not read as a value by writing <code>obj.method</code>: that is an error, and <code>reflect::bind(obj, &quot;method&quot;)</code> or a lambda is the spelling (see <a href="07-classes.html#methods-as-values">Classes</a>). A by-reference capture keeps the captured local alive after the declaring function returns. The classic counter factory works:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function apply_twice(f, x) { return f(f(x)); }

@@ -435,6 +435,14 @@ engine stays usable", not by `check_throws`.
   store's kernel. There is no second, narrower reference table.
 - **NaN** (Dev ruling 2026-09-30, R-q8): `== != < <= > >=` follow IEEE on every lane (a NaN operand compares false, and unequal);
   `<=>` with a NaN operand raises `Cannot order NaN with <=>` (`detail::nan_order_error`); map keys keep their total strong order.
+- **Array helpers** (2026-10-01, registry `init_builtin_method_registries`): `map` (an `array<T>` when the callback declares `T`), `reduce(f[, init])`, `for_each`, `find` (copy or null), `find_index` (-1), `some`, `every`, `concat`, `insert(i, v)`; a callback gets (element) or (element, index), a `T&` element parameter is the live element (`make_element_reference`), a predicate counts only a bool true; `parallel_transform.cpp` `builtin_runs_script` lists the callback ones.
+- **Arrow functions** `(params) => expr` / `(params) => { body }` / `x => expr`: a `[&]` lambda like `function(...)` (parser `arrow_function_ahead` scans to the matching `)` for `=>`); no declared return type.
+- **`??` / `??=` / optional chains**: `a ?? b` is a binary_expr (token `question_question`; interpreter short-circuit beside `&&`, vm `op_null_guard` + jump, a short-circuit op to the inliner and `return_conv`); `a ??= b` parses to `a ?? (a = b)` over a re-parsed side-effect-free target; `x?.a.b` skips the rest of its chain (parser `null_chain_rest`: `(null != x) ? x.a.b : null` for a side-effect-free base, `((p) => (null != p) ? p.a.b : null)(x)` otherwise).
+- **`print(obj)`** shows the class's `to_string()` (`engine::text_of`, both print implementations); such a text is never a format string.
+- **`do { } while (c);`** desugars to `for (bool do# = true; do# || c; do# = false)` (`continue` reaches the condition); `do` stays an identifier unless `{` follows.
+- **`let` is `var`** (Dev ruling 2026-10-01, a lexer keyword alias).
+- **Structured range-for bindings** `for (auto [k, v] : m)` / `auto&` / `var&` over maps: a hidden pair variable `entry#`, the key a copy, the value a reference to the pair's half (aliases the entry under `auto&`); the checker rejects a non-map container it can see.
+- **Foreign keywords** (`const`, `virtual`, `delete`, `new T[n]`, `goto`, `&x`, typed `catch`, `extends`, `===`, `!==`, `function*`) are parse errors naming the JaiScript spelling, recognized only where they would fail to parse (`detail/foreign_keyword.hpp`, docs/diagnostics.md). `.jaibite` version 35.
 - **User accessors** `_get_x` / `_set_x`: member access `expr.x` (any receiver, `this.x`
   included) reads through the nearest USER `_get_x` in the class chain and stores through the
   nearest USER `_set_x` (compound assigns and `++`/`--` read then write through them); the

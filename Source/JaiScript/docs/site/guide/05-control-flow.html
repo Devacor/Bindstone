@@ -52,16 +52,19 @@ print(&quot;for with continue/break: {}&quot;, total);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">odd
 while sum 1..4 = 10
 for with continue/break: 12</code></pre></div>
-<p>There is no <code>do ... while</code> and no <code>goto</code>. A loop that runs its body before the first test is a <code>while (true)</code> with the test at the end:</p>
+<h2 id="do-while">do ... while<a class="hlink" href="#do-while" aria-label="link">&#8203;</a></h2>
+<p><code>do { body } while (cond);</code> runs the body, then tests the condition, as in C++: the body always runs once, <code>continue</code> goes to the condition and <code>break</code> leaves the loop. The condition cannot see the body's locals. There is no <code>goto</code>; writing one is an error that points to <code>break</code>, <code>continue</code> and <code>return</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int tries = 0;
-while (true) {
+do {
     tries++;
-    if (tries &gt;= 3) { break; }
-}
-print(&quot;tries = {}&quot;, tries);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code>tries = 3</code></pre></div>
+    if (tries == 2) { continue; }      // continue goes to the condition
+} while (tries &lt; 4);
+int once = 0;
+do { once++; } while (false);          // the body runs before the first test
+print(tries, &quot; &quot;, once);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">4 1</code></pre></div>
 <h2 id="range-based-for">Range-based for<a class="hlink" href="#range-based-for" aria-label="link">&#8203;</a></h2>
-<p>Iterates arrays (elements), maps (<code>kv.first</code> / <code>kv.second</code> pairs), and coroutines (see <a href="../guide/08-coroutines.html#range-for-drives-a-coroutine">Coroutines</a>). A plain <code>auto item</code> is a copy of each element; <code>auto&amp;</code> mutates in place, one of the escape hatches from copy-by-default in <a href="../guide/03-value-semantics.html#escape-hatch-4-range-for-with-auto">Value Semantics</a>:</p>
+<p>Iterates arrays (elements), maps (<code>kv.first</code> / <code>kv.second</code> pairs, or <code>for (auto [k, v] : m)</code>, see <a href="09-containers-strings.html#maps">Maps</a>), and coroutines (see <a href="../guide/08-coroutines.html#range-for-drives-a-coroutine">Coroutines</a>). A plain <code>auto item</code> is a copy of each element; <code>auto&amp;</code> mutates in place, one of the escape hatches from copy-by-default in <a href="../guide/03-value-semantics.html#escape-hatch-4-range-for-with-auto">Value Semantics</a>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto items = [&quot;sword&quot;, &quot;shield&quot;, &quot;potion&quot;];
 for (auto item : items) { print(&quot;- {}&quot;, item); }
 

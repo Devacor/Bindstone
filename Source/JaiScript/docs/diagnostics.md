@@ -366,6 +366,44 @@ catchable on both backends: `Cannot read file 'saves/world.gqw': not found`, wit
 `permission denied`, `cannot be opened` or `read failed` in place of `not found`. An existing empty file
 reads as `""`; absence is asked with `file_exists(path)` first.
 
+## Foreign keywords (parse errors, kernel `detail/foreign_keyword.hpp`)
+
+A word or spelling from another language, where it would otherwise fail to parse, reports the JaiScript spelling.
+Each is recognized only in that position, so a script using one of these words as a name keeps working
+(`var goto = 5;`, `function delete(int n)`). The texts are `detail::foreign_word_text`, one per `foreign_word`:
+
+| written | where | text |
+|---|---|---|
+| `const int x = 5;`, `const x = 5;` | statement or member start | `JaiScript has no 'const': declare the variable with its type or auto (a reference parameter the function never writes through is already const)` |
+| `f(const T& x)` | parameter list | `JaiScript has no 'const': a reference parameter the function never writes through is already const, so write T& name` |
+| `virtual void f()` | statement or member start, before a type or name | `JaiScript has no 'virtual': every method dispatches dynamically; mark the subclass's method 'override'` |
+| `delete x;` | statement start, before a name, `this` or `[` | `JaiScript has no 'delete': an object is freed when its last owner lets go; set the handle to null to release it` |
+| `new int[5]` | after `new T` | `'new' makes one shared object (new T(args)); an array is a value: array<T> a = [];` |
+| `new T;` | after `new T` | `'new T' needs its constructor's parentheses: new T() or new T(args)` |
+| `goto done;` | statement start | `JaiScript has no 'goto': use break, continue, return or a flag` |
+| `&x` | expression start | `JaiScript has no address-of '&x': bind a reference with auto& r = x, or pass x to a T& parameter` |
+| `catch (Error e)`, `catch (int e)` | catch clause | `catch takes one name and no type: catch (e) { ... }; e.value is what was thrown and type_of(e.value) its type` |
+| `class B extends A` | class head | `JaiScript has no 'extends': derive with class Name : Base` |
+| `a === b` | after `==` | `JaiScript has no '===': == never converts between types, so a == b already compares without coercion` |
+| `a !== b` | after `!=` | `JaiScript has no '!==': != never converts between types, so a != b already compares without coercion` |
+| `function* g()`, `function*()` | declaration or expression | `JaiScript has no 'function*': a generator is a coroutine, coroutine name(...) { yield v; }` |
+
+`let` is not on the list: it is a synonym of `var` (Dev ruling 2026-10-01).
+
+## Array helpers, `??=` and structured bindings
+
+| text | raised by |
+|---|---|
+| `map() takes exactly one argument` (`reduce`, `for_each`, `find`, `find_index`, `some`, `every`, `concat` alike; `reduce() takes a function and an optional initial value`, `insert() takes an index and a value`) | arity (`argument_count_mismatch`) |
+| `map() requires a function argument` (the callback helpers alike), `concat() requires an array argument`, `insert() index must be an integer` | argument kind (`type_mismatch`) |
+| `Cannot push 'string' to array<int>` | a `map` result typed by its callback's declared return, or `concat` into a typed array, given an element it cannot hold (push's text) |
+| `Cannot insert 'string' into array<int>` | `insert` of an element the array's type refuses (`array_element_type_mismatch`) |
+| `Cannot insert at index 9 of an array of size 5` | `insert` outside 0..size (`index_out_of_bounds`) |
+| `Cannot reduce an empty array without an initial value` | `reduce(f)` on an empty array (`array_empty`) |
+| `'??=' needs a variable, a member or an element whose index runs no code; store anything else in a local first` | parse error: `a[i++] ??= v`, `f().x ??= v` (the target is read, then perhaps stored) |
+| `A map entry binds two names, the key and the value: for (auto [k, v] : m)` | parse error: another count of names |
+| `a structured binding takes a map's entries, its key and value: cannot bind 'array' to [k, v]` | checker (load error) when the container's static type is not a map; a dynamic container that is not a map raises the member text of `.first` when the loop runs |
+
 ## Untouched families (one-line recommendation each)
 
 | family | representative texts | recommendation |

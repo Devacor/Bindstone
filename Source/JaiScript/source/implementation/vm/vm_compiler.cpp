@@ -6433,7 +6433,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			// C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27); a literal right side
 			// keeps the target-first shape, which observes the same
 			const bool value_first = !compound_rhs_inert(expr->value.get());
-			if (value_first) { compile_expression(expr->value); }
+			if (value_first) { compile_expression(expr->value); deref_ahead_of(expr->value.get(), member.get()); }
 			if (member->is_static) {
 				emit(opcode::op_get_static, add_node(member));
 			} else {

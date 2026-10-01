@@ -2077,6 +2077,18 @@ public:
             check_both("function f() -> string { var v = 1.5; float& q = v; q = 2; q += 1; return type_of(v) + to_string(v); } f()", "float3.0", "a slot-resident float& over a var holding a float");
         });
 
+        test("a_compound_takes_the_value_of_a_subscript_right_side", [this, check_both]() {
+            // every compound target takes the value an element or map read yields (the read arrives as a reference)
+            check_both("class C { float f = 1.0; } C o = C(); array<float> e = [0.5, 1.5]; o.f += e[1]; to_string(o.f)", "2.5", "a field");
+            check_both("class S { static float s = 1.0; } array<float> e = [0.5, 1.5]; S::s += e[1]; to_string(S::s)", "2.5", "a static");
+            check_both("float x = 1.0; array<float> e = [0.5, 1.5]; x += e[1]; to_string(x)", "2.5", "a variable");
+            check_both("array<float> a = [1.0]; array<float> e = [0.5, 1.5]; a[0] += e[1]; to_string(a[0])", "2.5", "an element");
+            check_both("array<float> a = [1.0]; var e = [0.5, 1.5]; auto& r = a[0]; r += e[1]; to_string(a[0])", "2.5", "a reference");
+            check_both("float z = 1.0; array<float> e = [0.5, 1.5]; cast<float&>(z) += e[1]; to_string(z)", "2.5", "a reference cast");
+            check_both("string s = \"a\"; array<string> n = [\"b\"]; s += n[0]; class T { string t = \"x\"; } T k = T(); k.t += n[0]; s + k.t", "abxb", "text appends");
+            check_both("class C { int f = 1; } C o = C(); map<string, int> m = {\"k\": 4}; o.f -= m[\"k\"]; o.f *= m[\"k\"]; to_string(o.f)", "-12", "a map value into a field");
+        });
+
         test("a_reference_binding_must_reference", [this, check_both, both]() {
             // Dev ruling 2026-09-30: a T& binds a var only while it holds T's kind (a class: T or a subclass); otherwise the binding
             // raises, in every binding form, naming the value's type and T&

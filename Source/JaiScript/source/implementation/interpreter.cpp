@@ -4829,6 +4829,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     return {};
                 }
                 rightValue = pop_value();
+                if (rightValue.is_reference()) {   // an element or map read: its value, taken now (KEEP BYTE-PARALLEL with the vm's member compound)
+                    script_value derefed = rightValue.deref();
+                    rightValue = std::move(derefed);
+                }
             }
             if (memberExpr->is_static) {
                 JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{rightValue}));

@@ -1010,7 +1010,10 @@ string healthLevel = health > 75 ? "healthy" :
     and `cast<shared_ptr<T>>(e)` shares like `shared_ptr<T> h = e;`. Upcasts always pass;
     an unrelated class raises `Cannot cast 'X' to 'T'` (catchable) where X is the object's
     DYNAMIC class; under strict static checking a subtype member on a base-typed receiver
-    is a compile error and `cast<T&>(recv).member` is the spelled fix. One shared kernel
+    is a compile error and `cast<T&>(recv).member` is the spelled fix. `cast<T&>(e)` is an
+    lvalue: `cast<int&>(x) = v`, `cast<int&>(x) += v` and `cast<int&>(x)++` store through it
+    under the rules of the storage it names (the variable's declared type, a typed element, a
+    field, a static), the right-hand side evaluated first. One shared kernel
     (`detail/cast_kernel.hpp`) gives both backends the same verdict and text. Char converts
     only through the cast: `cast<int>(c)` / `cast<float>(c)` are the code point (0..255),
     `cast<string>(c)` the one-character string, `cast<char>(e)` takes an int in 0..255 or a

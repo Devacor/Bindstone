@@ -17702,6 +17702,19 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 }
 
 op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins) {
+	if (ins.c == 1) {
+		// C::s and ns::x are lvalues: the storage replaces the read (KEEP BYTE-PARALLEL with the interpreter's visit_return_stmt)
+		if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(f.code->nodes[ins.a].get()), *environment_,
+		                                             *symbolizer_, frame_access_context(f))) {
+			if (!*cell) { return raise_from(*cell); }
+			script_value& storage = *cell->value();
+			if (storage.is_reference() && !storage.get_reference_holder()) {
+				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+			}
+			stack_.back() = share_env_ref(storage);
+		}
+		return {};
+	}
 	ensure_frame_member_scope(f, environment_.get());   // kernel reads the frame's member scope
 	auto resolved = detail::resolve_ref_lvalue(
 		static_cast<const expression*>(f.code->nodes[ins.a].get()),
@@ -17718,6 +17731,29 @@ op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins
 		return raise_from(resolved);
 	}
 	stack_.push_back(std::move(resolved.value()));
+	return {};
+}
+
+// KEEP BYTE-PARALLEL with the interpreter's cast-target assignment
+op_status vm_backend::exec_ref_target_store(frame& f, const vm_instruction& ins) {
+	auto* expr = static_cast<assignment_expr*>(f.code->nodes[ins.a].get());
+	script_value target_ref = std::move(stack_.back());
+	stack_.pop_back();
+	script_value rightValue = std::move(stack_.back());
+	stack_.pop_back();
+	if (!target_ref.is_reference()) {
+		return raise_(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
+	}
+	const token_type op = expr->op.type == token_type::equal ? token_type::equal : detail::compound_base(expr->op.type);
+	auto stored = detail::ref_target_assign(target_ref, rightValue, op, expr->incdec_desugar, expr->postfix_old_result,
+		assignment_result_used(f), operator_table_, engine_, symbolizer_,
+		[this](const script_value& l, token_type o, const script_value& r) {
+			return evaluate_arithmetic(l, o, r, detail::compound_index(o));
+		});
+	if (!stored) {
+		return raise_from(stored);
+	}
+	stack_.push_back(std::move(stored.value()));
 	return {};
 }
 
@@ -17796,6 +17832,18 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 		case detail::cast_operand_mode::value:
 			operand = std::move(stack_.back());
 			stack_.pop_back();
+			// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter's visit_cast_expr)
+			if (expr->by_reference && expr->operand->get_type() == node_type::member_expr && static_cast<const member_expr*>(expr->operand.get())->is_static) {
+				if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(expr->operand.get()), *environment_, *symbolizer_,
+				                                             frame_access_context(f))) {
+					if (!*cell) { return raise_from(*cell); }
+					script_value& storage = *cell->value();
+					if (storage.is_reference() && !storage.get_reference_holder()) {
+						return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+					}
+					operand = share_env_ref(storage);
+				}
+			}
 			break;
 	}
 
@@ -17908,6 +17956,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_import: return exec_import(f, ins);
 		case opcode::op_ref_return_bind: return exec_ref_return_bind(f, ins);
 		case opcode::op_ref_return_lvalue: return exec_ref_return_lvalue(f, ins);
+		case opcode::op_ref_target_store: return exec_ref_target_store(f, ins);
 		case opcode::op_index_store: return exec_index_store(f, ins);
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
 		case opcode::op_math: return exec_math(f, ins);
@@ -19268,6 +19317,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_import:
 			case opcode::op_ref_return_bind:
 			case opcode::op_ref_return_lvalue:
+			case opcode::op_ref_target_store:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
 			case opcode::op_math:

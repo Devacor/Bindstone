@@ -275,7 +275,9 @@ that escapes whole into a container or a by-value parameter loses the marker.
 
 **Casts** — `cast<T>(e)` types as certain `T` (a typed local initialized from it proves
 `same_type`), `cast<T&>(e)` as `T` for member lookup only (a reference: never a store proof),
-`cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. The operand
+`cast<shared_ptr<T>>(e)` as the handle spelling; primitives type as the primitive. A store through
+`cast<T&>(e)` (`=`, `op=`, `++`/`--`) checks the stored value against `T` with the assignment table
+(`cannot assign 'string' to a cast<int&> target declared 'int'`). The operand
 is the explicit typed boundary and is never checked against `T` — the verdict is the runtime's
 (`Cannot cast 'X' to 'T'`, catchable). A `T` that names no class is an error
 (`unknown type in cast`). A value-form class cast whose operand is statically a `shared_ptr<T>`

@@ -3295,6 +3295,15 @@ private:
 				return element.is_unknown() ? stored : element;
 			}
 		}
+		if (target->get_type() == node_type::cast_expr && static_cast<cast_expr*>(target)->by_reference) {
+			// cast<T&>(e) is an lvalue of T (its operand already is a T): the store checks against T
+			ctype t = infer(target);
+			if (t.is_unknown()) { return rhs; }
+			t.tentative = false;
+			const std::string name = ctype_name(t);
+			check_store(rhs, compound, base_op, t, name, "a cast<" + name + "&> target", a->location, 0, 0);
+			return t;
+		}
 		infer(target);
 		return rhs;
 	}

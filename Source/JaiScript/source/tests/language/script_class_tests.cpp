@@ -1771,7 +1771,7 @@ public:
                 return [x.f / 2, x.i, x.any];
             )");
             const auto& v = r.as_array();
-            check_near(0.5, v[0].as_float(), 1e-12, "an int initializer converts into a float field");
+            check_near(0.5, v[0].as_float(), 1e-12);
             check_eq((int64_t)1, v[1].as_int(), "bool converts into an int field");
             check_eq(std::string("t"), v[2].as<std::string>(), "a var field takes anything");
         });
@@ -1797,6 +1797,8 @@ public:
             check_eq(std::string("No constructor of 'H' takes (int)"), v[3].as<std::string>(), "a private field: not an aggregate");
             check_eq(std::string("No constructor of 'Derived' takes (int, int)"), v[4].as<std::string>(), "a base with a constructor: not an aggregate");
         });
+    }
+};
 
 } // namespace jai::foundry::tests
 

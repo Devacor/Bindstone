@@ -754,57 +754,6 @@ public:
             }
         });
 
-        test("host_call_cost_split", [this]() {
-            // opt-in: where an adapted host call's time goes, as ns per call over the bare loop - the call itself (a scalar
-            // in and out), the generic value parameter, the adapter's decode of a vector argument, building the argument's
-            // box, boxing a vector result, and the whole scale3 round trip
-            if (!std::getenv("JAI_MATH_HOST_SPLIT")) { return; }
-            using adapter_hosts::point3;
-            const std::pair<const char*, const char*> rows[] = {
-                {"loop", "s += k;"},
-                {"raw_fn_no_binder", "s += fraw(k);"},
-                {"binder_no_dispatch", "s += fbound(k);"},
-                {"scalar", "s += fs(k);"},
-                {"scalar_statement", "fs(k);"},
-                {"script_fn_scalar", "s += sfs(k);"},
-                {"generic_value", "s += sink(p);"},
-                {"vec_arg_decode", "s += fv(p);"},
-                {"vec_arg_built", "s += fv(math::vec3(k, 2, 3));"},
-                {"vec_result_box", "s += vf(k).x;"},
-                {"scale3_round_trip", "s += scale3(p, k).x;"},
-                {"script_fn_vec_arg", "s += sfv(p);"},
-            };
-            for (bool use_vm : {false, true}) {
-                auto e = host(use_vm);
-                e->add_function("fs", [](double k) { return k + 1.0; });
-                e->add_function("sink", [](jai::script_value v) { return v.is_null() ? 1.0 : 0.0; });
-                e->add_function("fv", [](point3 p) { return static_cast<double>(p.x + p.y + p.z); });
-                e->add_function("vf", [](double k) { return point3(static_cast<float>(k), 2.0f, 3.0f); });
-                e->execute("function sfv(math::vec3 v) -> float { return v.x + v.y + v.z; }");
-                e->execute("function sfs(float k) -> float { return k + 1.0; }");
-                // a plain global script_function (no overload set, no binder) and the binder's function without the set's dispatcher
-                e->add_functionWithArity("fraw", [eng = e.get()](const std::vector<jai::script_value>& a) -> jai::checked_result<jai::script_value> {
-                    return jai::script_value(a[0].unchecked_as_float() + 1.0, eng);
-                }, 1);
-                e->add_functionWithArity("fbound", jai::make_functionBinder([](double k) { return k + 1.0; }, e.get()).bind(), 1);
-                double loop_ns = 0;
-                for (const auto& [name, body] : rows) {
-                    const std::string src = std::string("function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); float s = 0.0; float k = 1.5; "
-                                                        "for (int i = 0; i < n; i++) { ") + body + " } return s; } f(200000);";
-                    double best = 1e30;
-                    for (int r = 0; r < 7; ++r) {
-                        auto t0 = std::chrono::steady_clock::now();
-                        e->execute(src);
-                        const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / 200000.0;
-                        if (ns < best) best = ns;
-                    }
-                    if (std::string(name) == "loop") loop_ns = best;
-                    std::printf("SPLIT %s %-18s %7.1f ns/iter  %7.1f over the loop\n", use_vm ? "vm    " : "interp", name, best, best - loop_ns);
-                }
-            }
-            check(true, "timing printed");
-        });
-
         test("adapter_vs_class_binding_timing", [this]() {
             // A/B against the class-bound path (a Point bound with dynamic_binder): opt-in, prints ns per call
             if (!std::getenv("JAI_MATH_ADAPTER_BENCH")) { return; }

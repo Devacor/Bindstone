@@ -13602,7 +13602,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 			auto class_check = ns_check->second->classes.find(class_id);
 			if (class_check != ns_check->second->classes.end()) {
 				auto class_def = class_check->second;
-				script_value static_method = class_def->get_static_method(expr->member_id, false);
+				script_value static_method = class_def->static_method_in_chain(expr->member_id);
 				if (!static_method.is_null()) {
 					out = static_method;
 					return {};
@@ -13683,7 +13683,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 				}
 
 				if (fallback_class) {
-					script_value static_method = fallback_class->get_static_method(member_id, false);
+					script_value static_method = fallback_class->static_method_in_chain(member_id);
 					if (!static_method.is_null() && static_method.is_function()) {
 						auto func = static_method.as_function();
 						return func(args);
@@ -13749,19 +13749,19 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 		                                            frame_access_context(f)));
 	}
 
-	script_value static_method = class_def->get_static_method(expr->member_id, false);
+	script_value static_method = class_def->static_method_in_chain(expr->member_id);
 	if (!static_method.is_null()) {
 		out = static_method;
 		return {};
 	}
 
-	if (const script_value* static_value = class_def->get_static_field_ptr(expr->member_id)) {
+	if (const script_value* static_value = class_def->find_static_field_in_chain(expr->member_id)) {
 		out = *static_value;
 		return {};
 	}
 
 	auto [getter_id, getter_view] = symbolizer_->get_getter_id_with_view(expr->member_id);
-	script_value getter_method = class_def->get_static_method(getter_id, false);
+	script_value getter_method = class_def->static_method_in_chain(getter_id);
 	if (!getter_method.is_null() && getter_method.is_function()) {
 		auto func = getter_method.as_function();
 		std::vector<script_value> no_args;

@@ -263,15 +263,16 @@ try { Registry.count; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.0, last_id = 0
 caught: Cannot assign string to static &#x27;count&#x27; of Registry (declared int)
 caught: function has no member &#x27;count&#x27;</code></pre></div>
-<p>(<code>Registry::count = &quot;many&quot;;</code> written as a literal is the load error <code>cannot assign &#x27;string&#x27; to field &#x27;count&#x27; declared &#x27;int&#x27;</code>.) A class&#x27;s code sees its own and its bases&#x27; statics bare, and a base method running for a subclass instance reads its own class&#x27;s statics. From outside, qualify with the declaring class: <code>Derived::count</code> names no static:</p>
+<p>(<code>Registry::count = &quot;many&quot;;</code> written as a literal is the load error <code>cannot assign &#x27;string&#x27; to field &#x27;count&#x27; declared &#x27;int&#x27;</code>.) Statics are inherited names, as in C++: a class&#x27;s code sees its own and its bases&#x27; statics bare, a base method running for a subclass instance reads its own class&#x27;s statics, and <code>Derived::count</code> names the base&#x27;s static unless <code>Derived</code> declares a member of that name:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { static int count = 0; static int bump() { count += 1; return count; } }
 class Derived : Base {
     auto bump_twice() { bump(); return bump(); }   // a base&#x27;s statics by bare name
 }
 print(Derived().bump_twice());
-try { Derived::count; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+Derived::count += 10;                              // the base&#x27;s static, through the derived name
+print(Base::count);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2
-caught: class Derived has no static member &#x27;count&#x27;</code></pre></div>
+12</code></pre></div>
 <p><code>Class::name op= v</code> and <code>++Class::name</code> are lvalues; <code>static auto</code> infers from its initializer and <code>static var</code> stays dynamic. A namespace can override class statics of the same name. See <a href="../guide/11-kitchen-sink.html#namespaces">Namespaces</a>.</p>
 <h2 id="name-resolution-in-methods">Name resolution in methods<a class="hlink" href="#name-resolution-in-methods" aria-label="link">&#8203;</a></h2>
 <p>A bare identifier inside a method resolves in C++ unqualified-lookup order, identical on both backends and for reads AND writes:</p>

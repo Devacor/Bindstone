@@ -54,6 +54,10 @@ namespace jai::detail {
 				return access.error_value();
 			}
 		}
+		class_definition* owner = nullptr;   // D::s names a base's static as C++ does: the store lands on the declaring class
+		if (class_def->find_static_field_in_chain(member->member_id, &owner) && owner != class_def.get()) {
+			return owner->shared_from_this();
+		}
 		return class_def;
 	}
 

@@ -7673,7 +7673,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     auto class_def = class_check->second;
 
                     // Try to get the static method (use pre-computed member_id from parser)
-                    script_value static_method = class_def->get_static_method(expr->member_id, false);
+                    script_value static_method = class_def->static_method_in_chain(expr->member_id);
                     if (!static_method.is_null()) {
                         push_value(std::move(static_method));
                         return {};
@@ -7773,7 +7773,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                     // No matching overload found in namespace - try fallback to class static method
                     if (fallback_class) {
                         // get_static_method with false doesn't throw - returns null if not found
-                        script_value static_method = fallback_class->get_static_method(member_id, false);
+                        script_value static_method = fallback_class->static_method_in_chain(member_id);
                         if (!static_method.is_null() && static_method.is_function()) {
                             // Call the class static method
                             auto func = static_method.as_function();
@@ -7853,14 +7853,14 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
 
         // Try static method first (most common case for :: access)
         // get_static_method with false doesn't throw - returns null if not found
-        script_value static_method = class_def->get_static_method(expr->member_id, false);
+        script_value static_method = class_def->static_method_in_chain(expr->member_id);
         if (!static_method.is_null()) {
             push_value(std::move(static_method));
             return {};
         }
 
         // Try static field access (presence, not null-ness: a typed null static reads null)
-        if (const script_value* static_value = class_def->get_static_field_ptr(expr->member_id)) {
+        if (const script_value* static_value = class_def->find_static_field_in_chain(expr->member_id)) {
             push_value(*static_value);
             return {};
         }
@@ -7868,7 +7868,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
         // Try getter method as fallback (for C++ bound properties)
         auto [getter_id, _] = string_symbolizer_->get_getter_id_with_view(expr->member_id);
         // get_static_method with false doesn't throw - returns null if not found
-        script_value getter_method = class_def->get_static_method(getter_id, false);
+        script_value getter_method = class_def->static_method_in_chain(getter_id);
         if (!getter_method.is_null() && getter_method.is_function()) {
             // Call the getter with no arguments to get the live C++ value
             auto func = getter_method.as_function();

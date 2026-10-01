@@ -548,8 +548,9 @@ print(Vec::count());
 ```
 
 Static fields are class state, spelled `Class::name` anywhere or bare `name` inside the
-class's methods, constructors and static methods, its subclasses' included (from outside, qualify with the declaring
-class; `Class.name` is not a spelling). A static's declared type is enforced on every
+class's methods, constructors and static methods (statics are inherited names as in C++: a class's
+code sees its bases' statics bare and `Derived::name` names a base's static unless `Derived` declares a member of
+that name; `Class.name` is not a spelling). A static's declared type is enforced on every
 store spelling exactly like an instance field — the same conversion table, the same rejection
 shape (`Cannot assign string to static 'n' of C (declared int)`) — and its initializer converts the same way (`static float f = 3`
 holds `3.0`; `static int n;` is a readable typed null). `Class::name op= v` and `++`/`--` are

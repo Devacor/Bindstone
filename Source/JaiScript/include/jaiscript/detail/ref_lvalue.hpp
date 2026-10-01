@@ -672,6 +672,18 @@ namespace jai::detail {
 		return t ? t->declared_referent : nullptr;
 	}
 
+	// The storage behind the reference applies T's table itself (a typed element of T's kind, a variable declared T): the declared
+	// type adds nothing, and the storage's own rule and text stand
+	inline bool ref_storage_enforces(const script_value& ref, const type_info* declared) {
+		const auto* holder = ref.get_reference_holder();
+		if (!holder || holder->property || holder->component_base) { return false; }
+		const type_info* enforced = holder->container_element_type ? holder->container_element_type.get()
+		                          : holder->plain_cell() ? holder->cell()->type_info_raw() : nullptr;
+		if (!enforced || var_slot(enforced)) { return false; }
+		const uint8_t kind = declared_ref_kind(declared);
+		return kind && kind != 0xFF && declared_ref_kind(enforced) == kind;
+	}
+
 	// The value a declared reference names, a variable's cell read directly (no out-of-line dereference)
 	inline const script_value& ref_declared_current(const script_value& ref) {
 		const auto* holder = ref.get_reference_holder();
@@ -758,7 +770,8 @@ namespace jai::detail {
 	inline checked_result<void> ref_store_through(script_value& refLocal, script_value& value,
 	                                              engine* eng, string_symbolizer* symbolizer,
 	                                              type_info* declared_static = nullptr, uint8_t static_kind = 0) {
-		if (const uint8_t kind = static_kind ? static_kind : ref_declared_kind(refLocal); kind && kind != value.deref().raw_storage_index()) [[unlikely]] {
+		if (const uint8_t kind = static_kind ? static_kind : ref_declared_kind(refLocal);
+		    kind && kind != value.deref().raw_storage_index() && !ref_storage_enforces(refLocal, static_kind ? declared_static : ref_declared_type(refLocal))) [[unlikely]] {
 			auto converted = ref_declared_convert(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value, eng);
 			if (!converted) { return {}; }
 			if (!*converted) { return converted->error_value(); }
@@ -869,7 +882,7 @@ namespace jai::detail {
 						"Unknown compound assignment operator");
 			}
 		}
-		if (type_info* declared = declared_static ? declared_static : ref_declared_type(refLocal)) [[unlikely]] {
+		if (type_info* declared = declared_static ? declared_static : ref_declared_type(refLocal); declared && !ref_storage_enforces(refLocal, declared)) [[unlikely]] {
 			auto converted = ref_declared_convert(refLocal, declared, resultValue, eng);
 			if (!converted) { return resultValue; }
 			if (!*converted) { return converted->error_value(); }

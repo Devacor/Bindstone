@@ -232,10 +232,9 @@ namespace jai {
         // local, a parameter, a program-level declaration of this unit); false for reference declarations and
         // for names the unit does not declare. A reference bound to such a name dereferences a cell, never a getter.
         bool names_known_value = false;
-        // Parser resolution: the name is a slot-resident `T& name = e;` declaration with a concrete T (Dev ruling 2026-09-30:
-        // the declared type governs a store through it); the kind byte is the storage index a value of T's kind has, 0xFF
-        // when every store runs T's table (detail::declared_ref_kind)
-        type_info* declared_ref = nullptr;
+        // Parser resolution: the name is a slot-resident `T& name = e;` declaration or `T& p` parameter with a concrete T (Dev
+        // ruling 2026-09-30: the declared type governs a store through it): the storage index a value of T's kind has, 0xFF when
+        // every store runs T's table (detail::declared_ref_kind), and T in declared_ref
         uint8_t declared_ref_kind = 0;
         // Field proof (bare this-field read/write inside a method): the receiver's certain class
         // object, its flat field slot, the field_shape_epoch at stamp time, the declared type and
@@ -247,6 +246,7 @@ namespace jai {
         mutable type_info* proven_field_type = nullptr;
         mutable bool proven_field_write = false;
         mutable bool this_field = false;   // a bare name in a method the checker resolved to a field of the class chain (declared, no user accessor): the method graft's `recv.name`
+        type_info* declared_ref = nullptr;
 
         identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)
             : expression(loc, node_type::identifier_expr), name(n), symbol_id(sym_id), slot_index(SIZE_MAX) {}

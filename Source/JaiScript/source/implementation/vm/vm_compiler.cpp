@@ -6782,7 +6782,7 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 		}
 	}
 
-	if (expr->default_capture != lambda_expr::capture_default::none) {
+	{
 		std::unordered_set<uint64_t> param_ids;
 		for (const auto& p : expr->parameters) {
 			param_ids.insert(p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name));
@@ -6791,10 +6791,13 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 		body_walker walker;
 		walker.symbolizer = symbolizer_;
 		walker.on_identifier = [&](identifier_expr* ident) {
-			if (param_ids.count(ident->symbol_id)) return;
+			if (ident->global_qualified || declared.count(ident->symbol_id)) return;
 			if (seen.insert(ident->symbol_id).second) {
 				proto.used_variables.push_back(ident->symbol_id);
 			}
+		};
+		walker.on_instance = [&]() {
+			if (seen.insert(this_id).second) { proto.used_variables.push_back(this_id); }
 		};
 		walker.stmt(proto.body);
 		for (uint64_t sym : expr->chained_outer_names) {

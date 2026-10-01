@@ -802,42 +802,44 @@ public:
         // ------------------------------------------------------------ shadowing warnings
         // Always WARNING severity (shadowing is legal; strict must not throw on it).
 
-        test("warn_implicit_capture_in_bare_lambda", [this]() {
-            auto e = make_engine();
-            auto r = e->check(
-                "function f() -> void {\n"
-                "  int x = 5;\n"
-                "  auto g = []() { print(x); };\n"
-                "}");
-            check_eq((size_t)0, error_count(r));
-            check_eq((size_t)1, warning_count(r));
-            check_true(r.diagnostics[0].message.find(
-                "bare [] implicitly captured local 'x'") != std::string::npos);
-
-            // One warning per lambda, even with several implicit captures.
-            check_eq((size_t)1, e->check(
-                "function f() -> void { int x = 1; int y = 2; auto g = []() { return x + y; }; }")
-                .diagnostics.size());
-
-            // Explicit intent -> silent, all three spellings.
-            check_eq((size_t)0, e->check(
-                "function f() -> void { int x = 1; auto g = [=]() { return x; }; }")
-                .diagnostics.size());
-            check_eq((size_t)0, e->check(
-                "function f() -> void { int x = 1; auto g = [&]() { return x; }; }")
-                .diagnostics.size());
-            check_eq((size_t)0, e->check(
-                "function f() -> void { int x = 1; auto g = [x]() { return x; }; }")
-                .diagnostics.size());
-
-            // Bare [] using only its own params/locals or globals captures nothing -> silent.
-            check_eq((size_t)0, e->check(
-                "function f() -> void { auto g = [](int n) { var m = n; return m; }; }")
-                .diagnostics.size());
-            check_eq((size_t)0, e->check(
-                "var shared = 1;\nfunction f() -> void { auto g = []() { return shared; }; }")
-                .diagnostics.size());
-        });
+		test("lambda_capture_lists_are_exhaustive", [this]() {
+			for (auto backend : {backend_type::interpreter, backend_type::vm}) {
+				for (auto mode : {check_mode::strict, check_mode::off}) {
+					for (const auto& source : {
+						"auto f() { int x = 5; return []() { return x; }; } f()",
+						"auto f() { int x = 1; int y = 2; return [x]() { return x + y; }; } f()",
+						"auto f() { int x = 1; return []() { return [=]() { return x; }; }; } f()",
+						"auto f() { int x = 1; return []() { return [x]() { return x; }; }; } f()",
+						"class C { int x = 1; auto f() { return []() { return this.x; }; } } C c = C(); c.f()",
+						"class C { int x = 1; auto f() { return []() { return x; }; } } C c = C(); c.f()"
+					}) {
+						auto e = make_engine();
+						e->set_backend(backend);
+						e->static_checking(mode);
+						auto result = outcome(*e, source);
+						check_true(result.rfind("ERROR", 0) == 0 && result.find("capture") != std::string::npos, result);
+					}
+				}
+				for (const auto& source : {
+					"auto f() { int x = 3; return [=]() { return x; }; } auto g = f(); g()",
+					"auto f() { int x = 3; return [x]() { return x; }; } auto g = f(); g()",
+					"auto f() { int x = 3; return [copy = x]() { return copy; }; } auto g = f(); g()",
+					"auto f() { int x = 3; return [=]() { return [=]() { return x; }; }; } auto outer = f(); auto inner = outer(); inner()",
+					"auto f() { int x = 3; return [x]() { return [x]() { return x; }; }; } auto outer = f(); auto inner = outer(); inner()",
+					"int shared = 3; auto f() { return []() { return shared; }; } auto g = f(); g()",
+					"auto f() { return [](int n) { int m = n; return m; }; } auto g = f(); g(3)",
+					"namespace N { int x = 2; auto f() { return []() { return x; }; } } auto g = N::f(); N::x = 3; g()"
+				}) {
+					auto e = make_engine();
+					e->set_backend(backend);
+					check_eq(std::string("VALUE 3"), outcome(*e, source));
+				}
+				auto e = make_engine();
+				e->set_backend(backend);
+				check_eq(std::string("VALUE 4"), outcome(*e,
+					"auto f() { int x = 3; auto g = [&]() { x += 1; return x; }; g(); return x; } f()"));
+			}
+		});
 
         test("shadow_local_over_field", [this]() {
             auto e = make_engine();

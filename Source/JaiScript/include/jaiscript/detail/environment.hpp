@@ -192,6 +192,8 @@ namespace jai {
             return kind_ == env_kind::standard && local_ids_.empty();
         }
         environment* parent_raw() const noexcept { return parent_.get(); }
+        bool is_program_scope() const noexcept { return !parent_ || namespace_scope_; }
+        void mark_namespace_scope() noexcept { namespace_scope_ = true; }
 
         // A { } block's (or a loop's, a branch's) scope: a free function called from inside it sees the scope it was defined
         // in, never the block's declarations (C++ scoping; a function defined inside the block keeps its caller's chain)
@@ -322,6 +324,7 @@ namespace jai {
 
         // === Unified environment fields (replaces method_environment / static_method_environment) ===
         env_kind kind_;
+        bool namespace_scope_ = false;
 
         // For method environments: the 'this' object for field access
         script_value this_object_;

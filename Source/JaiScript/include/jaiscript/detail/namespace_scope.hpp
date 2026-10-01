@@ -24,6 +24,7 @@ namespace jai::detail {
 	inline const std::shared_ptr<environment>& namespace_scope(engine& eng, script_namespace_data& ns) {
 		if (!ns.scope) {
 			ns.scope = std::make_shared<environment>(eng.get_global_environment(), eng.get_symbolizer());
+			ns.scope->mark_namespace_scope();
 		}
 		return ns.scope;
 	}

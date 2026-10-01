@@ -8461,154 +8461,27 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     bool has_default_capture = (expr->default_capture != lambda_expr::capture_default::none);
     
     
-    // For default captures, analyze the lambda body to find which variables are actually used
-    std::unordered_set<std::string> used_variables;
-    if (has_default_capture) {
-        // Helper to recursively find all identifiers in an expression
-        std::function<void(expression*)> find_identifiers;
-        find_identifiers = [&](expression* e) {
-            if (e->get_type() == node_type::identifier_expr) {
-                auto* ident = static_cast<identifier_expr*>(e);
-                // Skip parameter names
-                bool is_param = false;
-                for (const auto& param : expr->parameters) {
-                    if (param.name == ident->name) {
-                        is_param = true;
-                        break;
-                    }
-                }
-                if (!is_param) {
-                    used_variables.insert(std::string(ident->name));
-                }
-            } else if (e->get_type() == node_type::binary_expr) {
-                auto* binary = static_cast<binary_expr*>(e);
-                find_identifiers(binary->left.get());
-                find_identifiers(binary->right.get());
-            } else if (e->get_type() == node_type::unary_expr) {
-                auto* unary = static_cast<unary_expr*>(e);
-                find_identifiers(unary->operand.get());
-            } else if (e->get_type() == node_type::call_expr) {
-                auto* call = static_cast<call_expr*>(e);
-                find_identifiers(call->callee.get());
-                for (const auto& arg : call->arguments) {
-                    find_identifiers(arg.get());
-                }
-            } else if (e->get_type() == node_type::member_expr) {
-                auto* member = static_cast<member_expr*>(e);
-                find_identifiers(member->object.get());
-            } else if (e->get_type() == node_type::assignment_expr) {
-                auto* assign = static_cast<assignment_expr*>(e);
-                find_identifiers(assign->target.get());
-                find_identifiers(assign->value.get());
-            } else if (e->get_type() == node_type::ternary_expr) {
-                auto* ternary = static_cast<ternary_expr*>(e);
-                find_identifiers(ternary->condition.get());
-                find_identifiers(ternary->then_expression.get());
-                find_identifiers(ternary->else_expression.get());
-            } else if (e->get_type() == node_type::array_literal_expr) {
-                auto* arr = static_cast<array_literal_expr*>(e);
-                for (const auto& el : arr->elements) find_identifiers(el.get());
-            } else if (e->get_type() == node_type::map_literal_expr) {
-                auto* m = static_cast<map_literal_expr*>(e);
-                for (const auto& kv : m->entries) { find_identifiers(kv.first.get()); find_identifiers(kv.second.get()); }
-            } else if (e->get_type() == node_type::new_expr) {
-                auto* ne = static_cast<new_expr*>(e);
-                for (const auto& a : ne->arguments) find_identifiers(a.get());
-            } else if (e->get_type() == node_type::throw_expr) {
-                auto* te = static_cast<throw_expr*>(e);
-                if (te->value) find_identifiers(te->value.get());
-            } else if (e->get_type() == node_type::yield_expr) {
-                auto* ye = static_cast<yield_expr*>(e);
-                if (ye->value) find_identifiers(ye->value.get());
-            } else if (e->get_type() == node_type::include_expr) {
-                auto* ie = static_cast<include_expr*>(e);
-                if (ie->path_expr) find_identifiers(ie->path_expr.get());
-            } else if (e->get_type() == node_type::import_expr) {
-                for (const auto& a : static_cast<import_expr*>(e)->path_exprs) find_identifiers(a.get());
-            } else if (e->get_type() == node_type::cast_expr) {
-                find_identifiers(static_cast<cast_expr*>(e)->operand.get());
-            }
-            // Add more expression types as needed
-        };
-        
-        // Helper to find identifiers in statements
-        std::function<void(statement*)> find_in_statement;
-        find_in_statement = [&](statement* s) {
-            if (s->get_type() == node_type::expression_stmt) {
-                auto* expr_stmt = static_cast<expression_stmt*>(s);
-                find_identifiers(expr_stmt->expression.get());
-            } else if (s->get_type() == node_type::block_stmt) {
-                auto* block = static_cast<block_stmt*>(s);
-                for (const auto& decl : block->declarations) {
-                    if (decl->get_type() == node_type::expression_decl) {
-                        auto* expr_decl = static_cast<expression_decl*>(decl.get());
-                        find_identifiers(expr_decl->expression.get());
-                    } else if (decl->get_type() == node_type::statement_decl) {
-                        auto* stmt_decl = static_cast<statement_decl*>(decl.get());
-                        find_in_statement(stmt_decl->statement.get());
-                    }
-                }
-            } else if (s->get_type() == node_type::if_stmt) {
-                auto* if_s = static_cast<if_stmt*>(s);
-                find_identifiers(if_s->condition.get());
-                find_in_statement(if_s->then_statement.get());
-                if (if_s->else_statement) {
-                    find_in_statement(if_s->else_statement.get());
-                }
-            } else if (s->get_type() == node_type::while_stmt) {
-                auto* while_s = static_cast<while_stmt*>(s);
-                find_identifiers(while_s->condition.get());
-                find_in_statement(while_s->body.get());
-            } else if (s->get_type() == node_type::return_stmt) {
-                auto* return_s = static_cast<return_stmt*>(s);
-                if (return_s->value) {
-                    find_identifiers(return_s->value.get());
-                }
-            } else if (s->get_type() == node_type::for_stmt) {
-                auto* for_s = static_cast<for_stmt*>(s);
-                if (for_s->initializer) find_in_statement(for_s->initializer.get());
-                if (for_s->condition) find_identifiers(for_s->condition.get());
-                if (for_s->update) find_identifiers(for_s->update.get());
-                find_in_statement(for_s->body.get());
-            } else if (s->get_type() == node_type::range_for_stmt) {
-                auto* rf = static_cast<range_for_stmt*>(s);
-                if (rf->container) find_identifiers(rf->container.get());
-                find_in_statement(rf->body.get());
-            } else if (s->get_type() == node_type::parallel_for_stmt) {
-                auto* pf = static_cast<parallel_for_stmt*>(s);
-                if (pf->container) find_identifiers(pf->container.get());
-                find_in_statement(pf->body.get());
-            } else if (s->get_type() == node_type::switch_stmt) {
-                auto* sw = static_cast<switch_stmt*>(s);
-                if (sw->condition) find_identifiers(sw->condition.get());
-                for (const auto& c : sw->cases) {
-                    if (c->value) find_identifiers(c->value.get());
-                    for (const auto& st : c->body) find_in_statement(st.get());
-                }
-                if (sw->default_case) {
-                    for (const auto& st : sw->default_case->body) find_in_statement(st.get());
-                }
-            } else if (s->get_type() == node_type::try_stmt) {
-                auto* tr = static_cast<try_stmt*>(s);
-                if (tr->try_block) find_in_statement(tr->try_block.get());
-                if (tr->catch_block) find_in_statement(tr->catch_block.get());
-            } else if (s->get_type() == node_type::variable_decl) {
-                auto* vd = static_cast<variable_decl*>(s);
-                if (vd->initializer) find_identifiers(vd->initializer.get());
-            } else if (s->get_type() == node_type::expression_decl) {
-                auto* ed = static_cast<expression_decl*>(s);
-                if (ed->expression) find_identifiers(ed->expression.get());
-            } else if (s->get_type() == node_type::statement_decl) {
-                auto* sd = static_cast<statement_decl*>(s);
-                if (sd->statement) find_in_statement(sd->statement.get());
-            }
-            // Add more statement types as needed
-        };
-        
-        // Analyze the lambda body
-        find_in_statement(expr->body.get());
-
-    }
+	// Analyze free uses once at closure creation; named lists must be exhaustive.
+	std::unordered_set<std::string> used_variables;
+	std::unordered_set<uint64_t> own_names;
+	for (const auto& parameter : expr->parameters) { own_names.insert(parameter.symbol_id); }
+	for (const auto& capture : expr->captures) {
+		if (capture.initializer) { own_names.insert(capture.symbol_id); }
+	}
+	detail::body_walker walker;
+	walker.symbolizer = string_symbolizer_;
+	walker.on_declared = [&](uint64_t a_id) { own_names.insert(a_id); };
+	walker.stmt(expr->body);
+	walker.on_declared = {};
+	walker.on_identifier = [&](identifier_expr* a_identifier) {
+		if (!a_identifier->global_qualified && !own_names.count(a_identifier->symbol_id)) {
+			used_variables.insert(std::string(a_identifier->name));
+		}
+	};
+	bool uses_instance = false;
+	walker.on_instance = [&]() { uses_instance = true; };
+	walker.stmt(expr->body);
+	auto program_scope = detail::lambda_parent_scope(closure_env);
 
     // ----------------------------------------------------------------
     // OUTER-LOCAL SLOT CAPTURE
@@ -8885,20 +8758,39 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         expr->outer_slot_plan_built = true;
     }
 
-    // If we found any outer-slot references, we need a capture env even for a
-    // bare [] lambda (automatic local capture, a stated JaiScript feature).
-    if (!outer_slot_refs.empty()) {
-        has_explicit_captures = true;  // forces needs_capture_env = true below
-    }
-
-    if (has_default_capture) {
-        for (uint64_t chained : expr->chained_outer_names) {
-            used_variables.insert(std::string(string_symbolizer_->get_string(chained)));
-        }
-    }
-
-    // Determine if we actually need a capture environment
-    bool needs_capture_env = has_explicit_captures || (has_default_capture && !used_variables.empty());
+	// A named list does not acquire unlisted outer slots as a fallback.
+	if (!has_default_capture) {
+		for (const auto& ref : outer_slot_refs) {
+			bool listed = std::any_of(expr->captures.begin(), expr->captures.end(),
+				[&](const auto& a_capture) { return a_capture.symbol_id == ref.symbol_id; });
+			if (!listed) {
+				return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+					"Lambda capture list does not capture enclosing local '{0}'", ref.symbol_id);
+			}
+		}
+		for (const auto& name : used_variables) {
+			const uint64_t id = string_symbolizer_->intern(name);
+			bool listed = std::any_of(expr->captures.begin(), expr->captures.end(),
+				[&](const auto& a_capture) { return a_capture.symbol_id == id; });
+			bool this_listed = std::any_of(expr->captures.begin(), expr->captures.end(),
+				[](const auto& a_capture) { return a_capture.name == "this"; });
+			if (listed) { continue; }
+			auto source = detail::resolve_capture_source(nullptr, environment_.get(), member_scope_, id);
+			if (source.global || source.what == detail::capture_source::kind::miss) { continue; }
+			if (this_listed && (source.what == detail::capture_source::kind::member ||
+				source.what == detail::capture_source::kind::cpp_property || source.what == detail::capture_source::kind::shadow)) { continue; }
+			return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+				"Lambda capture list does not capture enclosing name '{0}'", id);
+		}
+	}
+	if (has_default_capture) {
+		for (uint64_t chained : expr->chained_outer_names) {
+			used_variables.insert(std::string(string_symbolizer_->get_string(chained)));
+		}
+	}
+	bool needs_capture_env = has_explicit_captures || (has_default_capture && (!used_variables.empty() || uses_instance));
+	// Namespace variables remain live program bindings without a value capture.
+	needs_capture_env = needs_capture_env || (program_scope && program_scope != get_global_environment());
 
     // Pre-cache capture symbol IDs for optimization
     uint64_t this_id = string_symbolizer_->get_this_id();
@@ -8909,7 +8801,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     }
 
     // Check if [this] is captured - we'll need special handling
-    bool captures_this = false;
+    bool captures_this = has_default_capture && uses_instance;
     for (const auto& capture : expr->captures) {
         if (capture.symbol_id == this_id) {
             captures_this = true;
@@ -8917,6 +8809,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         }
     }
 
+	if (uses_instance && !captures_this) {
+		return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
+			"Lambda instance access requires [this], [=], or [&]");
+	}
     std::shared_ptr<environment> final_closure_env;
 
     if (needs_capture_env) {
@@ -8932,8 +8828,13 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // into it (env-variables above, and outer-slot locals below). The only thing
         // a parent provides beyond that is global-scope fallback, so pointing at the
         // global env gives correct semantics without the lifecycle hazard.
-        auto captureEnv = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
+        auto captureEnv = std::make_shared<environment>(program_scope, string_symbolizer_);
         
+		if (captures_this && has_default_capture && uses_instance) {
+			auto result = environment_->get(this_id);
+			if (!result) { return result.error_value(); }
+			captureEnv->define(this_id, script_value(result.value().deref()));
+		}
         // Process default captures first ([=] or [&])
         if (has_default_capture && !used_variables.empty()) {
             bool capture_by_ref = (expr->default_capture == lambda_expr::capture_default::by_reference);

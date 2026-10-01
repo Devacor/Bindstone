@@ -1584,6 +1584,43 @@ public:
 
         // The mixin's own state door: to_json gives {"$type","$script"}, from_json hydrates the
         // live layer, or re-derives first when $type names another class.
+        test("a_constructorless_script_class_constructs_its_cpp_base", [&]() {
+            // C++: the implicit default constructor runs the base's default constructor first
+            auto eng = hybrid_engine();
+            eng->execute(R"(
+                class Plainkin : SlotCreature { int chomp = 3; }
+                var p = Plainkin();
+                p.health = 7;
+                p.chomp = 17;
+                class Deepkin : Plainkin { int fangs = 2; }
+                var d = Deepkin();
+                d.health = 9;
+            )");
+            check_eq((script_int)7, eng->execute("p.health").as_int(), "the inherited C++ property stores and reads");
+            check_eq((script_int)17, eng->execute("p.chomp").as_int());
+            auto object = eng->execute("p").as<std::shared_ptr<SlotCreature>>();
+            check(object != nullptr, "the instance extracts to its C++ base");
+            check_eq(7, object->health, "the store reached the C++ object");
+            check_eq((script_int)9, eng->execute("d.health").as_int(), "a two-level constructor-less chain too");
+            check_eq((script_int)2, eng->execute("d.fangs").as_int());
+        });
+
+        test("a_script_layer_saves_only_its_script_fields", [&]() {
+            auto eng = hybrid_engine();
+            auto slot = std::make_shared<SlotCreature>();
+            slot->health = 55;
+            eng->add_global("kin", eng->extend(slot, "Slotkin"));
+            eng->execute("kin.chomp = 17;");
+            std::string state = slot->script_layer_to_json();
+            check(state.find("\"chomp\":17") != std::string::npos, "the script field: " + state);
+            check(state.find("health") == std::string::npos, "an inherited C++ property is the C++ object's, not the layer's: " + state);
+            jai::serialization::json_archive_writer w(0, eng.get());
+            w(std::shared_ptr<SlotCreature>(slot));
+            std::string json = w.str();
+            check(json.find("null") == std::string::npos, "no null inherited property in the archive: " + json);
+            check(json.find("55") != std::string::npos, "the C++ property saves through the C++ object: " + json);
+        });
+
         test("script_extensible_json_state_round_trip", [&]() {
             auto eng = hybrid_engine();
             eng->execute(R"(

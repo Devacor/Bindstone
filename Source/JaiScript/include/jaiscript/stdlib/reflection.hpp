@@ -41,7 +41,7 @@ inline std::string semantic_type_name(const script_value& val, engine* eng) {
     // Typed containers carry their canonical tag ("array<int>"); untyped report the kind
     if (d.is_array() || d.is_map()) {
         if (auto ti = d.get_type_info()) {
-            if (!ti->type_name.empty() && ti->type_name != "any") { return ti->type_name; }
+            if (ti->base_type == script_value_type::jai_array_type || ti->base_type == script_value_type::jai_map_type) { return ti->spelling(); }
         }
         return d.is_array() ? "array" : "map";
     }
@@ -240,6 +240,12 @@ inline script_value make_field_entry(engine* eng, const std::string& name, const
     return entry;
 }
 
+// A declared slot's type as the script spells it: auto when undeclared, var for any, element types spelled out
+inline std::string declared_type_spelling(const type_info_ptr& type) {
+    if (!type || (type->type_name.empty() && type->base_type == script_value_type::jai_object_type)) { return "auto"; }
+    return type->spelling();
+}
+
 // Base-first, declaration-order field walk (the determinism contract): each level
 // contributes its OWN fields from the retained field_order_, parents before children.
 inline void append_fields_of(engine* eng, class_definition* def, script_value& arr) {
@@ -249,11 +255,8 @@ inline void append_fields_of(engine* eng, class_definition* def, script_value& a
     const std::string from = def->get_name();
     for (uint64_t id : def->field_order()) {
         const std::string name{eng->get_symbolizer()->get_string(id)};
-        std::string type = "auto";
-        if (auto ti = def->get_field_declared_type(id)) {
-            type = (ti->type_name == "any") ? "var"
-                 : (ti->type_name.empty() ? "auto" : ti->type_name);
-        }
+        const std::string type = declared_type_spelling(def->is_static_field(id) ? def->get_static_declared_type(id)
+                                                                                 : def->get_field_declared_type(id));
         std::string access = "public";
         access_level level = access_level::public_access;
         if (def->find_nonpublic_declarer(id, level)) {
@@ -290,8 +293,7 @@ inline script_value make_param_entry(engine* eng, const std::string& name,
 }
 
 inline std::string declared_param_type_name(const parameter& p) {
-    if (!p.type || p.type->type_name.empty()) { return "auto"; }
-    return p.type->type_name == "any" ? "var" : p.type->type_name;
+    return declared_type_spelling(p.type);
 }
 
 inline script_value params_array_for(engine* eng, const std::vector<parameter>& params) {

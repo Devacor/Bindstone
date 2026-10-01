@@ -212,6 +212,26 @@ namespace jai {
             }
         }
 
+        // The script spelling a reader sees (reflection, reports): canonical_name with an untyped container spelled bare
+        // ("array", "map") and a dynamic element as var ("map<string,var>"); "var" for any
+        std::string spelling() const {
+            auto element = [](const type_info_ptr& t) { return t ? t->spelling() : std::string("var"); };
+            switch (base_type) {
+                case script_value_type::jai_any_type: return "var";
+                case script_value_type::jai_array_type:
+                    return element_type() ? "array<" + element_type()->spelling() + ">" : std::string("array");
+                case script_value_type::jai_map_type:
+                    if (!key_type() && !value_type()) { return "map"; }
+                    return "map<" + element(key_type()) + "," + element(value_type()) + ">";
+                case script_value_type::jai_weak_ptr_type:
+                    return element_type() ? "weak_ptr<" + element_type()->spelling() + ">" : std::string("weak_ptr");
+                case script_value_type::jai_shared_ptr_type:
+                    return element_type() ? "shared_ptr<" + element_type()->spelling() + ">" : canonical_name();
+                default:
+                    return canonical_name();
+            }
+        }
+
         // Equality comparison
         bool equals(const type_info& other) const;
 

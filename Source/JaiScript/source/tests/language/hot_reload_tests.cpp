@@ -54,6 +54,24 @@ public:
 			}
 		});
 
+		test("migration_reports_spell_container_types", [this]() {
+			for (auto backend : {jai::backend_type::interpreter, jai::backend_type::vm}) {
+				auto engine = jai::foundry::make_engine();
+				engine->set_backend(backend);
+				engine->execute("class S { var loose = [1, 2]; var bag = {\"a\": 1}; array<int> typed = [1]; map<string, int> tally = {\"b\": 2}; } S one = S();");
+				engine->hot_reload_reporting(true);
+				engine->execute("class S { var loose = [1, 2]; var bag = {\"a\": 1}; array<int> typed = [1]; map<string, int> tally = {\"b\": 2}; int extra = 0; }");
+				std::map<std::string, std::string> types;
+				for (const auto& report : engine->hot_reload_reports()) {
+					if (report.class_name == "S") { types[report.field_name] = report.old_type; }
+				}
+				check_eq(std::string("array"), types["loose"], "an untyped array");
+				check_eq(std::string("map"), types["bag"], "an untyped map");
+				check_eq(std::string("array<int>"), types["typed"], "a typed array");
+				check_eq(std::string("map<string,int>"), types["tally"], "a typed map");
+			}
+		});
+
 		test("generic_field_retype_marks_shape_change", [this]() {
 			auto engine = jai::foundry::make_engine();
 			engine->execute("class Generic { array<int> items = []; } Generic live = Generic();");

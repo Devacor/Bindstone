@@ -575,7 +575,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto callee = clone_expr(ce->callee, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
-		n->static_arg_proofs = ce->static_arg_proofs; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
+		n->static_arg_proofs = ce->static_arg_proofs; n->proof_globals = ce->proof_globals; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
 		c.origins[n.get()] = ce;
 		for (auto* pins : { c.alias_pins, c.callee_probes }) {
 			if (!pins) continue;
@@ -958,8 +958,10 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	if (const char* why = inline_eligible(call.get(), fn.get())) { out.why = why; return false; }
 	if (void_type(fn->return_type.get()) && !(statement_position && root.get() == call.get())) { out.why = "a void result used as a value"; return false; }   // a void result is a value nowhere but alone in a statement
 	// the body clones, and its writes decide what may stand before the call
-	bool in_loop = false;
-	for (const loop_context& lc : loops_) { if (lc.kind == region_kind::loop || lc.kind == region_kind::range_for) { in_loop = true; break; } }
+	const bool in_loop = in_closable_loop();
+	const bool outer_in_loop = graft_in_loop_;
+	graft_in_loop_ = in_loop;
+	struct restore_in_loop { bool& flag; bool value; ~restore_in_loop() { flag = value; } } restore{graft_in_loop_, outer_in_loop};
 	if (in_loop) {   // inside a loop every parameter's argument lands by a block instruction, or the call stays (its landing converts what a declaration cannot)
 		const land_ctx args = args_call ? graft_land_ctx(fn.get()) : plain;   // a leaf in an argument grafts inside the parameter's declaration
 		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (!fn->parameters[i].is_reference && !landable(call->arguments[i].get(), &args)) { out.why = "an argument the block cannot land"; return false; } }
@@ -1098,6 +1100,14 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 // what fn's body may call when fn grafts: the stdlib aliases, and a plain leaf the graft's compile grafts in turn, at any depth the tree's node
 // budget allows: eligible by itself, never fn or an enclosing graft, its guard and fallback inside fn's graft. A call's verdict is kept for
 // the chunk (its body's shape decides it; a recursion the memo misses is refused again where the graft compiles)
+// a loop encloses the statement that a block may still stand for: one the first compile closed, or any loop when no first compile spoke
+bool vm_compiler::in_closable_loop() const {
+	for (const loop_context& lc : loops_) {
+		if ((lc.kind == region_kind::loop || lc.kind == region_kind::range_for) && !open_loops_.count(lc.stmt)) return true;
+	}
+	return false;
+}
+
 land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
 	land_ctx lc;
 	lc.eng = engine_;
@@ -1109,7 +1119,7 @@ land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
 			// the verdict's inputs, never a clone's address: the callee, the grafts around it, and each argument's shape, proof and kind
 			std::string key;
 			auto put = [&key](uint64_t v) { key.append(reinterpret_cast<const char*>(&v), sizeof v); };
-			put(reinterpret_cast<uintptr_t>(fn)); put(reinterpret_cast<uintptr_t>(inner.get()));
+			put(reinterpret_cast<uintptr_t>(fn)); put(reinterpret_cast<uintptr_t>(inner.get())); put(graft_in_loop_ ? 1 : 0);
 			for (const block_stmt* b : graft_bodies_) { put(reinterpret_cast<uintptr_t>(b)); }
 			put(UINT64_MAX);
 			for (size_t i = 0; i < ce->arguments.size(); ++i) {
@@ -1132,7 +1142,7 @@ land_ctx vm_compiler::graft_land_ctx(const function_decl* fn) {
 				// the body the inner graft will clone, held to the block's landing rules: a leaf that stays a call inside the graft would only
 				// widen the caller's frame
 				inline_context probe; probe.lc = graft_land_ctx(inner.get()); probe.lc.frame = &probe.slot_types; probe.lc.origins = &probe.origins; probe.renames.assign(inner->local_count, nullptr); probe.result_type = graft_result_type(inner.get());
-				probe.callee_name = inner->name; probe.in_loop = true; probe.returns_proven = inner->graft_return_kind != 0;
+				probe.callee_name = inner->name; probe.in_loop = graft_in_loop_; probe.returns_proven = inner->graft_return_kind != 0;
 				probe.ref_slots.assign(inner->local_count, 0);
 				graft_param_types(ce, inner.get(), frame, probe.slot_types);
 				for (const parameter& p : inner->parameters) { if (p.is_reference && p.slot_index < inner->local_count) { probe.ref_slots[p.slot_index] = 1; } }
@@ -1282,7 +1292,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		c.renames.assign(fn->local_count, nullptr);
 		c.ref_slots.assign(fn->local_count, 0);
 		for (const parameter& p : fn->parameters) { if (p.is_reference && p.slot_index < fn->local_count) { c.ref_slots[p.slot_index] = 1; } }
-		c.result = result; c.result_type = graft_result_type(fn); c.callee_name = fn->name; c.in_loop = plan.in_loop;
+		c.result = result; c.result_type = graft_result_type(fn); c.callee_name = fn->name; c.in_loop = plan.in_loop; graft_in_loop_ = plan.in_loop;
 		c.returns_proven = fn->graft_return_kind != 0;
 		c.receiver = plan.receiver;
 		graft_param_types(call.get(), fn, nullptr, c.slot_types);
@@ -1416,6 +1426,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	}
 	site.body = fn->body.get();
 	site.decl = plan.fn;
+	site.proof_globals = call->proof_globals;
 	site.plain_numeric = plan.plain_numeric;
 	site.call_stmt = current_stmt_;
 	site.result_slot = result ? static_cast<uint32_t>(result->slot_index) : k_invalid_u32;

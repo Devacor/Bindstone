@@ -1453,21 +1453,71 @@ private:
 
     // C1: one statically resolved same-script callee, exact arity, no defaults in play, no
     // reference params. Per-argument same_type (an untyped/var parameter binds as identity).
-    // an argument whose static type an include cannot change: a literal, a local or a parameter (a frame slot), and arithmetic, a
-    // unary, a ternary, a cast or a math intrinsic over those; a global or a member may be redeclared by an included file
-    static bool certain_under_includes(const expression* e) {
+    // a scalar (int, float, bool) as its base type, an array of scalars as jai_array_type | the element's base type << 8, else 0
+    static uint16_t certain_kind(const type_info* t) {
+        if (!t || t->is_reference()) return 0;
+        auto scalar = [](script_value_type b) { return b == script_value_type::jai_int_type || b == script_value_type::jai_float_type || b == script_value_type::jai_bool_type; };
+        if (scalar(t->base_type)) return static_cast<uint16_t>(t->base_type);
+        if (t->base_type != script_value_type::jai_array_type) return 0;
+        const type_info* el = t->element_type().get();
+        if (!el || el->is_reference() || !scalar(el->base_type)) return 0;
+        return static_cast<uint16_t>(static_cast<uint16_t>(script_value_type::jai_array_type) | (static_cast<uint16_t>(el->base_type) << 8));
+    }
+    // a program-scope name whose declared type changes only when its declaring unit runs again: this unit's own typed top-level
+    // declaration, or the one spelled declaration another unit of the program makes, a scalar or an array of scalars; a name a field
+    // could shadow (inside a class) or a runtime include could declare stays uncertain. The name and the kind join deps
+    bool certain_global(const identifier_expr* id, std::vector<std::pair<uint64_t, uint16_t>>& deps) {
+        if (has_dynamic_includes_ || class_ctx_ || id->symbol_id == UINT64_MAX) return false;
+        size_t scope = SIZE_MAX;
+        const type_info* t = nullptr;
+        if (var_entry* v = find_named(id, &scope)) {
+            if (scope != 0 || v->dynamic || v->is_reference || v->is_handle) return false;
+            t = v->declared;
+        } else {
+            if (functions_.count(id->name) || enums_.count(id->name)) return false;
+            const variable_decl* g = program_global(std::string(id->name));
+            if (!g) return false;
+            t = g->type.get();
+        }
+        const uint16_t kind = certain_kind(t);
+        if (kind == 0) return false;
+        deps.emplace_back(id->symbol_id, kind);
+        return true;
+    }
+    // an argument whose static type an include cannot change: a literal, a local or a parameter (a frame slot), a certain program-scope
+    // name (certain_global; its kind recorded in deps), an element of a local or certain array, and arithmetic, a unary, a ternary, a cast
+    // or a math intrinsic over those
+    bool certain_argument(const expression* e, std::vector<std::pair<uint64_t, uint16_t>>& deps) {
         if (!e) return false;
         switch (e->get_type()) {
         case node_type::literal_expr: return true;
-        case node_type::identifier_expr: return static_cast<const identifier_expr*>(e)->slot_index != SIZE_MAX;
-        case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e); return b->op.type != token_type::left_bracket && certain_under_includes(b->left.get()) && certain_under_includes(b->right.get()); }
-        case node_type::unary_expr: return certain_under_includes(static_cast<const unary_expr*>(e)->operand.get());
-        case node_type::ternary_expr: { auto* x = static_cast<const ternary_expr*>(e); return certain_under_includes(x->condition.get()) && certain_under_includes(x->then_expression.get()) && certain_under_includes(x->else_expression.get()); }
-        case node_type::cast_expr: return certain_under_includes(static_cast<const cast_expr*>(e)->operand.get());
+        case node_type::identifier_expr: {
+            auto* id = static_cast<const identifier_expr*>(e);
+            return id->slot_index != SIZE_MAX || certain_global(id, deps);
+        }
+        case node_type::binary_expr: {
+            auto* b = static_cast<const binary_expr*>(e);
+            if (b->op.type == token_type::left_bracket) {
+                if (!b->left || b->left->get_type() != node_type::identifier_expr) return false;
+                auto* base = static_cast<const identifier_expr*>(b->left.get());
+                if (base->slot_index == SIZE_MAX) {
+                    if (!certain_global(base, deps)) return false;
+                    if ((deps.back().second & 0xFF) != static_cast<uint16_t>(script_value_type::jai_array_type)) return false;
+                } else {
+                    const var_entry* v = find_named(base);   // a local declared an array of scalars by value: a reference's declared type no bind checks
+                    if (!v || v->dynamic || v->is_reference || certain_kind(v->declared) == 0) return false;
+                }
+                return certain_argument(b->right.get(), deps);
+            }
+            return certain_argument(b->left.get(), deps) && certain_argument(b->right.get(), deps);
+        }
+        case node_type::unary_expr: return certain_argument(static_cast<const unary_expr*>(e)->operand.get(), deps);
+        case node_type::ternary_expr: { auto* x = static_cast<const ternary_expr*>(e); return certain_argument(x->condition.get(), deps) && certain_argument(x->then_expression.get(), deps) && certain_argument(x->else_expression.get(), deps); }
+        case node_type::cast_expr: return certain_argument(static_cast<const cast_expr*>(e)->operand.get(), deps);
         case node_type::call_expr: {
             auto* ce = static_cast<const call_expr*>(e);
             if (!ce->callee || ce->callee->get_type() != node_type::member_expr || detail::math_intrinsic_for_call(static_cast<const member_expr*>(ce->callee.get())) == detail::math_fn::none) return false;
-            for (const auto& a : ce->arguments) { if (!certain_under_includes(a.get())) return false; }
+            for (const auto& a : ce->arguments) { if (!certain_argument(a.get(), deps)) return false; }
             return true;
         }
         default: return false;
@@ -1490,18 +1540,23 @@ private:
         c->proven_callee_decl = fn && free_callee ? fn->weak_from_this() : std::weak_ptr<const function_decl>();
         if (!fn) {
             c->static_arg_proofs.clear();
+            c->proof_globals.clear();
             c->proven_callee_body = nullptr;
             return;
         }
         c->static_arg_proofs.assign(n, proof_none);
+        c->proof_globals.clear();
+        std::vector<std::pair<uint64_t, uint16_t>> deps;
         for (size_t i = 0; i < n; ++i) {
             const parameter& p = fn->parameters[i];
             if (p.is_reference) { continue; }   // a reference parameter binds, never converts: no proof, no count
             const bool untyped = !p.type || p.type->base_type == script_value_type::jai_any_type;
-            if (!(certain_program || certain_under_includes(c->arguments[i].get()))) { continue; }
+            deps.clear();
+            if (!(certain_program || certain_argument(c->arguments[i].get(), deps))) { continue; }
             if (untyped || same_type(ctype_from_type_info(p.type.get()), args[i])) {
                 c->static_arg_proofs[i] = proof_same_type;
                 if (certain_program) { ++counts_.args; }
+                for (const auto& d : deps) { if (std::find(c->proof_globals.begin(), c->proof_globals.end(), d) == c->proof_globals.end()) { c->proof_globals.push_back(d); } }
             }
         }
         c->proven_callee_body = by_value && certain_program ? fn->body.get() : nullptr;

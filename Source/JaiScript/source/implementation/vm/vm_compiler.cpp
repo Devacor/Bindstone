@@ -730,6 +730,7 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 	chunk_->pinned_decls = declarations;
 	chunk_->first_temp_slot = SIZE_MAX;   // a program chunk has no compiler slots (temps_active_ is false)
 	loops_.clear();
+	loop_marks_.clear();
 	callable_ = {};
 	scope_depth_ = 0;
 	current_stmt_ = nullptr;
@@ -744,10 +745,49 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 	return result;
 }
 
+// a body whose first compile left a loop open with a call the inliner kept inside it compiles once more, its grafts in open loops landing by
+// the rules outside a loop; the second compile stands only when it closes every loop the first closed
 std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
                                                      const std::vector<parameter>& parameters,
                                                      const std::shared_ptr<block_stmt>& body,
                                                      size_t local_count) {
+	open_loops_.clear();
+	loop_marks_.clear();
+	auto first = compile_callable_once(name, parameters, body, local_count);
+	if (!first || first->cell_refusals.empty() || first->inline_refusals.empty() || !ir_passes_ || !typed_lowering_) return first;
+	// a loop's verdict: the innermost closed loop or refusal whose span holds where the loop's body began
+	std::unordered_set<const ast_node*> open;
+	for (const auto& [stmt, at] : loop_marks_) {
+		bool refused = false; uint32_t best = UINT32_MAX;
+		for (const auto& r : first->cell_refusals) { if (r.head <= at && at <= r.back && r.back - r.head < best) { best = r.back - r.head; refused = true; } }
+		for (const auto& l : first->cell_loops) { if (!l.straight && !l.frame_program && l.head <= at && at <= l.back && l.back - l.head < best) { best = l.back - l.head; refused = false; } }
+		if (refused) { open.insert(stmt); }
+	}
+	if (open.empty()) return first;
+	bool kept_inside = false;
+	for (const auto& k : first->inline_refusals) {
+		for (const auto& r : first->cell_refusals) {
+			const ast_node* h = r.head < first->stmt_nodes.size() ? first->stmt_nodes[r.head] : nullptr;
+			const ast_node* b = r.back < first->stmt_nodes.size() ? first->stmt_nodes[r.back] : nullptr;
+			if (h && b && k.line >= static_cast<uint32_t>(h->location.line) && k.line <= static_cast<uint32_t>(b->location.line)) { kept_inside = true; }
+		}
+	}
+	if (!kept_inside) return first;
+	size_t first_closed = 0;
+	for (const auto& l : first->cell_loops) { if (!l.straight && !l.frame_program) { ++first_closed; } }
+	open_loops_ = std::move(open);
+	loop_marks_.clear();
+	auto second = compile_callable_once(name, parameters, body, local_count);
+	open_loops_.clear();
+	size_t second_closed = 0;
+	for (const auto& l : second->cell_loops) { if (!l.straight && !l.frame_program) { ++second_closed; } }
+	return second_closed >= first_closed ? second : first;
+}
+
+std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
+                                                          const std::vector<parameter>& parameters,
+                                                          const std::shared_ptr<block_stmt>& body,
+                                                          size_t local_count) {
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
 	chunk_->function_name = std::string(name);
@@ -1313,6 +1353,7 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 	temp_next_ = cond_mark;
 
 	loops_.push_back({});
+	mark_loop(stmt);
 	loops_.back().continue_target = top;
 	loops_.back().continue_is_loop_back = true;
 	loops_.back().scope_depth = scope_depth_;
@@ -1354,6 +1395,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	}
 
 	loops_.push_back({});
+	mark_loop(stmt);
 	loops_.back().scope_depth = scope_depth_;
 
 	compile_statement(stmt->body);
@@ -1478,6 +1520,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	const size_t body_start = chunk_->code.size();
 
 	loops_.push_back({});
+	mark_loop(stmt);
 	loops_.back().scope_depth = scope_depth_;
 
 	compile_statement(stmt->body);
@@ -1622,6 +1665,7 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	size_t exit_jump = emit(opcode::op_jump_if_false, k_invalid_u32, 1);
 
 	loops_.push_back({});
+	mark_loop(stmt);
 	loops_.back().kind = region_kind::range_for;
 	loops_.back().continue_target = loop_top;
 	loops_.back().scope_depth = scope_depth_;

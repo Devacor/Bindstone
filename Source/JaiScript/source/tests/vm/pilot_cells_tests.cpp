@@ -3939,6 +3939,59 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined span") != std::string::npos, "span grafts in the loop: its return reads the class-typed global's field after the re-stamp: " + l);
 			check_true(l.find("-- call kept at ") == std::string::npos, "no kept call for at: " + l);
 		});
+		test("an_argument_reading_a_typed_global_another_unit_declares_is_proven", [this]() {
+			// Gator Quest's walk_at(w, MOB_X[m], MOB_Y[m]): under imports an argument that reads a program-scope typed global (a scalar, or an
+			// element of an array of scalars) one unit declares is proven like a local, so the leaf grafts; the graft re-checks the global's
+			// kind once a run moved the definition epoch, so after the declaring unit runs again with another type the call is the call (its
+			// binding converts or raises in the call's own order and text), on both backends alike
+			namespace fs = std::filesystem;
+			fs::path dir = fs::temp_directory_path() / "jai_arg_global_proof";
+			fs::create_directories(dir);
+			std::ofstream(dir / "data.jai") << "array<int> MX = [2, 4, 6, 8];\nint OFF = 1;\n";
+			std::ofstream(dir / "lib.jai") << "int add1(int a) { return a + 1; }\n"
+			                                 "int total(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + add1(MX[i] + OFF); } return s; }\n"
+			                                 "int once() { return add1(MX[0]); }\n";
+			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nto_string(total(4)) + \"|\" + to_string(once());\n";
+			auto run_file = [&](bool vm, std::string* listing) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				e->import_recheck_interval(0);
+				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
+				e->add_include_path(dir.string());
+				std::string out;
+				try { out = e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+				// the declaring unit runs again with float elements: the proof's kind no longer holds
+				std::ofstream(dir / "data.jai") << "array<float> MX = [1.0e100, 2.5, 4.5, 6.5, 8.5];\nint OFF = 1;\n";
+				try {
+					out += "|" + e->execute("import \"data.jai\";\nvar r = \"\";\ntry { r = to_string(once()); } catch (e) { r = e; }\nr;").as_string();
+				} catch (const std::exception& ex) { out += std::string("|throw:") + ex.what(); }
+				std::ofstream(dir / "data.jai") << "array<int> MX = [2, 4, 6, 8];\nint OFF = 1;\n";
+				return out;
+			};
+			std::string l;
+			const std::string iv = run_file(false, nullptr), vv = run_file(true, &l);
+			check_eq(iv, vv, "a typed global's element as an argument: both backends, before and after the declaring unit changed its type");
+			check_eq(std::string("28|3|"), vv.substr(0, 5), "the values before the reload: " + vv);
+			check_true(l.find("-- inlined add1") != std::string::npos, "add1 grafts with arguments reading MX and OFF: " + l);
+			check_true(l.find("-- call kept add1") == std::string::npos, "no kept call for add1: " + l);
+		});
+		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
+			// Gator Quest's walk_at -> tile_now inside `for (int m = 0; m < MOB_KIND.size(); ++m)`: a loop the first compile refused holds no
+			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second
+			// compile; in a loop that closes the same leaf stays a call (the block's door), and both loops keep their verdicts
+			const std::string prelude =
+				"class D { int after = 0; }\n"
+				"array<D> DEFS;\n"
+				"array<int> XS = [0, 1, 2, 1, 0, 2];\n"
+				"int after_of(int t) { int a = DEFS[t].after; return a + t; }\n"
+				"int open_sum() { int s = 0; for (int i = 0; i < XS.size(); ++i) { s = s + after_of(XS[i]); } return s; }\n"
+				"int closed_sum(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + after_of(i % 3); } return s; }\n"
+				"for (int k = 0; k < 3; ++k) { D d; d.after = k * 10; DEFS.push(d); }\n";
+			both(prelude + "to_string(open_sum()) + \"|\" + to_string(closed_sum(6));", "66|66", "a leaf in an open loop and in a closed one");
+			both(prelude + "to_string(open_sum()) + \"|\" + to_string(closed_sum(6));", "66|66", "a leaf in an open loop and in a closed one, proofs off", false);
+			const std::string l = listing_run(prelude + "open_sum(); closed_sum(6);");
+			check_true(l.find("-- inlined after_of") != std::string::npos, "after_of grafts inside the open loop: " + l);
+			check_true(l.find("-- call kept after_of") != std::string::npos, "after_of stays a call inside the closed loop: " + l);
+		});
 		test("a_particle_step_through_an_alias_grafts_with_its_ternary", [this]() {
 			// row 153.2: gloom_particle_step's shape, a var& parameter bound to a range-for alias, member reads and stores through it and the
 			// ternary store `life = life < 4 ? life : 4`, which lands as the condition's jumps and one store per arm; the leaf grafts inside the

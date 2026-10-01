@@ -362,6 +362,17 @@ namespace jai::detail::math {
 		}
 	}
 
+	inline constexpr const char* negate_overflow_text = "Integer overflow in unary '-'";
+	// An ivec operator's exact int64 result into its int32 component: out of range raises the operator's text, or wraps
+	// under the wrap policy
+	inline checked_result<int32_t> narrow_int_component(int64_t v, const char* text) noexcept {
+		if (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()) {
+			if constexpr (k_checked_overflow) {
+				return checked_result<int32_t>(make_error_code(runtime_error_code::invalid_numeric_operand), text);
+			}
+		}
+		return static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>(v)));
+	}
 	// One ivec component of `a op b`: two int32 operands (or a narrowed scalar) computed exactly in int64 and narrowed to
 	// int32 under the policy; a zero divisor raises the scalar kernels' texts
 	inline checked_result<int32_t> int_component(bop op, int64_t a, int64_t b) noexcept {
@@ -379,20 +390,10 @@ namespace jai::detail::math {
 				v = a % b;
 				break;
 		}
-		if (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()) {
-			if constexpr (k_checked_overflow) {
-				return checked_result<int32_t>(make_error_code(runtime_error_code::invalid_numeric_operand), overflow_text(op));
-			}
-		}
-		return static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint64_t>(v)));
+		return narrow_int_component(v, overflow_text(op));
 	}
 	inline checked_result<int32_t> int_component_negate(int32_t x) noexcept {
-		if (x == std::numeric_limits<int32_t>::min()) {
-			if constexpr (k_checked_overflow) {
-				return checked_result<int32_t>(make_error_code(runtime_error_code::invalid_numeric_operand), "Integer overflow in unary '-'");
-			}
-		}
-		return static_cast<int32_t>(0u - static_cast<uint32_t>(x));
+		return narrow_int_component(-static_cast<int64_t>(x), negate_overflow_text);
 	}
 
 	// `l op r` where at least one side is a vec: vec op vec (the same kind, componentwise), vec op scalar and scalar op

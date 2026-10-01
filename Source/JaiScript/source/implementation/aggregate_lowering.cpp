@@ -12,7 +12,8 @@
 //   - a vector expression over lowered locals, constructors, the operators, the component-wise family and the geometry
 //     rows becomes component expressions: binary32 rows compute in binary64 and land through f32$ (innocuous double
 //     rounding: + - * / of two binary32 values rounded once to binary32 are the binary32 operations), ivec rows run
-//     vop$, the family runs vcomp$ - each the boxed kernel's own step, so bits and texts agree;
+//     the int64 operation narrowed by i32add$ .. i32neg$ (the kernel's int32 narrowing and texts), the family runs
+//     vcomp$ - each the boxed kernel's own step, so bits and texts agree;
 //   - a vector the program needs as a value is rebuilt with the constructor from its components.
 // Component expressions evaluate component by component, where the boxed kernel evaluates operation by operation, so
 // an inline form admits at most one node that may raise or run an effect (the orders then raise and act alike). Shared
@@ -48,6 +49,10 @@ uint8_t class_of_type(const type_info* t) {
 }
 
 bool math_kind_type(const type_info* t) { return t && math::is_vec_type(t->base_type); }
+// array<int> / array<float> / array<bool>: the class of every element (the buffer follows its declared type)
+uint8_t element_class_of_type(const type_info* t) {
+	return t && t->base_type == vk::jai_array_type ? class_of_type(t->element_type()) : c_unknown;
+}
 // array<math::K>: K, else invalid
 vk vec_buffer_kind(const type_info* t) {
 	if (!t || t->base_type != vk::jai_array_type || !t->element_type()) return vk::jai_invalid_type;
@@ -81,16 +86,17 @@ struct analysis {
 	std::unordered_map<const identifier_expr*, int> resolved;
 	std::unordered_map<const identifier_expr*, uint8_t> local_class;
 	std::unordered_map<const identifier_expr*, vk> vec_buffer;   // an identifier naming a local array<math::K>: K
-	struct entry { uint64_t symbol; int cand; size_t slot; uint8_t cls; vk buffer; };
+	std::unordered_map<const identifier_expr*, uint8_t> element_class;   // an identifier naming a local array of scalars: their class
+	struct entry { uint64_t symbol; int cand; size_t slot; uint8_t cls; vk buffer; uint8_t element; };
 	std::vector<std::vector<entry>> scopes;
 	int nested = 0;       // inside a nested function, lambda or parallel body
 	int loop_depth = 0;
 
 	explicit analysis(std::vector<candidate>& c) : cands(c) {}
 
-	void declare(uint64_t symbol, int cand, size_t slot, uint8_t cls, vk buffer = vk::jai_invalid_type) {
+	void declare(uint64_t symbol, int cand, size_t slot, uint8_t cls, vk buffer = vk::jai_invalid_type, uint8_t element = c_unknown) {
 		if (scopes.empty()) scopes.emplace_back();
-		scopes.back().push_back({symbol, cand, slot, cls, buffer});
+		scopes.back().push_back({symbol, cand, slot, cls, buffer, element});
 	}
 	void escape(int cand) { if (cand >= 0) cands[static_cast<size_t>(cand)].escaped = true; }
 
@@ -106,6 +112,7 @@ struct analysis {
 				if (nested == 0 && id->slot_index == e->slot) {
 					local_class[id] = e->cls;
 					if (e->buffer != vk::jai_invalid_type) vec_buffer[id] = e->buffer;
+					if (e->element != c_unknown) element_class[id] = e->element;
 				}
 				for (size_t c = 0; c < cands.size(); ++c) {   // the parser named a candidate this scope walk does not see
 					if (cands[c].symbol == id->symbol_id && cands[c].slot == id->slot_index && id->slot_index != SIZE_MAX) { cands[c].escaped = true; }
@@ -288,7 +295,7 @@ struct analysis {
 					cands.push_back(c);
 					cand = static_cast<int>(cands.size() - 1);
 				}
-				declare(v->name_id, cand, v->slot_index, class_of_type(v->type.get()), vec_buffer_kind(v->type.get()));
+				declare(v->name_id, cand, v->slot_index, class_of_type(v->type.get()), vec_buffer_kind(v->type.get()), element_class_of_type(v->type.get()));
 				break;
 			}
 			case node_type::expression_decl: stmt_expr(static_cast<const expression_decl*>(d)->expression.get()); break;
@@ -661,6 +668,11 @@ private:
 			}
 			case node_type::binary_expr: {
 				auto* b = static_cast<const binary_expr*>(e);
+				if (b->op.type == token_type::left_bracket) {
+					if (!b->left || b->left->get_type() != node_type::identifier_expr) return c_unknown;
+					auto it = an_.element_class.find(static_cast<const identifier_expr*>(b->left.get()));
+					return it == an_.element_class.end() ? c_unknown : it->second;
+				}
 				if (b->returns_bool()) return c_bool;
 				switch (b->op.type) {
 					case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent: {
@@ -690,7 +702,8 @@ private:
 				switch (math_intrinsic_for_call(m)) {
 					case math_fn::sqrt_: case math_fn::sin_: case math_fn::cos_: case math_fn::tan_: case math_fn::pow_: case math_fn::atan2_:
 					case math_fn::radians_to_degrees: case math_fn::degrees_to_radians: case math_fn::f32_: return c_float;
-					case math_fn::itrunc: case math_fn::ifloor: case math_fn::i32_: return c_int;
+					case math_fn::itrunc: case math_fn::ifloor: case math_fn::i32_:
+					case math_fn::i32_add_: case math_fn::i32_sub_: case math_fn::i32_mul_: case math_fn::i32_div_: case math_fn::i32_neg_: return c_int;
 					default: return c_unknown;
 				}
 			}
@@ -780,7 +793,7 @@ private:
 				if (!vec_of(u->operand, o, ctx)) return false;
 				f = o;
 				for (size_t k = 0; k < f.n; ++k) {
-					if (math::integral(f.kind)) f.c[k] = math_call("vop$", {lit_int(k_vop_negate, loc), o.c[k], lit_int(0, loc)}, loc);
+					if (math::integral(f.kind)) f.c[k] = math_call("i32neg$", {neg(o.c[k], loc)}, loc);
 					else f.c[k] = neg(o.c[k], loc);
 				}
 				if (math::integral(f.kind)) ++f.sensitive;
@@ -854,10 +867,15 @@ private:
 		if (l) f.merge(*l);
 		if (r) f.merge(*r);
 		if (integral) {
-			int code = t == token_type::plus ? 0 : t == token_type::minus ? 1 : t == token_type::star ? 2 : t == token_type::slash ? 3 : 4;
-			if (!r) code |= k_vop_scalar_right;
-			if (!l) code |= k_vop_scalar_left;
-			for (size_t k = 0; k < f.n; ++k) f.c[k] = math_call("vop$", {lit_int(code, loc), l ? l->c[k] : s, r ? r->c[k] : s}, loc);
+			// the int64 operation over int32 components narrowed with the operator's text (a remainder always fits); a scalar
+			// side narrows to int32 first, in every component, as the kernel's row does
+			bool raising = false;
+			expression_ptr s32 = (l && r) ? nullptr : i32(s, loc, &raising);
+			const char* narrow = t == token_type::plus ? "i32add$" : t == token_type::minus ? "i32sub$" : t == token_type::star ? "i32mul$" : t == token_type::slash ? "i32div$" : nullptr;
+			for (size_t k = 0; k < f.n; ++k) {
+				expression_ptr x = bin(l ? l->c[k] : s32, t, r ? r->c[k] : s32, loc);
+				f.c[k] = narrow ? math_call(narrow, {std::move(x)}, loc) : std::move(x);
+			}
 			++f.sensitive;
 			return true;
 		}
@@ -2060,7 +2078,7 @@ bool lower_site(engine& eng, const site_input& in, lowered_site& out, size_t& ou
 			cands.push_back(c);
 			cand = static_cast<int>(cands.size() - 1);
 		}
-		an.declare(p.symbol_id, cand, p.slot_index, class_of_type(p.type.get()), vec_buffer_kind(p.type.get()));
+		an.declare(p.symbol_id, cand, p.slot_index, class_of_type(p.type.get()), vec_buffer_kind(p.type.get()), element_class_of_type(p.type.get()));
 	}
 	an.block_body(static_cast<const block_stmt*>(body.get())->declarations);
 	// a parameter unpacks at every call: worth it when the body stores it or reads it in a loop or often

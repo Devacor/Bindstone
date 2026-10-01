@@ -51,9 +51,10 @@ namespace jai::detail {
         dot_, cross_, length_, length_squared_, normalize_, reflect_, project_, angle_between_, perpendicular_, rotate_,
         // the aggregate lowering's component steps (detail/aggregate_lowering.hpp), spelled with a `$` no source can write:
         // f32$(x) a binary32 component's value, i32$(x) an int32 component's, cstore$(x, kind) a component store's
-        // narrowing, vop$(code, a, b) one ivec operator component, vcomp$(code, ...) one component of the component-wise
-        // family
-        f32_, i32_, cstore_, vop_, vcomp_, acos_,
+        // narrowing, vcomp$(code, ...) one component of the component-wise family, i32add$(x) .. i32neg$(x) an ivec
+        // operator component computed in int64 and narrowed with the operator's text
+        f32_, i32_, cstore_, vcomp_, acos_,
+        i32_add_, i32_sub_, i32_mul_, i32_div_, i32_neg_,
         count,
         none = count
     };
@@ -92,12 +93,16 @@ namespace jai::detail {
                 if (name == "ivec2") return math_fn::ivec2_;
                 if (name == "ivec3") return math_fn::ivec3_;
                 if (name == "i32$") return math_fn::i32_;
+                if (name == "i32add$") return math_fn::i32_add_;
+                if (name == "i32sub$") return math_fn::i32_sub_;
+                if (name == "i32mul$") return math_fn::i32_mul_;
+                if (name == "i32div$") return math_fn::i32_div_;
+                if (name == "i32neg$") return math_fn::i32_neg_;
                 return math_fn::none;
             case 'v':
                 if (name == "vec2") return math_fn::vec2_;
                 if (name == "vec3") return math_fn::vec3_;
                 if (name == "vec4") return math_fn::vec4_;
-                if (name == "vop$") return math_fn::vop_;
                 if (name == "vcomp$") return math_fn::vcomp_;
                 return math_fn::none;
             case 'l':
@@ -895,18 +900,19 @@ namespace jai::detail {
         return call_vec_method(fn, receiver, args.data(), args.size(), eng);
     }
     // ---- the aggregate lowering's component steps (detail/aggregate_lowering.hpp) ------------------------------------------
-    // vop$'s code: the operator row (bop, or k_vop_negate), and which side is a scalar the row narrows to int32 first
-    inline constexpr int k_vop_negate = 5, k_vop_scalar_right = 8, k_vop_scalar_left = 16;
     // vcomp$'s code: the math_fn of the component-wise family, and whether the component is the exact int row
     inline constexpr int k_vcomp_exact = 0x100;
     inline const char* lowering_step_text() noexcept { return "a lowered math component received a value of another type (internal)"; }
-    // a scalar operand of an ivec row: an int or a bool narrowed to int32 (math_values.hpp binary), else the row's text
-    inline checked_result<int64_t> vop_scalar(const script_value& v, math::bop op) {
-        const math::scalar s = math::read_scalar(v);
-        if (!s.ok || !s.is_int) { return checked_result<int64_t>(make_error_code(runtime_error_code::type_mismatch), math::invalid_operands_text(op)); }
-        auto n = math::to_i32(s.i);
-        if (!n) { return n.error_value(); }
-        return static_cast<int64_t>(n.value());
+    inline bool is_i32_narrowing(math_fn fn) noexcept { return fn >= math_fn::i32_add_ && fn <= math_fn::i32_neg_; }
+    // the overflow text of an ivec operator component (math_values.hpp int_component, int_component_negate)
+    inline const char* i32_narrowing_text(math_fn fn) noexcept {
+        switch (fn) {
+            case math_fn::i32_add_: return math::overflow_text(math::bop::add);
+            case math_fn::i32_sub_: return math::overflow_text(math::bop::sub);
+            case math_fn::i32_mul_: return math::overflow_text(math::bop::mul);
+            case math_fn::i32_div_: return math::overflow_text(math::bop::div);
+            default: return math::negate_overflow_text;
+        }
     }
     JAI_MATH_COLD inline checked_result<script_value> eval_lowering_step(math_fn fn, const script_value* const* args, size_t argc, engine* eng) {
         auto internal = [&] { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), lowering_step_text()); };
@@ -930,24 +936,9 @@ namespace jai::detail {
                 uint32_t bits = 0;
                 return math::narrow_component(static_cast<script_value_type>(args[1]->unchecked_as_int()), *args[0], bits, eng);
             }
-            case math_fn::vop_: {
-                if (argc != 3 || args[0]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
-                const int code = static_cast<int>(args[0]->unchecked_as_int());
-                if ((code & 7) == k_vop_negate) {
-                    if (args[1]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
-                    auto r = math::int_component_negate(static_cast<int32_t>(args[1]->unchecked_as_int()));
-                    if (!r) { return r.error_value(); }
-                    return script_value(static_cast<script_int>(r.value()), eng);
-                }
-                const math::bop op = static_cast<math::bop>(code & 7);
-                int64_t a = 0, b = 0;
-                if (code & k_vop_scalar_left) { auto s = vop_scalar(*args[1], op); if (!s) { return s.error_value(); } a = s.value(); }
-                else if (args[1]->raw_storage_index() == script_value::TYPEID_INT) { a = args[1]->unchecked_as_int(); }
-                else { return internal(); }
-                if (code & k_vop_scalar_right) { auto s = vop_scalar(*args[2], op); if (!s) { return s.error_value(); } b = s.value(); }
-                else if (args[2]->raw_storage_index() == script_value::TYPEID_INT) { b = args[2]->unchecked_as_int(); }
-                else { return internal(); }
-                auto r = math::int_component(op, a, b);
+            case math_fn::i32_add_: case math_fn::i32_sub_: case math_fn::i32_mul_: case math_fn::i32_div_: case math_fn::i32_neg_: {
+                if (argc != 1 || args[0]->raw_storage_index() != script_value::TYPEID_INT) { return internal(); }
+                auto r = math::narrow_int_component(args[0]->unchecked_as_int(), i32_narrowing_text(fn));
                 if (!r) { return r.error_value(); }
                 return script_value(static_cast<script_int>(r.value()), eng);
             }
@@ -1261,9 +1252,9 @@ namespace jai::detail {
             case math_fn::f32_:
             case math_fn::i32_:
             case math_fn::cstore_:
-            case math_fn::vop_:
             case math_fn::vcomp_:
             case math_fn::acos_:
+            case math_fn::i32_add_: case math_fn::i32_sub_: case math_fn::i32_mul_: case math_fn::i32_div_: case math_fn::i32_neg_:
                 return eval_lowering_step(fn, args, argc, eng);
 
             case math_fn::round_: {

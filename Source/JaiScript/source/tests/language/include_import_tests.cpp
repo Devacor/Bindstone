@@ -1265,6 +1265,55 @@ public:
             }
         });
 
+        test("an_edit_is_seen_inside_one_long_execute", [=, this]() {
+            // interval 0: every reach checks, whichever site reaches the module, inside one execute; the default window: a loop
+            // that keeps reaching the same import inside one execute sees the edit once the window has passed (the clock
+            // sample moves with a time:: sleep and with the budget check's samples in a busy loop)
+            const auto dir = jai::foundry::test_temp_directory();
+            const auto path = dir / "le_mod.jai";
+            int tick = 0;
+            auto write = [&](int v) {
+                put_file(path, "le_ran();\nint le_value() { return " + std::to_string(v) + "; }\n");
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            auto setup = [&](int& runs, int& value) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->add_include_path(dir.string());
+                eng->add_function("le_ran", [&runs]() { ++runs; });
+                eng->add_function("rewrite", [&write, &value]() { write(++value); });
+                eng->add_function("runs", [&runs]() { return static_cast<script_int>(runs); });
+                return eng;
+            };
+            {
+                int runs = 0, value = 1;
+                write(value);
+                auto eng = setup(runs, value);
+                check_eq(std::string("1 2 3"), eng->execute(
+                    "import_recheck_interval(0);\nimport(\"le_mod.jai\");\nstring a = to_string(le_value());\nrewrite();\n"
+                    "import(\"le_mod.jai\");\nstring b = to_string(le_value());\nrewrite();\n"
+                    "for (int i = 0; i < 2; i++) { import(\"le_mod.jai\"); }\na + \" \" + b + \" \" + to_string(le_value());").to_string(),
+                    "interval 0: another site, and a loop's site, check on their next reach");
+                check_eq(3, runs);
+            }
+            for (bool sleeping : {true, false}) {
+                const std::string label = sleeping ? " (time::sleep_ms in the loop)" : " (a busy loop)";
+                int runs = 0, value = 1;
+                write(value);
+                auto eng = setup(runs, value);
+                eng->import_recheck_interval(0.2);
+                const std::string body = sleeping ? "time::sleep_ms(5);" : "for (int k = 0; k < 2000; k++) { spin += k; }";
+                const script_int seen = eng->execute(
+                    "int spin = 0;\nint frames = 0;\nimport(\"le_mod.jai\");\nrewrite();\n"
+                    "while (runs() < 2 && frames < 100000) { import(\"le_mod.jai\"); " + body + " frames++; }\nle_value();").as_int();
+                check_eq(script_int(2), seen, "the loop sees the edit within one execute" + label);
+                check_eq(2, runs, label);
+            }
+            std::filesystem::remove(path);
+            std::filesystem::remove(std::filesystem::path(path).replace_extension(".jaibite"));
+        });
+
         test("an_import_runs_a_module_only_from_text_read_under_its_stamp", [=, this]() {
             // a save landing while a module is read (its stamp queried after the read disagrees with the one before) holds a
             // module that ran before until a pass reads it whole; a first load reads again at once. A saver thread moves the

@@ -1516,6 +1516,18 @@ private:
         case node_type::cast_expr: return certain_argument(static_cast<const cast_expr*>(e)->operand.get(), deps);
         case node_type::call_expr: {
             auto* ce = static_cast<const call_expr*>(e);
+            if (ce->callee && ce->callee->get_type() == node_type::identifier_expr) {
+                // a free script function declared to return a scalar: its result converts to that type whatever the arguments; the name and
+                // the kind join deps (call_expr::k_proof_function), since a redefinition may declare another return type
+                auto* id = static_cast<const identifier_expr*>(ce->callee.get());
+                if (has_dynamic_includes_ || class_ctx_ || id->slot_index != SIZE_MAX || id->global_qualified || id->symbol_id == UINT64_MAX) return false;
+                const auto fn = ce->proven_callee_decl.lock();
+                if (!fn || fn->is_coroutine) return false;
+                const uint16_t kind = certain_kind(fn->return_type.get());
+                if (kind == 0 || (kind & 0xFF) == static_cast<uint16_t>(script_value_type::jai_array_type)) return false;
+                deps.emplace_back(id->symbol_id, static_cast<uint16_t>(kind | call_expr::k_proof_function));
+                return true;
+            }
             if (!ce->callee || ce->callee->get_type() != node_type::member_expr || detail::math_intrinsic_for_call(static_cast<const member_expr*>(ce->callee.get())) == detail::math_fn::none) return false;
             for (const auto& a : ce->arguments) { if (!certain_argument(a.get(), deps)) return false; }
             return true;
@@ -2967,6 +2979,12 @@ private:
             if (functions_.find(name) == functions_.end()) {
                 auto pit = program_functions_->find(std::string(name));
                 if (pit != program_functions_->end() && pit->second.size() == 1 && pit->second.begin()->second.size() == 1) { program_ov.push_back(pit->second.begin()->second[0].get()); }
+            }
+            // the proof pass alone types the call by that declaration's scalar return (the consumers guard it; a graft re-checks the
+            // callee's declared return per definition epoch, call_expr::k_proof_function)
+            if (t.is_unknown() && program_ov.size() == 1 && semantic_walk()) {
+                const uint16_t k = certain_kind(program_ov[0]->return_type.get());
+                if (k != 0 && (k & 0xFF) != static_cast<uint16_t>(script_value_type::jai_array_type)) { t = ctype_from_type_info(program_ov[0]->return_type.get()); }
             }
         }
         // a local declared with a lambda literal: the lambda as a one-overload declaration (the guard checks the binding at run time)

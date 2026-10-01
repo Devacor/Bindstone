@@ -179,6 +179,8 @@ if(MSVC)
     # JAI_MAX_CALL_DEPTH (10000) recursion frames exceed the 1 MB default stack in
     # Debug; a larger stack lets the catchable depth-limit error actually fire.
     target_link_options(jaiscript_tests PRIVATE /STACK:134217728)
+    # The Debug PDB passes MSVC's 4 GB limit at the default 4 KB page size (LNK1140); 8 KB pages raise it to 8 GB
+    target_link_options(jaiscript_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/PDBPAGESIZE:8192>)
 else()
     target_compile_options(jaiscript_tests PRIVATE
         -Wall

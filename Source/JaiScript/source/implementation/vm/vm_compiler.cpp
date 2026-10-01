@@ -3407,7 +3407,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				const auto* decl = static_cast<const variable_decl*>(c.nodes[code[ip + 1].a].get());
 				if (fp.index_chain_ext.size() > 2 || !array_target(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				if (decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask || decl->ref_escaping) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask || decl->ref_escaping || (code[ip + 1].c & 2)) { refuse(chunk::cell_refusal_representation, ip); break; }   // an unproven admission runs at the declaration
 				const uint32_t aslot = static_cast<uint32_t>(decl->slot_index);
 				bool taken = find_cell(aslot) >= 0 || is_alias(aslot);
 				for (const ir_op& prior : ops) { if (prior.container == aslot) { taken = true; } }
@@ -6903,8 +6903,9 @@ void vm_compiler::note_slot_declared_ref(size_t slot, const type_info* referent)
 // `T& name = e;` with a concrete T marks its reference at the binding only when the name does not decide its stores: no
 // frame slot holds it, or its reference reaches another binding (ref_escaping)
 uint32_t vm_compiler::declared_ref_at_bind(const variable_decl* decl) const {
-	if (!decl->type || decl->declared_ref_storage_enforced || !detail::declared_ref_kind(decl->type->element_type().get())) { return 0; }
-	return callable_.active && decl->slot_index != SIZE_MAX && !decl->ref_escaping ? 0u : 1u;
+	const uint32_t admission = detail::reference_decl_checks_admission(*decl) ? 2u : 0u;   // the binding's run-time admission
+	if (!decl->type || decl->declared_ref_storage_enforced || !detail::declared_ref_kind(decl->type->element_type().get())) { return admission; }
+	return admission | (callable_.active && decl->slot_index != SIZE_MAX && !decl->ref_escaping ? 0u : 1u);
 }
 
 // The declaration's value lands by the declaration's own rule: the move row for an identifier or a literal, the fused

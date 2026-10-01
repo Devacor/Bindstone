@@ -1349,9 +1349,10 @@ namespace jai::vm {
         // type, marked once it landed (the compiler's c = 1); a slot-resident one is decided at its stores from the chunk
         // (chunk::slot_declared_kinds)
         op_status declared_ref_landed(frame& f, const vm_instruction& ins, const variable_decl* decl, op_status landed) {
-            if (ins.c && landed == op_status{}) [[unlikely]] { declare_stored_reference(f, decl); }
+            if ((ins.c & 1) && landed == op_status{}) [[unlikely]] { declare_stored_reference(f, decl); }
             return landed;
         }
+        op_status define_ref_decl_value(frame& f, const vm_instruction& ins, const variable_decl* decl, script_value value);
         void declare_stored_reference(frame& f, const variable_decl* decl);
         uint8_t slot_declared_kind(const frame& f, uint32_t slot) const noexcept {
             const auto& k = f.code->slot_declared_kinds;

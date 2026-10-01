@@ -11270,6 +11270,13 @@ void vm_backend::declare_stored_reference(frame& f, const variable_decl* decl) {
 	if (stored) { detail::ref_declare(*stored, decl->type->element_type().get(), engine_); }
 }
 
+op_status vm_backend::define_ref_decl_value(frame& f, const vm_instruction& ins, const variable_decl* decl, script_value value) {
+	if (ins.c & 2) [[unlikely]] {   // a reference must reference: the admission (detail::reference_decl_rejection)
+		if (auto rejected = detail::reference_decl_rejection(*decl, value, engine_)) { return raise_from(*rejected); }
+	}
+	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), false, decl);
+}
+
 op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const uint64_t target_sym = f.code->symbols[ins.b];
@@ -11311,7 +11318,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			if (!*minted) {
 				return raise_from(*minted);
 			}
-			return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(minted->value())));
+			return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(minted->value())));
 		}
 		VM_TRY(frame_bare_member_access(f, target_sym));
 		if (auto method = bare_method_reference(f, target_sym)) { return *method; }
@@ -11323,11 +11330,11 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(aliased.value())));
+		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(aliased.value())));
 	}
 	// Box the variable's storage into a cell and alias it (escape-legal: the ref
 	// keeps the cell alive after the env dies)
-	return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, share_env_ref(*targetPtr)));
+	return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, share_env_ref(*targetPtr)));
 }
 
 op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
@@ -11340,7 +11347,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(aliased.value())));
+		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(aliased.value())));
 	}
 	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
 	if (decl->initializer && decl->initializer->get_type() == node_type::member_expr &&
@@ -11352,7 +11359,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (storage.is_reference() && !storage.get_reference_holder()) {
 				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 			}
-			return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, share_env_ref(storage)));
+			return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, share_env_ref(storage)));
 		}
 	}
 	if (decl->initializer && detail::is_member_final_ref_lvalue(decl->initializer.get())) {
@@ -11374,7 +11381,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (!aliased) {
 				return raise_from(aliased);
 			}
-			return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(aliased.value())));
+			return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(aliased.value())));
 		}
 	}
 	// A math component binds a COMPONENT reference (KEEP BYTE-PARALLEL with the interpreter's define_component_reference)
@@ -11383,7 +11390,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		return raise_from(part);
 	}
 	if (part.value().is_reference()) {
-		return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(part.value())));
+		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(part.value())));
 	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),

@@ -15,6 +15,20 @@
 
 namespace jai::detail {
 
+	inline bool requires_return_value(const type_info* a_type) {
+		if (!a_type || a_type->type_name.empty() || a_type->type_name == "auto") { return false; }
+		switch (a_type->base_type) {
+			case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+			case script_value_type::jai_bool_type: case script_value_type::jai_char_type:
+			case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+			case script_value_type::jai_reference_type:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+
     enum class return_conv : uint8_t {
         unclassified = 0,
         none,

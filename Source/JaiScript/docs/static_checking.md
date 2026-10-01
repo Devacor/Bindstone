@@ -147,11 +147,7 @@ methods, inherited fields) all check against the declared type.
   type is a diagnostics fact, never a proof source.
 - callables in variables (lambdas, cross-execute function values): unchecked.
 
-**Returns** — must be assignable to the declared return type. A value from a `void` fn is
-an error. Bare `return;` / falling off the end of a typed fn = warning severity in v1
-(runtime returns null there per HEAD). Coroutines (functions or methods — the method form
-is landing concurrently) are exempt: calling one yields a handle, and yield/return types
-aren't checked in v1.
+**Returns** — values follow the declared return conversion table. Primitive and reference return types require a value under strict checking: a bare return and structurally reachable fall-through are load errors. Uncertain exception-only completion paths remain warnings. This analysis runs at load/check time; it adds no per-call or per-return runtime guard. Warn mode records the diagnostics but preserves execution, and off mode deliberately opts out. Explicit return null remains an expression and follows the usual conversion rules. Void, auto/var, constructors and coroutine completion retain their existing rules. Nullable object/handle and container completion policy is unchanged in this draft.
 
 **Identifiers** — undeclared = error, checked against: scopes, the current class's members
 (incl. inherited), top-level declarations (two-pass, so forward references work), every

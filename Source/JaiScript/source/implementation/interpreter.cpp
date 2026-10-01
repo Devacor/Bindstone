@@ -87,6 +87,66 @@ namespace {
         return result;
     }
 
+    // A script callback's own declaration: the parameters it spells and the return type it declares (null for a host callable)
+    const std::vector<parameter>* callback_parameters(const script_value& callback, type_info_ptr* declared_return = nullptr) {
+        const script_value& c = callback.deref();
+        if (c.raw_storage_index() != script_value::TYPEID_FUNCTION) return nullptr;
+        const auto* thunk = c.unchecked_as_function().target<script_callable_thunk>();
+        if (!thunk) return nullptr;
+        const script_callable& p = thunk->payload;
+        if (p.kind == script_callable::kind_type::function && p.fn) {
+            if (declared_return) { *declared_return = p.fn->return_type; }
+            return &p.fn->parameters();
+        }
+        if ((p.kind == script_callable::kind_type::method || p.kind == script_callable::kind_type::static_method) && p.ast) {
+            if (declared_return) { *declared_return = p.ast->return_type; }
+            return &p.ast->parameters;
+        }
+        return nullptr;
+    }
+
+    // The array helpers' element callback (map, for_each, find, find_index, some, every, reduce): the element, then its index when the
+    // callback declares a parameter for it, as JavaScript's and C#'s do. A T& element parameter is the live element (an element
+    // reference, the array's element type its constraint), as std::for_each hands its function the element itself.
+    struct element_callback {
+        const script_function& fn;
+        uint32_t lvalues;
+        bool with_index;
+        size_t leading;   // arguments ahead of the element (reduce's accumulator)
+        type_info_ptr element_type;
+
+        element_callback(const script_value& callback, size_t lead, const script_value& self)
+            : fn(callback.unchecked_as_function()), lvalues(0), with_index(false), leading(lead) {
+            const auto* params = callback_parameters(callback);
+            with_index = params && params->size() >= lead + 2;
+            lvalues = callback_lvalue_positions(callback, lead + (with_index ? 2 : 1)) & ((1u << (lead + 1)) - 1);   // the index is a value
+            if (auto tag = self.get_type_info(); tag && tag->base_type == script_value_type::jai_array_type) {
+                type_info_ptr et = tag->element_type();
+                if (et && et->base_type != script_value_type::jai_any_type && et->base_type != script_value_type::jai_null_type) { element_type = et; }
+            }
+        }
+
+        checked_result<script_value> call(const strong_ptr<script_array>& array, size_t i, script_value* lead, engine* eng) const {
+            std::vector<script_value> args;
+            args.reserve(leading + 2);
+            if (leading) { args.push_back((lvalues & 1) ? script_value::make_cell_reference(script_value(lead->deref()), eng) : *lead); }
+            args.push_back(((lvalues >> leading) & 1) ? script_value::make_element_reference(array, i, eng, element_type) : array->get(i, eng));
+            if (with_index) { args.push_back(script_value(static_cast<script_int>(i), eng)); }
+            auto result = fn(args);
+            if (leading && (lvalues & 1)) {
+                script_value taken = args[0].deref();
+                *lead = std::move(taken);
+            }
+            return result;
+        }
+    };
+
+    // A predicate's answer: true only for a bool true, as filter and remove_if read theirs
+    bool predicate_true(const script_value& v) {
+        const script_value& d = v.deref();
+        return d.is_bool() && d.unchecked_as_bool();
+    }
+
     // A map callback (key, value): the value position aliases the entry (a map-entry reference, the map's value type as its
     // constraint), the key position gets a copy (a map key is const, as std::map's is)
     checked_result<script_value> call_map_entry(const script_function& callback, uint32_t positions, script_value& map_value,
@@ -653,6 +713,259 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         });
 
         return ctx.make_value(std::move(result));
+    }},
+
+        // map(f): a new array of f(element) in order; array<T> when f declares its return type T, else array<var>
+        {symbolizer->intern("map"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "map() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "map() requires a function argument");
+        }
+        engine* eng = ctx.get_engine();
+        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+        const element_callback callback(args[0], 0, self);
+        type_info_ptr declared;
+        callback_parameters(args[0], &declared);
+        const bool typed = declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != script_value_type::jai_null_type &&
+                           declared->base_type != script_value_type::jai_reference_type && declared->base_type != script_value_type::jai_function_type &&
+                           declared->base_type != script_value_type::jai_invalid_type && declared->base_type != script_value_type::jai_cpp_bound_type;
+        type_info_ptr element_type = typed ? declared : nullptr;
+        script_value result = script_value::make_array(element_type, eng);
+        const size_t count = array->size();
+        for (size_t i = 0; i < count && i < array->size(); ++i) {
+            auto mapped = callback.call(array, i, nullptr, eng);
+            if (!mapped) { return mapped.error_value(); }
+            if (ctx.unwinding()) { return ctx.make_value(); }
+            script_value value = mapped.value().is_reference() ? script_value(mapped.value().deref()) : std::move(mapped.value());
+            if (element_type) {
+                if (!detail::container_element_compatible(value, element_type, eng)) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
+                        ctx.get_string_symbolizer()->intern(detail::container_value_type_name(value)),
+                        ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
+                }
+                auto converted = detail::convert_container_element(eng, value, element_type);
+                if (!converted) { return converted.error_value(); }
+                value = std::move(converted.value());
+            }
+            result.unchecked_get_array_storage()->push(std::move(value));
+        }
+        return result;
+    }},
+
+        // reduce(f, init): f(accumulator, element) over the elements in order, starting from init; reduce(f) starts from the first element
+        {symbolizer->intern("reduce"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.empty() || args.size() > 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reduce() takes a function and an optional initial value");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "reduce() requires a function argument");
+        }
+        engine* eng = ctx.get_engine();
+        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+        size_t start = 0;
+        script_value accumulator = ctx.make_value();
+        if (args.size() == 2) {
+            accumulator = args[1];
+        } else {
+            if (array->empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot reduce an empty array without an initial value");
+            }
+            accumulator = array->get(0, eng);
+            start = 1;
+        }
+        const element_callback callback(args[0], 1, self);
+        const size_t count = array->size();
+        for (size_t i = start; i < count && i < array->size(); ++i) {
+            auto next = callback.call(array, i, &accumulator, eng);
+            if (!next) { return next.error_value(); }
+            if (ctx.unwinding()) { return ctx.make_value(); }
+            accumulator = next.value().is_reference() ? script_value(next.value().deref()) : std::move(next.value());
+        }
+        return accumulator;
+    }},
+
+        // for_each(f): f(element) for every element in order (a T& parameter changes the element)
+        {symbolizer->intern("for_each"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "for_each() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "for_each() requires a function argument");
+        }
+        engine* eng = ctx.get_engine();
+        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+        const element_callback callback(args[0], 0, self);
+        const size_t count = array->size();
+        for (size_t i = 0; i < count && i < array->size(); ++i) {
+            auto done = callback.call(array, i, nullptr, eng);
+            if (!done) { return done.error_value(); }
+            if (ctx.unwinding()) { return ctx.make_value(); }
+        }
+        return ctx.make_value();
+    }},
+
+        // find(f): the first element f answers true for, or null
+        {symbolizer->intern("find"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find() requires a function argument");
+        }
+        engine* eng = ctx.get_engine();
+        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+        const element_callback callback(args[0], 0, self);
+        const size_t count = array->size();
+        for (size_t i = 0; i < count && i < array->size(); ++i) {
+            auto answer = callback.call(array, i, nullptr, eng);
+            if (!answer) { return answer.error_value(); }
+            if (ctx.unwinding()) { return ctx.make_value(); }
+            if (predicate_true(answer.value()) && i < array->size()) { return array->get(i, eng).clone(); }
+        }
+        return ctx.make_value();
+    }},
+
+        // find_index(f): the index of the first element f answers true for, or -1
+        {symbolizer->intern("find_index"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "find_index() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "find_index() requires a function argument");
+        }
+        engine* eng = ctx.get_engine();
+        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+        const element_callback callback(args[0], 0, self);
+        const size_t count = array->size();
+        for (size_t i = 0; i < count && i < array->size(); ++i) {
+            auto answer = callback.call(array, i, nullptr, eng);
+            if (!answer) { return answer.error_value(); }
+            if (ctx.unwinding()) { return ctx.make_value(); }
+            if (predicate_true(answer.value())) { return ctx.make_value(static_cast<script_int>(i)); }
+        }
+        return ctx.make_value(script_int(-1));
+    }},
+
+        // some(f): whether f answers true for any element (false for an empty array); stops at the first
+        {symbolizer->intern("some"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "some() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "some() requires a function argument");
+        }
+        engine* eng = ctx.get_engine();
+        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+        const element_callback callback(args[0], 0, self);
+        const size_t count = array->size();
+        for (size_t i = 0; i < count && i < array->size(); ++i) {
+            auto answer = callback.call(array, i, nullptr, eng);
+            if (!answer) { return answer.error_value(); }
+            if (ctx.unwinding()) { return ctx.make_value(); }
+            if (predicate_true(answer.value())) { return ctx.make_value(true); }
+        }
+        return ctx.make_value(false);
+    }},
+
+        // every(f): whether f answers true for every element (true for an empty array); stops at the first that is not
+        {symbolizer->intern("every"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "every() takes exactly one argument");
+        }
+        if (!args[0].is_function()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "every() requires a function argument");
+        }
+        engine* eng = ctx.get_engine();
+        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+        const element_callback callback(args[0], 0, self);
+        const size_t count = array->size();
+        for (size_t i = 0; i < count && i < array->size(); ++i) {
+            auto answer = callback.call(array, i, nullptr, eng);
+            if (!answer) { return answer.error_value(); }
+            if (ctx.unwinding()) { return ctx.make_value(); }
+            if (!predicate_true(answer.value())) { return ctx.make_value(false); }
+        }
+        return ctx.make_value(true);
+    }},
+
+        // concat(other): a new array, this one's elements then other's (copies), with this array's element type
+        {symbolizer->intern("concat"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "concat() takes exactly one argument");
+        }
+        const script_value& other = args[0].deref();
+        if (!other.is_array()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "concat() requires an array argument");
+        }
+        engine* eng = ctx.get_engine();
+        auto self_type = self.get_type_info();
+        type_info_ptr element_type = self_type && self_type->base_type == script_value_type::jai_array_type ? self_type->element_type() : nullptr;
+        if (element_type && (element_type->base_type == script_value_type::jai_any_type || element_type->base_type == script_value_type::jai_null_type)) { element_type = nullptr; }
+        const script_array* left = self.unchecked_array_node();
+        const script_array* right = other.unchecked_array_node();
+        script_value result = script_value::make_array(element_type, eng);
+        auto& out = *result.unchecked_get_array_storage();
+        out.reserve(left->size() + right->size());
+        for (size_t i = 0; i < left->size(); ++i) { out.push(left->get(i, eng).clone()); }
+        for (size_t i = 0; i < right->size(); ++i) {
+            script_value value = right->get(i, eng).clone();
+            if (element_type) {
+                if (!detail::container_element_compatible(value, element_type, eng)) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
+                        ctx.get_string_symbolizer()->intern(detail::container_value_type_name(value)),
+                        ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
+                }
+                auto converted = detail::convert_container_element(eng, value, element_type);
+                if (!converted) { return converted.error_value(); }
+                value = std::move(converted.value());
+            }
+            out.push(std::move(value));
+        }
+        return result;
+    }},
+
+        // insert(index, value): value placed at index (0..size), the elements from there moving up one
+        {symbolizer->intern("insert"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "insert() takes an index and a value");
+        }
+        if (!args[0].is_int()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "insert() index must be an integer");
+        }
+        engine* eng = ctx.get_engine();
+        auto& node = *self.unchecked_get_array_storage();
+        const script_int index = args[0].unchecked_as_int();
+        if (index < 0 || index > static_cast<script_int>(node.size())) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "Cannot insert at index {0} of an array of size {1}",
+                ctx.get_string_symbolizer()->intern(std::to_string(index)), ctx.get_string_symbolizer()->intern(std::to_string(node.size())));
+        }
+        auto array_type_info = self.get_type_info();
+        type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
+        if (!detail::container_element_compatible(args[1], element_type, eng)) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot insert '{0}' into array<{1}>",
+                ctx.get_string_symbolizer()->intern(detail::container_value_type_name(args[1])),
+                ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
+        }
+        auto converted = detail::convert_container_element(eng, args[1], element_type);
+        if (!converted) { return converted.error_value(); }
+        if (!eng->execution_limits().memory_charge(sizeof(script_value))) [[unlikely]] {
+            return detail::raise_memory_cap(eng->execution_limits());
+        }
+        if (!node.is_typed()) {
+            node.values().insert(node.values().begin() + static_cast<std::ptrdiff_t>(index), std::move(converted.value()));
+            return ctx.make_value();
+        }
+        // a typed buffer: push, then rotate the new last element down to index
+        node.push(std::move(converted.value()));
+        for (size_t at = node.size() - 1; at > static_cast<size_t>(index); --at) {
+            script_value below = node.get(at - 1, eng);
+            script_value above = node.get(at, eng);
+            node.set(at, std::move(below));
+            node.set(at - 1, std::move(above));
+        }
+        return ctx.make_value();
     }}
     };
 

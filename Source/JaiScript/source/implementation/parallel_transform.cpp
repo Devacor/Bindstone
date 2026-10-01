@@ -647,8 +647,10 @@ namespace {
 			return false;
 		}
 		// Builtins that call back into script (a predicate, a comparator, an element's operator< or to_string)
-		static bool builtin_runs_script(std::string_view name) {
-			return name == "sort" || name == "filter" || name == "remove_if" || name == "join";
+		static bool builtin_runs_script(std::string_view name, const type_info_ptr& receiver) {
+			if (name == "sort" || name == "filter" || name == "remove_if" || name == "join") { return true; }
+			return receiver && receiver->base_type == script_value_type::jai_array_type &&
+			       (name == "map" || name == "reduce" || name == "for_each" || name == "find" || name == "find_index" || name == "some" || name == "every");
 		}
 		static bool builtin_container(const type_info_ptr& t) {
 			return t && (t->base_type == script_value_type::jai_array_type || t->base_type == script_value_type::jai_map_type ||
@@ -657,8 +659,9 @@ namespace {
 		bool builtin_method_call(const call_expr* call) {
 			if (!call->callee || call->callee->get_type() != node_type::member_expr) { return false; }
 			auto* m = static_cast<const member_expr*>(call->callee.get());
-			if (m->is_static || builtin_runs_script(m->member)) { return false; }
-			return builtin_container(proof_chain_type(m->object.get()));
+			if (m->is_static) { return false; }
+			const type_info_ptr receiver = proof_chain_type(m->object.get());
+			return !builtin_runs_script(m->member, receiver) && builtin_container(receiver);
 		}
 		bool maybe_object(const expression_ptr& e) {
 			if (!e) { return false; }
@@ -1505,7 +1508,11 @@ namespace {
 				// else may mutate the (worker-private snapshot of the) receiver, which
 				// would silently diverge across worker counts
 				if (identifier_expr* root = enclosing_root(m->object)) {
-					if (!parallel_readonly_method(m->member)) {
+					// an array's find(f) calls back into script: never a captured receiver's read
+					const bool callback_find = m->member == "find" &&
+					    (builtin_runs_script(m->member, proof_chain_type(m->object.get())) ||
+					     std::any_of(call->arguments.begin(), call->arguments.end(), [](const expression_ptr& a) { return a && a->get_type() == node_type::lambda_expr; }));
+					if (!parallel_readonly_method(m->member) || callback_find) {
 						return fail(m, "method '" + std::string(m->member) + "' may mutate captured state '" +
 						               std::string(root->name) + "'");
 					}
@@ -1528,7 +1535,7 @@ namespace {
 						const bool container_or_string = rt && (rt->base_type == script_value_type::jai_array_type ||
 						                                        rt->base_type == script_value_type::jai_map_type ||
 						                                        rt->base_type == script_value_type::jai_string_type);
-						if (!container_or_string || !parallel_readonly_method(m->member) || builtin_runs_script(m->member)) { root_escaped = true; }
+						if (!container_or_string || !parallel_readonly_method(m->member) || builtin_runs_script(m->member, rt)) { root_escaped = true; }
 					} else if (!walk_expr(m->object)) {
 						return false;
 					}

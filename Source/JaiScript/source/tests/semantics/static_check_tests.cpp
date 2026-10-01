@@ -1780,9 +1780,9 @@ public:
                 auto e = make_engine();
                 jai::stdlib::register_all(*e);
                 e->type_proofs(proofs);
-                auto r = e->check("array<string> a = [\"x\"];\na.insert(0, \"y\");");
+                auto r = e->check("array<string> a = [\"x\"];\na.splice(0, \"y\");");
                 check_eq((size_t)1, error_count(r));
-                check_true(has_diag(r, dlevel::error, "no member 'insert' on 'array<string>'"), r.format());
+                check_true(has_diag(r, dlevel::error, "no member 'splice' on 'array<string>'"), r.format());
                 check_true(has_diag(e->check("array<int> a = [1];\na.pusj(2);"), dlevel::error, "no member 'pusj' on 'array<int>' (did you mean 'push'?)"));
                 check_true(has_diag(e->check("string s = \"abc\";\ns.frobnicate();"), dlevel::error, "no member 'frobnicate' on 'string'"));
                 check_true(has_diag(e->check("map<string, int> m = {\"k\": 1};\nm.frobnicate();"), dlevel::error, "no member 'frobnicate' on 'map<string,int>'"));
@@ -1793,8 +1793,8 @@ public:
                 auto w = make_engine();
                 w->type_proofs(proofs);
                 w->static_checking(check_mode::warn);
-                check_eq(std::string("array has no member 'insert'"), w->execute("array<string> a = [\"x\"];\nvar m = \"\";\ntry { a.insert(0, \"y\"); } catch (err) { m = err; }\nm;").to_string());
-                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "no member 'insert' on 'array<string>'"));
+                check_eq(std::string("array has no member 'splice'"), w->execute("array<string> a = [\"x\"];\nvar m = \"\";\ntry { a.splice(0, \"y\"); } catch (err) { m = err; }\nm;").to_string());
+                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "no member 'splice' on 'array<string>'"));
             }
         });
 

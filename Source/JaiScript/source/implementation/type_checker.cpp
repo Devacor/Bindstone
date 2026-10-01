@@ -2145,6 +2145,41 @@ private:
         diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "'" +
              (best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
     }
+    // The return type a callback argument declares: a lambda's spelled one, or the one overload of a named script function
+    const type_info* callback_declared_return(const expression* arg) const {
+        if (!arg) { return nullptr; }
+        if (arg->get_type() == node_type::lambda_expr) { return static_cast<const lambda_expr*>(arg)->return_type.get(); }
+        if (arg->get_type() == node_type::identifier_expr) {
+            auto it = functions_.find(static_cast<const identifier_expr*>(arg)->name);
+            if (it != functions_.end() && it->second.size() == 1 && it->second[0]) { return it->second[0]->return_type.get(); }
+        }
+        return nullptr;
+    }
+
+    // The array helpers' results (the registry's map, reduce, for_each, find, find_index, some, every, concat, insert): map is array<T>
+    // when its callback declares T, as the runtime builds it; find's element may be null, so it stays open
+    bool array_helper_result(const ctype& recv, std::string_view member, const call_expr* c, const std::vector<ctype>& args, ctype& out) {
+        if (member == "some" || member == "every") { out = ctype::make(ctype::bool_k); return true; }
+        if (member == "find_index") { out = ctype::make(ctype::int_k); return true; }
+        if (member == "for_each" || member == "insert") { out = ctype::make(ctype::null_k); return true; }
+        if (member == "concat" && args.size() == 1) { out = recv; out.const_key = false; out.origin = nullptr; return true; }
+        if (member == "map" && args.size() == 1) {
+            out = ctype::make(ctype::array_k);   // an array; its element type is the runtime's (array<T> for a callback declaring T)
+            return true;
+        }
+        if (member == "reduce" && (args.size() == 1 || args.size() == 2)) {
+            // the callback's declared type when the initial value has it too (an empty array returns the initial value)
+            const type_info* r = callback_declared_return(c->arguments[0].get());
+            out = {};
+            if (r && r->base_type != script_value_type::jai_reference_type && args.size() == 2) {
+                const ctype declared = ctype_from_type_info(r);
+                if (!declared.is_unknown() && declared.kind == args[1].kind && declared.cls == args[1].cls) { out = declared; }
+            }
+            return true;
+        }
+        return false;
+    }
+
     static size_t edit_distance(std::string_view a, std::string_view b) {
         std::vector<size_t> row(b.size() + 1);
         for (size_t j = 0; j <= b.size(); ++j) { row[j] = j; }
@@ -3306,6 +3341,9 @@ private:
 				c->receiver_global = certain ? deps.back() : proof_global{};
 			}
 			if (proven && c->arguments.empty() && (m->member == "size" || m->member == "length")) { return ctype::make(ctype::int_k); }   // every kind's size is its count
+			if (recv.kind == ctype::array_k && !recv.tentative) {
+				if (ctype t; array_helper_result(recv, m->member, c, args, t)) { return t; }
+			}
 			if (proven) {
 				for (auto& a : c->arguments) {   // a builtin reads its arguments as values: a subscript argument needs no element reference
 					if (a->get_type() == node_type::binary_expr && static_cast<binary_expr*>(a.get())->op.type == token_type::left_bracket) {

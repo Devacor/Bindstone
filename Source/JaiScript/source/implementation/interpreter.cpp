@@ -5317,7 +5317,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                     }
                     if (store_through) {
-                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref, identifier->declared_ref_kind));
+                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind));
                     } else {
                         // Parse-proven typed store: an IDENTICAL interned type tag (raw
                         // pointer compare - int/float tags are engine-canonical) makes
@@ -5468,7 +5468,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 };
                 if (store_through) {
                     // This is a reference - assign through it (deep copy the value)
-                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_, identifier->declared_ref, identifier->declared_ref_kind));
+                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind));
                 } else if (currentVal && currentVal->is_cpp_bound()) {
                     // This is a C++ bound value - use assign_through
                     currentVal->assign_through(value);

@@ -340,7 +340,7 @@ engine stays usable", not by `check_throws`.
   at compile time (`identifier_expr::declared_ref`, `chunk::slot_declared_kinds`), so nothing is marked at the binding or the
   call; a reference that reaches another binding (a call argument, `auto& r = q`, a `[&]` capture) and a program-scope one are
   marked with T there (the declared `T&` twin, `engine::get_type_info_declared_reference`). A graft takes a typed reference
-  parameter only over a local of the same kind.
+  parameter only over a variable statically of the same type (a local declared T, a `T& alias`).
 - **Every C++ lvalue is an assignment target** (`docs/diagnostics.md` "Assignment targets"): besides names, members,
   elements and `cast<T&>`, a call returning `T&` (function, method, static, `operator[]`; a by-value result raises after
   the call), a conditional of lvalues, `(a = b) = c` and `++x = v`. The parser rewrites a conditional's arms and an inner

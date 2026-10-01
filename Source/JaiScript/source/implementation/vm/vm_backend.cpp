@@ -11270,9 +11270,14 @@ void vm_backend::declare_stored_reference(frame& f, const variable_decl* decl) {
 	if (stored) { detail::ref_declare(*stored, decl->type->element_type().get(), engine_); }
 }
 
+// out of line: inlined into the declaration path, the kernel shifts the store handlers' code generation
+JAI_VM_COLD_PATH static std::optional<error_propagator> reference_admission(const variable_decl& decl, const script_value& value, engine* eng) {
+	return detail::reference_decl_rejection(decl, value, eng);
+}
+
 op_status vm_backend::define_ref_decl_value(frame& f, const vm_instruction& ins, const variable_decl* decl, script_value value) {
-	if (ins.c & 2) [[unlikely]] {   // a reference must reference: the admission (detail::reference_decl_rejection)
-		if (auto rejected = detail::reference_decl_rejection(*decl, value, engine_)) { return raise_from(*rejected); }
+	if (ins.c & 2) [[unlikely]] {   // a reference must reference
+		if (auto rejected = reference_admission(*decl, value, engine_)) { return raise_from(*rejected); }
 	}
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), false, decl);
 }

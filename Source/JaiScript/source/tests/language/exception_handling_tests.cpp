@@ -424,11 +424,6 @@ public:
 
             fs::copy(a, b, fs::copy_options::recursive, ec);
             check_false(bool(ec));
-            for (const char* bite : {"main.jaibite", "lib/mod.jaibite"}) {   // the copy keeps the bites the fresher file
-                fs::path src = b / bite;
-                src.replace_extension(".jai");
-                fs::last_write_time(b / bite, fs::last_write_time(src, ec) + std::chrono::seconds(5), ec);
-            }
             const auto mainBiteBefore = fs::last_write_time(b / "main.jaibite", ec);
             auto second = make_engine();
             jai::engine* rawSecond = second.get();

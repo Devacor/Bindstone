@@ -34,6 +34,7 @@
 #include <thread>
 #ifndef _WIN32
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 // One-syscall (mtime, size) stat for the execute_file fast lane.
@@ -778,6 +779,12 @@ struct engine::implementation {
         bool closure_filesystem = true;   // permission under which dependencies were gathered
         std::vector<closure_stamp> closure_stamps;
         std::vector<closure_stamp> spliced_stamps;   // files spliced into function bodies at parse time: a change re-parses this entry; such a unit writes no jaibite sibling
+        // the jaibite sibling this entry last wrote or loaded, by its (mtime, size) stamp: while it stays in place the sibling
+        // holds this source, so a hit queries one stat; the source's identity is computed once, when a sibling first needs it
+        uint64_t sibling_mtime = 0, sibling_size = 0;
+        bool sibling_stamped = false;
+        bool identity_known = false;
+        detail::jaibite_source_identity identity;
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
         std::string closure_parse_failures;            // units that failed to parse: the program stops there, before any check
@@ -868,14 +875,15 @@ struct engine::implementation {
         siblingFresh = false;
         if (jaibite_cache_enabled && sourcePath != "<script>" && self.is_enabled(privilege::filesystem)) {
             sibling = jaibite_sibling_path(sourcePath);
-            siblingFresh = !sibling.empty() && jaibite_sibling_fresh(sibling, sourcePath);
         }
         auto cached = find_cached_script(sourcePath, content);
-        if (!cached && siblingFresh) {
-            // Fresh sibling: skip the parse entirely. Corrupt data or a fingerprint
-            // mismatch falls back to the parse below (and the sibling is rewritten).
-            cached = try_load_jaibite_entry(self, sibling, sourcePath, content);
-            if (!cached) { siblingFresh = false; }
+        std::optional<detail::jaibite_source_identity> identity;
+        if (cached) {
+            siblingFresh = !sibling.empty() && sibling_holds(*cached, sibling, content);
+        } else if (!sibling.empty()) {
+            // a sibling loads only when it records this exact source; anything else parses below and is rewritten
+            cached = try_load_jaibite_entry(self, sibling, sourcePath, content, identity);
+            siblingFresh = cached != nullptr;
         }
         if (!cached) {
             lexer lex(content, &string_symbolizer_, registeredTemplateTypes, sourcePath);
@@ -887,6 +895,7 @@ struct engine::implementation {
             }
             cached = store_cached_script(sourcePath, content, std::move(parse_result.value()));
             stamp_spliced(*cached, prs.spliced_files());
+            if (identity) { cached->identity = *identity; cached->identity_known = true; }
         }
         if (debugger_) { debugger_->note_source(sourcePath); }
         return cached;
@@ -1257,7 +1266,7 @@ struct engine::implementation {
     // File fast lane (engine::execute_file): canonical-path keyed, gated by ONE stat.
     // Reuse touches zero file bytes; stamp-equal content is verified by a single
     // read+memcmp after the initial store (same-tick-edit hazard), then trusted while
-    // the (mtime, size) stamp holds. Strictly-newer mtime or a size change = stale.
+    // the (mtime, size) stamp is equal. Any other stamp, older included, = stale.
     struct file_cache_node {
         uint64_t mtime = 0;
         uint64_t size = 0;
@@ -1334,10 +1343,28 @@ struct engine::implementation {
 #endif
     }
 
+    // A file's text read under the (mtime, size) stamp taken just before the read: the stamp queried again after it must
+    // agree, or a save landed mid-read and the text may mix two versions (torn: read it again later)
+    enum class stamped_read { missing, torn, stable };
+    static stamped_read read_under_stamp(const std::string& path, bool stamped, uint64_t mtime, uint64_t size, std::string& content) {
+        {
+            std::ifstream file(path);
+            if (!file.is_open()) { return stamped_read::missing; }
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            content = buffer.str();
+        }
+        if (!stamped) { return stamped_read::stable; }
+        uint64_t after_mtime = 0, after_size = 0;
+        return stat_mtime_size(path, after_mtime, after_size) && after_mtime == mtime && after_size == size
+            ? stamped_read::stable : stamped_read::torn;
+    }
+
     // Jaibite disk cache (engine.hpp doc): sibling <stem>.jaibite maintained beside every
     // file-based load. std::filesystem only; every touch is best-effort via error_code.
     bool jaibite_cache_enabled = true;
     size_t jaibite_cache_write_failures_ = 0;
+    uint64_t jaibite_temporary_serial_ = 0;
 
     std::string root_source_file_;   // engine::root_source_file
     std::function<std::string(const std::string&)> app_data_resolver;    // engine::app_directory_resolvers
@@ -1388,39 +1415,72 @@ struct engine::implementation {
         return src.replace_extension(k_jaibite_extension);
     }
 
-    // Strictly newer wins; equal mtimes are treated as stale (safer under coarse
-    // filesystem timestamp granularity) — Dev: "newer than the .jai = fresh".
-    static bool jaibite_sibling_fresh(const std::filesystem::path& sibling, const std::string& sourcePath) {
-        std::error_code cacheEc, sourceEc;
-        auto cacheTime = std::filesystem::last_write_time(sibling, cacheEc);
-        auto sourceTime = std::filesystem::last_write_time(sourcePath, sourceEc);
-        return !cacheEc && !sourceEc && cacheTime > sourceTime;
+    static bool stat_sibling(const std::filesystem::path& sibling, uint64_t& mtime, uint64_t& size) {
+        return stat_mtime_size(sibling.string(), mtime, size);
+    }
+    const detail::jaibite_source_identity& identity_of(script_cache_entry& entry, const std::string& source) {
+        if (!entry.identity_known) { entry.identity = detail::jaibite_identity_of(source); entry.identity_known = true; }
+        return entry.identity;
     }
 
-    // Load a fresh sibling into the normal parse-entry pipeline. nullptr = fall back to
-    // parsing (corrupt/truncated/unreadable data, version or registration-fingerprint
-    // mismatch) — never throws, the source is still in hand. The deserialized AST carries
-    // its saved filename stamps (serializer round-trips source_location.filename), so
-    // stack traces and the debugger still name the .jai.
+    // An in-memory hit rewrites its sibling unless it is the file the entry last wrote or loaded, or a file whose header
+    // records this source (another engine's write, adopted whatever its surface, so engines sharing a file never take
+    // turns rewriting it on every hit; a miss still loads only under a matching fingerprint)
+    bool sibling_holds(script_cache_entry& entry, const std::filesystem::path& sibling, const std::string& source) {
+        uint64_t mtime = 0, size = 0;
+        if (!stat_sibling(sibling, mtime, size)) { return false; }
+        if (entry.sibling_stamped && mtime == entry.sibling_mtime && size == entry.sibling_size) { return true; }
+        uint8_t header[detail::k_jaibite_header_size];
+        std::ifstream file(sibling, std::ios::binary);
+        if (!file.read(reinterpret_cast<char*>(header), sizeof(header))) { return false; }
+        uint64_t fingerprint = 0;
+        detail::jaibite_source_identity recorded;
+        if (!detail::read_jaibite_header(header, sizeof(header), fingerprint, recorded) || recorded != identity_of(entry, source)) {
+            return false;
+        }
+        entry.sibling_mtime = mtime;
+        entry.sibling_size = size;
+        entry.sibling_stamped = true;
+        return true;
+    }
+
+    // Load a sibling into the normal parse-entry pipeline when its header records exactly this source (size and hash,
+    // compared for equality: a file put in place with an older mtime, or restored with its old one, is judged by its
+    // bytes) and this engine's registration fingerprint. nullptr = parse instead (absent, corrupt, truncated, another
+    // version, another source, another surface); never throws, the source is still in hand. The deserialized AST
+    // carries its saved filename stamps, so stack traces and the debugger still name the .jai.
     std::shared_ptr<script_cache_entry> try_load_jaibite_entry(engine& self, const std::filesystem::path& sibling,
-                                                               const std::string& sourcePath, const std::string& source) {
+                                                               const std::string& sourcePath, const std::string& source,
+                                                               std::optional<detail::jaibite_source_identity>& identity) {
         try {
+            uint64_t siblingMtime = 0, siblingSize = 0;
+            if (!stat_sibling(sibling, siblingMtime, siblingSize)) {
+                return nullptr;
+            }
+            identity = detail::jaibite_identity_of(source);
             std::ifstream file(sibling, std::ios::binary);
             if (!file.is_open()) {
                 return nullptr;
             }
             std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             uint64_t savedFingerprint = 0;
+            detail::jaibite_source_identity recorded;
+            if (!detail::read_jaibite_header(bytes.data(), bytes.size(), savedFingerprint, recorded) ||
+                recorded != *identity || savedFingerprint != self.registration_fingerprint()) {
+                return nullptr;
+            }
             uint32_t flags = 0;
             auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath);
-            if (savedFingerprint != self.registration_fingerprint()) {
-                return nullptr;   // registration surface moved: stale, reparse + rewrite
-            }
             // jaibite carries structure, not the parser-pass flags (ref-escape,
             // value-decl naming, typed-store proofs, transient reads) — re-derive
             // them exactly like the parse tail does
             if (detail::run_ast_marking_passes(declarations, &string_symbolizer_)) { entry_stamps = true; }
             auto entry = store_cached_script(sourcePath, source, std::move(declarations));
+            entry->identity = *identity;
+            entry->identity_known = true;
+            entry->sibling_mtime = siblingMtime;
+            entry->sibling_size = siblingSize;
+            entry->sibling_stamped = true;
             if (flags & detail::k_jaibite_flag_checked_clean) {
                 // Trusted stamp (fingerprint matched): skip the re-check exactly like a
                 // loaded bite does — check_result stays default (no diagnostics).
@@ -1434,11 +1494,14 @@ struct engine::implementation {
     }
 
     // Best-effort sibling write: failures are SILENT (cache is an optimization, never an
-    // error — read-only asset dirs, shipped games) and counted for diagnostics. A partial
-    // write is removed so a fresh-looking corrupt sibling can't linger; even if the
-    // remove also fails, the loader's corrupt fallback covers it.
-    void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, const script_cache_entry& entry, const std::string& sourcePath) noexcept {
+    // error — read-only asset dirs, shipped games) and counted for diagnostics. The bytes go
+    // to a temporary file in the sibling's folder that is renamed over the sibling, so a
+    // reader (another engine, another process, a crash mid-write) sees the old file or the
+    // new one, never part of one; a failed write leaves no sibling rather than a stale one.
+    void write_jaibite_sibling(engine& self, const std::filesystem::path& sibling, script_cache_entry& entry,
+                               const std::string& sourcePath, const std::string& source) noexcept {
         if (!self.is_enabled(privilege::filesystem)) { return; }
+        std::filesystem::path temporary;
         try {
             uint32_t flags = 0;
             if (static_check_mode_ != check_mode::off && entry.checked &&
@@ -1447,24 +1510,42 @@ struct engine::implementation {
             }
             std::vector<uint8_t> bytes;
             {
-                detail::aggregate_source_view source(&entry.lowering);   // a sibling holds the parsed program
-                bytes = detail::serialize_jaibite(entry.declarations, string_symbolizer_, self.registration_fingerprint(), flags, sourcePath);
+                detail::aggregate_source_view view(&entry.lowering);   // a sibling holds the parsed program
+                bytes = detail::serialize_jaibite(entry.declarations, string_symbolizer_, self.registration_fingerprint(), flags, sourcePath,
+                                                  identity_of(entry, source));
             }
-            std::ofstream file(sibling, std::ios::binary | std::ios::trunc);
-            if (!file.is_open()) {
-                ++jaibite_cache_write_failures_;
-                return;
+#ifdef _WIN32
+            const uint64_t process = GetCurrentProcessId();
+#else
+            const uint64_t process = static_cast<uint64_t>(getpid());
+#endif
+            temporary = sibling;
+            temporary += "." + std::to_string(process) + "-" + std::to_string(reinterpret_cast<uintptr_t>(this)) + "-" +
+                         std::to_string(++jaibite_temporary_serial_) + ".tmp";
+            bool written = false;
+            {
+                std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+                if (file.is_open()) {
+                    file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                    file.close();
+                    written = static_cast<bool>(file);
+                }
             }
-            file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-            file.close();
-            if (!file) {
-                ++jaibite_cache_write_failures_;
-                std::error_code removeEc;
-                std::filesystem::remove(sibling, removeEc);
+            std::error_code ec;
+            if (written) {
+                std::filesystem::rename(temporary, sibling, ec);
+                if (!ec) {
+                    entry.sibling_stamped = stat_sibling(sibling, entry.sibling_mtime, entry.sibling_size);
+                    return;
+                }
             }
         } catch (...) {
-            ++jaibite_cache_write_failures_;
         }
+        ++jaibite_cache_write_failures_;
+        entry.sibling_stamped = false;
+        std::error_code ec;
+        if (!temporary.empty()) { std::filesystem::remove(temporary, ec); }
+        if (std::filesystem::is_regular_file(sibling, ec)) { std::filesystem::remove(sibling, ec); }
     }
 
     implementation();
@@ -2175,7 +2256,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
         if (!sibling.empty() && !siblingFresh && cached->spliced_stamps.empty()) {   // a unit with spliced includes keeps no sibling: the sibling's freshness knows only its own file
-            impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath);
+            impl->write_jaibite_sibling(*this, sibling, *cached, sourcePath, scriptContent);
         }
 
         // a textual include runs under the including unit and compiles once per such unit: the VM's chunk caches belong to one unit
@@ -2554,7 +2635,7 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
             auto& node = it->second;
             bool stampValid = node.entry && node.entry->epoch == impl->script_cache_epoch &&
                               node.attributed_path == attributed &&
-                              node.size == size && mtime <= node.mtime &&
+                              node.size == size && mtime == node.mtime &&
                               !impl->spliced_changed(*node.entry);   // the spliced includes' stamps, as find_cached_script checks them: a changed dependency is a miss on every tier
             if (stampValid && !node.verified) {
                 // One-shot equal-stamp verify: an edit in the same filesystem tick as
@@ -2577,19 +2658,22 @@ script_value engine::execute_file(const std::string& scriptPath, const instance_
         }
     }
 
-    std::ifstream file(scriptPath);
-    if (!file.is_open()) {
-        throw runtime_error("Failed to open script file: " + scriptPath);
+    // a save landing mid-read re-reads at once (bounded); text still torn after that runs, but is not remembered
+    std::string content;
+    bool stable = false;
+    for (int attempt = 0; ; ++attempt) {
+        const auto read = implementation::read_under_stamp(scriptPath, statOk, mtime, size, content);
+        if (read == implementation::stamped_read::missing) {
+            throw runtime_error("Failed to open script file: " + scriptPath);
+        }
+        stable = read == implementation::stamped_read::stable;
+        if (stable || attempt == 3) { break; }
+        statOk = implementation::stat_mtime_size(scriptPath, mtime, size);
     }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
     script_value result = execute_source(content, instanceVars, attributed);
 
-    // Stamp AFTER a successful execute, with the PRE-read stat: an edit between that
-    // stat and the read shows as strictly newer next time and re-verifies.
-    if (statOk && !canon.empty()) {
+    // Stamp AFTER a successful execute, with the stamp the read was taken under
+    if (statOk && stable && !canon.empty()) {
         if (auto entry = impl->find_cached_script(attributed, content)) {
             if (impl->file_script_cache.size() >= implementation::script_cache_max &&
                 impl->file_script_cache.find(canon) == impl->file_script_cache.end()) {
@@ -4521,13 +4605,6 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     };
     if (changed.empty() || (held && mods.size() > 1)) { mark_seen(); return false; }
 
-    const auto read_module = [](const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) { throw runtime_error("Failed to open import file: " + path); }
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        return buffer.str();
-    };
     const auto record_failure = [&](const import_unit& m) {
         auto rec = I.import_cache.find(m.resolved);
         if (rec == I.import_cache.end()) { return; }
@@ -4535,8 +4612,22 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         rec->second.failed_mtime = m.mtime;
         rec->second.failed_size = m.size;
     };
+    // a module runs only from text read under its stamp: a save landing mid-read holds a module that ran before until the
+    // next pass (its record keeps the old stamp), and a first load reads again at once (bounded)
     std::vector<std::string> contents(changed.size());
-    for (size_t k = 0; k < changed.size(); ++k) { contents[k] = read_module(mods[changed[k]].resolved); }
+    for (size_t k = 0; k < changed.size(); ++k) {
+        import_unit& m = mods[changed[k]];
+        const bool loaded_before = I.import_cache.count(m.resolved) != 0;
+        for (int attempt = 0; ; ++attempt) {
+            const auto read = implementation::read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, contents[k]);
+            if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
+            if (read == implementation::stamped_read::stable) { break; }
+            if (loaded_before) { mark_seen(); return false; }
+            if (attempt == 3) { break; }
+            ++I.import_stats_;
+            m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);
+        }
+    }
 
     // two or more: every one parsed and checked (the names they declare known to each other) before any runs
     if (changed.size() > 1 && I.static_check_mode_ != check_mode::off) {
@@ -4775,27 +4866,21 @@ script_value engine::execute_import(const std::string& resolved_path) {
             ~importing_scope() { set.erase(path); }
         } scope{impl->importing_, resolved_path};
 
-        // Read and execute the file
-        std::ifstream file(resolved_path);
-        if (!file.is_open()) {
+        // the record keeps the stamp the text was read under; a zero stamp (no stat, or a save landing mid-read) makes
+        // the next file_timestamp check import again
+        implementation::import_record record;
+        record.resolved_path = resolved_path;
+        const bool stamped = implementation::stat_mtime_size(resolved_path, record.mtime, record.size);
+        std::string content;
+        const auto read = implementation::read_under_stamp(resolved_path, stamped, record.mtime, record.size, content);
+        if (read == implementation::stamped_read::missing) {
             throw runtime_error("Failed to open import file: " + resolved_path);
         }
-        
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        std::string content = buffer.str();
+        if (read != implementation::stamped_read::stable || !stamped) { record.mtime = 0; record.size = 0; }
 
         // Attribute the imported unit to its resolved path (stack traces / debugger).
         auto result = execute_source(content, instance_variables{}, resolved_path);
         impl->restamp_deferred(*this);   // the unit's classes exist now: the proofs that waited for them
-
-        // Update import cache (zero stamp when the file can't be statted: the next
-        // file_timestamp check then re-imports, matching the old epoch-time fallback)
-        implementation::import_record record;
-        record.resolved_path = resolved_path;
-        if (is_enabled(privilege::filesystem)) {
-            implementation::stat_mtime_size(resolved_path, record.mtime, record.size);
-        }
         impl->import_cache[resolved_path] = record;
         
         return result;

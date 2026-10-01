@@ -202,9 +202,11 @@ namespace jai {
 
         // Automatic jaibite disk cache (default ON). Every FILE-based load — execute_file,
         // script include (all forms), script import — transparently maintains a sibling
-        // cache next to the source (foo.jai -> foo.jaibite): a sibling that is strictly
-        // newer by mtime (equal = stale) with a matching registration fingerprint loads
-        // instead of parsing; otherwise the source parses and the sibling is rewritten.
+        // cache next to the source (foo.jai -> foo.jaibite): a sibling whose header records
+        // the exact source text (its size and hash, compared for equality - mtimes never
+        // decide) and a matching registration fingerprint loads instead of parsing;
+        // otherwise the source parses and the sibling is rewritten. A write goes to a
+        // temporary file renamed over the sibling, so no reader sees part of one.
         // Cache writes are best-effort and SILENT on failure (read-only asset dirs,
         // shipped games) — jaibite_cache_write_failures() counts them for diagnostics.
         // Raw string roots have no disk sibling, but include/import dependencies can

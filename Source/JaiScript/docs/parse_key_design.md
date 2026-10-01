@@ -56,14 +56,15 @@ tagged sources — zero cost when unused.
 One `GetFileAttributesExW` (mtime FILETIME + size in a single syscall; std::filesystem
 pair fallback elsewhere) gates a canonical-path-keyed node (`weakly_canonical` computed
 once per new path spelling, cached):
-- strictly-newer mtime OR size change → stale → legacy read + reparse + restamp;
+- any other (mtime, size) stamp, older included → stale → read + reparse + restamp;
 - stamp-equal, unverified → ONE read+memcmp (the same-tick-edit hazard: an editor write
   within the mtime tick of the original read is invisible to the stat) → verified;
 - stamp-equal, verified → reuse with **zero file reads**.
 The node also pins the as-given path spelling: a different spelling of the same file
 misses the fast lane, so attribution (the path stamped on AST nodes, error text,
-breakpoints) stays byte-identical to the read path. Mirrors the jaibite disk cache's
-"strictly newer = fresh" rule; the fast lane's one stat is now the only per-execute
+breakpoints) stays byte-identical to the read path. A read stamps only when the stat taken
+after it agrees with the one before (a save landing mid-read is not remembered); the jaibite
+disk cache judges its sibling by the source identity it records; the fast lane's one stat is the only per-execute
 filesystem cost. (Note: on this machine a metadata stat is ~25 µs — Defender-inflated —
 which is now the file-lane floor; still 3.5-3.8× better than read+2 stats+key.)
 

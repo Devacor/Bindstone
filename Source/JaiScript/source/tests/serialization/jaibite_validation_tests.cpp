@@ -247,10 +247,11 @@ public:
             auto eng = make_engine();
             const std::vector<declaration_ptr> declarations;
             auto bytes = detail::serialize_jaibite(declarations, *eng->get_symbolizer(), eng->registration_fingerprint());
-            check_eq(size_t(22), bytes.size(), "fixture expects the fixed header and two empty vectors");
-            check_eq(uint8_t(0), bytes[20], "fixture string table must be empty");
-            check_eq(uint8_t(0), bytes[21], "fixture declaration list must be empty");
-            bytes.resize(21);
+            const size_t header = detail::k_jaibite_header_size;
+            check_eq(header + 2, bytes.size(), "fixture expects the fixed header and two empty vectors");
+            check_eq(uint8_t(0), bytes[header], "fixture string table must be empty");
+            check_eq(uint8_t(0), bytes[header + 1], "fixture declaration list must be empty");
+            bytes.resize(header + 1);
             for (size_t i = 0; i < 9; ++i) {
                 bytes.push_back(0x80);
             }

@@ -285,7 +285,7 @@ static int compute_param_match_cost(
             if (classes_by_type && paramInfo.cpp_type != std::type_index(typeid(void))) {
                 auto paramClassIt = classes_by_type->find(paramInfo.cpp_type);
                 if (paramClassIt != classes_by_type->end()) {
-                    std::string expectedClassName = paramClassIt->second->get_name();
+                    const std::string& expectedClassName = paramClassIt->second->get_name();
                     auto instance = const_cast<script_value&>(arg).get_class_instance();
                     class_definition* argClassDef = nullptr;
                     std::optional<std::string_view> argClassName;
@@ -461,6 +461,7 @@ struct engine::implementation {
         }
 
         void add_overload_with_types(size_t argCount, const script_value& func, const std::vector<param_type_info>& paramTypes) {
+            resolved_[0] = resolved_[1] = resolved_shape{};
             // If we have type info, check for exact type match first
             if (!paramTypes.empty()) {
                 auto it = std::find_if(overloads.begin(), overloads.end(),
@@ -486,63 +487,60 @@ struct engine::implementation {
             overloads.emplace_back(argCount, func, paramTypes);
         }
         
-        script_value findBestMatch(const std::vector<script_value>& args) const {
-            size_t argCount = args.size();
+        // The overload an argument shape (the count and each argument's type, no object among them: an object's cost
+        // follows its class) selects is fixed while the set is: the newest two shapes are remembered, an added overload
+        // forgets them. Only the engine thread caches (may_cache); a parallel worker resolves in full.
+        struct resolved_shape { uint64_t shape = 0; uint32_t index = 0; };
+        mutable resolved_shape resolved_[2];
 
-            // Use C++-style overload resolution: find all viable candidates, then pick the best
-            struct Candidate {
-                const Overload* overload;
-                int totalCost;
-            };
-            std::vector<Candidate> viableCandidates;
+        static uint64_t argument_shape(const std::vector<script_value>& args) {
+            if (args.size() > 7) { return 0; }
+            uint64_t shape = args.size() + 1;
+            for (size_t i = 0; i < args.size(); ++i) {
+                const script_value_type t = args[i].deref().type();
+                if (t == script_value_type::jai_object_type || t == script_value_type::jai_shared_ptr_type) { return 0; }
+                shape |= static_cast<uint64_t>(static_cast<uint8_t>(t)) << (8 + 8 * i);
+            }
+            return shape;
+        }
 
-            // Phase 1: Find all viable candidates
-            for (const auto& overload : overloads) {
-                // Variadic functions (VARIADIC_ARITY) match any argument count
-                if (overload.is_variadic()) {
-                    // Variadic function - always viable but lowest priority
-                    viableCandidates.push_back({&overload, 2000});
-                    continue;
-                }
-
-                if (overload.argCount != argCount) {
-                    continue; // Wrong number of arguments - must match exactly
-                }
-
-                if (overload.paramTypes.empty()) {
-                    // No type info - fallback priority (like script method var/any)
-                    viableCandidates.push_back({&overload, 1000});
-                    continue;
-                }
-
-                // Calculate conversion cost for typed overload (shared scorer; first_arg = 0 for
-                // free functions / constructors, where args[0] is already the first parameter).
-                int totalCost = compute_param_match_cost(args, 0, overload.paramTypes,
-                                                         conversions.get(), classes_by_type, classes_by_name);
-                if (totalCost >= 0) {
-                    viableCandidates.push_back({&overload, totalCost});
+        // C++-style resolution in one pass: the viable overload of lowest cost, the first of equal costs (a variadic one
+        // costs 2000, an untyped one 1000, a typed one the shared scorer's sum)
+        script_value findBestMatch(const std::vector<script_value>& args, bool may_cache = false) const {
+            const size_t argCount = args.size();
+            const uint64_t shape = may_cache && overloads.size() > 1 ? argument_shape(args) : 0;
+            if (shape) {
+                for (const resolved_shape& r : resolved_) {
+                    if (r.shape == shape) { return overloads[r.index].function; }
                 }
             }
-
-            // Phase 2: Pick the best viable candidate (lowest cost)
-            if (viableCandidates.empty()) {
+            const Overload* best = nullptr;
+            int best_cost = 0;
+            for (const auto& overload : overloads) {
+                int cost;
+                if (overload.is_variadic()) {
+                    cost = 2000;
+                } else if (overload.argCount != argCount) {
+                    continue;
+                } else if (overload.paramTypes.empty()) {
+                    cost = 1000;
+                } else {
+                    cost = compute_param_match_cost(args, 0, overload.paramTypes, conversions.get(), classes_by_type, classes_by_name);
+                    if (cost < 0) { continue; }
+                }
+                if (!best || cost < best_cost) {
+                    best = &overload;
+                    best_cost = cost;
+                }
+            }
+            if (!best) {
                 throw runtime_error("No viable candidates for function call");
             }
-
-            auto best = std::min_element(viableCandidates.begin(), viableCandidates.end(),
-                [](const Candidate& a, const Candidate& b) { return a.totalCost < b.totalCost; });
-
-            // Check for ambiguity (multiple candidates with same cost)
-            int bestCost = best->totalCost;
-            auto numBest = std::count_if(viableCandidates.begin(), viableCandidates.end(),
-                [bestCost](const Candidate& c) { return c.totalCost == bestCost; });
-
-            if (numBest > 1 && bestCost < 1000) { // Don't report ambiguity for untyped/var functions
-                // Could throw ambiguity error here, but for now just pick first
-                // throw runtime_error("Ambiguous function call");
+            if (shape) {
+                resolved_[1] = resolved_[0];
+                resolved_[0] = {shape, static_cast<uint32_t>(best - overloads.data())};
             }
-
-            return best->overload->function;
+            return best->function;
         }
     };
     
@@ -1787,7 +1785,7 @@ checked_result<script_value> engine::overload_dispatch::operator()(const std::ve
             "Overloaded function '{0}' not found", name_id);
     }
 
-    script_value bestMatch = it->second.findBestMatch(args);
+    script_value bestMatch = it->second.findBestMatch(args, !eng->impl->string_symbolizer_.frozen());
     if (bestMatch.is_null()) {
         return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
             name_id, args.data(), args.size(), eng);

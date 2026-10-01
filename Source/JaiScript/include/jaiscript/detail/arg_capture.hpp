@@ -61,10 +61,10 @@ namespace jai::detail {
         return ctors.empty() ? arg_binding::copy : overloads_binding(ctors, i, argc);
     }
 
-    inline arg_binding callee_binding(const script_value& callee, size_t i, bool through_bound = false, size_t argc = SIZE_MAX) {
-        const script_value& c = callee.deref();
-        if (c.raw_storage_index() != script_value::TYPEID_FUNCTION) return arg_binding::opaque;
-        const script_function& fn = c.unchecked_as_function();
+    inline arg_binding callee_binding(const script_value& callee, size_t i, bool through_bound = false, size_t argc = SIZE_MAX);
+
+    // how a callable binds argument i
+    inline arg_binding function_binding(const script_function& fn, size_t i, bool through_bound = false, size_t argc = SIZE_MAX) {
         if (const auto* thunk = fn.target<script_callable_thunk>()) {
             const script_callable& p = thunk->payload;
             switch (p.kind) {
@@ -89,6 +89,12 @@ namespace jai::detail {
         if (const auto* d = fn.target<engine::overload_dispatch>()) return static_cast<arg_binding>(d->argument_binding(i, argc));
         if (const auto* d = fn.target<class_definition::cpp_method_dispatch>()) return static_cast<arg_binding>(d->argument_binding(i, argc));
         return arg_binding::opaque;
+    }
+
+    inline arg_binding callee_binding(const script_value& callee, size_t i, bool through_bound, size_t argc) {
+        const script_value& c = callee.deref();
+        if (c.raw_storage_index() != script_value::TYPEID_FUNCTION) return arg_binding::opaque;
+        return function_binding(c.unchecked_as_function(), i, through_bound, argc);
     }
 
     // `recv.m(args)` resolved by lookup alone (no getter runs): a field's callable, else the class's method; `super.m` the

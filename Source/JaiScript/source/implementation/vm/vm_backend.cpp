@@ -11614,7 +11614,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 #endif
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
-	if (cached_global_env_ && site.ic_fn && argc == site.ic_argc && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
+	if (cached_global_env_ && ((site.ic_fn && argc == site.ic_argc) || site.ic_native) && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
 		bool plain_frame = !f.locals || f.top_level;
 		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
 		const auto& cache = f.code->env_lookup_cache;
@@ -11717,7 +11717,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 	if (cached_global_env_ &&
 	    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION &&
 	    &calleeVal.unchecked_as_function() == site.ic_identity &&
-	    argc == site.ic_argc) {
+	    (site.ic_native || argc == site.ic_argc)) {
 		pc.fn = site.ic_fn;
 		pc.pin = site.ic_pin;
 	} else {
@@ -11735,6 +11735,18 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 					site.ic_identity = &calleeVal.unchecked_as_function();
 					site.ic_fn = pc.fn;
 					site.ic_argc = static_cast<uint32_t>(argc);
+					site.ic_native = false;
+				}
+			} else if (!thunk) {
+				// a host callable takes the arguments as they are (invoke_callee's opaque path): held by its payload, cached
+				// on the same identity the script callee's cache keys on
+				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
+				parked_direct = true;
+				if (cached_global_env_) {
+					site.ic_pin = pc.pin;
+					site.ic_identity = &calleeVal.unchecked_as_function();
+					site.ic_fn = nullptr;
+					site.ic_native = true;
 				}
 			}
 		}
@@ -11758,7 +11770,9 @@ void vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 		case capture_form_probe:
 			if (!pending_callees_.empty()) {
 				const pending_callee& pc = pending_callees_.back();
-				b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k) : detail::callee_binding(pc.value, k, false, f.code->call_sites[ins.a].arg_symbols.size());
+				b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k)
+				    : pc.native() ? detail::function_binding(*pc.pin, k, false, f.code->call_sites[ins.a].arg_symbols.size())
+				    : detail::callee_binding(pc.value, k, false, f.code->call_sites[ins.a].arg_symbols.size());
 			}
 			break;
 		case capture_form_stack:
@@ -12163,6 +12177,7 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 		arguments.push_back(std::move(stack_[base + i]));
 	}
 	stack_.truncate(base);
+	if (pc.native()) { return invoke_native(f, *pc.pin, arguments, site); }
 	return invoke_callee(f, std::move(pc.value), arguments, site);
 }
 
@@ -12425,6 +12440,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 					site.ic_identity = &calleeVal.unchecked_as_function();
 					site.ic_fn = direct_fn;
 					site.ic_argc = static_cast<uint32_t>(argc);
+					site.ic_native = false;
 				}
 			}
 		}
@@ -12684,21 +12700,47 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 			return {};
 		}
 	}
+	if (!direct) {
+		return invoke_native(f, func, arguments, site);
+	}
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
-		if (direct) {
-			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, &f, f.code));
-		} else {
-			// Opaque invoke: arm the pending call-site context for the callee's bind
-			pending_call_site saved_pending = pending_site_ctx_;
-			pending_site_ctx_ = arguments.empty() ? saved_pending
-			                                      : pending_call_site{&site, &f, f.code, &arguments};
-			struct pending_restore {
-				vm_backend* vm; pending_call_site saved;
-				~pending_restore() { vm->pending_site_ctx_ = saved; }
-			} restore_pending{this, saved_pending};
-			callOutcome.emplace(func(arguments));
-		}
+		callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, &f, f.code));
+	} catch (const script_exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	} catch (const std::exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	}
+	checked_result<script_value>& result_checked = *callOutcome;
+
+	if (!result_checked) {
+		return raise_from(result_checked);
+	}
+
+	stack_.push_back(std::move(result_checked.value()));
+	return {};
+}
+
+// An opaque (host) callable with the arguments as they are: the pending call-site context arms the callee's bind
+op_status vm_backend::invoke_native(frame& f, const script_function& func, std::vector<script_value>& arguments, const call_site& site) {
+	std::optional<checked_result<script_value>> callOutcome;
+	try {
+		pending_call_site saved_pending = pending_site_ctx_;
+		pending_site_ctx_ = arguments.empty() ? saved_pending
+		                                      : pending_call_site{&site, &f, f.code, &arguments};
+		struct pending_restore {
+			vm_backend* vm; pending_call_site saved;
+			~pending_restore() { vm->pending_site_ctx_ = saved; }
+		} restore_pending{this, saved_pending};
+		callOutcome.emplace(func(arguments));
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
 		current_exception_ = e;

@@ -133,6 +133,7 @@ namespace jai::vm {
         mutable const script_defined_function* ic_fn = nullptr;
         mutable strong_ptr<script_function> ic_pin;
         mutable uint32_t ic_argc = 0;
+        mutable bool ic_native = false;   // the cached callee is a host callable (ic_fn null): the call invokes it with the arguments as they are
         // Monomorphic method-dispatch cache (flat-classes increment 1): validated on
         // (class identity, method_epoch) per class_definition::bump_method_epoch's
         // contract (derived-propagating; definitions engine-lifetime pinned, no ABA).

@@ -886,6 +886,8 @@ namespace jai::vm {
             strong_ptr<script_function> pin;
             const std::vector<uint32_t>* staged_slots = nullptr;
             const script_method_dispatch* method = nullptr;   // a bare sibling method of this frame's class: value is its dispatcher, the receiver the frame's this
+            // a host callable held by pin alone (no fn): invoked with the arguments as they are
+            bool native() const { return !fn && pin; }
         };
         std::vector<pending_callee> pending_callees_;
 
@@ -1751,6 +1753,7 @@ namespace jai::vm {
         void note_compiled(const chunk& compiled);
         op_status exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
+        op_status invoke_native(frame& f, const script_function& func, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare
         // sibling calls): call paths recover the payload (kind bound_method) and enter
         // the method in-loop; every other caller gets make_bound_method's exact

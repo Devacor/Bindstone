@@ -347,6 +347,35 @@ public:
 			}
 		});
 
+		test("known_reference_contracts_match_parameters_returns_and_grafts", [this]() {
+			const std::string source = R"JAI(
+				class Base { int value = 1; }
+				class Derived : Base {}
+				class Other { int value = 2; }
+				Derived derived;
+				Other other;
+				Base& good() { return derived; }
+				Base& bad() { return other; }
+			)JAI";
+			for (bool vm : {false, true}) {
+				for (bool proofs : {false, true}) {
+					auto e = engine::make();
+					if (vm) { e->set_backend(backend_type::vm); }
+					e->type_proofs(proofs);
+					check_true(e->check(source).has_errors());
+					check_true(e->check("void take(array<int>& value) {} array<string> words = [\"a\"]; take(words);").has_errors());
+					check_true(e->check("void take(math::vec2& value) {} math::vec3 v; take(v);").has_errors());
+					e->static_checking(check_mode::off);
+					e->execute(source);
+					check_eq(int64_t{1}, e->execute("good().value;").as_int());
+					check_true(e->execute("var m = \"\"; try { bad(); } catch (err) { m = err; } m;").as_string().starts_with("Cannot return reference"));
+					check_true(e->execute("void take(array<int>& value) {} array<string> words = [\"a\"]; var m = \"\"; try { take(words); } catch (err) { m = err; } m;").as_string().starts_with("Cannot pass"));
+					check_true(e->execute("void take_callback(function& value) {} var text = \"x\"; var m = \"\"; try { take_callback(text); } catch (err) { m = err; } m;").as_string().starts_with("Cannot pass"));
+					check_true(e->execute("int touch(int& value) { return value + 1; } string run() { float value = 1.5; try { return \"bad:\" + touch(value); } catch (err) { return err; } } run();").as_string().starts_with("Cannot pass"), "grafting cannot bypass a typed reference bind");
+				}
+			}
+		});
+
         test("coroutines_stay_lenient", [this]() {
             auto e = make_engine();
             // a coroutine's returns/yields aren't held to the declared type in v1, and

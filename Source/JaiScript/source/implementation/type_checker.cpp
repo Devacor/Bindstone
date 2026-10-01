@@ -27,6 +27,7 @@
 #include <jaiscript/detail/lvalue_shape.hpp>
 #include <cctype>
 #include <jaiscript/detail/return_flow.hpp>
+#include <jaiscript/detail/ref_lvalue.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -2362,6 +2363,13 @@ private:
             case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
             case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
             case script_value_type::jai_object_type:
+            case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
+            case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type: case script_value_type::jai_color_type:
+            case script_value_type::jai_function_type:
+                return reference_type_compatible(arg, ctype_from_type_info(p.type.get()));
+            case script_value_type::jai_array_type: case script_value_type::jai_map_type:
+            case script_value_type::jai_shared_ptr_type: case script_value_type::jai_weak_ptr_type:
+                if (!arg.ti || !concrete_reference_type(arg.ti) || !concrete_reference_type(p.type.get())) { return true; }
                 return reference_type_compatible(arg, ctype_from_type_info(p.type.get()));
             default:
                 return true;
@@ -3596,6 +3604,14 @@ private:
 			else { open.inferred_return = k; }
 		}
 		if (fn.is_coroutine || !fn.ret) { return; }   // coroutine returns/yields + auto: lenient
+		if (fn.ret->base_type == script_value_type::jai_reference_type && r->value) {
+			const type_info* referent = fn.ret->element_type().get();
+			if (referent && !reference_type_compatible(value, ctype_from_type_info(referent))) {
+				diag(diag_level::error, r->location, "cannot return reference to '" + ctype_name(value) +
+					"' from '" + std::string(fn.name) + "' declared to return '" + fn.ret->canonical_name() + "'");
+			}
+			return;
+		}
 		ctype ret = ctype_from_type_info(fn.ret);
 		if (ret.is_unknown()) { return; }
 		if (r->value && !r->binds_reference && ret.kind != ctype::null_k && same_type(ret, value)) { proof = proof_same_type; }

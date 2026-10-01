@@ -128,35 +128,7 @@ namespace jai::detail {
 		return def->get_name() == cls->type_name || class_derives_from(eng, def->get_type_id(), cls->id);
 	}
 
-	// A T& parameter binds an lvalue that holds a T (Dev ruling 2026-09-28, C++): a primitive its exact kind, a class T or a
-	// subclass (a typed null of T or a subclass too); var& and auto& bind any lvalue, container and handle types stay lenient
-	inline bool reference_binding_admits(const type_info* declared, const script_value& current_in, engine* eng) {
-		if (!declared) { return true; }
-		const script_value* cur = &current_in;
-		for (int depth = 0; depth < 8 && cur->is_reference(); ++depth) { cur = &cur->deref(); }   // a property's value can be a reference
-		std::optional<script_value> decoded;
-		if (cur->raw_storage_index() == script_value::TYPEID_CPP_BOUND) { decoded.emplace(cur->bound_decoded_temp()); cur = &*decoded; }
-		const script_value& current = *cur;
-		switch (declared->base_type) {
-			case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
-			case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
-				return current.type() == declared->base_type;
-			case script_value_type::jai_object_type: {
-				if (declared->type_name.empty()) { return true; }
-				if (current.is_null()) {
-					const type_info* t = current.get_type_info().get();
-					if (!t || t->base_type != script_value_type::jai_object_type || t->type_name.empty()) { return true; }
-					return t->type_name == declared->type_name || class_derives_from(eng, t->id, declared->id);
-				}
-				if (!current.is_object()) { return false; }
-				const class_definition* def = cast_dynamic_class(current);
-				if (!def) { return true; }
-				return def->get_name() == declared->type_name || class_derives_from(eng, def->get_type_id(), declared->id);
-			}
-			default:
-				return true;
-		}
-	}
+	// Shared reference admission is in ref_lvalue.hpp; casts, parameters, loops and returns use it.
 
 	// A typed range-for variable's element (Dev ruling 2026-09-28): by value it takes the element as `T x = element;` would, by
 	// reference it binds an element that holds a T (a class: T or a subclass). auto and var bind the element as it is

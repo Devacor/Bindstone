@@ -4275,6 +4275,25 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined tail_of") != std::string::npos, "tail_of grafts with its string reads: " + l);
 			check_true(l.find("-- call kept logs") != std::string::npos, "logs (a push) stays a call: " + l);
 		});
+		test("a_container_taken_ahead_of_a_graft_is_a_guard_the_loop_closes_over", [this]() {
+			// Gator Quest's find_target: mob_at's graft takes the global OCC's value ahead of occ_index's graft and reads its element; the value
+			// lands by the container guard's always form and the read keeps OCC as its container (a block's site resolves it once at entry),
+			// so neither the snapshot nor a later graft's parameter in the same temp (cheb) is a container rewritten inside the loop
+			const std::string prelude =
+				"array<int> OCC = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];\n"
+				"int occ_index(int x) { return x + 1; }\n"
+				"int mob_at(int x) { return OCC[occ_index(x)] - 1; }\n"
+				"int cheb(int a, int b, int c, int d) { return a + b + c + d; }\n"
+				"int run(int n) { int s = 0; for (int i = 0; i < n; ++i) { int o = mob_at(i); int d = cheb(0, 0, i, o); s = s + d; } return s; }\n"
+				"int rebind(int x) { OCC = [100, 200, 300]; return x; }\n"
+				"int swapread() { return OCC[rebind(1)] + 0; }\n";   // the container is read before the index (C++17): the old array's element
+			const std::string run = "to_string(run(8)) + \"|\" + to_string(swapread()) + \"|\" + to_string(OCC[1]);";
+			both(prelude + run, "96|6|200", "a container snapshot and a later graft in one loop");
+			both(prelude + run, "96|6|200", "a container snapshot and a later graft in one loop, proofs off", false);
+			const std::string l = listing_run(prelude + "run(8);");
+			check_true(l.find("-- inlined mob_at") != std::string::npos && l.find("-- inlined cheb") != std::string::npos, "both leaves graft: " + l);
+			check_true(l.find("-- open loop") == std::string::npos, "the loop closes: " + l);
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

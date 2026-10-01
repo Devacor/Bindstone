@@ -59,6 +59,8 @@ struct inline_context {
 	bool in_loop = false;                                          // the graft sits inside a loop: every landing must be a block instruction
 	int loop_depth = 0;                                            // loops of the callee's own the clone is inside (a break or continue binds there)
 	std::vector<std::pair<const expression*, std::shared_ptr<identifier_expr>>> spills;   // the statement's clone: a spilled operand becomes its temp
+	std::vector<std::pair<const expression*, uint32_t>> container_guards;   // the statement's clone: an element read whose container a guard took (its temp)
+	std::vector<std::pair<const binary_expr*, uint32_t>> guarded_reads;     // their clones
 	std::shared_ptr<identifier_expr> receiver;                     // a method graft: `this` and the bare fields read through the caller's receiver
 	bool returns_proven = false;                                   // an untyped lambda whose returns the checker proved one scalar kind
 	std::unordered_map<const expression*, const call_expr*> origins;   // per cloned call: the call it copies
@@ -555,6 +557,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto l = clone_expr(b->left, c); auto r = clone_expr(b->right, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<binary_expr>(b->location, l, b->op, r);
+		for (const auto& g : c.container_guards) { if (g.first == b) { c.guarded_reads.emplace_back(n.get(), g.second); } }
 		n->transient_element_read = b->transient_element_read;
 		n->static_operand_class = b->static_operand_class;
 		if (c.stamps && n->static_operand_class == operand_class_unknown && b->op.type != token_type::left_bracket && !logical_op(b->op.type)) { n->static_operand_class = kind_class(stamp_kind(b->left.get(), c), stamp_kind(b->right.get(), c)); }
@@ -1493,8 +1496,30 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			fused_binary_proto p;
 			p.left = make_fused_operand(sub);
 			chunk_->fused_binary_protos.push_back(std::move(p));
-			emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), static_cast<uint32_t>(tid->slot_index), 0);
-			sc.spills.emplace_back(sub.get(), tid);
+			// the container of an element read whose index is the call, a name or a literal: the guard's always form takes its value here and
+			// the read keeps the name as its container, reading the guard's temp (a block's site resolves the name once at entry; a temp in its
+			// place would be a container rewritten inside the body)
+			const binary_expr* read = nullptr;
+			std::vector<expression_ptr> path;
+			if (sub->get_type() == node_type::identifier_expr && find_path(root, sub.get(), path) && path.size() >= 2 && path[path.size() - 2]->get_type() == node_type::binary_expr) {
+				auto* b = static_cast<const binary_expr*>(path[path.size() - 2].get());
+				const node_type rt = b->right ? b->right->get_type() : node_type::literal_expr;
+				// a value read: the statement itself, or an operand of arithmetic, a comparison or a non-mutating unary
+				bool read_position = path.size() < 3;
+				if (!read_position) {
+					const expression* up = path[path.size() - 3].get();
+					switch (up->get_type()) {
+					case node_type::binary_expr: { auto* ub = static_cast<const binary_expr*>(up); read_position = !(ub->op.type == token_type::left_bracket && ub->left.get() == b); break; }
+					case node_type::unary_expr: read_position = !incdec_op(static_cast<const unary_expr*>(up)->op.type); break;
+					default: break;
+					}
+				}
+				if (b->op.type == token_type::left_bracket && b->left.get() == sub.get() && read_position &&
+				    (b->right.get() == call.get() || rt == node_type::identifier_expr || rt == node_type::literal_expr)) { read = b; }
+			}
+			emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), static_cast<uint32_t>(tid->slot_index), read ? 2u : 0u);
+			if (read) { sc.container_guards.emplace_back(read, static_cast<uint32_t>(tid->slot_index)); }
+			else { sc.spills.emplace_back(sub.get(), tid); }
 			continue;
 		}
 		auto sd = std::make_shared<variable_decl>(sub->location, inline_type(kind), std::string_view("\x01inl"), inline_symbol_, sub);
@@ -1638,7 +1663,10 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		sc.slot_types.assign(hi, nullptr);
 		for (const auto& [s, t] : callable_.slot_types) { sc.slot_types[s] = t; }
 	}
+	for (const auto& [read, slot] : subscript_guards_) { sc.container_guards.emplace_back(read, slot); }   // an earlier round's guarded read, cloned again
 	expression_ptr replaced = clone_expr(root, sc);
+	for (const auto& [read, slot] : sc.container_guards) { if (read->get_type() == node_type::binary_expr) { subscript_guards_.erase(static_cast<const binary_expr*>(read)); } }
+	for (const auto& [read, slot] : sc.guarded_reads) { subscript_guards_[read] = slot; }
 	for (const call_expr* p : pinned) { alias_pins_.erase(p); callee_probes_.erase(p); staged_arguments_.erase(p); }   // moved to the clone's node when the clone holds it
 	for (auto& n : sc.pins) { chunk_->nodes.push_back(n); }
 	--graft_nesting_;

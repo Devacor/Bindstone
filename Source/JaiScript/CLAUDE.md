@@ -335,7 +335,12 @@ engine stays usable", not by `check_throws`.
   The reference's declared type governs a store through it (Dev ruling 2026-09-30): `var v = 1; cast<int&>(v) = 2.5` and
   `int& r = v; r = 2.5` leave v int 2 (the declared `T&` twin, `engine::get_type_info_declared_reference`, stamped only where
   the storage would not already apply T's table; var&/auto& keep the referent's rule). The store decides: a value of
-  T's kind (the twin's `declared_kind`, one compare) takes the storage's own path, only a real conversion runs T's table.
+  T's kind (one compare) takes the storage's own path, only a real conversion runs T's table. A `T& p` parameter follows
+  the same rule (`void f(int& p)` over a var stores ints). A parameter or a slot-resident declaration takes T from its name
+  at compile time (`identifier_expr::declared_ref`, `chunk::slot_declared_kinds`), so nothing is marked at the binding or the
+  call; a reference that reaches another binding (a call argument, `auto& r = q`, a `[&]` capture) and a program-scope one are
+  marked with T there (the declared `T&` twin, `engine::get_type_info_declared_reference`). A graft takes a typed reference
+  parameter only over a local of the same kind.
 - **Every C++ lvalue is an assignment target** (`docs/diagnostics.md` "Assignment targets"): besides names, members,
   elements and `cast<T&>`, a call returning `T&` (function, method, static, `operator[]`; a by-value result raises after
   the call), a conditional of lvalues, `(a = b) = c` and `++x = v`. The parser rewrites a conditional's arms and an inner

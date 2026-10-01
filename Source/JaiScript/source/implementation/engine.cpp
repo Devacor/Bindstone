@@ -3556,12 +3556,7 @@ type_info* engine::get_type_info_declared_reference(type_info* referenced_type) 
         type_info temp = *get_type_info_reference(referenced_type);
         temp.declared_reference = true;
         temp.declared_referent = referenced_type;
-        temp.declared_kind = referenced_type->is_byte_element() ? uint8_t{0xFF}
-                           : referenced_type->base_type == script_value_type::jai_int_type ? static_cast<uint8_t>(script_value::TYPEID_INT)
-                           : referenced_type->base_type == script_value_type::jai_float_type ? static_cast<uint8_t>(script_value::TYPEID_FLOAT)
-                           : referenced_type->base_type == script_value_type::jai_bool_type ? static_cast<uint8_t>(script_value::TYPEID_BOOL)
-                           : referenced_type->base_type == script_value_type::jai_string_type ? static_cast<uint8_t>(script_value::TYPEID_STRING)
-                           : uint8_t{0xFF};
+        temp.declared_kind = detail::declared_ref_kind(referenced_type) ? detail::declared_ref_kind(referenced_type) : uint8_t{0xFF};
         temp.cached_reference_type = nullptr;
         temp.cached_declared_reference_type = nullptr;
         auto result = impl->type_infos_.emplace(key, temp);

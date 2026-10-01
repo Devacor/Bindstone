@@ -261,6 +261,8 @@ namespace jai::vm {
         void compile_cast(const std::shared_ptr<cast_expr>& expr);
         void compile_lambda(const std::shared_ptr<lambda_expr>& expr);
         static bool compound_rhs_inert(const expression* e);
+        uint32_t declared_ref_at_bind(const variable_decl* decl) const;
+        void note_slot_declared_ref(size_t slot, const type_info* referent);
         void compile_variable_decl(const std::shared_ptr<variable_decl>& decl);
         void compile_variable_decl_value(const std::shared_ptr<variable_decl>& decl);
         void compile_decl_value(const std::shared_ptr<variable_decl>& decl, const expression_ptr& init);

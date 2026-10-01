@@ -3810,11 +3810,13 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                 // live in call-frame slots, not the environment), then environment
                 script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
                 if (varPtr) {
-                    if (const uint8_t kind = detail::ref_declared_kind(*varPtr); kind && kind != detail::ref_declared_current(*varPtr).raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the VM exec_incdec)
+                    if (const uint8_t kind = identifier->declared_ref_kind && varPtr->is_reference() ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
+                        kind && kind != detail::ref_declared_current(*varPtr).raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the VM exec_incdec)
                         auto stepped = detail::ref_target_assign(*varPtr, make_value(static_cast<script_int>(1)),
                             expr->op.type == token_type::plus_plus ? token_type::plus : token_type::minus, true, expr->is_postfix, true,
                             operator_table_, engine_, string_symbolizer_,
-                            [this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); });
+                            [this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); },
+                            identifier->declared_ref);
                         if (!stepped) { return stepped.error_value(); }
                         push_value(std::move(stepped.value()));
                         return {};
@@ -4131,7 +4133,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             operator_table_, engine_, string_symbolizer_,
                             [this](const script_value& l, token_type o, const script_value& r) {
                                 return evaluate_arithmetic(l, o, r, detail::compound_index(o));
-                            });
+                            }, identifier->declared_ref);
                         if (!result) {
                             return result.error_value();
                         }
@@ -4145,7 +4147,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // right value is already on the stack); a plain cell or a value slot cannot raise on a dereference, so the
                 // fast paths keep reading it first
                 const auto* target_holder = varPtr->is_reference() ? varPtr->get_reference_holder() : nullptr;
-                const uint8_t declared_kind = target_holder ? detail::ref_declared_kind(*varPtr) : uint8_t{0};
+                const uint8_t declared_kind = !target_holder ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
                 const bool deferred_target = target_holder != nullptr && (!target_holder->plain_cell() ||
                                              (declared_kind && declared_kind != target_holder->cell()->raw_storage_index()));   // the in-place paths keep T's kind only over T's kind
                 if (!deferred_target) {
@@ -4608,14 +4610,14 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
                 // `int& r` over storage of another kind, or a result leaving T's kind: the declared type's table (KEEP
                 // BYTE-PARALLEL with the vm's compound store)
-                if (const uint8_t kind = detail::ref_declared_kind(*varPtr);
+                if (const uint8_t kind = !varPtr->is_reference() ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
                     kind && !detail::ref_declared_compound_keeps(kind, detail::ref_declared_current(*varPtr), derefRight, detail::compound_base(expr->op.type))) [[unlikely]] {
                     const token_type op = detail::compound_base(expr->op.type);
                     auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, detail::binary_op_name(op),
                         operator_table_, engine_, string_symbolizer_,
                         [this](const script_value& l, token_type o, const script_value& r) {
                             return evaluate_arithmetic(l, o, r, detail::compound_index(o));
-                        });
+                        }, identifier->declared_ref);
                     if (!result) {
                         return result.error_value();
                     }
@@ -5315,7 +5317,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                     }
                     if (store_through) {
-                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_));
+                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref, identifier->declared_ref_kind));
                     } else {
                         // Parse-proven typed store: an IDENTICAL interned type tag (raw
                         // pointer compare - int/float tags are engine-canonical) makes
@@ -5466,7 +5468,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 };
                 if (store_through) {
                     // This is a reference - assign through it (deep copy the value)
-                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_));
+                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_, identifier->declared_ref, identifier->declared_ref_kind));
                 } else if (currentVal && currentVal->is_cpp_bound()) {
                     // This is a C++ bound value - use assign_through
                     currentVal->assign_through(value);
@@ -6242,7 +6244,10 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         if (decl->ref_escaping && !value.is_reference()) {
             value = script_value::make_cell_reference(std::move(value), engine_);
         }
-        if (decl->type && decl->type->is_reference() && value.is_reference()) {   // `int& r = e`: the reference carries its declared type
+        // `int& r = e`: a reference whose value reaches another binding (or that no slot holds) carries its declared type; a
+        // slot-resident one is decided at its stores from the name (identifier_expr::declared_ref)
+        if (decl->type && decl->type->is_reference() && value.is_reference() && !decl->declared_ref_storage_enforced &&
+            (decl->ref_escaping || decl->slot_index == SIZE_MAX || call_stack_.empty())) {
             detail::ref_declare(value, decl->type->element_type().get(), engine_);
         }
         if (decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
@@ -14256,6 +14261,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             auto rejection = detail::typed_slot_rejection(bound->deref(), *param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function.name}, engine_);
             cleanup();
             return rejection;
+        }
+        if ((param.ref_escaping || param.declared_ref_escapes) && bound) [[unlikely]] {   // its reference reaches a binding that cannot see the name
+            detail::ref_declare(*const_cast<script_value*>(bound), const_cast<type_info*>(detail::parameter_declared_ref(param)), engine_);
         }
     }
 

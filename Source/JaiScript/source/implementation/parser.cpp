@@ -167,6 +167,93 @@ namespace {
             return false;
         }
 
+        // The T of the `T& name` declaration or `T& p` parameter a name resolves to, slot-resident with a concrete T (the store
+        // decides by T)
+        type_info* names_declared_reference(uint64_t symbol) const {
+            if (symbol == UINT64_MAX) {
+                return nullptr;
+            }
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+                auto vr = it->vars.equal_range(symbol);
+                const bool declared_here = vr.first != vr.second || it->params.count(symbol) || it->range_vars.count(symbol) ||
+                                           it->destructures.count(symbol);
+                if (!declared_here) {
+                    continue;
+                }
+                if (it->range_vars.count(symbol) || it->destructures.count(symbol)) {
+                    return nullptr;
+                }
+                type_info* found = nullptr;
+                auto pr = it->params.equal_range(symbol);
+                for (auto q = pr.first; q != pr.second; ++q) {
+                    const type_info* t = q->second->slot_index != SIZE_MAX ? detail::parameter_declared_ref(*q->second) : nullptr;
+                    if (!t || (found && found != t) || vr.first != vr.second) { return nullptr; }
+                    found = const_cast<type_info*>(t);
+                }
+                for (auto v = vr.first; v != vr.second; ++v) {
+                    const variable_decl* d = v->second;
+                    if (!d->type || d->type->base_type != script_value_type::jai_reference_type || d->slot_index == SIZE_MAX ||
+                        d->declared_ref_storage_enforced || !detail::declared_ref_kind(d->type->element_type().get())) {
+                        return nullptr;
+                    }
+                    if (found && found != d->type->element_type().get()) { return nullptr; }
+                    found = d->type->element_type().get();
+                }
+                return found;
+            }
+            return nullptr;
+        }
+
+        // The declared type of the value declaration a name resolves to (a typed local, a by-value parameter), else null
+        const type_info* resolved_value_type(uint64_t symbol) const {
+            if (symbol == UINT64_MAX) {
+                return nullptr;
+            }
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+                auto vr = it->vars.equal_range(symbol);
+                auto pr = it->params.equal_range(symbol);
+                if (vr.first == vr.second && pr.first == pr.second && !it->range_vars.count(symbol) && !it->destructures.count(symbol)) {
+                    continue;
+                }
+                const type_info* found = nullptr;
+                int count = 0;
+                for (auto v = vr.first; v != vr.second; ++v, ++count) {
+                    if (!v->second->type || v->second->type->base_type == script_value_type::jai_reference_type) { return nullptr; }
+                    found = v->second->type.get();
+                }
+                for (auto q = pr.first; q != pr.second; ++q, ++count) {
+                    if (q->second->is_reference || !q->second->type) { return nullptr; }
+                    found = q->second->type.get();
+                }
+                return count == 1 ? found : nullptr;
+            }
+            return nullptr;
+        }
+
+        // A reference declaration whose reference value reaches another binding (a call argument may bind a reference
+        // parameter): it carries its declared type with it (the runtime stamp, detail::ref_declare)
+        void escape_reference_decl(uint64_t symbol) {
+            if (symbol == UINT64_MAX) {
+                return;
+            }
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+                auto vr = it->vars.equal_range(symbol);
+                bool found = it->range_vars.count(symbol) || it->destructures.count(symbol);
+                for (auto v = vr.first; v != vr.second; ++v) {
+                    found = true;
+                    if (v->second->type && v->second->type->base_type == script_value_type::jai_reference_type) { v->second->ref_escaping = true; }
+                }
+                auto pr = it->params.equal_range(symbol);
+                for (auto q = pr.first; q != pr.second; ++q) {
+                    found = true;
+                    if (q->second->is_reference) { q->second->declared_ref_escapes = true; }
+                }
+                if (found) {
+                    return;
+                }
+            }
+        }
+
         // The same walk, answering whether the name resolves to a VALUE declaration at all (false for a
         // reference declaration and for a name the unit does not declare: another unit's global, a host name)
         bool names_known_value_decl(uint64_t symbol) const {
@@ -396,6 +483,7 @@ namespace {
 
         void walk_args(const std::vector<expression_ptr>& args) {
             for (const auto& a : args) {
+                if (a && a->get_type() == node_type::identifier_expr) { escape_reference_decl(static_cast<const identifier_expr*>(a.get())->symbol_id); }
                 walk_expr(a.get());
             }
         }
@@ -409,6 +497,7 @@ namespace {
                            bool returns_reference = false) {
             scopes.emplace_back();
             ref_return_stack.push_back(returns_reference ? 1 : 0);
+            for (auto& p : params) { p.declared_ref_escapes = false; }
             for (auto& p : params) {
                 if (p.symbol_id == UINT64_MAX && symbolizer) {
                     p.symbol_id = symbolizer->intern(p.name);
@@ -459,6 +548,8 @@ namespace {
                     auto* id = static_cast<identifier_expr*>(e);
                     id->names_value_decl = !names_reference_decl(id->symbol_id);
                     id->names_known_value = names_known_value_decl(id->symbol_id);
+                    id->declared_ref = id->global_qualified ? nullptr : names_declared_reference(id->symbol_id);
+                    id->declared_ref_kind = detail::declared_ref_kind(id->declared_ref);
                     escape_if_outer_read(id->symbol_id);   // default-[&] body: outer reads escape
                     break;
                 }
@@ -689,6 +780,14 @@ namespace {
                         escape(static_cast<identifier_expr*>(d->initializer.get())->symbol_id);
                     }
                     walk_expr(d->initializer.get());
+                    d->declared_ref_storage_enforced = false;
+                    if (d->type && d->type->base_type == script_value_type::jai_reference_type && d->initializer &&
+                        d->initializer->get_type() == node_type::identifier_expr && !static_cast<identifier_expr*>(d->initializer.get())->global_qualified) {
+                        const type_info* referent = d->type->element_type().get();
+                        const type_info* source = resolved_value_type(static_cast<identifier_expr*>(d->initializer.get())->symbol_id);
+                        const uint8_t kind = detail::declared_ref_kind(referent);
+                        d->declared_ref_storage_enforced = source && kind && kind != 0xFF && detail::declared_ref_kind(source) == kind;
+                    }
                     if (!scopes.empty() && d->name_id != UINT64_MAX) {
                         scopes.back().vars.emplace(d->name_id, d);
                         if (!d->is_static && d->type) {

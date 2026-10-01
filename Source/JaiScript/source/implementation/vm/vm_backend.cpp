@@ -3587,7 +3587,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 #ifdef JAISCRIPT_VM_PROFILE
 					profile_store_last_path_ = 3;
 #endif
-					VM_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_));
+					{
+						const uint8_t declared_kind = slot_declared_kind(f, ins.b);
+						VM_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_,
+							declared_kind ? f.code->slot_declared_refs[ins.b] : nullptr, declared_kind));
+					}
 					stack_.push_back(std::move(value));
 					return {};
 				}
@@ -4132,7 +4136,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		// reach the setter.
 		if (varPtr->is_reference()) {
 			const auto* refHolder = varPtr->get_reference_holder();
-			declared_kind = detail::ref_declared_kind(*varPtr);
+			declared_kind = !(ins.c & compound_flag_global_only) && slot_declared_kind(f, ins.b) ? slot_declared_kind(f, ins.b) : detail::ref_declared_kind(*varPtr);
 			if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
 				const token_type op = compound_kind_token(kind);
 				const char* opName = detail::binary_op_name(op);
@@ -4140,7 +4144,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 					operator_table_, engine_, symbolizer_,
 					[this](const script_value& l, token_type o, const script_value& r) {
 						return evaluate_arithmetic(l, o, r, detail::compound_index(o));
-					});
+					}, (ins.c & compound_flag_global_only) ? nullptr : slot_declared_ref(f, ins.b));
 				if (!result) {
 					return raise_from(result);
 				}
@@ -4171,7 +4175,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				operator_table_, engine_, symbolizer_,
 				[this](const script_value& l, token_type o, const script_value& r) {
 					return evaluate_arithmetic(l, o, r, detail::compound_index(o));
-				});
+				}, (ins.c & compound_flag_global_only) ? nullptr : slot_declared_ref(f, ins.b));
 			if (!result) {
 				return raise_from(result);
 			}
@@ -4632,10 +4636,13 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		// (KEEP BYTE-PARALLEL with the interpreter ++/-- twin)
 		auto* scratch_ref = varPtr->scratch_ref_holder();
 		script_value& target = varPtr->deref();
-		if (const uint8_t declared_kind = detail::ref_declared_kind(*varPtr); declared_kind && declared_kind != target.raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the interpreter ++/--)
+		const bool slot_named = !(ins.c & incdec_flag_global_only) && varPtr->is_reference();
+		if (const uint8_t declared_kind = slot_named && slot_declared_kind(f, ins.b) ? slot_declared_kind(f, ins.b) : detail::ref_declared_kind(*varPtr);
+		    declared_kind && declared_kind != target.raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the interpreter ++/--)
 			auto stepped = detail::ref_target_assign(*varPtr, script_value(static_cast<script_int>(1), engine_), isIncrement ? token_type::plus : token_type::minus,
 				true, postfix, true, operator_table_, engine_, symbolizer_,
-				[this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); });
+				[this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); },
+				slot_named ? slot_declared_ref(f, ins.b) : nullptr);
 			if (!stepped) { return raise_from(stepped); }
 			stack_.push_back(std::move(stepped.value()));
 			return {};
@@ -11257,8 +11264,10 @@ std::optional<checked_result<script_value>> vm_backend::bind_bare_cpp_property_r
 	return detail::bind_cpp_property_ref(*this_ptr, sym, engine_, symbolizer_);
 }
 
-void vm_backend::declare_reference(script_value& value, const variable_decl* decl) {
-	detail::ref_declare(value, decl->type->element_type().get(), engine_);
+void vm_backend::declare_stored_reference(frame& f, const variable_decl* decl) {
+	script_value* stored = decl->slot_index != SIZE_MAX && f.locals && !f.top_level ? frame_slot(f, decl->slot_index)
+	                                                                               : environment_->get_value_ptr(decl->name_id);
+	if (stored) { detail::ref_declare(*stored, decl->type->element_type().get(), engine_); }
 }
 
 op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
@@ -11302,7 +11311,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			if (!*minted) {
 				return raise_from(*minted);
 			}
-			return define_ref_decl(f, decl, std::move(minted->value()));
+			return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(minted->value())));
 		}
 		VM_TRY(frame_bare_member_access(f, target_sym));
 		if (auto method = bare_method_reference(f, target_sym)) { return *method; }
@@ -11314,11 +11323,11 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return define_ref_decl(f, decl, std::move(aliased.value()));
+		return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(aliased.value())));
 	}
 	// Box the variable's storage into a cell and alias it (escape-legal: the ref
 	// keeps the cell alive after the env dies)
-	return define_ref_decl(f, decl, share_env_ref(*targetPtr));
+	return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, share_env_ref(*targetPtr)));
 }
 
 op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
@@ -11331,7 +11340,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return define_ref_decl(f, decl, std::move(aliased.value()));
+		return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(aliased.value())));
 	}
 	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
 	if (decl->initializer && decl->initializer->get_type() == node_type::member_expr &&
@@ -11343,7 +11352,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (storage.is_reference() && !storage.get_reference_holder()) {
 				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 			}
-			return define_ref_decl(f, decl, share_env_ref(storage));
+			return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, share_env_ref(storage)));
 		}
 	}
 	if (decl->initializer && detail::is_member_final_ref_lvalue(decl->initializer.get())) {
@@ -11365,7 +11374,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (!aliased) {
 				return raise_from(aliased);
 			}
-			return define_ref_decl(f, decl, std::move(aliased.value()));
+			return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(aliased.value())));
 		}
 	}
 	// A math component binds a COMPONENT reference (KEEP BYTE-PARALLEL with the interpreter's define_component_reference)
@@ -11374,7 +11383,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		return raise_from(part);
 	}
 	if (part.value().is_reference()) {
-		return define_ref_decl(f, decl, std::move(part.value()));
+		return declared_ref_landed(f, ins, decl, define_decl_value(f, decl, std::move(part.value())));
 	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),
@@ -21474,6 +21483,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
 			return raise_from(detail::typed_slot_rejection(bound->deref(), *param.type,
 				detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name}, engine_));
+		}
+		if ((param.ref_escaping || param.declared_ref_escapes) && bound) [[unlikely]] {   // its reference reaches a binding that cannot see the name
+			detail::ref_declare(*const_cast<script_value*>(bound), const_cast<type_info*>(detail::parameter_declared_ref(param)), engine_);
 		}
 	}
 	return {};

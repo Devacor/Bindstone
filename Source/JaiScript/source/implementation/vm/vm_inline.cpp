@@ -866,12 +866,17 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 				const auto* identifier = static_cast<const identifier_expr*>(a);
 				if (identifier->global_qualified) return "a reference argument spelled ::name";
 				if (identifier->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
-				if (p.type && !any_type(p.type.get()) && p.type->type_name != "auto") {   // the alias skips the bind's admission check: a local declared another type (var included) binds through the call
+				if (p.type && !any_type(p.type.get()) && p.type->type_name != "auto") {
+					// the alias names the caller's variable in the parameter's place, skipping the bind's admission and the parameter's
+					// declared type at the stores (Dev ruling 2026-09-30): only a variable statically of that type (a local declared it, a
+					// `T& alias`) grafts, any other binds through the call
 					const type_info* actual = nullptr;
 					if (frame && identifier->slot_index < frame->size()) { actual = (*frame)[identifier->slot_index]; }
 					else if (auto found = callable_.slot_types.find(static_cast<uint32_t>(identifier->slot_index)); found != callable_.slot_types.end()) { actual = found->second; }
 					if (actual && actual->is_reference()) { actual = actual->element_type().get(); }
-					if (actual && !actual->equals(*p.type)) return "a typed reference argument of another declared type";
+					if (!actual && !identifier->names_value_decl) { actual = identifier->declared_ref; }
+					if (!actual) return "a typed reference argument of an unknown declared type";
+					if (!actual->equals(*p.type)) return "a typed reference argument of another declared type";
 				}
 				continue;
 			}

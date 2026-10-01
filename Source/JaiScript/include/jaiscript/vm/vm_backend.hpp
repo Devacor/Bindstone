@@ -1345,12 +1345,22 @@ namespace jai::vm {
             return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), box_cell, decl);
         }
         // `int& r = e`: the reference carries its declared type (detail::ref_declare)
-        op_status define_ref_decl(frame& f, const variable_decl* decl, script_value&& value) {
-            const type_info* t = decl->type.get();
-            if (t && t->base_type == script_value_type::jai_reference_type && !t->type_params.empty()) [[unlikely]] { declare_reference(value, decl); }
-            return define_decl_value(f, decl, std::move(value));
+        // `int& r = e`: a reference whose value reaches another binding (or that no frame slot holds) carries its declared
+        // type, marked once it landed (the compiler's c = 1); a slot-resident one is decided at its stores from the chunk
+        // (chunk::slot_declared_kinds)
+        op_status declared_ref_landed(frame& f, const vm_instruction& ins, const variable_decl* decl, op_status landed) {
+            if (ins.c && landed == op_status{}) [[unlikely]] { declare_stored_reference(f, decl); }
+            return landed;
         }
-        void declare_reference(script_value& value, const variable_decl* decl);
+        void declare_stored_reference(frame& f, const variable_decl* decl);
+        uint8_t slot_declared_kind(const frame& f, uint32_t slot) const noexcept {
+            const auto& k = f.code->slot_declared_kinds;
+            return slot < k.size() ? k[slot] : uint8_t{0};
+        }
+        type_info* slot_declared_ref(const frame& f, uint32_t slot) const noexcept {
+            const auto& t = f.code->slot_declared_refs;
+            return slot < t.size() ? t[slot] : nullptr;
+        }
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type,
                                                                 std::string_view var_name = {},

@@ -756,9 +756,10 @@ namespace jai::detail {
 	// exact clone-through-deref line; constrained element/field refs enforce like the
 	// subscript-assign paths do.
 	inline checked_result<void> ref_store_through(script_value& refLocal, script_value& value,
-	                                              engine* eng, string_symbolizer* symbolizer) {
-		if (const uint8_t kind = ref_declared_kind(refLocal); kind && kind != value.deref().raw_storage_index()) [[unlikely]] {
-			auto converted = ref_declared_convert(refLocal, ref_declared_type(refLocal), value, eng);
+	                                              engine* eng, string_symbolizer* symbolizer,
+	                                              type_info* declared_static = nullptr, uint8_t static_kind = 0) {
+		if (const uint8_t kind = static_kind ? static_kind : ref_declared_kind(refLocal); kind && kind != value.deref().raw_storage_index()) [[unlikely]] {
+			auto converted = ref_declared_convert(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value, eng);
 			if (!converted) { return {}; }
 			if (!*converted) { return converted->error_value(); }
 			return ref_store_through_storage(refLocal, converted->value(), eng, symbolizer);
@@ -800,7 +801,8 @@ namespace jai::detail {
 	template <typename Arith>
 	inline checked_result<script_value> ref_compound_store_constrained(
 			script_value& refLocal, const script_value& rightArg, token_type op, const char* opName,
-			const engine_operator_table* op_table, engine* eng, string_symbolizer* symbolizer, Arith&& arith) {
+			const engine_operator_table* op_table, engine* eng, string_symbolizer* symbolizer, Arith&& arith,
+			type_info* declared_static = nullptr) {
 		// Current-value read raw-derefs exactly like the unconstrained compound path: a
 		// removed element/field surfaces as the same caller-frame-catchable throw whether
 		// or not the bound container was typed
@@ -867,7 +869,7 @@ namespace jai::detail {
 						"Unknown compound assignment operator");
 			}
 		}
-		if (type_info* declared = ref_declared_type(refLocal)) [[unlikely]] {
+		if (type_info* declared = declared_static ? declared_static : ref_declared_type(refLocal)) [[unlikely]] {
 			auto converted = ref_declared_convert(refLocal, declared, resultValue, eng);
 			if (!converted) { return resultValue; }
 			if (!*converted) { return converted->error_value(); }
@@ -909,11 +911,12 @@ namespace jai::detail {
 	template <typename Arith>
 	inline checked_result<script_value> ref_target_assign(script_value& ref, const script_value& value, token_type op, bool incdec,
 	                                                      bool old_result, bool result_needed, const engine_operator_table* op_table,
-	                                                      engine* eng, string_symbolizer* symbolizer, Arith&& arith) {
+	                                                      engine* eng, string_symbolizer* symbolizer, Arith&& arith,
+	                                                      type_info* declared_static = nullptr) {
 		script_value outcome(std::monostate{}, eng);
 		if (op == token_type::equal) {
 			script_value incoming = value.deref();
-			auto stored = ref_store_through(ref, incoming, eng, symbolizer);
+			auto stored = ref_store_through(ref, incoming, eng, symbolizer, declared_static, declared_ref_kind(declared_static));
 			if (!stored) { return stored.error_value(); }
 			if (!result_needed) { return incoming; }
 		} else {
@@ -926,7 +929,7 @@ namespace jai::detail {
 				}
 			}
 			if (old_result) { outcome = ref_detached_value(std::move(current.value())); }
-			auto result = ref_compound_store_constrained(ref, value, op, binary_op_name(op), op_table, eng, symbolizer, arith);
+			auto result = ref_compound_store_constrained(ref, value, op, binary_op_name(op), op_table, eng, symbolizer, arith, declared_static);
 			if (!result) { return result; }
 			if (old_result) { return outcome; }
 			if (!result_needed) { return result; }

@@ -269,6 +269,7 @@ namespace jai::vm {
         void compile_member(const std::shared_ptr<member_expr>& expr);
         void member_tail_into_temp(const expression* e);
         bool size_temp_operand(const expression* e) const;
+        bool enum_temp_operand(const expression* e) const;
         bool elem_member_operand(const expression* e) const;
         bool velem_operand(const expression* e) const;
         void velem_proto_for(const expression_ptr& member, velem_proto& p);

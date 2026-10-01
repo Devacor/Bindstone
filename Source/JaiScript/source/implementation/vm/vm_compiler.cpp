@@ -3072,9 +3072,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (landing == k_typed_dst_temp) { cells[k].temp = true; cells[k].open_def = cells[k].open_def || kind == 0; defs.emplace_back(static_cast<uint32_t>(at), static_cast<uint32_t>(k)); }
 			}
 		};
-		auto env_cell = [&](const fused_operand& o, uint8_t kind, uint32_t cache_slot, size_t at) -> uint32_t {
+		auto env_cell = [&](const fused_operand& o, uint8_t kind, uint32_t cache_slot, size_t at, uint32_t member_node = k_invalid_u32) -> uint32_t {
+			auto member_name = [&](uint32_t node) -> std::string_view { return node < c.nodes.size() ? static_cast<const member_expr*>(c.nodes[node].get())->member : std::string_view{}; };
 			for (size_t e = 0; e < env_ops.size(); ++e) {
 				if (c.symbols[env_ops[e].operand.symbol] != c.symbols[o.symbol]) continue;   // one cell per name: the symbol table is not deduplicated
+				if ((env_ops[e].member_node == k_invalid_u32) != (member_node == k_invalid_u32) || (member_node != k_invalid_u32 && member_name(env_ops[e].member_node) != member_name(member_node))) continue;   // an enum's member is its own cell
 				for (auto& cl : cells) {
 					if (cl.env_operand == e) { if (cl.kind == 0) { cl.kind = kind; } else if (kind != 0 && cl.kind != kind) { refuse(chunk::cell_refusal_representation, at); } }
 				}
@@ -3082,7 +3084,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			chunk::cell_loop::cell nc{ k_invalid_u32, kind, 0, true, false, nullptr, static_cast<uint32_t>(env_ops.size()) };
 			cells.push_back(nc);
-			env_ops.push_back(chunk::cell_loop::env_operand_ref{ o, cache_slot });
+			env_ops.push_back(chunk::cell_loop::env_operand_ref{ o, cache_slot, member_node });
 			return static_cast<uint32_t>(env_ops.size() - 1);
 		};
 		// an environment value a store lands on (a global, or the member a bare name resolves to; `::name` stays general): the
@@ -3377,6 +3379,20 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(st.a, head_kind, false, 0, nullptr, ip); use_slot(st.b, head_kind, false, 0, nullptr, ip);
 					op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
 				}
+			} else if (st.op == opcode::op_load && st.a == k_invalid_u32 && st.c == 0 && st.b < c.symbols.size() && ip + 2 < back && code[ip + 1].op == opcode::op_get_member &&
+			           code[ip + 1].a < c.nodes.size() && c.nodes[code[ip + 1].a]->get_type() == node_type::member_expr &&
+			           code[ip + 2].op == opcode::op_call_temp && code[ip + 2].a < k_typed_slot_mask) {
+				// an enum's value read by name into a temp: an environment cell for the member, read at entry and after every call; the get and the
+				// temp's store have no copy
+				fused_operand o; o.symbol = st.b; o.ident_node = ip < c.ident_nodes.size() ? c.ident_nodes[ip] : k_invalid_u32;
+				const uint32_t e = env_cell(o, kint, static_cast<uint32_t>(ip * 3), ip, code[ip + 1].a);
+				const uint32_t t = code[ip + 2].a;
+				use_slot(t, kint, true, k_typed_dst_temp, nullptr, ip + 2);
+				op.kind = ir::mov; op.a = t; op.writes = t; op.b = k_ir_env_bit | e;
+				ops.push_back(op);
+				ir_op sk1; sk1.kind = ir::skip; ops.push_back(sk1);
+				op = ir_op{}; op.kind = ir::skip;
+				ip += 2;
 			} else if (vlive && st.op == opcode::op_jump) {
 				// the chain's value carried to its consumer
 				if (!(st.a > ip && st.a <= back)) { refuse(chunk::cell_refusal_effect, ip); break; }
@@ -5453,7 +5469,17 @@ uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
 	return slot != k_invalid_u32 && slot < k_typed_slot_mask ? slot : k_invalid_u32;
 }
-bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e) || velem_operand(e) || elem_member_operand(e); }
+bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e) || velem_operand(e) || elem_member_operand(e) || enum_temp_operand(e); }
+// `Ai.summon`: a member read of an environment name (an enum's value, a map's entry by name) lands in a temp; a block reads an enum map's
+// entry through an environment cell at entry and after calls, any other base refuses the block's entry
+bool vm_compiler::enum_temp_operand(const expression* e) const {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return false;
+	if (!e || e->get_type() != node_type::member_expr) return false;
+	const auto* m = static_cast<const member_expr*>(e);
+	if (m->is_static || m->null_safe || m->is_arrow || !m->object || m->object->get_type() != node_type::identifier_expr) return false;
+	auto* id = static_cast<identifier_expr*>(m->object.get());
+	return !id->global_qualified && const_cast<vm_compiler*>(this)->identifier_slot_operand(id) == k_invalid_u32;
+}
 
 // `a[i].x` where the checker proved `a` a math vector buffer, `a` a frame slot, `i` a frame slot or an int literal and `x` a component
 // name: op_velem_load reads the component straight from the buffer's words
@@ -5531,6 +5557,17 @@ bool vm_compiler::size_temp_operand(const expression* e) const {
 // The member read lands in a fresh compiler temp (op_member_temp: op_get_member's kernel, the value into the temp); `out`
 // becomes the direct temp operand. The read keeps its place: it is emitted where the operand is evaluated.
 void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operand& out) {
+	if (enum_temp_operand(e.get())) {
+		compile_expression(e);   // the enum's load and the member read, the value on the stack
+		const uint32_t t = static_cast<uint32_t>(temp_next_++);
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		emit(opcode::op_call_temp, t);
+		out = fused_operand{};
+		out.slot = t;
+		out.symbol = temp_symbol_index();
+		out.direct = true;
+		return;
+	}
 	if (size_temp_operand(e.get())) {
 		// the size call's site (a slot receiver, the builtin indexes), its value into a temp
 		const auto call = std::static_pointer_cast<call_expr>(e);
@@ -6895,7 +6932,7 @@ void vm_compiler::member_tail_into_temp(const expression* e) {
 	}
 	if (n < 2 || code[n - 1].op != opcode::op_get_member || code[n - 2].op != opcode::op_load) return;
 	const uint32_t base = member_base_slot(e);
-	if (code[n - 2].a != base || code[n - 2].c != 0) return;
+	if (base == k_invalid_u32 || code[n - 2].a != base || code[n - 2].c != 0) return;   // an environment base's load names no slot either
 	const uint32_t node = code[n - 1].a;
 	if (node >= chunk_->nodes.size() || chunk_->nodes[node].get() != e) return;
 	const uint32_t t = static_cast<uint32_t>(temp_next_);

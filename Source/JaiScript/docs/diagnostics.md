@@ -114,7 +114,7 @@ is the writability question.
 | host `[]` overloads | `No matching overload found for '[]' with <symbol> arguments` | `No overload of '[]' takes (string)` |
 | namespace function overloads | `No matching overload in namespace 'ns' for <symbol> arguments` | `No overload of 'f' takes (int)` |
 | script constructor overloads | `No constructor found with matching arguments` | `No constructor of 'Vec2' takes (string)` |
-| a class without a constructor called with arguments | `Default constructor takes no arguments` | `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same text when it knows the arguments' types) |
+| a class without a constructor called with arguments | `Default constructor takes no arguments` | an aggregate (every class in the chain constructor-less, no private or reference instance field) takes one initializer per field: `Too many initializers for 'Bare': it has 1 field, got 2`; any other class: `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same texts when it knows the arguments) |
 | `: Base(...)` / ancestor initializer | `No matching constructor for ancestor class` | `No constructor of 'Base' takes (string)` |
 | `: this(...)` delegation | `No matching constructor found for this() delegation` | `No constructor of 'Vec2' takes (string)` |
 | C++ method overloads by count | `Method argument count mismatch: no overload accepts this number of arguments` | `No overload of 'dot' takes (int, string)` |

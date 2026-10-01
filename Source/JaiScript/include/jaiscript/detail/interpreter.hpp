@@ -59,7 +59,7 @@ namespace jai {
     class script_class_definition;
     class class_definition;
     class class_instance;
-    namespace detail { struct namespace_store_target; }
+    namespace detail { struct namespace_store_target; struct aggregate_plan; }
     namespace debug { class controller; }
 
     // Forward declare interpreter for scoped_method_environment
@@ -581,7 +581,8 @@ namespace jai {
         checked_result<void> evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                         std::shared_ptr<script_class_definition> class_def,
                                         std::shared_ptr<environment> init_env,
-                                        bool skip_parent_recursion = false);
+                                        bool skip_parent_recursion = false,
+                                        const detail::aggregate_plan* aggregate = nullptr);
         // interpreter_backend forwards execution_backend::apply_field_initializers here
         void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                       const std::shared_ptr<class_definition>& class_def);

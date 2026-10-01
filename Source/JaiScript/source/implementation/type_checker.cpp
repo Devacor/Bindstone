@@ -2595,13 +2595,61 @@ private:
         }
     }
 
+    // The runtime's aggregate rule (detail::collect_aggregate_fields): every class in the chain is a script class declaring
+    // no constructor, no instance field is private or a reference; the instance fields in declaration order, bases first
+    enum class aggregate_shape : uint8_t { aggregate, not_aggregate, unknown };
+    aggregate_shape aggregate_fields(const sclass& c, std::vector<const variable_decl*>& out, int depth = 0) {
+        if (depth > 64 || !c.decl) { return aggregate_shape::unknown; }
+        if (!c.ctors.empty()) { return aggregate_shape::not_aggregate; }
+        for (auto base : c.decl->base_classes) {
+            const sclass* b = find_sclass(base);
+            if (!b) {
+                auto def = engine_class(base);
+                return def && !def->is_script_class() ? aggregate_shape::not_aggregate : aggregate_shape::unknown;
+            }
+            const aggregate_shape shape = aggregate_fields(*b, out, depth + 1);
+            if (shape != aggregate_shape::aggregate) { return shape; }
+        }
+        for (const auto& m : c.decl->members) {
+            if (!m.declaration || m.declaration->get_type() != node_type::variable_decl) { continue; }
+            auto* f = static_cast<const variable_decl*>(m.declaration.get());
+            if (f->is_static) { continue; }
+            if (c.nonpublic.count(f->name) || (f->type && f->type->base_type == script_value_type::jai_reference_type)) {
+                return aggregate_shape::not_aggregate;
+            }
+            out.push_back(f);
+        }
+        return aggregate_shape::aggregate;
+    }
+
     void check_ctor_call(std::string_view cls_name, const sclass& c, const std::vector<ctype>& args,
                          const source_location& loc) {
         if (c.ctors.empty()) {
-            // implicit default + implicit copy
+            // implicit default + implicit copy, else aggregate initialization (detail/aggregate_init.hpp)
             bool copy_ok = args.size() == 1 &&
                 (args[0].is_unknown() || (args[0].kind == ctype::object_k && class_relation(args[0].cls, cls_name) != 0));
-            if (!args.empty() && !copy_ok) {   // the runtime's text (detail::overload_miss)
+            if (args.empty() || copy_ok) { return; }
+            std::vector<const variable_decl*> fields;
+            switch (aggregate_fields(c, fields)) {
+                case aggregate_shape::unknown: return;
+                case aggregate_shape::aggregate:
+                    if (args.size() > fields.size()) {   // the runtime's text (detail::too_many_initializers)
+                        diag(diag_level::error, loc, "Too many initializers for '" + std::string(cls_name) + "': it has " +
+                             std::to_string(fields.size()) + (fields.size() == 1 ? " field" : " fields") + ", got " + std::to_string(args.size()),
+                             c.foreign ? 0 : c.decl->location.line, c.foreign ? 0 : c.decl->location.column);
+                        return;
+                    }
+                    for (size_t i = 0; i < args.size(); ++i) {
+                        const variable_decl* f = fields[i];
+                        if (!f->type || f->type->base_type == script_value_type::jai_any_type) { continue; }
+                        check_store(args[i], false, token_type::equal, ctype_from_type_info(f->type.get()), declared_variable_type_name(f),
+                                    "field '" + std::string(f->name) + "'", loc, 0, 0);
+                    }
+                    return;
+                case aggregate_shape::not_aggregate:
+                    break;
+            }
+            {   // the runtime's text (detail::overload_miss)
                 std::string list = "(";
                 for (size_t i = 0; i < args.size() && i < 6; ++i) { if (i) { list += ", "; } list += ctype_name(args[i]); }
                 if (args.size() > 6) { list += ", ..."; }

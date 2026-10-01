@@ -1706,8 +1706,97 @@ public:
                 check_eq((int64_t)4, instance->get_field(v_id).as_int(), "host get_field bypasses enforcement");
             }
         });
-    }
-};
+
+        // C++ aggregate initialization ([dcl.init.aggr]; detail/aggregate_init.hpp): a class declaring no constructor
+        // takes one initializer per instance field in declaration order, bases first
+        auto ints = [this](const script_value& r, const std::vector<int64_t>& expected, const std::string& what) {
+            const auto& v = r.as_array();
+            check_eq(expected.size(), v.size(), what + " (count)");
+            for (size_t i = 0; i < expected.size() && i < v.size(); ++i) { check_eq(expected[i], v[i].as_int(), what); }
+        };
+
+        test("aggregate_initialization_every_spelling", [this, ints]() {
+            auto e = make_engine();
+            ints(e->execute(R"(
+                class P { int x; int y; }
+                P a{1, 2};
+                P b(3, 4);
+                auto c = P{5, 6};
+                auto d = P(7, 8);
+                var h = new P{9, 10};
+                return [a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, h.x, h.y];
+            )"), {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, "P a{..}, P b(..), P{..}, P(..), new P{..}");
+        });
+
+        test("aggregate_initialization_fewer_initializers_keep_the_rest", [this, ints]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                int calls = 0;
+                function bump() -> int { calls += 1; return 9; }
+                class Q { int x = bump(); int y = bump(); int z; string s = "d"; }
+                Q q{1};
+                class R { int a; int b = this.a + 1; }
+                R r{5};
+                return [q.x, q.y, q.z, calls, r.b, q.s];
+            )");
+            const auto& v = r.as_array();
+            const std::vector<int64_t> expected{1, 9, 0, 1, 6};
+            for (size_t i = 0; i < expected.size(); ++i) {
+                check_eq(expected[i], v[i].as_int(), "an initialized field skips its initializer, the rest run theirs in order and read the earlier fields");
+            }
+            check_eq(std::string("d"), v[5].as<std::string>(), "a string field keeps its initializer");
+        });
+
+        test("aggregate_initialization_bases_first_and_nested", [this, ints]() {
+            auto e = make_engine();
+            ints(e->execute(R"(
+                class B { int a = 0; }
+                class D : B { int b = 0; int sum() { return a + b; } }
+                D d{1, 2};
+                class In { int v; }
+                class Out { In i; int n; }
+                Out o{In{4}, 5};
+                In copy = In(o.i);
+                copy.v = 7;
+                return [d.a, d.b, D{3, 4}.sum(), o.i.v, o.n, copy.v];
+            )"), {1, 2, 7, 4, 5, 7}, "bases first, methods allowed, a nested aggregate, one same-class argument copies");
+            ints(e->execute("[o.i.v]"), {4}, "the copy is its own object");
+        });
+
+        test("aggregate_initialization_converts_through_each_field", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                class F { float f; int i; var any; }
+                F x{1, true, "t"};
+                return [x.f / 2, x.i, x.any];
+            )");
+            const auto& v = r.as_array();
+            check_near(0.5, v[0].as_float(), 1e-12, "an int initializer converts into a float field");
+            check_eq((int64_t)1, v[1].as_int(), "bool converts into an int field");
+            check_eq(std::string("t"), v[2].as<std::string>(), "a var field takes anything");
+        });
+
+        test("aggregate_initialization_errors", [this]() {
+            auto e = make_engine();
+            auto r = e->execute(R"(
+                [[warn_mode]]
+                function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+                class P { int x; int y; }
+                class E { }
+                class H { private: int v; }
+                class Base { int a; Base(int v) { a = v; } }
+                class Derived : Base { int b; }
+                var one = 1; var word = "w";
+                return [t([]() { var p = P(one, one, one); }), t([]() { var p = E{one}; }), t([]() { var p = P{word}; }),
+                        t([]() { var h = H(one); }), t([]() { var d = Derived(one, one); })];
+            )");
+            const auto& v = r.as_array();
+            check_eq(std::string("Too many initializers for 'P': it has 2 fields, got 3"), v[0].as<std::string>(), "too many");
+            check_eq(std::string("Too many initializers for 'E': it has 0 fields, got 1"), v[1].as<std::string>(), "an empty class");
+            check_true(v[2].as<std::string>().find("field 'x'") != std::string::npos, "the field's own conversion text: " + v[2].as<std::string>());
+            check_eq(std::string("No constructor of 'H' takes (int)"), v[3].as<std::string>(), "a private field: not an aggregate");
+            check_eq(std::string("No constructor of 'Derived' takes (int, int)"), v[4].as<std::string>(), "a base with a constructor: not an aggregate");
+        });
 
 } // namespace jai::foundry::tests
 

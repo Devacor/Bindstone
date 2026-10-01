@@ -28,7 +28,7 @@
 
 namespace jai {
     class script_class_definition;
-    namespace detail { struct caller_frame_view; struct namespace_store_target; }
+    namespace detail { struct caller_frame_view; struct namespace_store_target; struct aggregate_plan; }
     struct script_namespace_data;
 }
 
@@ -1453,7 +1453,8 @@ namespace jai::vm {
         checked_result<void> evaluate_field_initializers(std::shared_ptr<class_instance> instance,
                                          std::shared_ptr<script_class_definition> class_def,
                                          std::shared_ptr<environment> init_env,
-                                         bool skip_parent_recursion = false);
+                                         bool skip_parent_recursion = false,
+                                         const detail::aggregate_plan* aggregate = nullptr);
         void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
                                       const std::shared_ptr<class_definition>& class_def) override;
 

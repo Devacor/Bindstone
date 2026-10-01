@@ -504,10 +504,14 @@ public:
             check_eq((size_t)0, error_count(e->check(std::string(cls) + "Pt p = Pt(3);")));
             check_eq((size_t)1, error_count(e->check(std::string(cls) + "Pt p = Pt();")));
             check_eq((size_t)1, error_count(e->check(std::string(cls) + "Pt p = Pt(\"s\");")));
-            // no declared ctor: default + copy only
+            // no declared ctor: default, copy, and aggregate initialization (one initializer per field, each typed)
             const char* plain = "class Bare { int v = 1; }\n";
             check_eq((size_t)0, error_count(e->check(std::string(plain) + "Bare b = Bare();")));
+            check_eq((size_t)0, error_count(e->check(std::string(plain) + "Bare b = Bare(Bare(4));")));
+            check_eq((size_t)0, error_count(e->check(std::string(plain) + "Bare b = Bare(1); Bare c{2}; Bare d = Bare{3};")));
             check_eq((size_t)1, error_count(e->check(std::string(plain) + "Bare b = Bare(1, 2);")));
+            check_eq((size_t)1, error_count(e->check(std::string(plain) + "Bare b{\"s\"};")));
+            check_eq((size_t)1, error_count(e->check("class Hid { private: int v = 1; }\nHid h{1};")));
         });
 
         test("inheritance_members_and_assignability", [this]() {

@@ -98,6 +98,37 @@ Move{a, b, 5}.cost;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 -&gt; 3 4, cost 1, step
 == result: 5</code></pre></div>
 <p>A class that declares no constructor is an aggregate, as in C++: <code>T x{a, b}</code>, <code>T{a, b}</code>, <code>T x(a, b)</code> and <code>T(a, b)</code> fill its instance fields in declaration order, base classes&#x27; fields first, each initializer converting through its field&#x27;s typed slot like a field store. Fields past the last initializer run their own initializers, in order, so a later initializer reads the earlier fields; an initialized field&#x27;s own initializer never runs. One argument of the class itself (or a subclass) copies it instead. More initializers than fields raise <code>Too many initializers for &#x27;Cell&#x27;: it has 2 fields, got 3</code>. A class is no aggregate when a class in its chain declares a constructor or is a C++ class, or an instance field is <code>private:</code> or a reference; those keep the constructor text <code>No constructor of &#x27;T&#x27; takes (int)</code>. Methods never disqualify a class (script methods dispatch dynamically without a <code>virtual</code> keyword). Nested braces (<code>Move m{{1, 2}, {3, 4}}</code>) are not part of it: spell each member&#x27;s type, <code>Move m{Cell{1, 2}, Cell{3, 4}}</code>.</p>
+<h2 id="constructor-exits-and-destructors">Constructor exits and destructors<a class="hlink" href="#constructor-exits-and-destructors" aria-label="link">&#8203;</a></h2>
+<p>A bare <code>return;</code> ends a constructor body early, and the call still yields the instance. <code>return expr;</code> in a constructor&#x27;s own body is the parse error <code>A constructor cannot return a value (a bare &#x27;return;&#x27; ends it early and the call yields the instance)</code>; a lambda or nested function inside it returns freely. A <code>throw</code> leaves the constructor like any function: the assignment target keeps its old value and the half-built instance runs no destructor.</p>
+<p><code>~Name() { ... }</code> declares a destructor. It runs when the object goes away: a value instance when the scope that holds it ends, a shared object when its last handle drops:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Torch {
+    string name;
+    Torch(string n) {
+        name = n;
+        if (n == &quot;&quot;) { return; }          // a bare return ends the constructor; the call yields the instance
+        print(&quot;lit {}&quot;, name);
+    }
+    ~Torch() { print(&quot;out {}&quot;, name); }
+}
+function visit() {
+    Torch t = Torch(&quot;hall&quot;);
+    print(&quot;visiting&quot;);
+}
+visit();
+{
+    auto lamp = new Torch(&quot;lamp&quot;);
+    auto other = lamp;                    // two handles, one object
+    print(&quot;two handles&quot;);
+}
+Torch dark = Torch(&quot;&quot;);
+print(&quot;dark is &#x27;{}&#x27;&quot;, dark.name);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">lit hall
+visiting
+out hall
+lit lamp
+two handles
+out lamp
+dark is &#x27;&#x27;</code></pre></div>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;
@@ -243,6 +274,25 @@ print(&quot;field = {}, t.target = {}&quot;, t.backing(), t.target);</code></pre
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">t.target = 200
 field = 6, t.target = 60</code></pre></div>
 <p>The checker types <code>obj.x</code> from the accessor when the declaration is unambiguous: one parameterless getter with a declared (non-<code>var</code>) return type gives reads that type, one single-parameter by-value setter gives writes theirs, so <code>t.target = &quot;warm&quot;;</code> is the load error <code>cannot assign &#x27;string&#x27; to property &#x27;target&#x27; declared &#x27;int&#x27;</code>, and <code>char c = t.target;</code> fails the same way. Anything murkier (two overloads, a <code>var</code>/<code>auto</code> getter, a getter with parameters, a reference or untyped setter parameter, an accessor on a class the engine registered from C++) leaves the member unchecked and the run-time conversion does the work. A property the host binds with <a href="../embedding/02-dynamic-binder.html">dynamic_binder</a> arrives in script as an accessor pair of this kind.</p>
+<h2 id="reference-returns-and-keyword-names">Reference returns and keyword method names<a class="hlink" href="#reference-returns-and-keyword-names" aria-label="link">&#8203;</a></h2>
+<p>A method declared with a reference return type (<code>int&amp; slot(int i)</code>, <code>Box&amp; pick()</code>, <code>int&amp; operator[](int i)</code>) returns the storage itself, so its call is an assignment target: <code>=</code>, every compound assignment and <code>++</code>/<code>--</code> store through it, as in C++. A call that returns by value is not: <code>s.get() = 4</code> raises <code>Cannot assign to a call result: &#x27;s.get&#x27; returns by value</code>.</p>
+<p>A keyword names a method: <code>delete</code>, <code>default</code>, <code>for</code> and the rest are method names in a class body and member names after a dot (or <code>?.</code>, <code>-&gt;</code>), so a host API or a data shape that uses one keeps its spelling. A field cannot take a keyword name.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Slots {
+    array&lt;int&gt; items = [0, 0, 0];
+    int&amp; slot(int i) { return items[i]; }    // a reference return: the call is an lvalue
+    void delete(int i) { items[i] = -1; }    // a keyword is a method name
+    int default() { return 7; }
+    void clear_all() { delete(1); this.delete(2); }   // bare or through this
+}
+Slots s;
+s.slot(1) = 5;
+s.slot(2) += s.default();
+s.delete(0);
+print(to_json(s.items));
+s.clear_all();
+print(to_json(s.items));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[-1,5,7]
+[-1,-1,-1]</code></pre></div>
 <h2 id="statics">Statics<a class="hlink" href="#statics" aria-label="link">&#8203;</a></h2>
 <p>Static fields and methods belong to the class and are reached with <code>Class::name</code>. Instance constructors/methods see them directly:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter {
@@ -291,7 +341,7 @@ print(Base::count);</code></pre></div>
 <li>the active <strong>catch variable</strong> (innermost <code>catch</code>)</li>
 <li><strong>locals and parameters</strong> of the current function, including range-for variables, <code>auto&amp;</code> reference declarations, and constructor parameters (declaration-point scoped: a use <em>before</em> the local&#x27;s declaration resolves outward)</li>
 <li><strong>enclosing scopes / explicit lambda captures</strong></li>
-<li><strong>class members</strong>: instance fields (implicit <code>this</code>, including inherited), then instance methods (as bound methods), then static fields and static methods (those of the class whose code runs and its bases, then the receiver&#x27;s own class)</li>
+<li><strong>class members</strong>: instance fields (implicit <code>this</code>, including inherited), then instance methods (called; a bare method name without a call is an error, see <a href="#methods-as-values">below</a>), then static fields and static methods (those of the class whose code runs and its bases, then the receiver&#x27;s own class)</li>
 <li><strong>globals</strong> (variables and free functions)</li>
 </ol>
 <p>Three consequences are worth knowing.</p>

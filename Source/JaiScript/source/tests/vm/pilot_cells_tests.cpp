@@ -3515,6 +3515,42 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "a door the block cannot land under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_calls_element_arguments_from_different_arrays_read_their_own_arrays", [this]() {
+			// a kept call inside a block whose arguments read elements of different program-scope arrays: each argument's read resolves its own
+			// container (the copy's miss ip is the first argument's, but the container's cache slots are its own instruction's); 2 to 4 such
+			// arguments, mixed with locals and literals; both backends, proofs off, the middle end off and miss injection
+			const std::string prelude =
+				"array<int> A = [0, 1, 0, 1, 0, 1, 0, 1];\n"
+				"array<int> B = [3, 5, 7, 9, 11, 13, 2, 4];\n"
+				"array<int> C = [8, 6, 4, 2, 9, 7, 5, 3];\n"
+				"array<float> D = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5];\n"
+				"int CNT = 0;\n"
+				"void bump() { CNT = CNT + 1; }\n"
+				"int two(int w, int x) { bump(); return w * 100 + x; }\n"
+				"int three(int w, int x, int y) { bump(); return w * 10000 + x * 100 + y; }\n"
+				"float four(int w, float d, int x, int y) { bump(); return w + d * 2.0 + x * 3 + y * 5; }\n"
+				"int run2() { int s = 0; for (int m = 0; m < 8; ++m) { int v = two(A[m], B[m]); s = (s * 3 + v) % 1000003; } return s; }\n"
+				"int run3() { int s = 0; for (int m = 0; m < 8; ++m) { int v = three(C[m], m, B[m]); s = (s * 7 + v) % 1000003; } return s; }\n"
+				"float run4() { float s = 0.0; for (int m = 0; m < 8; ++m) { s = s + four(A[m], D[m], 7, C[(m + 3) % 8]); } return s; }\n";
+			const std::string body = "to_string(run2()) + \"|\" + to_string(run3()) + \"|\" + to_string(run4()) + \"|\" + to_string(CNT);";
+			both(prelude + body, "95060|354612|456.0|24", "element arguments from different arrays");
+			both(prelude + body, "95060|354612|456.0|24", "element arguments from different arrays, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			const size_t at = l.find("== run2 ");
+			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos && l.find("C_ARGS", at) != std::string::npos, "run2's loop closes over the call\n" + l);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "element arguments under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

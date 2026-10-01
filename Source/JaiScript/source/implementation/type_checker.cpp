@@ -2723,6 +2723,16 @@ private:
 					stamp(b->subscript_receiver, receiver, uint8_t(0));
 					return el;
 				}
+				if (b->op.type == token_type::question_question) {
+					// the left value unless it is null, else the right: one type when both sides have it, the right's when the left is null
+					if (l.kind == ctype::null_k) { return r; }
+					if (l.kind == r.kind && l.cls == r.cls && !l.is_unknown()) {
+						if (l.ti != r.ti) { l.ti = nullptr; }
+						l.tentative = l.tentative || r.tentative;
+						return l;
+					}
+					return {};
+				}
 				stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
 				return binary_result(l, b->op.type, r);
 			}
@@ -2797,7 +2807,7 @@ private:
 					a.const_key = a.const_key || b.const_key;
 					return a;
 				}
-				if (!a.is_unknown() && !b.is_unknown()) {
+				if (!a.is_unknown() && !b.is_unknown() && a.kind != ctype::null_k && b.kind != ctype::null_k) {   // a T-or-null arm pair is a nullable value, never a type mix
 					last_mixed_ternary_ = {e, a, b};
 				}
 				ctype mixed{};

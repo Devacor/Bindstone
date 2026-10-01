@@ -1180,7 +1180,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 				if (clean_exit && rs->value->get_type() == node_type::binary_expr && !chunk_->code.empty()) {
 					const auto* bin = static_cast<const binary_expr*>(rs->value.get());
 					const token_type bop = bin->op.type;
-					const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe);
+					const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe || bop == token_type::question_question);
 					if (!logical && chunk_->code.back().op == opcode::op_binary) {
 						chunk_->code.back().op = opcode::op_return_binary;
 						chunk_->code.back().c = rs->static_return_proof;   // op_binary uses only a/b
@@ -2301,7 +2301,8 @@ static binary_expr* index_binary_candidate(expression* e) {
 	auto* b = static_cast<binary_expr*>(e);
 	if (b->op.type == token_type::left_bracket ||
 	    b->op.type == token_type::ampersand_ampersand ||
-	    b->op.type == token_type::pipe_pipe) {
+	    b->op.type == token_type::pipe_pipe ||
+	    b->op.type == token_type::question_question) {
 		return nullptr;
 	}
 	return b;
@@ -5920,6 +5921,17 @@ size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_
 }
 
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
+	if (expr->op.type == token_type::question_question) {
+		// the left value stays when it is not null; a null is replaced by the right operand, which runs only then
+		compile_expression(expr->left);
+		const size_t null_jump = emit(opcode::op_null_guard, k_invalid_u32);
+		const size_t done_jump = emit(opcode::op_jump, k_invalid_u32);
+		patch_jump(null_jump, chunk_->code.size());
+		emit(opcode::op_pop);
+		compile_expression(expr->right);
+		patch_jump(done_jump, chunk_->code.size());
+		return;
+	}
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
 		const uint32_t first_ip = static_cast<uint32_t>(chunk_->code.size());
 		compile_expression(expr->left);

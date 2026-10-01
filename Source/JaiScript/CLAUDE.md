@@ -562,7 +562,7 @@ engine stays usable", not by `check_throws`.
   type's default, like a class field on hot reload); a declaration that assigns re-runs its initializer (Dev ruling
   2026-09-27; `detail/redeclaration.hpp`, vm `op_decl_keep`, `.jaibite` version 22). Imports check in ENGINE-WIDE PASSES
   (Dev ruling 2026-09-28): at most once per `import_recheck_interval` (default 0.2 s; `engine::import_recheck_interval`,
-  script `import_recheck_interval(seconds)`, 0 = every reach) the first import reached opens a pass
+  script `import_recheck_interval(seconds)`, 0 = every reach opens its own pass, whichever site it is) the first import reached opens a pass
   (`execution_limits::import_pass_open`), every import reached in it stats its modules once (`import_record::checked_pass`),
   and the pass closes when a site reaches a path it already checked in this pass (the frame loop came around; a nested
   import inside a re-running module never closes it) or at the next top-level execute/resume (`reset_for_execute`); between

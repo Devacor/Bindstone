@@ -725,6 +725,7 @@ struct engine::implementation {
         uint64_t failed_mtime = 0;
         uint64_t failed_size = 0;
         bool missing = false;   // its file was gone at a check (raised once): it waits until a check finds the file again
+        uint64_t runs = 0;      // runs started: a nested module queued to re-run is skipped when something ran it meanwhile
         // the rest of the module's closure: every file its last run included (top level, nested, spliced into a function
         // body), each stamped as it was read; a pass queries each like the module itself
         std::vector<closure_stamp> closure;
@@ -4654,15 +4655,16 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         I.cwd_.clear();
     };
     const bool nested = !I.importing_.empty();
+    const bool fresh = force || I.import_recheck_ticks_ == 0;   // interval 0: every reach checks, whichever site reaches it
     if (!parallel_region_active()) {
-        if (force) { open_pass(); }
+        if (fresh) { open_pass(); }
         else if (!limits.import_pass_open && limits.sampled_now >= limits.import_window_until) { open_pass(); }
     }
 
     // an answer the ladder remembers from the asking folder itself stands unverified until the module's stamp query, which
     // verifies it (the file is gone: the full ladder); anything else takes the ladder now
     // a module that loaded before and whose file the ladder no longer finds is missing: it raises once, then waits quietly
-    struct import_unit { const std::string* path = nullptr; std::string resolved; uint64_t hash = 0; uint64_t mtime = 0, size = 0; bool stamped = false, remembered = false, missing = false; };
+    struct import_unit { const std::string* path = nullptr; std::string resolved; uint64_t hash = 0; uint64_t mtime = 0, size = 0, runs = 0; bool stamped = false, remembered = false, missing = false; };
     std::vector<import_unit> mods;
     mods.reserve(paths.size());
     const std::string from = current_source_file();
@@ -4708,7 +4710,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         return {};
     };
 
-    if (limits.import_pass_open && !nested && !force) {
+    if (limits.import_pass_open && !nested && !fresh) {
         if (site.pass_id != I.import_pass_id_) { site.pass_id = I.import_pass_id_; site.pass_paths.clear(); }
         bool wrapped = false;
         for (const auto& m : mods) { wrapped = wrapped || import_hash_seen(site.pass_paths, m.hash); }
@@ -4742,6 +4744,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             crec->second.checked_pass = I.import_pass_id_;
             import_unit u;
             u.resolved = child;
+            u.runs = crec->second.runs;
             ++I.import_stats_;
             u.stamped = implementation::stat_mtime_size(child, u.mtime, u.size);
             if (!u.stamped) {
@@ -4887,6 +4890,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 rec->second.size = m.size;
                 rec->second.checked_pass = I.import_pass_id_;
                 rec->second.missing = false;
+                ++rec->second.runs;
             }
             if (!I.importing_.insert(m.resolved).second) { continue; }
             struct importing_scope {
@@ -4917,6 +4921,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 record.mtime = m.mtime;
                 record.size = m.size;
                 record.checked_pass = I.import_pass_id_;
+                record.runs = 1;
                 record.closure = std::move(frame.files);
                 record.children = std::move(frame.children);
                 I.import_cache[m.resolved] = std::move(record);
@@ -4938,6 +4943,8 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         ran = true;
     }
     for (size_t k = 0; k < nested_changed.size(); ++k) {
+        auto rec = I.import_cache.find(nested_changed[k].resolved);
+        if (rec != I.import_cache.end() && rec->second.runs != nested_changed[k].runs) { continue; }
         ran = apply(nested_changed, {k}) || ran;
     }
     mark_seen();

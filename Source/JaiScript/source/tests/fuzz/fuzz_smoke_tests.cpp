@@ -22,13 +22,13 @@ public:
 	fuzz_smoke_tests() : suite("Differential Fuzz Smoke") {}
 
 	void run_seed_range(uint64_t k_first_seed, uint64_t k_seed_count, bool proofs = true, fuzz::band_mode band = fuzz::band_mode::never,
-	                    fuzz::band_mode math = fuzz::band_mode::never, int lowering = 0) {
+	                    fuzz::band_mode math = fuzz::band_mode::never, int lowering = 0, fuzz::band_mode call_args = fuzz::band_mode::never) {
 			constexpr double k_budget_seconds = 0.1; // budget-skips cost 2x this; keeps the suite fast
 
 			int divergences = 0;
 			std::string first_report;
 			for (uint64_t seed = k_first_seed; seed < k_first_seed + k_seed_count; ++seed) {
-				fuzz::program p = fuzz::generate_program(seed, 3, band, math);
+				fuzz::program p = fuzz::generate_program(seed, 3, band, math, call_args);
 				fuzz::compare_result cr = fuzz::compare_program(p, k_budget_seconds, proofs, true, true, 0, lowering);
 				if (cr.kind != fuzz::compare_result::diverge) continue;
 				if (!fuzz::match_suppression(p, cr.diff).empty()) continue; // known, in-flight fix
@@ -49,6 +49,7 @@ public:
 						" diverged (repro: jaiscript_fuzz --seed " + std::to_string(seed) +
 						" --max-depth 3 --minimize" + (proofs ? "" : " --no-proofs") +
 						(band == fuzz::band_mode::always ? " --element-band" : "") + (math == fuzz::band_mode::always ? " --math-band" : "") +
+							(call_args == fuzz::band_mode::always ? " --call-args-band" : "") +
 							(lowering == 1 ? " --no-lowering" : lowering == 2 ? " --lowered-interp" : "") + ")\n" + cr.diff;
 				}
 			}
@@ -120,6 +121,12 @@ public:
 			// by default the interpreter runs boxed and the vm lowered (the lowering's differential); both lowered and both boxed too
 			run_seed_range(300, 40, true, fuzz::band_mode::never, fuzz::band_mode::always, 2);
 			run_seed_range(300, 40, true, fuzz::band_mode::never, fuzz::band_mode::always, 1);
+		});
+		test("call_args_band_seeds_no_new_divergence", [this]() {
+			// every program carries the call-argument band: element reads of different typed arrays as the arguments of one kept call
+			// in a counted loop (a block's copied read resolving another argument's array diverged in 239 of 500 band seeds)
+			run_seed_range(0, 40, true, fuzz::band_mode::never, fuzz::band_mode::never, 0, fuzz::band_mode::always);
+			run_seed_range(0, 20, false, fuzz::band_mode::never, fuzz::band_mode::never, 0, fuzz::band_mode::always);
 		});
 		test("fixed_seeds_no_new_divergence_no_proofs", [this]() {
 			// interp-vs-vm parity must hold in both proof states (docs/static_checking.md "Proofs")

@@ -316,10 +316,28 @@ namespace jai {
         size_t lookup_capture_slot(uint64_t symbol_id) {
             return resolve_outer_use(symbol_id, function_scope_stack_.size() + 1);
         }
+		void check_instance_capture(const token& a_token) {
+			for (const auto& scope : function_scope_stack_) {
+				if (!scope.owner || scope.owner->default_capture != lambda_expr::capture_default::none) { continue; }
+				bool listed = std::any_of(scope.owner->captures.begin(), scope.owner->captures.end(),
+					[](const auto& a_capture) { return a_capture.name == "this"; });
+				if (!listed) { report_error("Lambda instance access requires [this], [=], or [&]", a_token); }
+			}
+		}
         size_t resolve_outer_use(uint64_t symbol_id, size_t use_scope_count) {
             for (size_t i = function_scope_stack_.size(); i-- > slot_lookup_boundary_;) {
                 auto found = function_scope_stack_[i].symbol_to_slot.find(symbol_id);
                 if (found == function_scope_stack_[i].symbol_to_slot.end()) continue;
+                for (size_t j = i + 1; j < function_scope_stack_.size() && j < use_scope_count; ++j) {
+                    auto* owner = function_scope_stack_[j].owner;
+                    if (!owner || owner->default_capture != lambda_expr::capture_default::none) { continue; }
+                    bool listed = std::any_of(owner->captures.begin(), owner->captures.end(),
+                        [symbol_id](const auto& capture) { return capture.symbol_id == symbol_id; });
+                    if (!listed) {
+                        report_error("Lambda capture list does not capture this enclosing local; use [=], [&], or a named capture", previous());
+                        return SIZE_MAX;
+                    }
+                }
                 if (i + 2 >= use_scope_count) return found->second;
                 if (lambda_expr* capturer = function_scope_stack_[i + 1].owner) {
                     auto& slots = capturer->chained_outer_slots;

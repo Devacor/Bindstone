@@ -1253,10 +1253,12 @@ checked_result<expression_ptr> parser::primary() {
 
     // Keywords
     if (match(token_type::this_keyword)) {
+		check_instance_capture(previous());
         return std::make_shared<this_expr>(previous().location);
     }
 
     if (match(token_type::super_keyword)) {
+		check_instance_capture(previous());
         // super:: must be followed by a method name
         token superToken = previous();
         JAISCRIPT_TRY_ASSIGN(token methodName, consume(token_type::identifier, "Expected method name after 'super::'"));
@@ -2950,8 +2952,7 @@ checked_result<expression_ptr> parser::lambda_expression() {
 }
 
 // Anonymous function expression: `function (params) {...}` — pure desugar to a
-// no-capture lambda ([]-equivalent: auto-capture, outer locals snapshot BY VALUE
-// at creation; explicit by-ref capture needs the lambda spelling)
+// no-capture lambda ([]-equivalent: enclosing locals require the lambda spelling)
 checked_result<expression_ptr> parser::anonymous_function_expression() {
     auto lambda = std::make_shared<lambda_expr>(previous().location);
     return finish_lambda_after_captures(std::move(lambda));
@@ -2979,6 +2980,14 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
 
     // Enter function scope for slot-based local variable tracking
     enter_function_scope(lambda.get());
+
+    // Named captures live in the closure environment, not this function's frame.
+    // Installing their names also makes an init-capture shadow its enclosing name.
+    for (const auto& capture : lambda->captures) {
+        if (capture.symbol_id != UINT64_MAX) {
+            function_scope_stack_.back().symbol_to_slot[capture.symbol_id] = SIZE_MAX;
+        }
+    }
 
     // Assign slots to parameters (they get slots 0, 1, 2, ...)
     for (auto& param : lambda->parameters) {
@@ -3015,6 +3024,7 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
     auto parse_capture_name = [this]() -> checked_result<std::string_view> {
         if (check(token_type::this_keyword)) {
             advance();  // consume 'this'
+			check_instance_capture(previous());
             // "this" is pre-interned in symbolizer
             return symbolizer_->get_string(symbolizer_->get_this_id());
         } else {

@@ -7,7 +7,7 @@
 // a hybrid's C++ property; a method name shadows and is not a cell), then the environment
 // chain from the creating env (definition env -> global). A same-named global never wins
 // over a slot or a member. The capture KIND is the caller's: [&]/[&x] cell-share the
-// source, [=]/[x]/bare [] snapshot it, a C++ property binds through
+// source, [=]/[x] snapshot it, [] captures nothing; a C++ property binds through
 // bind_cpp_property_ref / read_bare_cpp_property. An explicit [x]/[&x] takes variables
 // only (slot, own scope, chain): a member is not a capturable variable (C++: ill-formed),
 // so [field] keeps the undefined-capture text whether or not a global shares the name.
@@ -36,9 +36,17 @@ struct capture_source {
 // The environment that owns sym along the chain from `from` is the root (no parent)
 inline bool owned_by_root(environment* from, uint64_t sym) {
     for (environment* e = from; e; e = e->parent_raw()) {
-        if (e->get_own_value_ptr(sym)) { return e->parent_raw() == nullptr; }
+        if (e->get_own_value_ptr(sym)) { return e->is_program_scope(); }
     }
     return false;
+}
+
+// A closure retains its namespace/global scope, never a creating function frame.
+inline std::shared_ptr<environment> lambda_parent_scope(std::shared_ptr<environment> a_current) {
+    while (a_current && !a_current->is_program_scope()) {
+        a_current = a_current->get_parent();
+    }
+    return a_current;
 }
 
 inline capture_source resolve_capture_source(script_value* frame_slot_cell,

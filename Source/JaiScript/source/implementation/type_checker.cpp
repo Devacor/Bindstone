@@ -465,14 +465,10 @@ private:
              top != enums_.end() ? top->second->location.line : 0, top != enums_.end() ? top->second->location.column : 0);
     }
 
-    // Live lambda contexts: a bare [] lambda whose body reaches an enclosing-function local
-    // captured it implicitly — warn once per lambda, nudging toward explicit [=]/[&].
-    struct capture_ctx {
-        size_t base = 0;
-        bool bare = false;
-        bool warned = false;
-        source_location location;
-    };
+	struct capture_ctx {
+		size_t base = 0;
+		const lambda_expr* lambda = nullptr;
+	};
     std::vector<capture_ctx> capture_stack_;
 
     struct fn_ctx {
@@ -2686,6 +2682,10 @@ private:
 				return ctype::make(ctype::map_k);
 			}
 			case node_type::this_expr:
+				if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
+					capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
+					diag(diag_level::error, e->location, "lambda instance access requires [this], [=], or [&]");
+				}
 				return class_ctx_ ? ctype::object(class_ctx_name_) : ctype{};
 			case node_type::super_expr:
 				if (class_ctx_ && !class_ctx_->decl->base_classes.empty()) {
@@ -2747,14 +2747,15 @@ private:
 		size_t scope_index = 0;
 		if (var_entry* local = find_named(id, &scope_index)) {
 			if (scope_index == 0) { note_global_use(id->name); }   // top-level var read
-			if (!capture_stack_.empty()) {
-				auto& cap = capture_stack_.back();
-				if (cap.bare && !cap.warned && scope_index != 0 && scope_index < cap.base) {
-					cap.warned = true;
-					diag(diag_level::warning, cap.location,
-						 "bare [] implicitly captured local '" + std::string(id->name) +
-						 "' by value — be explicit with [=] (snapshot) or [&] (share updates)",
-						 local->line, local->column);
+			for (const auto& cap : capture_stack_) {
+				const bool program_scope = scope_index == 0 ||
+					std::find(namespace_scopes_.begin(), namespace_scopes_.end(), scope_index) != namespace_scopes_.end();
+				if (program_scope || scope_index >= cap.base || cap.lambda->default_capture != lambda_expr::capture_default::none) { continue; }
+				bool listed = std::any_of(cap.lambda->captures.begin(), cap.lambda->captures.end(),
+					[&](const auto& a_capture) { return a_capture.name == id->name; });
+				if (!listed) {
+					diag(diag_level::error, id->location, "lambda capture list does not capture enclosing local '" +
+						std::string(id->name) + "'; use [=], [&], or a named capture", local->line, local->column);
 				}
 			}
 			return local->dynamic ? (local->alias.kind != ctype::unknown ? local->alias : ctype{}) : local->type;
@@ -2766,6 +2767,11 @@ private:
 				// both is flow-order-ambiguous to a static walk (a global declared later
 				// in the source steals the read at call time) - stay unknown.
 				if (global_tier_name(id->name)) { return {}; }
+				if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
+					capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
+					diag(diag_level::error, id->location, "lambda instance member '" + std::string(id->name) + "' requires [this], [=], or [&]");
+					return {};
+				}
 				if (access_denied(hit, id->name, id->location)) { return {}; }
 				if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
 				if (hit.methods) {
@@ -4057,10 +4063,7 @@ private:
             if (extra_globals_.count(name) || engine_knows_name(name)) { continue; }
             undeclared(l->location, cap.name);
         }
-        capture_stack_.push_back(capture_ctx{
-            scopes_.size(),
-            l->default_capture == lambda_expr::capture_default::none && l->captures.empty(),
-            false, l->location});
+		capture_stack_.push_back(capture_ctx{scopes_.size(), l});
 
         scopes_.emplace_back();
         fn_ctx ctx{l->return_type.get(), /*is_coroutine=*/false, "lambda",
@@ -4073,7 +4076,10 @@ private:
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         define_params(l->parameters, l->location);
         for (const auto& cap : l->captures) {
-            if (!cap.initializer) { continue; }
+            if (!cap.initializer) {
+				if (var_entry* original = find_local(cap.name)) { scopes_.back().emplace(cap.name, *original); }
+				continue;
+			}
             var_entry entry;
             entry.dynamic = true;   // the lambda's own copy, typed by the value it holds
             entry.line = l->location.line; entry.column = l->location.column;

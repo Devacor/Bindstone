@@ -1977,7 +1977,8 @@ private:
         switch (fn) {
             case math_fn::itrunc: case math_fn::ifloor:
             case math_fn::wrap_add_: case math_fn::wrap_sub_: case math_fn::wrap_mul_:
-            case math_fn::i32_: case math_fn::vop_:
+            case math_fn::i32_:
+            case math_fn::i32_add_: case math_fn::i32_sub_: case math_fn::i32_mul_: case math_fn::i32_div_: case math_fn::i32_neg_:
                 return ctype::make(ctype::int_k);
             case math_fn::cstore_: case math_fn::vcomp_:
                 return {};   // the call site reads the kind from its literal code (math_step_result)

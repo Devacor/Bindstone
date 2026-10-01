@@ -261,8 +261,9 @@ rewrites.
   it in a loop, or reads it more often than it has components; otherwise it stays boxed.
 - **Operators.** `+ - * / %` over vectors and scalars, unary `-`, `==` and `!=` become component expressions: a binary32
   row computes in binary64 and lands through `f32$` (for `+ - * /` of two binary32 values one rounding to binary32 is
-  the binary32 operation, so the bits agree), an ivec row runs `vop$` (the kernel's exact int64 step, int32 narrowing
-  and texts), a scalar operand narrows as the kernel narrows it.
+  the binary32 operation, so the bits agree), an ivec row computes in int64 and lands through `i32add$`, `i32sub$`,
+  `i32mul$`, `i32div$` or `i32neg$` (the kernel's int32 narrowing with the operator's text; a remainder always fits), a
+  scalar operand narrows as the kernel narrows it.
 - **The libraries.** The component-wise family runs `vcomp$` per component, the kernel's own per-component step
   (`vec_component_value`, `vec_component_exact`), so the boxed call and the lowered form share one kernel. Every geometry
   row (`dot`, `cross`, `length`, `length_squared`, `normalize`, `distance`, `distance_squared`, `reflect`, `project`,

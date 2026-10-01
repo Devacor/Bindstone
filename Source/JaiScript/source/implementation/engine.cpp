@@ -4123,7 +4123,7 @@ const std::vector<std::pair<uint64_t, detail::parallel_capture_kind>>& engine::l
 // values, and overload sets dispatch over a per-copy snapshot (findBestMatch returns a
 // copy of the stored overload value — the snapshot makes those copies worker-private).
 void engine::register_math_alias(std::string_view name, std::string_view intrinsic) {
-    static_assert(static_cast<size_t>(detail::math_fn::count) <= k_math_alias_rows);
+    static_assert(static_cast<size_t>(detail::math_fn::degrees_to_radians) < k_math_alias_rows);   // every alias kernel (math_alias_kernel) has a row
     const detail::math_fn fn = detail::math_intrinsic_from_name(intrinsic);
     if (fn == detail::math_fn::none || !detail::math_alias_kernel(fn)) { return; }
     const std::string key(name);

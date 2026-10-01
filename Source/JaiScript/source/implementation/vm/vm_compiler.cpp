@@ -3635,6 +3635,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				uint8_t rk = kflt;
 				switch (fn) {
 				case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::i32_: rk = kint; break;
+				case detail::math_fn::i32_add_: case detail::math_fn::i32_sub_: case detail::math_fn::i32_mul_: case detail::math_fn::i32_div_: case detail::math_fn::i32_neg_: rk = kint; break;
 				case detail::math_fn::abs_: rk = alias ? kflt : 0; break;
 				case detail::math_fn::floor_: case detail::math_fn::ceil_: case detail::math_fn::sqrt_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
 				case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: case detail::math_fn::f32_: break;
@@ -3897,6 +3898,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						uint8_t rk = kflt;
 						switch (static_cast<detail::math_fn>(next->a)) {
 						case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::i32_: rk = kint; break;
+						case detail::math_fn::i32_add_: case detail::math_fn::i32_sub_: case detail::math_fn::i32_mul_: case detail::math_fn::i32_div_: case detail::math_fn::i32_neg_: rk = kint; break;
 						case detail::math_fn::abs_: rk = 0; break;
 						case detail::math_fn::floor_: case detail::math_fn::ceil_: case detail::math_fn::sqrt_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
 						case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: case detail::math_fn::f32_: break;
@@ -5113,6 +5115,7 @@ detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
 	case detail::math_fn::sqrt_: case detail::math_fn::abs_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
 	case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians:
 	case detail::math_fn::f32_: case detail::math_fn::i32_:
+	case detail::math_fn::i32_add_: case detail::math_fn::i32_sub_: case detail::math_fn::i32_mul_: case detail::math_fn::i32_div_: case detail::math_fn::i32_neg_:
 		return fn;
 	default: return detail::math_fn::none;
 	}

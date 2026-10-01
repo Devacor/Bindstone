@@ -5195,6 +5195,10 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 		v = &popped;
 	}
 	v = &v->deref();
+	if (detail::is_i32_narrowing(fn) && v->raw_storage_index() == script_value::TYPEID_INT) {
+		const script_int i = v->unchecked_as_int();
+		if (i >= INT32_MIN && i <= INT32_MAX) { typed_land_int(f, ins.b | (k_typed_dst_temp << k_typed_dst_shift), i); return {}; }
+	}
 	if (fn == detail::math_fn::f32_ || fn == detail::math_fn::i32_) {
 		// the lowering's component narrowing on a number (math_values.hpp to_f32 / to_i32); anything else is the kernel's
 		const size_t raw = v->raw_storage_index();
@@ -9688,6 +9692,11 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_math(frame& f, const vm_instruction
 		bits = static_cast<int64_t>(n);
 		break;
 	}
+	case detail::math_fn::i32_add_: case detail::math_fn::i32_sub_: case detail::math_fn::i32_mul_: case detail::math_fn::i32_div_: case detail::math_fn::i32_neg_:   // in range lands; out of range the general op raises the operator's text
+		if (!int_arg || xi < INT32_MIN || xi > INT32_MAX) return miss();
+		kind = static_cast<uint8_t>(script_value::TYPEID_INT);
+		bits = xi;
+		break;
 	default: return miss();
 	}
 	if (!cell_land(f, loop, dk, kind, bits)) return miss();

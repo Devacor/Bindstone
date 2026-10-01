@@ -6,7 +6,7 @@
 // The aggregate lowering (docs/math_types_design.md 4.3): a typed math local of a function or lambda body becomes its
 // component slots (`p` -> `p$x`, `p$y`, `p$z`, float slots for the binary32 kinds and int slots for the ivec kinds), and
 // the vector operations over such locals become the kernel's component steps (detail/math_intrinsics.hpp f32$, i32$,
-// cstore$, vop$, vcomp$), so both backends run float and int slots and compute the boxed kernel's bits and texts. A
+// cstore$, i32add$ .. i32neg$, vcomp$), so both backends run float and int slots and compute the boxed kernel's bits and texts. A
 // vector that must exist as a value (a call argument, a container element, a return) is rebuilt from its components at
 // that point. A local that escapes (a reference, a capture, a call argument, a store in expression position) stays
 // boxed. The rewrite is a pure function of the parsed body: each lowered site keeps both bodies, and the engine shows

@@ -445,6 +445,49 @@ public:
             (void)raised;
         });
 
+        // an ivec row lowers to the int64 operation and the operator's narrowing (i32add$ .. i32neg$), a component store of a typed
+        // array element to i32$ / f32$: the loops close as cell blocks, and a value out of range takes the general form's raise
+        test("lowered_ivec_loops", [expect, agree, this]() {
+            agree("function f() -> string { math::ivec3 p = math::ivec3(3, -1, -4); math::ivec3 q = math::ivec3(2, 8, -2); array<int> e = [12, 34, 19, -4]; int acc = 0; "
+                  "for (int i = 0; i < 4; i++) { q.z = q.z - e[i] % 5; p = p + q; acc = acc + q.x - p.x; acc = acc + p.z * 2; } var sp = p; return to_string(acc) + to_string(sp); } f()", "a component store of an element and a vector sum");
+            agree("function f() -> string { math::ivec3 p = math::ivec3(7, -1, 1); math::ivec3 q = math::ivec3(6, 4, 8); array<int> e = [18, 35, 15, 31, 46, 51]; "
+                  "for (int i = 0; i < 6; i++) { p = p + q; if (p.z > 20) { p.z = p.z - 17; } p.x += e[i]; } var sp = p; return to_string(sp); } f()", "a compound component store of an element");
+            agree("function f() -> string { math::ivec2 a = math::ivec2(9, -7); math::ivec2 b = math::ivec2(2, 3); int k = 3; for (int i = 0; i < 5; i++) { a = a * b - a / b + a % b; a = -a + b * k - k * b; a = a / 2; } "
+                  "var sa = a; return to_string(sa); } f()", "every operator, the scalar sides and a negation");
+            agree("function f() -> string { math::vec2 p = math::vec2(0.5, 1.5); array<float> e = [0.25, -2.5, 4.0]; for (int i = 0; i < 3; i++) { p.y = p.y - e[i] * 0.5; p.x += e[i]; } var sp = p; return to_string(sp); } f()",
+                  "a component store of a float element");
+            const char* overflow_rows[][3] = {
+                {"math::ivec2 a = math::ivec2(2147483600, 1); math::ivec2 b = math::ivec2(20, 0);", "a = a + b;", "Integer overflow in '+'"},
+                {"math::ivec2 a = math::ivec2(-2147483600, 1); math::ivec2 b = math::ivec2(20, 0);", "a = a - b;", "Integer overflow in '-'"},
+                {"math::ivec2 a = math::ivec2(70000, 1); math::ivec2 b = math::ivec2(7, 1);", "a = a * b;", "Integer overflow in '*'"},
+                {"math::ivec2 a = math::ivec2(-2147483647 - 1, 4); math::ivec2 b = math::ivec2(-1, 1);", "a = a / b;", "Integer overflow in '/'"},
+                {"math::ivec2 a = math::ivec2(8, 4); math::ivec2 b = math::ivec2(2, 1);", "b = b - math::ivec2(1, 0); a = a / b;", "Division by zero"},
+                {"math::ivec2 a = math::ivec2(8, 4); math::ivec2 b = math::ivec2(2, 1);", "b = b - math::ivec2(1, 0); a = a % b;", "Modulo by zero"},
+                {"math::ivec2 a = math::ivec2(-2147483646, 4); math::ivec2 b = math::ivec2(1, 0);", "a = a - b; a = -a; a = -a;", "Integer overflow in unary '-'"},
+                {"math::ivec2 a = math::ivec2(0, 0); int k = 1000000000;", "k = k * 2; a = a * k;", "Integer overflow: the value does not fit an int32 component"},
+            };
+            for (const auto& row : overflow_rows) {
+                const std::string src = std::string("function f() -> string { ") + row[0] + " string m = \"\"; try { for (int i = 0; i < 6; i++) { " + row[1] + " } } catch (e) { m = e; } var sa = a; return m + to_string(sa); } f()";
+                agree(src, row[2]);
+                for (bool use_vm : {false, true}) {
+                    auto e = jai::engine::make();
+                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->execution_budget(0);
+                    jai::stdlib::register_all(e);
+                    const std::string got = e->execute(src).to_string();
+                    check(got.rfind(row[2], 0) == 0, std::string(row[2]) + (use_vm ? " (vm): " : " (interpreter): ") + got);
+                }
+            }
+            auto e = jai::engine::make();
+            e->set_backend(jai::backend_type::vm);
+            e->execution_budget(0);
+            std::string listing;
+            e->disassembly_sink([&](const std::string& l, const std::string&) { listing += l; });
+            e->execute("function f() -> int { math::ivec3 p = math::ivec3(3, -1, -4); math::ivec3 q = math::ivec3(2, 8, -2); array<int> e = [12, 34, 19, -4]; int acc = 0; "
+                       "for (int i = 0; i < 4; i++) { q.z = q.z - e[i] % 5; p = p + q; p = -p * 2; acc = acc + p.z; } return acc; } f();");
+            check(listing.find("-- cell loop") != std::string::npos && listing.find("-- open loop") == std::string::npos, "the ivec loop closes as a cell block: " + listing.substr(0, 3000));
+        });
+
         test("equality_and_truthiness", [expect]() {
             expect("to_string(math::vec3(1, 2, 3) == math::vec3(1, 2, 3))", "true", "equal");
             expect("to_string(math::vec3(1, 2, 3) != math::vec3(1, 2, 4))", "true", "not equal");

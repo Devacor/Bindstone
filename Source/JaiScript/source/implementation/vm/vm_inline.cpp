@@ -108,6 +108,24 @@ bool size_call(const call_expr* ce) {
 	auto* m = static_cast<const member_expr*>(ce->callee.get());
 	return !m->is_static && !m->null_safe && m->member == "size" && m->object && m->object->get_type() == node_type::identifier_expr;
 }
+// a loop anywhere in a body (a graft into a fiber frame runs it without a block)
+bool body_has_loop(const statement* s) {
+	if (!s) return false;
+	switch (s->get_type()) {
+	case node_type::while_stmt: case node_type::for_stmt: case node_type::range_for_stmt: return true;
+	case node_type::block_stmt: for (const auto& d : static_cast<const block_stmt*>(s)->declarations) { if (body_has_loop(d.get())) return true; } return false;
+	case node_type::statement_decl: return body_has_loop(static_cast<const statement_decl*>(s)->statement.get());
+	case node_type::if_stmt: { auto* i = static_cast<const if_stmt*>(s); return body_has_loop(i->then_statement.get()) || body_has_loop(i->else_statement.get()); }
+	case node_type::try_stmt: { auto* t = static_cast<const try_stmt*>(s); return body_has_loop(t->try_block.get()) || body_has_loop(t->catch_block.get()); }
+	case node_type::switch_stmt: {
+		auto* sw = static_cast<const switch_stmt*>(s);
+		for (const auto& c : sw->cases) { for (const auto& b : c->body) { if (body_has_loop(b.get())) return true; } }
+		if (sw->default_case) { for (const auto& b : sw->default_case->body) { if (body_has_loop(b.get())) return true; } }
+		return false;
+	}
+	default: return false;
+	}
+}
 bool logical_op(token_type t) { return t == token_type::ampersand_ampersand || t == token_type::pipe_pipe; }
 bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_type::minus_minus; }
 
@@ -854,6 +872,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
 	if (!fn || !fn->body) return "a callee without a body";
 	if (fn->is_coroutine || fn->is_static) return "a coroutine or a static callee";
+	if (callable_.coroutine_body && body_has_loop(fn->body.get())) return "a loop the coroutine's frame would run without its block";
 	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
 	const type_info* rt = fn->return_type.get();
@@ -927,6 +946,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 	out.call = call;   // the call the plan is about, named with the rule that keeps it when the plan fails
 	if (unsupported) { out.why = "a statement the graft does not take"; return false; }
 	out.plain_numeric = false;
+	out.receiver_globals.clear();
 	std::vector<const call_expr*> alias_pins, probe_pins;
 	bool args_call = false;   // the grafted call's arguments hold calls: they run inside its parameters, after its guard
 	{
@@ -1037,7 +1057,20 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 				out.argument_prefixes[ce] = prefix;
 				break;
 			}
-			if (ce->callee->get_type() == node_type::member_expr) { if (!math_call(ce)) { out.why = "a method call's argument"; return false; } }   // a method's receiver and lookup stand before its arguments
+			if (ce->callee->get_type() == node_type::member_expr && !math_call(ce)) {
+				// a method's receiver and lookup stand before its arguments: a builtin method of a container the checker proved, on a
+				// receiver the graft cannot write (a private local, or a certain global when the body writes no global, re-checked by the
+				// graft's guard), observes nothing the graft changes, and neither its receiver nor its lookup can fail
+				auto* m = static_cast<const member_expr*>(ce->callee.get());
+				auto* rid = m->object && m->object->get_type() == node_type::identifier_expr ? static_cast<const identifier_expr*>(m->object.get()) : nullptr;
+				bool held = ce->builtin_receiver != 0 && !m->is_static && !m->null_safe && rid && !rid->global_qualified;
+				if (held && rid->slot_index != SIZE_MAX) { held = private_local(rid) && !args_call; }
+				else if (held) {
+					held = ce->receiver_global.first == rid->symbol_id && !probe.writes_global;
+					if (held) { out.receiver_globals.push_back(ce->receiver_global); }
+				}
+				if (!held) { out.why = "a method call's argument"; return false; }
+			}
 			else if (ce->callee->get_type() == node_type::identifier_expr) {   // an alias's guard or a probe resolves its callee here; any other name is a private local
 				if (std::find(alias_pins.begin(), alias_pins.end(), ce) != alias_pins.end() || std::find(probe_pins.begin(), probe_pins.end(), ce) != probe_pins.end()) { pre.push_back(a); }
 				else if (!alias_pins_.count(ce) && !callee_probes_.count(ce)) { pre.push_back(ce->callee); }
@@ -1046,7 +1079,8 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 			// a callee other than a math intrinsic or a stdlib alias may bind an argument by reference (whatever the name binds by then):
 			// it binds the argument itself after every argument, so a spilled copy in an earlier argument's place would bind a temp (the
 			// graft's own result stands as a value there, which a reference parameter refuses as the original's value would be refused)
-			const bool by_value = math_call(ce) || std::find(alias_pins.begin(), alias_pins.end(), ce) != alias_pins.end() || alias_pins_.count(ce) || alias_call(ce, engine_);
+			const bool by_value = math_call(ce) || std::find(alias_pins.begin(), alias_pins.end(), ce) != alias_pins.end() || alias_pins_.count(ce) || alias_call(ce, engine_) ||
+			                      (ce->callee->get_type() == node_type::member_expr && ce->builtin_receiver != 0);   // a builtin reads its arguments as values
 			const auto outer = math_call(ce) ? std::shared_ptr<const function_decl>() : ce->proven_callee_decl.lock();
 			for (size_t ai = 0; ai < ce->arguments.size() && ce->arguments[ai].get() != x; ++ai) {
 				const expression_ptr& arg = ce->arguments[ai];
@@ -1098,7 +1132,10 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		}
 		}
 	}
-	if (in_place && probe.writes_ref) { out.why = "a name before the call the body may write through its reference"; return false; }   // an identifier before the call may be the referent
+	// an identifier before the call may be the referent of a reference parameter; without one, a nested leaf's fallback reaches only the callee's
+	// own slots and the program scope, never a private local of the caller
+	const bool ref_params = std::any_of(fn->parameters.begin(), fn->parameters.end(), [](const parameter& p) { return p.is_reference; });
+	if (in_place && probe.writes_ref && ref_params) { out.why = "a name before the call the body may write through its reference"; return false; }
 	if (out.receiver && free_identifier && probe.writes_member) { out.why = "a name before the call a method may write"; return false; }   // an identifier before the call may alias the receiver's instance
 	out.fn = fn; out.in_loop = in_loop; out.why = nullptr;
 	return true;
@@ -1434,6 +1471,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	site.body = fn->body.get();
 	site.decl = plan.fn;
 	site.proof_globals = call->proof_globals;
+	for (const auto& g : plan.receiver_globals) { if (std::find(site.proof_globals.begin(), site.proof_globals.end(), g) == site.proof_globals.end()) { site.proof_globals.push_back(g); } }
 	site.plain_numeric = plan.plain_numeric;
 	site.call_stmt = current_stmt_;
 	site.result_slot = result ? static_cast<uint32_t>(result->slot_index) : k_invalid_u32;
@@ -1546,6 +1584,7 @@ expression_ptr vm_compiler::hoist_leaf_calls(const expression_ptr& e, bool state
 			if (!refused) { cur = next; changed = true; continue; }
 			plan.why = refused;
 		}
+		if (leaf_retry_ && plan.why && std::string_view(plan.why) == "an operand behind && or ||") break;   // the leaf's own hoist takes it
 		if (plan.why && plan.call && plan.call->callee && plan.call->callee->get_type() == node_type::identifier_expr) {   // the kept call, named for the listing and the profile
 			chunk_->inline_refusals.push_back({std::string(static_cast<const identifier_expr*>(plan.call->callee.get())->name), plan.why, static_cast<uint32_t>(plan.call->location.line)});
 		} else if (plan.why && plan.call && ever_stamped(plan.call->proven_method_decl) && plan.call->callee->get_type() == node_type::member_expr) {

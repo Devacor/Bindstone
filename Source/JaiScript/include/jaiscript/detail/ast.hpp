@@ -347,7 +347,10 @@ namespace jai {
         // and the kind the proof took, base_type | element base_type << 8 (an array of scalars), which a graft re-checks when a run moved the
         // definition epoch (the declaring unit may have re-run with another type)
         mutable std::vector<std::pair<uint64_t, uint16_t>> proof_globals;
-        static constexpr uint16_t k_proof_function = 0x8000;   // a proof_globals kind naming a free function's declared scalar return (a call's result)
+        static constexpr uint16_t k_proof_function = 0x8000;
+        // a builtin method's receiver that is a certain program-scope typed global (name, kind as proof_globals): a graft in its arguments
+        // re-checks it, since the graft runs ahead of the receiver's read
+        mutable std::pair<uint64_t, uint16_t> receiver_global{UINT64_MAX, 0};   // a proof_globals kind naming a free function's declared scalar return (a call's result)
         mutable const block_stmt* proven_callee_body = nullptr;
         // weak: the resolved declaration may belong to a program that dies before this site compiles (a dropped jaibite, an evicted parse-cache entry, a redefinition)
         mutable std::weak_ptr<const class function_decl> proven_callee_decl;

@@ -67,6 +67,7 @@ namespace jai::vm {
         };
 
         struct callable_context {
+            bool coroutine_body = false;   // the body yields: it runs on a fiber frame, which never runs a block, so a graft of a callee with a loop keeps the call (the callee's own frame closes it)
             // Symbols this callable itself declares (params + locals): identifiers outside
             // this set compile to env lookups, never to baked (possibly outer-frame) slots.
             std::unordered_set<uint64_t> declared;
@@ -187,7 +188,11 @@ namespace jai::vm {
         // each began, which name them to the first compile's verdicts
         std::unordered_set<const ast_node*> open_loops_;
         std::vector<std::pair<const ast_node*, uint32_t>> loop_marks_;
-        bool graft_in_loop_ = true;   // the graft being planned or compiled lands by the block rules: a leaf its body calls is held to them too
+        bool graft_in_loop_ = true;
+        // an if's condition: each leaf between the short-circuit jumps hoists its own leaf calls, so a graft behind && or || runs only on
+        // the path that reaches its operand
+        bool leaf_grafts_ = false;
+        bool leaf_retry_ = false;   // the if's whole condition hoists first: a call behind && or || is retried at its leaf, so the listing names it there   // the graft being planned or compiled lands by the block rules: a leaf its body calls is held to them too
         void mark_loop(const ast_node* stmt) { loops_.back().stmt = stmt; loop_marks_.emplace_back(stmt, static_cast<uint32_t>(chunk_->code.size())); }
         bool in_closable_loop() const;
         std::shared_ptr<chunk> compile_callable_once(std::string_view name, const std::vector<parameter>& parameters, const std::shared_ptr<block_stmt>& body, size_t local_count);
@@ -197,7 +202,7 @@ namespace jai::vm {
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> callee_probes_;   // a call staged ahead of a graft (probe ip, argument prefix already evaluated/captured in owned temps): compile_call completes it
         std::unordered_map<const call_expr*, std::vector<uint32_t>> staged_arguments_;   // owned argument temps, moved into their call in source order
         std::unordered_map<size_t, std::vector<size_t>> capture_sites_;   // capture instruction patches owned by an emitted callee probe
-        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; std::unordered_map<const call_expr*, size_t> argument_prefixes; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
+        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; std::unordered_map<const call_expr*, size_t> argument_prefixes; std::vector<std::pair<uint64_t, uint16_t>> receiver_globals; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
         const char* inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame = nullptr) const;   // nullptr: the graft takes the call; else the rule that keeps it
         script_value_type arg_kind(const expression* a, const std::vector<const type_info*>* frame) const;
         std::vector<script_value_type> site_kinds(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, script_value_type* result) const;

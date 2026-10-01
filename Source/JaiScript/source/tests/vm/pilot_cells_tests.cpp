@@ -1014,7 +1014,7 @@ public:
 			const std::string d = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; };");
 			check_true(d.find("CELLS_BACK") != std::string::npos && d.find("C_JCMP") != std::string::npos && d.find("C_JUMP") != std::string::npos, "the two-arm diamond closes with cell branches: " + d);
 			const std::string g = listing_of("var f = function(var& pix, var& pal, var& tp, int n, int th) { int y = 0; while (y < n) { int iv = (y * 7) % th - 3; if (iv < 0) { iv = iv + th; } pix[y] = pal[tp[iv]]; y = y + 1; } return y; };");
-			check_true(g.find("CELLS_BACK") != std::string::npos && g.find("C_JCMP") != std::string::npos && g.find("C_GUARD") != std::string::npos, "the texture shape closes over its guarded arm and its container guard: " + g);
+			check_true(g.find("CELLS_BACK") != std::string::npos && (g.find("C_JCMP") != std::string::npos || g.find("C_JL") != std::string::npos || g.find("C_JG") != std::string::npos) && g.find("C_GUARD") != std::string::npos, "the texture shape closes over its guarded arm and its container guard: " + g);
 			const std::string b = listing_of("var f = function(int n) { int total = 0; int i = 0; while (i < n) { if (i == 5) { break; } total += i; i = i + 1; } return total; };");
 			check_true(b.find("CELLS_BACK") != std::string::npos && b.find("C_EXIT") != std::string::npos, "a break is an exit of the block: " + b);
 		});
@@ -2720,7 +2720,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("|caught:") != std::string::npos && vm.find("|2|") != std::string::npos && vm.find("|24|") != std::string::npos, "the shapes ran, the overflow caught after two steps, the bool element summed as one: " + vm);
 			const std::string l = listing_of("var f = function(var& tp, var& pal, var& pix, int w, int h) { int acc = 0; for (int sx = 0; sx < w; ++sx) { for (int sy = 0; sy < h; ++sy) { int t = tp[sx * h + sy]; if (t >= 0) { pix[sy * 8 + sx] = pal[t]; acc = acc + t; } } } return acc; };");
-			check_true(l.find("CELLS_CFOR_BACK") != std::string::npos && l.find("C_JCMP") != std::string::npos && l.find("-- open loop") == std::string::npos, "the counted column loop closes over its counted row loop: " + l);
+			check_true(l.find("CELLS_CFOR_BACK") != std::string::npos && (l.find("C_JCMP") != std::string::npos || l.find("C_JL") != std::string::npos || l.find("C_JG") != std::string::npos) && l.find("-- open loop") == std::string::npos, "the counted column loop closes over its counted row loop: " + l);
 		});
 		test("an_untranslatable_instruction_inside_a_branch_arm_is_a_bail", [this]() {
 			// GLOOM's column loop (a cache-fill arm storing a call result into a global table the first time a key is seen, the pixel
@@ -3353,8 +3353,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var ints = function(int n) { int s = 3; int t = 5; int acc = 0; for (int i = 0; i < n; i++) { int a = s + t; int b = a - i; int c = b + 11; s = t; t = c - 7; acc = acc + a - b + c; } return acc; };\n"
 				"var moves = function(int n) { int k = 0; float f = 0.0; bool on = false; int acc = 0; for (int i = 0; i < n; i++) { int j = i; float g = f; k = 7; f = 2.5; on = true; if (on) { acc = acc + j + k; } f = g + f; } return to_string(acc) + \"/\" + to_string(f); };\n"
 				"var adds = function(int n) { int s = 0; string m = \"\"; try { for (int i = 0; i < n; i++) { int a = 9223372036854775800 + i; s = a + 3; } } catch (err) { m = err; } return m; };\n"
-				"var subs = function(int n) { int s = 0; string m = \"\"; try { for (int i = 0; i < n; i++) { int a = -9223372036854775800 - i; s = a - 3; } } catch (err) { m = err; } return m; };\n";
-			const std::string body = "string run() { return to_string(floats(24)) + \"|\" + to_string(ints(24)) + \"|\" + moves(24) + \"|\" + adds(9) + \"|\" + subs(9); }\nrun();";
+				"var subs = function(int n) { int s = 0; string m = \"\"; try { for (int i = 0; i < n; i++) { int a = -9223372036854775800 - i; s = a - 3; } } catch (err) { m = err; } return m; };\n"
+				"var reads = function(int n) { array<float> xs = [0.5, 1.5, -2.0, 3.25, 0.0, 7.5]; array<int> ys = [4, -1, 9]; float acc = 0.0; int hits = 0; for (int i = 0; i < n; i++) { int j = i % 6; float v = xs[j]; int q = j % 3; float w = ys[q]; if (v < 1.0) { acc = acc + v; } if (v >= acc) { hits = hits + 1; } if (i > 3) { acc = acc * 0.5 + w; } } return to_string(acc) + \"/\" + to_string(hits); };\n";
+			const std::string body = "string run() { return to_string(floats(24)) + \"|\" + to_string(ints(24)) + \"|\" + moves(24) + \"|\" + adds(9) + \"|\" + subs(9) + \"|\" + reads(30); }\nrun();";
 			both(prelude + body, "", "pinned by kind");
 			both(prelude + body, "", "pinned by kind, proofs off", false);
 			const std::string vm = run_on(true, prelude + body);
@@ -3368,6 +3369,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (const char* op : { "C_ADD_FF", "C_SUB_FF", "C_MUL_FF", "C_ADD_FFK", "C_MUL_FFK", "C_ADD_II", "C_SUB_II", "C_ADD_IIK", "C_SUB_IIK", "C_MOV_P", "C_MOV_K" }) {
 				check_true(l.find(std::string(op) + " ") != std::string::npos, std::string("the listing names ") + op + "\n" + l);
 			}
+			for (const char* op : { "C_LOAD_F ", "C_JLT_FFK ", "C_JGE_FF ", "C_JGT_IIK " }) { check_true(l.find(op) != std::string::npos, std::string("the listing names ") + op + "\n" + l); }
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
 				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);

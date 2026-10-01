@@ -404,10 +404,13 @@ pairs; pass <code>nullptr</code> as the setter for read-only.</li>
 registered yet throws at registration time with a fix-it message; this tag acknowledges a deliberate circular
 dependency and skips the check. The classic case is self-reference: <code>class Node { std::shared_ptr&lt;Node&gt; next; }</code>
 binds <code>next</code> before <code>Node</code> itself is registered.</li>
-<li><code>.static_property(name, &amp;var)</code>: a class-level value scripts read and assign as
-<code>Vec2::name</code>. It starts from <code>var</code>&#x27;s value at registration and is the class&#x27;s own
-copy from then on: script stores do not reach <code>var</code> and later C++ writes are not seen. For a live
-C++ variable use <code>add_global_ref</code>.</li>
+<li><code>.static_property(name, &amp;var)</code> / <code>.static_property(name, getter, setter)</code>:
+class-level values. The pointer form binds the live variable: <code>Class::name</code> reads it and
+<code>Class::name = v</code> writes it, so a change on either side is the other side&#x27;s value. The
+lambda form reads through the getter and stores through the setter, which takes the one new value.</li>
+<li><code>.method(name, lambda)</code>: a lambda whose first parameter is <code>T&amp;</code> or
+<code>const T&amp;</code> receives the object; any other lambda is a method that ignores its receiver
+(<code>.method(&quot;twice&quot;, [](int64_t k) { return k * 2; })</code> answers <code>obj.twice(4)</code>).</li>
 <li><code>.base_class&lt;Base&gt;()</code>: inheritance edge. Methods and properties of the base become
 callable on the derived, virtual dispatch preserved, and the polymorphic-load type check learns that a
 <code>Base</code> slot may hold this type. <code>static_assert</code>-guarded; diamond inheritance throws.</li>

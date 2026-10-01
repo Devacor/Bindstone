@@ -169,6 +169,54 @@ public:
     }
     
     void forge_tests() override {
+        test("a_lambda_method_without_self_ignores_the_receiver", [this]() {
+            auto eng = make_engine();
+            dynamic_binder<Counter>(*eng, "Counter")
+                .constructor<>()
+                .method("twice", [](int64_t k) { return k * 2; })
+                .method("seven", []() -> int64_t { return 7; })
+                .method("bump", [](int64_t& k) { k += 1; })
+                .method("get", &Counter::get)
+                .build();
+            check_eq((int64_t)8, eng->execute("auto c = Counter(); c.twice(4)").as_int(), "one argument");
+            check_eq((int64_t)7, eng->execute("c.seven()").as_int(), "no argument");
+            check_eq((int64_t)6, eng->execute("int n = 5; c.bump(n); n").as_int(), "a reference argument writes back");
+        });
+
+        test("static_property_registers_its_setter", [this]() {
+            auto eng = make_engine();
+            int64_t limit = 3;
+            dynamic_binder<Counter>(*eng, "Counter")
+                .constructor<>()
+                .static_property("limit", [&limit]() { return limit; }, [&limit](int64_t v) { limit = v; })
+                .build();
+            check_eq((int64_t)3, eng->execute("Counter::limit").as_int(), "the getter reads the host value");
+            check_eq((int64_t)9, eng->execute("Counter::limit = 9; Counter::limit").as_int(), "a strict store loads and runs the setter");
+            check_eq((int64_t)9, limit, "the setter wrote the host value");
+            check_eq((int64_t)10, eng->execute("Counter::limit += 1; Counter::limit").as_int(), "a compound store reads and writes");
+            check_eq((int64_t)10, limit);
+        });
+
+        test("static_property_binds_the_live_variable", [this]() {
+            auto eng = make_engine();
+            int64_t live = 1;
+            std::string label = "a";
+            dynamic_binder<Counter>(*eng, "Counter")
+                .constructor<>()
+                .static_property("live", &live)
+                .static_property("label", &label)
+                .build();
+            live = 5;
+            label = "b";
+            check_eq((int64_t)5, eng->execute("Counter::live").as_int(), "a host write after registration reads in script");
+            check_eq(std::string("b"), eng->execute("Counter::label").as<std::string>());
+            eng->execute("Counter::live = 12; Counter::label = \"c\";");
+            check_eq((int64_t)12, live, "a script store writes the variable");
+            check_eq(std::string("c"), label);
+            check_eq((int64_t)13, eng->execute("Counter::live += 1; Counter::live").as_int(), "a compound store");
+            check_eq((int64_t)13, live);
+        });
+
         test("basic_class_registration", [this]() {
             auto eng = make_engine();
             

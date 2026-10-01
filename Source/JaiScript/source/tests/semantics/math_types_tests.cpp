@@ -488,6 +488,32 @@ public:
             check(listing.find("-- cell loop") != std::string::npos && listing.find("-- open loop") == std::string::npos, "the ivec loop closes as a cell block: " + listing.substr(0, 3000));
         });
 
+        // math::min, max, pow, atan2, fmod, hypot and the wrap family over two scalars run as one math temp (and a cell operation): an int pair stays
+        // exact, a mixed pair keeps the picked operand's kind, an operand that is no number takes the kernel's text through the general op
+        test("scalar_pair_rows_in_cells", [agree, this]() {
+            agree("int g = 7; float h = 2.5; function f() -> string { array<int> e = [5, -3, 9, 12]; array<float> w = [0.5, -1.25, 3.0]; int s = 0; float t = 0.0; var mixed = 0; "
+                  "for (int i = 0; i < 4; i++) { s = s + math::min(e[i], g) + math::max(i * 2, e[i] - 1) + math::wrap_mul(e[i], 3) + math::wrap_add(e[i], 9223372036854775807) % 5; "
+                  "t = t + math::pow(w[i % 3], 2) + math::atan2(w[i % 3], h) + math::max(0, w[i % 3]); mixed = math::min(i, 1.5); } "
+                  "return to_string(s) + \" \" + to_string(t) + \" \" + to_string(mixed) + type_of(mixed); } f()", "pair rows over elements, locals, globals and literals", false);
+            agree("function f() -> string { int a = 9007199254740993; int b = 9007199254740992; int m = 0; for (int i = 0; i < 3; i++) { m = math::max(a, b) - math::min(b, a); } return to_string(m); } f()",
+                  "an int pair compares exactly above 2^53", false);
+            agree("function f() -> string { array<float> w = [5.5, -7.25, 3.0, 0.0]; array<int> e = [7, -9, 4, 0]; float t = 0.0; string z = \"\"; "
+                  "for (int i = 0; i < 4; i++) { t = t + math::fmod(w[i], 2.5) + math::fmod(e[i], 3) + math::hypot(w[i], e[i]) + math::hypot(3, 4); z = to_string(math::fmod(1.0, w[3])); } "
+                  "var m = \"\"; var v = 2; try { for (int i = 0; i < 3; i++) { var r = math::hypot(v, 1.5); if (i == 1) { v = \"s\"; } } } catch (er) { m = er; } "
+                  "return to_string(t) + \" \" + z + \" \" + m; } f()", "fmod and hypot over elements, int and float operands, a zero divisor", false);
+            agree("function f() -> string { var v = 3; float s = 0.0; string m = \"\"; try { for (int i = 0; i < 4; i++) { s = s + math::pow(v, 2); if (i == 2) { v = \"x\"; } } } catch (e) { m = e; } "
+                  "var k = 1.5; int w = 0; string n = \"\"; try { for (int i = 0; i < 3; i++) { w = math::wrap_add(w, 2); if (i == 1) { w = 0; var q = math::wrap_sub(k, 1); } } } catch (e) { n = e; } "
+                  "var p = 1; string o = \"\"; try { for (int i = 0; i < 3; i++) { var r = math::min(p, 4); if (i == 1) { p = \"s\"; } } } catch (e) { o = e; } return m + \"|\" + n + \"|\" + o + to_string(s); } f()",
+                  "an operand that is no number raises the kernel's text", false);
+            auto e = jai::engine::make();
+            e->set_backend(jai::backend_type::vm);
+            e->execution_budget(0);
+            std::string listing;
+            e->disassembly_sink([&](const std::string& l, const std::string&) { listing += l; });
+            e->execute("function f() -> float { array<float> w = [0.5, -1.25, 3.0, 2.0]; float t = 0.0; int s = 0; for (int i = 0; i < 4; i++) { t = t + math::max(w[i], 0.0) + math::pow(w[i], 2); s = math::min(s + i, 3); t = t + math::fmod(w[i], 1.5) + math::hypot(w[i], 2.0); } return t + s; } f();");
+            check(listing.find("-- cell loop") != std::string::npos && listing.find("-- open loop") == std::string::npos, "the pair rows close as a cell block: " + listing.substr(0, 3000));
+        });
+
         test("equality_and_truthiness", [expect]() {
             expect("to_string(math::vec3(1, 2, 3) == math::vec3(1, 2, 3))", "true", "equal");
             expect("to_string(math::vec3(1, 2, 3) != math::vec3(1, 2, 4))", "true", "not equal");

@@ -171,7 +171,9 @@ side has no numeric-to-string conversion, unlike a script <code>string</code> sl
 (lambdas, cross-execute function values) are unchecked.</p>
 <h3 id="returns">Returns<a class="hlink" href="#returns" aria-label="link">&#8203;</a></h3>
 <p>A returned value must be assignable to the declared return type; a value from a <code>void</code> function
-is an error; a bare <code>return;</code> or falling off the end of a typed function is a warning. Coroutines are
+is an error; a bare <code>return;</code> or a path that falls off the end is an error when the result holds no null (a
+primitive, a string, a reference) and a warning for a class, handle or container result. The walk runs at load and adds
+nothing to a call. Coroutines are
 exempt (calling one yields a handle; yield and return types are not checked).</p>
 <p>The run-time half matters when the value came through <code>var</code>: the conversion is part of the
 <code>return</code> statement itself, C++ style. A <code>try</code> around the <code>return</code> inside the

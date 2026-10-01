@@ -140,7 +140,7 @@ try { strict_level(&quot;seven&quot;); } catch (e) { print(&quot;caught by the c
 caught in parse_level: Cannot return string from &#x27;parse_level&#x27; (declared -&gt; int)
 0
 caught by the caller: Cannot return string from &#x27;strict_level&#x27; (declared -&gt; int)</code></pre></div>
-<p>Returning a value from a <code>void</code> function is a load error; a typed function that can fall off the end of its body draws only a warning (such a call yields <code>null</code>). Coroutines are the exception to all of this: calling one yields a handle, and their yield and return types are not checked (see <a href="../guide/08-coroutines.html#rules-and-edges">Coroutines</a>).</p>
+<p>Returning a value from a <code>void</code> function is a load error; so is a function whose result holds no null (<code>int</code>, <code>float</code>, <code>bool</code>, <code>char</code>, <code>string</code>, a reference) that can fall off the end of its body or <code>return;</code> without a value; a class, handle or container result draws only a warning there (such a call yields <code>null</code>). Coroutines are the exception to all of this: calling one yields a handle, and their yield and return types are not checked (see <a href="../guide/08-coroutines.html#rules-and-edges">Coroutines</a>).</p>
 <h2 id="parameters-defaults">Parameters and defaults<a class="hlink" href="#parameters-defaults" aria-label="link">&#8203;</a></h2>
 <p>Four parameter spellings: classic <code>int x</code> / <code>Creature&amp; c</code> (typed, enforced + converted like any typed target), bare <code>x</code> (dynamic), the typed shorthand <code>int: n</code>, and the auto shorthand <code>:x</code>, an auto-like parameter, the same as writing <code>auto x</code>. The shorthands exist for terse lambdas; <code>int x</code> and bare <code>x</code> are what you will write most. Defaults may follow any of them (once a parameter has a default, all later ones need one too):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(name, string greeting = &quot;hello&quot;) {
@@ -340,7 +340,7 @@ out.join(&quot;, &quot;);</code></pre></div>
 </div>
 <footer class="site-footer">
 <p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
-<p class="foot-note">draft contract update &middot; changed examples await both-backend validation</p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-30</p>
 </footer>
 <script src="../assets/search-index.js"></script>
 <script src="../assets/site.js"></script>

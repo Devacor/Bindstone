@@ -117,7 +117,7 @@ methods, inherited fields) all check against the declared type.
 **Calls** — checked only when the callee resolves statically:
 - same-script functions/ctors/methods: arity (with defaults) + per-arg assignability
   (same conversion table, element boundary included — note a `string` parameter accepts anything). Overloads: error
-  only if NO overload matches. A reference parameter aliases compatible storage without conversion: exact primitive/math kind, a compatible class, callable-or-null, and matching concrete container/handle types. Unknown container views remain lenient in this draft. A string
+  only if NO overload matches. A reference parameter aliases compatible storage without conversion: the exact primitive or math kind, the class or a subclass, and for containers and handles the same concrete type (an argument of unknown element type stays lenient). A string
   literal for a viable `string&` overload is accepted whether or not the callee writes through
   the parameter (the runtime binds a private cell; a string variable still aliases). For other types, a literal
   (a number, string, char, bool or null literal, an array or map literal) where every viable
@@ -147,7 +147,13 @@ methods, inherited fields) all check against the declared type.
   type is a diagnostics fact, never a proof source.
 - callables in variables (lambdas, cross-execute function values): unchecked.
 
-**Returns** — values follow the declared return conversion table. Primitive and reference return types require a value under strict checking: a bare return and structurally reachable fall-through are load errors. Uncertain exception-only completion paths remain warnings. This analysis runs at load/check time; it adds no per-call or per-return runtime guard. Warn mode records the diagnostics but preserves execution, and off mode deliberately opts out. Explicit return null remains an expression and follows the usual conversion rules. Void, auto/var, constructors and coroutine completion retain their existing rules. Nullable object/handle and container completion policy is unchanged in this draft.
+**Returns** — a returned value must be assignable to the declared return type; a value from a `void` fn is
+an error. A primitive, string or reference result holds no null, so a bare `return;` and a path that
+reaches the end of the body are errors there (`detail/return_flow.hpp`, a load-time walk: no call or
+return pays for it); an end reached only through a `catch` of an exception the walk cannot prove is
+raised is a warning. A class, handle or container result returns null on those paths: warning
+severity. Lambdas with a declared return type follow the same rule. Coroutines are exempt: calling one
+yields a handle, and yield/return types aren't checked.
 
 **Identifiers** — undeclared = error, checked against: scopes, the current class's members
 (incl. inherited), top-level declarations (two-pass, so forward references work), every

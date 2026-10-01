@@ -437,9 +437,21 @@ engine stays usable", not by `check_throws`.
   lane (vm member IC, field proofs — `class_definition::user_accessor`), is a non-lvalue to
   references, and adding/removing an accessor on hot reload takes effect for existing instances.
 - Functions & lambdas with captures (`[=]`/`[&]`, named or init-captures), variadics, default args,
-  by-reference params. A default capture (`[=]`, `[&]`) or capture-free `[]` never captures a program-scope name: the
-  lambda reads it when it runs; `[g]` copies it at creation and an init-capture `[x = e]` copies `e` into the
-  lambda's own `x` (Dev ruling 2026-09-27, `docs/closures_and_captures.md`, `.jaibite` version 23).
+  by-reference params. **Capture lists are exhaustive** (Dev ruling 2026-09-30, C++): `[]` captures nothing, `[x]`
+  captures only `x`, and a name a nested lambda uses must be admitted by every lambda between it and the declaring
+  frame; `this`/`super` and bare members need `[this]`, `[=]` or `[&]`. An unlisted frame local is a parse error, an
+  unlisted member or `this` a checker error, and closure creation raises for what neither saw (check off, a loaded
+  bite). A closure's parent is its program scope (the globals or its namespace), never the creating frame. A default
+  capture (`[=]`, `[&]`) or `[]` never captures a program-scope name: the lambda reads it when it runs; `[g]` copies
+  it at creation and an init-capture `[x = e]` copies `e` into the lambda's own `x` (Dev ruling 2026-09-27,
+  `docs/closures_and_captures.md`; `.jaibite` version 32).
+- **Required returns** (Dev request 2026-09-30): a function or lambda whose declared result holds no null (int,
+  float, bool, char, string, utf8_string, a reference) and that can fall off its body or `return;` is a strict load
+  error (`detail/return_flow.hpp`, load-time only: no runtime guard, opcode or per-call work); a nullable result
+  (class, handle, container) warns. Warn/off run it as written (the call yields null).
+- **Hot-reload reports** (`engine::hot_reload_reporting(true)`, off by default): reloads aggregate their automatic
+  field operations into `hot_reload_reports()` rows (class, field, stored type before/after, preserved / converted /
+  reset / added / removed, count) until `clear_hot_reload_reports()`; off, migration records nothing.
 - **Evaluation order** (Dev rulings 2026-09-27, C++17): arguments left to right after the callee, each taking
   its value when evaluated; an assignment `t = e` / `t op= e` evaluates `e` before every part of the target
   (a member's receiver, a static, a namespace variable, a subscript's container and index). `auto x = e` takes

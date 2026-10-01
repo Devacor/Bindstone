@@ -37,14 +37,14 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 
 <h2 id="settled-language">Settled: the language<a class="hlink" href="#settled-language" aria-label="link">&#8203;</a></h2>
 <ul>
-<li><strong>Value semantics.</strong> Assignment, by-value parameters and returns copy. Aliasing exists only where a declaration asks for it: a <code>T&amp;</code> reference or a <code>shared_ptr&lt;T&gt;</code> handle. Copying an instance, array or map copies its values and shares its handles, as C++ does. <a href="guide/03-value-semantics.html">Value Semantics</a></li>
+<li><strong>Value semantics.</strong> Assignment, by-value parameters and returns copy. Aliasing exists only where a declaration asks for it: a <code>T&amp;</code> reference or a <code>shared_ptr&lt;T&gt;</code> handle. A typed reference binds storage of its own type and never converts it (<code>int&amp;</code> refuses a <code>float</code> variable), and a store through a reference follows the target's declared type. Copying an instance, array or map copies its values and shares its handles, as C++ does. <a href="guide/03-value-semantics.html">Value Semantics</a></li>
 <li><strong>The type ladder.</strong> A typed slot (<code>int x</code>) is enforced, <code>auto</code> is inferred and then enforced, <code>var</code> stays dynamic. <a href="guide/02-type-ladder.html">The Type Ladder</a></li>
 <li><strong>Strict checking by default.</strong> The checker runs before anything executes. A typed-to-typed mistake it can see fails the load; a value that came through <code>var</code> fails at run time, where <code>try</code>/<code>catch</code> sees it. <code>warn</code> and <code>off</code> are per-engine modes, <code>[[warn_mode]]</code> and <code>[[strict_mode]]</code> apply to a region, <code>extern</code> declares a name the host provides, and <code>cast&lt;T&gt;</code>, <code>cast&lt;T&amp;&gt;</code> and <code>cast&lt;shared_ptr&lt;T&gt;&gt;</code> are the explicit boundary. A program that runs clean is never rejected. <a href="guide/13-strict-checking.html#the-promise">Strict checking</a></li>
 <li><strong>One conversion table.</strong> Declarations, assignments, by-value parameters, typed returns and field stores all convert through the same table, with at most one converting constructor per conversion. <a href="guide/02-type-ladder.html#conversion-table-typed-locked-auto-targets">The table</a></li>
-<li><strong>Typed containers.</strong> <code>array&lt;T&gt;</code> and <code>map&lt;K, V&gt;</code> hold what they declare: a store converts by the element rules or raises, nothing demotes silently, <code>array&lt;var&gt;</code> is the dynamic form, map keys never coerce, <code>array&lt;Base&gt;</code> holds subclasses, and handle-typed elements take null. <a href="guide/09-containers-strings.html#typed-containers">Typed containers</a></li>
+<li><strong>Typed containers.</strong> <code>array&lt;T&gt;</code> and <code>map&lt;K, V&gt;</code> hold what they declare: a store converts by the element rules or raises, nothing demotes silently, <code>array&lt;var&gt;</code> is the dynamic form, a copy into a <code>var</code> or a <code>slice</code> keeps the element type, map keys never coerce, <code>array&lt;Base&gt;</code> holds subclasses, and handle-typed elements take null. <a href="guide/09-containers-strings.html#typed-containers">Typed containers</a></li>
 <li><strong>Integers and chars.</strong> <code>int</code> is 64-bit. Overflow raises a catchable error, or wraps in a build that defines <code>JAISCRIPT_WRAP_ON_OVERFLOW</code>, and is never undefined behavior; shifts operate on the 64-bit pattern. <code>char</code> is a byte that enters arithmetic as 0..255 and converts only through <code>cast</code>. <a href="guide/04-operators.html#checked-overflow-raises-never-wraps-never-ub">Operators</a></li>
 <li><strong>Evaluation order.</strong> A call evaluates its callee, then its arguments left to right, and a by-value argument keeps the value it had when it was evaluated. A binary operator evaluates its left operand first. Errors surface in the same order. <a href="guide/04-operators.html#evaluation-order-is-a-contract">Evaluation order</a></li>
-<li><strong>Captures.</strong> <code>[]</code> captures nothing; named lists are exhaustive. A lambda captures the enclosing function's locals and parameters when it is created: a copy under <code>[=]</code> or <code>[x]</code>, the variable itself under <code>[&amp;]</code> or <code>[&amp;x]</code>, and a shared capture outlives its frame. A global is never captured implicitly; the lambda reads it when it runs. <a href="guide/06-functions.html#lambdas-and-captures">Lambdas and captures</a></li>
+<li><strong>Captures.</strong> <code>[]</code> captures nothing; named lists are exhaustive. A lambda captures the enclosing function's locals and parameters when it is created: a copy under <code>[=]</code> or <code>[x]</code>, the variable itself under <code>[&amp;]</code> or <code>[&amp;x]</code>, and a shared capture outlives its frame; <code>[this]</code> captures the instance itself. A global is never captured implicitly; the lambda reads it when it runs. <a href="guide/06-functions.html#lambdas-and-captures">Lambdas and captures</a></li>
 <li><strong>Names and scopes.</strong> Blocks scope as in C++. Inside a method a bare name resolves to a local, then a member, then a global. A namespace is a scope, and a <code>catch</code> variable belongs to its block. <a href="guide/07-classes.html#name-resolution-in-methods">Name resolution</a></li>
 <li><strong>Modules.</strong> <code>include</code> is textual and runs each time it is reached. <code>import</code> runs a module once per engine and may appear wherever a statement may; reached again, it re-runs a module whose file has changed on disk. <a href="guide/10-modules.html">Modules</a></li>
 <li><strong>Access control.</strong> Two levels: <code>public:</code> reaches everyone, <code>private:</code> reaches the declaring class and every class derived from it, and <code>protected:</code> is a synonym of <code>private:</code>. <a href="guide/07-classes.html#access-control">Access control</a></li>
@@ -75,19 +75,16 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><strong>Parallel admission.</strong> Which <code>parallel_for</code> and <code>parallel_transform</code> bodies run on worker threads rather than serially. Results stay deterministic at any worker count. <a href="guide/09-containers-strings.html#parallel-transform">parallel_transform</a></li>
 <li><strong>String mutators.</strong> <code>to_upper</code>, <code>trim</code> and the other mutating string methods change their receiver in place. <a href="guide/09-containers-strings.html#strings-observers-vs-mutators">Observers vs mutators</a></li>
 <li><strong>Script-extensible objects.</strong> <code>extend(obj, Class)</code> and its host side. <a href="embedding/13-script-extensible.html">extend</a></li>
-<li><strong>Syntax extensions.</strong> Bitwise compound assignments are supported. Coroutine lambdas remain absent.</li>
+<li><strong>Absent syntax.</strong> A coroutine cannot be declared inside a namespace, and there are no coroutine lambdas. Either may be added.</li>
 </ul>
 
 <h3 id="unspecified-edges">Unspecified edges<a class="hlink" href="#unspecified-edges" aria-label="link">&#8203;</a></h3>
-<p>These notes include specified behavior and unresolved edges from earlier releases. The linked guides and executable contract cases take precedence; each unresolved edge needs a current regression before becoming a promise.</p>
+<p>These are what the implementation does where no rule decides it. Both backends agree on each; do not depend on any of them.</p>
 <ul>
-<li><code>[this]</code> captures the original instance; reads and writes reach that object.</li>
 <li><code>contains</code>, <code>index_of</code> and <code>has</code> compare instances by identity, not by <code>==</code>.</li>
 <li>The <code>to_string(x)</code> builtin ignores a class's own <code>to_string()</code>; string <code>+</code> uses it.</li>
-<li>A script callback converted to <code>std::function</code> throws a host <code>runtime_error</code> on failure or an uncaught script throw. Signal receivers use the error sink.</li>
+<li>A script callback handed to a host <code>std::function</code> throws its error to the host caller as a <code>runtime_error</code>; a signal receiver's error goes to the engine's error handler.</li>
 <li>A derived instance stored in a base-typed slot keeps its class, where C++ would slice it.</li>
-<li>A typed array copied into <code>var</code>, or sliced, keeps its element constraint. Use an explicit <code>array&lt;var&gt;</code> copy for dynamic elements.</li>
-<li>Stores through references retain the target's declared constraints. Typed reference parameters bind compatible storage without converting it; <code>int&amp;</code> rejects a <code>float</code> variable.</li>
 <li>A compound assignment on a missing map key raises instead of inserting a default.</li>
 <li>A <code>case</code> label matches by kind as well as value: <code>switch (1)</code> skips <code>case 1.0</code>.</li>
 <li><code>0.0</code> and <code>-0.0</code> are distinct map keys.</li>
@@ -100,7 +97,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 <footer class="site-footer">
 <p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
-<p class="foot-note">draft contract update &middot; changed examples await both-backend validation</p>
+<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-30</p>
 </footer>
 <script src="assets/search-index.js"></script>
 <script src="assets/site.js"></script>

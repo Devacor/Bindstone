@@ -1002,8 +1002,29 @@ bool parser::reject_using_name(const token& t, const char* what) {
     return false;
 }
 
+void parser::check_reload_hook(const jai::declaration& d, bool& seen) {
+    static const char* const k_signature = "void hot_reload_migrate(map<string, var> previous)";
+    if (d.get_type() == node_type::function_decl) {
+        const auto& f = static_cast<const function_decl&>(d);
+        if (f.name != "hot_reload_migrate") return;
+        const type_info* previous = engine_->get_type_info_map(engine_->get_type_info_string(), engine_->get_type_info_any());
+        const bool shaped = !f.is_coroutine && f.parameters.size() == 1 && f.parameters[0].type && f.parameters[0].type->id == previous->id &&
+                            !f.parameters[0].is_reference && !f.parameters[0].default_value &&
+                            (!f.return_type || f.return_type->id == engine_->get_type_info_void()->id);
+        if (!shaped) {
+            errors_.push_back(f.location.to_string() + ": hot_reload_migrate at a unit's top level is its reload hook, declared " + k_signature);
+        } else if (seen) {
+            errors_.push_back(f.location.to_string() + ": a unit declares its reload hook hot_reload_migrate once");
+        }
+        seen = true;
+    } else if (d.get_type() == node_type::variable_decl && static_cast<const variable_decl&>(d).name == "hot_reload_migrate") {
+        errors_.push_back(d.location.to_string() + ": 'hot_reload_migrate' at a unit's top level names its reload hook, declared " + k_signature);
+    }
+}
+
 checked_result<std::vector<declaration_ptr>> parser::parse() {
     std::vector<declaration_ptr> declarations;
+    bool reload_hook_seen = false;
     if (apply_using_declarations(*stream_, using_stream_)) { stream_ = &using_stream_; }
 
     while (!is_at_end()) {
@@ -1020,6 +1041,7 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
         } else {
             auto decl = std::move(decl_result.value());
             if (decl) {
+                check_reload_hook(*decl, reload_hook_seen);
                 declarations.push_back(std::move(decl));
             }
         }

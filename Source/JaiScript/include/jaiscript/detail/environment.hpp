@@ -148,6 +148,9 @@ namespace jai {
         // Get all variables including parent scopes
         std::unordered_map<std::string_view, script_value> get_all_variables() const;
 
+        // The program-scope variables `unit` declared (its plain cells, current or shadowed by another unit's), by name id
+        std::vector<std::pair<uint64_t, const script_value*>> unit_variables(uint32_t unit) const;
+
         // Reset environment for reuse (optimization helper)
         void reset(std::shared_ptr<environment> new_parent);
 

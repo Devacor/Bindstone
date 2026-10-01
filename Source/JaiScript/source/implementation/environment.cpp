@@ -390,6 +390,20 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
     return true;
 }
 
+std::vector<std::pair<uint64_t, const script_value*>> environment::unit_variables(uint32_t unit) const {
+    std::vector<std::pair<uint64_t, const script_value*>> out;
+    if (parent_) { return out; }
+    for (const auto& [id, owner] : unit_of_) {
+        if (owner.id != unit || inline_cells_.count(id)) { continue; }
+        auto flat = flat_lookup_.find(id);
+        if (flat != flat_lookup_.end() && flat->second) { out.emplace_back(id, flat->second); }
+    }
+    for (const auto& [id, versions] : versions_) {
+        for (const auto& v : versions) { if (v.unit.id == unit && v.cell) { out.emplace_back(id, v.cell); } }
+    }
+    return out;
+}
+
 script_value* environment::same_unit_cell(uint64_t id) {
     if (parent_ || local_ids_.count(id) == 0) { return nullptr; }
     const unit_stamp unit = symbolizer_->current_unit();

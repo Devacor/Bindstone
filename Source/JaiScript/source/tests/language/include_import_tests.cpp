@@ -1314,6 +1314,140 @@ public:
             std::filesystem::remove(std::filesystem::path(path).replace_extension(".jaibite"));
         });
 
+        test("a_unit_reload_hook_receives_its_previous_values_after_a_re_run", [=, this]() {
+            // void hot_reload_migrate(map<string, var> previous) at a unit's top level runs once after a RE-run of that unit (never
+            // the first load), after its top-level code, with every program-scope variable the unit declared as it was before the
+            // re-run - a retyped one, a removed one, a re-initialized one; it is no global function: nothing can call it
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 0;
+            auto write = [&](const char* name, const std::string& body) {
+                const auto path = dir / name;
+                put_file(path, body);
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            write("rh_mod.jai",
+                "array<int> scores = [1, 2, 3];\nint legacy = 5;\nint phase = 1;\n"
+                "void hot_reload_migrate(map<string, var> previous) { hook_ran(\"v1\"); }\n");
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(dir.string());
+            std::vector<std::string> hooks;
+            eng->add_function("hook_ran", [&hooks](std::string which) { hooks.push_back(which); });
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("void frame() { import(\"rh_mod.jai\"); }\nframe();");
+            check_true(hooks.empty(), "no hook on the first load");
+            std::string called;
+            try { eng->execute("hot_reload_migrate({});"); } catch (const std::exception& e) { called = e.what(); }
+            check_true(called.find("hot_reload_migrate") != std::string::npos, "the hook is no global function: " + called);
+
+            write("rh_mod.jai",
+                "map<string, int> scores = {};\nint legacy_seen = 0;\nint phase = 2;\nint phase_seen = 0;\n"
+                "void hot_reload_migrate(map<string, var> previous) {\n"
+                "\thook_ran(\"v2\");\n"
+                "\tarray<int> old = previous[\"scores\"];\n"
+                "\tfor (int i = 0; i < old.size(); i++) { scores[to_string(i)] = old[i]; }\n"
+                "\tlegacy_seen = previous[\"legacy\"];\n"
+                "\tphase_seen = previous[\"phase\"] * 10 + phase;\n"
+                "}\n");
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("frame();");
+            check_eq(size_t(1), hooks.size(), "a re-run runs the new source's hook once");
+            check_eq(std::string("v2"), hooks.empty() ? std::string() : hooks.back());
+            check_eq(script_int(3), eng->execute("scores[\"2\"];").as_int(), "a retyped global converted from its previous value");
+            check_eq(script_int(5), eng->execute("legacy_seen;").as_int(), "a removed global is readable through previous");
+            check_eq(script_int(12), eng->execute("phase_seen;").as_int(), "previous holds the value before the re-run; the hook runs after its top-level code");
+            called.clear();
+            try { eng->execute("hot_reload_migrate({});"); } catch (const std::exception& e) { called = e.what(); }
+            check_false(called.empty(), "still not callable after a reload");
+            eng->static_checking(check_mode::off);
+            called = eng->execute("var m = \"\";\ntry { hot_reload_migrate({}); } catch (e) { m = e; }\nm;").to_string();
+            check_true(called.find("hot_reload_migrate") != std::string::npos, "at run time too: " + called);
+            eng->static_checking(check_mode::strict);
+
+            write("rh_mod.jai",
+                "int rh_version() { return 3; }\n"
+                "void hot_reload_migrate(map<string, var> previous) { hook_ran(\"v3\"); throw \"migrate failed\"; }\n");
+            eng->import_recheck_interval(1.0e6);
+            check_eq(std::string("migrate failed"), eng->execute("var m = \"\";\ntry { frame(); } catch (e) { m = e; }\nm;").to_string(),
+                     "an error in the hook is catchable");
+            check_eq(script_int(3), eng->execute("rh_version();").as_int(), "the program stays as the re-run left it");
+
+            write("rh_mod.jai", "int rh_version() { return 4; }\n");
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("frame();");
+            check_eq(size_t(2), hooks.size(), "a run without the declaration has no hook");
+
+            write("rh_bad.jai", "int bad_value = 1;\nvoid hot_reload_migrate(int previous) {}\n");
+            std::string bad;
+            try { eng->execute("import(\"rh_bad.jai\");"); } catch (const std::exception& e) { bad = e.what(); }
+            check_true(bad.find("void hot_reload_migrate(map<string, var> previous)") != std::string::npos, "a wrong signature is a load error naming the shape: " + bad);
+            for (const char* f : {"rh_mod.jai", "rh_bad.jai"}) {
+                std::filesystem::remove(dir / f);
+                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+            }
+        });
+
+        test("two_units_each_keep_their_own_reload_hook", [=, this]() {
+            // each file's hook is its own: it sees only its unit's variables, and a re-run of the file by execute_file runs it too
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 0;
+            auto write = [&](const char* name, const std::string& body) {
+                const auto path = dir / name;
+                put_file(path, body);
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            auto unit = [](const char* tag, int v) {
+                return std::string("int ") + tag + "_var = " + std::to_string(v) + ";\n"
+                    "void hot_reload_migrate(map<string, var> previous) { hook_ran(\"" + tag + ":\" + to_string(previous.size()) + \":\" + to_string(previous[\"" + tag + "_var\"])); }\n";
+            };
+            write("rh_a.jai", unit("a", 1));
+            write("rh_b.jai", unit("b", 2));
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(dir.string());
+            std::vector<std::string> hooks;
+            eng->add_function("hook_ran", [&hooks](std::string which) { hooks.push_back(which); });
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("void frame() { import(\"rh_a.jai\"); import(\"rh_b.jai\"); }\nframe();");
+            check_true(hooks.empty());
+            write("rh_a.jai", unit("a", 10));
+            write("rh_b.jai", unit("b", 20));
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("frame();");
+            check_eq(size_t(2), hooks.size(), "each re-run module runs its own hook");
+            check_true(std::find(hooks.begin(), hooks.end(), "a:1:1") != hooks.end() && std::find(hooks.begin(), hooks.end(), "b:1:2") != hooks.end(),
+                       "each sees only its own unit's variables, as they were");
+            {
+                auto fresh = make_engine();
+                jai::stdlib::register_all(*fresh);
+                fresh->add_include_path(dir.string());
+                fresh->add_function("hook_ran", [](std::string) {});
+                fresh->execute("import \"rh_a.jai\";");
+                std::string text;
+                try { fresh->execute("hot_reload_migrate({});"); } catch (const std::exception& e) { text = e.what(); }
+                check_false(text.empty(), "a hook loaded from the jaibite sibling is no global function either");
+                auto bite = fresh->jaibite("int q_var = 1;\nvoid hot_reload_migrate(map<string, var> previous) {}\nq_var + 1;");
+                check_eq(script_int(2), fresh->execute(bite).as_int());
+                text.clear();
+                try { fresh->execute("hot_reload_migrate({});"); } catch (const std::exception& e) { text = e.what(); }
+                check_false(text.empty(), "nor one from a jaibite");
+                check_eq(script_int(2), fresh->jaibite_load_bytes(bite.save_bytes()).execute().as_int(), "a saved bite round-trips with its hook kept off the program");
+            }
+            const auto file = dir / "rh_file.jai";
+            write("rh_file.jai", unit("f", 7));
+            eng->execute_file(file.string());
+            check_eq(size_t(2), hooks.size(), "the first execute_file of a file is its first load");
+            write("rh_file.jai", unit("f", 8));
+            eng->execute_file(file.string());
+            check_eq(std::string("f:1:7"), hooks.back(), "execute_file of the same file again is a re-run");
+            for (const char* f : {"rh_a.jai", "rh_b.jai", "rh_file.jai"}) {
+                std::filesystem::remove(dir / f);
+                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+            }
+        });
+
         test("an_import_runs_a_module_only_from_text_read_under_its_stamp", [=, this]() {
             // a save landing while a module is read (its stamp queried after the read disagrees with the one before) holds a
             // module that ran before until a pass reads it whole; a first load reads again at once. A saver thread moves the

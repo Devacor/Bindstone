@@ -42,6 +42,8 @@ namespace jai {
         // spelling (Dev ruling 2026-09-30: file-local, not transitive, any namespace); false when the stream names no using
         bool apply_using_declarations(const std::vector<token>& in, std::vector<token>& out);
         bool reject_using_name(const token& t, const char* what);
+        // hot_reload_migrate at a unit's top level is the unit's reload hook: one, declared void hot_reload_migrate(map<string, var> previous)
+        void check_reload_hook(const jai::declaration& d, bool& seen);
         std::string filename_;
         size_t current_ = 0;
         std::vector<std::string> errors_;

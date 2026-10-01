@@ -487,7 +487,9 @@ engine stays usable", not by `check_throws`.
   instance runs no destructor.
 - Coroutines: `coroutine`/`yield`, drivable by range-`for`; `coroutine` prefixes every function
   spelling (`coroutine name(...) [-> T]`, `coroutine function name(...) [-> T]`, `coroutine T name(...)`),
-  free, method or static method, and produces the same declaration node.
+  free, method or static method, and produces the same declaration node. A `yield e` takes the declared type like a
+  `return` (the return's table and identity lanes; `Cannot yield string from 'g' (declared -> int)`, catchable around the
+  yield); a bare `yield;` hands out nothing and is not converted.
 - stdlib: `print`, `to_string`, `type_of`, `to_json`/`from_json` (full-precision floats via
   `std::to_chars`).
 - **Parse-time type proofs** (`docs/static_checking.md` "Proofs"): the static checker's walk runs

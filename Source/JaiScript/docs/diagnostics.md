@@ -142,6 +142,7 @@ One conversion table (`detail/typed_slot.hpp`), one text kernel
 |---|---|---|---|
 | by-value parameter | `Type mismatch: expected int but got string` | `Cannot pass string to parameter 'n' of 'fib' (declared int)` (`of lambda` for lambdas) | `Cannot pass string to an int parameter` |
 | typed return | `Type mismatch: expected int but got string` | `Cannot return string from 'f' (declared -> int)` | `Cannot return string from a function declared -> int` |
+| coroutine yield (a yield takes the declared type like a return; a bare `yield;` hands out nothing) | (yielded as is) | `Cannot yield string from 'g' (declared -> int)` | `Cannot yield string from a coroutine declared -> int` |
 | `=` / compound | `Type mismatch in assignment` | `Cannot assign string to 'x' (declared int)` | `Cannot assign string to a variable declared int` |
 | declaration | `Type mismatch in assignment` | `Cannot initialize 'x' (declared int) with string` | `Cannot initialize a variable declared int with string` |
 | reference declaration over storage of another type (`float& r = v` with `v` a var holding an int; Dev ruling 2026-09-30: a reference must reference) | (bound, stored the var's way) | `Cannot initialize 'r' (declared float&) with int`; a class reference takes T or a subclass (`Cannot initialize 'e' (declared Enemy&) with int`); strict reports a statically known one at load (`cannot initialize 'r' declared 'float&' with 'int'`) | `Cannot initialize a variable declared float& with int` |

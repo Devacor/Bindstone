@@ -841,6 +841,23 @@ public:
 			}
 		});
 
+		test("documented_container_and_instance_capture_contracts", [this]() {
+			for (auto backend : {backend_type::interpreter, backend_type::vm}) {
+				auto e = make_engine();
+				e->set_backend(backend);
+				check_eq(std::string("VALUE 22"), outcome(*e,
+					"array<int> a = [1]; var b = a; var c = a.slice(0, 1); int caught = 0; "
+					"try { b.push(\"x\"); } catch (err) { caught += 1; } "
+					"try { c.push(\"x\"); } catch (err) { caught += 1; } "
+					"array<var> d = a; d.push(\"x\"); caught * 10 + d.size();"));
+				check_eq(std::string("VALUE 4"), outcome(*e,
+					"class C { int hp = 3; auto callback() { return [this]() { hp += 1; return hp; }; } } "
+					"C owner = C(); auto callback = owner.callback(); callback(); owner.hp;"));
+				const std::string source = "auto incomplete = []() -> int { };";
+				check_eq(std::size_t(1), error_count(e->check(source)));
+			}
+		});
+
         test("shadow_local_over_field", [this]() {
             auto e = make_engine();
             auto r = e->check("class Creature {\n  int hp = 10;\n  function hit() -> void { var hp = 3; }\n}");

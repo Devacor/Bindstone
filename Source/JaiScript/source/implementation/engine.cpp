@@ -2523,7 +2523,9 @@ void engine::record_field_migration(std::string_view a_className, uint64_t a_fie
 		if (!a_value) { return "<absent>"; }
 		const auto& value = a_value->deref();
 		if (value.is_null()) { return "null"; }
-		if (auto type = value.get_type_info()) { return type->canonical_name(); }
+		if (auto type = value.get_type_info(); type && type->base_type != script_value_type::jai_any_type && type->type_name != "auto") {
+			return type->canonical_name();
+		}
 		return detail::slot_source_type_name(value, this);
 	};
 	const std::string old_type = type_name(a_before);

@@ -1124,10 +1124,10 @@ namespace jai {
         // Cold class-reload boundary: recover surviving worker copies after a failed join.
         void recover_parallel_registrations();
 
-        // Script errors surfacing at the C++ boundary (converted callbacks, signal
-        // receivers) have no error-value channel and must not throw into arbitrary game
-        // callsites; they route here instead. Default sink is std::cerr; the host app
-        // installs its own logger. The message includes the script stack trace if captured.
+		// Signal receivers and other sink-based host boundaries report errors here.
+		// Converted std::function callbacks instead throw runtime_error on failure or
+		// uncaught script throws (engine_impl.hpp); hosts must handle that boundary.
+		// Default sink is std::cerr; messages include captured script stack traces.
         void set_script_error_handler(std::function<void(const std::string&)> a_handler);
         void report_script_error(const std::string& a_message, std::error_code a_code = {});
 

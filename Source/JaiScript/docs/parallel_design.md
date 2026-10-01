@@ -1,18 +1,11 @@
 # Parallel execution design (`parallel_for` on one engine, thread_storage pads)
 
-Status: DESIGN with the v0 slice SHIPPED — **`parallel_transform(arr, fn[, weight_fn])` and
-`thread_count()` are live** (the prove_or_serial §5 sequencing step; implementation:
-`detail/parallel_transform.hpp` + `source/implementation/parallel_transform.cpp`, tests in
-`source/tests/language/parallel_transform_tests.cpp`, scaling benches in
-`source/tests/performance/parallel_transform_bench.cpp`) — and the v0.5 slice SHIPPED
-(2026-07-08): **captured reads** (§13) — a body may READ enclosing names (globals, and the locals of the function its statement runs in) under the
-scalar/string/borrow/snapshot provisioning tiers; enclosing WRITES stay errors in every
-shape — and **element members** (§14): a transform body reads and stores members of its
-own element, a value-class instance included. The `parallel_for` keyword, `thread_storage`
-pads, and the binding annotations remain design-only. Dev rulings 2026-07-06 are final where marked RULED. All four §11
-questions are RULED — the only remaining open sub-item is the Q1 weight-hint syntax
-spelling for the future KEYWORD form; the shipped BUILTIN needs no new syntax (the hint
-is simply the third argument).
+Current status: `parallel_for`, `parallel_transform`, captured reads, element-member work,
+and native binding admission are implemented. Safe mode proves a body or rejects it;
+small admitted workloads may run serially. Worker count does not change the semantic
+admission rule. `thread_storage` pads and several extensions below remain proposals.
+The staged descriptions and performance snapshots below are design history, not a
+current feature checklist. See CLAUDE.md and the language guide for the shipped surface.
 
 ## 0. Ground truth: script values can never be shared live across threads
 

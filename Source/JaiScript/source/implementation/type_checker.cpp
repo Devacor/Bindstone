@@ -2769,7 +2769,7 @@ private:
 				if (global_tier_name(id->name)) { return {}; }
 				if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
 					capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
-					diag(diag_level::error, id->location, "lambda instance member '" + std::string(id->name) + "' requires [this], [=], or [&]");
+					diag(diag_level::error, id->location, "lambda capture list: instance member '" + std::string(id->name) + "' requires [this], [=], or [&]");
 					return {};
 				}
 				if (access_denied(hit, id->name, id->location)) { return {}; }
@@ -4086,6 +4086,7 @@ private:
             scopes_.back().emplace(cap.name, std::move(entry));
         }
         walk_stmt(l->body.get());
+		check_return_paths(l->return_type.get(), l->body.get(), l->location, "lambda");
         {
             const fn_ctx& done = fn_stack_.back();
             const uint8_t kind = !l->return_type && !done.inferred_mixed && !has_includes_ ? done.inferred_return : uint8_t(0);
@@ -4099,14 +4100,20 @@ private:
 	// Unknown exception paths remain advisory; structurally reachable fall-through violates a required result.
 	void check_falls_off_end(const function_decl* a_function) {
 		if (!a_function->return_type || a_function->is_coroutine || !a_function->body) { return; }
-		ctype ret = ctype_from_type_info(a_function->return_type.get());
-		if ((ret.is_unknown() && !requires_return_value(a_function->return_type.get())) || ret.kind == ctype::null_k) { return; }
-		auto flow = ReturnFlow(a_function->return_type.get()).analyze(a_function->body.get());
+		check_return_paths(a_function->return_type.get(), a_function->body.get(), a_function->location, a_function->name);
+	}
+
+	void check_return_paths(const type_info* a_returnType, const statement* a_body,
+		const source_location& a_location, std::string_view a_name) {
+		if (!a_returnType || !a_body) { return; }
+		ctype ret = ctype_from_type_info(a_returnType);
+		if ((ret.is_unknown() && !requires_return_value(a_returnType)) || ret.kind == ctype::null_k) { return; }
+		auto flow = ReturnFlow(a_returnType).analyze(a_body);
 		if (!(flow.paths & (ReturnFlow::NORMAL | ReturnFlow::MAYBE_NORMAL))) { return; }
 		const bool definite = (flow.paths & ReturnFlow::NORMAL) != 0;
-		diag(definite && requires_return_value(a_function->return_type.get()) ? diag_level::error : diag_level::warning,
-			a_function->location, "'" + std::string(a_function->name) + "' declared to return '" +
-			a_function->return_type->canonical_name() + "' may reach the end of its body without returning a value");
+		diag(definite && requires_return_value(a_returnType) ? diag_level::error : diag_level::warning,
+			a_location, "'" + std::string(a_name) + "' declared to return '" +
+			a_returnType->canonical_name() + "' may reach the end of its body without returning a value");
 	}
 
 	bool guarantees_exit_block(const std::vector<declaration_ptr>& a_declarations) {

@@ -54,6 +54,14 @@ public:
 			}
 		});
 
+		test("generic_field_retype_marks_shape_change", [this]() {
+			auto engine = jai::foundry::make_engine();
+			engine->execute("class Generic { array<int> items = []; } Generic live = Generic();");
+			const auto before = engine->hot_reload_field_migrations();
+			engine->execute("class Generic { array<float> items = []; }");
+			check(engine->hot_reload_field_migrations() > before, "generic argument change migrates live fields");
+		});
+
         test("basic_class_redefinition", [this]() {
             auto engine = jai::foundry::make_engine();
             

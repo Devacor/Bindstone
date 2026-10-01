@@ -44,7 +44,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><strong>Typed containers.</strong> <code>array&lt;T&gt;</code> and <code>map&lt;K, V&gt;</code> hold what they declare: a store converts by the element rules or raises, nothing demotes silently, <code>array&lt;var&gt;</code> is the dynamic form, map keys never coerce, <code>array&lt;Base&gt;</code> holds subclasses, and handle-typed elements take null. <a href="guide/09-containers-strings.html#typed-containers">Typed containers</a></li>
 <li><strong>Integers and chars.</strong> <code>int</code> is 64-bit. Overflow raises a catchable error, or wraps in a build that defines <code>JAISCRIPT_WRAP_ON_OVERFLOW</code>, and is never undefined behavior; shifts operate on the 64-bit pattern. <code>char</code> is a byte that enters arithmetic as 0..255 and converts only through <code>cast</code>. <a href="guide/04-operators.html#checked-overflow-raises-never-wraps-never-ub">Operators</a></li>
 <li><strong>Evaluation order.</strong> A call evaluates its callee, then its arguments left to right, and a by-value argument keeps the value it had when it was evaluated. A binary operator evaluates its left operand first. Errors surface in the same order. <a href="guide/04-operators.html#evaluation-order-is-a-contract">Evaluation order</a></li>
-<li><strong>Captures.</strong> A lambda captures the enclosing function's locals and parameters when it is created: a copy under <code>[]</code>, <code>[=]</code> or <code>[x]</code>, the variable itself under <code>[&amp;]</code> or <code>[&amp;x]</code>, and a shared capture outlives its frame. A global is never captured implicitly; the lambda reads it when it runs. <a href="guide/06-functions.html#lambdas-and-captures">Lambdas and captures</a></li>
+<li><strong>Captures.</strong> <code>[]</code> captures nothing; named lists are exhaustive. A lambda captures the enclosing function's locals and parameters when it is created: a copy under <code>[=]</code> or <code>[x]</code>, the variable itself under <code>[&amp;]</code> or <code>[&amp;x]</code>, and a shared capture outlives its frame. A global is never captured implicitly; the lambda reads it when it runs. <a href="guide/06-functions.html#lambdas-and-captures">Lambdas and captures</a></li>
 <li><strong>Names and scopes.</strong> Blocks scope as in C++. Inside a method a bare name resolves to a local, then a member, then a global. A namespace is a scope, and a <code>catch</code> variable belongs to its block. <a href="guide/07-classes.html#name-resolution-in-methods">Name resolution</a></li>
 <li><strong>Modules.</strong> <code>include</code> is textual and runs each time it is reached. <code>import</code> runs a module once per engine and may appear wherever a statement may; reached again, it re-runs a module whose file has changed on disk. <a href="guide/10-modules.html">Modules</a></li>
 <li><strong>Access control.</strong> Two levels: <code>public:</code> reaches everyone, <code>private:</code> reaches the declaring class and every class derived from it, and <code>protected:</code> is a synonym of <code>private:</code>. <a href="guide/07-classes.html#access-control">Access control</a></li>
@@ -75,19 +75,19 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><strong>Parallel admission.</strong> Which <code>parallel_for</code> and <code>parallel_transform</code> bodies run on worker threads rather than serially. Results stay deterministic at any worker count. <a href="guide/09-containers-strings.html#parallel-transform">parallel_transform</a></li>
 <li><strong>String mutators.</strong> <code>to_upper</code>, <code>trim</code> and the other mutating string methods change their receiver in place. <a href="guide/09-containers-strings.html#strings-observers-vs-mutators">Observers vs mutators</a></li>
 <li><strong>Script-extensible objects.</strong> <code>extend(obj, Class)</code> and its host side. <a href="embedding/13-script-extensible.html">extend</a></li>
-<li><strong>Absent syntax.</strong> The bitwise compound assignments (<code>&amp;=</code>, <code>|=</code>, <code>^=</code>, <code>&lt;&lt;=</code>, <code>&gt;&gt;=</code>) do not parse, a coroutine cannot be declared inside a namespace, and there are no coroutine lambdas. Any of these may be added.</li>
+<li><strong>Syntax extensions.</strong> Bitwise compound assignments are supported. Coroutine lambdas remain absent.</li>
 </ul>
 
 <h3 id="unspecified-edges">Unspecified edges<a class="hlink" href="#unspecified-edges" aria-label="link">&#8203;</a></h3>
-<p>These are what the implementation does where no rule decides it. Both backends agree on each; do not depend on any of them.</p>
+<p>These notes include specified behavior and unresolved edges from earlier releases. The linked guides and executable contract cases take precedence; each unresolved edge needs a current regression before becoming a promise.</p>
 <ul>
-<li><code>[this]</code> in a lambda captures a copy of the instance.</li>
+<li><code>[this]</code> captures the original instance; reads and writes reach that object.</li>
 <li><code>contains</code>, <code>index_of</code> and <code>has</code> compare instances by identity, not by <code>==</code>.</li>
 <li>The <code>to_string(x)</code> builtin ignores a class's own <code>to_string()</code>; string <code>+</code> uses it.</li>
-<li>A script callback handed to a host <code>std::function</code> reports its error to the host and returns a default instead of raising in script.</li>
+<li>A script callback converted to <code>std::function</code> throws a host <code>runtime_error</code> on failure or an uncaught script throw. Signal receivers use the error sink.</li>
 <li>A derived instance stored in a base-typed slot keeps its class, where C++ would slice it.</li>
-<li>A <code>var</code> copy of a typed array, and a <code>slice</code> of one, is an <code>array&lt;var&gt;</code>.</li>
-<li>A store through a <code>var&amp;</code> alias ignores the referent's declared type, and an <code>int&amp;</code> parameter binds any lvalue, a <code>float</code> variable included.</li>
+<li>A typed array copied into <code>var</code>, or sliced, keeps its element constraint. Use an explicit <code>array&lt;var&gt;</code> copy for dynamic elements.</li>
+<li>Stores through references retain the target's declared constraints. Typed reference parameters bind compatible storage without converting it; <code>int&amp;</code> rejects a <code>float</code> variable.</li>
 <li>A compound assignment on a missing map key raises instead of inserting a default.</li>
 <li>A <code>case</code> label matches by kind as well as value: <code>switch (1)</code> skips <code>case 1.0</code>.</li>
 <li><code>0.0</code> and <code>-0.0</code> are distinct map keys.</li>
@@ -100,7 +100,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 <footer class="site-footer">
 <p>JaiScript 0.1.0 &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
-<p class="foot-note">every example on this site was run on both backends &middot; built 2026-09-26</p>
+<p class="foot-note">draft contract update &middot; changed examples await both-backend validation</p>
 </footer>
 <script src="assets/search-index.js"></script>
 <script src="assets/site.js"></script>

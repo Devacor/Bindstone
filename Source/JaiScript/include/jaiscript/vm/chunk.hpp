@@ -157,6 +157,14 @@ namespace jai::vm {
         mutable const class_definition* probe_cd = nullptr;
         mutable uint64_t probe_epoch = 0;
         mutable bool probe_field_free = false;
+        // Host native-lane memo (class_definition::native_entry) for one receiver class, null entry included: validated on
+        // (class identity, native_stamp, field_shape_epoch); a hit still asks the instance for a field of the method's name
+        mutable const class_definition* nat_cd = nullptr;
+        mutable uint64_t nat_stamp = 0;
+        mutable uint64_t nat_shape = 0;
+        mutable const void* nat_entry = nullptr;
+        mutable uint32_t nat_cpp_slot = UINT32_MAX;
+        mutable bool nat_field_free = false;
         std::vector<uint32_t> staged_argument_slots;   // immutable owned temps released if this call is abandoned before invocation
     };
 

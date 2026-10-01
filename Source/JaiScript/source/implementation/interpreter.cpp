@@ -7037,6 +7037,54 @@ checked_result<script_value> interpreter::evaluate_arithmetic(const script_value
     }
 }
 
+namespace {
+
+// a bare identifier callee in an instance method's own frame that the member ladder may answer with a method of the receiver
+identifier_expr* sibling_method_callee(expression* callee, bool parallel_worker, const detail::member_scope_ctx& scope) {
+    if (callee->get_type() != node_type::identifier_expr || parallel_worker) return nullptr;
+    if (scope.state != detail::member_scope_state::instance || !scope.this_storage) return nullptr;
+    auto* ident = static_cast<identifier_expr*>(callee);
+    return ident->global_qualified || ident->slot_index != SIZE_MAX ? nullptr : ident;
+}
+
+bool method_site_field_free(const class_definition& cls, uint64_t id) {
+    return !cls.chain_declares_field(id) && cls.field_slot(id) == class_definition::k_no_field_slot;
+}
+
+bool method_site_field_shadowed(const method_site_cache& cache, const class_instance& inst, uint64_t id) {
+    if ((cache.flags & method_site_cache::field_free) && !inst.has_user_overflow_fields()) return false;
+    return inst.has_field(id);
+}
+
+// the lone overload's exact signature: a body (not a coroutine) of at most 8 by-value primitive/any parameters taking argc arguments
+bool lone_overload_signature(class_definition& cls, uint64_t name_id, size_t argc, method_site_cache& out) {
+    function_decl* lone = cls.single_method_overload(name_id);
+    if (!lone) return false;
+    const auto& params = lone->parameters;
+    if (params.size() > 8 || params.size() != argc || !lone->body || lone->is_coroutine) return false;
+    uint8_t sig[8] = {};
+    for (size_t i = 0; i < params.size(); ++i) {
+        const auto& p = params[i];
+        if (p.is_reference || p.ref_escaping) return false;
+        const bool untyped = !p.type || p.type->type_name.empty() || p.type->type_name == "any" ||
+                             p.type->base_type == script_value_type::jai_any_type;
+        if (untyped) { sig[i] = 0xFF; continue; }
+        switch (p.type->base_type) {
+            case script_value_type::jai_int_type:    sig[i] = script_value::TYPEID_INT; break;
+            case script_value_type::jai_float_type:  sig[i] = script_value::TYPEID_FLOAT; break;
+            case script_value_type::jai_bool_type:   sig[i] = script_value::TYPEID_BOOL; break;
+            case script_value_type::jai_string_type: sig[i] = script_value::TYPEID_STRING; break;
+            case script_value_type::jai_char_type:   sig[i] = script_value::TYPEID_CHAR; break;
+            default: return false;
+        }
+    }
+    out.decl = lone;
+    for (size_t i = 0; i < 8; ++i) out.sig[i] = sig[i];
+    out.argc = static_cast<uint8_t>(params.size());
+    return true;
+}
+
+}  // namespace
 
 // Placeholder implementations for remaining visitors
 template<bool Replaying>
@@ -7193,23 +7241,31 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
 
     // Direct script-method dispatch: callee is obj.method on a pure receiver expression
     // (identifier/this - re-evaluable without side effects, so a gate miss can fall to
-    // the generic path below). Mirrors vm exec_call_method's fast-entry precedence gate
+    // the generic path below), or a bare call of a method of this frame's receiver (the
+    // vm's park_sibling_method). Mirrors vm exec_call_method's fast-entry precedence gate
     // (same_as/super/coroutine/sp-builtin/access/getter-probe/field), skipping the
     // bound-method mint, its this+args re-copies, and the carrier method env. A per-site
-    // monomorphic inline cache (member_expr::mcache_*, validated by class identity +
+    // monomorphic inline cache (method_site_cache, validated by class identity +
     // method_epoch) skips lookup + overload resolution for the hot monomorphic shape.
-    if (expr->callee->get_type() == node_type::member_expr) {
-        auto* member = static_cast<member_expr*>(expr->callee.get());
-        const auto recv_type = member->object->get_type();
-        if (!member->is_static && member->member_id != same_as_id_ &&
-            (recv_type == node_type::identifier_expr || recv_type == node_type::this_expr)) {
-            JAISCRIPT_TRY(dispatch_expr(member->object.get()));
-            script_value objectValue = pop_value();
-            if (is_unwinding_) {
-                push_value(make_value());
-                return {};
+    {
+        member_expr* const member = expr->callee->get_type() == node_type::member_expr ? static_cast<member_expr*>(expr->callee.get()) : nullptr;
+        identifier_expr* const sibling = member ? nullptr : sibling_method_callee(expr->callee.get(), parallel_worker_, member_scope_);
+        if ((member && !member->is_static && member->member_id != same_as_id_ &&
+             (member->object->get_type() == node_type::identifier_expr || member->object->get_type() == node_type::this_expr)) || sibling) {
+            method_site_cache& mcache = member ? member->mcache : expr->sibling_cache;
+            const uint64_t member_id = member ? member->member_id : sibling->symbol_id;
+            script_value objectValue = make_value();
+            if (member) {
+                JAISCRIPT_TRY(dispatch_expr(member->object.get()));
+                objectValue = pop_value();
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
+                }
+                objectValue = objectValue.deref();
+            } else {
+                objectValue = member_scope_.this_storage->deref();
             }
-            objectValue = objectValue.deref();
 
             const script_method_dispatch* dispatch = nullptr;
             std::shared_ptr<environment> def_env;
@@ -7218,7 +7274,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
             class_definition* cls_raw = nullptr;
             bool ic_route = false;
 
-            if (objectValue.is_object()) {
+            if (member && objectValue.is_object()) {
                 auto holder = objectValue.get_object_holder();
                 if (holder && holder->type_id != coroutine_handle_type_id_) {
                     class_instance* inst_raw = nullptr;
@@ -7246,18 +7302,18 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         def_env = dispatch->definition_env;
                         cls_pin = dispatch->cls;
                         parallel_pin_decl = pin->resolved;
-                    } else if (cls_raw && member->mcache_cls == cls_raw &&
-                        member->mcache_epoch == cls_raw->method_epoch() &&
-                        !((member->mcache_flags & 2) && objectValue.get_type_info() &&
+                    } else if (cls_raw && mcache.cls == cls_raw &&
+                        mcache.epoch == cls_raw->method_epoch() &&
+                        !((mcache.flags & method_site_cache::sp_builtin) && objectValue.get_type_info() &&
                           objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) &&
-                        !inst_raw->has_field(member->member_id)) {
+                        !method_site_field_shadowed(mcache, *inst_raw, member_id)) {
                         // IC hit: the per-call precedence checks that stay dynamic ran
                         // (sp-builtin shadowing, field); access enforcement stays per call
-                        if (member->mcache_flags & 1) [[unlikely]] {
-                            JAISCRIPT_TRY(detail::enforce_member_access(cls_raw, member->member_id,
+                        if (mcache.flags & method_site_cache::access_checked) [[unlikely]] {
+                            JAISCRIPT_TRY(detail::enforce_member_access(cls_raw, member_id,
                                                                         environment_->find_access_context()));
                         }
-                        dispatch = static_cast<const script_method_dispatch*>(member->mcache_dispatch);
+                        dispatch = static_cast<const script_method_dispatch*>(mcache.dispatch);
                         // Owning copies BEFORE argument evaluation: an argument expression
                         // can hot reload the class and replace the dispatcher under us
                         def_env = dispatch->definition_env;
@@ -7300,38 +7356,16 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                                             // Fill the IC: single-overload methods with an
                                             // all-primitive/any exact-argc signature
                                             if (cls_raw && target.class_def == cls_raw) {
-                                                if (function_decl* lone = cls_pin->single_method_overload(d->name_id)) {
-                                                    const auto& params = lone->parameters;
-                                                    bool eligible = params.size() <= 8 && params.size() == expr->arguments.size() &&
-                                                                    lone->body && !lone->is_coroutine;
-                                                    uint8_t sig[8] = {};
-                                                    for (size_t i = 0; eligible && i < params.size(); ++i) {
-                                                        const auto& p = params[i];
-                                                        if (p.is_reference || p.ref_escaping) { eligible = false; break; }
-                                                        const bool untyped = !p.type || p.type->type_name.empty() ||
-                                                                             p.type->type_name == "any" ||
-                                                                             p.type->base_type == script_value_type::jai_any_type;
-                                                        if (untyped) { sig[i] = 0xFF; continue; }
-                                                        switch (p.type->base_type) {
-                                                            case script_value_type::jai_int_type:    sig[i] = script_value::TYPEID_INT; break;
-                                                            case script_value_type::jai_float_type:  sig[i] = script_value::TYPEID_FLOAT; break;
-                                                            case script_value_type::jai_bool_type:   sig[i] = script_value::TYPEID_BOOL; break;
-                                                            case script_value_type::jai_string_type: sig[i] = script_value::TYPEID_STRING; break;
-                                                            case script_value_type::jai_char_type:   sig[i] = script_value::TYPEID_CHAR; break;
-                                                            default: eligible = false; break;
-                                                        }
-                                                    }
-                                                    if (eligible) {
-                                                        member->mcache_cls = cls_raw;
-                                                        member->mcache_epoch = cls_raw->method_epoch();
-                                                        member->mcache_dispatch = d;
-                                                        member->mcache_decl = lone;
-                                                        for (size_t i = 0; i < 8; ++i) member->mcache_sig[i] = sig[i];
-                                                        member->mcache_argc = static_cast<uint8_t>(params.size());
-                                                        member->mcache_flags = static_cast<uint8_t>(
-                                                            (cls_raw->chain_has_nonpublic() ? 1 : 0) |
-                                                            (shared_ptr_methods_.find(member->member_id) != shared_ptr_methods_.end() ? 2 : 0));
-                                                    }
+                                                method_site_cache filled;
+                                                if (lone_overload_signature(*cls_pin, d->name_id, expr->arguments.size(), filled)) {
+                                                    filled.cls = cls_raw;
+                                                    filled.epoch = cls_raw->method_epoch();
+                                                    filled.dispatch = d;
+                                                    filled.flags = static_cast<uint8_t>(
+                                                        (cls_raw->chain_has_nonpublic() ? method_site_cache::access_checked : 0) |
+                                                        (shared_ptr_methods_.find(member_id) != shared_ptr_methods_.end() ? method_site_cache::sp_builtin : 0) |
+                                                        (method_site_field_free(*cls_raw, member_id) ? method_site_cache::field_free : 0));
+                                                    mcache = filled;
                                                 }
                                             }
                                         }
@@ -7340,6 +7374,43 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             }
                         }
                     }
+                }
+            } else if (sibling) {
+                // the member ladder's answer for this class and method epoch (no own-scope binding, no field of the name,
+                // an all-public chain) is the class's dispatcher on this frame's receiver, entered as the bound method the
+                // generic path would mint; a null dispatch caches "no script method of the name"
+                const size_t ti = objectValue.raw_storage_index();
+                class_instance* inst_raw = nullptr;
+                if (ti == script_value::TYPEID_OBJECT || ti == script_value::TYPEID_SHARED_PTR) {
+                    auto holder = objectValue.get_object_holder();
+                    if (holder && holder->is_class_instance_wrapper && holder->data) {
+                        inst_raw = static_cast<class_instance*>(holder->data.get());
+                    }
+                }
+                cls_raw = inst_raw ? inst_raw->get_class_definition() : nullptr;
+                const script_method_dispatch* d = nullptr;
+                if (cls_raw && mcache.cls == cls_raw && mcache.epoch == cls_raw->method_epoch()) {
+                    d = static_cast<const script_method_dispatch*>(mcache.dispatch);
+                } else if (cls_raw) {
+                    if (!cls_raw->chain_has_nonpublic()) {
+                        script_value method_val = inst_raw->get_method(member_id, false);
+                        d = method_val.is_function() ? method_val.as_function().target<script_method_dispatch>() : nullptr;
+                        if (d && d->eng != engine_) { d = nullptr; }
+                    }
+                    method_site_cache filled;
+                    if (d) { lone_overload_signature(*d->cls, d->name_id, expr->arguments.size(), filled); }
+                    filled.cls = cls_raw;
+                    filled.epoch = cls_raw->method_epoch();
+                    filled.dispatch = d;
+                    filled.flags = method_site_field_free(*cls_raw, member_id) ? method_site_cache::field_free : 0;
+                    mcache = filled;
+                }
+                if (d && !method_site_field_shadowed(mcache, *inst_raw, member_id) &&
+                    !detail::own_scope_lookup(environment_.get(), member_scope_.floor, member_id)) {
+                    dispatch = d;
+                    def_env = d->definition_env;
+                    cls_pin = d->cls;
+                    ic_route = true;
                 }
             }
 
@@ -7375,34 +7446,34 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     resolved_pin = parallel_pin_decl;
                     direct_ast = resolved_pin.get();
                 }
-                if (!direct_ast && ic_route && cls_raw && member->mcache_epoch == cls_raw->method_epoch()) {
+                if (!direct_ast && ic_route && cls_raw && mcache.decl && mcache.epoch == cls_raw->method_epoch()) {
                     // Post-args revalidation passed (an argument expression could have hot
                     // reloaded the class). The signature check replaces overload resolution:
                     // exact primitive/any match on a lone overload is what the scorer picks.
-                    bool sig_ok = arguments.size() == member->mcache_argc;
+                    bool sig_ok = arguments.size() == mcache.argc;
                     for (size_t i = 0; sig_ok && i < arguments.size(); ++i) {
-                        const uint8_t want = member->mcache_sig[i];
+                        const uint8_t want = mcache.sig[i];
                         if (want != 0xFF && arguments[i].raw_storage_index() != want) {
                             sig_ok = false;
                         }
                     }
                     if (sig_ok) {
-                        direct_ast = static_cast<function_decl*>(member->mcache_decl);
+                        direct_ast = static_cast<function_decl*>(mcache.decl);
                     }
                 }
                 if (!direct_ast) {
-                    if (ic_route && cls_raw && member->mcache_epoch != cls_raw->method_epoch()) {
+                    if (ic_route && cls_raw && mcache.epoch != cls_raw->method_epoch()) {
                         // Class changed under the arguments: refetch the live dispatcher
                         auto target = resolve_member_target(objectValue);
-                        script_value method_val = target ? target.method(member->member_id)
+                        script_value method_val = target ? target.method(member_id)
                                                          : script_value::make_invalid(engine_);
                         const script_method_dispatch* d = method_val.is_function()
                             ? method_val.as_function().target<script_method_dispatch>() : nullptr;
                         if (!d || d->eng != engine_) {
                             const std::string_view cls = target.class_name();
-                            std::string text = (cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(member->member) + "'";
+                            std::string text = (cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(member ? member->member : sibling->name) + "'";
                             active_exception_value_ = make_value(text);
-                            current_exception_ = script_exception(text, member->location);
+                            current_exception_ = script_exception(text, expr->callee->location);
                             is_unwinding_ = true;
                             push_value(make_value());
                             return {};

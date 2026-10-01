@@ -1624,6 +1624,27 @@ namespace jai::vm {
             if (site.probe_field_free && !inst.has_user_overflow_fields()) { return false; }
             return inst.has_field(id);
         }
+        static bool native_field_shadowed(const call_site& site, const class_instance& inst, uint64_t id) {
+            if (site.nat_field_free && !inst.has_user_overflow_fields()) { return false; }
+            return inst.has_field(id);
+        }
+        // the uncached native-lane lookup (a field of the name is the member the call reads); arms the site's memo
+        const class_definition::native_entry* native_site_miss(const call_site& site, class_definition& cd, const class_instance& inst,
+                                                               uint64_t id, void*& self) {
+            const class_definition::native_entry* entry = cd.extended_ever() ? nullptr : cd.find_native_method(id);
+            if (cached_global_env_) {
+                site.nat_cd = &cd;
+                site.nat_stamp = cd.native_stamp();
+                site.nat_shape = cd.field_shape_epoch();
+                site.nat_entry = entry;
+                site.nat_field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
+                const uint64_t cpp_id = inst.get_cpp_object_field_id();
+                site.nat_cpp_slot = cpp_id ? cd.field_slot(cpp_id) : class_definition::k_no_field_slot;
+            }
+            if (!entry || inst.has_field(id)) { return nullptr; }
+            self = inst.cpp_object_pointer();
+            return entry;
+        }
         void this_field_ic_arm(frame& f, size_t cache_slot, class_instance* instance, uint64_t sym) {
             if (!cached_global_env_ || cache_slot == SIZE_MAX) { return; }
             if (!f.locals || !f.locals->is_method) { return; }

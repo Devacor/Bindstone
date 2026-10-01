@@ -767,10 +767,14 @@ auto g = [&]() { counter += multiplier; };             // everything by referenc
 auto h = [&, multiplier]() { counter += multiplier; }; // by-ref default, one by-value exception
 auto m = [this]() { return health; };                  // inside a method
 
-// AUTO-CAPTURE: an empty [] still sees outer locals it references — they are
-// snapshot BY VALUE at creation time (use [&] / [&name] for write-through).
-int base = 10;
-auto n = []() { return base + 1; };                    // 11
+// An empty [] captures nothing, and a named list captures only what it names:
+// a lambda that reads an enclosing local lists it or takes a default.
+function make() {
+    int base = 10;
+    auto n = [base]() { return base + 1; };            // 11
+    // auto bad = []() { return base + 1; };           // error: [] does not capture 'base'
+    return n();
+}
 ```
 
 ### Variable Types: auto vs var

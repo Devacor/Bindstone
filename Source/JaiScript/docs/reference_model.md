@@ -166,4 +166,7 @@ additionally rejects every mutation spelling on `kv.first` it can see (`cannot m
 (`cpp_bound`) strings are the live C++ member and keep write-through
 (`docs/invariants.md` 11).
 
-Typed reference boundary audit: parameters, range-for and reference returns use the same admission kernel. Primitive/math kinds match exactly; class references accept subclasses; known concrete container/handle types are invariant. No reference conversion or retagging occurs. Untyped container views retain existing leniency; enforcing a typed write view over dynamic storage is a separate compatibility decision, not introduced here.
+A typed reference binds compatible storage and never converts it (`detail::reference_binding_admits`,
+one kernel for parameters, range-for variables, reference returns and the vm's inlined grafts): a
+primitive or math type its exact kind, a class the class or a subclass, a container or handle the same
+concrete type. A container of unknown element type binds as it is.

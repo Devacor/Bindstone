@@ -1,6 +1,6 @@
 # Closures and captures: the two-tier model
 
-**Status: explicit-capture contract draft; new regression cases await both-backend validation.** Previous capture semantics were pinned (`source/tests/properties/container_property_tests.cpp` "Lambda Capture Probes", `source/tests/language/function_tests.cpp`, `source/tests/language/test_lambda_captures.cpp`, `source/tests/vm/vm_backend_tests.cpp` ref-escape tests).
+**Pinned by tests on both backends** (`source/tests/semantics/static_check_tests.cpp` `lambda_capture_lists_are_exhaustive`, `source/tests/properties/container_property_tests.cpp` "Lambda Capture Probes", `source/tests/language/function_tests.cpp`, `source/tests/language/test_lambda_captures.cpp`, `source/tests/vm/vm_backend_tests.cpp` ref-escape tests).
 
 Every free name a lambda body references is classified into exactly one of two tiers, and
 the tiers behave completely differently. Knowing which tier a name is in answers every

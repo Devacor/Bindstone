@@ -114,7 +114,7 @@ public:
             check_parse_succeeds("!flag;");
             check_parse_succeeds("++i;");
             check_parse_succeeds("--count;");
-            check_parse_succeeds("&value;");
+            check_parse_fails("&value;");   // no address-of: the parser names auto& and T& parameters instead
         });
 
         test("assignment_operators", [this]() {

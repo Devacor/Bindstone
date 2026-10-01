@@ -2,6 +2,7 @@
 
 #include "lexer.hpp"
 #include "ast.hpp"
+#include "foreign_keyword.hpp"
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/parse_errors.hpp>
@@ -125,11 +126,23 @@ namespace jai {
         checked_result<statement_ptr> continue_statement();
         checked_result<statement_ptr> try_statement();
         checked_result<statement_ptr> switch_statement();
+        // do { body } while (cond); is `for (bool first = true; first || cond; first = false) body` over a name no script can
+        // spell, so continue reaches the condition as C++'s does
+        bool do_while_ahead() const;
+        checked_result<statement_ptr> do_while_statement();
+        // A name only the parser can spell (it holds a character no identifier may): a desugaring's own variable
+        std::pair<uint64_t, std::string_view> hidden_name(std::string_view stem);
+        expression_ptr hidden_identifier(uint64_t id, std::string_view name, const source_location& loc);
+        // A word or spelling another language uses, where it would otherwise fail to parse (detail/foreign_keyword.hpp)
+        bool foreign_word_at_statement();
+        void report_foreign(detail::foreign_word w, const token& at);
         
         // expression parsing (precedence climbing)
         checked_result<expression_ptr> expression();
         checked_result<expression_ptr> assignment();
         checked_result<expression_ptr> ternary();
+        checked_result<expression_ptr> coalesce();
+        checked_result<expression_ptr> null_chain_rest(size_t chain_start, const std::vector<size_t>& links, expression_ptr expr);
         checked_result<expression_ptr> logical_or();
         checked_result<expression_ptr> logical_and();
         checked_result<expression_ptr> bitwise_or();

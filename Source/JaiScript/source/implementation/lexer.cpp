@@ -39,6 +39,7 @@ const std::unordered_map<std::string, token_type> lexer::keywords_ = {
     {"while", token_type::while_keyword},
     {"auto", token_type::auto_keyword},
     {"var", token_type::var_keyword},
+    {"let", token_type::var_keyword},
     {"super", token_type::super_keyword},
     {"weak_ptr", token_type::weak_ptr_keyword},
     {"shared_ptr", token_type::shared_ptr_keyword},

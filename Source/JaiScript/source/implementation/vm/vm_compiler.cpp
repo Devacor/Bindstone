@@ -5657,6 +5657,12 @@ bool vm_compiler::call_temp_operand(const expression* e) const {
 	if (ident->name == "weak_from_this" || ident->name == "shared_from_this" || ident->name == "__jai_parallel_advance" || ident->name == "__jai_parallel_element") return false;
 	return call->arguments.size() <= 8;
 }
+// a hoistable call the checker resolved to a by-value return: its temp holds a value no later operand can change
+bool vm_compiler::value_call_operand(const expression* e) const {
+	if (!call_temp_operand(e)) return false;
+	const auto decl = static_cast<const call_expr*>(e)->proven_callee_decl.lock();
+	return decl && !(decl->return_type && decl->return_type->is_reference());
+}
 bool vm_compiler::call_partner_ok(const expression* e, const expression* call) {
 	if (!e) return false;
 	if (e->get_type() == node_type::literal_expr) return true;
@@ -5941,8 +5947,9 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) return false;
 	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 	auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
-	const bool lsub = (hoists(b->left.get()) && (quiet_partner(b->right.get()) || env_identifier(b->right.get()))) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get(), b->left.get()));
-	const bool rsub = (hoists(b->right.get()) && (quiet_partner(b->left.get()) || env_identifier(b->left.get()))) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get()));   // an environment name on the left of a hoisted read reads into a temp first
+	const bool call_then_read = value_call_operand(b->left.get()) && hoists(b->right.get());
+	const bool lsub = (hoists(b->left.get()) && (quiet_partner(b->right.get()) || env_identifier(b->right.get()))) || (call_temp_operand(b->left.get()) && call_partner_ok(b->right.get(), b->left.get())) || call_then_read;
+	const bool rsub = (hoists(b->right.get()) && (quiet_partner(b->left.get()) || env_identifier(b->left.get()))) || (call_temp_operand(b->right.get()) && call_partner_ok(b->left.get(), b->right.get())) || call_then_read;   // an environment name on the left of a hoisted read reads into a temp first
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
 	if (!lsub && call_temp_operand(b->right.get()) && numeric_value_binary(b->left.get())) return true;   // a value binary ahead of a call lands in a temp first
 	if (binary_shape(b) != binary_shape_none) return true;
@@ -6052,8 +6059,9 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	    detail::transient_read_marker::is_value_binary_op(expr->op.type)) {
 		auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 		auto hoists = [this](const expression* e) { return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e) || ternary_temp_operand(e); };
-		const bool lsub = (hoists(expr->left.get()) && (quiet_partner(expr->right.get()) || env_identifier(expr->right.get()))) || (call_temp_operand(expr->left.get()) && call_partner_ok(expr->right.get(), expr->left.get()));
-		const bool rsub = (hoists(expr->right.get()) && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get()))) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get()));
+		const bool call_then_read = value_call_operand(expr->left.get()) && hoists(expr->right.get());   // the call lands its value first, the read after it: source order
+		const bool lsub = (hoists(expr->left.get()) && (quiet_partner(expr->right.get()) || env_identifier(expr->right.get()))) || (call_temp_operand(expr->left.get()) && call_partner_ok(expr->right.get(), expr->left.get())) || call_then_read;
+		const bool rsub = (hoists(expr->right.get()) && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get()))) || (call_temp_operand(expr->right.get()) && call_partner_ok(expr->left.get(), expr->right.get())) || call_then_read;
 		// a numeric value binary ahead of a call on its right: the binary into a temp first, as the stack form evaluates it, then the call into a
 		// temp (a string stays on the stack form, which moves the left value into the result where a temp would copy it)
 		const bool lbin = !lsub && call_temp_operand(expr->right.get()) && numeric_value_binary(expr->left.get());

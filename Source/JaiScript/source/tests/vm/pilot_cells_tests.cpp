@@ -3454,6 +3454,42 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "a program-scope size under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("logical_chains_as_values_run_in_blocks", [this]() {
+			// a && / || chain whose value is used (a graft's return, a declaration, a no-result store, the condition after it): the comparisons
+			// land in a value cell and the chain's consumer reads it; a miss at the consumer re-runs the chain from its first instruction; both
+			// backends, proofs off, the middle end off and miss injection
+			const std::string prelude =
+				"array<int> W_W = [40, 8];\n"
+				"array<int> W_H = [30, 8];\n"
+				"bool in_world(int w, int x, int y) { return x >= 0 && y >= 0 && x < W_W[w] && y < W_H[w]; }\n"
+				"int count_in(int w) { int n = 0; for (int y = -2; y < 33; ++y) { for (int x = -2; x < 43; ++x) { if (in_world(w, x, y)) { n = n + 1; } } } return n; }\n"
+				"int either(int k) { int n = 0; for (int i = 0; i < k; ++i) { bool b = i % 3 == 0 || i % 5 == 0; if (b) { n = n + 1; } } return n; }\n"
+				"int stored(int k) { int n = 0; bool ok = false; for (int i = 0; i < k; ++i) { ok = i > 2 && i < 40 && i % 7 != 0; if (ok) { n = n + i; } } return n; }\n"
+				"int mixed(int k) { int n = 0; bool flag = true; for (int i = 0; i < k; ++i) { bool b = flag && i % 4 == 1; bool c = (i < 10 && i > 2) || i == 50; if (b) { n = n + 1; } if (c) { n = n + 100; } flag = !flag; } return n; }\n";
+			const std::string body = "string go() { return to_string(count_in(0)) + \"|\" + to_string(count_in(1)) + \"|\" + to_string(either(100)) + \"|\" + to_string(stored(60)) + \"|\" + to_string(mixed(64)); }\ngo();";
+			both(prelude + body, "", "logical chains as values");
+			both(prelude + body, "", "logical chains as values, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			check_true(l.find("cmpval") != std::string::npos, "a chain's comparison lands in a value cell\n" + l);
+			for (const char* fn : { "== count_in", "== either", "== stored" }) {
+				const size_t at = l.find(fn);
+				const size_t end = at == std::string::npos ? at : l.find("\n== ", at + 1);
+				check_true(at != std::string::npos && l.substr(at, end == std::string::npos ? std::string::npos : end - at).find("-- open loop") == std::string::npos, std::string(fn) + "'s loops close\n" + l);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "logical chains as values under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

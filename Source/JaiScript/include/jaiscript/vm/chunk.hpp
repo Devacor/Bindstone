@@ -547,6 +547,7 @@ namespace jai::vm {
             }
         }
         std::vector<cell_refusal> cell_refusals;
+        std::vector<std::pair<uint32_t, uint32_t>> logical_values;   // a && or || whose value is used: its first ip and the ip of the instruction consuming the value
         std::vector<fused_binary_proto> fused_binary_protos;
         std::vector<compound_fused_proto> compound_fused_protos;
         std::vector<fused_binary_dst_proto> fused_binary_dst_protos;

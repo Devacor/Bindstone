@@ -3648,6 +3648,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                     continue;
                 }
                 type_info_ptr type = std::move(type_result.value());
+                if (reference_method_head()) { type = wrap_reference_return_type(std::move(type)); }   // Box& self_ref() { ... }
 
                 // Continue with regular member parsing...
                 if (check(token_type::identifier)) {
@@ -3909,6 +3910,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 continue;
             }
             type_info_ptr type = std::move(type_result.value());
+            if (reference_method_head()) { type = wrap_reference_return_type(std::move(type)); }   // float& px() { ... }
 
             if (check(token_type::identifier) && reject_using_name(peek(), "member")) {
                 synchronize_class_member(class_open_index);
@@ -4572,6 +4574,14 @@ checked_result<uint8_t> parser::check_mode_attribute() {
     current_ += 5;
     match(token_type::semicolon);
     return mode;
+}
+
+// `& name(` / `& operator..` after a member's type: a reference-returning method (a class has no reference fields)
+bool parser::reference_method_head() const {
+    if (!check(token_type::ampersand) || current_ + 2 >= stream_->size() || (*stream_)[current_ + 1].type != token_type::identifier) {
+        return false;
+    }
+    return (*stream_)[current_ + 1].lexeme == "operator" || (*stream_)[current_ + 2].type == token_type::left_paren;
 }
 
 type_info_ptr parser::wrap_reference_return_type(type_info_ptr return_type) {

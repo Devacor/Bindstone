@@ -17,8 +17,9 @@ but unmarked.
     python assets/tools/run_samples.py [--runner PATH] [--out DIR] [--keep] [--page SUBSTR]
 
 Reports, per sample: load or runtime failures the page's own output block does not show,
-backend divergence (vm and interp print different text), and, for information, where the
-printed text differs from the page's output block. Exit code 1 on failures or divergence.
+backend divergence (vm and interp print different text), and expected-output drift (a line of
+the page's output block the runner did not print). Exit code 1 on failures, divergence or drift;
+--allow-drift reports drift without failing, --quiet-expected skips the comparison.
 """
 
 import argparse
@@ -232,7 +233,8 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep the extracted files")
     ap.add_argument("--page", default=None, help="only pages whose path contains this")
     ap.add_argument("--timeout", type=float, default=30.0)
-    ap.add_argument("--quiet-expected", action="store_true", help="do not list expected-output drift")
+    ap.add_argument("--quiet-expected", action="store_true", help="skip the expected-output comparison")
+    ap.add_argument("--allow-drift", action="store_true", help="report expected-output drift without failing")
     ap.add_argument("--show-errors", action="store_true",
                     help="list the samples whose page shows an error, with the runner's text beside it")
     args = ap.parse_args()
@@ -349,8 +351,8 @@ def main():
                 for l in (so + ("\n" + se if se else "")).split("\n")[:12]:
                     print("      | " + l)
     if drift and not args.quiet_expected:
-        print("\nEXPECTED-OUTPUT DRIFT (informational, %d): lines in the page's output block "
-              "that the runner did not print" % len(drift))
+        print("\nEXPECTED-OUTPUT DRIFT (%s, %d): lines in the page's output block "
+              "that the runner did not print" % ("informational" if args.allow_drift else "failure", len(drift)))
         for tag, missing, so, se in drift:
             print("  %s" % tag)
             for l in missing[:6]:
@@ -360,7 +362,7 @@ def main():
 
     if not args.keep:
         shutil.rmtree(out, ignore_errors=True)
-    return 1 if (hard or diverge) else 0
+    return 1 if (hard or diverge or (drift and not args.allow_drift)) else 0
 
 
 if __name__ == "__main__":

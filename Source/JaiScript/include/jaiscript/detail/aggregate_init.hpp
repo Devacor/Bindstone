@@ -106,29 +106,13 @@ inline checked_result<script_value> aggregate_answer(const aggregate_plan& plan,
     return overload_miss(make_error_code(runtime_error_code::no_constructor_found), cls.get_type_id(), args.data(), args.size(), eng, true);
 }
 
-// A constructor-less class over a C++ base: the base default-constructs ahead of the fields (C++: the implicit default
-// constructor runs the base's), its object landing in the instance's _cpp_object as an explicit `: super()` would
-inline checked_result<void> construct_cpp_base_default(class_instance& instance, const script_class_definition& cls, engine* eng) {
-    auto cpp_base = cls.find_cpp_base_class();
-    if (!cpp_base || !eng) { return {}; }
-    const uint64_t target_id = instance.get_cpp_object_field_id();
-    if (const script_value* existing = instance.find_field_value(target_id); existing && !existing->is_null()) { return {}; }
-    auto global = eng->get_global_environment();
-    if (!global) { return {}; }
-    auto ctor = global->get(cpp_base->get_name());
-    if (!ctor || !ctor.value().is_function()) {
-        return checked_result<void>(make_error_code(runtime_error_code::no_constructor_found), "No constructor found for class '{0}'",
-                                    cpp_base->get_type_id());
-    }
-    std::vector<script_value> none;
-    auto made = ctor.value().as_function()(none);
-    if (!made) { return made.error_value(); }
-    if (!made.value().is_object()) { return {}; }
-    auto base_instance = made.value().as<std::shared_ptr<class_instance>>();
-    if (!base_instance) { return {}; }
-    const uint64_t source_id = base_instance->get_cpp_object_field_id();
-    if (base_instance->has_field(source_id)) { instance.set_field(target_id, base_instance->get_field(source_id)); }
-    return {};
+// A base an empty `: super()` (written, or implied as C++'s implicit default construction) cannot default-construct
+inline error_propagator no_default_constructor(uint64_t base_id) {
+    return {make_error_code(runtime_error_code::no_constructor_found), "Base '{0}' has no default constructor; call super(...)", base_id, 0};
+}
+
+inline bool is_constructor_miss(std::error_code ec) {
+    return ec == make_error_code(runtime_error_code::no_constructor_found) || ec == make_error_code(runtime_error_code::argument_count_mismatch);
 }
 
 // One class's own instance fields, in declaration order: an initialized field takes its argument through the field

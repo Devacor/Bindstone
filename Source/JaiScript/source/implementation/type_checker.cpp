@@ -2712,8 +2712,40 @@ private:
         return aggregate_shape::aggregate;
     }
 
+    // The base an empty super() default-constructs (C++ implicit construction): a modeled script class whose constructors
+    // all need arguments, reached through constructor-less script bases; empty when it can or a host class decides
+    std::string_view base_without_default(std::string_view cls, int depth = 0) {
+        if (depth > 32) { return {}; }
+        const sclass* c = find_sclass(cls);
+        if (!c || !c->decl) { return {}; }
+        if (!c->ctors.empty()) {
+            const std::vector<ctype> none;
+            for (const auto* ctor : c->ctors) {
+                if (script_fn_viable(ctor, none)) { return {}; }
+            }
+            return c->decl->name;
+        }
+        for (auto base : c->decl->base_classes) {
+            if (auto missing = base_without_default(base, depth + 1); !missing.empty()) { return missing; }
+        }
+        return {};
+    }
+
+    // cls default-constructs its bases (an empty super(), or the implicit default constructor)
+    void report_base_without_default(std::string_view cls, const source_location& loc) {
+        const sclass* c = find_sclass(cls);
+        if (!c || !c->decl) { return; }
+        for (auto base : c->decl->base_classes) {
+            if (auto missing = base_without_default(base); !missing.empty()) {
+                diag(diag_level::error, loc, "Base '" + std::string(missing) + "' has no default constructor; call super(...)");
+                return;
+            }
+        }
+    }
+
     void check_ctor_call(std::string_view cls_name, const sclass& c, const std::vector<ctype>& args,
                          const source_location& loc) {
+        if (c.ctors.empty() && args.empty()) { report_base_without_default(cls_name, loc); }
         if (c.ctors.empty()) {
             // implicit default + implicit copy, else aggregate initialization (detail/aggregate_init.hpp)
             bool copy_ok = args.size() == 1 &&
@@ -4198,7 +4230,10 @@ private:
         fn_stack_.back().in_ctor_initializers = true;
         for (const auto& init : fn->initializers) {
             for (const auto& arg : init.arguments) { infer(arg.get()); }
+            if (is_ctor && init.target == "super" && init.arguments.empty()) { report_base_without_default(class_ctx_name_, fn->location); }
         }
+        // a constructor naming no initializer default-constructs its base (C++ implicit `: super()`)
+        if (is_ctor && fn->initializers.empty()) { report_base_without_default(class_ctx_name_, fn->location); }
         fn_stack_.back().in_ctor_initializers = false;
         if (fn->body) {
             mode_guard body(mode_stack_, leading_mode(fn->body->declarations), /*scoped=*/true);

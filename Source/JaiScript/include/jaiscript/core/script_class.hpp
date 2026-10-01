@@ -138,6 +138,38 @@ public:
     std::shared_ptr<function_decl> get_destructor_ast() const {
         return destructor_ast_;
     }
+
+    // C++ implicit construction: a base chain that runs code (a declared constructor or a C++ class above) must be
+    // constructed by a class that declares no constructor of its own
+    bool base_needs_construction() const {
+        for (const auto& parent : get_parent_classes()) {
+            if (!parent) { continue; }
+            if (!parent->is_script_class()) { return true; }
+            const auto& script_parent = static_cast<const script_class_definition&>(*parent);
+            if (!script_parent.get_constructor_asts().empty() || script_parent.base_needs_construction()) { return true; }
+        }
+        return find_cpp_base_class() != nullptr;
+    }
+
+    // A constructor's initializer list as it runs: one naming none over a base that needs construction is `: super()`
+    const std::vector<constructor_initializer>& effective_initializers(const function_decl& ctor) {
+        if (ctor.initializers.empty() && base_needs_construction()) { return implicit_default_constructor()->initializers; }
+        return ctor.initializers;
+    }
+
+    // The implicitly-declared default constructor: no parameters, an empty body, `: super()` over a base
+    std::shared_ptr<function_decl> implicit_default_constructor() {
+        if (!implicit_default_ctor_) {
+            auto eng = get_engine();
+            auto [name_id, name_view] = eng->get_symbolizer()->intern_with_view(get_name());
+            auto ctor = std::make_shared<function_decl>(source_location{}, name_view, name_id);
+            ctor->body = std::make_shared<block_stmt>(source_location{}, std::vector<declaration_ptr>{});
+            if (!get_parent_classes().empty()) { ctor->initializers.emplace_back("super", std::vector<expression_ptr>{}); }
+            ctor->unit = unit();
+            implicit_default_ctor_ = std::move(ctor);
+        }
+        return implicit_default_ctor_;
+    }
     
     // Add field initializer AST (will be evaluated at instance construction time).
     // Stored in SOURCE DECLARATION ORDER (append), not interned-id order — a field
@@ -212,6 +244,7 @@ public:
         method_asts_.clear();
         constructor_asts_.clear();
         destructor_ast_.reset();
+        implicit_default_ctor_.reset();
         field_initializer_asts_.clear();
     }
 
@@ -220,6 +253,7 @@ private:
     std::map<uint64_t, std::shared_ptr<function_decl>> method_asts_;
     std::vector<std::shared_ptr<function_decl>> constructor_asts_;
     std::shared_ptr<function_decl> destructor_ast_;
+    std::shared_ptr<function_decl> implicit_default_ctor_;
     // Vector (not map) to preserve source declaration order for field initializers.
     std::vector<std::pair<uint64_t, expression_ptr>> field_initializer_asts_;
     mutable uint64_t literal_memo_epoch_ = UINT64_MAX;

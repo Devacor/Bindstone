@@ -19,14 +19,16 @@ import sys
 SITE = pathlib.Path(__file__).resolve().parents[2]
 
 PAGES = (
-    ["index.html", "tour/index.html", "guide/index.html"]
+    ["index.html", "tour/index.html", "bridges/index.html"]
+    + sorted(p.relative_to(SITE).as_posix() for p in (SITE / "bridges").glob("[0-9]*.html"))
+    + ["guide/index.html"]
     + sorted(p.relative_to(SITE).as_posix() for p in (SITE / "guide").glob("[0-9]*.html"))
     + ["embedding/index.html"]
     + sorted(p.relative_to(SITE).as_posix() for p in (SITE / "embedding").glob("[0-9]*.html"))
     + ["examples/index.html", "reference/index.html", "stability.html"]
 )
 
-SECTION = {"guide": "Guide", "embedding": "Embedding", "examples": "Examples", "reference": "Reference"}
+SECTION = {"bridges": "Bridges", "guide": "Guide", "embedding": "Embedding", "examples": "Examples", "reference": "Reference"}
 
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
 H1_RE = re.compile(r"<h1(?:\s[^>]*)?>(.*?)</h1>", re.S)

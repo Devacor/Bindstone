@@ -3490,6 +3490,31 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "logical chains as values under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_call_the_door_cannot_land_bails_its_iteration", [this]() {
+			// a kept call whose value feeds something the block cannot hold (a string declaration through an index) inside a conditional span:
+			// the block bails there and the general form takes the rest of the iteration, so the loop still closes over the work before it; both
+			// backends, proofs off and miss injection
+			const std::string prelude =
+				"array<string> NAMES = [\"ant\", \"bee\", \"cat\", \"dog\"];\n"
+				"class Tag { int v = 0; string n = \"\"; Tag(int a) { v = a; } }\n"
+				"array<Tag> TAGS = [Tag(5), Tag(6), Tag(7), Tag(8)];\n"
+				"int pick(int i) { string t = \"x\"; if (i > 50) { return 3; } return i % 4 + t.size() - 1; }\n"
+				"int scan(int k) { int n = 0; int len = 0; for (int i = 0; i < k; ++i) { int a = i * 3 + 1; int b = a % 7; n = n + a * b; if (b < 3) { continue; } Tag g = TAGS[pick(i)]; if (g.v > 7 && i > 70) { return -n; } len = len + g.v + NAMES[b % 4].size(); } return n * 1000 + len; }\n";
+			const std::string body = "to_string(scan(80));";
+			both(prelude + body, "", "a door the block cannot land");
+			both(prelude + body, "", "a door the block cannot land, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shape ran: " + vm);
+			const std::string l = listing_run(prelude + body);
+			const size_t at = l.find("== scan ");
+			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos && l.find("C_BAIL", at) != std::string::npos, "scan's loop closes with a bail\n" + l);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "a door the block cannot land under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

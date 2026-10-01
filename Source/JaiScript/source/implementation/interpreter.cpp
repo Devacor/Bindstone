@@ -12723,16 +12723,11 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     }
     std::string resolved_path = std::move(resolve_result.value());
 
-    // Read the file contents
-    std::ifstream file(resolved_path);
-    if (!file.is_open()) {
+    std::string content;
+    if (!engine_ptr->read_include_file(resolved_path, content)) {
         // [ErrorText] Failed to open include file
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string content = buffer.str();
 
     // Execute the included file. Pass the resolved path so every node in the included
     // unit is stamped with its real filename (stack traces / breakpoints name the file).

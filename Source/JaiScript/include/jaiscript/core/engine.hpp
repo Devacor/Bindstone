@@ -228,6 +228,9 @@ namespace jai {
         // its declarations are the includer's (docs/global_shadowing.md). scope names the function or block the
         // include runs in (empty at program scope): an enum the file declares there stays local to it.
         script_value execute_include_source(const std::string& resolvedPath, const std::string& content, std::string_view scope = {});
+        // An include's file read for the backends: false = it cannot be opened. Inside a running import the file joins the
+        // module's closure under the stamp it was read at, so a later change to it re-runs the module.
+        bool read_include_file(const std::string& resolvedPath, std::string& content);
 
         // Pre-parsed script handle: parse once here, then run it repeatedly via
         // bite.execute() or engine->execute(bite) without re-lexing/parsing (the vm

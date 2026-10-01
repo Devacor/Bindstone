@@ -702,6 +702,11 @@ struct engine::implementation {
     std::vector<std::string> include_paths;
     engine::import_behavior import_behavior = engine::import_behavior::file_timestamp; // Default
     
+    struct closure_stamp {
+        std::string path;
+        uint64_t mtime = 0;
+        uint64_t size = 0;
+    };
     struct import_record {
         std::string resolved_path;
         // (mtime, size) stamp via stat_mtime_size, matching the script cache: 100 ns
@@ -715,6 +720,9 @@ struct engine::implementation {
         bool failed = false;
         uint64_t failed_mtime = 0;
         uint64_t failed_size = 0;
+        // the rest of the module's closure: every file its last run included (top level, nested, spliced into a function
+        // body), each stamped as it was read; a pass queries each like the module itself
+        std::vector<closure_stamp> closure;
     };
     std::unordered_map<std::string, import_record> import_cache;
     // the engine-wide import check pass (engine::import_recheck_interval): the window in steady ticks, the generation every
@@ -745,16 +753,48 @@ struct engine::implementation {
     std::unordered_map<std::string, resolution_entry> resolution_memo_;
     std::optional<std::array<std::unordered_set<uint64_t>, 4>> builtin_method_ids_;
     std::unordered_set<std::string> importing_;   // resolved paths mid-execution: a cyclic import's back edge is a no-op
+    std::vector<std::vector<closure_stamp>> import_closures_;   // per running import, innermost last: the files its run reads
+
+    // a file the running import read: a second read under another stamp leaves a zero stamp, which the next pass sees moved
+    void note_closure_file(const std::string& path, bool stamped, uint64_t mtime, uint64_t size) {
+        if (import_closures_.empty()) { return; }
+        if (!stamped) { mtime = 0; size = 0; }
+        auto& closure = import_closures_.back();
+        for (auto& s : closure) {
+            if (s.path != path) { continue; }
+            if (s.mtime != mtime || s.size != size) { s.mtime = 0; s.size = 0; }
+            return;
+        }
+        closure.push_back({path, mtime, size});
+    }
+    std::vector<closure_stamp> end_import_closure() {
+        std::vector<closure_stamp> closure = std::move(import_closures_.back());
+        import_closures_.pop_back();
+        return closure;
+    }
+    // a run that failed keeps the closure it had and adds what it read, so fixing any file it touched re-runs it
+    void merge_import_closure(const std::string& resolved, const std::vector<closure_stamp>& read) {
+        auto rec = import_cache.find(resolved);
+        if (rec == import_cache.end()) { return; }
+        for (const auto& s : read) {
+            bool known = false;
+            for (auto& k : rec->second.closure) { if (k.path == s.path) { k = s; known = true; break; } }
+            if (!known) { rec->second.closure.push_back(s); }
+        }
+    }
+    bool closure_moved(const import_record& record) {
+        for (const auto& s : record.closure) {
+            ++import_stats_;
+            uint64_t mtime = 0, size = 0;
+            if (!stat_mtime_size(s.path, mtime, size) || mtime != s.mtime || size != s.size) { return true; }
+        }
+        return false;
+    }
 
     // Source-string execution cache: re-executing identical source skips lex/parse
     // (both backends) and bytecode compilation (the vm fills the compiled slot), with
     // the same semantics as re-executing a jaibite. Bounded LRU; parse-affecting
     // registrations (template types, classes) bump the epoch and invalidate.
-    struct closure_stamp {
-        std::string path;
-        uint64_t mtime = 0;
-        uint64_t size = 0;
-    };
     struct script_cache_entry {
         std::vector<declaration_ptr> declarations;
         std::string source_path;   // the spelling the unit was parsed under ("<script>" for raw content)
@@ -891,6 +931,7 @@ struct engine::implementation {
             parser prs(tokens, &string_symbolizer_, &self, registeredTemplateTypes);
             auto parse_result = prs.parse();
             if (!parse_result) {
+                for (const auto& f : prs.spliced_files()) { uint64_t mtime = 0, size = 0; const bool ok = stat_mtime_size(f, mtime, size); note_closure_file(f, ok, mtime, size); }
                 throw parse_error(self.format_error(parse_result));
             }
             cached = store_cached_script(sourcePath, content, std::move(parse_result.value()));
@@ -2186,6 +2227,15 @@ script_value engine::execute_file_source(const std::string& resolvedPath, const 
     return execute_source(content, instance_variables{}, resolvedPath);
 }
 
+bool engine::read_include_file(const std::string& resolvedPath, std::string& content) {
+    uint64_t mtime = 0, size = 0;
+    const bool stamped = implementation::stat_mtime_size(resolvedPath, mtime, size);
+    const auto read = implementation::read_under_stamp(resolvedPath, stamped, mtime, size, content);
+    if (read == implementation::stamped_read::missing) { return false; }
+    impl->note_closure_file(resolvedPath, stamped && read == implementation::stamped_read::stable, mtime, size);
+    return true;
+}
+
 script_value engine::execute_include_source(const std::string& resolvedPath, const std::string& content, std::string_view scope) {
     return execute_source(content, instance_variables{}, resolvedPath, true, scope);
 }
@@ -2234,6 +2284,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         std::filesystem::path sibling;
         bool siblingFresh = false;
         auto cached = impl->acquire_entry(*this, scriptContent, sourcePath, sibling, siblingFresh);
+        for (const auto& s : cached->spliced_stamps) { impl->note_closure_file(s.path, true, s.mtime, s.size); }
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
@@ -4596,8 +4647,9 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             if (rec == I.import_cache.end()) { changed.push_back(i); continue; }
         }
         if (!m.stamped) { changed.push_back(i); continue; }
-        if (m.mtime == rec->second.mtime && m.size == rec->second.size) { continue; }
-        if (rec->second.failed && m.mtime == rec->second.failed_mtime && m.size == rec->second.failed_size) { held = true; continue; }
+        const bool same = m.mtime == rec->second.mtime && m.size == rec->second.size;
+        if (same && !I.closure_moved(rec->second)) { continue; }
+        if (!same && rec->second.failed && m.mtime == rec->second.failed_mtime && m.size == rec->second.failed_size) { held = true; continue; }
         changed.push_back(i);
     }
 
@@ -4691,15 +4743,22 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             const std::string& path;
             ~importing_scope() { set.erase(path); }
         } scope{I.importing_, m.resolved};
+        I.import_closures_.emplace_back();
         try {
             execute_source(contents[k], instance_variables{}, m.resolved);
         } catch (const static_check_error&) {
+            I.merge_import_closure(m.resolved, I.end_import_closure());
             record_failure(m);
             throw;
         } catch (const parse_error&) {
+            I.merge_import_closure(m.resolved, I.end_import_closure());
             record_failure(m);
             throw;
+        } catch (...) {
+            I.merge_import_closure(m.resolved, I.end_import_closure());
+            throw;
         }
+        auto closure = I.end_import_closure();
         I.restamp_deferred(*this);
         if (rec == I.import_cache.end()) {
             implementation::import_record record;
@@ -4707,10 +4766,11 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             record.mtime = m.mtime;
             record.size = m.size;
             record.checked_pass = I.import_pass_id_;
-            I.import_cache[m.resolved] = record;
+            record.closure = std::move(closure);
+            I.import_cache[m.resolved] = std::move(record);
         } else {
             rec = I.import_cache.find(m.resolved);
-            if (rec != I.import_cache.end()) { rec->second.failed = false; }
+            if (rec != I.import_cache.end()) { rec->second.failed = false; rec->second.closure = std::move(closure); }
         }
     }
     mark_seen();
@@ -4848,7 +4908,7 @@ script_value engine::execute_import(const std::string& resolved_path) {
                 // Check if file has been modified
                 uint64_t current_mtime = 0, current_size = 0;
                 if (implementation::stat_mtime_size(resolved_path, current_mtime, current_size)) {
-                    should_import = (current_mtime != it->second.mtime || current_size != it->second.size);
+                    should_import = current_mtime != it->second.mtime || current_size != it->second.size || impl->closure_moved(it->second);
                     if (should_import) {
                         // Update the stamp for next check
                         it->second.mtime = current_mtime;
@@ -4886,9 +4946,18 @@ script_value engine::execute_import(const std::string& resolved_path) {
         if (read != implementation::stamped_read::stable || !stamped) { record.mtime = 0; record.size = 0; }
 
         // Attribute the imported unit to its resolved path (stack traces / debugger).
-        auto result = execute_source(content, instance_variables{}, resolved_path);
+        impl->import_closures_.emplace_back();
+        script_value result = [&] {
+            try {
+                return execute_source(content, instance_variables{}, resolved_path);
+            } catch (...) {
+                impl->merge_import_closure(resolved_path, impl->end_import_closure());
+                throw;
+            }
+        }();
+        record.closure = impl->end_import_closure();
         impl->restamp_deferred(*this);   // the unit's classes exist now: the proofs that waited for them
-        impl->import_cache[resolved_path] = record;
+        impl->import_cache[resolved_path] = std::move(record);
         
         return result;
     } else {

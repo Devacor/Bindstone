@@ -3422,6 +3422,38 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "moves at their definitions under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_program_scope_arrays_size_heads_a_block", [this]() {
+			// `m < XS.size()` over a program-scope array: the size lands in a temp through the environment lookup and the loop closes over it
+			// (the size read live each iteration: a callee's push grows it, a reassignment of the global re-resolves after the call); both
+			// backends, proofs off, the middle end off and miss injection
+			const std::string prelude =
+				"array<int> XS = [3, 1, 4, 1, 5, 9, 2, 6];\n"
+				"array<float> FS = [0.5, 1.25, 2.0];\n"
+				"int grown = 0;\n"
+				"void grow() { if (grown < 3) { XS.push(grown * 7); grown = grown + 1; } }\n"
+				"void swap_in() { if (grown == 3) { XS = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]; grown = 4; } }\n"
+				"int sum_all() { int s = 0; for (int m = 0; m < XS.size(); ++m) { s = s + XS[m] * (m + 1); } return s; }\n"
+				"int sum_grow() { int s = 0; for (int m = 0; m < XS.size(); ++m) { if (m == 4) { grow(); } if (m == 9) { swap_in(); } s = s + XS[m]; } return s; }\n"
+				"float fsum() { float s = 0.0; int n = 0; while (n < FS.size()) { s = s + FS[n] * 2.0; n = n + 1; } return s; }\n";
+			const std::string body = "string go() { string r = to_string(sum_all()) + \"|\" + to_string(fsum()); r = r + \"|\" + to_string(sum_grow()); r = r + \"|\" + to_string(sum_grow()) + \"|\" + to_string(XS.size()); return r; }\ngo();";
+			both(prelude + body, "", "a program-scope size in the head");
+			both(prelude + body, "", "a program-scope size in the head, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			check_true(l.find("C_SIZE") != std::string::npos && l.find("SIZE_TEMP") != std::string::npos, "the size lands in a temp and the block reads it\n" + l);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "a program-scope size under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

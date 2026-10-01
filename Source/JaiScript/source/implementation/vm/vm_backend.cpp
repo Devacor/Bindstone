@@ -7796,10 +7796,13 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		if (k < loop.site_alias.size() && loop.site_alias[k]) { cs.site_node[ip - loop.copy_head] = nullptr; cs.site_member[ip - loop.copy_head] = nullptr; cs.site_member_class[ip - loop.copy_head] = nullptr; continue; }   // a site through an alias: its container is the rebind's element, never the entry's
 		if (ci.op == opcode::op_c_size) {
 			// a size site: the receiver slot's array node (a plain cell reference passes through), read live by C_SIZE
-			const script_value* cp = frame_slot(f, ci.b);
+			const bool env_receiver = (ci.b & k_typed_const_bit) != 0;   // b = the general ip | the bit, c = the call site
+			const size_t size_cache = static_cast<size_t>(ci.b & ~k_typed_const_bit) * 3;
+			const script_value* cp = !env_receiver ? frame_slot(f, ci.b) : ci.c < f.code->call_sites.size() ? fused_cmp_operand(f, f.code->call_sites[ci.c].callee, size_cache) : nullptr;
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return refuse_site(ip, "a size receiver behind a non-plain reference"); cp = &cp->deref(); }
 			if (!cp || cp->raw_storage_index() != script_value::TYPEID_ARRAY || !cp->unchecked_array_node()) return refuse_site(ip, "a size receiver that is not an array");
-			cs.site_node[ip - loop.copy_head] = cp->unchecked_array_node(); cs.site_slot[k] = ci.b; cs.site_member[ip - loop.copy_head] = nullptr;
+			cs.site_node[ip - loop.copy_head] = cp->unchecked_array_node(); cs.site_member[ip - loop.copy_head] = nullptr;
+			if (!env_receiver) { cs.site_slot[k] = ci.b; } else { cs.site_env[k] = env_binding(cp, size_cache); }
 			continue;
 		}
 		if (ci.op == opcode::op_c_mload || ci.op == opcode::op_c_mstore) {
@@ -13977,7 +13980,7 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 // through op_call_method whole (a null raises its text) with the result into the temp
 op_status vm_backend::exec_size_temp(frame& f, const vm_instruction& ins) {
 	const call_site& site = f.code->call_sites[ins.b];
-	const script_value* r = frame_slot(f, site.receiver_slot);
+	const script_value* r = site.receiver_slot != k_invalid_u32 ? frame_slot(f, site.receiver_slot) : fused_cmp_operand(f, site.callee, f.ip * 3);
 	if (r) {
 		const script_value& v = r->deref();
 		const size_t k = v.raw_storage_index();

@@ -861,6 +861,7 @@ private:
     void warn_shadow(std::string_view kind, std::string_view name, const source_location& loc,
                      bool allow_field_shape = true) {
         if (fn_stack_.empty()) { return; }   // top-level decls ARE the globals
+        if (name.find('#') != std::string_view::npos) { return; }   // a desugaring's own variable (parser::hidden_name): no script spells it
         // The dangerous shape: shadows a field of the enclosing class (only where the
         // body can actually reach fields - methods/ctors and [this] lambdas)
         if (allow_field_shape && class_ctx_ && fn_stack_.back().sees_fields) {

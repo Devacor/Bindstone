@@ -1436,7 +1436,7 @@ checked_result<expression_ptr> parser::primary() {
         }
 
         if (!check(token_type::left_paren) && !check(token_type::left_brace)) {
-            report_error("Expected '(' or '{' after type in 'new' expression", peek());
+            report_foreign(check(token_type::left_bracket) ? detail::foreign_word::new_array : detail::foreign_word::new_without_arguments, newToken);
             return make_error_code(parse_error_code::unexpected_token);
         }
         bool is_brace = check(token_type::left_brace);
@@ -1594,7 +1594,28 @@ checked_result<expression_ptr> parser::primary() {
     // Array literal with [] or Lambda expression
     if (match(token_type::left_bracket)) {
         auto startLoc = previous().location;
-        
+
+        // A bracket group followed by '(' is a capture list (an array literal is never called): the lambda, read as one
+        if (!pushed_back_token_) {
+            size_t depth = 0;
+            for (size_t i = current_ - 1; i < stream_->size(); ++i) {
+                const token_type t = (*stream_)[i].type;
+                if (t == token_type::left_bracket || t == token_type::left_paren || t == token_type::left_brace) {
+                    ++depth;
+                } else if (t == token_type::right_bracket || t == token_type::right_paren || t == token_type::right_brace) {
+                    if (--depth == 0) {
+                        if (t == token_type::right_bracket && i + 1 < stream_->size() && (*stream_)[i + 1].type == token_type::left_paren) {
+                            current_ -= 1;
+                            return lambda_expression();
+                        }
+                        break;
+                    }
+                } else if (t == token_type::eof || (t == token_type::semicolon && depth == 1)) {
+                    break;
+                }
+            }
+        }
+
         // Check for empty array OR empty capture list for lambda
         if (check(token_type::right_bracket)) {
             JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']'"));
@@ -2161,6 +2182,10 @@ checked_result<expression_ptr> parser::equality() {
 
     while (match({token_type::equal_equal, token_type::bang_equal})) {
         token op = previous();
+        if (check(token_type::equal)) {
+            report_foreign(op.type == token_type::equal_equal ? detail::foreign_word::strict_equal : detail::foreign_word::strict_not_equal, op);
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, relational());
         expr = std::make_shared<binary_expr>(op.location, expr, op, right);
     }
@@ -2340,8 +2365,12 @@ checked_result<expression_ptr> parser::unary() {
             "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
     }
 
+    if (check(token_type::ampersand)) {
+        report_foreign(detail::foreign_word::address_of, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     if (match({token_type::bang, token_type::minus, token_type::plus, token_type::plus_plus,
-               token_type::minus_minus, token_type::ampersand, token_type::tilde})) {
+               token_type::minus_minus, token_type::tilde})) {
         token op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, unary());
         if ((op.type == token_type::plus_plus || op.type == token_type::minus_minus) &&
@@ -2554,6 +2583,12 @@ checked_result<declaration_ptr> parser::declaration_body() {
             "Maximum statement nesting depth exceeded ({})", MAX_PARSE_DEPTH);
     }
 
+    if (do_while_ahead()) {
+        JAISCRIPT_TRY_ASSIGN(auto stmt, statement());
+        return std::make_shared<statement_decl>(stmt->location, stmt);
+    }
+    if (foreign_word_at_statement()) { return make_error_code(parse_error_code::unexpected_token); }
+
     if (match(token_type::nocopy_keyword)) {
         JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'"));
         JAISCRIPT_TRY_ASSIGN(auto result, class_declaration(true));
@@ -2627,6 +2662,11 @@ checked_result<declaration_ptr> parser::declaration_body() {
         }
         match(token_type::semicolon);
         return result;
+    }
+
+    if (check(token_type::function_keyword) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::star) {
+        report_foreign(detail::foreign_word::generator_function, peek());
+        return make_error_code(parse_error_code::unexpected_token);
     }
 
     // Check specifically for function keyword to handle function declarations
@@ -2892,7 +2932,10 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 
     if (!check(token_type::right_paren)) {
         do {
-            // Parse parameter without const support (const is only for C++ binding)
+            if (check(token_type::const_keyword)) {
+                report_foreign(detail::foreign_word::const_parameter, peek());
+                return make_error_code(parse_error_code::unexpected_token);
+            }
             bool is_const = false;
 
             type_info_ptr type = nullptr;
@@ -3175,6 +3218,11 @@ checked_result<statement_ptr> parser::statement_body() {
     }
 
     if (match(token_type::left_brace)) return block_statement();
+    if (do_while_ahead()) {
+        advance();
+        return do_while_statement();
+    }
+    if (foreign_word_at_statement()) { return make_error_code(parse_error_code::unexpected_token); }
     if (match(token_type::if_keyword)) return if_statement();
     if (match(token_type::while_keyword)) return while_statement();
     if (match(token_type::for_keyword)) return for_statement();
@@ -3601,6 +3649,14 @@ checked_result<statement_ptr> parser::try_statement() {
     size_t catch_slot = SIZE_MAX;
     block_scope_guard catch_var_scope(*this);
     if (match(token_type::left_paren)) {
+        const bool typed = is_type_keyword_token(peek().type) || check(token_type::const_keyword) ||
+                           (check(token_type::identifier) && current_ + 1 < stream_->size() &&
+                            ((*stream_)[current_ + 1].type == token_type::identifier || (*stream_)[current_ + 1].type == token_type::ampersand ||
+                             (*stream_)[current_ + 1].type == token_type::colon_colon));
+        if (typed) {
+            report_foreign(detail::foreign_word::typed_catch, peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "Expected variable name in catch"));
         catch_var = var_name.lexeme;
         JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after catch variable"));
@@ -3624,6 +3680,10 @@ checked_result<statement_ptr> parser::try_statement() {
 checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     if (check(token_type::identifier) && reject_using_name(peek(), "class")) { return make_error_code(parse_error_code::unexpected_token); }
     JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "Expected class name"));
+    if (check(token_type::identifier) && peek().lexeme == "extends") {
+        report_foreign(detail::foreign_word::extends_base, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
 
     std::vector<std::string_view> base_classes;
     if (match(token_type::colon)) {
@@ -3687,6 +3747,11 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 continue;
             }
             visibility = class_decl::Protected;
+            continue;
+        }
+
+        if (foreign_word_at_statement()) {
+            synchronize_class_member(class_open_index);
             continue;
         }
 
@@ -5086,6 +5151,76 @@ checked_result<statement_ptr> parser::switch_statement() {
 }
 
 // Helper to get symbol ID from token - uses pre-interned symbol_id if available
+std::pair<uint64_t, std::string_view> parser::hidden_name(std::string_view stem) {
+    std::string name(stem);
+    name += '#';
+    return symbolizer_->intern_with_view(name);
+}
+
+expression_ptr parser::hidden_identifier(uint64_t id, std::string_view name, const source_location& loc) {
+    auto ident = std::make_shared<identifier_expr>(loc, name, id);
+    ident->slot_index = lookup_slot(id);
+    return ident;
+}
+
+bool parser::do_while_ahead() const {
+    return check(token_type::identifier) && peek().lexeme == "do" && current_ + 1 < stream_->size() &&
+           (*stream_)[current_ + 1].type == token_type::left_brace;
+}
+
+checked_result<statement_ptr> parser::do_while_statement() {
+    const token do_token = previous();
+    block_scope_guard loop_scope(*this);
+    const auto [flag_id, flag_name] = hidden_name("do");
+    script_value first_pass(script_value::ast_literal_tag{}, true);
+    auto flag = std::make_shared<variable_decl>(do_token.location, store_type_info(type_info::make_bool(*symbolizer_)), flag_name, flag_id,
+                                                std::make_shared<literal_expr>(do_token.location, first_pass));
+    if (in_function_scope()) { flag->slot_index = allocate_slot(flag_id); }
+
+    JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
+    JAISCRIPT_TRY_ASSIGN(token while_token, consume(token_type::while_keyword, "Expected 'while' after the body of 'do'"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'while'"));
+    JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
+    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after while condition"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after do-while condition"));
+
+    token or_op(token_type::pipe_pipe, "||", while_token.location);
+    auto test = std::make_shared<binary_expr>(while_token.location, hidden_identifier(flag_id, flag_name, while_token.location), or_op, condition);
+    token assign(token_type::equal, "=", while_token.location);
+    script_value later_pass(script_value::ast_literal_tag{}, false);
+    auto update = std::make_shared<assignment_expr>(while_token.location, hidden_identifier(flag_id, flag_name, while_token.location), assign,
+                                                    std::make_shared<literal_expr>(while_token.location, later_pass));
+    return std::make_shared<for_stmt>(do_token.location, flag, test, update, body);
+}
+
+void parser::report_foreign(detail::foreign_word w, const token& at) {
+    report_error(std::string(detail::foreign_word_text(w)), at);
+}
+
+bool parser::foreign_word_at_statement() {
+    const token& t = peek();
+    if (t.type == token_type::const_keyword) {
+        report_foreign(detail::foreign_word::const_declaration, t);
+        return true;
+    }
+    if (t.type != token_type::identifier || current_ + 1 >= stream_->size()) return false;
+    const token& next = (*stream_)[current_ + 1];
+    if (t.lexeme == "delete" && (next.type == token_type::identifier || next.type == token_type::this_keyword || next.type == token_type::left_bracket)) {
+        report_foreign(detail::foreign_word::delete_statement, t);
+        return true;
+    }
+    if (t.lexeme == "goto" && next.type == token_type::identifier && current_ + 2 < stream_->size() &&
+        (*stream_)[current_ + 2].type == token_type::semicolon) {
+        report_foreign(detail::foreign_word::goto_statement, t);
+        return true;
+    }
+    if (t.lexeme == "virtual" && (next.type == token_type::identifier || is_type_keyword_token(next.type) || next.type == token_type::static_keyword)) {
+        report_foreign(detail::foreign_word::virtual_method, t);
+        return true;
+    }
+    return false;
+}
+
 uint64_t parser::get_symbol_id(const token& tok) const {
     // If lexer already interned this token (identifiers), use that
     if (tok.symbol_id != 0) {

@@ -119,29 +119,38 @@ checked_result<script_value> script_callable_thunk::operator()(const std::vector
         }
         return result;
     }
-    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+    if (!eng) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
+    }
+    struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, args};
+    return eng->checked_host_entry([](execution_backend& be, void* ctx) {
+        auto* cc = static_cast<call*>(ctx);
+        return be.execute_callable(cc->payload, cc->args);
+    }, &c);
+}
+
+checked_result<script_value> engine::checked_host_entry(host_entry_body run, void* context) {
+    execution_backend* backend = get_execution_backend();
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
-    // Host-boundary detection BEFORE the call (the backends' host-level-resume rule):
-    // an invocation with no execute in flight is a fresh host entry.
-    const bool host_boundary = !backend->is_executing() && !backend->is_unwinding();
-    if (host_boundary) {
-        eng->note_host_entry();
-        backend->begin_host_call();
-    }
-    auto result = backend->execute_callable(payload, args);
-    if (host_boundary && result.has_value() && backend->is_unwinding()) [[unlikely]] {
-        // Uncaught script throw crossing the host boundary: report EXACTLY like
-        // engine::execute's uncaught-throw path (same script_exception type, the
-        // original message), then scrub so the engine stays usable. Mid-script host
-        // callbacks keep the latched unwinding flag instead - the calling script's
-        // catch must still see the original thrown VALUE.
-        script_exception ex = without_repeated_category(backend->get_current_exception());
+    // Mid-script host callbacks keep the latched unwinding flag: the calling script's catch must still see the thrown VALUE
+    if (backend->is_executing() || backend->is_unwinding()) { return run(*backend, context); }
+    note_host_entry();
+    backend->begin_host_call();
+    const auto failure = [&](const char* text) {
         backend->prepare_for_execution();
-        throw ex;
+        return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", symbolize(text));
+    };
+    try {
+        auto result = run(*backend, context);
+        if (result.has_value() && backend->is_unwinding()) [[unlikely]] {   // an uncaught script throw: its text, as execute() throws it
+            return failure(without_repeated_category(backend->get_current_exception()).what());
+        }
+        return result;
+    } catch (const std::exception& e) {   // a nested run's failure (an import that is missing or fails its check) leaves as an exception
+        return failure(e.what());
     }
-    return result;
 }
 
 namespace {

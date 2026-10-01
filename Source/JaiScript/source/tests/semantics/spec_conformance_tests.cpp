@@ -6,6 +6,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
@@ -2636,7 +2637,89 @@ private:
 	// Dev's rulings of 2026-10-01
 	void rulings_2026_10_01() {
 		comparison_rewriting();
+		host_call_failure_routes();
 		host_global_references();
+	}
+
+	// "<kind>:<key>" when the text holds the key, else "<kind>:<text>"
+	static std::string route(const std::string& kind, const std::string& text, const std::string& key) {
+		return kind + ":" + (text.find(key) != std::string::npos ? key : text);
+	}
+
+	void host_call_failure_routes() {
+		// Dev ruling 2026-10-01: a checked_result-returning call reports every failure in its result (a run-time error, an
+		// uncaught script throw, a missing module, a failed reload; a function, a bound method, a static method, a coroutine
+		// resume); a throwing call (execute, convert_script_function's std::function) throws for every failure; the engine
+		// stays usable after each
+		const std::filesystem::path dir = test_temp_directory() / "host_call_routes";
+		std::filesystem::create_directories(dir);
+		const std::string mod = (dir / "reloaded.jai").generic_string();
+		const std::string prog = R"(
+			function runtime_fail() -> int { array<int> a = [1]; return a[5]; }
+			function throws_value() -> int { throw "boom"; return 0; }
+			function missing_module() -> int { import "no_such_module_for_host_routes.jai"; return 1; }
+			function reload_module() -> int { import ")" + mod + R"("; return reloaded_value(); }
+			class C { int m() { throw "method boom"; return 0; } static int s() { throw "static boom"; return 0; } }
+			coroutine co() { yield 1; throw "co boom"; }
+			C c; var bm = reflect::bind(c, "m"); var sm = C::s; var h = co();
+		)";
+		const std::vector<std::pair<std::string, std::string>> calls = {
+			{"runtime_fail", "out of bounds"}, {"throws_value", "boom"}, {"missing_module", "Could not find include/import file"},
+			{"reload_module", "reloaded"}, {"bm", "method boom"}, {"sm", "static boom"}};
+		test("a_checked_host_call_reports_every_failure_in_its_result", [=, this]() {
+			every_config("checked routes", "err:out of bounds|err:boom|err:Could not find include/import file|ok:<1>|err:reloaded|"
+			             "err:method boom|err:static boom|ok:<1>|err:co boom|<42>", [&](engine& e) {
+				e.import_recheck_interval(0);
+				std::ofstream(mod) << "function reloaded_value() -> int { return 1; }\n";
+				e.execute(prog);
+				auto call = [&](const std::string& name, const std::string& key) -> std::string {
+					try {
+						auto r = e.get_variable(name).as_function()({});
+						if (r) { return "ok:" + spec::render(r.value()); }
+						return route("err", e.format_error(r), key);
+					} catch (const std::exception& ex) { return route("throw", ex.what(), key); }
+				};
+				std::string out;
+				for (const auto& [name, key] : calls) {
+					if (name == "reload_module") {
+						out += call(name, key) + "|";
+						std::ofstream(mod) << "function reloaded_value() -> int { return ; \n";
+					}
+					out += call(name, key) + "|";
+				}
+				auto handle = std::static_pointer_cast<coroutine_handle>(e.get_variable("h").get_object_holder()->data);
+				for (int i = 0; i < 2; ++i) {
+					try {
+						auto r = handle->resume(&e);
+						out += r ? "ok:" + spec::render(r.value()) + "|" : route("err", e.format_error(r), "co boom") + "|";
+					} catch (const std::exception& ex) { out += route("throw", ex.what(), "co boom") + "|"; }
+				}
+				return out + spec::render(e.execute("40 + 2"));
+			}, check_mode::warn);
+		});
+		test("a_throwing_host_call_throws_for_every_failure", [=, this]() {
+			every_config("throwing routes", "throw:out of bounds|throw:boom|throw:Could not find include/import file|ok|throw:reloaded|"
+			             "throw:method boom|throw:static boom|exec throw:boom|exec throw:Could not find include/import file|null:empty|<42>", [&](engine& e) {
+				e.import_recheck_interval(0);
+				std::ofstream(mod) << "function reloaded_value() -> int { return 1; }\n";
+				e.execute(prog);
+				std::string out;
+				for (const auto& [name, key] : calls) {
+					auto fn = convert_script_function<int64_t()>(e.get_variable(name));
+					if (name == "reload_module") {
+						try { fn(); out += "ok|"; } catch (const std::exception& ex) { out += route("throw", ex.what(), key) + "|"; }
+						std::ofstream(mod) << "function reloaded_value() -> int { return ; \n";
+					}
+					try { fn(); out += "ok|"; } catch (const std::exception& ex) { out += route("throw", ex.what(), key) + "|"; }
+				}
+				for (const auto& [src, key] : std::vector<std::pair<std::string, std::string>>{{"throws_value();", "boom"}, {"missing_module();", "Could not find include/import file"}}) {
+					try { e.execute(src); out += "exec ok|"; } catch (const std::exception& ex) { out += route("exec throw", ex.what(), key) + "|"; }
+				}
+				auto none = convert_script_function<void()>(script_value(std::monostate{}, &e));
+				out += none ? "null:callable|" : "null:empty|";
+				return out + spec::render(e.execute("40 + 2"));
+			}, check_mode::warn);
+		});
 	}
 
 	struct ref_player { int64_t hp = 0; std::string tag; };

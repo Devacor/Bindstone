@@ -1163,6 +1163,12 @@ namespace jai {
         void push_external_call_scope();
         void pop_external_call_scope();
 
+        // The checked_result flavor's host entry (Dev ruling 2026-10-01): `run` executes on the backend, and a call made while no
+        // script runs reports every failure in its result (a run-time error, an uncaught throw, a failed import or reload), the
+        // engine left ready for the next call; a call from inside running script passes straight through
+        using host_entry_body = checked_result<script_value> (*)(execution_backend&, void*);
+        checked_result<script_value> checked_host_entry(host_entry_body run, void* context);
+
         // An overloaded host function name's callable: the overload the arguments select
         struct overload_dispatch {
             engine* eng;

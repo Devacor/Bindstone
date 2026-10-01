@@ -404,10 +404,11 @@ public:
 				std::string caught = "<no throw>";
 				try {
 					auto r = boom.as_function()(std::vector<jai::script_value>{});
-					if (!r.has_value()) { caught = std::string("<checked error> ") + std::string(r.message()); }
+					if (!r.has_value()) { caught = std::string("<checked error> ") + e->format_error(r); }   // the checked flavor carries it (Dev ruling 2026-10-01)
 				} catch (const jai::script_exception& ex) {
-					caught = ex.what();
+					caught = std::string("<threw> ") + ex.what();
 				}
+				check_true(caught.rfind("<checked error> ", 0) == 0, backend_tag(use_vm) + "the result carries it, no throw: " + caught);
 				check_true(caught.find("the actual message") != std::string::npos,
 					backend_tag(use_vm) + "host sees the thrown message, got: " + caught);
 

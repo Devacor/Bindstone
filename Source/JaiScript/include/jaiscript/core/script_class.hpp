@@ -256,8 +256,12 @@ inline checked_result<script_value> script_method_dispatch::operator()(const std
     payload.cls = cls;
     payload.definition_env = definition_env;
     payload.this_obj = args[0];
-    if (!backend->is_executing()) { eng->note_host_entry(); }
-    return backend->execute_callable(payload, method_args);
+    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_callable(payload, method_args); }
+    struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, method_args};
+    return eng->checked_host_entry([](execution_backend& be, void* ctx) {
+        auto* cc = static_cast<call*>(ctx);
+        return be.execute_callable(cc->payload, cc->args);
+    }, &c);
 }
 
 // Implementation of add_script_method. The stored dispatcher captures only
@@ -312,7 +316,12 @@ inline checked_result<script_value> script_static_method_dispatch::operator()(co
     if (it != table.end() && it->second.size() > 1) {
         if (auto best = pick_best_overload(it->second, args)) { payload.ast = best; }
     }
-    return backend->execute_callable(payload, args);
+    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_callable(payload, args); }
+    struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, args};
+    return eng->checked_host_entry([](execution_backend& be, void* ctx) {
+        auto* cc = static_cast<call*>(ctx);
+        return be.execute_callable(cc->payload, cc->args);
+    }, &c);
 }
 
 // Implementation of add_static_script_method. Same engine*+payload pattern; overloads

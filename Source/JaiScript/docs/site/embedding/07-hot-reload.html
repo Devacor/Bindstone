@@ -146,16 +146,12 @@ int tick(int frame) {
 eng-&gt;execute_file(&quot;scripts/game.jai&quot;);
 jai::script_value tick = eng-&gt;get_variable(&quot;tick&quot;);
 for (int64_t frame = 0; running; ++frame) {
-    try {
-        auto r = tick.as_function()({eng-&gt;make_value(frame)});
-        if (!r) { log(eng-&gt;format_error(r)); }   // a run-time error in the frame: &quot;Division by zero&quot;
-        else { use(r.value().as_int()); }
-    } catch (const std::exception&amp; e) {
-        log(e.what());                          // a broken edit or a missing module (and an uncaught script throw)
-    }
+    auto r = tick.as_function()({eng-&gt;make_value(frame)});
+    if (!r) { log(eng-&gt;format_error(r)); }   // &quot;Division by zero&quot;, a broken edit&#x27;s listing, a missing module, an uncaught throw
+    else { use(r.value().as_int()); }
     // ... render, sleep ...
 }</code></pre></div>
-<p>The two failure routes differ. A run-time error inside the call comes back in the <code>checked_result</code>. A rejected reload (the check listing, naming <code>rules.jai</code> with its line and a caret), a module whose file went missing, and a script <code>throw</code> nothing caught all cross the call as a <code>jai::script_exception</code>. Either way the engine keeps the code it had and the next frame runs it. Inside script, a <code>try</code> around the <code>import</code> catches the same errors.</p>
+<p>Every failure comes back in the <code>checked_result</code>: a run-time error inside the call, a rejected reload (the check listing, naming <code>rules.jai</code> with its line and a caret), a module whose file went missing, and a script <code>throw</code> nothing caught. The engine keeps the code it had and the next frame runs it. A throwing call (<code>execute</code>, a <code>convert_script_function</code> wrapper) raises the same failures as exceptions (<a href="01-embedding-quickstart.html#error-surfaces">Error surfaces</a>). Inside script, a <code>try</code> around the <code>import</code> catches the same errors.</p>
 <p>Tests want no window at all: <code>eng-&gt;import_recheck_interval(0)</code> (or <code>import_recheck_interval(0)</code> from script) checks on every reach, so a file the test writes is seen by the very next import, even inside one <code>execute()</code>. With the default 0.2 s, an edit made just after a pass is seen by the first reach after the window closes.</p>
 <p><code>engine::reset_import(path)</code> and <code>reset_imports()</code> are the narrow escape hatches (forcing a re-run under <code>once</code> mode), not the mechanism; <code>set_import_behavior(jai::engine::import_behavior::once)</code> picks the policy (<code>file_timestamp</code>, the default; <code>once</code>; or <code>always</code>, which treats every import as an include).</p>
 <h2 id="reload-reports">Reload reports<a class="hlink" href="#reload-reports" aria-label="link">&#8203;</a></h2>

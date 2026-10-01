@@ -1366,7 +1366,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 				jai::script_value callable = eng->get_variable("main");
 				const std::vector<jai::script_value> arguments;
 				auto result = callable.as_function()(arguments);
-				if (!result) { throw std::runtime_error(std::string(result.message())); }
+				if (!result) { throw std::runtime_error(eng->format_error(result)); }
 				r.exit_code = result_to_exit_code(result.value());
 #ifdef GLOOM_PROFILE_CAPTURE
 				capture.stop();

@@ -58,6 +58,8 @@ GUIDE = [
      "What fails at load and what waits for run time, how to read a diagnostic, cast&lt;T&gt; as the explicit boundary, extern, and the [[warn_mode]] / [[strict_mode]] attributes."),
     ("14-time.html", "Time: Clocks, Stopwatches &amp; Dates",
      "The time:: namespace: monotonic and wall clocks, execute_elapsed, value-type stopwatches, validated calendar dates in UTC or local time, templates with format specs, and why parallel bodies cannot read the clock."),
+    ("15-math.html", "Math: Vectors &amp; Colors",
+     "The math value types: vec2, vec3, vec4, ivec2, ivec3 and color, their operators and value semantics, the component-wise and geometry libraries, perceptual color mixing, and packed vector arrays."),
 ]
 
 EMBEDDING = [
@@ -89,6 +91,8 @@ EMBEDDING = [
      "A script class can derive a bound C++ class, and the script decides which object becomes which class."),
     ("14-language-server.html", "Editor Support: the Language Server",
      "jaiscript_lsp answers the editor from the engine's own parser and strict checker: diagnostics as you type across a whole program, definitions, references, hover, completion, rename."),
+    ("15-math-adapters.html", "Math Adapters: Host Vector Types",
+     "One macro line makes a host vector, point or color struct cross every binding as math::vec3, math::ivec2 or math::color: parameters, returns, write-back, bound members, reflected properties and std::vector buffers."),
 ]
 
 BRIDGES = [
@@ -106,9 +110,9 @@ SECTION_INDEX_DESC = {
     "bridges/index.html":
         "Three pages for programmers arriving from JavaScript, C++ or C#: the familiar spellings side by side, the habits that get a different answer, and a complete program for each.",
     "guide/index.html":
-        "Fourteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
+        "Fifteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
     "embedding/index.html":
-        "Fourteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, and editor support.",
+        "Fifteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, and host math types.",
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel - and what each one proves.",
     "reference/index.html":

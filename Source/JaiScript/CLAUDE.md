@@ -590,7 +590,11 @@ engine stays usable", not by `check_throws`.
   empty file, and raises the catchable `Cannot read file '<path>': not found` / `not a file` / `permission denied` for one
   it cannot hand back, so absence is asked with `file_data(path) != null` or `file_exists` first). `.jaibite` siblings mark
   their own file (v14)
-  so a moved folder keeps its names.
+  so a moved folder keeps its names. A sibling records the source it was parsed from (size + 64-bit hash,
+  `detail::jaibite_identity_of`, `.jaibite` version 31) and loads only for that exact text (equality, never an mtime
+  ordering); it is written to a temporary file renamed over it. Every file read that is remembered (an import's record,
+  the `execute_file` lane) takes its (mtime, size) stamp before and after the read and keeps it only when they agree: a
+  re-run module saved mid-read waits for the next pass, a first load reads again at once.
 - **Filesystem privilege**: enabled by default. C++ `eng->disable(jai::filesystem)`, `enable(...)`,
   `is_enabled(...)`; `jai::filesystem` aliases scoped `jai::privilege::filesystem`, the only built-in
   privilege implemented. Script `reflect::is_enabled(requirements...)` is query-only: at least one

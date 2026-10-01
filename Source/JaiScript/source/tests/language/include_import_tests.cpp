@@ -2,8 +2,11 @@
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>
+#include <atomic>
 #include <fstream>
 #include <filesystem>
+#include <sstream>
 #include <thread>
 #include <chrono>
 
@@ -585,10 +588,9 @@ public:
             cleanup_temp_file(counter_file);
         });
 
-        // === jaibite disk cache (Dev ruling 2026-07): every file-based load maintains a
-        // sibling <stem>.jaibite — strictly-newer mtime + matching registration
+        // === jaibite disk cache: every file-based load maintains a sibling <stem>.jaibite; a
+        // sibling whose header records the exact source (size + hash) and the registration
         // fingerprint loads instead of parsing; anything else reparses and rewrites.
-        // Deterministic mtime orderings via the std::filesystem::last_write_time SETTER.
 
         auto sibling_of = [](const std::string& src) {
             return std::filesystem::path(src).replace_extension(".jaibite").string();
@@ -599,9 +601,18 @@ public:
             f.read(magic, 4);
             return f.gcount() == 4 && magic[0] == 'J' && magic[1] == 'B' && magic[2] == 'I' && magic[3] == 'T';
         };
-        auto force_older_than = [](const std::string& target, const std::string& reference) {
-            auto ref = std::filesystem::last_write_time(reference);
-            std::filesystem::last_write_time(target, ref - std::chrono::hours(1));
+        // the sibling's recorded source identity rewritten to the file's current text: a load then proves the parse was
+        // skipped, since that text need not parse
+        auto relabel_sibling = [sibling_of](const std::string& src) {
+            std::ifstream in(src);
+            std::stringstream text;
+            text << in.rdbuf();
+            const auto id = jai::detail::jaibite_identity_of(text.str());
+            std::fstream f(sibling_of(src), std::ios::in | std::ios::out | std::ios::binary);
+            f.seekp(20);
+            for (uint64_t v : {id.size, id.hash}) {
+                for (int i = 0; i < 8; ++i) { f.put(char(uint8_t(v >> (8 * i)))); }
+            }
         };
 
         test("jaibite_cache_creates_sibling_on_file_loads", [=, this]() {
@@ -629,8 +640,8 @@ public:
         });
 
         test("jaibite_cache_fresh_sibling_skips_parse", [=, this]() {
-            // Proof the parse is skipped: a fresh (strictly newer, fingerprint-matching)
-            // sibling loads fine even when the .jai itself no longer parses.
+            // Proof the parse is skipped: a sibling recording the source's identity (relabeled
+            // here) loads even though the .jai itself does not parse.
             for (bool use_vm : {false, true}) {
                 auto src = create_temp_file("cache_skip.jai", "42;");
                 std::filesystem::remove(sibling_of(src));
@@ -644,7 +655,7 @@ public:
                     std::ofstream f(src, std::ios::trunc);
                     f << "%%% not a script %%%";
                 }
-                force_older_than(src, sibling_of(src));
+                relabel_sibling(src);
                 auto reader = engine::make();
                 if (use_vm) { reader->set_backend(jai::backend_type::vm); }
                 reader->add_include_path(jai::foundry::test_temp_directory().string());
@@ -671,7 +682,7 @@ public:
                     std::ofstream f(src, std::ios::trunc);
                     f << "%%%";
                 }
-                force_older_than(src, sibling_of(src));
+                relabel_sibling(src);
                 auto reader = engine::make();
                 if (use_vm) { reader->set_backend(jai::backend_type::vm); }
                 try { reader->execute_file(src); } catch (...) {}
@@ -692,8 +703,8 @@ public:
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)1, eng->execute("var a = include \"cache_edit.jai\"; a;").as_int());
-                // edit lands on the very next include, same engine run; equal mtimes
-                // must read as stale (pin: strictly-newer freshness rule)
+                // edit lands on the very next include, same engine run, with the sibling's
+                // mtime: the sibling records the old text, so the new one parses
                 {
                     std::ofstream f(src, std::ios::trunc);
                     f << "2;";
@@ -713,7 +724,6 @@ public:
                     std::ofstream f(sibling_of(src), std::ios::binary | std::ios::trunc);
                     f << "JBITgarbage-not-a-real-bite";
                 }
-                force_older_than(src, sibling_of(src));   // corrupt sibling looks "fresh"
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
@@ -725,7 +735,7 @@ public:
                     std::ofstream f(src, std::ios::trunc);
                     f << "%%%";
                 }
-                force_older_than(src, sibling_of(src));
+                relabel_sibling(src);
                 auto eng2 = engine::make();
                 if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
                 eng2->add_include_path(jai::foundry::test_temp_directory().string());
@@ -746,12 +756,12 @@ public:
                     a->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)100, a->execute("var r = include \"cache_fp.jai\"; r;").as_int());
                 }
-                // source now says 200, forced older than the sibling (mtime says "fresh")
+                // source now says 200 and the sibling is relabeled to it: only the fingerprint differs
                 {
                     std::ofstream f(src, std::ios::trunc);
                     f << "200;";
                 }
-                force_older_than(src, sibling_of(src));
+                relabel_sibling(src);
                 {   // engine B: different registration surface -> stale -> parses the source
                     auto b = engine::make();
                     if (use_vm) { b->set_backend(jai::backend_type::vm); }
@@ -761,7 +771,11 @@ public:
                 }
                 // B's reparse rewrote the sibling under B's (bare) surface; an engine
                 // with the same bare surface now loads it (fingerprint matches)
-                force_older_than(src, sibling_of(src));
+                {
+                    std::ofstream f(src, std::ios::trunc);
+                    f << "%%%";
+                }
+                relabel_sibling(src);
                 {
                     auto c = engine::make();
                     if (use_vm) { c->set_backend(jai::backend_type::vm); }
@@ -791,7 +805,6 @@ public:
                     f.write(reinterpret_cast<const char*>(&flags), 4);
                     f.write(reinterpret_cast<const char*>(&fingerprint), 8);
                 }
-                force_older_than(src, sibling_of(src));   // stale-version sibling looks "fresh"
                 auto eng = engine::make();
                 if (use_vm) { eng->set_backend(jai::backend_type::vm); }
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
@@ -803,7 +816,7 @@ public:
                     std::ofstream f(src, std::ios::trunc);
                     f << "%%%";
                 }
-                force_older_than(src, sibling_of(src));
+                relabel_sibling(src);
                 auto eng2 = engine::make();
                 if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
                 eng2->add_include_path(jai::foundry::test_temp_directory().string());
@@ -844,6 +857,207 @@ public:
                 std::filesystem::remove(sibling_of(src));
                 cleanup_temp_file(src);
             }
+        });
+
+        auto put_file = [](const std::filesystem::path& path, const std::string& text) {
+            std::ofstream(path, std::ios::binary | std::ios::trunc) << text;
+        };
+        auto temporaries_beside = [](const std::filesystem::path& sibling) {
+            int count = 0;
+            const std::string prefix = sibling.filename().string() + ".";
+            for (const auto& e : std::filesystem::directory_iterator(sibling.parent_path())) {
+                const std::string name = e.path().filename().string();
+                count += name.rfind(prefix, 0) == 0 && e.path().extension() == ".tmp";
+            }
+            return count;
+        };
+
+        test("a_reimport_runs_the_saved_source_whatever_its_mtime", [=, this]() {
+            // a revision put in place with an older mtime (a copy keeping its source file's time), with the same size, or
+            // with the same mtime runs its own definitions on the re-run: the sibling written for the version before it
+            // records another source, so it never stands in for this one
+            const auto dir = jai::foundry::test_temp_directory();
+            const auto path = dir / "hr_flight.jai";
+            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            struct revision { const char* name; const char* text; int value; int shift; };   // shift: new mtime - old, seconds
+            const revision cases[] = {
+                {"older mtime, other size", "flight_ran();\nint flight() { return 22; }\n", 22, -3600},
+                {"older mtime, same size", "flight_ran();\nint flight() { return 2; }\n", 2, -3600},
+                {"same mtime, other size", "flight_ran();\nint flight() { return 222; }\n", 222, 0},
+            };
+            for (const auto& c : cases) {
+                for (bool keep_sibling : {true, false}) {
+                    const std::string label = std::string(c.name) + (keep_sibling ? ", sibling present" : ", sibling absent");
+                    std::filesystem::remove(sibling);
+                    put_file(path, "flight_ran();\nint flight() { return 1; }\n");
+                    auto eng = make_engine();
+                    eng->add_include_path(dir.string());
+                    int runs = 0;
+                    eng->add_function("flight_ran", [&runs]() { ++runs; });
+                    eng->execute("import \"hr_flight.jai\";");
+                    check_eq(script_int(1), eng->execute("flight();").as_int(), label);
+                    check_true(std::filesystem::exists(sibling), "the first load writes the sibling: " + label);
+                    const auto before = std::filesystem::last_write_time(path);
+                    put_file(path, c.text);
+                    std::filesystem::last_write_time(path, before + std::chrono::seconds(c.shift));
+                    if (!keep_sibling) { std::filesystem::remove(sibling); }
+                    check_true(eng->execute("import(\"hr_flight.jai\");").as_bool(), "the stamp moved, the module re-runs: " + label);
+                    check_eq(2, runs, label);
+                    check_eq(script_int(c.value), eng->execute("flight();").as_int(), "the re-run runs the saved source: " + label);
+                    auto fresh = make_engine();
+                    fresh->add_include_path(dir.string());
+                    fresh->add_function("flight_ran", []() {});
+                    fresh->execute("import \"hr_flight.jai\";");
+                    check_eq(script_int(c.value), fresh->execute("flight();").as_int(), "a new engine reads the saved source too: " + label);
+                }
+            }
+            std::filesystem::remove(path);
+            std::filesystem::remove(sibling);
+        });
+
+        test("a_jaibite_sibling_loads_only_for_the_exact_source_it_records", [=, this]() {
+            // a fresh engine finds a sibling written for the previous text: older mtime, or same mtime and same size (a tool
+            // restoring a file with its old time), the sibling never loads for the new text and is rewritten for it; a bite
+            // saved without a source never loads as a sibling
+            const auto path = jai::foundry::test_temp_directory() / "hr_restored.jai";
+            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            auto bytes_of = [](const std::filesystem::path& p) {
+                std::ifstream f(p, std::ios::binary);
+                return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            };
+            for (int shift : {-3600, 0}) {
+                const std::string label = shift ? "older mtime, same size" : "same mtime, same size";
+                std::filesystem::remove(sibling);
+                put_file(path, "int restored() { return 1; }\nrestored();\n");
+                check_eq(script_int(1), make_engine()->execute_file(path.string()).as_int(), label);
+                const std::string first = bytes_of(sibling);
+                check_false(first.empty(), "the sibling is written: " + label);
+                const auto before = std::filesystem::last_write_time(path);
+                put_file(path, "int restored() { return 2; }\nrestored();\n");
+                std::filesystem::last_write_time(path, before + std::chrono::seconds(shift));
+                check_eq(script_int(2), make_engine()->execute_file(path.string()).as_int(), "the new text runs: " + label);
+                const std::string second = bytes_of(sibling);
+                check_true(!second.empty() && second != first, "the sibling is rewritten for the new text: " + label);
+                const auto rewritten = std::filesystem::last_write_time(sibling);
+                check_eq(script_int(2), make_engine()->execute_file(path.string()).as_int(), label);
+                check_true(std::filesystem::last_write_time(sibling) == rewritten, "a matching sibling loads, unrewritten: " + label);
+                check_eq(0, temporaries_beside(sibling), "no temporary file is left: " + label);
+            }
+            auto saver = make_engine();
+            saver->jaibite("7;").save(sibling.string());
+            put_file(path, "40 + 2;");
+            check_eq(script_int(42), make_engine()->execute_file(path.string()).as_int(), "a bite saved without a source never loads as a sibling");
+            std::filesystem::remove(path);
+            std::filesystem::remove(sibling);
+        });
+
+        test("execute_file_reruns_a_same_size_file_put_back_with_an_older_mtime", [=, this]() {
+            // the file fast lane trusts a stamp only while it is equal: an older mtime is a change like a newer one
+            const auto path = jai::foundry::test_temp_directory() / "hr_lane.jai";
+            put_file(path, "11;");
+            auto eng = make_engine();
+            check_eq(script_int(11), eng->execute_file(path.string()).as_int());
+            check_eq(script_int(11), eng->execute_file(path.string()).as_int(), "the second run verifies the stamp");
+            const auto before = std::filesystem::last_write_time(path);
+            put_file(path, "22;");
+            std::filesystem::last_write_time(path, before - std::chrono::hours(1));
+            check_eq(script_int(22), eng->execute_file(path.string()).as_int(), "an older stamp re-reads the file");
+            std::filesystem::remove(path);
+            std::filesystem::remove(std::filesystem::path(path).replace_extension(".jaibite"));
+        });
+
+        test("a_jaibite_sibling_is_replaced_whole_or_not_at_all", [=, this]() {
+            // the writer renames a finished temporary file over the sibling: a truncated sibling (a crash leftover) parses
+            // and is replaced whole, a sibling that cannot be replaced never stands in for the new text, and no temporary
+            // file outlives a write, failed or not
+            const auto path = jai::foundry::test_temp_directory() / "hr_atomic.jai";
+            const auto sibling = std::filesystem::path(path).replace_extension(".jaibite");
+            std::filesystem::remove(sibling);
+            put_file(path, "int atomic_v() { return 5; }\natomic_v();\n");
+            check_eq(script_int(5), make_engine()->execute_file(path.string()).as_int());
+            const auto full = std::filesystem::file_size(sibling);
+            std::filesystem::resize_file(sibling, jai::detail::k_jaibite_header_size + 3);
+            check_eq(script_int(5), make_engine()->execute_file(path.string()).as_int(), "a truncated sibling with the right identity parses");
+            check_eq(full, std::filesystem::file_size(sibling), "and is replaced whole");
+            check_eq(0, temporaries_beside(sibling), "no temporary file after a write");
+
+            std::filesystem::permissions(sibling, std::filesystem::perms::owner_write | std::filesystem::perms::group_write | std::filesystem::perms::others_write, std::filesystem::perm_options::remove);
+            put_file(path, "int atomic_v() { return 6; }\natomic_v();\n");
+            auto eng = make_engine();
+            check_eq(script_int(6), eng->execute_file(path.string()).as_int(), "a read-only stale sibling never loads for the new text");
+            check_eq(0, temporaries_beside(sibling), "no temporary file after a write to a read-only sibling");
+            if (std::filesystem::exists(sibling)) {
+                std::filesystem::permissions(sibling, std::filesystem::perms::owner_write, std::filesystem::perm_options::add);
+                std::filesystem::remove(sibling);
+            }
+
+            std::filesystem::create_directory(sibling);
+            auto blocked = make_engine();
+            check_eq(script_int(6), blocked->execute_file(path.string()).as_int());
+            check_true(blocked->jaibite_cache_write_failures() >= 1, "a sibling path that is a folder fails the write");
+            check_true(std::filesystem::is_directory(sibling), "the folder is left alone");
+            check_eq(0, temporaries_beside(sibling), "no temporary file after a failed write");
+            std::filesystem::remove(sibling);
+            std::filesystem::remove(path);
+        });
+
+        test("an_import_runs_a_module_only_from_text_read_under_its_stamp", [=, this]() {
+            // a save landing while a module is read (its stamp queried after the read disagrees with the one before) holds a
+            // module that ran before until a pass reads it whole; a first load reads again at once. A saver thread moves the
+            // file's mtime continuously while a long file is read, so every read in the storm overlaps a save.
+            const auto dir = jai::foundry::test_temp_directory();
+            const auto path = dir / "hr_torn.jai";
+            const std::string pad(8 << 20, ' ');
+            auto body = [&](int v) { return "torn_ran();\nint torn_value() { return " + std::to_string(v) + "; }\n//" + pad + "\n"; };
+            auto storm = [&](std::atomic<bool>& stop) {
+                return std::thread([&stop, path]() {
+                    std::error_code ec;
+                    auto t = std::filesystem::last_write_time(path, ec);
+                    while (!stop.load()) {
+                        t += std::chrono::milliseconds(1);
+                        std::filesystem::last_write_time(path, t, ec);
+                    }
+                });
+            };
+            auto eng = make_engine();
+            eng->jaibite_cache(false);
+            eng->add_include_path(dir.string());
+            int runs = 0;
+            eng->add_function("torn_ran", [&runs]() { ++runs; });
+            put_file(path, body(1));
+            eng->execute("import \"hr_torn.jai\";");
+            check_eq(1, runs);
+            put_file(path, body(2));
+            {
+                std::atomic<bool> stop{false};
+                std::thread saver = storm(stop);
+                bool ran = false;
+                for (int i = 0; i < 3; ++i) { ran = eng->execute("import(\"hr_torn.jai\");").as_bool() || ran; }
+                stop = true;
+                saver.join();
+                check_false(ran, "a module saved during each read does not re-run");
+                check_eq(1, runs);
+                check_eq(script_int(1), eng->execute("torn_value();").as_int(), "the program keeps the version it ran");
+            }
+            check_true(eng->execute("import(\"hr_torn.jai\");").as_bool(), "the next pass reads it whole and runs it");
+            check_eq(2, runs);
+            check_eq(script_int(2), eng->execute("torn_value();").as_int());
+
+            auto first = make_engine();
+            first->jaibite_cache(false);
+            first->add_include_path(dir.string());
+            int first_runs = 0;
+            first->add_function("torn_ran", [&first_runs]() { ++first_runs; });
+            {
+                std::atomic<bool> stop{false};
+                std::thread saver = storm(stop);
+                first->execute("import \"hr_torn.jai\";");
+                stop = true;
+                saver.join();
+            }
+            check_eq(1, first_runs, "a first load runs while the file is being saved");
+            check_eq(script_int(2), first->execute("torn_value();").as_int());
+            std::filesystem::remove(path);
         });
 
         test("import_is_a_statement_that_takes_no_scope", [=, this]() {

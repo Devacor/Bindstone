@@ -9,8 +9,8 @@
 // and re-interned via engine::get_type_info. The compiled VM chunk is never written —
 // a loaded bite recompiles lazily through the normal path. Little-endian, x64 only.
 //
-// Format v1: "JBIT" magic, u32 version, u32 flags, u64 registration fingerprint,
-// string table (count + length-prefixed strings), declaration count, node tree.
+// Format: "JBIT" magic, u32 version, u32 flags, u64 registration fingerprint, u64 source
+// size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed strings), declaration count, node tree.
 // Node encoding: u8 node_type tag (0xFF = null pointer), source_location, fields.
 // Runtime AST patches (identifier slot_index -> SIZE_MAX, outer_slot_plan, cached
 // getter_id) are serialized faithfully: patched state is self-consistent in memory on
@@ -39,11 +39,45 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 30;   // 30: C++ lvalue targets (a conditional of lvalues, `(a = b) = c`, `++x = v`) read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference; 2026-09-30); 29: the checker holds a shared_ptr<T> namespace variable store to R-q6 (2026-09-30), so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`, 2026-09-30); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types (2026-09-28), so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force; 2026-09-28); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 31;   // 31: the header carries the identity of the source the bite was parsed from (2026-09-30), so a sibling describes exactly one source text; 30: C++ lvalue targets (a conditional of lvalues, `(a = b) = c`, `++x = v`) read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference; 2026-09-30); 29: the checker holds a shared_ptr<T> namespace variable store to R-q6 (2026-09-30), so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`, 2026-09-30); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types (2026-09-28), so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force; 2026-09-28); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
     inline constexpr uint32_t k_jaibite_flag_checked_clean = 0x1;
+    // The source a bite was parsed from: its byte count and a 64-bit hash of its bytes. A disk sibling is valid only for
+    // the source whose identity equals the one it records (never by an mtime ordering); a bite saved without a source
+    // records the empty identity, which no source text has.
+    struct jaibite_source_identity {
+        uint64_t size = 0;
+        uint64_t hash = 0;
+        bool operator==(const jaibite_source_identity&) const = default;
+    };
+    // Each step is a bijection of the running state for a fixed word and of the word for a fixed state, so two texts of
+    // one length that differ in a single word never collide.
+    inline jaibite_source_identity jaibite_identity_of(std::string_view source) {
+        const auto* p = reinterpret_cast<const unsigned char*>(source.data());
+        const size_t n = source.size();
+        uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
+        const auto step = [&h](uint64_t w) { h = (h ^ w) * 0xBF58476D1CE4E5B9ull; h ^= h >> 31; };
+        size_t i = 0;
+        for (; i + 8 <= n; i += 8) { uint64_t w; std::memcpy(&w, p + i, 8); step(w); }
+        uint64_t tail = uint64_t(n - i) << 56;
+        for (size_t k = 0; i + k < n; ++k) { tail |= uint64_t(p[i + k]) << (8 * k); }
+        step(tail);
+        h ^= h >> 30; h *= 0x94D049BB133111EBull; h ^= h >> 31;
+        return { uint64_t(n) + 1, h };
+    }
+    inline constexpr size_t k_jaibite_header_size = 36;   // magic, version, flags, fingerprint, source size, source hash
+    // The header of a current-version bite, read without touching the body; false = not one
+    inline bool read_jaibite_header(const uint8_t* data, size_t size, uint64_t& fingerprint, jaibite_source_identity& source) {
+        if (size < k_jaibite_header_size || std::memcmp(data, k_jaibite_magic, 4) != 0) return false;
+        const auto u64 = [data](size_t at) { uint64_t x = 0; for (int i = 0; i < 8; ++i) x |= uint64_t(data[at + i]) << (i * 8); return x; };
+        const uint32_t version = uint32_t(data[4]) | uint32_t(data[5]) << 8 | uint32_t(data[6]) << 16 | uint32_t(data[7]) << 24;
+        if (version != k_jaibite_version) return false;
+        fingerprint = u64(12);
+        source = { u64(20), u64(28) };
+        return true;
+    }
     // Locations naming the unit's own file serialize as this marker and read back as the
     // path the jaibite is loaded under, so a moved folder still names its files
     // (stack traces, breakpoints, engine::current_source_file).
@@ -80,7 +114,7 @@ namespace jai::detail {
         }
 
         std::vector<uint8_t> serialize(const std::vector<declaration_ptr>& decls, uint64_t fingerprint,
-                                       uint32_t flags = 0) {
+                                       uint32_t flags = 0, jaibite_source_identity source = {}) {
             varint(decls.size());
             for (const auto& d : decls) node(d.get());
 
@@ -90,6 +124,8 @@ namespace jai::detail {
             fixed_u32(out, k_jaibite_version);
             fixed_u32(out, flags);
             fixed_u64(out, fingerprint);
+            fixed_u64(out, source.size);
+            fixed_u64(out, source.hash);
             append_varint(out, table_.size());
             for (const auto& s : table_) {
                 append_varint(out, s.size());
@@ -622,6 +658,8 @@ namespace jai::detail {
             uint32_t flags = fixed_u32();
             if (flags_out) *flags_out = flags;
             fingerprint_out = fixed_u64();
+            if (size_ < k_jaibite_header_size) jaibite_fail("truncated header");
+            pos_ += 16;   // the source identity, which read_jaibite_header reads
 
             uint64_t table_count = varint();
             check_count(table_count);
@@ -1500,8 +1538,9 @@ namespace jai::detail {
     // deserialize_jaibite (the path the bite is loaded under) and the file may move.
     inline std::vector<uint8_t> serialize_jaibite(const std::vector<declaration_ptr>& decls,
                                                   const string_symbolizer& symbols, uint64_t fingerprint,
-                                                  uint32_t flags = 0, std::string own_path = {}) {
-        return ast_writer(symbols, /*include_locations=*/true, std::move(own_path)).serialize(decls, fingerprint, flags);
+                                                  uint32_t flags = 0, std::string own_path = {},
+                                                  jaibite_source_identity source = {}) {
+        return ast_writer(symbols, /*include_locations=*/true, std::move(own_path)).serialize(decls, fingerprint, flags, source);
     }
 
     inline std::vector<declaration_ptr> deserialize_jaibite(const uint8_t* data, size_t size,

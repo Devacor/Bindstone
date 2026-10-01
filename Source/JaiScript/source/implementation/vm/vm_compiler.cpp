@@ -171,7 +171,7 @@ namespace {
 			case opcode::op_c_mov:
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
-			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
+			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
@@ -368,7 +368,7 @@ namespace {
 			case opcode::op_c_mov:
 			case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
-			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f:
+			case opcode::op_c_sin_f: case opcode::op_c_cos_f: case opcode::op_c_sqrt_f: case opcode::op_c_jtruth:
 			case opcode::op_c_load_f: case opcode::op_c_jlt_ff: case opcode::op_c_jle_ff: case opcode::op_c_jgt_ff: case opcode::op_c_jge_ff: case opcode::op_c_jlt_ffk: case opcode::op_c_jle_ffk: case opcode::op_c_jgt_ffk: case opcode::op_c_jge_ffk: case opcode::op_c_jlt_ii: case opcode::op_c_jle_ii: case opcode::op_c_jgt_ii: case opcode::op_c_jge_ii: case opcode::op_c_jlt_iik: case opcode::op_c_jle_iik: case opcode::op_c_jgt_iik: case opcode::op_c_jge_iik:
 			case opcode::op_c_math:
 			case opcode::op_cells_cfor_back:
@@ -3988,6 +3988,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					land.writes = cn.b;
 				} else if (cn.op == opcode::op_store && cn.b == k_invalid_u32 && !(cn.c & (store_flag_ref_alias | store_flag_global_only)) && (cn.c & store_flag_no_result)) {
 					cc.consumer = 2; cc.dst = k_ir_env_bit | env_written(cn.a, k_typed_dst_store, consumer_ip);   // an environment value takes the result
+				} else if ((cn.op == opcode::op_jump_if_false || cn.op == opcode::op_jump_if_true) && cn.a > consumer_ip && cn.a <= back) {
+					// the result as a branch: it lands in a value cell (a synthetic slot, never flushed; a kind other than int, float or bool misses at
+					// the landing, before anything is popped) and the landing branches on its truthiness
+					const uint32_t t = arg_temp_next++;
+					cc.consumer = 3; cc.dst = t;
+					use_slot(t, 0, true, k_typed_dst_temp, nullptr, consumer_ip);
+					land.writes = t; land.b = t; land.branch = true; land.target = cn.a; land.sense = cn.op == opcode::op_jump_if_true;
 				} else if (cn.op == opcode::op_call_temp && cn.a < k_typed_slot_mask) {
 					cc.consumer = 3; cc.dst = cn.a;   // the result into a compiler temp: the expression around the call reads it as a slot operand
 					use_slot(cn.a, 0, true, k_typed_dst_temp, nullptr, consumer_ip);
@@ -4547,6 +4554,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				chunk::cell_loop::cell_call& cc = loop.calls[op.a];
 				if (cc.consumer != 0) { cc.dst = dst_of(cc.dst); }   // the landing cell
 				append(vm_instruction{opcode::op_c_land, op.a, loop_index, static_cast<uint32_t>(ip)}, ip);
+				if (op.branch) {   // a branching landing: the truth jump on the landed cell
+					const uint32_t bits = op.sense ? 0x80000000u : 0u;
+					fixups.push_back(fixup{ static_cast<uint32_t>(code.size()), 1, op.target, bits });
+					append(vm_instruction{opcode::op_c_jtruth, cc.dst, 0, bits}, ip);   // the landing cell (the definition takes effect after this operation, so not current[])
+				}
 				break;
 			}
 			case ir::probe: { const chunk::cell_loop::cell_call& cc = loop.calls[op.a]; append(vm_instruction{opcode::op_c_probe, op.a, loop_index, cc.probe_ip}, cc.probe_ip); break; }   // the callee resolved at its own place

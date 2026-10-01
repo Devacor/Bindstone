@@ -8257,6 +8257,11 @@ next_frame:
 		}
 		case opcode::op_c_mov_p: regs.payload[ci.a] = regs.payload[ci.b]; regs.kinds[ci.a] = regs.kinds[ci.b]; regs.dirty->set(ci.a); ++ip; break;
 		case opcode::op_c_sin_f: cell_put_float(regs, ci.a, std::sin(cell_float_of_bits(regs.payload[ci.b]))); ++ip; break;
+		case opcode::op_c_jtruth: {
+			const bool truthy = regs.kinds[ci.a] == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_float_of_bits(regs.payload[ci.a]) != 0.0 : regs.payload[ci.a] != 0;
+			if (truthy != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; }
+			break;
+		}
 		case opcode::op_c_load_f: {   // a float buffer's element in place; any other container kind or index runs C_LOAD's rows
 			const script_array* node = cs.site_node[ip - loop.copy_head];
 			const uint64_t at = static_cast<uint64_t>(regs.payload[ci.b]);

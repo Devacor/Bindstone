@@ -3551,6 +3551,37 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "element arguments under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_calls_result_as_a_branch_lands_and_branches_in_the_block", [this]() {
+			// a kept call whose result is a condition (`if (!hostile(m, o)) continue;`, `if (near(i) && ...)`): the result lands in a value cell and
+			// the landing branches on its truthiness; a result of another kind misses at the landing and the general jump takes it; both
+			// backends, proofs off, the middle end off and miss injection
+			const std::string prelude =
+				"array<int> FAC = [0, 1, 2, 1, 0, 2, 2, 1];\n"
+				"bool hostile(int a, int b) { string why = \"x\"; if (a == b) { return false; } return FAC[a % 8] != FAC[b % 8]; }\n"
+				"int weight(int a) { string why = \"y\"; return a % 3; }\n"
+				"var odd(int a) { if (a % 5 == 0) { return \"five\"; } return a % 2; }\n"
+				"int scan(int m, int k) { int best = -1; int bestd = 1000; for (int o = 0; o < k; ++o) { int d = (o - m) * (o - m); if (d >= bestd || !hostile(m, o)) { continue; } if (weight(o)) { d = d + 1; } best = o; bestd = d; } return best * 1000 + bestd; }\n"
+				"int odds(int k) { int n = 0; for (int i = 0; i < k; ++i) { if (odd(i)) { n = n + 1; } } return n; }\n";
+			const std::string body = "string go() { return to_string(scan(3, 40)) + \"|\" + to_string(scan(6, 40)) + \"|\" + to_string(odds(30)); }\ngo();";
+			both(prelude + body, "", "a call's result as a branch");
+			both(prelude + body, "", "a call's result as a branch, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			const size_t at = l.find("== scan ");
+			check_true(at != std::string::npos && l.find("C_JTRUTH", at) != std::string::npos, "scan's block branches on the landed result\n" + l);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "a call's result as a branch under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

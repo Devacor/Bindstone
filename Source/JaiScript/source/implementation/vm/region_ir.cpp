@@ -17,6 +17,7 @@ region_cfg control_flow(const region_ir& r) {
 		case ir::jump: case ir::boundary: g.succ[k][0] = node_of(op.target); break;   // a boundary continues at its statement's end
 		case ir::range:
 		case ir::cmp: g.succ[k][0] = k + 1; g.succ[k][1] = op.head ? g.exit_node : node_of(op.target); break;
+		case ir::land: g.succ[k][0] = k + 1; if (op.branch) { g.succ[k][1] = node_of(op.target); } break;   // a branching landing (a call's result as a truth jump)
 		default: g.succ[k][0] = k + 1; break;
 		}
 	}

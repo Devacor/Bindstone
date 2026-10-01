@@ -2364,6 +2364,10 @@ private:
 				 "string s = \"\"; for (int k = 250; k <= 258; k++) { try { f(k); s += \"+\"; } catch (e) { s += \"-\"; } } s;", "++++++---"},
 				{"mutual", "function a(int n) -> int { if (n <= 0) { return 0; } return b(n - 1) + 1; } function b(int n) -> int { if (n <= 0) { return 0; } return a(n - 1) + 1; }\n"
 				 "string s = \"\"; for (int k = 250; k <= 258; k++) { try { a(k); s += \"+\"; } catch (e) { s += \"-\"; } } s;", "++++++---"},
+				// a leaf the vm grafts into its caller makes no frame: called at the cap it raises where the call would, never one call deeper
+				{"a leaf grafted at the cap", "function leaf(int x) -> int { return x + 1; }\n"
+				 "function rec7(int n) -> int { if (n <= 0) { int v = leaf(n); return v; } return rec7(n - 1) + 1; }\n"
+				 "function run() -> string { string s = \"\"; for (int k = 250; k <= 258; k++) { try { rec7(k); s += \"+\"; } catch (e) { s += \"-\"; } } return s; } run();", "++++-----"},
 				{"the fuzz seed's shape", "function rec6(int n7) -> int { if (n7 <= 0) { return 0; } return n7 + rec6(n7 - 1); }\n"
 				 "string s = \"\"; try { s += \"\" + rec6(rec6(41)); } catch (e) { s += \"caught\"; } try { s += \"|\" + rec6(9223372036854775807); } catch (e) { s += \"|caught\"; } s;",
 				 "caught|caught"},

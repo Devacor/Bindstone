@@ -14525,6 +14525,10 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		stack_.pop_back();
 	}
 	currentValue = currentValue.deref();
+	if (rightValue.is_reference()) {   // an element or map read: its value (the compiler took it ahead of a target that may write it)
+		script_value derefed = rightValue.deref();
+		rightValue = std::move(derefed);
+	}
 	script_value postfix_old = old_result ? currentValue : make_null();
 	if (ins.c & compound_flag_incdec) {
 		const size_t ci = currentValue.raw_storage_index();

@@ -141,6 +141,18 @@ public:
             expect(fns + "math::ivec2 q = math::ivec2(1, 1); math::ivec2 d = math::ivec2(1, 1); string a = \"\"; string b = \"\"; try { d.x = 2.7; } catch (e) { a = e; } try { g(q.x); } catch (e) { b = e; } to_string(a == b && to_string(q) == to_string(d))", "true", "the store narrows as v.x = value does");
         });
 
+        test("a_compound_takes_the_value_of_a_subscript_right_side", [expect]() {
+            // an element or map read arrives as a reference: every compound kernel takes its value (lowered and boxed alike)
+            expect("math::vec2 p = math::vec2(1.0, 2.0); array<float> e = [0.5, 1.5]; p.x += e[1]; p.y -= e[0]; to_string(p)", "(2.5, 1.5)", "a component and a typed element");
+            expect("function f() -> string { math::vec2 p = math::vec2(1.0, 2.0); array<float> e = [0.5, 1.5]; p.x += e[1]; p.y *= e[1]; return to_string(p); } f()", "(2.5, 3.0)", "a function's local");
+            expect("math::vec2 p = math::vec2(1.0, 2.0); var e = [0.5, 1.5]; p.x += e[1]; to_string(p)", "(2.5, 2.0)", "an untyped element");
+            expect("math::vec2 p = math::vec2(1.0, 2.0); map<string, float> m = {\"a\": 0.5}; p.x += m[\"a\"]; to_string(p)", "(1.5, 2.0)", "a map value");
+            expect("math::ivec2 q = math::ivec2(1, 2); array<int> n = [3, 4]; q.x += n[1]; q.y -= n[0]; to_string(q)", "(5, -1)", "an int component");
+            expect("array<math::vec2> a6 = [math::vec2(1, 2)]; array<float> e6 = [0.5, 1.5]; a6[0].x += e6[1]; to_string(a6[0])", "(2.5, 2.0)", "an element's component");
+            expect("math::vec2 p = math::vec2(1.0, 2.0); array<math::vec2> d = [math::vec2(1, 1)]; p += d[0]; to_string(p)", "(2.0, 3.0)", "a whole vector");
+            expect("math::vec2 p = math::vec2(1.0, 2.0); array<float> e = [0.5, 1.5]; auto& c = p.x; c += e[1]; to_string(p)", "(2.5, 2.0)", "a component reference");
+        });
+
         test("every_copy_is_its_own_value", [expect]() {
             expect("math::vec3 a = math::vec3(1, 2, 3); var b = a; var c = [a, a]; c[1].y = 7; b.z = 9; to_string(a) + to_string(b) + to_string(c[0]) + to_string(c[1])",
                    "(1.0, 2.0, 3.0)(1.0, 2.0, 9.0)(1.0, 2.0, 3.0)(1.0, 7.0, 3.0)", "locals and elements");

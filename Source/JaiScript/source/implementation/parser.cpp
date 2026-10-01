@@ -1203,7 +1203,7 @@ checked_result<expression_ptr> parser::primary() {
         return parse_map_literal();
     }
 
-    // Anonymous function expression: `function (params) {...}` (a no-capture lambda).
+    // Anonymous function expression: `function (params) {...}` (a [&] lambda, the JavaScript closure).
     // `function name...` never reaches here (declaration() routes it first).
     if (check(token_type::function_keyword) &&
         current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren) {
@@ -2951,10 +2951,11 @@ checked_result<expression_ptr> parser::lambda_expression() {
     return finish_lambda_after_captures(std::move(lambda));
 }
 
-// Anonymous function expression: `function (params) {...}` — pure desugar to a
-// no-capture lambda ([]-equivalent: enclosing locals require the lambda spelling)
+// Anonymous function expression: `function (params) {...}` closes over its scope as JavaScript does, by reference -
+// a desugar to a [&] lambda (Dev ruling 2026-10-01)
 checked_result<expression_ptr> parser::anonymous_function_expression() {
     auto lambda = std::make_shared<lambda_expr>(previous().location);
+    lambda->default_capture = lambda_expr::capture_default::by_reference;
     return finish_lambda_after_captures(std::move(lambda));
 }
 

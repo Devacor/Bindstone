@@ -439,7 +439,8 @@ engine stays usable", not by `check_throws`.
 - Functions & lambdas with captures (`[=]`/`[&]`, named or init-captures), variadics, default args,
   by-reference params. **Capture lists are exhaustive** (Dev ruling 2026-09-30, C++): `[]` captures nothing, `[x]`
   captures only `x`, and a name a nested lambda uses must be admitted by every lambda between it and the declaring
-  frame; `this`/`super` and bare members need `[this]`, `[=]` or `[&]`. An unlisted frame local is a parse error, an
+  frame; `this`/`super` and bare members need `[this]`, `[=]` or `[&]`. An anonymous `function(...)` expression is the
+  JavaScript form: a `[&]` lambda (Dev ruling 2026-10-01, `.jaibite` version 33). An unlisted frame local is a parse error, an
   unlisted member or `this` a checker error, and closure creation raises for what neither saw (check off, a loaded
   bite). A closure's parent is its program scope (the globals or its namespace), never the creating frame. A default
   capture (`[=]`, `[&]`) or `[]` never captures a program-scope name: the lambda reads it when it runs; `[g]` copies

@@ -48,7 +48,7 @@ print(7 / 2, " ", 7.0 / 2, " ", 7 / 2.0);</code></pre></div>
 3 3.5 3.5</code></pre></div>
 <p><code>auto n = 5; n = "five";</code> is a load error, the checker's answer to a type change it can see. The ladder from <code>var</code> to <code>int</code> is the subject of <a href="../guide/02-type-ladder.html">The Type Ladder</a>.</p>
 <h3 id="functions-and-closures">Functions and closures<a class="hlink" href="#functions-and-closures" aria-label="link">&#8203;</a></h3>
-<div class="tablewrap"><table><thead><tr><th></th><th>JavaScript</th><th>JaiScript</th></tr></thead><tbody><tr><td>declaration</td><td><code>function add(a, b) { return a + b; }</code></td><td>the same; types are optional: <code>function add(int a, int b) -&gt; int</code>, or C++'s <code>int add(int a, int b)</code></td></tr><tr><td>default parameter</td><td><code>function hit(dmg = 5)</code></td><td><code>function hit(int dmg = 5)</code></td></tr><tr><td>arrow function</td><td><code>x =&gt; x * 2</code></td><td>a lambda: <code>[](x) { return x * 2; }</code></td></tr><tr><td>closure over a local</td><td><code>() =&gt; count++</code></td><td><code>[&amp;]() { count++; }</code> shares the variable; <code>[=]</code> or <code>[count]</code> copies it</td></tr><tr><td>top-level variable in a function</td><td>read when the function runs</td><td>the same: functions and lambdas read program-scope variables when they run</td></tr><tr><td>function value</td><td><code>const f = add; f(1, 2);</code></td><td><code>var f = add; f(1, 2);</code></td></tr><tr><td>rest parameters</td><td><code>function f(...xs)</code></td><td>none in script; a host (C++) function can take any number of arguments</td></tr></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th></th><th>JavaScript</th><th>JaiScript</th></tr></thead><tbody><tr><td>declaration</td><td><code>function add(a, b) { return a + b; }</code></td><td>the same; types are optional: <code>function add(int a, int b) -&gt; int</code>, or C++'s <code>int add(int a, int b)</code></td></tr><tr><td>default parameter</td><td><code>function hit(dmg = 5)</code></td><td><code>function hit(int dmg = 5)</code></td></tr><tr><td>arrow function</td><td><code>x =&gt; x * 2</code></td><td>a lambda: <code>[](x) { return x * 2; }</code></td></tr><tr><td>closure over a local</td><td><code>() =&gt; count++</code></td><td><code>function() { count++; }</code> or <code>[&amp;]() { count++; }</code> shares the variable; <code>[=]</code> or <code>[count]</code> copies it</td></tr><tr><td>top-level variable in a function</td><td>read when the function runs</td><td>the same: functions and lambdas read program-scope variables when they run</td></tr><tr><td>function value</td><td><code>const f = add; f(1, 2);</code></td><td><code>var f = add; f(1, 2);</code></td></tr><tr><td>rest parameters</td><td><code>function f(...xs)</code></td><td>none in script; a host (C++) function can take any number of arguments</td></tr></tbody></table></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function add(a, b) { return a + b; }
 int add_ints(int a, int b) { return a + b; }
 function hit(int dmg = 5) { return dmg; }
@@ -289,13 +289,22 @@ for (auto x : a) { if (x &gt; 2) { first_big = x; break; } }  // find
 a.remove_if([](x) { return x % 2 == 0; });                 // filter in place
 print(to_json(doubled), " ", sum, " ", first_big, " ", to_json(a));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[2,4,6,8] 10 3 [1,3]</code></pre></div>
-<h3 id="closures">A closure names what it captures<a class="hlink" href="#closures" aria-label="link">&#8203;</a></h3>
-<p>A <code>function(...)</code> expression or a <code>[]</code> lambda captures nothing from the function around it, and using one of that function's locals is a load error that names it. <code>[&amp;]</code> is JavaScript's closure, sharing the variable; <code>[=]</code> or <code>[count]</code> copies it:</p>
+<h3 id="closures">A function expression closes over its scope; a lambda names what it captures<a class="hlink" href="#closures" aria-label="link">&#8203;</a></h3>
+<p>A <code>function(...)</code> expression is JavaScript's closure: it shares the variables of the function around it, and they outlive that function, so the counter is safe to return. In lambda terms it is <code>[&amp;]</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_counter() {
     int count = 0;
     return function() { count += 1; return count; };
+}
+var next = make_counter();
+next();
+print(next());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2</code></pre></div>
+<p>A lambda names what it captures, as C++ does: <code>[]</code> captures nothing, and using a local of the function around it is a load error that names it; <code>[&amp;]</code> shares the variable, <code>[=]</code> or <code>[count]</code> copies it:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function broken() {
+    int count = 0;
+    return []() { return count; };
 }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:3:25: Lambda capture list does not capture enclosing local 'count'; name it or use [=] or [&amp;]</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:3:26: Lambda capture list does not capture enclosing local 'count'; name it or use [=] or [&amp;]</code></pre></div>
 <p>A copy is taken when the lambda is made, so a loop that collects callbacks sees each iteration's value, as <code>let</code> does in JavaScript:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var callbacks = [];
 for (int i = 0; i &lt; 3; i++) { callbacks.push([i]() { return i; }); }

@@ -892,21 +892,35 @@ public:
             });
         });
 
-        test("anonymous_function_capture_matches_empty_lambda", [this]() {
+        test("anonymous_function_closes_over_its_scope_by_reference", [this]() {
+            // function(...) is the JavaScript form: [&] over the enclosing scope, shared live cells that outlive it
             auto engine = make_engine();
-            // function() is [] - it captures nothing, so both spellings reject an enclosing local
-            check_throws([&]() { engine->execute("function outer() { int a = 1; var f = function() { return a; }; return f(); } outer();"); });
-            check_throws([&]() { engine->execute("function outer2() { int a = 1; var g = [](){ return a; }; return g(); } outer2();"); });
-            auto r = engine->execute(R"(
-                function outer3() {
-                    int a = 1;
-                    var f = function(int v) { return v; };
-                    var g = [](int v){ return v; };
-                    return f(a) * 10 + g(a);
+            check_eq(int64_t(5), engine->execute("var adder = function(x) { return function(y) { return x + y; }; }; adder(2)(3);").as_int(), "curried");
+            check_eq(int64_t(2), engine->execute("function live() { int a = 1; var f = function() { return a; }; a = 2; return f(); } live();").as_int(), "a later write is seen");
+            check_eq(int64_t(3), engine->execute("function writes() { int a = 1; var inc = function() { a += 1; }; inc(); inc(); return a; } writes();").as_int(), "writes land in the local");
+            check_eq(int64_t(40), engine->execute("function nested() { int a = 1; var f = function() { return function() { return a * 10; }; }; a = 4; return f()(); } nested();").as_int(), "nested");
+            check_eq(int64_t(2), engine->execute("function counter() { int n = 0; return function() { n += 1; return n; }; } var c = counter(); c(); c();").as_int(), "the cell outlives the frame");
+            check_eq(int64_t(13), engine->execute("class C { int hp = 5; int m() { int k = 2; var f = function() { return k + hp + this.hp; }; k = 3; return f(); } } C().m();").as_int(), "a method's locals and this");
+            check_throws([&]() { engine->execute("function bare() { int a = 1; var g = [](){ return a; }; return g(); } bare();"); });
+        });
+
+        test("instance_capture_keeps_the_other_captures", [this]() {
+            // [this] with locals, explicit or by default: the locals stay in front of the members
+            auto engine = make_engine();
+            engine->execute(R"(
+                class C {
+                    int hp = 5;
+                    int k = 100;
+                    int named() { int k = 2; var f = [this, k]() { return k + this.hp; }; k = 3; return f(); }
+                    int shared() { int k = 2; var f = [this, &k]() { return k + hp; }; k = 3; return f(); }
+                    int copied() { int k = 2; var f = [=]() { return k + this.hp; }; k = 3; return f(); }
+                    int live() { int k = 2; var f = [&]() { return k + hp + this.hp; }; k = 3; return f(); }
                 }
-                outer3();
             )");
-            check_eq(int64_t(11), r.as_int());
+            check_eq(int64_t(7), engine->execute("C().named();").as_int());
+            check_eq(int64_t(8), engine->execute("C().shared();").as_int());
+            check_eq(int64_t(7), engine->execute("C().copied();").as_int());
+            check_eq(int64_t(13), engine->execute("C().live();").as_int());
         });
 
         test("anonymous_function_default_param", [this]() {
@@ -918,7 +932,7 @@ public:
         test("anonymous_function_returned_and_nested", [this]() {
             auto engine = make_engine();
             check_eq(int64_t(5), engine->execute(
-                "var adder = function(x) { return [x](y) { return x + y; }; };"
+                "var adder = function(x) { return function(y) { return x + y; }; };"
                 "adder(2)(3);").as_int());
         });
 

@@ -4,80 +4,17 @@
 #define __JAISCRIPT_CORE_TEMPLATE_BINDER_HPP__
 
 #include <jaiscript/core/static_binder.hpp>
+#include <jaiscript/core/type_info.hpp>
+#include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
+#include <type_traits>
 #include <typeinfo>
+#include <unordered_map>
+#include <vector>
 
 namespace jai {
-
-template<typename T>
-struct type_name_helper {
-    static std::string name() {
-        // Fallback to compiler's mangled name (not ideal but works)
-        return typeid(T).name();
-    }
-};
-
-// Specializations for explicit integer types (avoids duplicates with platform-dependent int)
-template<> struct type_name_helper<int8_t> {
-    static std::string name() { return "int8"; }
-};
-template<> struct type_name_helper<int16_t> {
-    static std::string name() { return "int16"; }
-};
-template<> struct type_name_helper<int32_t> {
-    static std::string name() { return "int32"; }
-};
-template<> struct type_name_helper<int64_t> {
-    static std::string name() { return "int"; }  // JaiScript's native int is 64-bit
-};
-template<> struct type_name_helper<uint8_t> {
-    static std::string name() { return "uint8"; }
-};
-template<> struct type_name_helper<uint16_t> {
-    static std::string name() { return "uint16"; }
-};
-template<> struct type_name_helper<uint32_t> {
-    static std::string name() { return "uint32"; }
-};
-template<> struct type_name_helper<uint64_t> {
-    static std::string name() { return "uint"; }  // JaiScript's native uint is 64-bit
-};
-template<> struct type_name_helper<float> {
-    static std::string name() { return "float"; }
-};
-template<> struct type_name_helper<double> {
-    static std::string name() { return "double"; }
-};
-template<> struct type_name_helper<bool> {
-    static std::string name() { return "bool"; }
-};
-template<> struct type_name_helper<char> {
-    static std::string name() { return "char"; }
-};
-template<> struct type_name_helper<std::string> {
-    static std::string name() { return "string"; }
-};
-
-class static_type_registry {
-public:
-    template<typename T>
-    static bool is_registered() {
-        return get_registration_flag<T>();
-    }
-
-    template<typename T>
-    static void mark_registered() {
-        get_registration_flag<T>() = true;
-    }
-
-private:
-    // Per-type static flag - thread-safe initialization guaranteed by C++11
-    template<typename T>
-    static bool& get_registration_flag() {
-        static bool registered = false;
-        return registered;
-    }
-};
 
 // Specialized by JAI_TEMPLATE_BINDER to provide type_name() and make_binder()
 template<template<typename> class Template, typename T>
@@ -170,101 +107,126 @@ struct template_binder_accessor<Template<Arg1, Arg2>,
     }
 };
 
-// When binding a template with an integer type parameter, automatically
-// binds both 32-bit and 64-bit variants so users get:
-//   - Point<int>    (64-bit, JaiScript's native int)
-//   - Point<int32>  (32-bit, explicit)
-//
-// This is called from engine::bind_static_type() after binding the primary type.
-template<typename T>
-struct integer_variant_binder {
-    static void bind(engine&) {} // Default: no-op for non-templates
-};
+namespace detail {
+    template<typename> inline constexpr bool no_script_spelling_v = false;
+    template<typename> struct std_vector_of { using type = void; };
+    template<typename E, typename A> struct std_vector_of<std::vector<E, A>> { using type = E; };
+    template<typename> struct std_map_of { using key = void; using value = void; };
+    template<typename K, typename V, typename C, typename A> struct std_map_of<std::map<K, V, C, A>> { using key = K; using value = V; };
+    template<typename K, typename V, typename H, typename E, typename A> struct std_map_of<std::unordered_map<K, V, H, E, A>> { using key = K; using value = V; };
+    template<typename> struct std_handle_of { using type = void; static constexpr const char* name = nullptr; };
+    template<typename E> struct std_handle_of<std::shared_ptr<E>> { using type = E; static constexpr const char* name = "shared_ptr"; };
+    template<typename E> struct std_handle_of<std::weak_ptr<E>> { using type = E; static constexpr const char* name = "weak_ptr"; };
+    template<typename U> inline constexpr bool is_wide_character_v =
+        std::is_same_v<U, wchar_t> || std::is_same_v<U, char16_t> || std::is_same_v<U, char32_t>
+#if defined(__cpp_char8_t)
+        || std::is_same_v<U, char8_t>
+#endif
+        ;
+}
 
-template<template<typename> class Template, typename Arg>
-struct integer_variant_binder<Template<Arg>> {
-    static void bind(engine& eng) {
-        // int32_t / int → also bind int64_t
-        if constexpr (std::is_same_v<Arg, int32_t>) {
-            if constexpr (has_template_binder_v<Template<int64_t>>) {
-                auto name = template_binder_accessor<Template<int64_t>>::type_name();
-                if (!eng.is_type_registered(name)) {
-                    template_binder_accessor<Template<int64_t>>::bind_to(eng);
-                }
-            }
-        }
-        // int64_t → also bind int32_t
-        else if constexpr (std::is_same_v<Arg, int64_t>) {
-            if constexpr (has_template_binder_v<Template<int32_t>>) {
-                auto name = template_binder_accessor<Template<int32_t>>::type_name();
-                if (!eng.is_type_registered(name)) {
-                    template_binder_accessor<Template<int32_t>>::bind_to(eng);
-                }
-            }
-        }
-        // uint32_t → also bind uint64_t
-        else if constexpr (std::is_same_v<Arg, uint32_t>) {
-            if constexpr (has_template_binder_v<Template<uint64_t>>) {
-                auto name = template_binder_accessor<Template<uint64_t>>::type_name();
-                if (!eng.is_type_registered(name)) {
-                    template_binder_accessor<Template<uint64_t>>::bind_to(eng);
-                }
-            }
-        }
-        // uint64_t → also bind uint32_t
-        else if constexpr (std::is_same_v<Arg, uint64_t>) {
-            if constexpr (has_template_binder_v<Template<uint32_t>>) {
-                auto name = template_binder_accessor<Template<uint32_t>>::type_name();
-                if (!eng.is_type_registered(name)) {
-                    template_binder_accessor<Template<uint32_t>>::bind_to(eng);
-                }
-            }
+// The script spelling of a C++ type as a template argument: the canonical name the parser gives the type a script writes
+// for it (type_info::canonical_name), so a host instantiation and its script spelling register one class. Script int and
+// float are 64-bit, so int64_t spells "int" and double "float"; a narrower width carries its size (int32, uint8, float32).
+// A type with no script spelling is a compile error: specialize jai::type_name_helper<T> to name it.
+template<typename T, typename = void>
+struct type_name_helper {
+    static std::string name() {
+        using U = std::remove_cv_t<T>;
+        if constexpr (std::is_same_v<U, bool>) {
+            return "bool";
+        } else if constexpr (std::is_same_v<U, char>) {
+            return "char";
+        } else if constexpr (std::is_integral_v<U> && !detail::is_wide_character_v<U>) {
+            static_assert(sizeof(U) == 1 || sizeof(U) == 2 || sizeof(U) == 4 || sizeof(U) == 8,
+                "jai::type_name_helper: an integer template argument must be 8, 16, 32 or 64 bits wide");
+            const char* width = sizeof(U) == 1 ? "8" : sizeof(U) == 2 ? "16" : sizeof(U) == 4 ? "32" : "";
+            return std::string(std::is_signed_v<U> ? "int" : "uint") + width;
+        } else if constexpr (std::is_same_v<U, double>) {
+            return "float";
+        } else if constexpr (std::is_same_v<U, float>) {
+            return "float32";
+        } else if constexpr (std::is_same_v<U, std::string>) {
+            return "string";
+        } else if constexpr (math_adapted<U>) {
+            return math_type_name(math_adapter<U>::kind);
+        } else if constexpr (!std::is_void_v<typename detail::std_vector_of<U>::type>) {
+            return "array<" + type_name_helper<typename detail::std_vector_of<U>::type>::name() + ">";
+        } else if constexpr (!std::is_void_v<typename detail::std_map_of<U>::key>) {
+            return "map<" + type_name_helper<typename detail::std_map_of<U>::key>::name() + "," +
+                   type_name_helper<typename detail::std_map_of<U>::value>::name() + ">";
+        } else if constexpr (detail::std_handle_of<U>::name != nullptr) {
+            return std::string(detail::std_handle_of<U>::name) + "<" + type_name_helper<typename detail::std_handle_of<U>::type>::name() + ">";
+        } else if constexpr (has_static_type_v<U>) {
+            return std::string(jai_static_type<U>::name);
+        } else if constexpr (has_any_template_binder_v<U>) {
+            return template_binder_accessor<U>::type_name();
+        } else {
+            static_assert(detail::no_script_spelling_v<T>,
+                "jai::type_name_helper: this template argument has no script spelling. Bind it with JAI_STATIC_BINDER or "
+                "JAI_TEMPLATE_BINDER, or specialize jai::type_name_helper<T> with the name scripts write for it.");
+            return {};
         }
     }
 };
 
-// Inherit from this to automatically register template instantiations.
-// Registration happens when the type is first ODR-used (before main()).
-//
-// Usage:
-//   template<typename T>
-//   class Point : public jai::property_owner<Point<T>>,
-//                 public jai::auto_bind_template<Point, T> {
-//       JAI_PROPERTY((T), x, T{});
-//       JAI_PROPERTY((T), y, T{});
-//   };
+// Whether T is declared for binding (a JAI_BIND_TEMPLATE instantiation, or a template deriving auto_bind_template):
+// compile-time facts, no state. What an engine has bound is engine state: is_registered<T>(eng).
 template<template<typename> class Template, typename T>
-struct auto_bind_template {
-    // The constructor odr-uses _registrar: a static data member of a class template
-    // is only instantiated when odr-used, so without this conforming compilers
-    // (GCC/Clang) never run the registration — MSVC merely happens to be eager.
-    auto_bind_template() { (void)&_registrar; }
-
-private:
-    struct registrar {
-        registrar() {
-            if (!static_type_registry::is_registered<Template<T>>()) {
-                static_type_registry::mark_registered<Template<T>>();
-            }
-        }
-    };
-
-    static inline registrar _registrar{};
-};
+struct auto_bind_template {};
 
 template<template<typename, typename> class Template, typename T1, typename T2>
-struct auto_bind_template_2 {
-    auto_bind_template_2() { (void)&_registrar; }
+struct auto_bind_template_2 {};
 
-private:
-    struct registrar {
-        registrar() {
-            if (!static_type_registry::is_registered<Template<T1, T2>>()) {
-                static_type_registry::mark_registered<Template<T1, T2>>();
+template<typename T>
+struct is_auto_bind_template : std::false_type {};
+
+template<template<typename> class Template, typename Arg>
+struct is_auto_bind_template<Template<Arg>> : std::is_base_of<auto_bind_template<Template, Arg>, Template<Arg>> {};
+
+template<template<typename, typename> class Template, typename Arg1, typename Arg2>
+struct is_auto_bind_template<Template<Arg1, Arg2>> : std::is_base_of<auto_bind_template_2<Template, Arg1, Arg2>, Template<Arg1, Arg2>> {};
+
+struct static_type_registry {
+    template<typename T>
+    static constexpr bool is_registered() {
+        return has_static_type_v<T> || is_auto_bind_template<T>::value;
+    }
+
+    template<typename T, typename Engine>
+    static bool is_registered(const Engine& eng) {
+        return eng.template has_registered_class<T>();
+    }
+};
+
+// Binding one width of a numeric template argument also binds its native-width sibling, so a script reaches the
+// instantiation through either spelling: Point<int32> with Point<int>, Point<uint32> with Point<uint>, Point<float32>
+// with Point<float>. Called from engine::bind_static_type() after binding the primary type.
+template<typename A> struct native_width_sibling { using type = void; };
+template<> struct native_width_sibling<int32_t> { using type = int64_t; };
+template<> struct native_width_sibling<int64_t> { using type = int32_t; };
+template<> struct native_width_sibling<uint32_t> { using type = uint64_t; };
+template<> struct native_width_sibling<uint64_t> { using type = uint32_t; };
+template<> struct native_width_sibling<float> { using type = double; };
+template<> struct native_width_sibling<double> { using type = float; };
+
+template<typename T>
+struct width_variant_binder {
+    static void bind(engine&) {}
+};
+
+template<template<typename> class Template, typename Arg>
+struct width_variant_binder<Template<Arg>> {
+    static void bind(engine& eng) {
+        using sibling = typename native_width_sibling<Arg>::type;
+        if constexpr (!std::is_void_v<sibling>) {
+            if constexpr (has_template_binder_v<Template<sibling>>) {
+                if (!eng.is_type_registered(template_binder_accessor<Template<sibling>>::type_name())) {
+                    template_binder_accessor<Template<sibling>>::bind_to(eng);
+                }
             }
         }
-    };
-    static inline registrar _registrar{};
+    }
 };
 
 // Simple version (3 params) - TemplateClass used as binder name:
@@ -284,8 +246,7 @@ private:
         static constexpr const char* base_name = BaseName; \
         \
         static std::string type_name() { \
-            return std::string(BaseName) + "<" + \
-                   jai::type_name_helper<T>::name() + ">"; \
+            return jai::template_instance_name(BaseName, {jai::type_name_helper<T>::name()}); \
         } \
         \
         static auto make_binder() { \
@@ -318,9 +279,8 @@ private:
         static constexpr const char* base_name = BaseName; \
         \
         static std::string type_name() { \
-            return std::string(BaseName) + "<" + \
-                   jai::type_name_helper<T1>::name() + ", " + \
-                   jai::type_name_helper<T2>::name() + ">"; \
+            return jai::template_instance_name(BaseName, {jai::type_name_helper<T1>::name(), \
+                                                          jai::type_name_helper<T2>::name()}); \
         } \
         \
         static auto make_binder() { \
@@ -346,8 +306,8 @@ private:
     JAI_TEMPLATE_BINDER_2_IMPL(BinderName, TemplateClass, BaseName, __VA_ARGS__)
 
 // Simple version (2 params) - TemplateClass matches binder name:
-//   JAI_BIND_TEMPLATE(Point, int);      // Creates Point<int> binding
-//   JAI_BIND_TEMPLATE(Point, float);    // Creates Point<float> binding
+//   JAI_BIND_TEMPLATE(Point, int);      // Point<int32> (C++ int is 32-bit; int64_t spells int)
+//   JAI_BIND_TEMPLATE(Point, double);   // Point<float> (script float is 64-bit; C++ float spells float32)
 //
 // Named version (3 params) - for namespaced types:
 //   JAI_BIND_TEMPLATE_NAMED(MyPoint, NS::Point, int);   // Creates NS::Point<int> binding
@@ -373,11 +333,6 @@ private:
         static void bind_to(jai::engine& eng) { \
             binder.bind_to(eng, name.c_str()); \
         } \
-    private: \
-        static inline const bool _registered = []() { \
-            jai::static_type_registry::mark_registered<TemplateClass<TypeParam>>(); \
-            return true; \
-        }(); \
     }
 
 // Uses TemplateClass as the binder name (must match JAI_TEMPLATE_BINDER)
@@ -409,11 +364,6 @@ private:
         static void bind_to(jai::engine& eng) { \
             binder.bind_to(eng, name.c_str()); \
         } \
-    private: \
-        static inline const bool _registered = []() { \
-            jai::static_type_registry::mark_registered<TemplateClass<T1, T2>>(); \
-            return true; \
-        }(); \
     }
 
 #define JAI_BIND_TEMPLATE_2(TemplateClass, T1, T2) \

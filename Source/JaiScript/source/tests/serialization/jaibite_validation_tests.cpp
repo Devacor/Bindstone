@@ -13,7 +13,7 @@ public:
 
     static std::vector<declaration_ptr> parse(engine& eng, const std::string& source) {
         auto templates = eng.get_registered_template_types();
-        lexer lex(source, eng.get_symbolizer(), templates);
+        lexer lex(source, eng.get_symbolizer());
         auto tokens = lex.tokenize();
         parser parse(tokens, eng.get_symbolizer(), &eng, templates);
         auto result = parse.parse();

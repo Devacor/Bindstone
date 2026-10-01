@@ -950,7 +950,7 @@ struct engine::implementation {
             siblingFresh = cached != nullptr;
         }
         if (!cached) {
-            lexer lex(content, &string_symbolizer_, registeredTemplateTypes, sourcePath);
+            lexer lex(content, &string_symbolizer_, sourcePath);
             auto tokens = lex.tokenize();
             parser prs(tokens, &string_symbolizer_, &self, registeredTemplateTypes);
             auto parse_result = prs.parse();
@@ -2394,7 +2394,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
 }
 
 jai::jaibite engine::jaibite(const std::string& scriptContent) {
-    lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
+    lexer lexer(scriptContent, &impl->string_symbolizer_);
     auto tokens = lexer.tokenize();
     parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
     auto parse_result = parser.parse();
@@ -2687,7 +2687,7 @@ const check_report& engine::last_check_diagnostics() const {
 check_report engine::check(const std::string& scriptContent) {
     auto cached = impl->find_cached_script("<script>", scriptContent);
     if (!cached) {
-        lexer lexer(scriptContent, &impl->string_symbolizer_, impl->registeredTemplateTypes);
+        lexer lexer(scriptContent, &impl->string_symbolizer_);
         auto tokens = lexer.tokenize();
         parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
         auto parse_result = parser.parse();

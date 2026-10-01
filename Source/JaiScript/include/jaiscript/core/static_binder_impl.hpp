@@ -126,10 +126,19 @@ void static_binder<T, Props, Methods>::bind_to(engine& eng, const char* type_nam
     builder.build();
 }
 
+// Two C++ types the script spells alike (int and long on MSVC are both int32) cannot share one registered name
+template<typename T>
+void reject_static_type_name_collision(const engine& eng, const std::string& type_name) {
+    if (!eng.has_registered_class<T>()) {
+        throw runtime_error("'" + type_name + "' is already bound to another C++ type; give this instantiation its own script name");
+    }
+}
+
 template<typename T>
 void engine::bind_static_type() {
     if constexpr (has_static_type_v<T>) {
         if (is_type_registered(jai_static_type<T>::name)) {
+            reject_static_type_name_collision<T>(*this, jai_static_type<T>::name);
             return;
         }
         jai_static_type<T>::bind_to(*this);
@@ -137,13 +146,11 @@ void engine::bind_static_type() {
     else if constexpr (has_any_template_binder_v<T>) {
         auto type_name = template_binder_accessor<T>::type_name();
         if (is_type_registered(type_name)) {
+            reject_static_type_name_collision<T>(*this, type_name);
             return;
         }
         template_binder_accessor<T>::bind_to(*this);
-
-        // Auto-bind complementary integer variants (int32 ↔ int64, uint32 ↔ uint64)
-        // so Point<int> and Point<int32> are both available when either is bound
-        integer_variant_binder<T>::bind(*this);
+        width_variant_binder<T>::bind(*this);
     }
     else {
         static_assert(has_static_type_v<T> || has_any_template_binder_v<T>,

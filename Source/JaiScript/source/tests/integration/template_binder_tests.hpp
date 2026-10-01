@@ -91,6 +91,32 @@ template<> inline int audit_pt<float>::kind() const { return 2; }
 template<typename T>
 struct audit_opaque { T v{}; };
 
+struct TplLeaf { int64_t n = 0; };
+struct TplNamedLeaf { int64_t n = 0; };
+
+// One instantiation per script spelling: kind() tells them apart
+template<typename T>
+struct TplBox {
+    T v{};
+    int64_t kind() const {
+        if constexpr (std::is_same_v<T, std::vector<int64_t>>) { return 1; }
+        else if constexpr (std::is_same_v<T, int64_t>) { return 2; }
+        else if constexpr (std::is_same_v<T, double>) { return 3; }
+        else if constexpr (std::is_same_v<T, float>) { return 4; }
+        else if constexpr (std::is_same_v<T, std::shared_ptr<TplLeaf>>) { return 5; }
+        else if constexpr (std::is_same_v<T, TplLeaf>) { return 6; }
+        else if constexpr (std::is_same_v<T, uint8_t>) { return 7; }
+        else if constexpr (std::is_same_v<T, int32_t>) { return 8; }
+        else if constexpr (std::is_same_v<T, std::map<std::string, double>>) { return 9; }
+        else if constexpr (std::is_same_v<T, TplNamedLeaf>) { return 10; }
+        else { return 0; }
+    }
+};
+
+// Two distinct C++ integer types the script spells alike (int/long on MSVC, long/long long on LP64)
+using tpl_same_width_a = std::conditional_t<sizeof(long) == sizeof(int), int, long>;
+using tpl_same_width_b = std::conditional_t<sizeof(long) == sizeof(int), long, long long>;
+
 inline void register_audit_points(jai::engine& e) {
     dynamic_binder<audit_pt_base>(e, "PBase")
         .constructor<>()
@@ -139,6 +165,18 @@ JAI_TEMPLATE_BINDER_NAMED(TplAutoDetectVec, jai::foundry::tests::TplAutoDetectVe
     .property("a", &jai::foundry::tests::TplAutoDetectVec<T>::a)
     .property("b", &jai::foundry::tests::TplAutoDetectVec<T>::b)
     .method("dot", &jai::foundry::tests::TplAutoDetectVec<T>::dot)
+);
+
+JAI_STATIC_BINDER(jai::foundry::tests::TplLeaf, "TplLeaf",
+    .property("n", &jai::foundry::tests::TplLeaf::n)
+);
+
+template<> struct jai::type_name_helper<jai::foundry::tests::TplNamedLeaf> {
+    static std::string name() { return "NamedLeaf"; }
+};
+
+JAI_TEMPLATE_BINDER_NAMED(TplBox, jai::foundry::tests::TplBox, "TplBox",
+    .method("kind", &jai::foundry::tests::TplBox<T>::kind)
 );
 
 JAI_BIND_TEMPLATE_NAMED(TplBinderVec2, jai::foundry::tests::TplBinderVec2, int);
@@ -284,10 +322,29 @@ public:
 
         test("type_name_helper_primitives", [this]() {
             check_eq(type_name_helper<int>::name(), std::string("int32"), "int32 name");
-            check_eq(type_name_helper<float>::name(), std::string("float"), "float name");
-            check_eq(type_name_helper<double>::name(), std::string("double"), "double name");
+            check_eq(type_name_helper<float>::name(), std::string("float32"), "C++ float is the script's float32");
+            check_eq(type_name_helper<double>::name(), std::string("float"), "C++ double is the script's (64-bit) float");
             check_eq(type_name_helper<bool>::name(), std::string("bool"), "bool name");
+            check_eq(type_name_helper<char>::name(), std::string("char"), "char name");
             check_eq(type_name_helper<std::string>::name(), std::string("string"), "string name");
+        });
+
+        test("type_name_helper_spells_what_the_parser_spells", [this]() {
+            // every integer type by width and sign (long and long long included), containers and handles by their script types
+            check_eq(type_name_helper<long long>::name(), std::string("int"), "long long");
+            check_eq(type_name_helper<unsigned long long>::name(), std::string("uint"), "unsigned long long");
+            check_eq(type_name_helper<long>::name(), std::string(sizeof(long) == 8 ? "int" : "int32"), "long");
+            check_eq(type_name_helper<signed char>::name(), std::string("int8"), "signed char");
+            check_eq(type_name_helper<std::vector<int64_t>>::name(), std::string("array<int>"), "vector<int64_t>");
+            check_eq(type_name_helper<std::vector<std::vector<double>>>::name(), std::string("array<array<float>>"), "nested vector");
+            check_eq(type_name_helper<std::map<std::string, int64_t>>::name(), std::string("map<string,int>"), "map");
+            check_eq(type_name_helper<std::shared_ptr<TplLeaf>>::name(), std::string("shared_ptr<TplLeaf>"), "shared_ptr of a static type");
+            check_eq(type_name_helper<std::weak_ptr<TplLeaf>>::name(), std::string("weak_ptr<TplLeaf>"), "weak_ptr");
+            check_eq(type_name_helper<TplLeaf>::name(), std::string("TplLeaf"), "a JAI_STATIC_BINDER type");
+            check_eq(type_name_helper<TplBinderVec2<int64_t>>::name(), std::string("TplBinderVec2<int>"), "a template-bound type");
+            check_eq(type_name_helper<TplNamedLeaf>::name(), std::string("NamedLeaf"), "a host specialization");
+            check_eq(jai_template_binder_TplBox<std::shared_ptr<TplLeaf>>::type_name(), std::string("TplBox<shared_ptr<TplLeaf>>"),
+                     "a handle argument keeps its shared_ptr spelling");
         });
 
         test("type_name_helper_integers", [this]() {
@@ -307,8 +364,8 @@ public:
             auto double_name = jai_template_binder_TplBinderVec2<double>::type_name();
 
             check_eq(int_name, std::string("TplBinderVec2<int32>"), "int32 variant name");
-            check_eq(float_name, std::string("TplBinderVec2<float>"), "float variant name");
-            check_eq(double_name, std::string("TplBinderVec2<double>"), "double variant name");
+            check_eq(float_name, std::string("TplBinderVec2<float32>"), "float variant name");
+            check_eq(double_name, std::string("TplBinderVec2<float>"), "double variant name");
         });
 
         test("template_binder_2_type_names", [this]() {
@@ -316,7 +373,62 @@ public:
             auto name2 = jai_template_binder_TplBinderKVPair<std::string, double>::type_name();
 
             check_eq(name1, std::string("TplBinderKVPair<int32, string>"), "int32,string variant");
-            check_eq(name2, std::string("TplBinderKVPair<string, double>"), "string,double variant");
+            check_eq(name2, std::string("TplBinderKVPair<string, float>"), "string,double variant");
+        });
+
+        test("script_template_arguments_reach_their_instantiations", [this]() {
+            // the parser spells each argument canonically, as the host does: array<int> is not array, shared_ptr<TplLeaf>
+            // is not TplLeaf, double is float, C++ float is float32, uint8 is a template argument
+            auto eng = make_engine();
+            eng->bind_static_types<TplBox<std::vector<int64_t>>, TplBox<int64_t>, TplBox<double>, TplBox<float>,
+                                   TplBox<std::shared_ptr<TplLeaf>>, TplBox<TplLeaf>, TplBox<uint8_t>,
+                                   TplBox<std::map<std::string, double>>, TplBox<TplNamedLeaf>>();
+            check_eq((int64_t)1, eng->execute("TplBox<array<int>>().kind()").as_int(), "array<int>");
+            check_eq((int64_t)2, eng->execute("TplBox<int>().kind()").as_int(), "int");
+            check_eq((int64_t)8, eng->execute("TplBox<int32>().kind()").as_int(), "int32 (the int64 binding's sibling)");
+            check_eq((int64_t)3, eng->execute("TplBox<double>().kind()").as_int(), "double reaches the C++ double");
+            check_eq((int64_t)3, eng->execute("TplBox<float>().kind()").as_int(), "script float is the C++ double");
+            check_eq((int64_t)4, eng->execute("TplBox<float32>().kind()").as_int(), "float32 reaches the C++ float");
+            check_eq((int64_t)5, eng->execute("TplBox<shared_ptr<TplLeaf>>().kind()").as_int(), "shared_ptr<TplLeaf>");
+            check_eq((int64_t)6, eng->execute("TplBox<TplLeaf>().kind()").as_int(), "TplLeaf");
+            check_eq((int64_t)7, eng->execute("TplBox<uint8>().kind()").as_int(), "uint8");
+            check_eq((int64_t)9, eng->execute("TplBox<map<string, double>>().kind()").as_int(), "map<string, double>");
+            check_eq((int64_t)10, eng->execute("TplBox<NamedLeaf>().kind()").as_int(), "a host-named argument");
+            check_eq((int64_t)5, eng->execute("TplBox<shared_ptr<TplLeaf>> b; b.kind()").as_int(), "a declaration");
+            check_eq((int64_t)1, eng->execute("auto a = TplBox<array<int>>{}; a.kind()").as_int(), "a brace construction");
+            check_eq((int64_t)4, eng->execute("function k(TplBox<float32>& b) -> int { return b.kind(); } TplBox<float32> f; k(f)").as_int(),
+                     "a reference parameter");
+        });
+
+        test("a_template_base_name_is_not_a_reserved_word", [this]() {
+            auto eng = make_engine();
+            eng->bind_static_type<TplBox<int64_t>>();
+            check_eq((int64_t)6, eng->execute("int TplBox = 5; TplBox + 1").as_int(), "a variable named like the template");
+            check_true(eng->execute("TplBox < 10").as_bool(), "a comparison is not a template argument list");
+            check_true(eng->execute("TplBox < 10 && 3 > 2").as_bool(), "nor is a comparison chain");
+            check_eq((int64_t)2, eng->execute("TplBox<int>().kind()").as_int(), "the template still constructs");
+            auto fresh = make_engine();
+            fresh->bind_static_type<TplBox<int64_t>>();
+            check_eq((int64_t)7, fresh->execute("class TplBox { int v = 7; } TplBox().v").as_int(), "a script class named like the template");
+            check_eq((int64_t)2, fresh->execute("TplBox<int> t; t.kind()").as_int(), "beside the template's instantiations");
+        });
+
+        test("two_cpp_types_one_script_spelling_raise_at_bind", [this]() {
+            auto eng = make_engine();
+            eng->bind_static_type<TplBox<tpl_same_width_a>>();
+            check_throws([&]() { eng->bind_static_type<TplBox<tpl_same_width_b>>(); });
+            eng->bind_static_type<TplBox<tpl_same_width_a>>();   // the same type again stays idempotent
+        });
+
+        test("static_type_registry_engine_state", [this]() {
+            static_assert(static_type_registry::is_registered<TplBinderVec2<int>>(), "a JAI_BIND_TEMPLATE instantiation");
+            static_assert(static_type_registry::is_registered<TplBinderPoint<float>>(), "an auto_bind_template instantiation");
+            static_assert(!static_type_registry::is_registered<TplBox<int64_t>>(), "a template binder alone declares nothing");
+            auto eng = make_engine();
+            check_false(static_type_registry::is_registered<TplBox<int64_t>>(*eng), "not bound in this engine yet");
+            eng->bind_static_type<TplBox<int64_t>>();
+            check_true(static_type_registry::is_registered<TplBox<int64_t>>(*eng), "bound in this engine");
+            check_false(static_type_registry::is_registered<TplBox<int64_t>>(*make_engine()), "another engine is its own");
         });
 
         test("static_type_registry_registration", [this]() {
@@ -378,7 +490,7 @@ public:
             eng->execute("vi.x = 1; vi.y = 2;");
             check_eq(eng->execute("vi.length_squared()").as<int>(), 5, "int32 variant works");
 
-            eng->execute("auto vf = TplBinderVec2<float>();");
+            eng->execute("auto vf = TplBinderVec2<float32>();");
             eng->execute("vf.x = 1.5; vf.y = 2.0;");
             auto len_sq = eng->execute("vf.length_squared()").as<float>();
             check(std::abs(len_sq - 6.25f) < 0.001f, "float variant works");
@@ -386,6 +498,11 @@ public:
             eng->execute("auto vd = TplBinderVec2<double>();");
             eng->execute("vd.x = 3.0; vd.y = 4.0;");
             check_eq(eng->execute("vd.length_squared()").as<double>(), 25.0, "double variant works");
+
+            // each spelling holds its own width: 0.1 rounds in the float, stays exact in the double
+            eng->execute("vf.x = 0.1; vd.x = 0.1;");
+            check_true(eng->execute("vf.x != 0.1").as_bool(), "float32 stores binary32");
+            check_true(eng->execute("vd.x == 0.1").as_bool(), "double (script float) stores binary64");
         });
 
         test("bind_two_param_template_variant", [this]() {
@@ -496,7 +613,7 @@ public:
 
             eng->bind_static_types<TplBinderVec2<float>, TplBinderVec2<float>, TplBinderVec2<double>>();
 
-            eng->execute("auto vf = TplBinderVec2<float>();");
+            eng->execute("auto vf = TplBinderVec2<float32>();");
             eng->execute("auto vd = TplBinderVec2<double>();");
             check(true, "Multiple binds of same type didn't crash");
         });
@@ -528,7 +645,7 @@ public:
             auto name_float = template_binder_accessor<TplAutoDetectVec<float>>::type_name();
 
             check_eq(name_int, std::string("TplAutoDetectVec<int32>"), "accessor type_name for int");
-            check_eq(name_float, std::string("TplAutoDetectVec<float>"), "accessor type_name for float");
+            check_eq(name_float, std::string("TplAutoDetectVec<float32>"), "accessor type_name for float");
         });
 
         test("auto_detect_bind_without_explicit_registration", [this]() {
@@ -579,7 +696,7 @@ public:
             eng->bind_static_type<TplAutoDetectVec<double>>();
 
             eng->execute("auto vi = TplAutoDetectVec<int32>();");
-            eng->execute("auto vf = TplAutoDetectVec<float>();");
+            eng->execute("auto vf = TplAutoDetectVec<float32>();");
             eng->execute("auto vd = TplAutoDetectVec<double>();");
 
             eng->execute("vi.a = 2; vi.b = 3;");

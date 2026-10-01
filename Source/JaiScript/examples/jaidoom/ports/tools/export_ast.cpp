@@ -115,7 +115,7 @@ int main(int argc,char** argv) {
 		std::ifstream in(argv[1],std::ios::binary);if(!in){throw std::runtime_error("input unavailable");}
 		std::ostringstream text;text<<in.rdbuf();
 		auto templates=e->get_registered_template_types();
-		jai::lexer lex(text.str(),e->get_symbolizer(),templates,argv[1]);auto tokens=lex.tokenize();
+		jai::lexer lex(text.str(),e->get_symbolizer(),argv[1]);auto tokens=lex.tokenize();
 		jai::parser parser(tokens,e->get_symbolizer(),e.get(),templates);auto parsed=parser.parse();
 		if(!parsed){throw std::runtime_error(e->format_error(parsed));}
 		std::ofstream out(argv[2],std::ios::binary);out<<nodes(parsed.value())<<'\n';

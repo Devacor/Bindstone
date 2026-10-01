@@ -839,6 +839,10 @@ struct engine::implementation {
         bool closure_filesystem = true;   // permission under which dependencies were gathered
         std::vector<closure_stamp> closure_stamps;
         std::vector<closure_stamp> spliced_stamps;   // files spliced into function bodies at parse time: a change re-parses this entry; such a unit writes no jaibite sibling
+        // the unit's reload hook (hot_reload_migrate at its top level): kept off the program - never defined, never callable - and
+        // run after a re-run of the unit; check_declarations = the program and the hook, what the checker and the proof pass walk
+        std::shared_ptr<function_decl> reload_hook;
+        std::vector<declaration_ptr> check_declarations;
         // the jaibite sibling this entry last wrote or loaded, by its (mtime, size) stamp: while it stays in place the sibling
         // holds this source, so a hit queries one stat; the source's identity is computed once, when a sibling first needs it
         uint64_t sibling_mtime = 0, sibling_size = 0;
@@ -930,6 +934,31 @@ struct engine::implementation {
         detail::collect_unit_imports(decls, out);
     }
 
+    // A unit's reload hook leaves its program: the parser checked its shape; it checks and runs under an unspellable name
+    std::shared_ptr<function_decl> take_reload_hook(std::vector<declaration_ptr>& decls) {
+        for (auto it = decls.begin(); it != decls.end(); ++it) {
+            if (!*it || (*it)->get_type() != node_type::function_decl) { continue; }
+            auto f = std::static_pointer_cast<function_decl>(*it);
+            if (f->name != "hot_reload_migrate" && f->name != k_reload_hook_name) { continue; }
+            decls.erase(it);
+            f->name_id = string_symbolizer_.intern(k_reload_hook_name);
+            f->name = string_symbolizer_.get_string(f->name_id);
+            return f;
+        }
+        return nullptr;
+    }
+    static constexpr std::string_view k_reload_hook_name = "<hot_reload_migrate>";
+    void adopt_reload_hook(script_cache_entry& entry, std::shared_ptr<function_decl> hook) {
+        entry.reload_hook = std::move(hook);
+        entry.check_declarations.clear();
+        if (!entry.reload_hook) { return; }
+        entry.check_declarations = entry.declarations;
+        entry.check_declarations.push_back(entry.reload_hook);
+    }
+    static const std::vector<declaration_ptr>& checked_declarations(const script_cache_entry& entry) {
+        return entry.reload_hook ? entry.check_declarations : entry.declarations;
+    }
+
     // The parse-cache entry for (sourcePath, content): a hit, a fresh jaibite sibling, or a
     // fresh parse stored under that key. Throws parse_error. sibling/siblingFresh tell the
     // caller whether to rewrite the sibling afterwards.
@@ -958,7 +987,10 @@ struct engine::implementation {
                 for (const auto& f : prs.spliced_files()) { uint64_t mtime = 0, size = 0; const bool ok = stat_mtime_size(f, mtime, size); note_closure_file(f, ok, mtime, size); }
                 throw parse_error(self.format_error(parse_result));
             }
-            cached = store_cached_script(sourcePath, content, std::move(parse_result.value()));
+            auto decls = std::move(parse_result.value());
+            auto hook = take_reload_hook(decls);
+            cached = store_cached_script(sourcePath, content, std::move(decls));
+            adopt_reload_hook(*cached, std::move(hook));
             stamp_spliced(*cached, prs.spliced_files());
             if (identity) { cached->identity = *identity; cached->identity_known = true; }
         }
@@ -1041,7 +1073,7 @@ struct engine::implementation {
         o.program_globals = &program_globals_;
         entry.deferred_classes.clear();
         o.deferred_classes = &entry.deferred_classes;
-        detail::run_static_check(self, entry.declarations, nullptr, o);
+        detail::run_static_check(self, checked_declarations(entry), nullptr, o);
         entry.proofs_deferred = type_proofs_ && !entry.deferred_classes.empty();
     }
     bool class_defined_now(engine& self, const std::vector<std::string>& names) {
@@ -1086,12 +1118,12 @@ struct engine::implementation {
             o.program_classes = &program_classes_;
             o.program_functions = &program_functions_;
             o.program_globals = &program_globals_;
-            entry.check_result = detail::run_static_check(self, entry.declarations, nullptr, o);
+            entry.check_result = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
             entry.checked = true;
             entry.checked_epoch = check_surface_epoch_;
         }
         if (need_check || need_proofs) {
-            lowering_view(self, entry.declarations, entry.lowering);
+            lowering_view(self, checked_declarations(entry), entry.lowering);
             stamp_proofs(self, entry);
             entry.proof_epoch = want_proof_epoch;
             entry.autos_typed = true;
@@ -1217,7 +1249,7 @@ struct engine::implementation {
         o.program_classes = &program_classes_;
         o.program_functions = &program_functions_;
         o.program_globals = &program_globals_;
-        return detail::run_static_check(self, entry.declarations, &extra, o);
+        return detail::run_static_check(self, checked_declarations(entry), &extra, o);
     }
 
     // The one cache-hit execution tail (execute_file fast lane + the literal lane):
@@ -1235,7 +1267,56 @@ struct engine::implementation {
                 gate_checked(check_with_instance_vars(self, entry, instanceVars), source);
             }
         }
-        return self.execute_parsed(entry.declarations, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars, unit_of(entry, source));
+        return run_unit(self, entry, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars, source, false);
+    }
+
+    // A unit's run. A re-run of a unit whose source declares a reload hook snapshots the unit's program-scope variables first and
+    // hands them to the hook once the run's top-level code finishes; a unit without one pays nothing. A textual include runs under
+    // the including unit: its re-run is the same file included again by the same unit, and its snapshot is that unit's.
+    std::unordered_set<uint64_t> textual_runs_;   // (included file's unit, including unit) pairs that ran
+    bool unit_ran_before(const script_cache_entry& entry, std::string_view content) const {
+        if (entry.unit != 0) { return true; }
+        const std::string key = entry.source_path == "<script>" ? std::string("\n").append(content)
+                                                                : std::filesystem::path(entry.source_path).lexically_normal().string();
+        return unit_index_.count(key) != 0;
+    }
+    script_value unit_snapshot(engine& self, uint32_t unit) {
+        auto previous = script_value::make_map(self.get_type_info_string(), nullptr, &self);
+        auto& map = const_cast<script_map&>(previous.as_map());
+        for (const auto& [id, cell] : global_environment_->unit_variables(unit)) {
+            map[script_value(std::string(string_symbolizer_.get_string(id)), &self)] = cell->deref().clone_element();
+        }
+        return previous;
+    }
+    void run_reload_hook(engine& self, const function_decl& hook, uint32_t unit, script_value previous) {
+        script_callable payload;
+        payload.kind = script_callable::kind_type::function;
+        payload.fn = std::make_shared<script_defined_function>(string_symbolizer_.get_string(string_symbolizer_.intern("hot_reload_migrate")),
+                                                                shared_parameters_for(&hook), hook.return_type, hook.body, nullptr, hook.local_count);
+        payload.fn->unit = unit_stamp{unit, string_symbolizer_.next_execution()};
+        execution_backend* be = self.backend();
+        auto result = script_callable_thunk{&self, std::move(payload)}({std::move(previous)});
+        if (be->is_unwinding()) {
+            if (be->is_executing()) { be->park_nested_failure(); }
+            throw without_repeated_category(be->get_current_exception());
+        }
+        if (!result) { throw runtime_error(self.format_error(result)); }
+    }
+    script_value run_unit(engine& self, script_cache_entry& entry, std::shared_ptr<void>& compiled_slot,
+                          const instance_variables* instanceVars, std::string_view source, bool textual) {
+        std::optional<script_value> previous;
+        uint32_t runner = 0;
+        if (textual) {
+            runner = self.backend()->current_unit().id;
+            const bool rerun = !textual_runs_.insert((uint64_t(unit_of(entry, source)) << 32) | runner).second;
+            if (rerun && entry.reload_hook) { previous = unit_snapshot(self, runner); }
+        } else if (entry.reload_hook && unit_ran_before(entry, source)) {
+            runner = unit_of(entry, source);
+            previous = unit_snapshot(self, runner);
+        }
+        script_value result = self.execute_parsed(entry.declarations, compiled_slot, instanceVars, unit_of(entry, source), textual);
+        if (previous) { run_reload_hook(self, *entry.reload_hook, runner, std::move(*previous)); }
+        return result;
     }
 
     // Keyed on (sourcePath, content) so identical text under different paths does not
@@ -1540,7 +1621,9 @@ struct engine::implementation {
             // value-decl naming, typed-store proofs, transient reads) — re-derive
             // them exactly like the parse tail does
             if (detail::run_ast_marking_passes(declarations, &string_symbolizer_)) { entry_stamps = true; }
+            auto hook = take_reload_hook(declarations);
             auto entry = store_cached_script(sourcePath, source, std::move(declarations));
+            adopt_reload_hook(*entry, std::move(hook));
             entry->identity = *identity;
             entry->identity_known = true;
             entry->sibling_mtime = siblingMtime;
@@ -1576,7 +1659,7 @@ struct engine::implementation {
             std::vector<uint8_t> bytes;
             {
                 detail::aggregate_source_view view(&entry.lowering);   // a sibling holds the parsed program
-                bytes = detail::serialize_jaibite(entry.declarations, string_symbolizer_, self.registration_fingerprint(), flags, sourcePath,
+                bytes = detail::serialize_jaibite(checked_declarations(entry), string_symbolizer_, self.registration_fingerprint(), flags, sourcePath,
                                                   identity_of(entry, source));
             }
 #ifdef _WIN32
@@ -2345,7 +2428,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
         // a textual include runs under the including unit and compiles once per such unit: the VM's chunk caches belong to one unit
         std::shared_ptr<void>& compiled_slot = textual ? cached->textual_compiled[backend()->current_unit().id] : cached->compiled;
-        return execute_parsed(cached->declarations, compiled_slot, instanceVars.empty() ? nullptr : &instanceVars, impl->unit_of(*cached, scriptContent), textual);
+        return impl->run_unit(*this, *cached, compiled_slot, instanceVars.empty() ? nullptr : &instanceVars, scriptContent, textual);
 
     } catch (const parse_error&) {
         // Parse errors should propagate as-is (don't wrap compilation errors)
@@ -2410,7 +2493,10 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
     if (!parse_result) {
         throw parse_error(format_error(parse_result));
     }
-    jai::jaibite bite(weak_from_this(), std::move(parse_result.value()));
+    auto declarations = std::move(parse_result.value());
+    auto hook = impl->take_reload_hook(declarations);
+    jai::jaibite bite(weak_from_this(), std::move(declarations));
+    bite.reload_hook_ = std::move(hook);
     check_bite(bite, &scriptContent);
     return bite;
 }
@@ -2483,7 +2569,10 @@ std::vector<uint8_t> jaibite::save_bytes() const {
     }
     uint32_t flags = (check_state_ == check_state::clean) ? detail::k_jaibite_flag_checked_clean : 0;
     detail::aggregate_source_view source(lowering_ ? std::static_pointer_cast<detail::aggregate_lowering_state>(lowering_).get() : nullptr);
-    return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags);
+    if (!reload_hook_) { return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags); }
+    std::vector<declaration_ptr> with_hook = declarations_;
+    with_hook.push_back(reload_hook_);
+    return detail::serialize_jaibite(with_hook, *owner->get_symbolizer(), owner->registration_fingerprint(), flags);
 }
 
 void jaibite::save(const std::string& path) const {
@@ -2520,7 +2609,9 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     // jaibite carries structure, not the parser-pass flags — re-derive them (see
     // try_load_jaibite_entry's twin)
     if (detail::run_ast_marking_passes(declarations, get_symbolizer())) { note_execute_elapsed_use(); }
+    auto hook = impl->take_reload_hook(declarations);
     jai::jaibite bite(weak_from_this(), std::move(declarations));
+    bite.reload_hook_ = std::move(hook);
     bite.registration_mismatch_ = (saved_fingerprint != registration_fingerprint());
     // Trust the checked-clean stamp only when the registration surface matches the
     // saving engine's; otherwise the bite loads unchecked and is re-checked here

@@ -73,6 +73,7 @@ namespace jai {
         bool autos_typed_ = false;   // the first proof pass types the auto slots, in every mode
         uint32_t unit_ = 0;   // shadowing unit, numbered at the first execute
         std::shared_ptr<void> lowering_;   // detail::aggregate_lowering_state (engine::aggregate_lowering)
+        declaration_ptr reload_hook_;      // the source's hot_reload_migrate, kept off the program and saved with it; a bite runs no hook
     };
 
 } // namespace jai

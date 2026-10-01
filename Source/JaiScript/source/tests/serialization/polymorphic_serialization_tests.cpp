@@ -1069,6 +1069,13 @@ struct SlotCreature : jai::script_extensible {
 };
 static jai::registrar<SlotCreature, void> _slotCreatureReg("SlotCreature");
 
+// A base with no default constructor: implicit base construction must name it
+struct ArgOnlyCreature : jai::script_extensible {
+    explicit ArgOnlyCreature(int h) : health(h) {}
+    virtual ~ArgOnlyCreature() = default;
+    int health;
+};
+
 // A base whose copy constructor is deleted: copying its hybrid must refuse (S4).
 struct NoCopyCreature : jai::script_extensible {
     NoCopyCreature() = default;
@@ -1603,6 +1610,33 @@ public:
             check_eq(7, object->health, "the store reached the C++ object");
             check_eq((script_int)9, eng->execute("d.health").as_int(), "a two-level constructor-less chain too");
             check_eq((script_int)2, eng->execute("d.fangs").as_int());
+        });
+
+        test("a_constructor_without_super_constructs_its_cpp_base", [&]() {
+            auto eng = hybrid_engine();
+            dynamic_binder<ArgOnlyCreature>(*eng, "ArgOnlyCreature")
+                .constructor<int>()
+                .property("health", &ArgOnlyCreature::health)
+                .build();
+            auto r = eng->execute(R"(
+                [[warn_mode]]
+                function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
+                class Bodykin : SlotCreature { int chomp = 3; int seen = this.health; Bodykin() { chomp = health + 1; } }
+                var b = Bodykin();
+                b.health = 7;
+                class Argkin : ArgOnlyCreature { Argkin() {} }
+                class Bareargkin : ArgOnlyCreature { }
+                class Fineargkin : ArgOnlyCreature { Fineargkin() : super(9) {} }
+                return [b.chomp, b.seen, b.health, t([]() { var a = Argkin(); }), t([]() { var a = Bareargkin(); }), Fineargkin().health];
+            )");
+            const auto& v = r.as_array();
+            check_eq((script_int)101, v[0].as_int(), "the C++ base was constructed before the body");
+            check_eq((script_int)100, v[1].as_int(), "and before the derived class's field initializers");
+            check_eq((script_int)7, v[2].as_int(), "the inherited property stores");
+            const std::string text = "Base 'ArgOnlyCreature' has no default constructor; call super(...)";
+            check_eq(text, v[3].as<std::string>(), "a host base without a default constructor");
+            check_eq(text, v[4].as<std::string>(), "the same for a constructor-less class");
+            check_eq((script_int)9, v[5].as_int(), "an explicit super(...) still passes its arguments");
         });
 
         test("a_script_layer_saves_only_its_script_fields", [&]() {

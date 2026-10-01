@@ -11462,8 +11462,34 @@ bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_s
 	return v && v->raw_storage_index() == script_value::TYPEID_FUNCTION && &v->unchecked_as_function() == math_alias_rows_[ms.fn].identity;
 }
 
+// the program-scope names a graft's argument proofs read still hold the kinds the checker proved them (their declaring unit may have run
+// again with another type): re-checked once per definition epoch; a name that resolves to anything else keeps the call
+bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
+	const uint64_t epoch = engine_->definition_epoch();
+	if (site.globals_epoch == epoch) return true;
+	for (const auto& [sym, kind] : site.proof_globals) {
+		const script_value* v = environment_ ? environment_->get_value_ptr(sym) : nullptr;
+		if (!v) return false;
+		if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
+		const auto base = static_cast<script_value_type>(kind & 0xFF);
+		if (base == script_value_type::jai_array_type) {
+			if (v->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
+			const script_array* node = v->unchecked_array_node();
+			const auto el = static_cast<script_value_type>(kind >> 8);
+			const script_array::kind_t want = el == script_value_type::jai_int_type ? script_array::kind_t::i64 : el == script_value_type::jai_float_type ? script_array::kind_t::f64 : script_array::kind_t::b8;
+			if (!node || node->kind() != want) return false;
+		} else {
+			const size_t want = base == script_value_type::jai_int_type ? script_value::TYPEID_INT : base == script_value_type::jai_float_type ? script_value::TYPEID_FLOAT : script_value::TYPEID_BOOL;
+			if (v->raw_storage_index() != want) return false;
+		}
+	}
+	if (!parallel_worker_) { site.globals_epoch = epoch; }
+	return true;
+}
+
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_ || (site.plain_numeric && has_custom_numeric_ops_)) return false;
+	if (!site.proof_globals.empty() && !inline_globals_hold(site)) return false;
 	if (site.method) return inline_method_holds(f, site);
 	if (site.env_reads && f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());

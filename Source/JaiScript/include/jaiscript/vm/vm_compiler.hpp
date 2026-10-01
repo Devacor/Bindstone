@@ -63,6 +63,7 @@ namespace jai::vm {
             size_t continue_target = k_invalid_u32;   // known target (while/range-for); patches used otherwise
             bool continue_is_loop_back = false;       // while: continue re-checks budget via loop_back
             size_t scope_depth = 0;
+            const ast_node* stmt = nullptr;            // a loop's statement: its block verdict decides how a graft inside it lands (open_loops_)
         };
 
         struct callable_context {
@@ -181,6 +182,15 @@ namespace jai::vm {
         bool inlining_off_ = false;
         size_t graft_nesting_ = 0;       // compile_hoist's own nesting: grafts compiled inside a graft (its body, its parameters)
         size_t graft_tree_nodes_ = 0;    // the nodes cloned for the outermost graft being compiled and every graft inside it
+        // a loop the first compile left open (refused, no block of its own): a graft whose every enclosing loop is open lands by the rules
+        // outside a loop, since no block stands to keep (compile_callable compiles again with them); the loops compiled so far and where
+        // each began, which name them to the first compile's verdicts
+        std::unordered_set<const ast_node*> open_loops_;
+        std::vector<std::pair<const ast_node*, uint32_t>> loop_marks_;
+        bool graft_in_loop_ = true;   // the graft being planned or compiled lands by the block rules: a leaf its body calls is held to them too
+        void mark_loop(const ast_node* stmt) { loops_.back().stmt = stmt; loop_marks_.emplace_back(stmt, static_cast<uint32_t>(chunk_->code.size())); }
+        bool in_closable_loop() const;
+        std::shared_ptr<chunk> compile_callable_once(std::string_view name, const std::vector<parameter>& parameters, const std::shared_ptr<block_stmt>& body, size_t local_count);
         std::unordered_map<std::string, bool> nested_land_memo_;   // a call a graft's body makes, by what decides it (the callee, the grafts around it, its arguments' shapes and kinds): whether it grafts as the body's block instructions
         uint64_t inline_symbol_ = 0;
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> alias_pins_;   // a stdlib alias whose callee a guard resolved at its place (call site, mark temp): compile_math_into_temp takes them

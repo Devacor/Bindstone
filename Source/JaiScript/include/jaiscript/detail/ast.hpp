@@ -343,6 +343,10 @@ namespace jai {
         // Per-argument proof_same_type against the ONE statically resolved same-script callee
         // (identified by body); empty = unproven call
         mutable std::vector<uint8_t> static_arg_proofs;
+        // the program-scope names the argument proofs read (a typed global another unit declares, or this unit's): each name's symbol id
+        // and the kind the proof took, base_type | element base_type << 8 (an array of scalars), which a graft re-checks when a run moved the
+        // definition epoch (the declaring unit may have re-run with another type)
+        mutable std::vector<std::pair<uint64_t, uint16_t>> proof_globals;
         mutable const block_stmt* proven_callee_body = nullptr;
         // weak: the resolved declaration may belong to a program that dies before this site compiles (a dropped jaibite, an evicted parse-cache entry, a redefinition)
         mutable std::weak_ptr<const class function_decl> proven_callee_decl;

@@ -807,6 +807,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 	temp_next_ = local_count;
 	temp_high_ = local_count;
 	temp_symbol_index_ = k_invalid_u32;
+	subscript_guards_.clear();
 
 	callable_ = {};
 	callable_.active = true;
@@ -5699,6 +5700,7 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 		fused_index_proto p;
 		p.container = make_fused_operand(expr->left);
 		p.index = make_fused_operand(expr->right);
+		if (const auto g = subscript_guards_.find(expr); g != subscript_guards_.end()) { p.container_guard = g->second; p.guard_always = true; subscript_guards_.erase(g); }
 		chunk_->fused_index_protos.push_back(p);
 		emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 		return true;

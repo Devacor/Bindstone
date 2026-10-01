@@ -229,6 +229,7 @@ namespace {
 			case opcode::op_get_static:
 			case opcode::op_set_static:
 			case opcode::op_new:
+			case opcode::op_ref_target_store:
 				break;
 			case opcode::op_decl_var: {
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
@@ -417,6 +418,7 @@ namespace {
 			case opcode::op_set_static:
 			case opcode::op_member_compound:
 			case opcode::op_new:
+			case opcode::op_ref_target_store:
 				break;
 			case opcode::op_decl_var: {
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
@@ -1088,6 +1090,11 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 			} else if (rs->binds_reference && detail::is_ref_bindable_lvalue(rs->value.get())) {
 				// Field/subscript/chain operand: owner-pinned reference via the shared kernel
 				emit(opcode::op_ref_return_lvalue, add_node(rs->value));
+			} else if (rs->binds_reference && rs->value->get_type() == node_type::member_expr &&
+			           static_cast<const member_expr*>(rs->value.get())->is_static) {
+				// C::s / ns::x: the read first, then its storage replaces it
+				compile_expression(rs->value);
+				emit(opcode::op_ref_return_lvalue, add_node(rs->value), 0, 1);
 			} else if (clean_exit && rs->value->get_type() == node_type::identifier_expr) {
 				// Structural LOAD+RETURN fusion (`return n;` - half of fib's dynamic
 				// returns): whole-node gate, resolution mirrors op_load exactly at runtime
@@ -6125,6 +6132,14 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 			note_component_base(node, member.get());
 			emit(opcode::op_member_compound, node, expr->static_store_proof, kind);
 		}
+		return;
+	}
+
+	if (expr->target->get_type() == node_type::cast_expr && static_cast<const cast_expr*>(expr->target.get())->by_reference) {
+		// cast<T&>(e) is an lvalue: the right-hand side first (C++17), then the reference
+		compile_expression(expr->value);
+		compile_expression(expr->target);
+		emit(opcode::op_ref_target_store, add_node(expr));
 		return;
 	}
 

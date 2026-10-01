@@ -328,7 +328,10 @@ engine stays usable", not by `check_throws`.
   reference form. Char converts only through the cast (`cast<int>('a') == 97`,
   `cast<char>(97) == 'a'` range-checked 0..255, `cast<string>(c)`, `cast<char>("a")` for a
   one-character string; `char c = 65` still raises). Shared kernel `detail/cast_kernel.hpp`
-  (`.jaibite` version 9 added the node).
+  (`.jaibite` version 9 added the node). `cast<T&>(e)` is an lvalue: `= v`, `op= v` and `++`/`--` store through it,
+  right side first, under the rules of the storage it names (a variable's declared type, a typed element, a field, a
+  static, a component; `detail::ref_target_assign`, vm `op_ref_target_store`), and the checker checks the stored value
+  against `T`. A static (`C::s`, `ns::x`) binds its storage as a `cast<T&>` operand and as a `-> T&` return operand.
 - **One conversion table for every typed slot** (`detail/typed_slot.hpp` +
   `class_definition.hpp` `convert_for_typed_slot_core`): declaration, `=`, by-value parameter,
   typed return and field store all run the assignment table (`docs/static_checking.md` rule

@@ -287,6 +287,7 @@ namespace jai::vm {
         op_cells_resume,    // a = the trampoline (the instruction this one replaced, then a jump past it): the end of a boundary statement; a block parked for it resumes here, anything else runs the trampoline
         op_velem_load,      // a = velem_protos index, b = frame slot (a compiler temp): the component of a vector buffer's element into the temp, else the element's member read
         op_velem_store,     // a = velem_protos index: `a[i].x = v;` / `a[i].x op= v;` in statement position into a vector buffer's words, else the general member store
+        op_ref_target_store, // a = node index (the assignment_expr): stack [value, reference] -> the expression's value; cast<T&>(e) = v, op= v, ++ and -- store through the reference (detail::ref_target_assign)
         op_halt,
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
@@ -604,6 +605,7 @@ namespace jai::vm {
             case opcode::op_c_ret: return "C_RET";
             case opcode::op_c_boundary: return "C_BOUNDARY";
             case opcode::op_cells_resume: return "CELLS_RESUME";
+            case opcode::op_ref_target_store: return "REF_TARGET_STORE";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

@@ -122,6 +122,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_set_member:
 			case opcode::op_set_static:
 			case opcode::op_member_compound:
+			case opcode::op_ref_target_store:
 			case opcode::op_new:
 			case opcode::op_class_decl:
 			case opcode::op_namespace_decl:

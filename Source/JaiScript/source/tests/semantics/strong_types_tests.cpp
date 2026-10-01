@@ -1934,6 +1934,63 @@ public:
             )", "2,77,77", "field operand through the implicit and explicit receiver");
         });
 
+        test("cast_reference_is_an_assignment_target", [this, check_both, both, both_in, with_prelude]() {
+            // cast<T&>(e) is an lvalue (C++): =, op= and ++/-- store through it under the rules of the storage it names
+            check_both("int x = 1; cast<int&>(x) = 5; to_string(x)", "5", "a variable");
+            check_both("int x = 1; cast<int&>(x) = 3.9; type_of(x) + \":\" + to_string(x)", "int:3", "the variable's table converts");
+            check_both("int x = 10; cast<int&>(x) += 2.5; type_of(x) + \":\" + to_string(x)", "int:12", "a compound converts back to the variable's type");
+            check_both("int x = 5; cast<int&>(x)++; ++cast<int&>(x); cast<int&>(x)--; to_string(x)", "6", "increment and decrement");
+            check_both("int x = 5; int old = cast<int&>(x)++; int now = ++cast<int&>(x); to_string(old) + \",\" + to_string(now) + \",\" + to_string(x)", "5,7,7", "postfix yields the old value, prefix the new");
+            check_both("int x = 0; auto r = (cast<int&>(x) = 3.9); type_of(r) + \":\" + to_string(r)", "int:3", "the expression's value is the stored value");
+            check_both("int x = 1; auto r = (cast<int&>(x) += 0.5); type_of(r) + \":\" + to_string(r)", "int:1", "a consumed compound yields the stored value");
+            check_both("function f() -> int { int x = 1; cast<int&>(x) += 2.9; cast<int&>(x) *= 2; return x; } to_string(f())", "6", "a function's slot local");
+            check_both("class C { int n = 0; } C c = C(); cast<int&>(c.n) = 7; cast<int&>(c.n) *= 3; to_string(c.n)", "21", "a field");
+            check_both("class C { int n = 0; void go() { cast<int&>(n) = 4; cast<int&>(this.n) += 1; } } C c = C(); c.go(); to_string(c.n)", "5", "a bare field and this.field");
+            check_both("class W { static int s = 1; } cast<int&>(W::s) = 6; cast<int&>(W::s) += 1; to_string(W::s)", "7", "a static");
+            check_both("array<float> a = [1.0, 2.0]; int i = 1; cast<float&>(a[i]) += 1; cast<float&>(a[0]) = 4; to_string(a[0]) + \",\" + to_string(a[1])", "4.0,3.0", "a typed element");
+            check_both("var a = [1, 2]; cast<int&>(a[1]) = 9; to_string(a[1])", "9", "an untyped element");
+            check_both("map<string, int> m = {\"a\": 1}; cast<int&>(m[\"a\"]) += 4; to_string(m[\"a\"])", "5", "a map entry");
+            check_both("string s = \"ab\"; cast<string&>(s) += \"cd\"; s", "abcd", "a string appends");
+            check_both("class P { int v = 1; } P p = P(); P q = P(); q.v = 9; cast<P&>(p) = q; q.v = 2; to_string(p.v)", "9", "a class value copies");
+            check_both(with_prelude("T n = T(); n.t = 5; cast<T&>(h.p) = n; var d = h.p; to_string(d.t)").c_str(), "5", "a subtype through a base-typed field");
+            check_both("math::vec2 v = math::vec2(1, 2); cast<float&>(v.x) = 8; cast<float&>(v.y) += 1; cast<float&>(v.y)++; to_string(v)", "(8.0, 4.0)", "a math component");
+            check_both("var log = \"\"; function k() -> int { log += \"k\"; return 0; } function v() -> int { log += \"v\"; return 1; } array<int> a = [0]; cast<int&>(a[k()]) = v(); cast<int&>(a[k()]) += v(); log + to_string(a[0])", "vkvk2", "the right side runs before the target");
+            check_both("int x = 1; var c = \"\"; try { cast<float&>(x) = 2; } catch (e) { c = e; } c + to_string(x)", "Cannot cast 'int' to 'float&'1", "the cast's own verdict raises first");
+            auto [si, sv] = both("int x = 1; cast<int&>(x) = \"s\";");
+            check_eq(si, sv, "static rejection parity: a string into cast<int&>");
+            check(si.find("ERROR: ") == 0 && si.find("cannot assign 'string'") != std::string::npos, "a string into cast<int&> is rejected at load: " + si);
+            auto [ii, iv] = both("string s = \"a\"; cast<string&>(s)++;");
+            check_eq(ii, iv, "static rejection parity: ++ on cast<string&>");
+            check(ii.find("ERROR: ") == 0 && ii.find("cannot apply '++' to 'string'") != std::string::npos, "++ on cast<string&> is rejected at load: " + ii);
+            auto [oi, ov] = both_in(check_mode::off, "int x = 1; var c = \"\"; try { cast<int&>(x) = \"s\"; } catch (e) { c = e; } c");
+            check_eq(oi, ov, "run-time rejection parity: a string into cast<int&>");
+            check_eq(std::string("Cannot assign string to a variable declared int"), oi, "a string into cast<int&> raises at run time");
+            auto [pi, pv] = both_in(check_mode::off, "string s = \"a\"; var c = \"\"; try { cast<string&>(s)++; } catch (e) { c = e; } c");
+            check_eq(pi, pv, "run-time rejection parity: ++ on cast<string&>");
+            check_eq(std::string("Cannot apply '++' to string"), pi, "++ on cast<string&> raises at run time");
+            check_both("var log = \"\"; function v() -> int { log += \"v\"; return 5; } "
+                       "coroutine h() { array<int> a = [0, 0]; cast<int&>(a[(yield 1) == null ? 1 : 0]) += v(); int k = 1; cast<int&>(k) += v() + ((yield 2) == null ? 1 : 0); yield to_string(a[1]) + to_string(k); } "
+                       "var co = h(); co.resume(); co.resume(); co.resume() + log", "57vv", "a yield inside the target or the right side resumes without re-running either");
+            check_both("class W { static int s = 1; } cast<int&>(W::s) += 0.75; type_of(W::s) + \":\" + to_string(W::s)", "int:1", "a static's own table");
+        });
+
+        test("reference_stores_run_the_storage_rules", [this, check_both]() {
+            // a compound through a reference to a typed variable runs the variable's table, as the direct compound does
+            check_both("int x = 10; auto& r = x; r += 2.5; type_of(x) + \":\" + to_string(x)", "int:12", "auto& to an int");
+            check_both("function f(int& r) { r += 2.5; } int x = 10; f(x); type_of(x) + \":\" + to_string(x)", "int:12", "an int& parameter");
+            check_both("int x = 10; var& r = x; r -= 0.5; type_of(x) + \":\" + to_string(x)", "int:9", "var& to an int");
+            const std::string cnt = "class Cnt { int n = 0; function operator=(int v) { n = v * 10; } } ";
+            check_both((cnt + "Cnt c = Cnt(); auto& r = c; r = 3; to_string(c.n)").c_str(), "30", "a reference to a class variable runs its operator=");
+            check_both((cnt + "class H { Cnt k = Cnt(); } H h = H(); auto& r = h.k; r = 4; to_string(h.k.n)").c_str(), "40", "a reference to a class field runs its operator=");
+            check_both((cnt + "Cnt c = Cnt(); cast<Cnt&>(c) = 2; to_string(c.n)").c_str(), "20", "a store through cast<Cnt&> runs its operator=");
+        });
+
+        test("a_static_member_is_a_reference_return", [this, check_both]() {
+            check_both("class W { static int s = 3; } function g() -> int& { return W::s; } auto& r = g(); r = 9; to_string(W::s)", "9", "a static through -> int&");
+            check_both("class W { static int s = 3; static int& get() { return W::s; } } auto& r = W::get(); r += 2; to_string(W::s)", "5", "a static method returning its class's static");
+            check_both("namespace ns { int v = 1; } function g() -> int& { return ns::v; } auto& r = g(); r = 4; to_string(ns::v)", "4", "a namespace variable");
+        });
+
         test("typed_field_set_field_cpp_api", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

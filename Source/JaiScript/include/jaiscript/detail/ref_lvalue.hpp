@@ -526,6 +526,15 @@ namespace jai::detail {
 	// A field reference stores what the direct field store stores, with its text
 	inline checked_result<script_value> ref_field_store(const auto& holder, const script_value& value, engine* eng) {
 		const class_definition* owner = holder.owner_instance ? holder.owner_instance->get_class_definition() : nullptr;
+		if (holder.owner_instance && holder.container_element_type &&
+		    holder.container_element_type->base_type == script_value_type::jai_object_type) {
+			if (const script_value* current = holder.owner_instance->find_field_value(holder.field_id)) {
+				if (auto assigned = user_assign_operator(*current, value, eng)) {
+					if (!*assigned) { return assigned->error_value(); }
+					return *current;
+				}
+			}
+		}
 		return field_store_convert(clone_for_assignment(value), holder.container_element_type, eng,
 		                           holder.field_id == UINT64_MAX ? 0 : holder.field_id, owner);
 	}
@@ -588,6 +597,12 @@ namespace jai::detail {
 			if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { var_stamp(v, tag, eng); }
 			storage = std::move(v);
 			return {};
+		}
+		if (tag && tag->base_type == script_value_type::jai_object_type) {
+			if (auto assigned = user_assign_operator(storage, value, eng)) {
+				if (!*assigned) { return assigned->error_value(); }
+				return {};
+			}
 		}
 		if (tag && tag->base_type != script_value_type::jai_reference_type) {
 			// the value copy first (value semantics: an array store never aliases its source), then the variable's table
@@ -709,6 +724,11 @@ namespace jai::detail {
 		}
 		const auto* holder = refLocal.get_reference_holder();
 		type_info_ptr constraint = holder ? holder->container_element_type : nullptr;
+		if (holder && holder->plain_cell() && !constraint) {
+			auto stored = variable_store(refLocal.deref(), resultValue, eng);
+			if (!stored) { return stored.error_value(); }
+			return resultValue;
+		}
 		if (holder && holder->owner_instance) {
 			auto stored = ref_field_store(*holder, resultValue, eng);
 			if (!stored) { return stored.error_value(); }
@@ -722,6 +742,45 @@ namespace jai::detail {
 		if (!converted) { return converted.error_value(); }
 		ref_write_through(refLocal, std::move(converted.value()));
 		return resultValue;
+	}
+
+	inline script_value ref_detached_value(script_value v) {
+		if (v.raw_storage_index() == script_value::TYPEID_CPP_BOUND) { return v.bound_decoded_temp(); }
+		return clone_for_assignment(v);
+	}
+
+	// cast<T&>(e) = v, op= v, ++ and --: a store through the reference the target evaluated to, by the rules of the storage
+	// it names (a variable's declared type, a typed element, a field, a static, a property's setter, a component). `op` is
+	// the compound's base operator, or token_type::equal. The expression's value: the old value for a postfix, else the
+	// stored value read back when consumed, else what was stored.
+	template <typename Arith>
+	inline checked_result<script_value> ref_target_assign(script_value& ref, const script_value& value, token_type op, bool incdec,
+	                                                      bool old_result, bool result_needed, const engine_operator_table* op_table,
+	                                                      engine* eng, string_symbolizer* symbolizer, Arith&& arith) {
+		script_value outcome(std::monostate{}, eng);
+		if (op == token_type::equal) {
+			script_value incoming = value.deref();
+			auto stored = ref_store_through(ref, incoming, eng, symbolizer);
+			if (!stored) { return stored.error_value(); }
+			if (!result_needed) { return incoming; }
+		} else {
+			auto current = ref_checked_deref(ref);
+			if (!current) { return current; }
+			if (incdec) {
+				const size_t ci = current.value().raw_storage_index();
+				if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
+					return incdec_mismatch(op == token_type::plus, current.value(), eng);
+				}
+			}
+			if (old_result) { outcome = ref_detached_value(std::move(current.value())); }
+			auto result = ref_compound_store_constrained(ref, value, op, binary_op_name(op), op_table, eng, symbolizer, arith);
+			if (!result) { return result; }
+			if (old_result) { return outcome; }
+			if (!result_needed) { return result; }
+		}
+		auto back = ref_checked_deref(ref);
+		if (!back) { return back; }
+		return ref_detached_value(std::move(back.value()));
 	}
 
 } // namespace jai::detail

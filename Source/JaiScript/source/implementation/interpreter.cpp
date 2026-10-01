@@ -4033,17 +4033,53 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
 template<bool Replaying>
 checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr, const replay_point* rs) {
     // Non-lvalue targets fail before ANY evaluation (the vm rejects them at compile time)
+    const node_type target_kind = expr->target->get_type();
     {
-        const node_type target_kind = expr->target->get_type();
         if (target_kind != node_type::identifier_expr && target_kind != node_type::member_expr &&
             !(target_kind == node_type::binary_expr &&
-              static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket)) {
+              static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket) &&
+            !(target_kind == node_type::cast_expr && static_cast<cast_expr*>(expr->target.get())->by_reference)) {
             return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
         }
     }
     // Only the statement's own root discards its value; a nested assignment's stored value is consumed
     struct result_needed_scope { bool& flag; bool saved; ~result_needed_scope() { flag = saved; } } result_needed{ expression_result_needed_, expression_result_needed_ };
     expression_result_needed_ = expr != unconsumed_root_;
+
+    if (target_kind == node_type::cast_expr) [[unlikely]] {
+        // cast<T&>(e) is an lvalue: the right-hand side first (C++17), then the reference, then the store
+        // (detail::ref_target_assign; KEEP BYTE-PARALLEL with vm_backend::exec_ref_target_store)
+        script_value rightValue;
+        if (parked<Replaying>(rs, 0)) {
+            rightValue = rs->partial[0];
+        } else {
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_general, 0, {});
+            if (is_unwinding_) {
+                return {};
+            }
+            rightValue = pop_value();
+        }
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->target.get(), rs, 1), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
+        script_value target_ref = pop_value();
+        if (is_unwinding_) {
+            push_value(make_value());
+            return {};
+        }
+        if (!target_ref.is_reference()) {
+            return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
+        }
+        const token_type op = expr->op.type == token_type::equal ? token_type::equal : detail::compound_base(expr->op.type);
+        auto stored = detail::ref_target_assign(target_ref, rightValue, op, expr->incdec_desugar, expr->postfix_old_result,
+            expression_result_needed_, operator_table_, engine_, string_symbolizer_,
+            [this](const script_value& l, token_type o, const script_value& r) {
+                return evaluate_arithmetic(l, o, r, detail::compound_index(o));
+            });
+        if (!stored) {
+            return stored.error_value();
+        }
+        push_value(std::move(stored.value()));
+        return {};
+    }
 
     // For compound assignment operators, we need the current value
     if (expr->op.type != token_type::equal) {
@@ -9628,6 +9664,18 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
                 push_value(make_value());
                 return {};
             }
+            // C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the vm's exec_cast)
+            if (expr->by_reference && expr->operand->get_type() == node_type::member_expr && static_cast<const member_expr*>(expr->operand.get())->is_static) {
+                if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(expr->operand.get()), *environment_,
+                                                             *string_symbolizer_, environment_->find_access_context())) {
+                    if (!*cell) { return cell->error_value(); }
+                    script_value& storage = *cell->value();
+                    if (storage.is_reference() && !storage.get_reference_holder()) {
+                        return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+                    }
+                    operand = share_boxed_env_storage(storage, engine_);
+                }
+            }
             break;
     }
 
@@ -11102,6 +11150,22 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                     out.emplace(std::move(part.value()));
                 } else {
                     out.emplace(std::move(resolved.value()));
+                }
+            } else if (stmt->value->get_type() == node_type::member_expr && static_cast<const member_expr*>(stmt->value.get())->is_static) {
+                // C::s and ns::x are lvalues: the read first, then its storage replaces it (KEEP BYTE-PARALLEL with the vm's
+                // exec_ref_return_lvalue)
+                JAISCRIPT_TRY_ROOT(stmt, stmt->value.get());
+                out.emplace(pop_value());
+                if (!is_unwinding_) {
+                    if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(stmt->value.get()), *environment_,
+                                                                 *string_symbolizer_, environment_->find_access_context())) {
+                        if (!*cell) { return cell->error_value(); }
+                        script_value& storage = *cell->value();
+                        if (storage.is_reference() && !storage.get_reference_holder()) {
+                            return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+                        }
+                        out.emplace(share_boxed_env_storage(storage, engine_));
+                    }
                 }
             }
             // Fall through: calls that already yield a reference pass; anything else

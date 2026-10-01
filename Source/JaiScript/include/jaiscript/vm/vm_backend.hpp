@@ -1330,7 +1330,12 @@ namespace jai::vm {
             return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), box_cell, decl);
         }
         // `int& r = e`: the reference carries its declared type (detail::ref_declare)
-        op_status define_ref_decl(frame& f, const variable_decl* decl, script_value value);
+        op_status define_ref_decl(frame& f, const variable_decl* decl, script_value&& value) {
+            const type_info* t = decl->type.get();
+            if (t && t->base_type == script_value_type::jai_reference_type && !t->type_params.empty()) [[unlikely]] { declare_reference(value, decl); }
+            return define_decl_value(f, decl, std::move(value));
+        }
+        void declare_reference(script_value& value, const variable_decl* decl);
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type,
                                                                 std::string_view var_name = {},

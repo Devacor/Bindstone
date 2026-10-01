@@ -88,6 +88,10 @@ namespace jai {
         // it converts by T's table before the storage's own rules. Same name/id/element as the plain T&; interned via
         // engine::get_type_info_declared_reference. Excluded from equals().
         bool declared_reference = false;
+        type_info* declared_referent = nullptr;   // on the declared twin: T, one load from the reference value's stamp
+        // on the declared twin: the storage index a value of T's kind has (int, float, bool, string), or 0xFF when every store
+        // runs T's table; 0 on every other type_info (a store through it decides with one compare)
+        uint8_t declared_kind = 0;
 
         // Engine-interned "T&" twin cache (engine::get_type_info_reference fast path -
         // elides the intern-map lookup on every reference mint). Only meaningful on the

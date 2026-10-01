@@ -3810,7 +3810,7 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                 // live in call-frame slots, not the environment), then environment
                 script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
                 if (varPtr) {
-                    if (detail::ref_declared_type(*varPtr)) [[unlikely]] {   // `int& r`: the declared type's table (KEEP BYTE-PARALLEL with the VM exec_incdec)
+                    if (const uint8_t kind = detail::ref_declared_kind(*varPtr); kind && kind != detail::ref_declared_current(*varPtr).raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the VM exec_incdec)
                         auto stepped = detail::ref_target_assign(*varPtr, make_value(static_cast<script_int>(1)),
                             expr->op.type == token_type::plus_plus ? token_type::plus : token_type::minus, true, expr->is_postfix, true,
                             operator_table_, engine_, string_symbolizer_,
@@ -4118,7 +4118,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // deref is a scratch, the write must reach the setter.
                 if (varPtr->is_reference()) {
                     const auto* refHolder = varPtr->get_reference_holder();
-                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element() || detail::ref_declared_type(*varPtr))) {
+                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
                         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                         if (is_unwinding_) {
                             push_value(make_value());
@@ -4145,7 +4145,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // right value is already on the stack); a plain cell or a value slot cannot raise on a dereference, so the
                 // fast paths keep reading it first
                 const auto* target_holder = varPtr->is_reference() ? varPtr->get_reference_holder() : nullptr;
-                const bool deferred_target = target_holder != nullptr && !target_holder->plain_cell();
+                const uint8_t declared_kind = target_holder ? detail::ref_declared_kind(*varPtr) : uint8_t{0};
+                const bool deferred_target = target_holder != nullptr && (!target_holder->plain_cell() ||
+                                             (declared_kind && declared_kind != target_holder->cell()->raw_storage_index()));   // the in-place paths keep T's kind only over T's kind
                 if (!deferred_target) {
                 // Fast path: direct in-place mutation for local variables
                 script_value& target = varPtr->deref();
@@ -4603,6 +4605,22 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     // language's error at this point (the checked twin of deref, so the error takes the ordinary flow)
                     auto alive = detail::ref_checked_deref(*varPtr);
                     if (!alive) [[unlikely]] { return alive.error_value(); }
+                }
+                // `int& r` over storage of another kind, or a result leaving T's kind: the declared type's table (KEEP
+                // BYTE-PARALLEL with the vm's compound store)
+                if (const uint8_t kind = detail::ref_declared_kind(*varPtr);
+                    kind && !detail::ref_declared_compound_keeps(kind, detail::ref_declared_current(*varPtr), derefRight, detail::compound_base(expr->op.type))) [[unlikely]] {
+                    const token_type op = detail::compound_base(expr->op.type);
+                    auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, detail::binary_op_name(op),
+                        operator_table_, engine_, string_symbolizer_,
+                        [this](const script_value& l, token_type o, const script_value& r) {
+                            return evaluate_arithmetic(l, o, r, detail::compound_index(o));
+                        });
+                    if (!result) {
+                        return result.error_value();
+                    }
+                    push_value(std::move(result.value()));
+                    return {};
                 }
                 return apply(varPtr->deref(), varPtr->deref().type());
             } else {

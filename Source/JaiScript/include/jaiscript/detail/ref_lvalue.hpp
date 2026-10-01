@@ -620,7 +620,13 @@ namespace jai::detail {
 	// The declared type of a reference (`int& r = v`, cast<int&>(v)): null for var&/auto& and every minted reference
 	inline type_info* ref_declared_type(const script_value& ref) {
 		const type_info* t = ref.type_info_raw();
-		return t && t->declared_reference && !t->type_params.empty() ? t->type_params[0].get() : nullptr;
+		return t ? t->declared_referent : nullptr;
+	}
+
+	// The value a declared reference names, a variable's cell read directly (no out-of-line dereference)
+	inline const script_value& ref_declared_current(const script_value& ref) {
+		const auto* holder = ref.get_reference_holder();
+		return holder && holder->plain_cell() ? *holder->cell() : ref.deref();
 	}
 
 	// Stamps the declared type where the storage would not already apply T's table (a var, an untyped element), so a store
@@ -633,9 +639,45 @@ namespace jai::detail {
 		const auto* holder = ref.get_reference_holder();
 		if (!holder || holder->property || holder->component_base) { return; }
 		const type_info* enforced = holder->container_element_type ? holder->container_element_type.get()
-		                          : holder->plain_cell() ? ref.deref().type_info_raw() : nullptr;
+		                          : holder->plain_cell() ? holder->cell()->type_info_raw() : nullptr;
 		if (enforced && !var_slot(enforced) && enforced->base_type == declared->base_type) { return; }
-		ref.set_type_info(eng->get_type_info_declared_reference(declared));
+		type_info* twin = declared->cached_declared_reference_type;
+		ref.set_type_info(twin ? twin : eng->get_type_info_declared_reference(declared));
+	}
+
+	// The declared type is decided at the store: a value already of T's kind passes T's table unchanged, so the storage's own
+	// path stores it with no extra work
+	inline bool ref_declared_matches(const type_info* declared, const script_value& v) {
+		switch (v.raw_storage_index()) {
+			case script_value::TYPEID_INT: return declared->base_type == script_value_type::jai_int_type && !declared->is_byte_element();
+			case script_value::TYPEID_FLOAT: return declared->base_type == script_value_type::jai_float_type;
+			case script_value::TYPEID_BOOL: return declared->base_type == script_value_type::jai_bool_type;
+			case script_value::TYPEID_STRING: return declared->base_type == script_value_type::jai_string_type;
+			default: return false;
+		}
+	}
+
+	// The hot form of the store-time decision, from the reference value's own stamp: 0 = no declared type, else whether the value
+	// is of another kind than T's
+	inline uint8_t ref_declared_kind(const script_value& ref) {
+		const type_info* t = ref.type_info_raw();
+		return t ? t->declared_kind : uint8_t{0};
+	}
+
+	// x op= v through a declared reference whose value has T's kind and keeps it (int op int, float op number): the storage's
+	// in-place path applies
+	inline bool ref_declared_compound_keeps(uint8_t kind, const script_value& current, const script_value& right, token_type base_op) {
+		const size_t ci = current.raw_storage_index();
+		const size_t ri = right.raw_storage_index();
+		if (kind == script_value::TYPEID_INT) {
+			return ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT;
+		}
+		if (kind == script_value::TYPEID_FLOAT) {
+			return ci == script_value::TYPEID_FLOAT && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT) &&
+			       (base_op == token_type::plus || base_op == token_type::minus || base_op == token_type::star ||
+			        base_op == token_type::slash || base_op == token_type::percent);
+		}
+		return false;
 	}
 
 	// A store through a reference with a declared type T runs T's table first (Dev ruling 2026-09-30: `var v; int& r = v;
@@ -653,24 +695,21 @@ namespace jai::detail {
 			}
 		}
 		const script_value& plain = value.deref();
-		const size_t vi = plain.raw_storage_index();
-		if ((vi == script_value::TYPEID_INT && declared->base_type == script_value_type::jai_int_type && !declared->is_byte_element()) ||
-		    (vi == script_value::TYPEID_FLOAT && declared->base_type == script_value_type::jai_float_type)) {
-			return script_value(plain);   // the identity row
-		}
+		if (ref_declared_matches(declared, plain)) { return script_value(plain); }
 		return typed_store_convert(clone_for_assignment(plain), type_info_ptr{declared}, eng,
 		                           []() { return slot_site{slot_kind::assignment, {}, {}}; });
 	}
 
 	inline checked_result<void> ref_store_through_storage(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer);
 
+
 	// Identifier-assignment through a reference local: unconstrained refs keep today's
 	// exact clone-through-deref line; constrained element/field refs enforce like the
 	// subscript-assign paths do.
 	inline checked_result<void> ref_store_through(script_value& refLocal, script_value& value,
 	                                              engine* eng, string_symbolizer* symbolizer) {
-		if (type_info* declared = ref_declared_type(refLocal)) [[unlikely]] {
-			auto converted = ref_declared_convert(refLocal, declared, value, eng);
+		if (const uint8_t kind = ref_declared_kind(refLocal); kind && kind != value.deref().raw_storage_index()) [[unlikely]] {
+			auto converted = ref_declared_convert(refLocal, ref_declared_type(refLocal), value, eng);
 			if (!converted) { return {}; }
 			if (!*converted) { return converted->error_value(); }
 			return ref_store_through_storage(refLocal, converted->value(), eng, symbolizer);

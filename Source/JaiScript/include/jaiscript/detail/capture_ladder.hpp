@@ -42,6 +42,13 @@ inline bool owned_by_root(environment* from, uint64_t sym) {
 }
 
 // A closure parents on its program scope (the global environment or a namespace's), never a creating frame
+inline environment* program_scope_of(environment* env) {
+    while (env && !env->is_program_scope()) {
+        env = env->parent_raw();
+    }
+    return env;
+}
+
 inline std::shared_ptr<environment> lambda_parent_scope(std::shared_ptr<environment> env) {
     while (env && !env->is_program_scope()) {
         env = env->get_parent();

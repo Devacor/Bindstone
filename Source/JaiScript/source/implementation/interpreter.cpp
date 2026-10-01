@@ -8506,7 +8506,6 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         return checked_result<void>(make_error_code(runtime_error_code::capture_undefined_variable),
             "Lambda capture list does not capture 'this'; use [this], [=] or [&]");
     }
-    auto program_scope = detail::lambda_parent_scope(closure_env);
 
     // ----------------------------------------------------------------
     // OUTER-LOCAL SLOT CAPTURE
@@ -8805,8 +8804,9 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         }
     }
     // A closure's parent is its program scope (a namespace keeps its live variables), never the creating frame
+    const environment* program_scope_raw = detail::program_scope_of(closure_env.get());
     const bool needs_capture_env = has_explicit_captures || !outer_slot_refs.empty() || (has_default_capture && !free_names.empty()) ||
-        (program_scope && program_scope != get_global_environment());
+        (program_scope_raw && program_scope_raw->parent_raw());
     std::shared_ptr<environment> final_closure_env;
 
     if (needs_capture_env) {
@@ -8822,7 +8822,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         // into it (env-variables above, and outer-slot locals below). The only thing
         // a parent provides beyond that is global-scope fallback, so pointing at the
         // global env gives correct semantics without the lifecycle hazard.
-        auto captureEnv = std::make_shared<environment>(program_scope, string_symbolizer_);
+        auto captureEnv = std::make_shared<environment>(detail::lambda_parent_scope(closure_env), string_symbolizer_);
         
         if (captures_this && has_default_capture) {
             auto result = environment_->get(this_id);

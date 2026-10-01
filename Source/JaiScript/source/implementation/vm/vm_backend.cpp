@@ -12701,12 +12701,13 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 	if (uses_instance && !captures_this) {
 		return raise_(make_error_code(runtime_error_code::capture_undefined_variable), "Lambda capture list does not capture 'this'; use [this], [=] or [&]");
 	}
-	auto program_scope = detail::lambda_parent_scope(closure_env);
 	// A capture list names everything the lambda captures (KEEP BYTE-PARALLEL with interpreter::visit_lambda_expr)
 	if (!has_default_capture) {
 		auto listed = [&](uint64_t id) {
 			return std::any_of(proto.captures.begin(), proto.captures.end(), [id](const auto& c) { return c.symbol_id == id; });
 		};
+		detail::member_scope_ctx scope;
+		bool scope_ready = false;
 		for (const auto& [sym, slot] : outer_refs) {
 			if (!listed(sym)) {
 				return raise_(make_error_code(runtime_error_code::capture_undefined_variable),
@@ -12715,11 +12716,11 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		}
 		for (uint64_t id : proto.used_variables) {
 			if (id == this_id_ || listed(id)) { continue; }
-			detail::member_scope_ctx scope;
-			if (f.locals && !f.top_level) {
+			if (!scope_ready && f.locals && !f.top_level) {
 				ensure_frame_member_scope(f, environment_.get());
 				scope = detail::frame_member_scope(*f.locals);
 			}
+			scope_ready = true;
 			auto source = detail::resolve_capture_source(nullptr, environment_.get(), scope, id);
 			if (source.global || source.what == detail::capture_source::kind::miss) { continue; }
 			if (captures_this && (source.what == detail::capture_source::kind::member ||
@@ -12729,13 +12730,14 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		}
 	}
 	// A closure's parent is its program scope (a namespace keeps its live variables), never the creating frame
+	const environment* program_scope_raw = detail::program_scope_of(closure_env.get());
 	const bool needs_capture_env = has_explicit_captures || !outer_refs.empty() || (has_default_capture && !proto.used_variables.empty()) ||
-		(program_scope && program_scope != engine_->get_global_environment());
+		(program_scope_raw && program_scope_raw->parent_raw());
 
 	std::shared_ptr<environment> final_closure_env;
 
 	if (needs_capture_env) {
-		auto captureEnv = std::make_shared<environment>(program_scope, symbolizer_);
+		auto captureEnv = std::make_shared<environment>(detail::lambda_parent_scope(closure_env), symbolizer_);
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_env_births_[4];
 #endif

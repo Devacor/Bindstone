@@ -44,16 +44,21 @@ eng-&gt;execute(R&quot;( class Player {
                      int level = 1;            // new
                      // speed removed
                      void hot_reload_migrate() { level = 5; }
-                 } )&quot;);</code></pre></div>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">hp: string 62                  &lt;- retyped field CONVERTED (int 62 -&gt; &quot;62&quot;)
-name: Alice                    &lt;- same-name field KEPT its runtime value
-level (set by migrate hook): 5 &lt;- new field defaulted, then hook ran
-speed removed: access throws (true) &lt;- removed field gone</code></pre></div>
+                 } )&quot;);
+
+eng-&gt;execute(R&quot;( print(&quot;hp: &quot;, type_of(p.hp), &quot; &quot;, p.hp);
+                 print(&quot;name: &quot;, p.name);
+                 print(&quot;level: &quot;, p.level);
+                 try { print(p.speed); } catch (e) { print(&quot;speed: &quot;, e); } )&quot;);</code></pre></div>
+<div class="codeblock cb-plain"><pre><code class="lang-plain">hp: string 62                         &lt;- retyped field CONVERTED (int 62 -&gt; &quot;62&quot;)
+name: Alice                           &lt;- same-name field KEPT its runtime value
+level: 5                              &lt;- new field took its initializer, then the hook ran
+speed: Player has no member &#x27;speed&#x27;   &lt;- removed field gone</code></pre></div>
 <p>The full matrix. Both backends share one field-migration kernel, so behavior is identical, and the test suite holds them to it:</p>
-<div class="tablewrap"><table><thead><tr><th>change</th><th>what happens to live instances</th></tr></thead><tbody><tr><td>field kept (same name, same type)</td><td>value preserved, even if the initializer changed</td></tr><tr><td>field added</td><td>takes the new initializer</td></tr><tr><td>field removed</td><td>gone; access throws</td></tr><tr><td>field <strong>retyped</strong></td><td>value <strong>converts permissively</strong> via the assignment table (int→string via to_string, float→int truncation, int→float widening); only a value with NO conversion falls back to the new initializer. A reload never bricks an instance</td></tr><tr><td>method body changed</td><td>next call runs the new body, including via previously bound methods (no stale caches)</td></tr><tr><td>static members</td><td><strong>runtime state preserved</strong>, not reset to the initializer; removed statics inaccessible; static method bodies update</td></tr><tr><td>constructor overloads</td><td>survive (arity dispatch intact)</td></tr><tr><td>base class reloaded</td><td>derived instances keep their own data, inherit new/retyped base fields (converted through the parent chain)</td></tr><tr><td>script class extending a <strong>C++ class</strong></td><td>the live C++ object (<code>_cpp_object</code>) is carried across, neither destructed nor rebuilt; inherited C++ methods stay callable</td></tr></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>change</th><th>what happens to live instances</th></tr></thead><tbody><tr><td>field kept (same name, same type)</td><td>value preserved, even if the initializer changed</td></tr><tr><td>field added</td><td>takes the new initializer</td></tr><tr><td>field removed</td><td>gone; access raises <code>Player has no member &#x27;speed&#x27;</code></td></tr><tr><td>field <strong>retyped</strong></td><td>value <strong>converts permissively</strong> via the assignment table (int→string via to_string, float→int truncation, int→float widening); only a value with NO conversion falls back to the new initializer. A reload never bricks an instance</td></tr><tr><td>method body changed</td><td>next call runs the new body, including through a method bound earlier with <code>reflect::bind</code> (no stale caches)</td></tr><tr><td>static members</td><td><strong>runtime state preserved</strong>, not reset to the initializer; removed statics inaccessible; static method bodies update</td></tr><tr><td>constructor overloads</td><td>survive (arity dispatch intact)</td></tr><tr><td>base class reloaded</td><td>derived instances keep their own data, inherit new/retyped base fields (converted through the parent chain)</td></tr><tr><td>script class extending a <strong>C++ class</strong></td><td>the live C++ object (<code>_cpp_object</code>) is carried across, neither destructed nor rebuilt; inherited C++ methods stay callable</td></tr></tbody></table></div>
 <p>Migration cost is linear in live instances and fields; 100 instances migrate fast enough to sit in a keypress handler.</p>
 <h2 id="the-hot-reload-migrate-hook">The <code>hot_reload_migrate</code> hook<a class="hlink" href="#the-hot-reload-migrate-hook" aria-label="link">&#8203;</a></h2>
-<p>If the <strong>new</strong> class defines <code>void hot_reload_migrate()</code>, it runs once per live instance during the reload, <em>after</em> field migration. Inside the hook the old removed fields are still readable, which is what makes real data conversions possible.</p>
+<p>If the <strong>new</strong> class defines <code>void hot_reload_migrate()</code>, it runs once per live instance during a reload that changes the class&#x27;s fields (adds, removes or retypes one), <em>after</em> field migration. A reload that changes only method bodies or initializers migrates nothing and runs no hook. Inside the hook the old removed fields are still readable, which is what makes real data conversions possible.</p>
 <p>Start with the shipped class:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; config_v1.jai</span><pre><code class="lang-jai">class Config {
     int version = 1;
@@ -96,13 +101,13 @@ not live yet when v2 is checked. Without the attribute the same text is a load e
 both situations, put <code>[[warn_mode]]</code> in front of the statement that reads removed fields (or, as
 here, at the top of the hook&#x27;s body). It demotes the diagnostic for that subtree and changes nothing at
 run time. (See <a href="06-static-checking.html#escape-hatches">Escape hatches</a>.)</p></div>
-<p>Chained across versions v1→v2→v3→... each reload runs only the incoming class&#x27;s hook. Robustness rules: an error in one instance&#x27;s hook doesn&#x27;t abort migration of the others, and a hook that constructs new instances of the same class can&#x27;t hang the reload (the execution budget backstops it).</p>
+<p>Chained across versions v1→v2→v3→... each reload runs only the incoming class&#x27;s hook. Robustness rules: an error in one instance&#x27;s hook doesn&#x27;t abort migration of the others (that instance keeps the fields migration gave it), and an instance a hook constructs is already of the new class, so it is not migrated again.</p>
 <h2 id="code-on-the-live-call-stack">Code on the live call stack<a class="hlink" href="#code-on-the-live-call-stack" aria-label="link">&#8203;</a></h2>
 <p>Redefining a function (or class) <strong>while it is executing</strong> (e.g. a host callback fires mid-script and re-executes a script file) follows one rule: <em>frames already on the stack finish with their old bodies; the global binding is replaced immediately, so recursion and all later calls resolve the new one; the new definition persists</em>.</p>
-<p>Here is a function that swaps <em>itself</em> out mid-call by including a file that redefines it, then calls itself once more before returning:</p>
+<p>Here is a function that swaps <em>itself</em> out mid-call by importing a file that redefines it, then calls itself once more before returning:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; live.jai</span><pre><code class="lang-jai">function damage(int x) -&gt; int {
     print(&quot;v1 body: damage({})&quot;, x);
-    include &quot;damage_v2.jai&quot;;           // swaps the global binding while this frame is live
+    import &quot;damage_v2.jai&quot;;            // program scope: swaps the global binding while this frame is live
     if (x &gt; 1) { print(&quot;recursive call, new body: {}&quot;, damage(1)); }
     return x;                          // this frame finishes on the old body
 }
@@ -114,32 +119,67 @@ print(&quot;later call, new body: {}&quot;, damage(10));</code></pre></div>
 recursive call, new body: 3
 outer call, old body: 10
 later call, new body: 30</code></pre></div>
-<p>The frame that was running when the swap happened finished on the old body (<code>10</code>); the recursive call inside it already resolved the new one (<code>3</code>); the new binding survived (<code>30</code>). The same rule covers reentrant <code>execute()</code> calls, which neither clobber the suspended outer run&#x27;s environment nor leak exceptions into it. Coroutines suspended at reload keep their old bodies until rebuilt.</p>
-<p>One documented quirk: a class method mid-recursion when its own class is reloaded fails to resolve sibling methods for the <em>remainder of that one call</em> (consistently, both backends). Afterwards the instance, the class, and new instances all work on the new bodies.</p>
+<p>The frame that was running when the swap happened finished on the old body (<code>10</code>); the recursive call inside it already resolved the new one (<code>3</code>); the new binding survived (<code>30</code>). The same rule covers a class reloaded while one of its methods is on the stack, and reentrant <code>execute()</code> calls, which neither clobber the suspended outer run&#x27;s environment nor leak exceptions into it. Coroutines suspended at reload keep their old bodies until rebuilt.</p>
+<p>The swap uses <code>import</code> because an import&#x27;s effect is always program scope. A literal <code>include</code> inside a function body is spliced into that body when it parses: the functions it declares become the enclosing function&#x27;s own, so they never replace the global one (classes it declares still replace the global class). Reload from program scope, from the host, or through <code>import</code>.</p>
 <h2 id="live-usage-the-games-dev-modes">Live usage: the games&#x27; <code>--dev</code> modes<a class="hlink" href="#live-usage-the-games-dev-modes" aria-label="link">&#8203;</a></h2>
 <p>Both shipped examples dogfood this:</p>
-<ul><li><strong><code>examples/crawler</code></strong> (<code>--dev</code>, key <code>R</code>): <code>reload_scripts()</code> in <code>scripts/main.jai</code> simply re-<code>include</code>s every rule file mid-game: &quot;Classes hot-reload with instance migration; live coroutines keep their old bodies until rebuilt. G and RNG live in state.jai, which is deliberately skipped&quot; (comment in the script). The pattern to copy: split <em>rules</em> (reloadable) from <em>state</em> (not re-executed).</li><li><strong><code>examples/demoreel</code></strong>: live-coding (edit a scene file while it renders, reload on the fly).</li></ul>
+<ul><li><strong><code>examples/crawler</code></strong> (<code>--dev</code>, key <code>R</code>): <code>reload_scripts()</code> in <code>scripts/main.jai</code> re-runs every rule file mid-game and deliberately skips <code>state.jai</code>, which holds the persistent globals (<code>G</code>, <code>RNG</code>). The pattern to copy: split <em>rules</em> (reloadable) from <em>state</em> (not re-executed).</li><li><strong><code>examples/demoreel</code></strong>: live-coding. Edit a scene file while it renders and press <code>r</code>: the host re-executes every scene file into both engines and the current scene rebuilds; <code>main.jai</code>, which owns the persistent globals, is never reloaded.</li></ul>
 <p><code>include</code> re-runs a file every time by design (PHP-style template semantics): the forcing form. <code>import</code> is the module system, and reload is <strong>pull-based</strong>: a module re-runs when an <code>import</code> of it is <em>reached</em> after its file changed. There is no watcher thread and no out-of-band reload sweep, deliberately: a module re-running has side effects, and those land exactly where control flow puts them. The full rules are the guide&#x27;s <a href="../guide/10-modules.html#reloading-from-a-running-program">Reloading from a running program</a>; what a host needs from them:</p>
 <ul><li><strong>Checks come in passes.</strong> At most once per <code>import_recheck_interval</code> (0.2 s by default) the first import reached opens a pass and every import reached in it stats its modules once; between passes an import reads no clock and asks the filesystem nothing. A touched file is picked up within about the interval, and a frame sees all of a set of edits or none.</li>
-<li><strong>Check, then apply.</strong> A changed module is parsed and checked (with the modules it imports) before any of it runs. A mistake raises a catchable error naming the file and line, and the program keeps the code it had.</li>
+<li><strong>Check, then apply.</strong> A changed module is parsed and checked (with the modules it imports) before any of it runs. A mistake raises a catchable error naming the file and line, and the program keeps the code it had. The broken file is not retried until it changes again.</li>
+<li><strong>A module is its whole tree.</strong> A pass also checks every module a module&#x27;s last run imported (transitively, each once per pass) and every file that run included, so an edit to a nested module or to an included table file re-runs exactly the module that read it.</li>
+<li><strong>A missing file raises once.</strong> When a loaded module&#x27;s file disappears, the next pass raises <code>Failed to open import file: &lt;path&gt;</code> once; after that the program keeps the code it had and the import waits quietly until the file is back, then re-runs it.</li>
 <li><strong>State survives by declaration.</strong> Functions and classes replace in place (live instances migrate, rules above); a variable declared with an initializer takes the new value, one declared without (<code>int kills;</code>) keeps the value it holds.</li>
 <li><strong>The call form is an expression.</strong> <code>import(&quot;rules.jai&quot;)</code> answers <code>true</code> when a module ran on this reach; <code>import(&quot;a.jai&quot;, &quot;b.jai&quot;)</code> or an array of paths is one group decision; a trailing <code>jai::force</code> opens a pass at once (an F5 key).</li></ul>
-<p>The host side is a frame loop that reaches the imports, usually by calling a script function that names them. The C++ half, from <code>examples/embed_quickstart</code>:</p>
+<p>The host side is a frame loop that reaches the imports, usually by calling a script function that names them:</p>
 <div class="codeblock cb-jai" data-host="rules.jai (damage_for) and the C++ loop below"><span class="cb-label">jaiscript &middot; game.jai</span><pre><code class="lang-jai">import &quot;rules.jai&quot;;
 
 int tick(int frame) {
     import(&quot;rules.jai&quot;);            // reached every frame: a touched rules.jai re-runs here
     return damage_for(frame);
 }</code></pre></div>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute_file(&quot;scripts/game.jai&quot;);
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
+eng-&gt;execute_file(&quot;scripts/game.jai&quot;);
 jai::script_value tick = eng-&gt;get_variable(&quot;tick&quot;);
 for (int64_t frame = 0; running; ++frame) {
-    auto r = tick.as_function()({eng-&gt;make_value(frame)});
-    if (!r) { log(eng-&gt;format_error(r)); }            // a broken edit: listing with file:line, old code keeps running
+    try {
+        auto r = tick.as_function()({eng-&gt;make_value(frame)});
+        if (!r) { log(eng-&gt;format_error(r)); }   // a run-time error in the frame: &quot;Division by zero&quot;
+        else { use(r.value().as_int()); }
+    } catch (const std::exception&amp; e) {
+        log(e.what());                          // a broken edit or a missing module (and an uncaught script throw)
+    }
     // ... render, sleep ...
+}</code></pre></div>
+<p>The two failure routes differ. A run-time error inside the call comes back in the <code>checked_result</code>. A rejected reload (the check listing, naming <code>rules.jai</code> with its line and a caret), a module whose file went missing, and a script <code>throw</code> nothing caught all cross the call as a <code>jai::script_exception</code>. Either way the engine keeps the code it had and the next frame runs it. Inside script, a <code>try</code> around the <code>import</code> catches the same errors.</p>
+<p>Tests want no window at all: <code>eng-&gt;import_recheck_interval(0)</code> (or <code>import_recheck_interval(0)</code> from script) checks on every reach, so a file the test writes is seen by the very next import, even inside one <code>execute()</code>. With the default 0.2 s, an edit made just after a pass is seen by the first reach after the window closes.</p>
+<p><code>engine::reset_import(path)</code> and <code>reset_imports()</code> are the narrow escape hatches (forcing a re-run under <code>once</code> mode), not the mechanism; <code>set_import_behavior(jai::engine::import_behavior::once)</code> picks the policy (<code>file_timestamp</code>, the default; <code>once</code>; or <code>always</code>, which treats every import as an include).</p>
+<h2 id="reload-reports">Reload reports<a class="hlink" href="#reload-reports" aria-label="link">&#8203;</a></h2>
+<p>A host (an editor panel, a log line after each reload) can ask what a reload did to live instances. Reporting is off by default; turned on, every automatic field operation a reload performs is aggregated into rows until the host clears them. Continuing the <code>Player</code> reload above:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
+const char* outcome_name(jai::field_migration_outcome o) {
+    switch (o) {
+        case jai::field_migration_outcome::preserved: return &quot;preserved&quot;;
+        case jai::field_migration_outcome::converted: return &quot;converted&quot;;
+        case jai::field_migration_outcome::reset:     return &quot;reset&quot;;
+        case jai::field_migration_outcome::added:     return &quot;added&quot;;
+        case jai::field_migration_outcome::removed:   return &quot;removed&quot;;
+    }
+    return &quot;?&quot;;
 }
-// eng-&gt;import_recheck_interval(0);                   // tests: check on every reach</code></pre></div>
-<p><code>engine::reset_import(s)</code> is the narrow escape hatch (forcing a re-run under <code>once</code> mode), not the mechanism; <code>set_import_behavior(once|always|file_timestamp)</code> (<code>engine.hpp</code>).</p>
+
+eng-&gt;hot_reload_reporting(true);         // off by default
+eng-&gt;clear_hot_reload_reports();         // rows accumulate until cleared
+eng-&gt;execute(new_player_source);         // the reload
+for (const jai::field_migration_report&amp; row : eng-&gt;hot_reload_reports()) {
+    std::cout &lt;&lt; row.class_name &lt;&lt; &quot;.&quot; &lt;&lt; row.field_name &lt;&lt; &quot;: &quot; &lt;&lt; row.old_type &lt;&lt; &quot; -&gt; &quot; &lt;&lt; row.new_type
+              &lt;&lt; &quot; &quot; &lt;&lt; outcome_name(row.outcome) &lt;&lt; &quot; x&quot; &lt;&lt; row.count &lt;&lt; &quot;\n&quot;;
+}</code></pre></div>
+<div class="codeblock cb-plain"><pre><code class="lang-plain">Player.hp: int -&gt; string converted x1
+Player.name: string -&gt; string preserved x1
+Player.level: &lt;absent&gt; -&gt; int added x1
+Player.speed: float -&gt; &lt;absent&gt; removed x1</code></pre></div>
+<p>A row aggregates by class, field, the stored type before and after, and the outcome (<code>preserved</code>, <code>converted</code>, <code>reset</code> when a retyped value had no conversion and took the new initializer, <code>added</code>, <code>removed</code>); <code>count</code> is the number of instances that field operation touched. A reload that changes no fields migrates nothing and adds no rows. Rows hold metadata only: no values, no object identities, no hook outcomes. The host reads them on the engine&#x27;s thread after the reload; nothing calls back during migration, and with reporting off a reload records nothing.</p>
 <h2 id="interaction-with-the-rest-of-the-engine">Interaction with the rest of the engine<a class="hlink" href="#interaction-with-the-rest-of-the-engine" aria-label="link">&#8203;</a></h2>
 <ul><li><strong>Source cache / static checker</strong>: new source text is a new parse-cache entry, so the checker re-checks reloaded code automatically. A redefinition may read fields of the shape the engine still holds (that is what makes migration hooks legal). The same text in a fresh engine is a load error.</li>
 <li><strong>Parse-time type proofs</strong>: a reload that retypes, drops, re-parents or hides a field moves that class&#x27;s field-shape epoch, so every proof stamped against the old shape simply misses and the value converts through the migration path documented above. Nothing for you to do. It is why the fast lanes stay safe under reload (<a href="06-static-checking.html#proofs">Proofs</a>).</li><li><strong>jaibite</strong>: class redefinition works across repeated bite executions too.</li><li><strong>Serialization</strong>: for <em>C++-side</em> class evolution, versioned archives + <code>post_load_hook</code> are the analogous migration story (see Serialization chapter); <code>hot_reload_migrate</code> is the <em>script-side</em> twin for live sessions.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/06-static-checking.html"><span>&larr; previous</span>Static Checking</a><a class="next" rel="next" href="../embedding/08-serialization.html"><span>next &rarr;</span>Serialization</a></nav></article>

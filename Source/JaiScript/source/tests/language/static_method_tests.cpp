@@ -287,6 +287,33 @@ public:
             check_eq(eng->execute("Fmt::tag(\"x\")").as<std::string>(), "[x]");
             check_eq(eng->execute("Fmt::tag(\"x\", \"*\")").as<std::string>(), "*x*");
         });
+
+        // a static method runs in the caller's loop: overloads, recursion, a bare static and a sibling static, a reference
+        // parameter, a throw caught by the caller, a call through a saved function value, from a loop and from a method
+        test("static_methods_called_from_loops", [&]() {
+            auto eng = make_engine();
+            eng->execute(R"(
+                class K {
+                    static int count = 0;
+                    static int pick(int a) { return 1; }
+                    static int pick(string a) { return 2; }
+                    static int fact(int n) { if (n <= 1) { return 1; } return n * K::fact(n - 1); }
+                    static int bump() { count += 1; return twice(count); }
+                    static int twice(int x) { return x * 2; }
+                    static void inc(int& r) { r += 10; }
+                    static int fail(int x) { if (x > 2) { throw "too big"; } return x; }
+                    int via_method(int n) { int s = 0; for (int i = 0; i < n; i++) { s += K::twice(i); } return s; }
+                }
+            )");
+            check_eq((int64_t)1212, eng->execute("int s = 0; for (int i = 0; i < 2; i++) { s = s * 100 + K::pick(i) * 10 + K::pick(\"x\"); } s").as_int(), "overloads by argument type");
+            check_eq((int64_t)120, eng->execute("int f = 0; for (int i = 0; i < 3; i++) { f = K::fact(5); } f").as_int(), "recursion");
+            check_eq((int64_t)6, eng->execute("int b = 0; for (int i = 0; i < 3; i++) { b = K::bump(); } b").as_int(), "a bare static and a sibling static");
+            check_eq((int64_t)30, eng->execute("int v = 0; for (int i = 0; i < 3; i++) { K::inc(v); } v").as_int(), "a reference parameter");
+            check_eq(std::string("too big"), eng->execute("string m = \"\"; for (int i = 0; i < 4; i++) { try { K::fail(i); } catch (e) { m = e; } } m").as<std::string>(), "a throw");
+            check_eq((int64_t)3, eng->execute("int ok = 0; for (int i = 0; i < 4; i++) { try { ok += K::fail(i); } catch (e) { ok += 100; } } ok - 100").as_int(), "the calls before the throw");
+            check_eq((int64_t)8, eng->execute("var g = K::twice; int r = 0; for (int i = 0; i < 2; i++) { r = g(4); } r").as_int(), "a saved function value");
+            check_eq((int64_t)12, eng->execute("K k = K(); k.via_method(4)").as_int(), "from a method");
+        });
     }
 };
 

@@ -1472,6 +1472,9 @@ namespace jai {
         std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
         std::shared_ptr<environment> get_block_environment(std::shared_ptr<environment> parent);   // a { } / loop / case scope
         std::shared_ptr<environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx = nullptr);
+        // a script class's static method called directly (the dispatcher's overload and static scope env, no callable hop): false when
+        // callee is not one this interpreter enters, else the call's result in out
+        bool call_static_method(const script_function& callee, const std::vector<script_value>& arguments, std::optional<checked_result<script_value>>& out);
         void release_environment(const std::shared_ptr<environment>& env, bool clear_now = true);
         void reset_environment_pool();
     };

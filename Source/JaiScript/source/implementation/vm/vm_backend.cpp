@@ -11738,7 +11738,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 					site.ic_argc = static_cast<uint32_t>(argc);
 					site.ic_native = false;
 				}
-			} else if (!thunk) {
+			} else if (!thunk && !calleeVal.unchecked_as_function().target<script_static_method_dispatch>()) {   // a static method enters in-loop (invoke_callee)
 				// a host callable takes the arguments as they are (invoke_callee's opaque path): held by its payload, cached
 				// on the same identity the script callee's cache keys on
 				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
@@ -12551,6 +12551,10 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 		profile_bound_method_paths_[3]++;
 	}
 #endif
+	if (!direct) {
+		op_status st{};
+		if (enter_static_method(f, callee, arguments, site, st)) { return st; }
+	}
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		if (direct) {
@@ -12702,6 +12706,8 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 		}
 	}
 	if (!direct) {
+		op_status st{};
+		if (enter_static_method(f, callee, arguments, site, st)) { return st; }
 		return invoke_native(f, func, arguments, site);
 	}
 	std::optional<checked_result<script_value>> callOutcome;
@@ -20570,6 +20576,131 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 		return bound;
 	}
 	// Body slots exist behind window_live so operand temps start above the full window
+	{
+		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
+		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
+	}
+	switch_to_ = &rec.f;
+	return {};
+}
+
+bool vm_backend::enter_static_method(frame& caller, script_value& callee, const std::vector<script_value>& arguments, const call_site& site, op_status& st) {
+	if (parallel_worker_ || callee.raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
+	const auto* dispatch = callee.unchecked_as_function().target<script_static_method_dispatch>();
+	if (!dispatch || dispatch->eng != engine_ || !dispatch->cls || !dispatch->fallback) return false;
+	// the overload operator() would run: the fallback, or the best of several
+	std::shared_ptr<function_decl> ast = dispatch->fallback;
+	const auto& table = dispatch->cls->script_static_method_overloads();
+	const auto it = table.find(dispatch->name_id);
+	if (it != table.end() && it->second.size() > 1) {
+		if (auto best = pick_best_overload(it->second, arguments)) { ast = std::move(best); }
+	}
+	if (!ast->body || ast->is_coroutine) return false;   // a coroutine mints a handle: the opaque call's execute_method_ast
+	try {
+		st = push_static_method_frame(caller, std::move(callee), *dispatch, ast, arguments, &site);
+	} catch (const script_exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		st = {};
+	} catch (const std::exception& e) {
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		st = {};
+	}
+	return true;
+}
+
+// push_method_frame without a receiver: the body runs in the static scope env the opaque call's execute_method_ast gives it
+// (parented on the definition env, the class for bare statics and access), parameters in the window
+op_status vm_backend::push_static_method_frame(frame& caller, script_value&& method_val, const script_static_method_dispatch& dispatch,
+                                               const std::shared_ptr<function_decl>& ast, const std::vector<script_value>& arguments, const call_site* site) {
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
+		return raise_from(detail::raise_call_depth());
+	}
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return raise_from(execution_limit_failure());
+	}
+	assert(!has_return_value_);
+	chunk* body_chunk;
+	if (dispatch.body_cache_key == ast->body.get()) {
+		body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
+	} else {
+		auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
+		dispatch.body_cache = compiled;
+		dispatch.body_cache_key = ast->body.get();
+		body_chunk = compiled.get();
+	}
+	if (call_records_top_ == call_records_.size()) {
+		call_records_.push_back(std::make_unique<call_record>());
+	}
+	call_record& rec = *call_records_[call_records_top_];
+	++call_records_top_;
+#ifdef JAISCRIPT_VM_PROFILE
+	rec.profile_entry_tsc = __rdtsc();
+#endif
+	rec.caller = &caller;
+	rec.return_type = ast->return_type;
+	if (ast->backend_return_conv == 0) {
+		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
+	}
+	rec.return_conv_class = ast->backend_return_conv;
+	if (rec.ast_pin.get() != ast.get()) [[unlikely]] {
+		rec.ast_pin = ast;
+	}
+	rec.method_result_anchor = false;   // no receiver to anchor a result to
+	rec.callee_pin = std::move(method_val);
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
+	rec.locals.function_name = ast->name;
+	rec.locals.reset_member_scope();
+	rec.locals.scope_static = dispatch.cls.get();
+	rec.cells.reset_call();
+	rec.f.cells = &rec.cells;
+	rec.env_lazy = false;
+	rec.env_untouched = false;
+	try {
+		rec.prev_env = std::move(environment_);
+		environment_ = acquire_static_scope_env(dispatch.definition_env, dispatch.cls);
+	} catch (...) {
+		rec.callee_pin = make_null();
+		rec.return_type = nullptr;
+		rec.ast_pin.reset();
+		if (rec.prev_env) { environment_ = std::move(rec.prev_env); }
+		--call_records_top_;
+		throw;
+	}
+	++current_call_depth_;
+	rec.f.code = body_chunk;
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	rec.f.entry_env = environment_;
+	rec.f.window_backed = true;
+	rec.f.window_base = stack_.size();
+	rec.f.window_live = 0;
+	rec.f.stack_base = stack_.size();
+	rec.f.top_level = false;
+	rec.f.unit = ast->unit;
+	enter_unit(ast->unit);
+	frames_.push_back(&rec.f);
+	op_status bound{};
+	try {
+		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code, rec.prev_env, site, &caller, caller.code,
+		                        site_arg_proofs(site, caller.code, ast->body.get(), ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
+		                        0, false, ast->body.get());
+	} catch (...) {
+		pop_script_frame_core(rec);
+		throw;
+	}
+	if (bound == op_status::failed) {
+		pop_script_frame_core(rec);
+		return bound;
+	}
 	{
 		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
 		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);

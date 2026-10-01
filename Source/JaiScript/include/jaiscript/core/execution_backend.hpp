@@ -84,6 +84,9 @@ struct script_static_method_dispatch {
     uint64_t name_id = 0;
     std::shared_ptr<environment> definition_env;
     std::shared_ptr<function_decl> fallback;
+    // the vm's compiled-body slot for the overload last entered in-loop, keyed by its body (script_method_dispatch's)
+    mutable std::shared_ptr<void> body_cache;
+    mutable const void* body_cache_key = nullptr;
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
 };
 

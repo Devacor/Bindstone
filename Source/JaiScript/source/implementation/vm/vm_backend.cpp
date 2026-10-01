@@ -15193,10 +15193,19 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					class_definition* cd = inst->get_class_definition();
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
 					// C++ object, the receiver and arguments read in place; a declined shape takes the ordinary call
-					if (!parallel_worker_ && cd && cd->has_native_methods() && !cd->extended_ever()) {
-						const class_definition::native_entry* native = cd->find_native_method(member->member_id);
-						if (native && !inst->has_field(member->member_id)) {   // a field of the name is the member the call reads
-							if (void* self = inst->cpp_object_pointer()) {
+					if (!parallel_worker_ && cd && cd->has_native_methods()) {
+						const class_definition::native_entry* native = nullptr;
+						void* self = nullptr;
+						if (site.nat_cd == cd && site.nat_stamp == cd->native_stamp() && site.nat_shape == cd->field_shape_epoch()) {
+							if (site.nat_entry && !native_field_shadowed(site, *inst, member->member_id)) {
+								native = static_cast<const class_definition::native_entry*>(site.nat_entry);
+								self = inst->cpp_object_pointer_at(site.nat_cpp_slot);
+							}
+						} else {
+							native = native_site_miss(site, *cd, *inst, member->member_id, self);
+						}
+						if (native) {
+							if (self) {
 								script_value out = make_null();
 								bool taken = false;
 								try {
@@ -20451,8 +20460,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 		return bound;
 	}
 	JAI_MPUSH_SECTION(4);
-	// Conversions during binding push and pop above the args, so the slice is intact
-	assert(stack_.size() == args_base + argc);
+	// Conversions during binding push and pop above the args, so the slice is intact; a default argument extends the window
+	assert(stack_.size() == args_base + rec.f.window_live);
 	{
 		const size_t window_slots = std::max(rec.ast_pin->local_count, static_cast<size_t>(body_chunk->local_count));
 		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);

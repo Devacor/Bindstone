@@ -248,6 +248,88 @@ public:
             check_eq(oracle, run(true, false), "vm, proofs off");
             check_eq(oracle, run(false, false), "interpreter, proofs off");
         });
+
+        // The sibling memo for the other method shapes: overloads chosen by the arguments, a reference parameter, a default argument, a
+        // class parameter, a private sibling, a throw, a coroutine minted by a bare call, a lambda in a method and a sibling that a
+        // derived class overrides on alternating receivers, each called from a loop
+        test("sibling_method_calls_of_every_shape", [this]() {
+            const std::string src = R"(
+                class P { int x = 0; P(int v) { x = v; } }
+                class Shapes {
+                    int n = 2;
+                    int pick(int k) { return k; }
+                    int pick(string s) { return 100; }
+                    void bump(int& r) { r = r + n; }
+                    int dflt(int a, int b = 5) { return a * b; }
+                    int px(P p) { return p.x; }
+                    int vf(int k) { return k + 1; }
+                    private: int secret(int k) { return k * 7; }
+                    public:
+                    int raise_at(int k) { if (k == 2) { throw "at " + to_string(k); } return k; }
+                    coroutine int gen(int m) { for (int i = 0; i < m; ++i) { yield i * n; } }
+                    string run() {
+                        int s = 0; int r = 0; string errs = "";
+                        for (int i = 0; i < 4; ++i) {
+                            s = s + pick(i) + pick("q") + dflt(i) + dflt(i, 2) + px(P(i)) + secret(i) + vf(i);
+                            bump(r);
+                            try { s = s + raise_at(i); } catch (e) { errs = errs + e; }
+                        }
+                        var co = gen(3); int g = 0;
+                        while (true) { var v = co.resume(); if (co.done()) { break; } g = g + v; }
+                        var f = [this](int k) { return pick(k) + vf(k); };
+                        int l = 0; for (int i = 0; i < 3; ++i) { l = l + f(i); }
+                        return to_string(s) + " " + to_string(r) + " " + errs + " " + to_string(g) + " " + to_string(l);
+                    }
+                }
+                class Over : Shapes { int vf(int k) override { return k * 1000; } }
+                var a = Shapes(); var b = Over();
+                string out = "";
+                for (int k = 0; k < 2; ++k) { out = out + a.run() + ";" + b.run() + ";"; }
+                out;
+            )";
+            auto run = [&](bool vm, bool proofs) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                if (!proofs) { e->type_proofs(false); }
+                std::string got;
+                try { got = e->execute(src).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+                return got;
+            };
+            const std::string oracle = run(false, true);
+            check_true(oracle.rfind("throw:", 0) != 0, "the interpreter's answer: " + oracle);
+            check_eq(std::string("510 8 at 2 6 9;6500 8 at 2 6 3003;510 8 at 2 6 9;6500 8 at 2 6 3003;"), oracle, "the expected values");
+            check_eq(oracle, run(true, true), "vm");
+            check_eq(oracle, run(true, false), "vm, proofs off");
+            check_eq(oracle, run(false, false), "interpreter, proofs off");
+        });
+
+        // The vm's memo of a host class's native lane follows the class: a lane replaced or withdrawn after a site cached it is what the
+        // next call through that site takes (the replacement's answer, or the ordinary call's)
+        test("native_lane_site_memo_follows_the_class", [this]() {
+            struct Acc {
+                int64_t total = 0;
+                int64_t add(int64_t v) { total += v; return total; }
+            };
+            for (bool vm : {false, true}) {
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                stdlib::register_all(*e);
+                dynamic_binder<Acc>(*e, "Acc").constructor<>().method("add", &Acc::add).build();
+                e->execute("auto a = Acc(); function go(var acc, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s = s + acc.add(i); } return s; }");
+                const std::string tag = vm ? " (vm)" : " (interpreter)";
+                check_eq((int64_t)20, e->execute("go(a, 5)").as_int(), "the lane" + tag);
+                auto def = e->get_class_definition("Acc");
+                def->withdraw_native_lane(e->symbolize("add"));
+                check_eq((int64_t)20, e->execute("go(a, 5)").as_int(), "the withdrawn lane's ordinary call" + tag);
+                def->add_native_method(e->symbolize("add"), [](void*, const script_value& receiver, const script_value*, size_t argc, script_value& out) {
+                    if (argc != 1) { return false; }
+                    out = script_value(script_int(1000), receiver.get_engine());
+                    return true;
+                });
+                check_eq(vm ? (int64_t)5000 : (int64_t)20, e->execute("go(a, 5)").as_int(), "a lane added later" + tag);
+            }
+        });
     }
 };
 

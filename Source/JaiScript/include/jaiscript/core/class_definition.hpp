@@ -218,6 +218,8 @@ public:
 
     // The C++ object's address as _cpp_object holds it (owning or not); null without one.
     // A raw read - no handle copies - for the slot lookups on member resolution.
+    // cpp_object_pointer through the class's slot for _cpp_object (k_no_field_slot: the ordinary lookup)
+    void* cpp_object_pointer_at(uint32_t slot) const;
     void* cpp_object_pointer() const {
         uint64_t field_id = get_cpp_object_field_id();
         if (field_id == 0) return nullptr;
@@ -1444,7 +1446,7 @@ public:
     // Set once an object of this C++ class has been extended: only then does member
     // resolution on a plain wrapper of the class consult the object's slot (a wrapper made
     // before the extend still resolves to the layer). Definitions never extended pay nothing.
-    void note_extended() { extended_ever_ = true; }
+    void note_extended() { if (!extended_ever_) { extended_ever_ = true; restamp_native_methods(); } }
     bool extended_ever() const { return extended_ever_; }
 
     // Nearest C++ base anywhere up the script parent chain — the class an instance's
@@ -1624,9 +1626,10 @@ public:
             return plain ? plain(self, receiver, args, argc, out) : lane(state.get(), self, receiver, args, argc, out);
         }
     };
-    void add_native_method(uint64_t id, native_method fn) { native_entry& e = native_methods_[id]; e.plain = fn; e.lane = nullptr; e.state.reset(); }
+    void add_native_method(uint64_t id, native_method fn) { native_entry& e = native_methods_[id]; e.plain = fn; e.lane = nullptr; e.state.reset(); restamp_native_methods(); }
     // a second binding of the name (an overload) withdraws the derived lane: resolution among overloads stays the ordinary call's
     void add_native_lane(uint64_t id, native_lane fn, std::shared_ptr<const void> state) {
+        restamp_native_methods();
         if (!native_lane_names_.insert(id).second) {
             auto it = native_methods_.find(id);
             if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
@@ -1637,6 +1640,7 @@ public:
         it->second.lane = fn; it->second.state = std::move(state);
     }
     void withdraw_native_lane(uint64_t id) {
+        restamp_native_methods();
         native_lane_names_.insert(id);
         auto it = native_methods_.find(id);
         if (it != native_methods_.end() && !it->second.plain) { native_methods_.erase(it); }
@@ -1645,6 +1649,13 @@ public:
     const native_entry* find_native_method(uint64_t id) const {
         auto it = native_methods_.find(id);
         return it == native_methods_.end() ? nullptr : &it->second;
+    }
+    // Moves on every change to the native lanes (and on extend) to a value unique in the engine, so a call site that
+    // cached an entry of this class can never match a recycled class_definition at the same address
+    uint64_t native_stamp() const noexcept { return native_stamp_; }
+    void restamp_native_methods() {
+        if (engine_) { engine_->bump_class_definition_epoch(); native_stamp_ = engine_->class_definition_epoch(); }
+        else { ++native_stamp_; }
     }
     uint64_t reflection_generation() const { return reflection_generation_; }
     // The C++ identity behind a host-backed class (nullptr for script classes) — lets
@@ -2215,6 +2226,7 @@ private:
     bool strict_signatures_ = false;
     std::unordered_map<uint64_t, native_entry> native_methods_;
     std::unordered_set<uint64_t> native_lane_names_;   // every name the binder bound (a second binding is an overload)
+    uint64_t native_stamp_ = 0;
     uint64_t reflection_generation_ = 0;
     std::vector<uint64_t> field_order_;
     const std::type_info* cpp_type_ = nullptr;
@@ -2416,6 +2428,16 @@ inline script_value* class_instance::find_field_value(uint64_t id) {
 
 inline const script_value* class_instance::find_field_value(uint64_t id) const {
     return const_cast<class_instance*>(this)->find_field_value(id);
+}
+
+inline void* class_instance::cpp_object_pointer_at(uint32_t slot) const {
+    if (slot == class_definition::k_no_field_slot) { return cpp_object_pointer(); }
+    if (slot >= flat_fields_.size()) { return nullptr; }
+    const script_value* held = flat_fields_[slot].get();
+    if (!held || !held->is_object()) { return nullptr; }
+    auto holder = held->get_object_holder();
+    if (!holder) { return nullptr; }
+    return holder->data ? holder->data.get() : holder->bound_ptr;
 }
 
 inline script_value& class_instance::materialize_field(uint64_t id, script_value&& v) {

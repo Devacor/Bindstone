@@ -556,7 +556,7 @@ namespace jai {
             external_ctx_stack_.push_back(pending_call_ctx_);
             pending_call_ctx_ = nullptr;
         }
-        checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset, int& component,
+        checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
                                                              host_slot& slot);
         checked_result<void> host_slot_store(const host_slot& slot, script_value& value);
         void pop_external_call_scope() {
@@ -1333,6 +1333,10 @@ namespace jai {
                                                       const script_defined_function* callee = nullptr, size_t param_index = 0);
         // Share-or-box against the caller's variable storage (cell model)
         checked_result<bool> reference_to_storage(script_value& storage, script_value& out);
+        // `v.x` where a reference binds: a COMPONENT reference (detail/math_component_store.hpp), else a non-reference
+        checked_result<script_value> component_reference(const expression* e, call_frame* caller_locals, const std::shared_ptr<environment>& caller_env);
+        // A reference declaration's math-component initializer as a COMPONENT reference, else the declaration's non-lvalue error
+        checked_result<script_value> declared_component_reference(variable_decl* decl);
         checked_result<bool> bind_site_reference(const expression* argExpr, call_frame* caller_locals,
                                                  const std::shared_ptr<environment>& caller_env, script_value& out,
                                                  host_slot* slot_out = nullptr, size_t caller_index = 0);

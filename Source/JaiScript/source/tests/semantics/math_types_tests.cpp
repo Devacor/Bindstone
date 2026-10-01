@@ -119,6 +119,24 @@ public:
             expect(raised("var v = math::vec2(); v.z = 1;"), "math::vec2 has no member 'z'", "a store to a missing component");
         });
 
+        // Dev ruling 2026-09-30: a component is an lvalue wherever a reference binds, as in C++
+        test("components_are_lvalues", [expect, raised]() {
+            const std::string fns = "void f(float& a) { a = a * 10; } void g(var& a) { a = 2.7; } ";
+            expect(fns + "math::vec3 v = math::vec3(1, 2, 3); f(v.y); to_string(v)", "(1.0, 20.0, 3.0)", "a reference parameter");
+            expect("function k() -> string { math::vec2 v = math::vec2(1, 2); var bump = [](float& a) { a += 5; }; bump(v.x); return to_string(v); } k()", "(6.0, 2.0)", "a local of a lowered function");
+            expect("math::vec3 v = math::vec3(1, 2, 3); auto& r = v.x; r = 5; r += 1; r++; to_string(v) + to_string(r)", "(7.0, 2.0, 3.0)7.0", "auto& r = v.x: stores, compound, increment");
+            expect("math::vec3 v = math::vec3(1, 2, 3); float& r = v.z; v = math::vec3(0, 0, 0); r = 4; to_string(v)", "(0.0, 0.0, 4.0)", "a reference to the variable's component outlives a whole store");
+            expect("math::vec2 v = math::vec2(1, 2); auto& r = v.y; v.y = 7; to_string(r)", "7.0", "a read through the reference sees the current component");
+            expect("math::vec3 v = math::vec3(1, 2, 3); auto& r = cast<float&>(v.x); r = 8; to_string(v)", "(8.0, 2.0, 3.0)", "cast<float&>(v.x)");
+            expect("class H { math::vec2 p = math::vec2(1, 2); } float& px(H& h) { return h.p.x; } var h = H(); auto& r = px(h); r = 5; to_string(h.p)", "(5.0, 2.0)", "a -> float& return of a component");
+            expect(fns + "class B { math::vec3 pos = math::vec3(1, 1, 1); } var b = B(); f(b.pos.x); to_string(b.pos)", "(10.0, 1.0, 1.0)", "a field's component");
+            expect(fns + "class B { math::vec3 pos = math::vec3(1, 1, 1); void go() { f(pos.y); f(this.pos.z); } } var b = B(); b.go(); to_string(b.pos)", "(1.0, 10.0, 10.0)", "a bare field and this.field in a method");
+            expect(fns + "array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4)]; int i = 1; f(a[i].y); f(a[0].x); to_string(a[0]) + to_string(a[1])", "(10.0, 2.0)(3.0, 40.0)", "an element of a typed vector buffer");
+            expect(fns + "class S { static math::vec2 v = math::vec2(1, 2); } f(S::v.y); to_string(S::v)", "(1.0, 20.0)", "a static's component");
+            expect("void h(float& c) { c = 0.5; } math::color col = math::color(1, 1, 1, 1); h(col.g); to_string(col)", "(1.0, 0.5, 1.0, 1.0)", "a color channel");
+            expect(fns + "math::ivec2 q = math::ivec2(1, 1); math::ivec2 d = math::ivec2(1, 1); string a = \"\"; string b = \"\"; try { d.x = 2.7; } catch (e) { a = e; } try { g(q.x); } catch (e) { b = e; } to_string(a == b && to_string(q) == to_string(d))", "true", "the store narrows as v.x = value does");
+        });
+
         test("every_copy_is_its_own_value", [expect]() {
             expect("math::vec3 a = math::vec3(1, 2, 3); var b = a; var c = [a, a]; c[1].y = 7; b.z = 9; to_string(a) + to_string(b) + to_string(c[0]) + to_string(c[1])",
                    "(1.0, 2.0, 3.0)(1.0, 2.0, 9.0)(1.0, 2.0, 3.0)(1.0, 7.0, 3.0)", "locals and elements");
@@ -690,6 +708,8 @@ public:
             expect("var b = Body(); b.p2 = math::vec3(1, 1, 1); b.p2.y = 3; to_string(b.p2) + to_string(b.pos)", "(1.0, 3.0, 1.0)(1.0, 3.0, 1.0)", "a getter/setter property");
             expect("var b = Body(); b.pos = math::vec3(1, 2, 3); to_string(b.moved(math::vec3(1, 1, 1)))", "(2.0, 3.0, 4.0)", "a method");
             expect("var b = Body(); b.path = [math::vec3(1, 2, 3)]; to_string(b.path.size())", "1", "a vector member");
+            expect("void f(float& a) { a = 9; } var b = Body(); b.pos = math::vec3(1, 2, 3); f(b.pos.y); auto& r = b.pos.z; r = 4; to_string(b.pos)", "(1.0, 9.0, 4.0)", "a component of a member binds by reference");
+            expect("void f(float& a) { a = 9; } var b = Body(); b.p2 = math::vec3(1, 2, 3); f(b.p2.x); to_string(b.pos)", "(9.0, 2.0, 3.0)", "a component of a getter/setter property stores through the setter");
         });
 
         test("reflected_properties", [this]() {

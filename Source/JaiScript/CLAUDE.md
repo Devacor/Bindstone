@@ -406,6 +406,10 @@ engine stays usable", not by `check_throws`.
   the checker reports an instance method it resolves in the enclosing class chain; locals and parameters still win, a static
   method stays a function value. A reference bound to such a name (`auto& r = heal`, `T& r = heal`, `cast<T&>(heal)`, a `-> T&`
   return) raises the same text, never `Cannot take reference of undefined variable` (`bare_method_reference(_error)`).
+- **Math components are lvalues** (Dev ruling 2026-09-30): `f(v.x)` with `float&`, `auto& r = v.x`, `cast<float&>(v.x)` and a
+  `-> float&` return bind a COMPONENT reference (`reference_holder::component_base` + index over the base's own reference,
+  `detail::math::component_reference`); stores run the component store `v.x = value` makes; a lowered vector local whose
+  component is bound by reference escapes (aggregate lowering, `pos::ref_cast`).
 - **Stores through references** (Dev ruling 2026-09-30, R-q7): `auto& r = o.f; r = v` (and `r op= v`) runs the direct field
   store's table and text (`detail::field_store_convert` via `ref_field_store`); an element reference runs the direct subscript
   store's kernel. There is no second, narrower reference table.

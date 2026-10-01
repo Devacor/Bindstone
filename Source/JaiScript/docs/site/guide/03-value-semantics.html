@@ -134,6 +134,7 @@ print(&quot;arr[1] after realloc = {}&quot;, arr[1]);</code></pre></div>
 arr[1] = 7
 arr[1] after realloc = 8</code></pre></div>
 <p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. This one is not catchable: it is an invariant of the reference model, not a script error.</p>
+<p>A vector or color component is an lvalue too, as a struct member is in C++: <code>f(v.x)</code> with <code>void f(float&amp; a)</code>, <code>auto&amp; r = pos.y;</code>, <code>cast&lt;float&amp;&gt;(v.x)</code> and a <code>-&gt; float&amp;</code> return of a component all bind it. Writes land in the vector the component belongs to (a local, a field, an element of an <code>array&lt;math::vec2&gt;</code>, a C++ property through its setter), with the same narrowing as <code>v.x = value</code>.</p>
 <h2 id="escape-hatch-3-reference-declarations-auto">Escape hatch 3: reference declarations (<code>auto&amp;</code>)<a class="hlink" href="#escape-hatch-3-reference-declarations-auto" aria-label="link">&#8203;</a></h2>
 <p><code>auto&amp; r = x;</code> declares an alias. References chain, and element references survive reallocation just like ref params:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 1;

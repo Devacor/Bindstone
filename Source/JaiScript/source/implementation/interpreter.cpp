@@ -4064,7 +4064,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // deref is a scratch, the write must reach the setter.
                 if (varPtr->is_reference()) {
                     const auto* refHolder = varPtr->get_reference_holder();
-                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref())) {
+                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
                         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                         if (is_unwinding_) {
                             push_value(make_value());
@@ -6443,17 +6443,19 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     }
                     JAISCRIPT_TRY(define_variable(std::move(aliased.value())));
                 } else {
-                    return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
-                        "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
-                        "subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
-                        "computed script properties are not ref-bindable)");
+                    auto part = declared_component_reference(decl);
+                    if (!part) {
+                        return part.error_value();
+                    }
+                    JAISCRIPT_TRY(define_variable(std::move(part.value())));
                 }
             } else {
                 // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_reference),
-                    "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
-                    "subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
-                    "computed script properties are not ref-bindable)");
+                auto part = declared_component_reference(decl);
+                if (!part) {
+                    return part.error_value();
+                }
+                JAISCRIPT_TRY(define_variable(std::move(part.value())));
             }
         }
     } else {
@@ -9599,7 +9601,15 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
                 if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
                     return resolved.error_value();
                 }
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), detail::cast_non_lvalue_text);
+                auto part = component_reference(expr->operand.get(), call_stack_.empty() ? nullptr : &call_stack_.back(), environment_);
+                if (!part) {
+                    return part.error_value();
+                }
+                if (!part.value().is_reference()) {
+                    return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), detail::cast_non_lvalue_text);
+                }
+                operand = std::move(part.value());
+                break;
             }
             operand = std::move(resolved.value());
             break;
@@ -11075,9 +11085,17 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                     detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
                     environment_.get(), engine_, string_symbolizer_);
                 if (!resolved) {
-                    return resolved.error_value();
+                    // a math component returns a COMPONENT reference; anything else keeps the kernel's verdict
+                    auto part = resolved.error() == make_error_code(runtime_error_code::invalid_reference)
+                        ? component_reference(stmt->value.get(), call_stack_.empty() ? nullptr : &call_stack_.back(), environment_)
+                        : checked_result<script_value>(make_value());
+                    if (!part || !part.value().is_reference()) {
+                        return resolved.error_value();
+                    }
+                    out.emplace(std::move(part.value()));
+                } else {
+                    out.emplace(std::move(resolved.value()));
                 }
-                out.emplace(std::move(resolved.value()));
             }
             // Fall through: calls that already yield a reference pass; anything else
             // rejects in the ref-return conversion below
@@ -13631,8 +13649,38 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
             return resolved.error_value();
         }
     }
+    // A math component (f(v.x)) binds a COMPONENT reference over the vector's storage
+    auto part = component_reference(argExpr, caller_locals, caller_env);
+    if (!part) {
+        return part.error_value();
+    }
+    if (part.value().is_reference()) {
+        out = std::move(part.value());
+        return true;
+    }
 
     return false;
+}
+
+checked_result<script_value> interpreter::declared_component_reference(variable_decl* decl) {
+    auto part = component_reference(decl->initializer.get(), call_stack_.empty() ? nullptr : &call_stack_.back(), environment_);
+    if (!part) {
+        return part;
+    }
+    if (!part.value().is_reference()) {
+        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),
+            "Cannot take reference of non-lvalue expression (var&/auto& declarations bind locals, "
+            "subscript chains like arr[i] or grid[y][x], map entries, object fields like obj.field and C++ properties; "
+            "computed script properties are not ref-bindable)");
+    }
+    return part;
+}
+
+checked_result<script_value> interpreter::component_reference(const expression* e, call_frame* caller_locals,
+                                                              const std::shared_ptr<environment>& caller_env) {
+    return detail::math::component_reference(e, detail::caller_frame_view{caller_locals}, caller_env.get(),
+        caller_env ? caller_env->find_access_context() : nullptr, engine_, string_symbolizer_,
+        [this](script_value& storage) { return share_boxed_env_storage(storage, engine_); });
 }
 
 checked_result<bool> interpreter::reference_to_storage(script_value& storage, script_value& out) {
@@ -13702,8 +13750,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
 // A host callable's T& argument (execution_backend::host_reference_argument): the argument the call in flight passed, when
 // the callable received it (a callback a builtin makes with its own arguments did not), resolved as a T& parameter binds it
 checked_result<script_value> interpreter::host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                                  int& component, host_slot& slot) {
-    component = -1;
+                                                                  host_slot& slot) {
     slot = {};
     script_value none(std::monostate{}, engine_);
     const detail::call_site_context* ctx = pending_call_ctx_;
@@ -13724,18 +13771,6 @@ checked_result<script_value> interpreter::host_reference_argument(const std::vec
     }
     if (site.value()) {
         return bound;
-    }
-    if (argExpr && argExpr->get_type() == node_type::member_expr) {
-        auto part = detail::math::component_argument(static_cast<const member_expr*>(argExpr), component,
-            [this](const identifier_expr* id) { return resolve_local_or_env(id->slot_index, id->symbol_id, id->global_qualified); },
-            [this](const member_expr* m) {
-                return detail::math::static_component_cell(m, *engine_, *environment_, *string_symbolizer_, environment_->find_access_context());
-            },
-            [this](script_value& storage) { return share_boxed_env_storage(storage, engine_); },
-            detail::caller_frame_view{caller_locals}, environment_.get(), engine_, string_symbolizer_);
-        if (!part || component >= 0) {
-            return part;
-        }
     }
     if (const auto* holder = detail::deferred_argument(passed)) {
         const script_value& lvalue = holder->argument_source->lvalue;

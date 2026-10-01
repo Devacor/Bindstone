@@ -1660,9 +1660,7 @@ uint8_t engine::overload_dispatch::argument_binding(size_t i, size_t argc) const
     return bits ? bits : static_cast<uint8_t>(detail::arg_binding::opaque);
 }
 
-checked_result<script_value> execution_backend::host_reference_argument(const std::vector<script_value>&, size_t, size_t, int& component,
-                                                                        host_slot& slot) {
-    component = -1;
+checked_result<script_value> execution_backend::host_reference_argument(const std::vector<script_value>&, size_t, size_t, host_slot& slot) {
     slot = {};
     return script_value(std::monostate{}, nullptr);
 }
@@ -1679,9 +1677,8 @@ host_reference host_reference_argument(engine* eng, const std::vector<script_val
     if (!backend || eng->get_symbolizer()->frozen()) {
         return ref;   // parallel workers never write through a host reference
     }
-    int component = -1;
     host_slot slot;
-    auto resolved = backend->host_reference_argument(args, index, offset, component, slot);
+    auto resolved = backend->host_reference_argument(args, index, offset, slot);
     if (!resolved) {
         throw runtime_error(format_error_message_numeric(resolved.message(), resolved.symbol_id(), resolved.symbol_id2()));
     }
@@ -1698,40 +1695,26 @@ host_reference host_reference_argument(engine* eng, const std::vector<script_val
             return ref;
         }
         target = received;
-        component = -1;
     }
     auto current = ref_checked_deref(target);
     if (!current) {
         throw runtime_error(format_error_message_numeric(current.message(), current.symbol_id(), current.symbol_id2()));
     }
-    ref.value = component >= 0 ? math::component_value(current.value(), static_cast<size_t>(component), eng) : std::move(current.value());
+    ref.value = std::move(current.value());
     ref.target = std::move(target);
-    ref.component = component;
     return ref;
 }
 
-checked_result<void> host_reference_store(engine* eng, const host_slot& slot, script_value& target, int component, script_value&& value) {
+checked_result<void> host_reference_store(engine* eng, const host_slot& slot, script_value& target, script_value&& value) {
     if (slot.frame) {
         execution_backend* backend = eng->get_execution_backend();
         return backend ? backend->host_slot_store(slot, value) : checked_result<void>{};
     }
-    if (component < 0) {
+    try {
         return ref_store_through(target, value, eng, eng->get_symbolizer());
+    } catch (const std::exception& e) {
+        return checked_result<void>(make_error_code(runtime_error_code::cpp_exception), "{0}", symbolize_text(eng, e.what()));
     }
-    // a component: the store `v.x = value` makes, into the value the reference names now
-    script_value* storage = math::final_referent(target);
-    if (!math::is_kind(storage->raw_storage_index())) {
-        return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to member of non-object type");
-    }
-    const script_value& rhs = value.deref();
-    auto stored = rhs.raw_storage_index() == script_value::TYPEID_CPP_BOUND
-        ? math::store_component(*storage, component, rhs.bound_decoded_temp(), eng)
-        : math::store_component(*storage, component, rhs, eng);
-    if (!stored) {
-        return stored.error_value();
-    }
-    if (auto* sr = target.scratch_ref_holder()) { sr->commit_scratch(); }
-    return {};
 }
 
 }

@@ -199,6 +199,40 @@ const script_value& script_value::reference_holder::materialize_string_element(e
     return *cell();
 }
 
+const script_value& script_value::reference_holder::materialize_component(engine* eng) {
+    script_value pin = make_component_pin(*this, eng);
+    script_value* storage = &pin.deref();
+    while (storage->is_reference()) { storage = &storage->deref(); }
+    if (!detail::math::is_kind(storage->raw_storage_index())) {
+        throw runtime_error("Reference to a component of a value that is no longer a vector");
+    }
+    script_value v = detail::math::component_value(*storage, container_index, eng);
+    if (has_elem_scratch) {
+        *cell() = std::move(v);
+    } else {
+        new (cell_storage) script_value(std::move(v));
+        has_elem_scratch = true;
+    }
+    return *cell();
+}
+
+void script_value::reference_holder::store_component(const script_value& value, engine* eng) {
+    script_value pin = make_component_pin(*this, eng);
+    script_value* storage = &pin.deref();
+    while (storage->is_reference()) { storage = &storage->deref(); }
+    if (!detail::math::is_kind(storage->raw_storage_index())) {
+        throw runtime_error("Reference to a component of a value that is no longer a vector");
+    }
+    const script_value& rhs = value.deref();
+    auto stored = rhs.raw_storage_index() == TYPEID_CPP_BOUND
+        ? detail::math::store_component(*storage, static_cast<int>(container_index), rhs.bound_decoded_temp(), eng)
+        : detail::math::store_component(*storage, static_cast<int>(container_index), rhs, eng);
+    if (!stored) {
+        throw runtime_error(format_error(stored, *eng->get_symbolizer()));
+    }
+    if (auto* sr = pin.scratch_ref_holder()) { sr->commit_scratch(); }
+}
+
 // PROPERTY mode touches re-resolve the receiver's class and accessor every time (a
 // reload that adds a same-named script field re-points the reference at that field; a
 // retired layer reports). Touch points throw like the other modes do; bind points take
@@ -271,6 +305,10 @@ void script_value::reference_holder::commit_scratch() {
         if (!stored) {
             throw runtime_error(format_error(stored, *eng->get_symbolizer()));
         }
+        return;
+    }
+    if (component_base && has_elem_scratch) {
+        store_component(*cell(), cell()->get_engine());
     }
 }
 
@@ -894,6 +932,29 @@ script_value script_value::make_string_element_reference(const script_value& pin
     return v;
 }
 
+script_value script_value::make_component_reference(const script_value& pin, size_t component, engine* eng) {
+    if (!eng) {
+        throw runtime_error("Cannot create reference: null engine pointer");
+    }
+    if (!pin.get_reference_holder()) {
+        throw runtime_error("Cannot create reference to null");
+    }
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(nullptr);
+    auto ref = acquire_reference_holder(eng);
+    ref->component_base = pin.storage_.get<strong_ptr<reference_holder>>();
+    ref->container_index = component;
+    v.storage_ = ref;
+    return v;
+}
+
+script_value script_value::make_component_pin(const reference_holder& holder, engine* eng) {
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(nullptr);
+    v.storage_ = holder.component_base;
+    return v;
+}
+
 script_value script_value::make_string_element_pin(const reference_holder& holder, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_reference(nullptr);
@@ -1501,6 +1562,9 @@ const script_value& script_value::deref_slow() const {
         if (refHolder->string_base) {
             return refHolder->materialize_string_element(engine_);
         }
+        if (refHolder->component_base) {
+            return refHolder->materialize_component(engine_);
+        }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
     // For C++ references, we don't deref here - they need special handling
@@ -1554,6 +1618,10 @@ script_value& script_value::deref_slow() {
         if (refHolder->string_base) {
             // a materialized VIEW: writers go through the string-element store (detail/string_element.hpp)
             return const_cast<script_value&>(refHolder->materialize_string_element(engine_));
+        }
+        if (refHolder->component_base) {
+            // a materialized VIEW: writers go through the component store
+            return const_cast<script_value&>(refHolder->materialize_component(engine_));
         }
         throw runtime_error("Null reference");   // unreachable: every factory sets a mode
     }
@@ -1621,6 +1689,10 @@ void script_value::assign_through(const script_value& value) {
             if (!stored) {
                 throw runtime_error(format_error(stored, *engine_->get_symbolizer()));
             }
+            return;
+        }
+        if (refHolder->component_base) {
+            refHolder->store_component(value, engine_);
             return;
         }
         throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode
@@ -1727,6 +1799,10 @@ void script_value::assign_through(script_value&& value) {
             if (!stored) {
                 throw runtime_error(format_error(stored, *engine_->get_symbolizer()));
             }
+            return;
+        }
+        if (refHolder->component_base) {
+            refHolder->store_component(value, engine_);
             return;
         }
         throw runtime_error("Null reference in assign_through");   // unreachable: every factory sets a mode

@@ -2948,6 +2948,20 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	auto always_true = [&](const vm_instruction& ins) {
 		return ins.op == opcode::op_true || (ins.op == opcode::op_const && ins.a < c.constants.size() && c.constants[ins.a].raw_storage_index() == script_value::TYPEID_BOOL && c.constants[ins.a].unchecked_as_bool());
 	};
+	// an entry at a region's first instruction: the instruction moves to a trampoline ahead of a jump to the next one, op_cells_enter takes its place
+	auto entry_trampoline = [&](size_t head, uint32_t loop_index) -> uint32_t {
+		const uint32_t tramp = static_cast<uint32_t>(code.size());
+		const ast_node* sn = head < c.stmt_nodes.size() ? c.stmt_nodes[head] : nullptr;
+		const chunk::typed_site site = head < c.typed_sites.size() ? c.typed_sites[head] : chunk::typed_site{};
+		const uint32_t in = head < c.ident_nodes.size() ? c.ident_nodes[head] : k_invalid_u32;
+		const vm_instruction replaced = code[head];
+		code.push_back(replaced); c.stmt_nodes.push_back(sn);
+		code.push_back(vm_instruction{opcode::op_jump, static_cast<uint32_t>(head + 1), 0, 0}); c.stmt_nodes.push_back(sn);
+		if (head < c.typed_sites.size()) { chunk_ = &c; typed_site_at(tramp) = site; }
+		if (in != k_invalid_u32) { if (c.ident_nodes.size() <= tramp) { c.ident_nodes.resize(tramp + 1, k_invalid_u32); } c.ident_nodes[tramp] = in; }
+		code[head] = vm_instruction{opcode::op_cells_enter, loop_index, tramp, 0};
+		return tramp;
+	};
 	size_t no_boundary_cand = SIZE_MAX;   // a loop translated again without boundary operations (they left it too little work of its own)
 	for (size_t cand = 0;; ++cand) {
 		size_t back = cand, line_head = SIZE_MAX;
@@ -4870,18 +4884,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (line) {
 			// the entry replaces the region's first instruction, which moves to the trampoline ahead of a jump to the next one
 			loop.straight = true;
-			loop.trampoline = static_cast<uint32_t>(code.size());
-			const ast_node* sn = head < c.stmt_nodes.size() ? c.stmt_nodes[head] : nullptr;
-			const chunk::typed_site site = head < c.typed_sites.size() ? c.typed_sites[head] : chunk::typed_site{};
-			const uint32_t in = head < c.ident_nodes.size() ? c.ident_nodes[head] : k_invalid_u32;
-			const vm_instruction replaced = code[head];
-			code.push_back(replaced); c.stmt_nodes.push_back(sn);
-			code.push_back(vm_instruction{opcode::op_jump, static_cast<uint32_t>(head + 1), 0, 0}); c.stmt_nodes.push_back(sn);
-			if (head < c.typed_sites.size()) { chunk_ = &c; typed_site_at(loop.trampoline) = site; }
-			if (in != k_invalid_u32) { if (c.ident_nodes.size() <= loop.trampoline) { c.ident_nodes.resize(loop.trampoline + 1, k_invalid_u32); } c.ident_nodes[loop.trampoline] = in; }
-			code[head] = vm_instruction{opcode::op_cells_enter, loop_index, loop.trampoline, 0};
+			loop.trampoline = entry_trampoline(head, loop_index);
 		}
 		c.cell_loops.push_back(std::move(loop));
+	}
+	// a compare-headed loop's head is an entry too (after every translation, which reads the general code at the heads): the first iteration
+	// runs in the block, the back edge re-enters after a miss, and a refusal or a miss at the head resumes at the trampoline
+	for (uint32_t li = 0; li < c.cell_loops.size(); ++li) {
+		chunk::cell_loop& loop = c.cell_loops[li];
+		if (loop.straight || loop.frame_program || loop.counted != k_invalid_u32 || loop.iter_proto != k_invalid_u32 || loop.trampoline != k_invalid_u32) continue;
+		const vm_instruction& h = code[loop.head];
+		const bool head_ok = (h.op >= opcode::op_t_jlt_ii && h.op <= opcode::op_t_jne_ff) || h.op == opcode::op_fused_cmp_jump || (h.op == opcode::op_load && h.c == 0) || always_true(h) || entry_op(h);
+		if (!head_ok) continue;
+		loop.trampoline = entry_trampoline(loop.head, li);
 	}
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }
 }

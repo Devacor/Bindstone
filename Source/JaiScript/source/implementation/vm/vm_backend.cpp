@@ -7562,7 +7562,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 	for (const auto& ms : loop.math_alias_sites) {
 		if (ms.cache_slot % 3 != 0 || ms.cache_slot / 3 >= original_ip) continue;   // an unguarded alias resolves at its own op
 		const uint32_t guard_ip = ms.cache_slot / 3;
-		if (f.code->code[loop.straight && guard_ip == loop.head ? loop.trampoline : guard_ip].op != opcode::op_math_guard) continue;   // a region's first instruction lives in its trampoline
+		if (f.code->code[loop.trampoline != k_invalid_u32 && guard_ip == loop.head ? loop.trampoline : guard_ip].op != opcode::op_math_guard) continue;   // a region's first instruction lives in its trampoline
 		for (uint32_t ip2 = guard_ip + 1; ip2 < f.code->code.size(); ++ip2) {
 			const vm_instruction& oi = f.code->code[ip2];
 			if (oi.op != opcode::op_math_temp || oi.c <= 0xFF || !(oi.c & 0x80) || ((oi.c >> 8) - 1) != ms.site) continue;
@@ -7575,7 +7575,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 		const counted_for_proto& p = f.code->counted_for_protos[pi];
 		if (original_ip >= p.body_ip && original_ip < p.exit_ip) { cfor_state_push(f, p); }
 	}
-	f.ip = loop.straight && original_ip == loop.head ? loop.trampoline : original_ip;   // a region's first instruction is the trampoline's
+	f.ip = loop.trampoline != k_invalid_u32 && original_ip == loop.head ? loop.trampoline : original_ip;   // a region's first instruction is the trampoline's
 }
 // the frame's ip written for the flush's liveness row and a miss's resume point, read back after a miss (the block loop's ip is a register)
 JAI_FORCEINLINE void vm_backend::cells_miss_ip(frame& f, size_t& ip, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
@@ -7649,7 +7649,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	// window-backed record frames only: a fiber frame is call_frame-backed and takes the general form; a
 	// frame copied into fiber state is default-constructed with a null area pointer; a record's pointer is
 	// rebound to its own area at every push, so a reused record never aliases another frame's cells
-	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = loop.head; return {}; }
+	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = loop.trampoline != k_invalid_u32 ? loop.trampoline : loop.head; return {}; }   // a head entry is not tried again
 	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
@@ -7659,8 +7659,8 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	return cells_run(f, loop);
 }
 
-// a straight-line region's entry (its first instruction): the live-in guards and the unboxing, then the copy; a refusal runs the replaced
-// instruction at the trampoline
+// a straight-line region's entry (its first instruction) or a compare-headed loop's (its head): the live-in guards and the unboxing, then the
+// copy; a refusal runs the replaced instruction at the trampoline
 op_status vm_backend::exec_cells_enter(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
@@ -8436,7 +8436,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 		f.ip = ci.c;
 		return {};
 	}
-	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = loop.straight && ci.a == loop.head ? loop.trampoline : ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
+	case opcode::op_c_exit: JAI_CELLS_COUNT(4); cells_flush(f, loop); f.ip = loop.trampoline != k_invalid_u32 && ci.a == loop.head ? loop.trampoline : ci.a; return {};   // the block ends: the general form runs the exit statement, or continues at the compare's target
 	default: cells_flush(f, loop); return {};   // unreachable by construction (the copy is cell ops only, a return only in a frame program); materialize before handing f.ip back
 	}
 }

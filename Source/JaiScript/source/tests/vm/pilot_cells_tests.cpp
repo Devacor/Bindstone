@@ -3647,6 +3647,47 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "while (true) loops under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_compare_headed_loop_is_entered_at_its_head", [this]() {
+			// the head is a block entry (CELLS_ENTER): a loop of one iteration runs it in the block, a by-value call's result compares against an
+			// enum's value in the block (the call lands first, the read after it), a live-in whose kind the body changes enters, misses at the
+			// landing and re-enters at the back edge, and a reference result keeps the stack form; both backends, proofs off, the middle end
+			// off and miss injection
+			const std::string prelude =
+				"enum Fac { player, npc, monster, guard }\n"
+				"array<int> FACS = [0, 2, 3, 2, 1, 3, 0, 3];\n"
+				"int G = 1;\n"
+				"int T = 0;\n"
+				"void tick() { T = T + 1; }\n"
+				"int fac_of(int i) { tick(); return FACS[i % 8]; }\n"
+				"int& gref() { string why = \"r\"; return G; }\n"
+				"int bump() { string why = \"b\"; G = G + 100; return 1; }\n"
+				"int count(int k) { int n = 0; int i = 0; while (i < k) { if (fac_of(i) != Fac.guard) { n = n + 1; } i = i + 1; } return n; }\n"
+				"int once(int k) { int n = 3; int i = 0; while (i < k) { n = n * 7 + i; i = i + 1; } return n; }\n"
+				"float widen(int k) { var s = 0; int i = 0; while (i < k) { s = s + 0.5; i = i + 1; } return s; }\n"
+				"int refs(int k) { int n = 0; int i = 0; while (i < k) { G = 1; n = n + (gref() - math::abs(bump())); i = i + 1; } return n; }\n";
+			const std::string body = "to_string(count(40)) + \"|\" + to_string(once(1)) + \"|\" + to_string(once(0)) + \"|\" + to_string(widen(9)) + \"|\" + to_string(refs(5));";
+			both(prelude + body, "25|21|3|4.5|0", "loops entered at their heads");
+			both(prelude + body, "25|21|3|4.5|0", "loops entered at their heads, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			for (const char* fn : { "count", "once" }) {
+				const size_t at = l.find(std::string("== ") + fn + " ");
+				const size_t end = at == std::string::npos ? at : l.find("\n== ", at + 1);
+				const std::string part = at == std::string::npos ? std::string() : l.substr(at, end == std::string::npos ? std::string::npos : end - at);
+				check_true(part.find("-- cell loop") != std::string::npos && part.find("CELLS_ENTER") != std::string::npos, std::string(fn) + "'s loop closes with an entry at its head\n" + l);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "loops entered at their heads under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

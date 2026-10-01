@@ -225,7 +225,7 @@ namespace jai::vm {
         // closed typed loops as cell blocks (docs/typed_regions_design.md): the cell-form copy of a closed typed loop
         op_cells_back,      // a = cell loop index: the loop's ORIGINAL back edge; budget poll, live-in guards,
                             // unboxing, then the copy's head (or the general head when a guard refuses)
-        op_cells_enter,     // a = cell region index, b = its trampoline: a straight-line region's first instruction; the live-in guards and
+        op_cells_enter,     // a = cell region index, b = its trampoline: a straight-line region's first instruction or a loop's head; the live-in guards and
                             // the unboxing, then the copy; a refusal runs the replaced instruction at the trampoline (it jumps back to the next)
         op_c_mload,         // a = dst cell, b = member_expr node, c = the base slot: a member read site, the field's value pointer resolved
                             // at entry (cell_state::site_member), its kind and payload landed in the cell

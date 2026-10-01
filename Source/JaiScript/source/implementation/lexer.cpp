@@ -165,6 +165,10 @@ token lexer::next_token() {
         case ',': return make_token(token_type::comma);
         case '?':
             if (match('.')) return make_token(token_type::question_dot);
+            if (match('?')) {
+                if (match('=')) return make_token(token_type::question_question_equal);
+                return make_token(token_type::question_question);
+            }
             return make_token(token_type::question);
         case '~': return make_token(token_type::tilde);
         case '^':

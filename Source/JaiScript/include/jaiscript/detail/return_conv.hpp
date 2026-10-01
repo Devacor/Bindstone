@@ -93,9 +93,15 @@ namespace jai::detail {
             case node_type::identifier_expr: return return_operand_ident;
             case node_type::member_expr:
             case node_type::assignment_expr: return return_operand_lvalue;
-            case node_type::binary_expr:
-                return static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket
-                    ? return_operand_lvalue : return_operand_temporary;
+            case node_type::binary_expr: {
+                const auto* b = static_cast<const binary_expr*>(e);
+                if (b->op.type == token_type::question_question) {   // either operand's value, as a conditional's arms
+                    return classify_return_operand(b->left.get()) != return_operand_temporary ||
+                           classify_return_operand(b->right.get()) != return_operand_temporary
+                        ? return_operand_lvalue : return_operand_temporary;
+                }
+                return b->op.type == token_type::left_bracket ? return_operand_lvalue : return_operand_temporary;
+            }
             case node_type::ternary_expr: {
                 const auto* t = static_cast<const ternary_expr*>(e);
                 return classify_return_operand(t->then_expression.get()) != return_operand_temporary ||

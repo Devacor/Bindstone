@@ -1962,8 +1962,68 @@ checked_result<expression_ptr> parser::expression() {
     return assignment();
 }
 
+namespace {
+    // A target `??=` reads and then may store: evaluating it twice must do what evaluating it once does, so it names storage
+    // through names, members and elements whose indices run no code
+    bool coalesce_target_pure(const expression* e) {
+        if (!e) return false;
+        switch (e->get_type()) {
+            case node_type::identifier_expr:
+            case node_type::this_expr:
+            case node_type::literal_expr:
+                return true;
+            case node_type::member_expr: {
+                auto* m = static_cast<const member_expr*>(e);
+                return !m->null_safe && coalesce_target_pure(m->object.get());
+            }
+            case node_type::binary_expr: {
+                auto* b = static_cast<const binary_expr*>(e);
+                switch (b->op.type) {
+                    case token_type::left_bracket: case token_type::plus: case token_type::minus: case token_type::star:
+                    case token_type::slash: case token_type::percent:
+                        return coalesce_target_pure(b->left.get()) && coalesce_target_pure(b->right.get());
+                    default:
+                        return false;
+                }
+            }
+            case node_type::unary_expr: {
+                auto* u = static_cast<const unary_expr*>(e);
+                return (u->op.type == token_type::minus || u->op.type == token_type::plus) && coalesce_target_pure(u->operand.get());
+            }
+            default:
+                return false;
+        }
+    }
+}
+
 checked_result<expression_ptr> parser::assignment() {
+    const size_t target_start = current_;
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, ternary());
+
+    // a ??= b is a ?? (a = b): the target read once to test it, stored only when it held null
+    if (match(token_type::question_question_equal)) {
+        token op = previous();
+        const node_type shape = expr->get_type();
+        const bool storage = shape == node_type::identifier_expr || shape == node_type::member_expr ||
+                             (shape == node_type::binary_expr && static_cast<const binary_expr*>(expr.get())->op.type == token_type::left_bracket);
+        if (!storage || !coalesce_target_pure(expr.get())) {
+            report_error("'??=' needs a variable, a member or an element whose index runs no code; store anything else in a local first", op);
+            return make_error_code(parse_error_code::unexpected_token);
+        }
+        const size_t resume = current_;
+        const std::optional<token> pushed = pushed_back_token_;
+        current_ = target_start;
+        pushed_back_token_.reset();
+        auto store_target = ternary();
+        current_ = resume;
+        pushed_back_token_ = pushed;
+        if (!store_target) { return store_target.error_value(); }
+        JAISCRIPT_TRY_ASSIGN(expression_ptr right, assignment());
+        token assign(token_type::equal, "=", op.location);
+        auto store = std::make_shared<assignment_expr>(op.location, lvalue_target(store_target.value()), assign, right);
+        token coalesce_op(token_type::question_question, "??", op.location);
+        return std::make_shared<binary_expr>(op.location, expr, coalesce_op, store);
+    }
 
     if (match({token_type::equal, token_type::plus_equal, token_type::minus_equal,
                token_type::star_equal, token_type::slash_equal, token_type::percent_equal,
@@ -2111,7 +2171,7 @@ checked_result<expression_ptr> parser::parse_map_literal() {
 }
 
 checked_result<expression_ptr> parser::ternary() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, logical_or());
+    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, coalesce());
 
     if (match(token_type::question)) {
         token questionLoc = previous();
@@ -2121,6 +2181,17 @@ checked_result<expression_ptr> parser::ternary() {
         return std::make_shared<ternary_expr>(questionLoc.location, expr, then_expression, else_expression);
     }
 
+    return expr;
+}
+
+// a ?? b: a when it is not null, else b (b runs only then); right-associative, below || and above the conditional, as C#'s
+checked_result<expression_ptr> parser::coalesce() {
+    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, logical_or());
+    if (match(token_type::question_question)) {
+        token op = previous();
+        JAISCRIPT_TRY_ASSIGN(expression_ptr right, coalesce());
+        return std::make_shared<binary_expr>(op.location, expr, op, right);
+    }
     return expr;
 }
 
@@ -2438,6 +2509,9 @@ checked_result<expression_ptr> parser::unary() {
 }
 
 checked_result<expression_ptr> parser::postfix() {
+    const size_t chain_start = current_;
+    const bool chain_starts_clean = !pushed_back_token_.has_value();
+    std::vector<size_t> null_links;   // the ?. tokens of this chain
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, primary());
 
     while (true) {
@@ -2471,6 +2545,7 @@ checked_result<expression_ptr> parser::postfix() {
             }
         } else if (match(token_type::dot) || match(token_type::question_dot)) {
             bool is_null_safe = (previous().type == token_type::question_dot);
+            if (is_null_safe && !pushed_back_token_) { null_links.push_back(current_ - 1); }
             JAISCRIPT_TRY_ASSIGN(expr, finish_member_access(expr, false));
             if (is_null_safe) {
                 static_cast<member_expr*>(expr.get())->null_safe = true;
@@ -2510,7 +2585,104 @@ checked_result<expression_ptr> parser::postfix() {
         }
     }
 
+    if (!null_links.empty() && chain_starts_clean && !pushed_back_token_) { return null_chain_rest(chain_start, null_links, expr); }
     return expr;
+}
+
+// a?.b.c: a null before the ?. skips the rest of the chain, which then yields null (JavaScript's and C#'s optional chaining). The
+// last ?. a plain link follows (one more than its member and that member's call) is rewritten over the tokens: a base that runs no
+// code reads twice, `(null != base) ? base.rest : null`; any other base is evaluated once into an arrow function's parameter,
+// `((p) => (null != p) ? p.rest : null)(base)`. Each part parses again, so an earlier ?. in it is rewritten the same way.
+checked_result<expression_ptr> parser::null_chain_rest(size_t chain_start, const std::vector<size_t>& links, expression_ptr expr) {
+    const std::vector<token>& tokens = *stream_;
+    const size_t chain_end = current_;
+    auto group_end = [&](size_t at) {   // past the balanced group opened at `at`
+        size_t depth = 0;
+        for (size_t i = at; i < chain_end; ++i) {
+            if (tokens[i].type == token_type::left_paren || tokens[i].type == token_type::left_bracket || tokens[i].type == token_type::left_brace) { ++depth; }
+            else if (tokens[i].type == token_type::right_paren || tokens[i].type == token_type::right_bracket || tokens[i].type == token_type::right_brace) {
+                if (--depth == 0) return i + 1;
+            }
+        }
+        return chain_end;
+    };
+    size_t link = SIZE_MAX;
+    for (size_t k = links.size(); k-- > 0;) {
+        size_t at = links[k] + 2;   // past ?. and the member's name
+        if (at < chain_end && tokens[at].type == token_type::left_paren) { at = group_end(at); }
+        if (at < chain_end && tokens[at].type != token_type::question_dot) { link = links[k]; break; }
+    }
+    if (link == SIZE_MAX) { return expr; }
+
+    bool pure = true;
+    for (size_t i = chain_start; i < link && pure; ++i) {
+        switch (tokens[i].type) {
+            case token_type::left_paren: case token_type::left_brace: case token_type::plus_plus: case token_type::minus_minus:
+            case token_type::equal: case token_type::plus_equal: case token_type::minus_equal: case token_type::star_equal:
+            case token_type::slash_equal: case token_type::percent_equal: case token_type::ampersand_equal: case token_type::pipe_equal:
+            case token_type::caret_equal: case token_type::left_shift_equal: case token_type::right_shift_equal:
+            case token_type::question_question_equal: case token_type::new_keyword: case token_type::function_keyword:
+            case token_type::fat_arrow: case token_type::yield_keyword: case token_type::throw_keyword: case token_type::cast_keyword:
+                pure = false;
+                break;
+            default:
+                break;
+        }
+    }
+
+    const source_location at = tokens[link].location;
+    auto synth = [&](token_type t, std::string_view lexeme) { return token(t, lexeme, at); };
+    std::vector<token> rewritten;
+    rewritten.reserve((chain_end - chain_start) * 2 + 16);
+    rewritten.push_back(synth(token_type::left_paren, "("));
+    if (pure) {
+        rewritten.push_back(synth(token_type::null_keyword, "null"));
+        rewritten.push_back(synth(token_type::bang_equal, "!="));
+        rewritten.push_back(synth(token_type::left_paren, "("));
+        rewritten.insert(rewritten.end(), tokens.begin() + chain_start, tokens.begin() + link);
+        rewritten.push_back(synth(token_type::right_paren, ")"));
+        rewritten.push_back(synth(token_type::question, "?"));
+        rewritten.insert(rewritten.end(), tokens.begin() + chain_start, tokens.begin() + link);
+    } else {
+        const auto [held_id, held_name] = hidden_name("chain");
+        const token held(token_type::identifier, held_name, held_id, at);
+        rewritten.push_back(synth(token_type::left_paren, "("));
+        rewritten.push_back(held);
+        rewritten.push_back(synth(token_type::right_paren, ")"));
+        rewritten.push_back(synth(token_type::fat_arrow, "=>"));
+        rewritten.push_back(synth(token_type::null_keyword, "null"));
+        rewritten.push_back(synth(token_type::bang_equal, "!="));
+        rewritten.push_back(held);
+        rewritten.push_back(synth(token_type::question, "?"));
+        rewritten.push_back(held);
+    }
+    rewritten.push_back(synth(token_type::dot, "."));
+    rewritten.insert(rewritten.end(), tokens.begin() + link + 1, tokens.begin() + chain_end);
+    rewritten.push_back(synth(token_type::colon, ":"));
+    rewritten.push_back(synth(token_type::null_keyword, "null"));
+    rewritten.push_back(synth(token_type::right_paren, ")"));
+    if (!pure) {
+        rewritten.push_back(synth(token_type::left_paren, "("));
+        rewritten.insert(rewritten.end(), tokens.begin() + chain_start, tokens.begin() + link);
+        rewritten.push_back(synth(token_type::right_paren, ")"));
+    }
+    rewritten.push_back(synth(token_type::eof, ""));
+
+    const std::vector<token>* saved_stream = stream_;
+    const size_t saved_current = current_;
+    stream_ = &rewritten;
+    current_ = 0;
+    auto parsed = expression();
+    const bool whole = parsed && is_at_end();
+    stream_ = saved_stream;
+    current_ = saved_current;
+    pushed_back_token_.reset();
+    if (!parsed) { return parsed.error_value(); }
+    if (!whole) {
+        report_error("Unexpected tokens in an optional chain", tokens[link]);
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    return parsed.value();
 }
 
 // ++x / x++ on a non-identifier target (element, entry, member, nested) IS `x += 1` /

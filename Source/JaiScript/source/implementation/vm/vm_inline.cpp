@@ -148,6 +148,8 @@ bool body_has_loop(const statement* s) {
 	}
 }
 bool logical_op(token_type t) { return t == token_type::ampersand_ampersand || t == token_type::pipe_pipe; }
+// an operator whose right operand runs only on some evaluations (&&, ||, ??)
+bool short_circuit_op(token_type t) { return logical_op(t) || t == token_type::question_question; }
 bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_type::minus_minus; }
 
 // an expression whose value lands in a slot by a block instruction (the typed declaration rows, the fused binary, the proven element
@@ -560,7 +562,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		for (const auto& g : c.container_guards) { if (g.first == b) { c.guarded_reads.emplace_back(n.get(), g.second); } }
 		n->transient_element_read = b->transient_element_read;
 		n->static_operand_class = b->static_operand_class;
-		if (c.stamps && n->static_operand_class == operand_class_unknown && b->op.type != token_type::left_bracket && !logical_op(b->op.type)) { n->static_operand_class = kind_class(stamp_kind(b->left.get(), c), stamp_kind(b->right.get(), c)); }
+		if (c.stamps && n->static_operand_class == operand_class_unknown && b->op.type != token_type::left_bracket && !short_circuit_op(b->op.type)) { n->static_operand_class = kind_class(stamp_kind(b->left.get(), c), stamp_kind(b->right.get(), c)); }
 		return n;
 	}
 	case node_type::unary_expr: {
@@ -1076,7 +1078,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 		switch (a->get_type()) {
 		case node_type::binary_expr: {
 			auto* b = static_cast<const binary_expr*>(a.get());
-			if (x == b->right.get()) { if (logical_op(b->op.type)) { out.why = "an operand behind && or ||"; return false; } pre.push_back(b->left); }
+			if (x == b->right.get()) { if (short_circuit_op(b->op.type)) { out.why = logical_op(b->op.type) ? "an operand behind && or ||" : "an operand behind ??"; return false; } pre.push_back(b->left); }
 			break;
 		}
 		case node_type::ternary_expr: { auto* t = static_cast<const ternary_expr*>(a.get()); if (x != t->condition.get()) { out.why = "a call in a ternary's arm"; return false; } break; }

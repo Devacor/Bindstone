@@ -3206,7 +3206,8 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 
 	// FAST PATH: identifier + identifier (e.g., "a + b", "sum + i") - eliminates 2 virtual calls
 	// Skip logical operators - they need short-circuit evaluation
-	if (!Replaying && expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe) {
+	if (!Replaying && expr->op.type != token_type::ampersand_ampersand && expr->op.type != token_type::pipe_pipe &&
+	    expr->op.type != token_type::question_question) {
 		if (expr->left->get_type() == node_type::identifier_expr) {
 			auto* leftId = static_cast<identifier_expr*>(expr->left.get());
 			if (expr->right->get_type() == node_type::identifier_expr) {
@@ -3309,6 +3310,21 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             push_value(make_value(is_truthy(right)));
             return {};
         }
+    }
+
+    // a ?? b: the left operand's value unless it is null; the right operand runs only then
+    if (expr->op.type == token_type::question_question) {
+        if (!parked<Replaying>(rs, 0)) {
+            JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->left.get(), rs, 0), expr, rp_operand, 0, {});
+            if (is_unwinding_) { return {}; }
+        }
+        script_value left = parked<Replaying>(rs, 0) ? *pre_fetched_left : pop_value();
+        if (!left.is_null()) {
+            push_value(std::move(left));
+            return {};
+        }
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->right.get(), rs, 1), expr, rp_operand, 1, (std::vector<script_value>{left}));
+        return {};
     }
 
     // Capture whether THIS binary expression is the outermost assignment-target

@@ -5459,7 +5459,7 @@ public:
                    "10|3|7|2", "keyword members beside inherited statics");
             expect("var m = {\"map\": 1}; m.map;", "1", "a map key read with a keyword after the dot");
             expect("class C { int x = 0; } var c = C(); c.map();", "ERROR: C has no member 'map'", "an undeclared keyword member is the no-member error");
-            expect("var a = [1, 2]; a.map(5);", "ERROR: array has no member 'map'", "arrays have no map method");
+            expect("var a = [1, 2]; a.string(5);", "ERROR: array has no member 'string'", "an array answers a keyword member it lacks with the no-member error");
         });
 
         test("host_methods_named_after_keywords", [this]() {

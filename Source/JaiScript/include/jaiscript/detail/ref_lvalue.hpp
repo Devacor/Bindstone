@@ -83,6 +83,23 @@ namespace jai::detail {
 		}
 	}
 
+	// `T& name = e;` binds e's storage only when it holds a T (Dev ruling 2026-09-30: a var too - a reference must reference):
+	// the declaration's text names the value's type and T&
+	inline std::optional<error_propagator> reference_decl_rejection(const variable_decl& decl, const script_value& value, engine* eng) {
+		const type_info* t = decl.type.get();
+		if (!t || t->base_type != script_value_type::jai_reference_type || t->type_params.empty()) { return std::nullopt; }
+		if (reference_binding_admits(t->type_params[0].get(), value, eng)) { return std::nullopt; }
+		return typed_slot_rejection(value.deref(), *t, slot_site{slot_kind::declaration, decl.name, {}}, eng);
+	}
+
+	inline bool reference_decl_checks_admission(const variable_decl& decl) {
+		const type_info* t = decl.type.get();
+		if (!t || t->base_type != script_value_type::jai_reference_type || t->type_params.empty()) { return false; }
+		const type_info* referent = t->type_params[0].get();
+		return referent && referent->base_type != script_value_type::jai_any_type && referent->type_name != "auto" &&
+		       !decl.declared_ref_storage_enforced && !decl.reference_admission_proven;
+	}
+
 	inline checked_result<script_value> ref_non_lvalue_error() {
 		return checked_result<script_value>(
 			make_error_code(runtime_error_code::invalid_reference),

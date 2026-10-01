@@ -332,7 +332,9 @@ engine stays usable", not by `check_throws`.
   right side first, under the rules of the storage it names (a variable's declared type, a typed element, a field, a
   static, a component; `detail::ref_target_assign`, vm `op_ref_target_store`), and the checker checks the stored value
   against `T`. A static (`C::s`, `ns::x`) binds its storage as a `cast<T&>` operand and as a `-> T&` return operand.
-  The reference's declared type governs a store through it (Dev ruling 2026-09-30): `var v = 1; cast<int&>(v) = 2.5` and
+  A `T&` binds a var only while it holds T's kind (a class: T or a subclass), in every binding form (declaration,
+  parameter, `cast<T&>`, range-for, reference return); otherwise the binding raises (`Cannot initialize 'r' (declared float&)
+  with int`; one kernel, `detail::reference_binding_admits`, Dev ruling 2026-09-30: a reference must reference). The reference's declared type governs a store through it (Dev ruling 2026-09-30): `var v = 1; cast<int&>(v) = 2.5` and
   `int& r = v; r = 2.5` leave v int 2 (the declared `T&` twin, `engine::get_type_info_declared_reference`, stamped only where
   the storage would not already apply T's table; var&/auto& keep the referent's rule). The store decides: a value of
   T's kind (one compare) takes the storage's own path, only a real conversion runs T's table. A `T& p` parameter follows

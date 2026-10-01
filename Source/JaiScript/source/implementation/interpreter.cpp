@@ -6244,6 +6244,9 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         if (decl->ref_escaping && !value.is_reference()) {
             value = script_value::make_cell_reference(std::move(value), engine_);
         }
+        if (value.is_reference() && detail::reference_decl_checks_admission(*decl)) [[unlikely]] {
+            if (auto rejected = detail::reference_decl_rejection(*decl, value, engine_)) { return *rejected; }
+        }
         // `int& r = e`: a reference whose value reaches another binding (or that no slot holds) carries its declared type; a
         // slot-resident one is decided at its stores from the name (identifier_expr::declared_ref)
         if (decl->type && decl->type->is_reference() && value.is_reference() && !decl->declared_ref_storage_enforced &&

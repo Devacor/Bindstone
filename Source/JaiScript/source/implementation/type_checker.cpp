@@ -3882,6 +3882,9 @@ private:
 			const bool init_ok = is_reference_decl
 				? reference_type_compatible(binding_source, entry.type)
 				: assignable(init, entry.type);
+			stamp(decl->reference_admission_proven, is_reference_decl && has_init && init_ok && !binding_source.is_unknown() &&
+			      !binding_source.tentative && binding_source.kind != ctype::null_k &&
+			      binding_source.kind != ctype::object_k, false);   // a class binding checks at run time (a reload may change the chain)
 			if (has_init && (!entry.dynamic || is_reference_decl) && !init_ok) {
 				diag(diag_level::error, decl->location, "cannot initialize '" + std::string(decl->name) +
 				     "' declared '" + entry.display + "' with '" + ctype_name(binding_source) + "'" + assignment_detail(binding_source, entry.type));

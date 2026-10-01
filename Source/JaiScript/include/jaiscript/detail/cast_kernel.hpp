@@ -235,9 +235,7 @@ namespace jai::detail {
 		if (seen.is_null()) {
 			return cast_error(seen, c, sym);
 		}
-		const bool ok = cast_target_is_class(*c.target)
-			? cast_class_admits(seen, *c.target, eng)
-			: seen.type() == c.target->base_type;
+		const bool ok = reference_binding_admits(c.target.get(), seen, eng);   // the one admission kernel of every binding form
 		if (!ok) {
 			return cast_error(seen, c, sym);
 		}

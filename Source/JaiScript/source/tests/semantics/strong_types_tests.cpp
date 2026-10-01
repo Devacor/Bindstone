@@ -2064,7 +2064,7 @@ public:
             check_both("var v = 1; auto& r = v; r = 2.5; var& q = v; q = \"s\"; type_of(v)", "string", "auto& and var& keep the var");
             check_both("class Cnt { int n = 0; function operator=(int x) { n = x * 10; } } var c = Cnt(); cast<Cnt&>(c) = 2; to_string(c.n)", "20", "a class's operator= through cast<Cnt&> over a var");
             check_both("function f() -> int { var v = 1; int& r = v; r = 3.5; return v; } to_string(f())", "3", "a function's slot local");
-            check_both("var v = 1; float& r = v; r += 1; var w = 1; float& s = w; s++; type_of(v) + \":\" + to_string(v) + \",\" + type_of(w) + \":\" + to_string(w)", "float:2.0,float:2.0", "a float& over an int: the result takes the declared kind");
+            check_both("var v = 1.5; float& r = v; r = 2; r += 1; var w = 1.5; float& s = w; s = 1; s++; type_of(v) + \":\" + to_string(v) + \",\" + type_of(w) + \":\" + to_string(w)", "float:3.0,float:2.0", "an int stored through float& takes the declared kind");
             check_both("var v = 1; int& r = v; r += 2; r *= 3; r++; type_of(v) + \":\" + to_string(v)", "int:10", "matching kinds take the storage's own path");
             // a function's `T& name` is decided at its stores from the name; one whose reference reaches another binding carries
             // the declared type with it, so every route agrees
@@ -2074,7 +2074,25 @@ public:
             check_both("function f() -> string { var v = 1; int& q = v; auto& r = q; r = 2.5; return type_of(v) + to_string(v); } f()", "int2", "aliased by auto&");
             check_both("function f() -> string { var v = 1; int& q = v; var h = [&]() { q = 2.5; }; h(); return type_of(v) + to_string(v); } f()", "int2", "captured by reference");
             check_both("function f() -> string { var v = 1; var w = 1; int& q = v; (true ? q : w) = 2.5; return type_of(v) + to_string(v); } f()", "int2", "an arm of a conditional target");
-            check_both("function f() -> string { var v = 1; float& q = v; q = 2; q += 1; return type_of(v) + to_string(v); } f()", "float3.0", "a slot-resident float& over a var holding an int");
+            check_both("function f() -> string { var v = 1.5; float& q = v; q = 2; q += 1; return type_of(v) + to_string(v); } f()", "float3.0", "a slot-resident float& over a var holding a float");
+        });
+
+        test("a_reference_binding_must_reference", [this, check_both, both]() {
+            // Dev ruling 2026-09-30: a T& binds a var only while it holds T's kind (a class: T or a subclass); otherwise the binding
+            // raises, in every binding form, naming the value's type and T&
+            check_both("var v = 1; var c = \"\"; try { float& r = v; c = \"bound\"; } catch (e) { c = e; } c", "Cannot initialize 'r' (declared float&) with int", "float& over a var holding an int");
+            check_both("var v = 2.5; var c = \"\"; try { int& r = v; c = \"bound\"; } catch (e) { c = e; } c", "Cannot initialize 'r' (declared int&) with float", "int& over a var holding a float");
+            check_both("class Enemy { int hp = 1; } var v = 5; var c = \"\"; try { Enemy& e = v; c = \"bound\"; } catch (x) { c = x; } c", "Cannot initialize 'e' (declared Enemy&) with int", "a class reference over a var holding an int");
+            check_both("function f() -> string { var v = 1; var c = \"\"; try { float& r = v; c = \"bound\"; } catch (e) { c = e; } return c; } f()", "Cannot initialize 'r' (declared float&) with int", "a function's local");
+            check_both("var a = [1, 2]; var c = \"\"; try { float& r = a[0]; c = \"bound\"; } catch (e) { c = e; } c", "Cannot initialize 'r' (declared float&) with int", "an untyped element");
+            check_both("function f(float& p) { p = 1; } var v = 1; var c = \"\"; try { f(v); c = \"bound\"; } catch (e) { c = e; } c", "Cannot pass int to parameter 'p' of 'f' (declared float)", "a parameter");
+            check_both("var v = 1; var c = \"\"; try { cast<float&>(v) = 2; c = \"bound\"; } catch (e) { c = e; } c", "Cannot cast 'int' to 'float&'", "a reference cast");
+            check_both("var v = 1; int& r = v; r = 2.5; type_of(v) + to_string(v)", "int2", "a matching binding stores by T");
+            check_both("class A { int a = 1; } class B : A { int b = 2; } var v = B(); A& r = v; type_of(r)", "B", "a subclass binds a base reference");
+            check_both("var v = 1; auto& r = v; var& q = v; r = \"s\"; type_of(v)", "string", "auto& and var& bind any value");
+            auto [si, sv] = both("int x = 1; float& r = x;");
+            check_eq(si, sv, "static rejection parity: float& over an int");
+            check(si.find("ERROR: ") == 0 && si.find("cannot initialize 'r' declared 'float&' with 'int'") != std::string::npos, "float& over an int is rejected at load: " + si);
         });
 
         test("a_reference_parameter_stores_by_its_declared_type", [this, check_both]() {

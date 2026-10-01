@@ -826,6 +826,9 @@ namespace jai {
         // Parser resolution: `T& name = x;` over a value declared T already (int& r = n with int n): the storage applies T's
         // table itself, so the declared type adds nothing at the stores or the binding
         bool declared_ref_storage_enforced = false;
+        // Checker proof (`T& name = e;`): e's static type is certain and a T (detail::reference_binding_admits cannot refuse it),
+        // so the binding skips the run-time admission
+        mutable bool reference_admission_proven = false;
         size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = global/class member)
 
         // Construction-time classification for both backends' decl fast path

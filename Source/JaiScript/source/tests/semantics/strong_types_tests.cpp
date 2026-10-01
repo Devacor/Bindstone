@@ -1991,6 +1991,81 @@ public:
             check_both("namespace ns { int v = 1; } function g() -> int& { return ns::v; } auto& r = g(); r = 4; to_string(ns::v)", "4", "a namespace variable");
         });
 
+        test("a_reference_result_is_an_assignment_target", [this, check_both, both]() {
+            // f() returning T&, a conditional of lvalues, an assignment and a prefix ++/-- are lvalues (C++)
+            check_both("int g = 1; function f() -> int& { return g; } f() = 9; f() += 1; ++f(); f()++; to_string(g)", "12", "a function returning int&");
+            check_both("int g = 1; function f() -> int& { return g; } f() = 3.9; type_of(g) + \":\" + to_string(g)", "int:3", "the referent's table converts");
+            check_both("int g = 1; function f() -> int& { return g; } auto r = (f() = 3.9); type_of(r) + \":\" + to_string(r)", "int:3", "the expression's value is the stored value");
+            check_both("class W { array<int> d = [1, 2, 3]; int& first() { return d[0]; } } W w = W(); w.first() = 11; w.first() *= 2; to_string(w.d[0])", "22", "a method returning int&");
+            check_both("class S { static int s = 1; static int& get() { return S::s; } } S::get() = 4; S::get()++; to_string(S::s)", "5", "a static method returning a static");
+            check_both("class W { array<int> d = [1, 2, 3]; int& operator[](int i) { return d[i]; } } W w = W(); w[2] = 30; ++w[1]; to_string(w.d[1]) + \",\" + to_string(w.d[2])", "3,30", "a user operator[] returning int&");
+            check_both("var log = \"\"; int g = 0; function f() -> int& { log += \"f\"; return g; } function v() -> int { log += \"v\"; return 1; } f() = v(); f() += v(); log + to_string(g)", "vfvf2", "the right side runs before the call");
+            check_both("int a = 1; int b = 2; bool t = true; (t ? a : b) = 5; (!t ? a : b) += 10; to_string(a) + \",\" + to_string(b)", "5,12", "a conditional of variables");
+            check_both("int a = 1; float b = 2; bool t = true; (t ? a : b) = 2.5; (!t ? a : b) = 2.5; to_string(a) + \",\" + to_string(b)", "2,2.5", "each arm stores by its own table");
+            check_both("class P { int x = 0; } P p = P(); array<int> arr = [0, 0]; int i = 1; bool t = false; (t ? p.x : arr[i]) = 7; ++(t ? p.x : arr[i]); (!t ? p.x : arr[i])--; to_string(p.x) + \",\" + to_string(arr[1])", "-1,8", "a conditional of a field and an element");
+            check_both("int a = 0; int b = 0; int c = 0; bool t = false; bool u = true; (t ? a : (u ? b : c)) = 3; to_string(a) + to_string(b) + to_string(c)", "030", "a nested conditional");
+            check_both("var log = \"\"; function cond() -> bool { log += \"c\"; return true; } function v() -> int { log += \"v\"; return 1; } int a = 0; int b = 0; (cond() ? a : b) = v(); log + to_string(a)", "vc1", "the right side, then the condition once");
+            check_both("string s = \"a\"; string q = \"b\"; (true ? s : q) += \"c\"; s", "ac", "a conditional of strings");
+            check_both("int a = 0; int b = 5; (a = b) = 7; to_string(a) + \",\" + to_string(b)", "7,5", "an assignment yields its left side");
+            check_both("var log = \"\"; function v(int n) -> int { log += to_string(n); return n; } int a = 0; (a = v(1)) = v(2); log + \",\" + to_string(a)", "21,2", "the outer right side runs first");
+            check_both("int a = 1; (a += 1) *= 3; to_string(a)", "6", "a compound yields its left side");
+            check_both("int x = 1; ++x = 10; int y = 1; (++y) += 5; int z = 1; --z = 4; to_string(x) + \",\" + to_string(y) + \",\" + to_string(z)", "10,7,4", "a prefix increment yields its operand");
+            check_both("array<int> a = [1]; ++a[0] = 9; int x = 0; auto r = (++x = 10); to_string(a[0]) + \",\" + to_string(r)", "9,10", "a prefix increment of an element");
+            check_both("coroutine h() { int a = 0; int b = 0; ((yield 1) == null ? a : b) = 5; yield to_string(a) + to_string(b); } var co = h(); co.resume(); co.resume()", "50", "a yield inside the condition resumes once");
+            auto [si, sv] = both("int g = 1; function f() -> int& { return g; } f() = \"s\";");
+            check_eq(si, sv, "static rejection parity: a string into an int& result");
+            check(si.find("ERROR: ") == 0 && si.find("cannot assign 'string'") != std::string::npos, "a string into an int& result is rejected at load: " + si);
+            auto [ti, tv] = both("int a = 1; int b = 2; (true ? a : b) = \"s\";");
+            check_eq(ti, tv, "static rejection parity: a string into a conditional of ints");
+            check(ti.find("ERROR: ") == 0 && ti.find("cannot assign 'string'") != std::string::npos, "a string into a conditional of ints is rejected at load: " + ti);
+        });
+
+        test("a_non_lvalue_target_names_what_was_written", [this, both, both_in]() {
+            // the text names the expression and why it holds no storage; strict reports it at load (lowercase), a program the
+            // checker does not see raises it before anything runs, except a call's result, which only the call can tell
+            const std::pair<const char*, const char*> rows[] = {
+                {"5 = 1;", "Cannot assign to a literal"},
+                {"int x = 1; cast<int>(x) = 2;", "Cannot assign to the result of cast<int>(x): it is a temporary value (cast<int&>(x) names the variable)"},
+                {"int x = 1; x + 1 = 2;", "Cannot assign to the result of '+': it is a temporary value"},
+                {"int x = 1; -x = 2;", "Cannot assign to the result of '-': it is a temporary value"},
+                {"int x = 1; x++ = 5;", "Cannot assign to x++: it yields the old value"},
+                {"array<int> a = [1]; a[0]-- = 5;", "Cannot assign to a[0]--: it yields the old value"},
+                {"int a = 1; (true ? a : 5) = 2;", "Cannot assign to a conditional: its arm '5' names no storage"},
+                {"function h() -> int { return 1; } h() = 2;", "Cannot assign to a call result: 'h' returns by value"},
+                {"class P { int v = 0; } P() = P();", "Cannot assign to a call result: 'P' returns by value"},
+                {"[1, 2] = 3;", "Cannot assign to an array literal"},
+            };
+            for (const auto& [src, text] : rows) {
+                std::string lower = text;
+                lower[0] = 'c';
+                auto [si, sv] = both(src);
+                check_eq(si, sv, std::string("static parity: ") + src);
+                check(si.find("ERROR: ") == 0 && si.find(lower) != std::string::npos, std::string("load error for ") + src + ": " + si);
+                const std::string caught = std::string("var c = \"\"; try { ") + src + " } catch (e) { c = e; } c";
+                auto [oi, ov] = both_in(check_mode::off, caught.c_str());
+                check_eq(std::string(text), oi, std::string("interp run-time text: ") + src);
+                check_eq(std::string(text), ov, std::string("vm run-time text: ") + src);
+            }
+            auto [ri, rv] = both_in(check_mode::off, "var cnt = 0; function bump() { cnt++; return 5; } int x = 1; var out = \"\"; "
+                                    "try { x++ = bump(); } catch (e) { out += e; } try { bump() = 1; } catch (e) { out += \"|\" + e; } out + \"|\" + to_string(cnt) + to_string(x)");
+            check_eq(std::string("Cannot assign to x++: it yields the old value|Cannot assign to a call result: 'bump' returns by value|11"), ri, "interp: a non-lvalue raises before it runs, a call's result after");
+            check_eq(ri, rv, "vm agrees");
+        });
+
+        test("a_reference_stores_by_its_declared_type", [this, check_both]() {
+            // Dev ruling 2026-09-30: the reference's declared type governs the store (cast<int&>(v), int& r = v); var& and auto&
+            // keep the referent's own rule
+            check_both("var v = 1; cast<int&>(v) = 2.5; type_of(v) + \":\" + to_string(v)", "int:2", "cast<int&> over a var");
+            check_both("var v = 1; int& r = v; r = 2.5; type_of(v) + \":\" + to_string(v)", "int:2", "int& over a var");
+            check_both("var v = 1; int& r = v; r += 0.5; type_of(v) + \":\" + to_string(v)", "int:1", "a compound through int& over a var");
+            check_both("var v = 1; int& r = v; v = 1.5; r++; type_of(v) + \":\" + to_string(v)", "int:2", "++ through int& over a var that now holds a float");
+            check_both("var v = 1; cast<int&>(v) += 0.5; cast<int&>(v)++; type_of(v) + \":\" + to_string(v)", "int:2", "compound and ++ through cast<int&>");
+            check_both("var a = [1, 2]; int& r = a[0]; r = 7.9; type_of(a[0]) + \":\" + to_string(a[0])", "int:7", "int& over an untyped element");
+            check_both("var v = 1; auto& r = v; r = 2.5; var& q = v; q = \"s\"; type_of(v)", "string", "auto& and var& keep the var");
+            check_both("class Cnt { int n = 0; function operator=(int x) { n = x * 10; } } var c = Cnt(); cast<Cnt&>(c) = 2; to_string(c.n)", "20", "a class's operator= through cast<Cnt&> over a var");
+            check_both("function f() -> int { var v = 1; int& r = v; r = 3.5; return v; } to_string(f())", "3", "a function's slot local");
+        });
+
         test("typed_field_set_field_cpp_api", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

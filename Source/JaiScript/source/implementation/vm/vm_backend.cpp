@@ -4114,7 +4114,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		// reach the setter.
 		if (varPtr->is_reference()) {
 			const auto* refHolder = varPtr->get_reference_holder();
-			if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
+			if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element() || detail::ref_declared_type(*varPtr))) {
 				const token_type op = compound_kind_token(kind);
 				const char* opName = detail::binary_op_name(op);
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
@@ -4593,6 +4593,14 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		? engine_->get_global_environment()->get_value_ptr(sym)
 		: resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
+		if (detail::ref_declared_type(*varPtr)) [[unlikely]] {   // `int& r`: the declared type's table (KEEP BYTE-PARALLEL with the interpreter ++/--)
+			auto stepped = detail::ref_target_assign(*varPtr, script_value(static_cast<script_int>(1), engine_), isIncrement ? token_type::plus : token_type::minus,
+				true, postfix, true, operator_table_, engine_, symbolizer_,
+				[this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); });
+			if (!stepped) { return raise_from(stepped); }
+			stack_.push_back(std::move(stepped.value()));
+			return {};
+		}
 		// Scratch-backed ref (typed element, C++ property): deref hands back the holder
 		// scratch - the in-place mutation below must commit it (buffer store / setter)
 		// (KEEP BYTE-PARALLEL with the interpreter ++/-- twin)
@@ -11181,6 +11189,11 @@ std::optional<checked_result<script_value>> vm_backend::bind_bare_cpp_property_r
 	return detail::bind_cpp_property_ref(*this_ptr, sym, engine_, symbolizer_);
 }
 
+op_status vm_backend::define_ref_decl(frame& f, const variable_decl* decl, script_value value) {
+	if (decl->type && decl->type->is_reference()) { detail::ref_declare(value, decl->type->element_type().get(), engine_); }
+	return define_decl_value(f, decl, std::move(value));
+}
+
 op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
 	const uint64_t target_sym = f.code->symbols[ins.b];
@@ -11222,7 +11235,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 			if (!*minted) {
 				return raise_from(*minted);
 			}
-			return define_decl_value(f, decl, std::move(minted->value()));
+			return define_ref_decl(f, decl, std::move(minted->value()));
 		}
 		VM_TRY(frame_bare_member_access(f, target_sym));
 		if (auto method = bare_method_reference(f, target_sym)) { return *method; }
@@ -11234,11 +11247,11 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return define_decl_value(f, decl, std::move(aliased.value()));
+		return define_ref_decl(f, decl, std::move(aliased.value()));
 	}
 	// Box the variable's storage into a cell and alias it (escape-legal: the ref
 	// keeps the cell alive after the env dies)
-	return define_decl_value(f, decl, share_env_ref(*targetPtr));
+	return define_ref_decl(f, decl, share_env_ref(*targetPtr));
 }
 
 op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
@@ -11251,7 +11264,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		if (!aliased) {
 			return raise_from(aliased);
 		}
-		return define_decl_value(f, decl, std::move(aliased.value()));
+		return define_ref_decl(f, decl, std::move(aliased.value()));
 	}
 	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
 	if (decl->initializer && decl->initializer->get_type() == node_type::member_expr &&
@@ -11263,7 +11276,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (storage.is_reference() && !storage.get_reference_holder()) {
 				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
 			}
-			return define_decl_value(f, decl, share_env_ref(storage));
+			return define_ref_decl(f, decl, share_env_ref(storage));
 		}
 	}
 	if (decl->initializer && detail::is_member_final_ref_lvalue(decl->initializer.get())) {
@@ -11285,7 +11298,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 			if (!aliased) {
 				return raise_from(aliased);
 			}
-			return define_decl_value(f, decl, std::move(aliased.value()));
+			return define_ref_decl(f, decl, std::move(aliased.value()));
 		}
 	}
 	// A math component binds a COMPONENT reference (KEEP BYTE-PARALLEL with the interpreter's define_component_reference)
@@ -11294,7 +11307,7 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		return raise_from(part);
 	}
 	if (part.value().is_reference()) {
-		return define_decl_value(f, decl, std::move(part.value()));
+		return define_ref_decl(f, decl, std::move(part.value()));
 	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),
@@ -17734,7 +17747,11 @@ op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins
 	return {};
 }
 
-// KEEP BYTE-PARALLEL with the interpreter's cast-target assignment
+op_status vm_backend::non_lvalue_target(const expression* target) {
+	return raise_(make_error_code(runtime_error_code::invalid_assignment_target), "{0}", symbolizer_->intern(detail::non_lvalue_target_text(target)));
+}
+
+// KEEP BYTE-PARALLEL with the interpreter's reference-target assignment
 op_status vm_backend::exec_ref_target_store(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<assignment_expr*>(f.code->nodes[ins.a].get());
 	script_value target_ref = std::move(stack_.back());
@@ -17742,18 +17759,18 @@ op_status vm_backend::exec_ref_target_store(frame& f, const vm_instruction& ins)
 	script_value rightValue = std::move(stack_.back());
 	stack_.pop_back();
 	if (!target_ref.is_reference()) {
-		return raise_(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
+		return non_lvalue_target(expr->target.get());
 	}
 	const token_type op = expr->op.type == token_type::equal ? token_type::equal : detail::compound_base(expr->op.type);
 	auto stored = detail::ref_target_assign(target_ref, rightValue, op, expr->incdec_desugar, expr->postfix_old_result,
-		assignment_result_used(f), operator_table_, engine_, symbolizer_,
+		assignment_result_used(f) && !expr->yields_reference, operator_table_, engine_, symbolizer_,
 		[this](const script_value& l, token_type o, const script_value& r) {
 			return evaluate_arithmetic(l, o, r, detail::compound_index(o));
 		});
 	if (!stored) {
 		return raise_from(stored);
 	}
-	stack_.push_back(std::move(stored.value()));
+	stack_.push_back(expr->yields_reference ? std::move(target_ref) : std::move(stored.value()));
 	return {};
 }
 
@@ -17847,11 +17864,19 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 			break;
 	}
 
+	if (expr->implicit_ref) {
+		if (!operand.is_reference()) {
+			return non_lvalue_target(expr->operand.get());
+		}
+		stack_.push_back(std::move(operand));
+		return {};
+	}
 	if (expr->by_reference) {
 		auto out = detail::cast_reference(detail::cast_pin_temporary(std::move(operand), engine_), *expr, engine_, symbolizer_);
 		if (!out) {
 			return raise_from(out);
 		}
+		detail::ref_declare(out.value(), expr->target.get(), engine_);
 		stack_.push_back(std::move(out.value()));
 		return {};
 	}

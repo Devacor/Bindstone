@@ -48,6 +48,8 @@ namespace jai {
         string_symbolizer* symbolizer_ = nullptr;  // Optional: for interning identifiers at parse time
         engine* engine_ = nullptr;  // Engine for interning type_info objects
         expression_ptr desugar_incdec(const token& op, const expression_ptr& target, bool postfix);
+        expression_ptr lvalue_target(const expression_ptr& target);
+        expression_ptr bound_reference(const expression_ptr& piece);
 
         // token buffer for handling >> splitting in generic contexts
         std::optional<token> pushed_back_token_;

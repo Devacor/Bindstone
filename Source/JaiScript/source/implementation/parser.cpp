@@ -1905,7 +1905,7 @@ checked_result<expression_ptr> parser::assignment() {
                token_type::left_shift_equal, token_type::right_shift_equal})) {
         token op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, assignment());
-        return std::make_shared<assignment_expr>(op.location, expr, op, right);
+        return std::make_shared<assignment_expr>(op.location, lvalue_target(expr), op, right);
     }
 
     return expr;
@@ -2447,11 +2447,48 @@ expression_ptr parser::desugar_incdec(const token& op, const expression_ptr& tar
     const bool increment = op.type == token_type::plus_plus;
     token compound(increment ? token_type::plus_equal : token_type::minus_equal, increment ? "+=" : "-=", op.location);
     script_value one(script_value::ast_literal_tag{}, static_cast<script_int>(1));
-    auto node = std::make_shared<assignment_expr>(op.location, target, compound,
+    auto node = std::make_shared<assignment_expr>(op.location, lvalue_target(target), compound,
                                                   std::make_shared<literal_expr>(op.location, one));
     node->postfix_old_result = postfix;
     node->incdec_desugar = true;
     return node;
+}
+
+// The C++ lvalues past names, members, elements and cast<T&> as an assignment target: a conditional of lvalues reads its
+// arms as references, an assignment yields the reference it stored through, and a prefix ++/-- on a name is that
+// assignment (`x += 1` yielding x); anything else stays as written and raises as a non-lvalue
+expression_ptr parser::lvalue_target(const expression_ptr& target) {
+    if (!detail::lvalue_capable(target.get())) { return target; }
+    switch (target->get_type()) {
+        case node_type::ternary_expr: {
+            auto* c = static_cast<ternary_expr*>(target.get());
+            c->then_expression = bound_reference(c->then_expression);
+            c->else_expression = bound_reference(c->else_expression);
+            return target;
+        }
+        case node_type::assignment_expr: {
+            auto* a = static_cast<assignment_expr*>(target.get());
+            a->target = bound_reference(a->target);
+            a->yields_reference = true;
+            return target;
+        }
+        case node_type::unary_expr: {
+            auto* u = static_cast<unary_expr*>(target.get());
+            auto node = std::static_pointer_cast<assignment_expr>(desugar_incdec(u->op, u->operand, false));
+            node->target = bound_reference(u->operand);
+            node->yields_reference = true;
+            return node;
+        }
+        default:
+            return target;
+    }
+}
+
+expression_ptr parser::bound_reference(const expression_ptr& piece) {
+    if (piece->get_type() == node_type::cast_expr && static_cast<cast_expr*>(piece.get())->by_reference) { return piece; }
+    auto cast = std::make_shared<cast_expr>(piece->location, store_type_info(type_info::make_any(*symbolizer_)), true, lvalue_target(piece));
+    cast->implicit_ref = true;
+    return cast;
 }
 
 // Stub for declaration

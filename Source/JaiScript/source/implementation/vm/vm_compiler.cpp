@@ -6135,16 +6135,18 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 		return;
 	}
 
-	if (expr->target->get_type() == node_type::cast_expr && static_cast<const cast_expr*>(expr->target.get())->by_reference) {
-		// cast<T&>(e) is an lvalue: the right-hand side first (C++17), then the reference
+	if (detail::reference_target(expr->target.get())) {
+		// cast<T&>(e), f() returning T&, a conditional of lvalues, an assignment, a prefix ++/--: the right-hand side first
+		// (C++17, its value taken then), then the reference
 		compile_expression(expr->value);
+		deref_ahead_of(expr->value.get(), expr->target.get());
 		compile_expression(expr->target);
 		emit(opcode::op_ref_target_store, add_node(expr));
 		return;
 	}
 
-	emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::unsupported_operation),
-	     add_message("Complex assignment targets not yet implemented"), k_invalid_u32);
+	emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::invalid_assignment_target),
+	     add_message(detail::non_lvalue_target_text(expr->target.get())), k_invalid_u32);
 	emit(opcode::op_null);
 }
 

@@ -320,6 +320,9 @@ namespace jai {
         // Set on every ++/-- desugar (prefix and postfix): the target must be numeric, exactly
         // like the identifier path's gate (a string element must not concatenate "1")
         bool incdec_desugar = false;
+        // In an assignment target (`(a = b) = c`, `++x = v`) the parser makes the inner assignment yield the reference it
+        // stored through (its target is then an implicit cast<&>), the C++ lvalue an assignment is
+        bool yields_reference = false;
 
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
             : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}    };
@@ -563,6 +566,9 @@ namespace jai {
     public:
         type_info_ptr target;
         bool by_reference;
+        // A piece of an assignment target the parser made read as a reference (a conditional's arm, an inner assignment's
+        // target): no type verdict, and a value that is no reference is no lvalue
+        bool implicit_ref = false;
         expression_ptr operand;
 
         cast_expr(const source_location& loc, type_info_ptr t, bool by_ref, expression_ptr e)

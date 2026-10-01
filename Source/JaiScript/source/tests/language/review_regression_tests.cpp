@@ -930,11 +930,11 @@ public:
             for (int i = 0; i < 9; ++i) expected += "boom|";
             check_eq(expected, r.as_string());
         });
-        // Non-lvalue assignment targets: the vm rejects them at compile time without
-        // evaluating anything; the interpreter evaluated target and rhs first (side
-        // effects, and a raising target won the error)
-        test("assignment_to_call_result_rejected_before_evaluation", [this]() {
+        // A call is an lvalue when it returns T& (C++), which only the call can tell: the right-hand side, then the call, then a
+        // by-value result raises naming the callee (strict reports a statically known one at load); a throw in either wins
+        test("assignment_to_a_by_value_call_result_raises_after_the_call", [this]() {
             auto e = make_engine();
+            e->static_checking(check_mode::off);
             stdlib::register_all(*e);
             auto r = e->execute(R"(
                 var cnt = 0;
@@ -950,8 +950,8 @@ public:
                 out + to_string(cnt);
             )");
             std::string expected;
-            for (int i = 0; i < 6; ++i) expected += "Complex assignment targets not yet implemented|";
-            check_eq(expected + "0", r.as_string());
+            for (int i = 0; i < 4; ++i) expected += "Cannot assign to a call result: 'bump' returns by value|";
+            check_eq(expected + "boom|boom|5", r.as_string());
         });
         test("fuzz_typed_fn_falls_off_end_returns_null", [this]() {
             auto e = make_engine();

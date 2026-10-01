@@ -1056,6 +1056,7 @@ namespace jai {
         // A var slot's twin of a typed array's tag: dynamic_slot=true (Dev ruling 2026-09-28)
         type_info* get_type_info_array_dynamic(type_info* array_type);
         type_info* get_type_info_reference(type_info* referenced_type);
+        type_info* get_type_info_declared_reference(type_info* referenced_type);
         type_info* get_type_info_function(type_info* return_type, const std::vector<type_info*>& arg_types);
 
         // Get or create type_info for object types (uses class_definition's type_info)

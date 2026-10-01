@@ -39,7 +39,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 29;   // 29: the checker holds a shared_ptr<T> namespace variable store to R-q6 (2026-09-30), so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`, 2026-09-30); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types (2026-09-28), so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force; 2026-09-28); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 30;   // 30: C++ lvalue targets (a conditional of lvalues, `(a = b) = c`, `++x = v`) read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference; 2026-09-30); 29: the checker holds a shared_ptr<T> namespace variable store to R-q6 (2026-09-30), so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`, 2026-09-30); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types (2026-09-28), so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force; 2026-09-28); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -254,7 +254,7 @@ namespace jai::detail {
                     node(e->target.get());
                     tok(e->op);
                     node(e->value.get());
-                    u8(static_cast<uint8_t>((e->postfix_old_result ? 1 : 0) | (e->incdec_desugar ? 2 : 0)));
+                    u8(static_cast<uint8_t>((e->postfix_old_result ? 1 : 0) | (e->incdec_desugar ? 2 : 0) | (e->yields_reference ? 4 : 0)));
                     break;
                 }
                 case node_type::call_expr: {
@@ -351,7 +351,7 @@ namespace jai::detail {
                     auto* e = static_cast<const cast_expr*>(n);
                     type(e->result_type);
                     type(e->target);
-                    u8(e->by_reference ? 1 : 0);
+                    u8(static_cast<uint8_t>((e->by_reference ? 1 : 0) | (e->implicit_ref ? 2 : 0)));
                     node(e->operand.get());
                     break;
                 }
@@ -990,7 +990,7 @@ namespace jai::detail {
                     auto v = expr_req();
                     auto e = std::make_shared<assignment_expr>(loc, t, op, v);
                     e->result_type = rt;
-                    { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; }
+                    { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->yields_reference = (fl & 4) != 0; }
                     result = e;
                     break;
                 }
@@ -1134,8 +1134,9 @@ namespace jai::detail {
                 case node_type::cast_expr: {
                     auto rt = type();
                     auto target = type();
-                    const bool by_reference = u8() != 0;
-                    auto e = std::make_shared<cast_expr>(loc, target, by_reference, expr_req());
+                    const uint8_t cast_flags = u8();
+                    auto e = std::make_shared<cast_expr>(loc, target, (cast_flags & 1) != 0, expr_req());
+                    e->implicit_ref = (cast_flags & 2) != 0;
                     e->result_type = rt;
                     result = e;
                     break;

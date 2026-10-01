@@ -216,7 +216,7 @@ public:
             check_parse_fails("return return;");
         });
 
-        // 'map'/'array' are hard keywords by grammar contract; using one as a name
+        // 'map'/'array' are hard keywords by grammar contract outside member names; using one as a name
         // used to report a generic "Expected X name" (or "Expected '<'") with no
         // cause. The diagnostic now names the keyword at the true token.
         test("type_keyword_as_name_diagnostics", [this]() {
@@ -243,8 +243,9 @@ public:
             auto destructureErrs = collect_parse_errors("auto [x, map] = p;");
             check(contains(destructureErrs, "'map' is a type keyword"), "destructuring");
 
-            auto memberErrs = collect_parse_errors("obj.map;");
-            check(contains(memberErrs, "'map' is a type keyword"), "member access");
+            // after a dot, and as a method's declared name, a keyword is a member name
+            check(collect_parse_errors("obj.map; obj.string(); p->array;").empty(), "member access");
+            check(collect_parse_errors("class C { int map(int x) { return x; } static bool default() { return true; } }").empty(), "method names");
 
             // Statement starting with the keyword commits to a type parse - the '<'
             // message now explains the collision instead of a bare "Expected '<'"

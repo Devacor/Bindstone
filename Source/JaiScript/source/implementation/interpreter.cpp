@@ -3125,9 +3125,9 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
                     }
 
                     // Check for static fields of the class
-                    auto class_def = instance->get_class_definition();
-                    if (class_def && class_def->has_static_field(expr->symbol_id)) {
-                        push_value(class_def->get_static_field(expr->symbol_id));
+                    if (class_definition* owner = detail::bare_static_owner(bare_declaring_class(), instance->get_class_definition(),
+                                                                            expr->symbol_id)) {
+                        push_value(owner->get_static_field(expr->symbol_id));
                         return checked_result<void>();
                     }
                 }
@@ -5804,8 +5804,9 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             }
                             // Then try static fields (typed statics enforce like fields)
                             else {
-                                auto class_def = instance->get_class_definition();
-                                if (class_def && class_def->has_static_field(identifier->symbol_id)) {
+                                class_definition* class_def = detail::bare_static_owner(bare_declaring_class(), instance->get_class_definition(),
+                                                                                        identifier->symbol_id);
+                                if (class_def) {
                                     // All-detach (#12): implicit static store snapshots too
                                     if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
                                         value = value.detached_for_store();
@@ -5834,19 +5835,20 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // assign would raw-write the static cell it finds through the scope env - land
                 // the store on the scope's class (KEEP BYTE-PARALLEL with vm_backend
                 // store_popped_value's statics tail)
-                if (!assigned_to_member && member_scope_.state == detail::member_scope_state::statics &&
-                    member_scope_.statics && member_scope_.statics->has_static_field(identifier->symbol_id)) {
+                class_definition* static_owner = !assigned_to_member && member_scope_.state == detail::member_scope_state::statics
+                    ? detail::bare_static_owner(member_scope_.statics, nullptr, identifier->symbol_id) : nullptr;
+                if (static_owner) {
                     if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
                         value = value.detached_for_store();
                     }
                     if (is_lvalue_read) {
-                        auto stored = detail::store_static_member(*member_scope_.statics, identifier->symbol_id, clone_for_assignment(value));
+                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, clone_for_assignment(value));
                         if (!stored) {
                             return stored.error_value();
                         }
                         if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
                     } else {
-                        auto stored = detail::store_static_member(*member_scope_.statics, identifier->symbol_id, std::move(value));
+                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, std::move(value));
                         if (!stored) {
                             return stored.error_value();
                         }
@@ -12833,6 +12835,7 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
     if (script_value* init_this = init_env->method_this_storage()) {
         member_scope_.state = detail::member_scope_state::instance;
         member_scope_.this_storage = init_this;
+        member_scope_.statics = detail::lexical_access_class(init_env.get());
         member_scope_.floor = init_env->parent_raw();
     }
 
@@ -13989,6 +13992,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                                                      method_ctx->access_ctx);
         member_scope_.state = detail::member_scope_state::instance;
         member_scope_.this_storage = call_stack_[frame_index].this_object_ptr.get();
+        member_scope_.statics = method_ctx->access_ctx;
         member_scope_.floor = method_ctx->definition_env->get();
     } else if (function.closure_env) {
         if (function.closure_env->is_method_env()) {
@@ -14001,6 +14005,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                                                          function.closure_env->get_access_context());
             member_scope_.state = detail::member_scope_state::instance;
             member_scope_.this_storage = call_stack_[frame_index].this_object_ptr.get();
+            member_scope_.statics = function.closure_env->get_access_context();
             member_scope_.floor = function.closure_env->parent_raw();
         } else if (function.closure_env->is_static_method_env()) {
             // Static method - store class definition in frame
@@ -14029,6 +14034,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     if (script_value* this_storage = boundary->method_this_storage()) {
                         member_scope_.state = detail::member_scope_state::instance;
                         member_scope_.this_storage = this_storage;
+                        member_scope_.statics = boundary->get_access_context();
                         member_scope_.floor = (boundary == function.closure_env.get())
                                                   ? boundary->parent_raw() : boundary;
                     }

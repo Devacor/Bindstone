@@ -162,6 +162,21 @@ public:
             )");
         });
 
+        test("roundtrip_keyword_member_names_and_inherited_statics", [check_roundtrip]() {
+            check_roundtrip(R"(
+                class Base { static int count = 0; Base() { count += 1; } }
+                class C : Base {
+                    int array() { return 3; }
+                    C() : super() {}
+                    int map(int x) { return x * count; }
+                    static int string() { return 7; }
+                }
+                auto c = C();
+                auto d = C();
+                to_string(c.map(5)) + "|" + to_string(c.array()) + "|" + to_string(C::string()) + "|" + to_string(Base::count);
+            )");
+        });
+
         test("roundtrip_lambdas_captures", [check_roundtrip]() {
             check_roundtrip(R"(
                 int base = 10;

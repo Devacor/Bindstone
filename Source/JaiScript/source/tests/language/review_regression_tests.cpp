@@ -5351,3 +5351,133 @@ using compound_order_tests = jai::foundry::tests::compound_order_tests;
 FOUNDRY_REGISTER(compound_order_tests)
 using loop_frame_storage_tests = jai::foundry::tests::loop_frame_storage_tests;
 FOUNDRY_REGISTER(loop_frame_storage_tests)
+
+namespace jai::foundry::tests {
+
+struct keyword_member_probe {
+    int64_t map(int64_t x) const { return x * 2; }
+    std::string string() const { return "s"; }
+};
+
+class doc_pass_fix_tests : public suite {
+public:
+    doc_pass_fix_tests() : suite("Doc Pass Fixes") {}
+
+    void forge_tests() override {
+        auto run_both = [](const std::string& src) {
+            std::string out[2];
+            int idx = 0;
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->execution_budget(0);
+                jai::stdlib::register_all(e);
+                try { out[idx] = e->execute(src).to_string(); }
+                catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+                ++idx;
+            }
+            return std::make_pair(out[0], out[1]);
+        };
+        auto expect = [this, run_both](const std::string& src, const std::string& expected, const char* what) {
+            auto [i_out, v_out] = run_both(src);
+            check_eq(expected, i_out, std::string(what) + " (interpreter)");
+            check_eq(expected, v_out, std::string(what) + " (vm)");
+        };
+
+        test("base_class_statics_resolve_by_bare_name_for_a_subclass_instance", [expect]() {
+            const std::string defs =
+                "class Base { static int count = 0; static int seed() { return count + 100; }"
+                "  int id = 0; Base() { count += 1; id = count; } int read() { return count; } void bump() { count++; } }"
+                " class Derived : Base { Derived() : super() {} int mine() { return count * 10; } static int peek() { return count + seed(); } }"
+                " class Leaf : Derived { Leaf() : super() {} int deep() { return count + seed(); } }";
+            expect(defs + " auto d = Derived(); auto e = Derived(); to_string(e.id) + \" \" + to_string(Base::count);", "2 2", "base ctor compound store for a subclass instance");
+            expect(defs + " auto d = Derived(); d.bump(); to_string(d.read()) + \" \" + to_string(Base::count);", "2 2", "base method read and ++ for a subclass instance");
+            expect(defs + " auto d = Derived(); to_string(d.mine());", "10", "subclass method reads a base static");
+            expect(defs + " auto d = Derived(); to_string(Derived::peek());", "102", "subclass static method reads a base static and calls a base static method");
+            expect(defs + " auto l = Leaf(); to_string(l.deep()) + \" \" + to_string(l.read());", "102 1", "a grandchild reads the base static through two levels");
+            expect("class B { static int n = 1; void set(int v) { n = v; } } class D : B { int get() { return n; } }"
+                   " auto d = D(); d.set(7); to_string(d.get()) + \" \" + to_string(B::n);", "7 7", "base method plain store for a subclass instance");
+            expect("class B { static int n = 1; int get() { return n; } } class D : B { static int n = 50; }"
+                   " auto d = D(); to_string(d.get());", "1", "a base method reads its own class's static, not a same-named subclass static");
+            expect("class B { static int n = 1; } class D : B { static int m = 2; void touch() { m += n; } } class E : D {}"
+                   " auto e = E(); e.touch(); to_string(D::m);", "3", "an inherited method run on a grandchild reads and stores its class's statics");
+        });
+
+        test("builtins_see_through_element_references", [this, run_both]() {
+            const std::pair<const char*, const char*> rows[] = {
+                {"var a = [[1, 2], [3]]; to_json(a[0]);", "[1,2]"},
+                {"var m = {\"k\": {\"x\": 1}}; to_json(m[\"k\"]);", "{\"x\":1}"},
+                {"var a = [{\"x\": [1]}]; to_json(a[0][\"x\"]);", "[1]"},
+                {"var a = [1, 2]; to_json(a[1]);", "2"},
+                {"class P { array<int> v = [1, 2]; } var ps = [P()]; to_json(ps[0].v);", "[1,2]"},
+                {"var a = [[1, 2], [3]]; type_of(a[0]);", "array"},
+                {"var m = {\"k\": {\"x\": 1}}; type_of(m[\"k\"]);", "map"},
+                {"var a = [[1, 2], [3]]; var b = a[0]; to_string(a[0]) == to_string(b);", "true"},
+                {"var m = {\"k\": [1]}; var b = m[\"k\"]; to_string(m[\"k\"]) == to_string(b);", "true"},
+                {"var a = [1, 2]; to_string(a[1]) + format(\"{}\", a[0]);", "21"},
+                {"var a = [[1, 2], [3]]; var s = to_json(a[1], 2); s;", "[\n  3\n]"},
+                {"var a = [[1, 2], [3]]; to_binary(a[0]) == to_binary([1, 2]);", "true"},
+                {"var a = [[1, 2], [3]]; to_base64(a[0]) == to_base64([1, 2]);", "true"},
+            };
+            std::string misses;
+            for (const auto& [src, want] : rows) {
+                auto [i_out, v_out] = run_both(src);
+                if (i_out != want) { misses += std::string("interp: ") + src + " -> " + i_out + "\n"; }
+                if (v_out != want) { misses += std::string("vm: ") + src + " -> " + v_out + "\n"; }
+            }
+            check_eq(std::string(), misses, "builtins over element references");
+        });
+
+        test("to_json_indent_argument_pretty_prints", [expect]() {
+            expect("to_json({\"a\": 1, \"b\": [1, 2], \"c\": {}}, 2);",
+                   "{\n  \"a\": 1,\n  \"b\": [\n    1,\n    2\n  ],\n  \"c\": {}\n}", "a nested map at two spaces");
+            expect("to_json([1, [2], []], 4);", "[\n    1,\n    [\n        2\n    ],\n    []\n]", "arrays at four spaces");
+            expect("to_json({\"a\": 1, \"b\": [1, 2]});", "{\"a\":1,\"b\":[1,2]}", "no indent stays compact");
+            expect("to_json({\"a\": 1, \"b\": [1, 2]}, 0);", "{\"a\":1,\"b\":[1,2]}", "indent 0 is compact");
+            expect("to_json(5, 2);", "5", "a scalar is unchanged");
+            expect("var v = {\"a\": [1, 2.5, \"s\", true, null], \"m\": {\"x\": {\"y\": 1}}}; to_json(from_json(to_json(v, 2))) == to_json(v);",
+                   "true", "an indented document round-trips through from_json");
+            expect("class P { int x = 1; array<int> v = [2]; } to_json(P(), 2);",
+                   "{\n  \"_type_\": \"P\",\n  \"x\": 1,\n  \"v\": [\n    2\n  ]\n}", "a class instance");
+        });
+
+        test("type_keywords_are_member_names_after_a_dot", [expect]() {
+            expect("class C { int map(int x) { return x * 2; } int string() { return 7; } int array() { return 3; } }"
+                   " auto c = C(); to_string(c.map(4)) + \" \" + to_string(c.string()) + \" \" + to_string(c.array());",
+                   "8 7 3", "methods named after type keywords");
+            expect("class C { bool bool() { return true; } float float() { return 1.5; } int var() { return 2; } int function() { return 3; } }"
+                   " auto c = C(); to_string(c.bool()) + \" \" + to_string(c.float()) + \" \" + to_string(c.var()) + \" \" + to_string(c.function());",
+                   "true 1.5 2 3", "more type keywords as method names");
+            expect("class C { static int map() { return 4; } function array(int x) { return x + 1; } int default(int x) { return -x; } }"
+                   " auto c = C(); to_string(C::map()) + \" \" + to_string(c.array(1)) + \" \" + to_string(c.default(3));",
+                   "4 2 -3", "a static, a function-spelled method and a non-type keyword");
+            expect("class Base { static int count = 0; Base() { count += 1; } }"
+                   " class C : Base { int array() { return 3; } C() : super() {} int map(int x) { return x * count; } static int string() { return 7; } }"
+                   " auto c = C(); auto d = C(); to_string(c.map(5)) + \"|\" + to_string(c.array()) + \"|\" + to_string(C::string()) + \"|\" + to_string(Base::count);",
+                   "10|3|7|2", "keyword members beside inherited statics");
+            expect("var m = {\"map\": 1}; m.map;", "1", "a map key read with a keyword after the dot");
+            expect("class C { int x = 0; } var c = C(); c.map();", "ERROR: C has no member 'map'", "an undeclared keyword member is the no-member error");
+            expect("var a = [1, 2]; a.map(5);", "ERROR: array has no member 'map'", "arrays have no map method");
+        });
+
+        test("host_methods_named_after_keywords", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                jai::stdlib::register_all(e);
+                dynamic_binder<keyword_member_probe>(*e, "KeywordProbe")
+                    .constructor<>()
+                    .method("map", &keyword_member_probe::map)
+                    .method("string", &keyword_member_probe::string)
+                    .build();
+                check_eq(std::string("10|s"), e->execute("auto k = KeywordProbe(); to_string(k.map(5)) + \"|\" + k.string();").to_string(),
+                         use_vm ? "vm" : "interpreter");
+            }
+        });
+    }
+};
+
+} // namespace jai::foundry::tests
+
+using doc_pass_fix_tests = jai::foundry::tests::doc_pass_fix_tests;
+FOUNDRY_REGISTER(doc_pass_fix_tests)

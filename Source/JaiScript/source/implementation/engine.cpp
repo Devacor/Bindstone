@@ -2868,6 +2868,24 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
 
 void engine::add_variadic_function(const std::string& name, script_function func, privilege required) {
     func = guard_function(std::move(func), required);
+    // A variadic callable takes its arguments by value: an element reference an argument site minted (`f(a[i])`) reaches it
+    // as the element's value, as a typed parameter's conversion already reads it
+    func = [inner = std::move(func)](const std::vector<script_value>& args) -> checked_result<script_value> {
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (args[i].is_reference()) [[unlikely]] {
+                std::vector<script_value> values;
+                values.reserve(args.size());
+                for (const script_value& arg : args) {
+                    if (!arg.is_reference()) { values.push_back(arg); continue; }
+                    auto value = detail::ref_checked_deref(arg);
+                    if (!value) { return value.error_value(); }
+                    values.push_back(std::move(value.value()));
+                }
+                return inner(values);
+            }
+        }
+        return inner(args);
+    };
     // Variadic function registration - handles any number of arguments
     // Register with SIZE_MAX to indicate it's a wildcard function
     constexpr size_t VARIADIC = SIZE_MAX;

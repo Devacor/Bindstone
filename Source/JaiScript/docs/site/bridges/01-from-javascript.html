@@ -274,10 +274,10 @@ try { stats.hp = 1; } catch (e) { print("caught: ", e); }</code></pre></div>
 10
 caught: Cannot assign to member of non-object type</code></pre></div>
 <h3 id="array-helpers">The array helpers<a class="hlink" href="#array-helpers" aria-label="link">&#8203;</a></h3>
-<p>Arrays have <code>filter</code>, <code>sort</code>, <code>remove_if</code>, <code>slice</code>, <code>index_of</code>, <code>contains</code> and <code>join</code>, and no <code>map</code>, <code>reduce</code>, <code>forEach</code>, <code>find</code>, <code>some</code>, <code>every</code>, <code>includes</code>, <code>shift</code>, <code>splice</code> or <code>concat</code>. <code>map</code> is a type keyword, so <code>a.map(...)</code> does not even parse:</p>
+<p>Arrays have <code>filter</code>, <code>sort</code>, <code>remove_if</code>, <code>slice</code>, <code>index_of</code>, <code>contains</code> and <code>join</code>, and no <code>map</code>, <code>reduce</code>, <code>forEach</code>, <code>find</code>, <code>some</code>, <code>every</code>, <code>includes</code>, <code>shift</code>, <code>splice</code> or <code>concat</code>. <code>a.map(...)</code> parses (a keyword after a dot is a member name, so a class or host may define <code>map</code>) and raises, since arrays have no such method:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var a = [1, 2, 3];
 var doubled = a.map([](x) { return x * 2; });</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:2:17: 'map' is a type keyword and cannot be used as a member name - rename it (e.g. 'mapname')</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: array has no member 'map'</code></pre></div>
 <p>A range-<code>for</code> loop does each of those jobs, and <code>parallel_transform</code> maps:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var a = [1, 2, 3, 4];
 var doubled = [];

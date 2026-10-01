@@ -1142,6 +1142,16 @@ namespace {
         }
     }
 
+    // A keyword after '.' / '->', or as a method's declared name, is a member name; a field keeps the keyword diagnostic
+    // (its bare name in a method body would read as the keyword)
+    bool is_keyword_word(token_type type) {
+        return type >= token_type::bool_keyword && type <= token_type::extern_keyword;
+    }
+
+    bool keyword_member_name_at(const std::vector<token>& stream, size_t index) {
+        return index + 1 < stream.size() && is_keyword_word(stream[index].type) && stream[index + 1].type == token_type::left_paren;
+    }
+
     std::string type_keyword_name_message(std::string_view lexeme, const char* what) {
         std::string name(lexeme);
         return "'" + name + "' is a type keyword and cannot be used as a " + std::string(what) +
@@ -2941,6 +2951,10 @@ checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
 }
 
 checked_result<expression_ptr> parser::finish_member_access(expression_ptr object, bool is_arrow) {
+    if (is_keyword_word(peek().type)) {
+        token name = advance();
+        return std::make_shared<member_expr>(name.location, object, name.lexeme, get_symbol_id(name), is_arrow);
+    }
     JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected member name", "member"));
     uint64_t member_id = get_symbol_id(name);
     return std::make_shared<member_expr>(name.location, object, name.lexeme, member_id, is_arrow);
@@ -3798,7 +3812,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 if (reference_method_head()) { type = wrap_reference_return_type(std::move(type)); }   // Box& self_ref() { ... }
 
                 // Continue with regular member parsing...
-                if (check(token_type::identifier)) {
+                if (check(token_type::identifier) || keyword_member_name_at(*stream_, current_)) {
                     token name = advance();
                     std::string method_name(name.lexeme);
 
@@ -4022,7 +4036,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                     continue;
                 }
                 method_name = std::move(*op_name);
-            } else if (check(token_type::identifier)) {
+            } else if (check(token_type::identifier) || keyword_member_name_at(*stream_, current_)) {
                 // Regular method name
                 token name_tok = advance();
                 method_name = std::string(name_tok.lexeme);
@@ -4063,7 +4077,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 synchronize_class_member(class_open_index);
                 continue;
             }
-            if (check(token_type::identifier)) {
+            if (check(token_type::identifier) || keyword_member_name_at(*stream_, current_)) {
                 token name = advance();
                 std::string method_name(name.lexeme);
 

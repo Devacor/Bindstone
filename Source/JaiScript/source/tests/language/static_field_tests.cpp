@@ -106,7 +106,7 @@ public:
                     static int derived_static = 20;
 
                     function getBaseStatic() -> int {
-                        // Static fields follow C++ semantics: not inherited, must use explicit qualification
+                        // The declaring class's qualification names an inherited static
                         return Base::base_static;
                     }
                 }

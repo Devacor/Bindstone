@@ -173,6 +173,10 @@ public:
     }
 
     void write_value(const script_value& value) {
+        if (value.is_reference()) [[unlikely]] {
+            write_value(value.deref());
+            return;
+        }
         // Track depth - throws on overflow (hard failure, no partial data)
         depth_guard guard(current_depth_);
 

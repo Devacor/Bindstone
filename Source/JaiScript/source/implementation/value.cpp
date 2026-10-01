@@ -1635,6 +1635,7 @@ void script_value::assign_through(const script_value& value) {
             throw runtime_error("Null reference in assign_through");
         }
         if (refHolder->has_cell) {
+            if (refHolder->cell()->is_cpp_bound_primitive()) { refHolder->cell()->assign_through(value); return; }   // a boxed host-bound variable: the C++ memory
             *refHolder->cell() = value;
             return;
         }
@@ -1751,6 +1752,7 @@ void script_value::assign_through(script_value&& value) {
             throw runtime_error("Null reference in assign_through");
         }
         if (refHolder->has_cell) {
+            if (refHolder->cell()->is_cpp_bound_primitive()) { refHolder->cell()->assign_through(value); return; }
             *refHolder->cell() = std::move(value);
             return;
         }

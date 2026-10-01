@@ -658,6 +658,12 @@ namespace jai::detail {
 	// A store into a variable's own storage (a cell's value, a frame slot) obeys the variable's declared type: the assignment
 	// table and its text (Dev ruling 2026-09-28; no slot is named, so the text is the slot-less shape)
 	inline checked_result<void> variable_store(script_value& storage, script_value& value, engine* eng) {
+		if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {   // a host-bound variable (add_global_ref): the C++ memory
+			auto stored = typed_store_convert(clone_for_assignment(value.deref()), storage.get_type_info(), eng, []() { return slot_site{slot_kind::assignment, {}, {}}; });
+			if (!stored) { return stored.error_value(); }
+			storage.assign_through(stored.value());
+			return {};
+		}
 		type_info_ptr tag = storage.get_type_info();
 		if (tag && var_slot(tag.get())) {   // a var stays a var (a typed array keeps its element type)
 			script_value v = clone_for_assignment(value);

@@ -47,6 +47,10 @@ allocates except the first boxing of a variable.
   (`share_env_ref` / `share_boxed_env_storage`). The variable's storage BECOMES the
   handle; reads/stores handle the boxed form transparently, and direct assignment to
   the boxed name writes the cell inner with the variable's typed-store enforcement.
+  A host-bound variable (`add_global_ref`) boxes the same way, its cpp_bound box becoming the
+  cell's value: every store through the cell (the name, `auto& r = hp`, an `int&` parameter,
+  `=`, `op=`, `++`) writes the C++ memory through the box's conversion (`variable_store`,
+  `assign_through`) and never replaces the box, so the name stays bound (Dev ruling 2026-10-01).
 - **`arr[i]` / `obj.field` / chains** resolve to ELEMENT/FIELD refs via the shared
   `detail/ref_lvalue.hpp` resolver (ref args, ref returns) or the subscript-lvalue
   paths. **`m[k]`** lvalues mint MAP-ENTRY refs.

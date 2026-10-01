@@ -208,6 +208,7 @@ engine.execution_budget(1.0/60);   // wall-clock seconds per host entry (execute
                                    // Checked at loop back-edges + call entry (clock sampled every
                                    // 1024 ticks — no measurable hot-path cost).
 ```
+A reference to an `add_global_ref` variable (`auto& r = hp`, an `int&` parameter; Dev ruling 2026-10-01) stores through the box into C++ (a CELL holding a cpp_bound box: `variable_store`, `assign_through`), the name stays bound.
 
 ---
 

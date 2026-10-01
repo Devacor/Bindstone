@@ -609,6 +609,9 @@ namespace jai::vm {
             bool speculative = false;
             uint32_t guard_temp = k_invalid_u32;   // fused_index_proto::container_guard, flattened
             bool guard_always = false;             // fused_index_proto::guard_always, flattened
+            // a block's copy of a read: the general instruction's own ip, whose environment cache slots the entry resolves the container
+            // through (the copy's miss ip may be another instruction's: an argument's read misses onto the first argument instruction)
+            uint32_t orig_ip = k_invalid_u32;
         };
         std::vector<typed_site> typed_sites;
         // the environment operands of typed ops (k_typed_env_bit): resolved as the replaced instruction resolved them, at its cache slots

@@ -7830,7 +7830,8 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 				cs.site_node[ip - loop.copy_head] = node;
 				continue;
 			}
-			const size_t cache_slot = site.fold_count ? ci.c * 3 + 2 : ci.c * 3;
+			const size_t read_ip = site.orig_ip != k_invalid_u32 ? site.orig_ip : ci.c;   // the general read's own cache slots (an argument's miss ip is the first argument's)
+			const size_t cache_slot = site.fold_count ? read_ip * 3 + 2 : read_ip * 3;
 			if (site.cont_slot == k_invalid_u32 && cache_slot < f.code->env_lookup_cache.size()) {
 				// an environment binding that is a reference to a property or an element is not a plain node: its getter or its error
 				// belongs to every read, so the loop stays on the general form (the cache holds the binding the general form resolved)

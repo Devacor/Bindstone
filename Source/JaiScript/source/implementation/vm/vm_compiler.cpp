@@ -4439,6 +4439,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					site = c.typed_sites[ip];   // a T_LOAD's row with its slot operands rebound to cells
 					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { if (!(site.operands[k] & k_typed_const_bit)) { site.operands[k] = current[site.operands[k] & k_typed_slot_mask]; } }
 				}
+				site.orig_ip = static_cast<uint32_t>(ip);
 				chunk_ = &c;
 				typed_site_at(code.size()) = site;
 				const uint32_t dst = dst_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place
@@ -4668,7 +4669,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (pi >= c.fused_index_protos.size()) continue;
 			const fused_operand& co = c.fused_index_protos[pi].container;
 			if (co.member_node != k_invalid_u32 || co.const_index != k_invalid_u32 || co.is_subscript() || co.load_flags != 0 || co.slot != k_invalid_u32 || co.symbol == k_invalid_u32) continue;
-			loop.site_env_cache[k] = s.fold_count ? code[cip].c * 3 + 2 : code[cip].c * 3;
+			const uint32_t read_ip = s.orig_ip != k_invalid_u32 ? s.orig_ip : code[cip].c;   // the general read's own cache slots, never the miss ip's
+			loop.site_env_cache[k] = s.fold_count ? read_ip * 3 + 2 : read_ip * 3;
 		}
 		std::vector<std::pair<uint32_t, uint32_t>> exits;   // (general target, its exit's copy ip): a compare's edge out of the loop
 		auto exit_at = [&](uint32_t target) -> uint32_t {

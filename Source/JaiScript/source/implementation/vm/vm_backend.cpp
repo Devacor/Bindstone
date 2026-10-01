@@ -11593,6 +11593,7 @@ bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
 
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_ || (site.plain_numeric && has_custom_numeric_ops_)) return false;
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) [[unlikely]] return false;   // at the depth cap the call raises: the fallback makes it
 	if (!site.proof_globals.empty() && !inline_globals_hold(site)) return false;
 	if (site.method) return inline_method_holds(f, site);
 	if (site.env_reads && f.locals && !f.top_level) {

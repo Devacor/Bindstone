@@ -1001,6 +1001,62 @@ public:
             std::filesystem::remove(path);
         });
 
+        test("an_import_re_runs_its_module_when_only_an_included_file_changes", [=, this]() {
+            // a module's closure is the module and every file its run included (top level, nested, spliced into a function
+            // body): a pass queries each once and a change to any of them, an older mtime included, re-runs the module;
+            // between passes nothing is queried
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 0;
+            auto write = [&](const char* name, const std::string& body, int shift = 0) {
+                const auto path = dir / name;
+                put_file(path, body);
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(shift ? shift : 2 * ++tick), ec);
+            };
+            write("cl_main.jai", "closure_ran();\ninclude \"cl_a.jai\";\nint cl_spliced() { include \"cl_s.jai\"; return S_VALUE; }\n");
+            write("cl_a.jai", "include \"cl_b.jai\";\nint cl_a() { return 1; }\n");
+            write("cl_b.jai", "int cl_b() { return 2; }\n");
+            write("cl_s.jai", "int S_VALUE = 3;\n");
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(dir.string());
+            int runs = 0;
+            eng->add_function("closure_ran", [&runs]() { ++runs; });
+            eng->import_recheck_interval(1.0e6);   // every pass below is opened on purpose
+            eng->execute("void frame() { import(\"cl_main.jai\"); }\nframe();");
+            check_eq(1, runs);
+            check_eq(std::string("1 2 3"), eng->execute("to_string(cl_a()) + \" \" + to_string(cl_b()) + \" \" + to_string(cl_spliced());").to_string());
+            const uint64_t warm = eng->import_stat_count();
+            eng->execute("for (int i = 0; i < 50; i++) { frame(); }");
+            check_eq(warm, eng->import_stat_count(), "between passes the closure is not queried");
+            eng->import_recheck_interval(1.0e6);
+            const uint64_t before = eng->import_stat_count();
+            eng->execute("frame();");
+            check_eq(1, runs, "an unchanged closure does not re-run");
+            check_eq(before + 4, eng->import_stat_count(), "one query per file of the closure in a pass");
+            struct edit { const char* file; const char* body; int shift; const char* probe; const char* expect; const char* why; };
+            const edit edits[] = {
+                {"cl_b.jai", "int cl_b() { return 5; }\n", 0, "cl_b();", "5", "a nested include changed"},
+                {"cl_a.jai", "include \"cl_b.jai\";\nint cl_a() { return 4; }\n", 0, "cl_a();", "4", "a top-level include changed"},
+                {"cl_s.jai", "int S_VALUE = 6;\n", 0, "cl_spliced();", "6", "a spliced include changed"},
+                {"cl_b.jai", "int cl_b() { return 8; }\n", -3600, "cl_b();", "8", "an include put back with an older mtime"},
+            };
+            int expected_runs = 1;
+            for (const auto& e : edits) {
+                write(e.file, e.body, e.shift);
+                eng->import_recheck_interval(1.0e6);
+                eng->execute("frame();");
+                check_eq(++expected_runs, runs, std::string("the module re-runs: ") + e.why);
+                check_eq(std::string(e.expect), eng->execute(e.probe).to_string(), e.why);
+                eng->execute("frame();");
+                check_eq(expected_runs, runs, std::string("and the next frame does not: ") + e.why);
+            }
+            for (const char* f : {"cl_main.jai", "cl_a.jai", "cl_b.jai", "cl_s.jai"}) {
+                std::filesystem::remove(dir / f);
+                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+            }
+        });
+
         test("an_import_runs_a_module_only_from_text_read_under_its_stamp", [=, this]() {
             // a save landing while a module is read (its stamp queried after the read disagrees with the one before) holds a
             // module that ran before until a pass reads it whole; a first load reads again at once. A saver thread moves the

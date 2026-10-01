@@ -17563,13 +17563,10 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	}
 	std::string resolved_path = std::move(resolve_result.value());
 
-	std::ifstream file(resolved_path);
-	if (!file.is_open()) {
+	std::string content;
+	if (!engine_->read_include_file(resolved_path, content)) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
-	std::stringstream buffer;
-	buffer << file.rdbuf();
-	std::string content = buffer.str();
 
 	// Re-entrant into this backend's execute(); prepare_for_execution preserves any
 	// running-coroutine state. An error in the included file surfaces as unwinding.

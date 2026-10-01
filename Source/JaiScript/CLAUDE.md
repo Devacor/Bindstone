@@ -532,8 +532,10 @@ engine stays usable", not by `check_throws`.
   includer writes the included x in place; `{ include ... }` scopes it); an import is its own unit keyed by its
   canonical path, a statement allowed wherever a statement is (a function, a block, a loop, a conditional, a coroutine,
   a lambda) whose effect is always program scope - it takes no scope (Dev ruling 2026-09-27); directly in a class or a
-  namespace body it is a parse error. It runs when first reached and, reached again, re-runs only when the file's
-  (mtime, size) stamp moved (functions and classes replace in place, instances migrate); the re-run parses and
+  namespace body it is a parse error. It runs when first reached and, reached again, re-runs only when a stamp in its
+  closure moved: the module's (mtime, size) and every file its last run included (top level, nested, spliced into a
+  function body; `import_record::closure`, recorded through `engine::read_include_file`) (functions and classes replace in
+  place, instances migrate); the re-run parses and
   strict-checks the module and the modules it imports before any of it runs, so a check failure is a catchable error
   that leaves the program unchanged, and a run-time error in it is catchable too. A same-unit re-run (a module re-run,
   the host's `execute_file` of the same file, a re-executed string, a top-level include run again) keeps a program-scope
@@ -556,7 +558,7 @@ engine stays usable", not by `check_throws`.
   decision, every changed module parsed + checked with the others' names published before any runs, one catchable error
   applies nothing, a module that failed at its current stamp holds the group quietly until it changes, then the changed
   ones run in order); a trailing `jai::force` opens a pass now. `engine::import_modules` is the one step both backends
-  call; `engine::import_stat_count()` counts its filesystem queries (0 per idle import, 1 per module per pass). The
+  call; `engine::import_stat_count()` counts its filesystem queries (0 per idle import, 1 per file of a module's closure per pass). The
   resolution key caches the working directory (refreshed when a pass opens). Foundry's `make_engine()` sets the window to
   0 (tests touch and re-import at once). The host reads and
   assigns the newest cell. Zero cost

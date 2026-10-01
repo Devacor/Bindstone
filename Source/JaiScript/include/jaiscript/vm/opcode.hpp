@@ -295,6 +295,7 @@ namespace jai::vm {
         op_c_mov_p,         // a = dst cell, b = src cell: a move between cells pinned to one kind (the landing's rules keep the value as it is)
         op_c_mov_k,         // a = dst cell, b = constant index: a constant of the dst's pinned kind
         op_c_sin_f, op_c_cos_f, op_c_sqrt_f,   // a = dst cell, b = src cell: the intrinsic on a pinned float into a pinned float
+        op_c_jtruth,        // a = cell, c = the copy ip taken when false | 0x80000000 (jump when true): a call's landed int, float or bool as a branch (no miss: the landing took only those kinds)
         op_c_load_f,        // a = dst cell, b = the pinned int index cell, c = the original ip: C_LOAD of a float element into a float cell (a float buffer read in place; anything else runs C_LOAD)
         // pinned compare-jumps by kind: a = left cell, b = right cell (the k forms: a constant index), c = the copy ip taken when false | 0x80000000 (jump when true)
         op_c_jlt_ff, op_c_jle_ff, op_c_jgt_ff, op_c_jge_ff, op_c_jlt_ffk, op_c_jle_ffk, op_c_jgt_ffk, op_c_jge_ffk, op_c_jlt_ii, op_c_jle_ii, op_c_jgt_ii, op_c_jge_ii, op_c_jlt_iik, op_c_jle_iik, op_c_jgt_iik, op_c_jge_iik,
@@ -629,6 +630,7 @@ namespace jai::vm {
             case opcode::op_c_sin_f: return "C_SIN_F";
             case opcode::op_c_cos_f: return "C_COS_F";
             case opcode::op_c_sqrt_f: return "C_SQRT_F";
+            case opcode::op_c_jtruth: return "C_JTRUTH";
             case opcode::op_c_load_f: return "C_LOAD_F";
             case opcode::op_c_jlt_ff: return "C_JLT_FF";
             case opcode::op_c_jle_ff: return "C_JLE_FF";

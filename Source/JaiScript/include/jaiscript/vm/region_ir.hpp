@@ -47,6 +47,7 @@ namespace jai::vm {
 		uint32_t origin = k_invalid_u32;         // the original ip a miss at this operation re-runs (k_invalid_u32 = its own): an argument's value re-runs from the probe
 		bool poll = false;                       // arith: an inner counted loop's step, preceded in the copy by the budget poll (C_JUMP c = 1: a miss on exhaustion onto the step's own origin)
 		uint32_t member = k_invalid_u32;         // load: the member_expr node of a member read site (container = the base slot; the field resolved at entry)
+		bool branch = false;                     // land: the call's result as a truth jump to target (sense as cmp's), b the landed slot
 	};
 
 	// one loop's operations with the span of the general form they stand for: ops[k] stands for the instruction

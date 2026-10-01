@@ -4144,6 +4144,31 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined cheb") != std::string::npos, "cheb grafts with imax taking iabs's results: " + l);
 			check_true(l.find("-- call kept imax") == std::string::npos, "no kept call for imax: " + l);
 		});
+		test("leaves_graft_behind_short_circuits_in_builtin_arguments_and_after_names", [this]() {
+			// Gator Quest's kept calls: `if (o < 0 || !hostile(m, o))` grafts the leaf between the short-circuit jumps, so it runs only on the
+			// path that reaches its operand; `TVAR.push(hash3(...) & 255)` grafts in a builtin method's argument (a proven array whose receiver
+			// the graft cannot write); `return n + cheb(...)` grafts when the callee has no reference parameter (a nested leaf's fallback cannot
+			// reach the caller's local)
+			const std::string prelude =
+				"int calls = 0;\n"
+				"bool chk(int v) { calls = calls + 1; return v > 2; }\n"
+				"int short_circuit() { int n = 0; for (int i = 0; i < 6; ++i) { if (i < 3 || chk(i)) { n = n + 1; } if (i > 9 && chk(i)) { n = n + 1000; } } return n * 100 + calls; }\n"
+				"array<int> OUT;\n"
+				"int sq(int v) { return v * v; }\n"
+				"int pushes() { array<int> loc; for (int i = 0; i < 4; ++i) { OUT.push(sq(i) + 1); loc.push(sq(i)); } int s = 0; for (int i = 0; i < 4; ++i) { s = s + OUT[i] + loc[i]; } return s; }\n"
+				"int iabs(int v) { return v < 0 ? -v : v; }\n"
+				"int imax(int a, int b) { return a > b ? a : b; }\n"
+				"int cheb(int x0, int y0, int x1, int y1) { return imax(iabs(x0 - x1), iabs(y0 - y1)); }\n"
+				"int after_name() { int n = 1; return n + cheb(1, 2, 4, -3); }\n";
+			const std::string run = "to_string(short_circuit()) + \"|\" + to_string(pushes()) + \"|\" + to_string(after_name());";
+			both(prelude + run, "603|32|6", "leaves behind a short circuit, in builtin arguments and after a name");
+			both(prelude + run, "603|32|6", "leaves behind a short circuit, in builtin arguments and after a name, proofs off", false);
+			const std::string l = listing_run(prelude + "short_circuit(); pushes(); after_name();");
+			check_true(l.find("-- inlined chk") != std::string::npos, "chk grafts behind || and &&: " + l);
+			check_true(l.find("-- call kept chk") == std::string::npos, "no kept call for chk: " + l);
+			check_true(l.find("-- call kept sq") == std::string::npos, "sq grafts in the push arguments: " + l);
+			check_true(l.find("-- inlined cheb") != std::string::npos, "cheb grafts after the name n: " + l);
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second
@@ -5896,6 +5921,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; float wx = q + W * sin(q * 1.3 + T * 0.7); s += wx + f(q); } return s; }\n"
 				"function rb(int i) -> int { if (i == 5) { sin = function(float v) { return 3; }; } return i; }\n"
 				"function run2(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; s += q + W * sin(q); int k = rb(i); s += k; } return s; }\n"
+				"float probe_f = f(0.1);\n"   // a program-scope call compiles f itself (run's call grafts it)
 				"string out = to_string(run(40)) + \" \" + to_string(run2(10));\n"
 				"sin = function(float v) { return \"x\"; };\n"
 				"function bad() -> string { try { float q = 1.0; float r = q + W * sin(q); return to_string(r); } catch (e) { return \"E:\" + e; } }\n"

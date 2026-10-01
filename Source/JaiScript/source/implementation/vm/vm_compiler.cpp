@@ -15,6 +15,8 @@
 #include <cassert>
 #include <functional>
 
+namespace jai::detail::aggregate_lowering_impl { bool contains_yield(const statement* s); }
+
 namespace jai::vm {
 
 static bool primitive_declared_type(const type_info* t);   // defined with the quietness predicates below
@@ -808,6 +810,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 
 	callable_ = {};
 	callable_.active = true;
+	callable_.coroutine_body = detail::aggregate_lowering_impl::contains_yield(body.get());
 	callable_body_ = body.get();
 	frame_param_kinds_.clear();
 	frame_eligible_ = parameters.size() <= 8 && loop_free_body(body.get());
@@ -1303,9 +1306,15 @@ void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vect
 			return;
 		}
 	}
-	compile_expression(cond);
-	if (cond->get_type() == node_type::member_expr) { member_tail_into_temp(cond.get()); }
-	false_jumps.push_back(emit_cond_jump_false(cond.get()));
+	const bool grafts = leaf_grafts_;
+	leaf_grafts_ = false;
+	bool changed = false;
+	expression_ptr hoisted = grafts ? hoist_leaf_calls(cond, false, changed) : nullptr;
+	const expression_ptr& leaf = hoisted ? hoisted : cond;
+	compile_expression(leaf);
+	if (leaf->get_type() == node_type::member_expr) { member_tail_into_temp(leaf.get()); }
+	false_jumps.push_back(emit_cond_jump_false(leaf.get()));
+	leaf_grafts_ = grafts;
 }
 
 void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std::vector<size_t>& true_jumps) {
@@ -1328,15 +1337,26 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 			return;
 		}
 	}
-	compile_expression(cond);
-	if (cond->get_type() == node_type::member_expr) { member_tail_into_temp(cond.get()); }
-	true_jumps.push_back(emit(opcode::op_jump_if_true, k_invalid_u32, expression_returns_bool(cond.get()) ? 1u : 0u));
+	const bool grafts = leaf_grafts_;
+	leaf_grafts_ = false;
+	bool changed = false;
+	expression_ptr hoisted = grafts ? hoist_leaf_calls(cond, false, changed) : nullptr;
+	const expression_ptr& leaf = hoisted ? hoisted : cond;
+	compile_expression(leaf);
+	if (leaf->get_type() == node_type::member_expr) { member_tail_into_temp(leaf.get()); }
+	true_jumps.push_back(emit(opcode::op_jump_if_true, k_invalid_u32, expression_returns_bool(leaf.get()) ? 1u : 0u));
+	leaf_grafts_ = grafts;
 }
 
 void vm_compiler::compile_if(if_stmt* stmt) {
 	std::vector<size_t> false_jumps;
 	const size_t cond_mark = temp_next_;
-	compile_branch_condition(hoisted_condition(stmt->condition), false_jumps);
+	leaf_retry_ = true;
+	const expression_ptr cond = hoisted_condition(stmt->condition);
+	leaf_retry_ = false;
+	leaf_grafts_ = true;
+	compile_branch_condition(cond, false_jumps);
+	leaf_grafts_ = false;
 	temp_next_ = cond_mark;   // the hoisted leaves' temps die at the jumps
 	compile_statement(stmt->then_statement);
 	if (stmt->else_statement) {

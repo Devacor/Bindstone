@@ -3220,6 +3220,12 @@ private:
 			}
 			if (!recv.tentative && !m->is_static) { check_builtin_member(recv, m); }
 			stamp(c->builtin_receiver, proven, uint8_t(0));
+			{
+				std::vector<std::pair<uint64_t, uint16_t>> deps;
+				auto* rid = m->object && m->object->get_type() == node_type::identifier_expr ? static_cast<identifier_expr*>(m->object.get()) : nullptr;
+				const bool certain = stamping() && proven && rid && rid->slot_index == SIZE_MAX && certain_global(rid, deps);
+				c->receiver_global = certain ? deps.back() : std::pair<uint64_t, uint16_t>{UINT64_MAX, 0};
+			}
 			if (proven && c->arguments.empty() && (m->member == "size" || m->member == "length")) { return ctype::make(ctype::int_k); }   // every kind's size is its count
 			if (proven) {
 				for (auto& a : c->arguments) {   // a builtin reads its arguments as values: a subscript argument needs no element reference

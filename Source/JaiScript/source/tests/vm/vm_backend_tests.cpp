@@ -140,7 +140,7 @@ public:
 			for (const auto& src : corpus) {
 				auto* symbolizer = e->get_symbolizer();
 				auto templates = e->get_registered_template_types();
-				jai::lexer lex(src, symbolizer, templates);
+				jai::lexer lex(src, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
 				auto parsed = p.parse();
@@ -170,7 +170,7 @@ public:
 			auto e = vm_engine();
 			auto* symbolizer = e->get_symbolizer();
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex("a + b; a[1];", symbolizer, templates);
+			jai::lexer lex("a + b; a[1];", symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parsed = p.parse();
@@ -589,7 +589,7 @@ public:
 			auto body_needs_env = [&](const char* script) -> bool {
 				auto* symbolizer = e->get_symbolizer();
 				auto templates = e->get_registered_template_types();
-				jai::lexer lex(script, symbolizer, templates);
+				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
 				auto parsed = p.parse();
@@ -650,7 +650,7 @@ public:
 			auto body_reusable = [&](const char* script) -> bool {
 				auto* symbolizer = e->get_symbolizer();
 				auto templates = e->get_registered_template_types();
-				jai::lexer lex(script, symbolizer, templates);
+				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
 				auto parsed = p.parse();
@@ -2626,7 +2626,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			std::string script = "var x = 1; while (x < 10) { x = x + 1; } x;";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -2650,7 +2650,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			auto listing_of = [&](const char* script) {
 				auto templates = e->get_registered_template_types();
-				jai::lexer lex(script, symbolizer, templates);
+				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
 				auto parse_result = p.parse();
@@ -4350,7 +4350,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			std::string script = "var g = 1; int f(int n) { int m = n + g; return h(m, g); } g = g + 1; f(g);";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -4593,7 +4593,7 @@ public:
 				auto* symbolizer = vm->get_symbolizer();
 				const char* script = "array<int> G = [1, 2, 3, 4]; var f = function(int w) { int y = 1; int x = 0; int v = G[y * w + x]; int q = G[x]; return v + q; }; var z = 0;";
 				auto templates = vm->get_registered_template_types();
-				jai::lexer lex(script, symbolizer, templates);
+				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);
 				auto parse_result = p.parse();
@@ -4610,7 +4610,7 @@ public:
 				auto* symbolizer = vm->get_symbolizer();
 				const char* script = "var f = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int t = i * 2; acc = acc + t; int c = 5; int d = c; } return acc; }; var z = 0;";
 				auto templates = vm->get_registered_template_types();
-				jai::lexer lex(script, symbolizer, templates);
+				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);
 				auto parse_result = p.parse();
@@ -4791,7 +4791,7 @@ public:
 			auto* symbolizer = vm->get_symbolizer();
 			auto listing_of = [&](const char* script) {
 				auto templates = vm->get_registered_template_types();
-				jai::lexer lex(script, symbolizer, templates);
+				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);
 				auto parse_result = p.parse();

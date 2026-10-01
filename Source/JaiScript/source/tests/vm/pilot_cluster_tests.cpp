@@ -184,7 +184,7 @@ public:
 			                     " while (y < cy1) { int c = strip[tacc >> 11]; pix[gi] = c; pix[gi + 1] = c; tacc += tstep; gi += vw; y = y + 1; }"
 			                     " return gi; };";
 			auto templates = vm->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
 			auto parse_result = p.parse();

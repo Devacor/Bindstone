@@ -2743,7 +2743,7 @@ public:
                 "auto n = names[0];\n"
                 "int bad = \"s\";\n";
             auto types = e->get_registered_template_types();
-            lexer lex(src, e->get_symbolizer(), types);
+            lexer lex(src, e->get_symbolizer());
             auto tokens = lex.tokenize();
             parser prs(tokens, e->get_symbolizer(), e.get(), types);
             auto parsed = prs.parse();
@@ -2771,7 +2771,7 @@ public:
             auto e = engine::make();
             const std::string src = "int a = 1;\nint broken( {\nint b = 2;\n";
             auto types = e->get_registered_template_types();
-            lexer lex(src, e->get_symbolizer(), types);
+            lexer lex(src, e->get_symbolizer());
             auto tokens = lex.tokenize();
             parser prs(tokens, e->get_symbolizer(), e.get(), types);
             auto parsed = prs.parse();

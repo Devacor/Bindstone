@@ -580,7 +580,24 @@ thread-shared.</li>
 <code>jai::registrar&lt;Point&lt;int&gt;, Ctx&gt;</code> without an explicit name is a compile error pointing
 you at the named constructor. Pass <code>"Pointi"</code> (or any script-legal name) yourself. Template-syntax
 names like <code>"Point&lt;int&gt;"</code> register the base template name with the parser
-automatically.</li>
+automatically; the base name stays an ordinary identifier, so a variable or script class may still be called
+<code>Point</code>, and only <code>Point&lt;</code> followed by a type reads as the template.</li>
+<li><strong><code>JAI_TEMPLATE_BINDER</code> names an instantiation the way a script spells it.</strong>
+Each argument takes its script type's name: script <code>int</code> and <code>float</code> are 64-bit, so
+<code>int64_t</code> spells <code>int</code> and <code>double</code> spells <code>float</code> (a script
+<code>double</code> is the same type), while narrower widths carry their size: <code>int32_t</code> is
+<code>int32</code>, <code>uint8_t</code> is <code>uint8</code>, C++ <code>float</code> is <code>float32</code>.
+<code>std::vector&lt;E&gt;</code> is <code>array&lt;E&gt;</code>, <code>std::map&lt;K, V&gt;</code> is
+<code>map&lt;K,V&gt;</code>, <code>std::shared_ptr&lt;T&gt;</code> is <code>shared_ptr&lt;T&gt;</code>, and a
+class argument takes its <code>JAI_STATIC_BINDER</code> or template-binder name. So
+<code>Point&lt;double&gt;</code> registers <code>"Point&lt;float&gt;"</code>, and a script's
+<code>Point&lt;double&gt;</code> and <code>Point&lt;float&gt;</code> both reach it; <code>Point&lt;float32&gt;</code>
+reaches the C++ <code>float</code> one. <code>bind_static_type</code> binds a 32/64-bit sibling with either width
+(<code>Point&lt;int32&gt;</code> with <code>Point&lt;int&gt;</code>, <code>Point&lt;float32&gt;</code> with
+<code>Point&lt;float&gt;</code>). An argument with no script spelling is a compile error: specialize
+<code>jai::type_name_helper&lt;T&gt;</code> with the name scripts write for it. Two C++ types the script spells
+alike (<code>int</code> and <code>long</code> on MSVC) cannot both bind; the second
+<code>bind_static_type</code> throws.</li>
 </ul>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/01-embedding-quickstart.html"><span>&larr; previous</span>Embedding Quickstart</a><a class="next" rel="next" href="../embedding/03-backends.html"><span>next &rarr;</span>Backends: Interpreter vs VM</a></nav></article>
 </main>

@@ -182,7 +182,7 @@ std::vector<std::string> salvage_names(const std::vector<lex_token>& tokens) {
 		switch (t.type) {
 			case tt::identifier: case tt::int_keyword: case tt::float_keyword: case tt::string_keyword: case tt::bool_keyword:
 			case tt::char_keyword: case tt::void_keyword: case tt::auto_keyword: case tt::var_keyword: case tt::function_keyword:
-			case tt::greater: case tt::right_angle: case tt::right_shift: case tt::ampersand: case tt::user_template_type:
+			case tt::greater: case tt::right_angle: case tt::right_shift: case tt::ampersand:
 				return true;
 			default:
 				return false;
@@ -309,9 +309,9 @@ void workspace::parse(unit& u, bool publish) {
 	u.imports.clear();
 	auto registered = eng.get_registered_template_types();
 	std::vector<jai::token> tokens;
-	std::unique_ptr<jai::lexer> lex;   // literal and template-type lexemes view the lexer's own storage: it outlives the parse
+	std::unique_ptr<jai::lexer> lex;   // literal lexemes view the lexer's own storage: it outlives the parse
 	try {
-		lex = std::make_unique<jai::lexer>(u.text, eng.get_symbolizer(), registered, u.path);
+		lex = std::make_unique<jai::lexer>(u.text, eng.get_symbolizer(), u.path);
 		tokens = lex->tokenize();
 	} catch (const std::exception& ex) {
 		u.decls.clear();

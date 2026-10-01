@@ -77,7 +77,7 @@ public:
 		stdlib::register_all(*e);
 		auto* symbolizer = e->get_symbolizer();
 		auto templates = e->get_registered_template_types();
-		jai::lexer lex(source, symbolizer, templates);
+		jai::lexer lex(source, symbolizer);
 		auto tokens = lex.tokenize();
 		jai::parser p(tokens, symbolizer, e.get(), templates);
 		auto parse_result = p.parse();
@@ -107,7 +107,7 @@ public:
 		stdlib::register_all(*c.eng);
 		auto* symbolizer = c.eng->get_symbolizer();
 		auto templates = c.eng->get_registered_template_types();
-		jai::lexer lex(source, symbolizer, templates);
+		jai::lexer lex(source, symbolizer);
 		auto tokens = lex.tokenize();
 		jai::parser p(tokens, symbolizer, c.eng.get(), templates);
 		auto parse_result = p.parse();
@@ -466,7 +466,7 @@ public:
 			const char* script = "var f = function(int n) { array<int> data = [3, 1, 4, 1, 5, 9, 2, 6]; int acc = 0; int i = 0;"
 			                     " while (i < n) { int idx = i % 8; acc = acc + data[idx]; i = i + 1; } return acc; };";
 			auto templates = vm->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
 			auto parse_result = p.parse();
@@ -557,7 +557,7 @@ public:
 				" while (i < n) { int idx = i % 8; acc = acc + G[idx]; i = i + 1; } return acc; };" };
 			for (const char* script : scripts) {
 			auto templates = vm->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
 			auto parse_result = p.parse();
@@ -594,7 +594,7 @@ public:
 			auto* symbolizer = vm->get_symbolizer();
 			const char* script = "var g = function(int v, int dv, int n) { int i = 0; while (i < n) { v = v + dv; i = i + 1; } return v; };";
 			auto templates = vm->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
 			auto parse_result = p.parse();
@@ -673,7 +673,7 @@ public:
 				" for (int i = 0; i < n; ++i) { auto& e = G[i % 4]; acc = acc + e; } return acc; };" };
 			for (const char* script : scripts) {
 				auto templates = vm->get_registered_template_types();
-				jai::lexer lex(script, symbolizer, templates);
+				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);
 				auto parse_result = p.parse();
@@ -752,7 +752,7 @@ public:
 				" var f = function(int n) { var& p = P; int acc = 0; int i = 0;"
 				" while (i < n) { int k = i % 4; acc = acc + p[k + Q[i % 8]]; i = i + 1; } return acc; };";
 			auto templates = vm->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
 			auto parse_result = p.parse();
@@ -839,7 +839,7 @@ public:
 			                     " int z = cy1; while (z > cy0) { pix[gi] = z; z--; }"
 			                     " return gi; };";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -876,7 +876,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var f = function(var& tp, var& pal, int n, int j) { int s = 0; for (int i = 0; i < n; ++i) { int base = i * 2; s = s + pal[base + tp[i + j]]; } return s; };";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(fn, symbolizer, templates);
+			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -915,7 +915,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var f = function(var& flat, int bb, float z, float wx, float wy) { int b = bb + math::itrunc(z * 0.001953125); return b + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; };";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(fn, symbolizer, templates);
+			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -953,7 +953,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var f = function(var& flat, float wx, float wy, int k) { int v = flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; int w = flat[(k + 1) * 2 - v]; return v + w; };";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(fn, symbolizer, templates);
+			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -1002,7 +1002,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			auto listing_of = [&](const char* src) {
 				auto templates = e->get_registered_template_types();
-				jai::lexer lex(src, symbolizer, templates);
+				jai::lexer lex(src, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
 				auto parse_result = p.parse();
@@ -1041,7 +1041,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var VW = 4; var f = function(var& pix, var& pal, var& tp, int x, int n) { int y = 0; while (y < n) { int iv = (y * 5) % 8 - 2; if (iv < 0) { iv = iv + 8; } pix[y * VW + x] = pal[tp[iv]]; y = y + 1; } return y; };";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(fn, symbolizer, templates);
+			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -1102,7 +1102,7 @@ public:
 			                 " int band = bandbase + math::itrunc(z * 0.001953125); if (band < 0) { band = 0; } if (band > 31) { band = 31; }"
 			                 " pix[y * VW + x] = palcm[band * 256 + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]]; } return y0; };";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(fn, symbolizer, templates);
+			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -1173,7 +1173,7 @@ public:
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "array<int> PIX = []; var VW = 8; var VH = 8; var f = function(int color) { int n = VW * VH; for (int i = 0; i < n; ++i) { PIX[i] = color; } return n; };";
 			auto templates = e->get_registered_template_types();
-			jai::lexer lex(fn, symbolizer, templates);
+			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
 			auto parse_result = p.parse();
@@ -1915,7 +1915,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 				stdlib::register_all(*e);
 				auto* symbolizer = e->get_symbolizer();
 				auto templates = e->get_registered_template_types();
-				jai::lexer lex(defs, symbolizer, templates);
+				jai::lexer lex(defs, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
 				auto parse_result = p.parse();
@@ -2995,7 +2995,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                     " while (y < cy1) { int c = strip[tacc >> 11]; pix[gi] = c; pix[gi + 1] = c; tacc += tstep; gi += vw; y = y + 1; }"
 			                     " return gi; };";
 			auto templates = vm->get_registered_template_types();
-			jai::lexer lex(script, symbolizer, templates);
+			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
 			auto parse_result = p.parse();

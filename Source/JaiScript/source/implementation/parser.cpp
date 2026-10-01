@@ -1739,16 +1739,17 @@ checked_result<expression_ptr> parser::primary() {
     }
     
     // Check for custom type constructors (Point<int>(), SafeComponent<Button>(), etc.)
-    if (check(token_type::identifier) || check(token_type::user_template_type)) {
+    if (check(token_type::identifier)) {
         size_t savedPos = current_;
-        advance(); // consume identifier or template type
+        advance(); // consume identifier
 
-        // Check if this might be a templated constructor
-        if (check(token_type::less) || previous().type == token_type::user_template_type) {
-            // Backtrack and parse as type
+        // A host template's name followed by '<' may be a construction (Point<int>(1, 2)); a failed type parse is a comparison
+        if (check(token_type::less) && is_registered_template_type(std::string(previous().lexeme))) {
             current_ = savedPos;
+            const size_t errors_before = errors_.size();
+            const std::optional<token> pushed_before = pushed_back_token_;
             auto type_result = parse_type();
-            if (type_result) {
+            if (type_result && errors_.size() == errors_before) {
                 type_info_ptr type = std::move(type_result.value());
                 if (type && check(token_type::left_brace)) {
                     // This is a brace-initialized constructor expression like map<string, int>{}
@@ -1784,14 +1785,14 @@ checked_result<expression_ptr> parser::primary() {
                     return std::make_shared<new_expr>((*stream_)[savedPos].location, type, std::move(arguments));
                 }
             }
-            // Otherwise backtrack and continue
             current_ = savedPos;
+            errors_.resize(errors_before);
+            pushed_back_token_ = pushed_before;
         } else {
-            // Backtrack - not a template
             current_ = savedPos;
         }
     }
-    
+
     // Super keyword
     if (match(token_type::super_keyword)) {
         return std::make_shared<super_expr>(previous().location);
@@ -1928,13 +1929,12 @@ checked_result<type_info_ptr> parser::parse_type() {
     }
 
     // User-defined type (potentially templated)
-    if (match({token_type::identifier, token_type::user_template_type})) {
+    if (match(token_type::identifier)) {
         std::string type_name(previous().lexeme);
-        token_type typeToken = previous().type;
         // ns::Type names a class registered under its qualified name (time::date); a class this unit declared inside a
         // namespace is defined under its bare name
         std::string last_name(previous().lexeme);
-        while (typeToken == token_type::identifier && check(token_type::colon_colon) &&
+        while (check(token_type::colon_colon) &&
                current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
             advance();
             type_name += "::";
@@ -1943,48 +1943,29 @@ checked_result<type_info_ptr> parser::parse_type() {
         }
         if (namespace_class_names_.count(type_name)) { type_name = last_name; }
 
-        // If it's a user_template_type token, we know it's safe to parse template syntax
-        if (typeToken == token_type::user_template_type && match(token_type::less)) {
-            // Try to parse as templated type like Point<int> or SafeComponent<Button>
-            size_t savedPos = current_ - 1; // Save position after '<'
-
+        // A host template's base name followed by '<' is a template (Point<int>); the bare name stays an ordinary identifier
+        if (check(token_type::less) && is_registered_template_type(type_name)) {
+            advance();
             std::vector<type_info_ptr> templateParams;
-
-            // Parse template arguments
-            // Use a while loop instead of do-while to ensure we have at least one argument
-            auto firstParam_result = parse_type();
-            if (!firstParam_result) {
-                report_error("Expected template parameter", peek());
-    return make_error_code(parse_error_code::unexpected_token);
-            }
-            templateParams.push_back(std::move(firstParam_result.value()));
-
-            while (match(token_type::comma)) {
-                auto param_result = parse_type();
-                if (!param_result) {
-                    report_error("Expected template parameter after ','", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+            std::vector<std::string> spellings;
+            do {
+                type_info_ptr param;
+                if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
+                    param = store_type_info(advance().lexeme == "uint8" ? type_info::make_uint8(*symbolizer_) : type_info::make_int8(*symbolizer_));
+                } else {
+                    JAISCRIPT_TRY_ASSIGN(param, parse_type());
                 }
-                templateParams.push_back(std::move(param_result.value()));
-            }
+                if (!param) {
+                    report_error("A template argument needs a concrete type", previous());
+                    return make_error_code(parse_error_code::unexpected_token);
+                }
+                spellings.push_back(param->canonical_name());
+                templateParams.push_back(param);
+            } while (match(token_type::comma));
 
             consume_greater_in_generic("Expected '>' after template parameters");
 
-            // Build the full template type name
-            type_name += "<";
-            for (size_t i = 0; i < templateParams.size(); ++i) {
-                if (i > 0) type_name += ", ";
-                if (templateParams[i]) {
-                    type_name += templateParams[i]->type_name;
-                } else {
-                    // Handle null type (shouldn't happen but let's be safe)
-                    type_name += "unknown";
-                }
-            }
-            type_name += ">";
-
-            // Create a templated object type
-            type_info info = type_info::make_object(*symbolizer_, type_name);
+            type_info info = type_info::make_object(*symbolizer_, template_instance_name(type_name, spellings));
             info.type_params = std::move(templateParams);
             return store_type_info(std::move(info));
         }
@@ -2800,12 +2781,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     // Check if this might be a type name followed by an identifier (for custom types)
     // We need to look ahead to see if this is a declaration
-    if (check(token_type::identifier) || check(token_type::user_template_type)) {
-        // If it's a user_template_type, we know it's a type declaration
-        if (peek().type == token_type::user_template_type) {
-            return variable_declaration();
-        }
-
+    if (check(token_type::identifier)) {
         // Save current position
         size_t savedPos = current_;
         std::string firstIdentifier(peek().lexeme);
@@ -2835,22 +2811,28 @@ checked_result<declaration_ptr> parser::declaration_body() {
             }
         }
 
-        // Check for template syntax after the identifier
-        if (check(token_type::less)) {
-            // Might be a templated type like Point<int>
-            // Try to parse the full type
+        if (check(token_type::less) && is_registered_template_type(firstIdentifier)) {
+            // Point<int> p; / Point<int>& r = q; / Point<int> make() {...}: the same declaration rules as a plain class name;
+            // a failed type parse is an expression (Point < x)
             current_ = savedPos;
-            size_t typeParsePos = current_;
+            const size_t errors_before = errors_.size();
+            const std::optional<token> pushed_before = pushed_back_token_;
             auto type_result = parse_type();
-            if (type_result) {
-                type_info_ptr type = std::move(type_result.value());
-                if (type && check(token_type::identifier)) {
-                    // We have a type followed by an identifier - it's a declaration
-                    current_ = savedPos;
-                    return variable_declaration();
+            if (type_result && type_result.value() && errors_.size() == errors_before && !pushed_back_token_) {
+                const bool reference = check(token_type::ampersand);
+                const size_t name_at = current_ + (reference ? 1 : 0);
+                if (name_at + 1 < stream_->size() && (*stream_)[name_at].type == token_type::identifier) {
+                    const token_type then = (*stream_)[name_at + 1].type;
+                    const bool is_function = then == token_type::left_paren && !paren_group_ends_statement(name_at + 1);
+                    if (!reference || then == token_type::left_paren || then == token_type::equal || then == token_type::semicolon) {
+                        current_ = savedPos;
+                        return is_function ? function_declaration() : variable_declaration();
+                    }
                 }
             }
             current_ = savedPos;
+            errors_.resize(errors_before);
+            pushed_back_token_ = pushed_before;
         } else if (check(token_type::identifier)) {
             // Pattern: identifier identifier - a declaration. A '(' after the second
             // identifier makes it a class-typed free function (C++ return-type-first,
@@ -3321,7 +3303,7 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     std::ifstream file(resolved.value(), std::ios::binary);
     if (!file) return false;
     std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    lexer lex(content, symbolizer_, registered_template_types_, resolved.value());
+    lexer lex(content, symbolizer_, resolved.value());
     const std::vector<token> lexed = lex.tokenize();
     std::vector<token> used;   // the included file's own using declarations apply to its own text only
     const std::vector<token>& tokens = apply_using_declarations(lexed, used) ? used : lexed;

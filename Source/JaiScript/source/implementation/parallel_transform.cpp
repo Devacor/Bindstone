@@ -1774,7 +1774,7 @@ namespace {
 
 	std::shared_ptr<function_decl> parse_chunk_skeleton(engine& eng, const char* source) {
 		const auto templates = eng.get_registered_template_types();
-		lexer lex(source, eng.get_symbolizer(), templates);
+		lexer lex(source, eng.get_symbolizer());
 		auto tokens = lex.tokenize();
 		parser parse(tokens, eng.get_symbolizer(), &eng, templates, "<parallel_for>");
 		auto decls = parse.parse();

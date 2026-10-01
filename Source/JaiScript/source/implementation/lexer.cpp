@@ -71,11 +71,6 @@ lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std
     if (source_.rfind("\xEF\xBB\xBF", 0) == 0) source_.erase(0, 3);
 }
 
-lexer::lexer(const std::string& source, string_symbolizer* symbolizer, const std::unordered_set<std::string>& registeredTypes, const std::string& filename)
-    : source_(source), filename_(filename), symbolizer_(symbolizer), current_(0), line_(1), column_(1), registered_types_(registeredTypes) {
-    if (source_.rfind("\xEF\xBB\xBF", 0) == 0) source_.erase(0, 3);
-}
-
 std::vector<token> lexer::tokenize() {
     std::vector<token> tokens;
     // Loop until next_token() actually produces EOF, rather than gating on
@@ -878,13 +873,6 @@ token lexer::scan_identifier() {
         }
 
         return tok;
-    }
-
-    // Check if it's a registered template type base name (e.g., "Point" for Point<int>)
-    auto reg_it = registered_types_.find(lexeme_str);
-    if (reg_it != registered_types_.end()) {
-        // Point to the registered type string (permanent storage in the set)
-        return token(token_type::user_template_type, *reg_it, loc);
     }
 
     // For regular identifiers - symbolizer is always required

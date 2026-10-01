@@ -18,7 +18,6 @@ namespace jai {
         null_literal,
 
         identifier,
-        user_template_type,  // User-defined template types (Point, SafeComponent, etc.) to disambiguate from < operator
 
         bool_keyword, break_keyword, char_keyword, class_keyword, const_keyword, continue_keyword, else_keyword, false_keyword, float_keyword, for_keyword,
         function_keyword, if_keyword, int_keyword, map_keyword, array_keyword, namespace_keyword, null_keyword, override_keyword, private_keyword, public_keyword, return_keyword, static_keyword, string_keyword,
@@ -92,7 +91,6 @@ namespace jai {
     public:
         // Constructors require symbolizer for proper identifier interning
         lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename = "<script>");
-        lexer(const std::string& source, string_symbolizer* symbolizer, const std::unordered_set<std::string>& registeredTypes, const std::string& filename = "<script>");
 
         std::vector<token> tokenize();
         token next_token();
@@ -107,7 +105,6 @@ namespace jai {
         size_t line_ = 1;
         size_t column_ = 1;
 
-        std::unordered_set<std::string> registered_types_;
 
         static const std::unordered_map<std::string, token_type> keywords_;
 

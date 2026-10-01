@@ -9,6 +9,7 @@
 #include <jaiscript/math/adapter.hpp>
 #include <vector>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <typeinfo>
 #include <string_view>
@@ -37,6 +38,20 @@ namespace jai {
         if (name == "math::ivec2") return script_value_type::jai_ivec2_type;
         if (name == "math::ivec3") return script_value_type::jai_ivec3_type;
         return script_value_type::jai_null_type;
+    }
+
+    // A template instance's registered name: the base, then each argument's canonical spelling (type_info::canonical_name
+    // for a script type, type_name_helper for a C++ one), so the parser's Box<array<int>> and a host's
+    // Box<std::vector<int64_t>> name one class
+    inline std::string template_instance_name(std::string_view base, const std::vector<std::string>& arguments) {
+        std::string name(base);
+        name += '<';
+        for (size_t i = 0; i < arguments.size(); ++i) {
+            if (i) { name += ", "; }
+            name += arguments[i];
+        }
+        name += '>';
+        return name;
     }
 
     // Forward declarations

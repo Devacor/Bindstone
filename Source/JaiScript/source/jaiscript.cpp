@@ -26,6 +26,7 @@
 #include "implementation/vm/disassembler.cpp"
 #include "implementation/vm/region_ir.cpp"
 #include "implementation/vm/chunk_manifest.cpp"
+#include "implementation/vm/vm_coverage.cpp"
 #include "implementation/coroutine.cpp"
 #include "implementation/parallel_transform.cpp"
 #include "implementation/debug/controller.cpp"

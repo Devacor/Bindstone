@@ -2868,6 +2868,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			}
 			if (end >= hi || boundary(end) || code[end].op == opcode::op_halt) { last_boundary = end; work_at_boundary = work; }
 			if (work_at_boundary >= k_region_min_work && last_boundary > at) { straight.emplace_back(static_cast<uint32_t>(at), static_cast<uint32_t>(last_boundary)); }
+#ifdef JAISCRIPT_VM_COVERAGE
+			else if (work > 0) { c.straight_notes.push_back(chunk::straight_note{ static_cast<uint32_t>(at), static_cast<uint32_t>(std::max(end, last_boundary)), static_cast<uint32_t>(at), chunk::cell_refusal_none, static_cast<uint32_t>(work), static_cast<uint32_t>(last_boundary > at ? work_at_boundary : 0) }); }
+#endif
 			at = std::max(end, at + 1);
 		}
 	};
@@ -4037,6 +4040,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		}
 		if (refusal != chunk::cell_refusal_none) {
 			if (line) {
+#ifdef JAISCRIPT_VM_COVERAGE
+				c.straight_notes.push_back(chunk::straight_note{ static_cast<uint32_t>(head), static_cast<uint32_t>(back), refusal_ip, refusal, 0, 0 });
+#endif
 				// the span splits around the refusing statement (the parts before and after it are spans of their own), or in halves when it
 				// holds too many cells; a refusal of the whole span (no cells, a binding it rewrites) drops it
 				if (refusal == chunk::cell_refusal_too_many_cells) {

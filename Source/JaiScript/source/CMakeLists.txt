@@ -26,6 +26,7 @@ set(JAISCRIPT_SOURCES
     implementation/vm/disassembler.cpp
     implementation/vm/vm_backend.cpp
     implementation/vm/vm_compiler.cpp
+    implementation/vm/vm_coverage.cpp
     implementation/vm/vm_inline.cpp
     implementation/vm/region_ir.cpp
 )

@@ -134,6 +134,7 @@ struct options {
 	bool selftest = false;
 	std::string disasm;                    // --disasm=<file>: every chunk the VM compiles, disassembled with its regions' IR, in compile order
 	std::string manifest;                  // --manifest=<file>: the same chunks' semantic manifests (the identity gate's text)
+	std::string coverage;                  // --coverage=<file>: the vm's execution-coverage census at exit (a build with JAISCRIPT_VM_COVERAGE)
 	int benchmark_main = 0;               // file execution warms main; then call it N more times
 	std::vector<std::string> script_args;  // everything after `--`, exposed as global ARGS
 };
@@ -201,6 +202,8 @@ void print_usage() {
 		"  --check=strict|warn|off\n"
 		"  --disasm=<file>       write every chunk the VM compiles, disassembled with its regions' IR, to <file>\n"
 		"  --manifest=<file>     write the same chunks' semantic manifests (every field, exact constant bits) to <file>\n"
+		"  --coverage=<file>     write the vm's execution-coverage census (cells / typed / general, the reasons and their\n"
+		"                        source sites) to <file> at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
 		"                        static checker mode (default strict: typed mistakes and undeclared\n"
 		"                        names fail the load; warn loads anyway and prints them; off skips)\n"
 		"  --budget=N            execution budget in seconds per execute; overruns raise a script\n"
@@ -276,6 +279,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a.rfind("--check", 0) == 0) { opt.check = value_of("--check"); }
 		else if (a.rfind("--disasm", 0) == 0) { opt.disasm = value_of("--disasm"); }
 		else if (a.rfind("--manifest", 0) == 0) { opt.manifest = value_of("--manifest"); }
+		else if (a.rfind("--coverage", 0) == 0) { opt.coverage = value_of("--coverage"); }
 		else if (a.rfind("--budget", 0) == 0) { opt.budget = std::stod(value_of("--budget")); }
 		else if (a.rfind("--debug-port", 0) == 0) { opt.debug_port = static_cast<int>(std::stol(value_of("--debug-port"))); }
 		else if (a == "--version" || a == "-v") { std::printf("JaiScript %s\n", jai::version().c_str()); std::exit(0); }
@@ -1334,6 +1338,10 @@ int run_file_mode(const options& opt, const console_state& con) {
 		std::fprintf(stderr, "%s\n", con.red("jaiscript: no such file: " + opt.script).c_str());
 		return 2;
 	}
+	if (!opt.coverage.empty() && !jai::engine::vm_coverage_available()) {
+		std::fprintf(stderr, "%s\n", con.red("jaiscript: --coverage needs a build with JAISCRIPT_VM_COVERAGE (cmake -DJAISCRIPT_VM_COVERAGE=ON)").c_str());
+		return 2;
+	}
 	auto eng = make_runner_engine(opt, nullptr);
 	std::ostringstream debug_note;
 	wire_debugger(opt, *eng, con, debug_note);
@@ -1349,6 +1357,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 			// diagnostic report describes this replay, including its main() setup.
 			eng->vm_profile_reset();
 #endif
+			if (!opt.coverage.empty()) { eng->vm_coverage_reset(); }
 			try {
 #ifdef GLOOM_PROFILE_CAPTURE
 				gloom::profile_capture capture(L"JaiDOOM measured main");
@@ -1375,6 +1384,11 @@ int run_file_mode(const options& opt, const console_state& con) {
 	if (!r.ok) {
 		std::fprintf(stderr, "%s\n", con.red("jaiscript: " + r.error).c_str());
 		if (!r.stack_trace.empty()) { std::fprintf(stderr, "%s\n", r.stack_trace.c_str()); }
+	}
+	if (!opt.coverage.empty()) {
+		std::ofstream out(opt.coverage, std::ios::binary | std::ios::trunc);
+		out << "script " << opt.script << "\n" << eng->vm_coverage_report();
+		if (!out) { std::fprintf(stderr, "%s\n", con.red("jaiscript: cannot write " + opt.coverage).c_str()); }
 	}
 	if (opt.time_runs) {
 		char text[64];

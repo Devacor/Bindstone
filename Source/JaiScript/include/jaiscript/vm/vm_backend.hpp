@@ -4,6 +4,7 @@
 #define __JAISCRIPT_VM_VM_BACKEND_HPP__
 
 #include "chunk.hpp"
+#include "coverage.hpp"
 #include "vm_compiler.hpp"
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
@@ -817,6 +818,20 @@ namespace jai::vm {
 #ifdef JAISCRIPT_MISS_INJECTION
         uint32_t miss_every_ = 0;        // engine::cells_miss_every, read at every block entry
         uint32_t miss_countdown_ = 0;    // plain cell instructions until the next injected miss; runs across entries
+#endif
+#ifdef JAISCRIPT_VM_COVERAGE
+    public:
+        // the execution-coverage census (vm/coverage.hpp, defined in vm_coverage.cpp): this backend's tables, adopted by the engine
+        // at set_engine_reference so a worker's outlive it
+        std::shared_ptr<coverage_tables> coverage_ = std::make_shared<coverage_tables>();
+        void coverage_general(frame& f);
+        void coverage_cell(const frame& f, size_t ip, opcode op);
+        void coverage_cell_pair(const frame& f, size_t ip, const vm_instruction& ci, size_t next);
+        void coverage_entry(const frame& f, uint32_t loop, bool taken);
+        void coverage_miss(const frame& f);
+    private:
+        void coverage_observe(frame& f, const vm_instruction& ins, coverage_chunk& row);
+        coverage_chunk& coverage_row(const chunk& c);
 #endif
         // Step-debugger controller (engine-owned, shared with the interpreter backend).
         // Atomic: engine::debugger() may wire it from another thread mid-run; NOT read per

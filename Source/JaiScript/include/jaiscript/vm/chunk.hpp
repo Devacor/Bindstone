@@ -653,6 +653,13 @@ namespace jai::vm {
             for (const auto& [n, slot] : component_base_slots) { if (n == node) { return slot; } }
             return 0xFFFFFFFFu;
         }
+#ifdef JAISCRIPT_VM_COVERAGE
+        // the straight-line spans [head, end) the region builder dropped (vm/coverage.hpp): reason none = too little work (work counts
+        // the span's operations, bounded those up to its last statement boundary, which the builder judges), else the translation's
+        // refusal class at ip
+        struct straight_note { uint32_t head = 0, end = 0, ip = 0; uint8_t reason = 0; uint32_t work = 0, bounded = 0; };
+        std::vector<straight_note> straight_notes;
+#endif
     };
 
 } // namespace jai::vm

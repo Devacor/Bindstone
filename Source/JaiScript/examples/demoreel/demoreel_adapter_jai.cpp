@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -34,6 +35,7 @@ struct jai_flags {
 	bool debug = false;                  // single-interpreter debug session (VS Code attach)
 	bool debug_wait = false;             // also hold boot until a debugger attaches
 	int64_t debug_port = 52472;
+	std::string coverage;                // the vm's execution-coverage census, written at exit (a build with JAISCRIPT_VM_COVERAGE)
 };
 
 jai::script_value call_script(jai::engine& eng, const char* fn_name,
@@ -51,6 +53,8 @@ public:
 	jai_session(const std::string& backend, const demoreel::host_services& services,
 	            const demoreel::host_options& opt, const jai_flags& flags)
 		: opt_(opt), flags_(flags), eng_(jai::engine::make()) {
+		if (backend != "vm") { flags_.coverage.clear(); }
+		if (!flags_.coverage.empty() && !jai::engine::vm_coverage_available()) { throw std::runtime_error("--coverage needs a build with JAISCRIPT_VM_COVERAGE"); }
 		eng_->set_backend(backend == "vm" ? jai::backend_type::vm : jai::backend_type::interpreter);
 		eng_->execution_budget(0.0);
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
@@ -171,6 +175,10 @@ public:
 
 	std::string stack_trace() override { return eng_->format_stack_trace(); }
 
+	~jai_session() override {
+		if (!flags_.coverage.empty()) { std::ofstream out(flags_.coverage, std::ios::binary | std::ios::trunc); out << "jai_demoreel vm\n" << eng_->vm_coverage_report(); }
+	}
+
 private:
 	demoreel::host_options opt_;
 	jai_flags flags_;
@@ -202,6 +210,7 @@ public:
 		};
 		if (a == "--precompiled") { flags_.precompiled = true; return 1; }
 		if (a == "--jaibite" && has_value()) { flags_.jaibite_path = argv[i + 1]; return 2; }
+		if (a == "--coverage" && has_value()) { flags_.coverage = argv[i + 1]; return 2; }
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 		if (a == "--debug") { flags_.debug = true; return 1; }
 		if (a == "--debug-wait") { flags_.debug = true; flags_.debug_wait = true; return 1; }
@@ -214,6 +223,7 @@ public:
 		return
 			"  --precompiled    boot from demoreel.jaibite (saved on first run)\n"
 			"  --jaibite PATH   .jaibite path for --precompiled\n"
+			"  --coverage PATH  write the vm's execution-coverage census to PATH at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 			"  --debug          single-interpreter session, listening for a VS Code attach the whole run\n"
 			"  --debug-wait     like --debug, but also hold boot until you attach + press Enter\n"

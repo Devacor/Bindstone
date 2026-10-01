@@ -356,6 +356,7 @@ void print_usage(script_adapter& adapter) {
 		"  --warmup N      untimed smoke ticks before reboot (default 0)\n"
 		"  --workers N     parallel workers (0 = serial loop; default engine; ports: serial)\n"
 		"  --miss-every N  jai: the vm misses at every Nth plain cell instruction (a build with JAISCRIPT_MISS_INJECTION)\n"
+		"  --coverage FILE jai: write the vm's execution-coverage census to FILE at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
 		"  --dump-frame N  smoke: dump frame N per backend to gloom_frame_<backend>.txt\n"
 		"  --profile-reset-tick N  smoke: restart the VM profile accounting at tick N (diagnostic builds)\n"
 		"  --bench N       run N frames autopilot with live rendering, report sim/draw split\n"
@@ -392,6 +393,7 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		else if (a == "--warmup") { opt.warmup_ticks = std::stoll(next_arg("--warmup")); }
 		else if (a == "--workers") { opt.workers = std::stoll(next_arg("--workers")); }
 		else if (a == "--miss-every") { opt.miss_every = static_cast<uint32_t>(std::stoll(next_arg("--miss-every"))); }
+		else if (a == "--coverage") { opt.coverage = next_arg("--coverage"); }
 		else if (a == "--dump-frame") { opt.dump_frame = std::stoll(next_arg("--dump-frame")); }
 		else if (a == "--bench") { opt.bench = std::stoll(next_arg("--bench")); }
 		else if (a == "--fps") { opt.target_fps = std::stod(next_arg("--fps")); }

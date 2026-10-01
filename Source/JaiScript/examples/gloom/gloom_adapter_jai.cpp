@@ -10,6 +10,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 
 #include <cmath>
+#include <fstream>
 #include <stdexcept>
 
 namespace {
@@ -28,7 +29,8 @@ class jai_session : public gloom::script_session {
 public:
 	jai_session(const std::string& backend, const gloom::host_services& services,
 	            const gloom::host_options& opt)
-		: opt_(opt), eng_(jai::engine::make()) {
+		: opt_(opt), eng_(jai::engine::make()), coverage_(backend == "vm" ? opt.coverage : std::string()) {
+		if (!coverage_.empty() && !jai::engine::vm_coverage_available()) { throw std::runtime_error("--coverage needs a build with JAISCRIPT_VM_COVERAGE"); }
 		eng_->set_backend(backend == "vm" ? jai::backend_type::vm : jai::backend_type::interpreter);
 		eng_->execution_budget(0.0);
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
@@ -110,11 +112,16 @@ public:
 	void summary() override { call_script(*eng_, "gloom_summary", {}); }
 
 	std::string stack_trace() override { return eng_->format_stack_trace(); }
-	void profile_reset() override { eng_->vm_profile_reset(); }
+	void profile_reset() override { eng_->vm_profile_reset(); if (!coverage_.empty()) { eng_->vm_coverage_reset(); } }
+
+	~jai_session() override {
+		if (!coverage_.empty()) { std::ofstream out(coverage_, std::ios::binary | std::ios::trunc); out << "jai_gloom vm\n" << eng_->vm_coverage_report(); }
+	}
 
 private:
 	gloom::host_options opt_;
 	std::shared_ptr<jai::engine> eng_;
+	std::string coverage_;
 };
 
 class jai_adapter : public gloom::script_adapter {

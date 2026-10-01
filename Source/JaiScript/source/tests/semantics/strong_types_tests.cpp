@@ -2064,6 +2064,8 @@ public:
             check_both("var v = 1; auto& r = v; r = 2.5; var& q = v; q = \"s\"; type_of(v)", "string", "auto& and var& keep the var");
             check_both("class Cnt { int n = 0; function operator=(int x) { n = x * 10; } } var c = Cnt(); cast<Cnt&>(c) = 2; to_string(c.n)", "20", "a class's operator= through cast<Cnt&> over a var");
             check_both("function f() -> int { var v = 1; int& r = v; r = 3.5; return v; } to_string(f())", "3", "a function's slot local");
+            check_both("var v = 1; float& r = v; r += 1; var w = 1; float& s = w; s++; type_of(v) + \":\" + to_string(v) + \",\" + type_of(w) + \":\" + to_string(w)", "float:2.0,float:2.0", "a float& over an int: the result takes the declared kind");
+            check_both("var v = 1; int& r = v; r += 2; r *= 3; r++; type_of(v) + \":\" + to_string(v)", "int:10", "matching kinds take the storage's own path");
         });
 
         test("typed_field_set_field_cpp_api", [this]() {

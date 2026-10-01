@@ -4108,13 +4108,15 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		? engine_->get_global_environment()->get_value_ptr(sym)
 		: resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
+		uint8_t declared_kind = 0;
 		// Constrained element/field ref (Tier 1 bind): route through the shared helper
 		// so the compound result honors the constraint like subscript compounds do. A
 		// C++ PROPERTY ref takes the same route: its deref is a scratch, the write must
 		// reach the setter.
 		if (varPtr->is_reference()) {
 			const auto* refHolder = varPtr->get_reference_holder();
-			if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element() || detail::ref_declared_type(*varPtr))) {
+			declared_kind = detail::ref_declared_kind(*varPtr);
+			if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
 				const token_type op = compound_kind_token(kind);
 				const char* opName = detail::binary_op_name(op);
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
@@ -4144,6 +4146,21 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 			rightValue = std::move(decoded);
 		}
 		script_value& derefRight = rightValue.deref();
+		if (declared_kind && !detail::ref_declared_compound_keeps(declared_kind, target, derefRight, compound_kind_token(kind))) [[unlikely]] {
+			// `int& r` over storage of another kind, or a result leaving T's kind: the declared type's table (KEEP BYTE-PARALLEL
+			// with the interpreter's compound assignment)
+			const token_type op = compound_kind_token(kind);
+			auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, detail::binary_op_name(op),
+				operator_table_, engine_, symbolizer_,
+				[this](const script_value& l, token_type o, const script_value& r) {
+					return evaluate_arithmetic(l, o, r, detail::compound_index(o));
+				});
+			if (!result) {
+				return raise_from(result);
+			}
+			if (!no_result) { stack_.push_back(std::move(result.value())); }
+			return {};
+		}
 
 		if (has_custom_numeric_ops_) [[unlikely]] {
 			detail::op_slot op_slot = detail::op_slot::none;
@@ -4593,7 +4610,12 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		? engine_->get_global_environment()->get_value_ptr(sym)
 		: resolve_local_or_env_cached(f, ins.b, sym);
 	if (varPtr) {
-		if (detail::ref_declared_type(*varPtr)) [[unlikely]] {   // `int& r`: the declared type's table (KEEP BYTE-PARALLEL with the interpreter ++/--)
+		// Scratch-backed ref (typed element, C++ property): deref hands back the holder
+		// scratch - the in-place mutation below must commit it (buffer store / setter)
+		// (KEEP BYTE-PARALLEL with the interpreter ++/-- twin)
+		auto* scratch_ref = varPtr->scratch_ref_holder();
+		script_value& target = varPtr->deref();
+		if (const uint8_t declared_kind = detail::ref_declared_kind(*varPtr); declared_kind && declared_kind != target.raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the interpreter ++/--)
 			auto stepped = detail::ref_target_assign(*varPtr, script_value(static_cast<script_int>(1), engine_), isIncrement ? token_type::plus : token_type::minus,
 				true, postfix, true, operator_table_, engine_, symbolizer_,
 				[this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); });
@@ -4601,11 +4623,6 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 			stack_.push_back(std::move(stepped.value()));
 			return {};
 		}
-		// Scratch-backed ref (typed element, C++ property): deref hands back the holder
-		// scratch - the in-place mutation below must commit it (buffer store / setter)
-		// (KEEP BYTE-PARALLEL with the interpreter ++/-- twin)
-		auto* scratch_ref = varPtr->scratch_ref_holder();
-		script_value& target = varPtr->deref();
 		// §12.1 write-through: ++/-- on a bound VARIABLE decodes the live value and stores
 		// back through assign_through (the type() switch below would mutate a dead shadow).
 		// KEEP BYTE-PARALLEL with the interpreter ++/-- bound branch.
@@ -11189,9 +11206,8 @@ std::optional<checked_result<script_value>> vm_backend::bind_bare_cpp_property_r
 	return detail::bind_cpp_property_ref(*this_ptr, sym, engine_, symbolizer_);
 }
 
-op_status vm_backend::define_ref_decl(frame& f, const variable_decl* decl, script_value value) {
-	if (decl->type && decl->type->is_reference()) { detail::ref_declare(value, decl->type->element_type().get(), engine_); }
-	return define_decl_value(f, decl, std::move(value));
+void vm_backend::declare_reference(script_value& value, const variable_decl* decl) {
+	detail::ref_declare(value, decl->type->element_type().get(), engine_);
 }
 
 op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {

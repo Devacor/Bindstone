@@ -400,6 +400,56 @@ public:
             cleanup_temp_file(lib);
             cleanup_temp_file(inner);
         });
+        test("a_function_body_include_declares_nested_functions_and_no_class", [=, this]() {
+            // Dev ruling 2026-10-01: the spliced text is the function's own, as pasted C++ text is: a function it declares is a
+            // nested function, local to the body and gone after it, the program-scope function of that name untouched (the
+            // strict checker warns that it hides one); a class, always a program-scope type, cannot be declared there
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto fns = create_temp_file("splice_fns.jai", "function helper() -> string { return \"included\"; }\nfunction only_here() -> string { return \"only\"; }\n");
+            auto cls = create_temp_file("splice_cls.jai", "var before = 1;\nclass SplicedK { int v = 2; }\n");
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            check_eq(std::string("included only|program|gone"), eng->execute(R"(
+                function helper() -> string { return "program"; }
+                function reload() -> string { include "splice_fns.jai"; return helper() + " " + only_here(); }
+                string r = reload() + "|" + helper() + "|";
+                try { only_here(); r += "still"; } catch (e) { r += "gone"; }
+                r;
+            )").as<std::string>());
+            size_t hides = 0;
+            for (const auto& d : eng->last_check_diagnostics().diagnostics) {
+                if (d.severity == check_diagnostic::level::warning &&
+                    d.message.find("splice_fns.jai:1:10: function 'helper' from the include in function 'reload' is local to it and hides the program-scope 'helper' there without replacing it; import the file to replace program-scope functions") != std::string::npos) { ++hides; }
+                check_true(d.message.find("'only_here'") == std::string::npos, "a nested function hiding nothing is silent");
+            }
+            check_eq((size_t)1, hides, "the checker warns once for the hidden program-scope function");
+            std::string err;
+            try { eng->execute("function reload2() { include \"splice_cls.jai\"; } reload2();"); } catch (const std::exception& ex) { err = ex.what(); }
+            check_true(err.find("an include inside a function body cannot declare class 'SplicedK' (a class is a program-scope type and the included text is the function's own); import 'splice_cls.jai' instead") != std::string::npos, err);
+            check_throws([&]() { eng->execute("SplicedK k; k.v;"); });
+            cleanup_temp_file(fns);
+            cleanup_temp_file(cls);
+        });
+        test("an_import_inside_a_function_reloads_functions_and_classes", [=, this]() {
+            // the reload a function-body include cannot do: an import is program scope wherever it stands, so a re-run replaces
+            // functions and classes in place and live instances migrate
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->import_recheck_interval(0);
+            auto mod = create_temp_file("reload_by_import.jai", "function greet() -> string { return \"v1\"; }\nclass ReloadP { int n = 1; string who() { return \"P1\"; } }\n");
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            check_eq(std::string("v1 P1"), eng->execute(R"(
+                import "reload_by_import.jai";
+                function reload_scripts() -> bool { return import("reload_by_import.jai"); }
+                ReloadP keep = ReloadP();
+                greet() + " " + keep.who();
+            )").as<std::string>());
+            mod = create_temp_file("reload_by_import.jai", "function greet() -> string { return \"v2!\"; }\nclass ReloadP { int n = 1; int extra = 7; string who() { return \"P2\"; } }\n");
+            check_true(eng->execute("reload_scripts();").as_bool(), "the import re-ran the touched module");
+            check_eq(std::string("v2! P2 7"), eng->execute("greet() + \" \" + keep.who() + \" \" + keep.extra;").as<std::string>());
+            check_false(eng->execute("reload_scripts();").as_bool(), "an untouched module does not re-run");
+            cleanup_temp_file(mod);
+        });
         test("a_computed_include_path_inside_a_function_stays_a_runtime_include", [=, this]() {
             // pay for what you use: a computed path cannot be spliced, so it runs in the function's environment and does not
             // see the frame (the checker names the included x undeclared at the include's load)

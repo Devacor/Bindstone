@@ -245,6 +245,13 @@ warning, path-qualified, for each enum the file declares under a program-scope n
 host's warning channel (`engine::report_script_warning`, stderr unless the host sets a handler),
 since a run-time include has no load listing to print.
 
+**Functions from an include inside a function body** — a literal include there is spliced into the body, so a
+function the file declares is a nested function (Dev ruling 2026-10-01). When the program scope names it too (the unit's top
+level, another unit of the program, or the engine) the checker warns at the enclosing body, the message led by the
+included declaration's place: `inc.jai:1:10: function 'helper' from the include in function
+'reload' is local to it and hides the program-scope 'helper' there without replacing it; import the file to replace
+program-scope functions` (`in a lambda`). A declaration counts as spliced when its file differs from the enclosing body's.
+
 **Access** — two levels (Dev ruling 2026-09-27): a member after `private:` (or `protected:`,
 its synonym) is reachable from the declaring class and every class derived from it, by any
 spelling and through any receiver of that family. An access outside the family whose member

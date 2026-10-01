@@ -80,13 +80,13 @@ user `_get_`/`_set_` anywhere in their chain, member METHOD names, missing map k
 (reads never insert), member-final chains over COMPUTED subscripts (`objs[i+1].v` —
 bind a `var&` row first), and any property bind inside a parallel region (workers reach
 neither accessors nor raw member memory).
-For a script `string&` parameter, a string value that does not bind an existing lvalue
-gets a writable temporary CELL. This also applies to lambdas and direct host calls of
-script functions. Ordinary strings share their copy-on-write buffer until mutation;
-a C++-bound string used as a temporary detaches from native storage. Existing lvalues
-still bind their storage first. Changes to a temporary remain private, and an escaping
-capture or reference return pins its cell. This exception does not apply to reference
-declarations or to other parameter types, and it does not change overload ranking.
+
+A script `string&` parameter (lambdas and host calls of script functions included) binds a
+string argument that is no lvalue to a writable temporary CELL: a script string shares its
+copy-on-write node, a C++-bound one detaches from native storage, writes stay private, and an
+escaping capture or a reference return pins the cell (`detail::make_reference_argument_temporary`).
+Another `T&` parameter takes a temporary only when the callee never writes through it
+(`detail/ref_param_writes.hpp`); a reference declaration never does.
 - **Ref returns** (`int& f()`, `-> auto&`): the return operand binds like a ref arg
   (ident ⇒ share/box; chain ⇒ resolver; call ⇒ pass-through) and the epilogue hands
   the HANDLE out via `detail::ref_return_pass_through` — non-lvalues and referent

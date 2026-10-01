@@ -1717,176 +1717,176 @@ public:
             }
         });
 
-		test("reference_temporary_rules_keep_non_string_write_checks", [this]() {
-			// string& admits writable temporaries; other reference types retain inferred read-only admission.
-			const std::string decl = "int index_of_name(array<string>& names, string n, int def) { for (int i = 0; i < names.size(); ++i) { if (names[i] == n) { return i; } } return def; }\n";
-			for (bool proofs : {true, false}) {
-				auto e = make_engine();
-				e->type_proofs(proofs);
-				auto run = [&](const std::string& src) { return e->execute(src).to_string(); };
-				check_eq((size_t)0, error_count(e->check(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);")));
-				check_eq(std::string("1"), run(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);"));
-				check_eq(std::string("hi bob|hi ab"), run("string greet(string& name) { return \"hi \" + name; }\ngreet(\"bob\") + \"|\" + greet(\"a\" + \"b\");"));
-				check_eq(std::string("43"), run("int len(string& s) { return s.size(); }\nint outer(string& s) { return len(s); }\n"
-					"int count(array<int>& xs, int i) { if (i >= xs.size()) { return 0; } return 1 + count(xs, i + 1); }\n"
-					"outer(\"abcd\") * 10 + count([5, 6, 7], 0);"));
-				check_eq(std::string("true"), run("bool same(array<int>& a, array<int>& b) { return same_object(a, b); }\nvoid grow(array<int>& xs) { xs.push(4); }\n"
-					"array<int> v = [1];\nbool s = same(v, v);\ngrow(v);\ns && v.size() == 2;"));
-				check_eq(std::string("true"), run("class P { string name = \"p\"; bool is(string& n) { return name == n; } }\nP p = P();\np.is(\"p\");"));
+        test("reference_temporary_rules_keep_non_string_write_checks", [this]() {
+            // string& admits writable temporaries; other reference types retain inferred read-only admission.
+            const std::string decl = "int index_of_name(array<string>& names, string n, int def) { for (int i = 0; i < names.size(); ++i) { if (names[i] == n) { return i; } } return def; }\n";
+            for (bool proofs : {true, false}) {
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                auto run = [&](const std::string& src) { return e->execute(src).to_string(); };
+                check_eq((size_t)0, error_count(e->check(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);")));
+                check_eq(std::string("1"), run(decl + "index_of_name([\"common\", \"rare\"], \"rare\", 0);"));
+                check_eq(std::string("hi bob|hi ab"), run("string greet(string& name) { return \"hi \" + name; }\ngreet(\"bob\") + \"|\" + greet(\"a\" + \"b\");"));
+                check_eq(std::string("43"), run("int len(string& s) { return s.size(); }\nint outer(string& s) { return len(s); }\n"
+                    "int count(array<int>& xs, int i) { if (i >= xs.size()) { return 0; } return 1 + count(xs, i + 1); }\n"
+                    "outer(\"abcd\") * 10 + count([5, 6, 7], 0);"));
+                check_eq(std::string("true"), run("bool same(array<int>& a, array<int>& b) { return same_object(a, b); }\nvoid grow(array<int>& xs) { xs.push(4); }\n"
+                    "array<int> v = [1];\nbool s = same(v, v);\ngrow(v);\ns && v.size() == 2;"));
+                check_eq(std::string("true"), run("class P { string name = \"p\"; bool is(string& n) { return name == n; } }\nP p = P();\np.is(\"p\");"));
 
-				auto r = e->check("void inc(int& x) { x = x + 1; }\ninc(5);");
-				check_eq((size_t)1, error_count(r));
-				check_true(has_diag(r, dlevel::error, "'inc' writes through parameter 'x' (line 1); pass a variable"), r.format());
-				check_eq((size_t)0, error_count(e->check("void shout(string& s) { s.to_upper(); }\nshout(\"hi\");")));
-				check_eq((size_t)1, error_count(e->check("void shout(string& s) { s.to_upper(); }\nshout(5);")), "temporary admission adds no numeric-to-string reference conversion");
-				check_eq((size_t)0, error_count(e->check("void set0(string& s) { s = \"x\"; }\nvoid outer2(string& s) {\n\tset0(s);\n}\nouter2(\"lit\");")));
-				check_eq((size_t)1, error_count(e->check("void clear_all(array<int>& xs) { auto& r = xs; r.clear(); }\nclear_all([1]);")));
-				check_eq((size_t)0, error_count(e->check("class K { void put(string& s) { s = \"\"; } }\nK k = K();\nk.put(\"lit\");")));
-				const std::string log = "class Log { string last = \"\"; void say(string& m) { last = m; } }\n";
-				check_eq((size_t)0, error_count(e->check(log + "Log l = Log();\nl.say(\"hi\");")));
-				check_eq((size_t)0, error_count(e->check(log + "class Loud : Log { void say(string& m) override {\n\tm = m + \"!\";\n} }\nLog l = Log();\nl.say(\"hi\");")), "string literal admission is independent of overrides");
-				check_eq((size_t)0, error_count(e->check(decl + "array<string> names = [\"a\"];\nindex_of_name(names, \"a\", 0);")));
-				check_eq((size_t)0, error_count(e->check("void inc(int& x) { x = x + 1; }\nvoid inc(int x, int y) { }\nint v = 1;\ninc(v);")));
-				check_eq((size_t)0, error_count(e->check("coroutine int gen(int& x) { yield x + 1; }\nauto g = gen(6);")), "a coroutine binds a copy of the argument");
+                auto r = e->check("void inc(int& x) { x = x + 1; }\ninc(5);");
+                check_eq((size_t)1, error_count(r));
+                check_true(has_diag(r, dlevel::error, "'inc' writes through parameter 'x' (line 1); pass a variable"), r.format());
+                check_eq((size_t)0, error_count(e->check("void shout(string& s) { s.to_upper(); }\nshout(\"hi\");")));
+                check_eq((size_t)1, error_count(e->check("void shout(string& s) { s.to_upper(); }\nshout(5);")), "temporary admission adds no numeric-to-string reference conversion");
+                check_eq((size_t)0, error_count(e->check("void set0(string& s) { s = \"x\"; }\nvoid outer2(string& s) {\n\tset0(s);\n}\nouter2(\"lit\");")));
+                check_eq((size_t)1, error_count(e->check("void clear_all(array<int>& xs) { auto& r = xs; r.clear(); }\nclear_all([1]);")));
+                check_eq((size_t)0, error_count(e->check("class K { void put(string& s) { s = \"\"; } }\nK k = K();\nk.put(\"lit\");")));
+                const std::string log = "class Log { string last = \"\"; void say(string& m) { last = m; } }\n";
+                check_eq((size_t)0, error_count(e->check(log + "Log l = Log();\nl.say(\"hi\");")));
+                check_eq((size_t)0, error_count(e->check(log + "class Loud : Log { void say(string& m) override {\n\tm = m + \"!\";\n} }\nLog l = Log();\nl.say(\"hi\");")), "string literal admission is independent of overrides");
+                check_eq((size_t)0, error_count(e->check(decl + "array<string> names = [\"a\"];\nindex_of_name(names, \"a\", 0);")));
+                check_eq((size_t)0, error_count(e->check("void inc(int& x) { x = x + 1; }\nvoid inc(int x, int y) { }\nint v = 1;\ninc(v);")));
+                check_eq((size_t)0, error_count(e->check("coroutine int gen(int& x) { yield x + 1; }\nauto g = gen(6);")), "a coroutine binds a copy of the argument");
 
-				check_eq(std::string("x"), run("string set_name(string& name) { name = \"x\"; return name; }\nstring g() { return \"a\"; }\nset_name(g());"));
-				check_eq(std::string("3"), run("auto lf = [](string& s) { return s.size(); };\nlf(\"abc\");"));
-				check_eq(std::string("2"), run("int peek(string& s) { return s.size(); }\nstring g2() { return \"ab\"; }\npeek(g2());"));
-				run("int peek(string& s) { s = \"zzz\"; return 0; }");
-				check_eq(std::string("0"), run("peek(g2());"), "a string parameter remains callable after reload adds a write");
+                check_eq(std::string("x"), run("string set_name(string& name) { name = \"x\"; return name; }\nstring g() { return \"a\"; }\nset_name(g());"));
+                check_eq(std::string("3"), run("auto lf = [](string& s) { return s.size(); };\nlf(\"abc\");"));
+                check_eq(std::string("2"), run("int peek(string& s) { return s.size(); }\nstring g2() { return \"ab\"; }\npeek(g2());"));
+                run("int peek(string& s) { s = \"zzz\"; return 0; }");
+                check_eq(std::string("0"), run("peek(g2());"), "a string parameter remains callable after reload adds a write");
 
-				auto w = make_engine();
-				w->type_proofs(proofs);
-				w->static_checking(check_mode::warn);
-				check_eq(std::string("Cannot pass non-lvalue to reference parameter"),
-					w->execute("void inc(int& x) { x = x + 1; }\nvar m = \"\";\ntry { inc(5); } catch (err) { m = err; }\nm;").to_string());
-				check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "'inc' writes through parameter 'x' (line 1); pass a variable"));
-			}
-		});
+                auto w = make_engine();
+                w->type_proofs(proofs);
+                w->static_checking(check_mode::warn);
+                check_eq(std::string("Cannot pass non-lvalue to reference parameter"),
+                    w->execute("void inc(int& x) { x = x + 1; }\nvar m = \"\";\ntry { inc(5); } catch (err) { m = err; }\nm;").to_string());
+                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "'inc' writes through parameter 'x' (line 1); pass a variable"));
+            }
+        });
 
-		test("string_reference_temporaries_mutate_privately_and_variables_alias", [this]() {
-			const std::string source = R"JAI(
-				string normalize(string& value) {
-					value.trim();
-					value.to_upper();
-					value += "!";
-					return value;
-				}
-				string label = "  alice  ";
-				string copy = label;
-				string existing = normalize(label);
-				string literal = normalize("  bob  ");
-				string computed = normalize("  " + "cara  ");
-				string cached() { return normalize("  cached  "); }
-				label + "|" + copy + "|" + existing + "|" + literal + "|" + computed + "|" + cached() + "|" + cached();
-			)JAI";
-			for (bool vm : {false, true}) {
-				for (bool proofs : {false, true}) {
-					for (auto mode : {check_mode::strict, check_mode::warn, check_mode::off}) {
-						auto e = engine::make();
-						if (vm) { e->set_backend(backend_type::vm); }
-						e->type_proofs(proofs);
-						e->static_checking(mode);
-						check_eq(std::string("ALICE!|  alice  |ALICE!|BOB!|CARA!|CACHED!|CACHED!"), e->execute(source).as_string());
-						check_eq((size_t)0, error_count(e->last_check_diagnostics()));
-					}
-				}
-			}
-		});
+        test("string_reference_temporaries_mutate_privately_and_variables_alias", [this]() {
+            const std::string source = R"JAI(
+                string normalize(string& value) {
+                    value.trim();
+                    value.to_upper();
+                    value += "!";
+                    return value;
+                }
+                string label = "  alice  ";
+                string copy = label;
+                string existing = normalize(label);
+                string literal = normalize("  bob  ");
+                string computed = normalize("  " + "cara  ");
+                string cached() { return normalize("  cached  "); }
+                label + "|" + copy + "|" + existing + "|" + literal + "|" + computed + "|" + cached() + "|" + cached();
+            )JAI";
+            for (bool vm : {false, true}) {
+                for (bool proofs : {false, true}) {
+                    for (auto mode : {check_mode::strict, check_mode::warn, check_mode::off}) {
+                        auto e = engine::make();
+                        if (vm) { e->set_backend(backend_type::vm); }
+                        e->type_proofs(proofs);
+                        e->static_checking(mode);
+                        check_eq(std::string("ALICE!|  alice  |ALICE!|BOB!|CARA!|CACHED!|CACHED!"), e->execute(source).as_string());
+                        check_eq((size_t)0, error_count(e->last_check_diagnostics()));
+                    }
+                }
+            }
+        });
 
-		test("string_reference_temporaries_support_lambdas_methods_and_overloads", [this]() {
-			const std::string source = R"JAI(
-				auto append = [](string& value) { value += "!"; return value; };
-				class Receiver {
-					string saved;
-					Receiver(string& value) { value += "?"; saved = value; }
-					string upper(string& value) { value.to_upper(); return value; }
-					static string decorate(string& value) { value += "."; return value; }
-					string pick(string& value) { value += "+"; return value; }
-					string pick(var& value) { value = 42; return "fallback"; }
-					int pick(int value) { return value + 1; }
-				}
-				string existing = "named";
-				string lambda_named = append(existing);
-				string lambda_literal = append("literal");
-				Receiver receiver = Receiver("ctor");
-				lambda_named + "|" + existing + "|" + lambda_literal + "|" + receiver.saved + "|" +
-					receiver.upper("method") + "|" + Receiver::decorate("static") + "|" + receiver.pick("overload") + "|" + receiver.pick(4);
-			)JAI";
-			for (bool vm : {false, true}) {
-				for (bool proofs : {false, true}) {
-					auto e = engine::make();
-					if (vm) { e->set_backend(backend_type::vm); }
-					e->type_proofs(proofs);
-					check_eq(std::string("named!|named!|literal!|ctor?|METHOD|static.|overload+|5"), e->execute(source).as_string());
-				}
-			}
-		});
+        test("string_reference_temporaries_support_lambdas_methods_and_overloads", [this]() {
+            const std::string source = R"JAI(
+                auto append = [](string& value) { value += "!"; return value; };
+                class Receiver {
+                    string saved;
+                    Receiver(string& value) { value += "?"; saved = value; }
+                    string upper(string& value) { value.to_upper(); return value; }
+                    static string decorate(string& value) { value += "."; return value; }
+                    string pick(string& value) { value += "+"; return value; }
+                    string pick(var& value) { value = 42; return "fallback"; }
+                    int pick(int value) { return value + 1; }
+                }
+                string existing = "named";
+                string lambda_named = append(existing);
+                string lambda_literal = append("literal");
+                Receiver receiver = Receiver("ctor");
+                lambda_named + "|" + existing + "|" + lambda_literal + "|" + receiver.saved + "|" +
+                    receiver.upper("method") + "|" + Receiver::decorate("static") + "|" + receiver.pick("overload") + "|" + receiver.pick(4);
+            )JAI";
+            for (bool vm : {false, true}) {
+                for (bool proofs : {false, true}) {
+                    auto e = engine::make();
+                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->type_proofs(proofs);
+                    check_eq(std::string("named!|named!|literal!|ctor?|METHOD|static.|overload+|5"), e->execute(source).as_string());
+                }
+            }
+        });
 
-		test("string_reference_temporary_cells_survive_escaping_captures", [this]() {
-			const std::string source = R"JAI(
-				function retain(string& value) {
-					value += "!";
-					return [&]() { value += "?"; return value; };
-				}
-				string& keep(string& value) { return value; }
-				auto first = retain("a");
-				auto second = retain("b");
-				auto& held = keep("held");
-				held += "!";
-				first() + "|" + second() + "|" + first() + "|" + held;
-			)JAI";
-			for (bool vm : {false, true}) {
-				for (bool proofs : {false, true}) {
-					auto e = engine::make();
-					if (vm) { e->set_backend(backend_type::vm); }
-					e->type_proofs(proofs);
-					check_eq(std::string("a!?|b!?|a!??|held!"), e->execute(source).as_string());
-				}
-			}
-		});
+        test("string_reference_temporary_cells_survive_escaping_captures", [this]() {
+            const std::string source = R"JAI(
+                function retain(string& value) {
+                    value += "!";
+                    return [&]() { value += "?"; return value; };
+                }
+                string& keep(string& value) { return value; }
+                auto first = retain("a");
+                auto second = retain("b");
+                auto& held = keep("held");
+                held += "!";
+                first() + "|" + second() + "|" + first() + "|" + held;
+            )JAI";
+            for (bool vm : {false, true}) {
+                for (bool proofs : {false, true}) {
+                    auto e = engine::make();
+                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->type_proofs(proofs);
+                    check_eq(std::string("a!?|b!?|a!??|held!"), e->execute(source).as_string());
+                }
+            }
+        });
 
-		test("string_reference_temporaries_detach_bound_values_and_accept_host_calls", [this]() {
-			for (bool vm : {false, true}) {
-				std::string native_string{"native"};
-				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
-				e->add_global_ref("native_string", native_string);
-				e->add_function("bound_text", [engine_ptr = e.get()]() { return engine_ptr->get_variable("native_string"); });
-				check_eq(std::string("NATIVE"), e->execute("string upper(string& value) { value.to_upper(); return value; }\nupper(bound_text());").as_string());
-				check_eq(std::string("native"), native_string, "a bound string used as a temporary detaches from native storage");
-				check_eq(std::string("NATIVE"), e->execute("upper(native_string);").as_string());
-				check_eq(std::string("NATIVE"), native_string, "a named native string remains an alias");
-				auto callable = e->get_variable("upper");
-				std::vector<script_value> args{e->make_value(std::string{"host"})};
-				auto result = callable.as_function()(args);
-				check_true(static_cast<bool>(result));
-				if (result) {
-					check_eq(std::string("HOST"), result.value().as_string());
-				}
-				check_eq(std::string("host"), args[0].as_string(), "a host-supplied value argument has private mutation");
-			}
-		});
+        test("string_reference_temporaries_detach_bound_values_and_accept_host_calls", [this]() {
+            for (bool vm : {false, true}) {
+                std::string native_string{"native"};
+                auto e = engine::make();
+                if (vm) { e->set_backend(backend_type::vm); }
+                e->add_global_ref("native_string", native_string);
+                e->add_function("bound_text", [engine_ptr = e.get()]() { return engine_ptr->get_variable("native_string"); });
+                check_eq(std::string("NATIVE"), e->execute("string upper(string& value) { value.to_upper(); return value; }\nupper(bound_text());").as_string());
+                check_eq(std::string("native"), native_string, "a bound string used as a temporary detaches from native storage");
+                check_eq(std::string("NATIVE"), e->execute("upper(native_string);").as_string());
+                check_eq(std::string("NATIVE"), native_string, "a named native string remains an alias");
+                auto callable = e->get_variable("upper");
+                std::vector<script_value> args{e->make_value(std::string{"host"})};
+                auto result = callable.as_function()(args);
+                check_true(static_cast<bool>(result));
+                if (result) {
+                    check_eq(std::string("HOST"), result.value().as_string());
+                }
+                check_eq(std::string("host"), args[0].as_string(), "a host-supplied value argument has private mutation");
+            }
+        });
 
-		test("string_reference_temporaries_are_private_in_parallel_workers", [this]() {
-			const std::string source = R"JAI(
-				int lengthen(string& value) { value += "!"; return value.size(); }
-				array<int> values = [];
-				for (int i = 0; i < 128; ++i) { values.push(0); }
-				parallel_for (auto& value : values) { value = lengthen("a") + lengthen("b"); }
-				int sum = 0;
-				for (auto value : values) { sum += value; }
-				sum;
-			)JAI";
-			for (bool vm : {false, true}) {
-				for (size_t workers : {1u, 2u, 4u}) {
-					auto e = engine::make();
-					if (vm) { e->set_backend(backend_type::vm); }
-					e->parallel_thread_count(workers);
-					check_eq(int64_t{512}, e->execute(source).as_int());
-				}
-			}
-		});
+        test("string_reference_temporaries_are_private_in_parallel_workers", [this]() {
+            const std::string source = R"JAI(
+                int lengthen(string& value) { value += "!"; return value.size(); }
+                array<int> values = [];
+                for (int i = 0; i < 128; ++i) { values.push(0); }
+                parallel_for (auto& value : values) { value = lengthen("a") + lengthen("b"); }
+                int sum = 0;
+                for (auto value : values) { sum += value; }
+                sum;
+            )JAI";
+            for (bool vm : {false, true}) {
+                for (size_t workers : {1u, 2u, 4u}) {
+                    auto e = engine::make();
+                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->parallel_thread_count(workers);
+                    check_eq(int64_t{512}, e->execute(source).as_int());
+                }
+            }
+        });
 
         test("an_enum_declared_in_a_function_is_local_and_warns_when_it_hides_a_program_enum", [this]() {
             // the runtime scopes an enum written in a function or a block to that scope (both backends); the checker models it

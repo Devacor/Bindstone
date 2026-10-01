@@ -3974,6 +3974,44 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined add1") != std::string::npos, "add1 grafts with arguments reading MX and OFF: " + l);
 			check_true(l.find("-- call kept add1") == std::string::npos, "no kept call for add1: " + l);
 		});
+		test("a_size_call_and_a_nested_leafs_result_graft_under_imports", [this]() {
+			// Gator Quest's mob_live (`m < MOB_KIND.size()` in the body) and cheb (`imax(iabs(x0 - x1), iabs(y0 - y1))`): a body reading a proven
+			// array's size grafts, and a call's result is a proven argument when its callee is a free function declared to return that scalar;
+			// the graft re-checks the callee's declared return once a run moved the definition epoch, so after the declaring unit runs again
+			// with another return type the call is the call, on both backends alike
+			namespace fs = std::filesystem;
+			fs::path dir = fs::temp_directory_path() / "jai_size_nested_proof";
+			fs::create_directories(dir);
+			const std::string util_int = "int iabs(int v) { return v < 0 ? -v : v; }\nint imax(int a, int b) { return a > b ? a : b; }\n";
+			std::ofstream(dir / "util.jai") << util_int;
+			std::ofstream(dir / "data.jai") << "array<int> KIND = [3, -1, 4, 0];\n";
+			std::ofstream(dir / "lib.jai") << "import \"util.jai\";\nimport \"data.jai\";\n"
+			                                 "bool live(int m) { return m >= 0 && m < KIND.size() && KIND[m] >= 0; }\n"
+			                                 "int cheb(int x0, int y0, int x1, int y1) { return imax(iabs(x0 - x1), iabs(y0 - y1)); }\n"
+			                                 "int probe() { int n = 0; if (live(0)) { n = n + 1; } if (live(1)) { n = n + 10; } if (live(7)) { n = n + 100; } int d = cheb(1, 2, 4, -3); return n + d; }\n";
+			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
+			auto run_file = [&](bool vm, std::string* listing) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				e->import_recheck_interval(0);
+				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
+				e->add_include_path(dir.string());
+				std::string out;
+				try { out = e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+				std::ofstream(dir / "util.jai") << "float iabs(int v) { return (v < 0 ? -v : v) + 0.5; }\nint imax(int a, int b) { return a > b ? a : b; }\n";
+				try {
+					out += "|" + e->execute("import \"util.jai\";\nvar r = \"\";\ntry { r = to_string(probe()); } catch (e) { r = e; }\nr;").as_string();
+				} catch (const std::exception& ex) { out += std::string("|throw:") + ex.what(); }
+				std::ofstream(dir / "util.jai") << util_int;
+				return out;
+			};
+			std::string l;
+			const std::string iv = run_file(false, nullptr), vv = run_file(true, &l);
+			check_eq(iv, vv, "a size call and a nested leaf's result as arguments: both backends, before and after iabs changed its return type");
+			check_eq(std::string("6|"), vv.substr(0, 2), "the value before the reload: " + vv);
+			check_true(l.find("-- inlined live") != std::string::npos, "live grafts with its size call: " + l);
+			check_true(l.find("-- inlined cheb") != std::string::npos, "cheb grafts with imax taking iabs's results: " + l);
+			check_true(l.find("-- call kept imax") == std::string::npos, "no kept call for imax: " + l);
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside `for (int m = 0; m < MOB_KIND.size(); ++m)`: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

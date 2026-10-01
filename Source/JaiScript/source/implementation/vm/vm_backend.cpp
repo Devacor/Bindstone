@@ -11475,6 +11475,14 @@ bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
 		if (!v) return false;
 		if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
 		const auto base = static_cast<script_value_type>(kind & 0xFF);
+		if (kind & call_expr::k_proof_function) {   // a call's result: the name binds a script function declared to return that scalar
+			if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
+			const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
+			if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) return false;
+			const type_info* rt = thunk->payload.fn->return_type.get();
+			if (!rt || rt->is_reference() || rt->base_type != base) return false;
+			continue;
+		}
 		if (base == script_value_type::jai_array_type) {
 			if (v->raw_storage_index() != script_value::TYPEID_ARRAY) return false;
 			const script_array* node = v->unchecked_array_node();

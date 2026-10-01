@@ -102,6 +102,12 @@ bool alias_call(const call_expr* ce, const engine* eng) {
 	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
 	return !id->global_qualified && id->slot_index == SIZE_MAX && eng->math_alias_fn(id->symbol_id) < engine::k_math_alias_rows;
 }
+// `name.size()` on a receiver the checker proved an array: it reads the array and runs no user code (the builtin call guards the kind)
+bool size_call(const call_expr* ce) {
+	if (!ce->callee || ce->callee->get_type() != node_type::member_expr || !ce->arguments.empty() || ce->builtin_receiver != 2) return false;
+	auto* m = static_cast<const member_expr*>(ce->callee.get());
+	return !m->is_static && !m->null_safe && m->member == "size" && m->object && m->object->get_type() == node_type::identifier_expr;
+}
 bool logical_op(token_type t) { return t == token_type::ampersand_ampersand || t == token_type::pipe_pipe; }
 bool incdec_op(token_type t) { return t == token_type::plus_plus || t == token_type::minus_minus; }
 
@@ -564,7 +570,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e.get());
 		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? copy_identifier(c.result.get(), e->location, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
-		if (!c.replace && !math_call(ce)) {
+		if (!c.replace && !math_call(ce) && !size_call(ce)) {
 			if (!alias_call(ce, c.lc.eng) && !nested_call(ce, &c.lc)) { c.fail("a call in the body"); return nullptr; }
 			// the alias makes the real call when its name binds anything else, a nested leaf when its guard fails: that callee may write
 			// anything, so nothing the statement reads before the graft stays in place behind it
@@ -576,6 +582,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (!c.ok) return nullptr;
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
 		n->static_arg_proofs = ce->static_arg_proofs; n->proof_globals = ce->proof_globals; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_decl = ce->proven_callee_decl;
+		n->builtin_receiver = ce->builtin_receiver;
 		c.origins[n.get()] = ce;
 		for (auto* pins : { c.alias_pins, c.callee_probes }) {
 			if (!pins) continue;

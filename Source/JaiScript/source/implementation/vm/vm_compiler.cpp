@@ -2945,6 +2945,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			at = std::max(end, at + 1);
 		}
 	};
+	auto always_true = [&](const vm_instruction& ins) {
+		return ins.op == opcode::op_true || (ins.op == opcode::op_const && ins.a < c.constants.size() && c.constants[ins.a].raw_storage_index() == script_value::TYPEID_BOOL && c.constants[ins.a].unchecked_as_bool());
+	};
 	size_t no_boundary_cand = SIZE_MAX;   // a loop translated again without boundary operations (they left it too little work of its own)
 	for (size_t cand = 0;; ++cand) {
 		size_t back = cand, line_head = SIZE_MAX;
@@ -3005,10 +3008,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (ci.op == opcode::op_fused_cmp_jump && ci.a == back + 1 && ci.b < c.fused_binary_protos.size()) break;
 				// a truth test on a local as the head (`while (n)`): the load and its exit jump
 				if (ci.op == opcode::op_load && (ci.a == k_invalid_u32 || ci.a < k_typed_slot_mask) && ci.c == 0 && cmp_ip + 1 < back && code[cmp_ip + 1].op == opcode::op_jump_if_false && code[cmp_ip + 1].a == back + 1) break;
+				if (cmp_ip == head && always_true(ci) && cmp_ip + 1 < back && code[cmp_ip + 1].op == opcode::op_jump_if_false && code[cmp_ip + 1].a == back + 1) break;   // `while (true)`: exits only through its breaks and returns
 			}
 			if (cmp_ip >= back) { refuse(chunk::cell_refusal_head, head); cmp_ip = head; }
 			hd = code[cmp_ip];
-			if (hd.op == opcode::op_load) { hd = code[cmp_ip + 1]; hd.op = opcode::op_jump_if_false; }   // the exit is the jump's target (read below as hd.a)
+			if (hd.op == opcode::op_load || always_true(hd)) { hd = code[cmp_ip + 1]; hd.op = opcode::op_jump_if_false; }   // the exit is the jump's target (read below as hd.a)
 		} else {
 			if (be.a >= c.counted_for_protos.size()) continue;
 			const counted_for_proto& p = c.counted_for_protos[be.a];
@@ -3363,7 +3367,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (!line && counted == k_invalid_u32 && ip == cmp_ip) {
 				// the head compare: its false edge is the loop's exit
 				op.kind = ir::cmp; op.head = true;
-				if (st.op == opcode::op_load) {
+				if (always_true(st)) {   // a constant-true condition and its jump: no copy instruction
+					op = ir_op{}; op.kind = ir::skip;
+					ops.push_back(op);
+					++ip;
+				} else if (st.op == opcode::op_load) {
 					// `while (n)` / `while (RUNNING)`: the truthiness of a local's or an environment value's int, float or bool; the jump has no copy
 					if (!truth_operand(op, st, ip, op.a)) { refuse(chunk::cell_refusal_head, ip); break; }
 					op.tok = static_cast<uint8_t>(token_type::bang); op.b = k_typed_const_bit; op.target = code[ip + 1].a;

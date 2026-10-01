@@ -3614,6 +3614,39 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "enum values read by name under an injected miss at every " + std::to_string(every));
 			}
 		});
+		test("a_while_true_loop_runs_in_a_block", [this]() {
+			// `while (true)`: the constant condition and its jump have no copy, the loop leaves through its breaks and returns (exit statements)
+			// and a continue lands on the body's first operation; nested under a counted loop too; both backends, proofs off, the middle end
+			// off and miss injection
+			const std::string prelude =
+				"array<int> A = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];\n"
+				"int walk(int start) { int i = start; int s = 0; while (true) { s = s + A[i % 10] * 3; i = i + 1; if (s > 200) { break; } } return s * 100 + i; }\n"
+				"int spin(int n) { int k = 0; int t = 0; while (true) { k = k + 1; t = t + k * 2; if (k >= n) { return t; } } return -1; }\n"
+				"int skip3(int n) { int k = 0; int t = 0; while (true) { k = k + 1; if (A[k % 10] == 1) { continue; } t = t + k; if (k >= n) { break; } } return t; }\n"
+				"int nest(int m) { int t = 0; for (int j = 0; j < m; ++j) { int k = j; while (true) { k = k + 3; t = t + A[k % 10]; if (k > j + 20) { break; } } } return t; }\n";
+			const std::string body = "to_string(walk(2)) + \"|\" + to_string(spin(50)) + \"|\" + to_string(skip3(40)) + \"|\" + to_string(nest(30));";
+			both(prelude + body, "", "while (true) loops");
+			both(prelude + body, "", "while (true) loops, proofs off", false);
+			const std::string vm = run_on(true, prelude + body);
+			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
+			{
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
+				check_eq(vm, off, "the middle end's switch off answers the same");
+			}
+			const std::string l = listing_run(prelude + body);
+			for (const char* fn : { "walk", "spin", "skip3" }) {
+				const size_t at = l.find(std::string("== ") + fn + " ");
+				const size_t end = at == std::string::npos ? at : l.find("\n== ", at + 1);
+				check_true(at != std::string::npos && l.substr(at, end == std::string::npos ? std::string::npos : end - at).find("-- cell loop") != std::string::npos, std::string(fn) + "'s loop closes\n" + l);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(vm, got, "while (true) loops under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
 			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs

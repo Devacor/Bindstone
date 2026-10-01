@@ -3810,6 +3810,15 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
                 // live in call-frame slots, not the environment), then environment
                 script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
                 if (varPtr) {
+                    if (detail::ref_declared_type(*varPtr)) [[unlikely]] {   // `int& r`: the declared type's table (KEEP BYTE-PARALLEL with the VM exec_incdec)
+                        auto stepped = detail::ref_target_assign(*varPtr, make_value(static_cast<script_int>(1)),
+                            expr->op.type == token_type::plus_plus ? token_type::plus : token_type::minus, true, expr->is_postfix, true,
+                            operator_table_, engine_, string_symbolizer_,
+                            [this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); });
+                        if (!stepped) { return stepped.error_value(); }
+                        push_value(std::move(stepped.value()));
+                        return {};
+                    }
                     // Scratch-backed ref (typed element, C++ property): deref hands back the
                     // holder scratch - the in-place mutation below must commit it (buffer
                     // store / setter) (KEEP BYTE-PARALLEL with the VM exec_incdec twin)
@@ -4030,25 +4039,30 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     return {};
 }
 
+checked_result<void> interpreter::non_lvalue_target(const expression* target) {
+    return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "{0}",
+                                string_symbolizer_->intern(detail::non_lvalue_target_text(target)));
+}
+
 template<bool Replaying>
 checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr, const replay_point* rs) {
     // Non-lvalue targets fail before ANY evaluation (the vm rejects them at compile time)
     const node_type target_kind = expr->target->get_type();
-    {
-        if (target_kind != node_type::identifier_expr && target_kind != node_type::member_expr &&
-            !(target_kind == node_type::binary_expr &&
-              static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket) &&
-            !(target_kind == node_type::cast_expr && static_cast<cast_expr*>(expr->target.get())->by_reference)) {
-            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
-        }
+    const bool through_reference = target_kind != node_type::identifier_expr && target_kind != node_type::member_expr &&
+                                   target_kind != node_type::binary_expr && detail::reference_target(expr->target.get());
+    if (target_kind != node_type::identifier_expr && target_kind != node_type::member_expr &&
+        !(target_kind == node_type::binary_expr &&
+          static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket) && !through_reference) {
+        return non_lvalue_target(expr->target.get());
     }
     // Only the statement's own root discards its value; a nested assignment's stored value is consumed
     struct result_needed_scope { bool& flag; bool saved; ~result_needed_scope() { flag = saved; } } result_needed{ expression_result_needed_, expression_result_needed_ };
     expression_result_needed_ = expr != unconsumed_root_;
 
-    if (target_kind == node_type::cast_expr) [[unlikely]] {
-        // cast<T&>(e) is an lvalue: the right-hand side first (C++17), then the reference, then the store
-        // (detail::ref_target_assign; KEEP BYTE-PARALLEL with vm_backend::exec_ref_target_store)
+    if (through_reference) [[unlikely]] {
+        // cast<T&>(e), f() returning T&, a conditional of lvalues, an assignment, a prefix ++/--: the right-hand side first
+        // (C++17), then the reference, then the store (detail::ref_target_assign; KEEP BYTE-PARALLEL with
+        // vm_backend::exec_ref_target_store)
         script_value rightValue;
         if (parked<Replaying>(rs, 0)) {
             rightValue = rs->partial[0];
@@ -4058,6 +4072,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 return {};
             }
             rightValue = pop_value();
+            if (rightValue.is_reference()) {
+                script_value derefed = rightValue.deref();
+                rightValue = std::move(derefed);
+            }
         }
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->target.get(), rs, 1), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
         script_value target_ref = pop_value();
@@ -4066,18 +4084,18 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             return {};
         }
         if (!target_ref.is_reference()) {
-            return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
+            return non_lvalue_target(expr->target.get());
         }
         const token_type op = expr->op.type == token_type::equal ? token_type::equal : detail::compound_base(expr->op.type);
         auto stored = detail::ref_target_assign(target_ref, rightValue, op, expr->incdec_desugar, expr->postfix_old_result,
-            expression_result_needed_, operator_table_, engine_, string_symbolizer_,
+            expression_result_needed_ && !expr->yields_reference, operator_table_, engine_, string_symbolizer_,
             [this](const script_value& l, token_type o, const script_value& r) {
                 return evaluate_arithmetic(l, o, r, detail::compound_index(o));
             });
         if (!stored) {
             return stored.error_value();
         }
-        push_value(std::move(stored.value()));
+        push_value(expr->yields_reference ? std::move(target_ref) : std::move(stored.value()));
         return {};
     }
 
@@ -4100,7 +4118,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // deref is a scratch, the write must reach the setter.
                 if (varPtr->is_reference()) {
                     const auto* refHolder = varPtr->get_reference_holder();
-                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
+                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element() || detail::ref_declared_type(*varPtr))) {
                         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
                         if (is_unwinding_) {
                             push_value(make_value());
@@ -5973,10 +5991,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
                 }
             } else {
-                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
+                return non_lvalue_target(expr->target.get());
             }
         } else {
-            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation), "Complex assignment targets not yet implemented");
+            return non_lvalue_target(expr->target.get());
         }
     }
     return {};
@@ -6205,6 +6223,9 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
         // untouched (ref decls alias; a cell never wraps a reference).
         if (decl->ref_escaping && !value.is_reference()) {
             value = script_value::make_cell_reference(std::move(value), engine_);
+        }
+        if (decl->type && decl->type->is_reference() && value.is_reference()) {   // `int& r = e`: the reference carries its declared type
+            detail::ref_declare(value, decl->type->element_type().get(), engine_);
         }
         if (decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
             // Local variable with slot - use O(1) slot-based storage
@@ -9679,11 +9700,19 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
             break;
     }
 
+    if (expr->implicit_ref) {
+        if (!operand.is_reference()) {
+            return non_lvalue_target(expr->operand.get());
+        }
+        push_value(std::move(operand));
+        return {};
+    }
     if (expr->by_reference) {
         auto out = detail::cast_reference(detail::cast_pin_temporary(std::move(operand), engine_), *expr, engine_, string_symbolizer_);
         if (!out) {
             return out.error_value();
         }
+        detail::ref_declare(out.value(), expr->target.get(), engine_);
         push_value(std::move(out.value()));
         return {};
     }

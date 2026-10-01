@@ -253,6 +253,29 @@ first, then the container, the index and the element's read. An error in the rig
 one raised, and the target is never evaluated (`nv.f += bad()` with a null `nv` and `a[5] += bad()`
 past the end both raise `bad()`'s error, not the receiver's or the index's).
 
+## Assignment targets (`invalid_assignment_target`, kernel `detail/lvalue_shape.hpp` `non_lvalue_target_text`)
+
+The C++ lvalues are assignable (`=`, `op=`, `++`/`--`): a name, a member, an element, `cast<T&>(e)`, a call returning
+`T&` (function, method, static method, `operator[]`), a conditional whose arms are both lvalues, an assignment and a
+prefix `++`/`--` (both yield their left side). Anything else names no storage, and the text says what was written and
+why. Strict checking reports the same text at load with a lowercase first letter; a program the checker does not see
+raises it before any of the assignment runs, except a call, whose result only the call can tell (the right side and the
+call run, then a by-value result raises). One kernel for both backends and the checker.
+
+| target | text |
+|---|---|
+| a literal | `Cannot assign to a literal` |
+| a value cast | `Cannot assign to the result of cast<int>(x): it is a temporary value (cast<int&>(x) names the variable)` (`names the storage` for a member or element operand; no suggestion for an operand that names nothing) |
+| a call returning by value | `Cannot assign to a call result: 'f' returns by value` (a constructor call is one: `'P' returns by value`) |
+| a postfix increment | `Cannot assign to x++: it yields the old value` (`a[0]--` spells the element) |
+| an operator result | `Cannot assign to the result of '+': it is a temporary value` (unary `'-'`, `'!'`, `'~'` alike) |
+| a conditional with a non-lvalue arm | `Cannot assign to a conditional: its arm '5' names no storage` |
+| `this`, `new`, a lambda, a literal array or map | `Cannot assign to 'this'`, `Cannot assign to a new object: it is a temporary value`, `Cannot assign to a lambda`, `Cannot assign to an array literal`, `Cannot assign to a map literal` |
+| anything else | `Cannot assign to this expression: it names no storage` |
+
+Spellings name variables, members, `C::s` statics, int-literal and identifier subscripts, and calls as `f(...)`; a part
+the kernel does not spell reads `...`.
+
 ## Call-depth limits (`max_recursion_depth`)
 
 `Maximum recursion depth exceeded - possible infinite recursion`
@@ -366,4 +389,4 @@ reads as `""`; absence is asked with `file_exists(path)` first.
 | script layers | `Script layer 'C' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object`, `Cannot copy an instance of nocopy class 'C'`, `No copy constructor available for class C` | keep |
 | static stores | `Static member assignment requires a class name`, `'C' is not a class`, `'C' is not a valid class`, `Cannot assign to static member: field 's' not found` | `Cannot assign to static member: field 's' not found` -> family B's `class C has no static member 's'` (same fact, second spelling) |
 | casts | `Cannot cast 'X' to 'T'`, char range texts (`detail/cast_kernel.hpp`) | keep; the quoted-type spelling is this family's own contract (documented in CLAUDE.md) |
-| internal | `Unknown expression type in dispatch_expr`, `Unknown callable kind`, `Complex assignment targets not yet implemented`, `this_id_ mismatch with symbolizer` | internal invariants; keep |
+| internal | `Unknown expression type in dispatch_expr`, `Unknown callable kind`, `this_id_ mismatch with symbolizer` | internal invariants; keep |

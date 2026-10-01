@@ -467,6 +467,7 @@ namespace jai {
         checked_result<void> dispatch_decl_resuming(declaration* decl);
         checked_result<void> run_case_body(ast_node* self, const std::vector<statement_ptr>& body);
         checked_result<void> store_through_subscript_reference(script_value& target_ref, script_value value);
+        checked_result<void> non_lvalue_target(const expression* target);
         script_value string_element_pin(script_value& base_raw, const expression* base_expr);
         // Unwind side (cold): park a node's produced operands / mark a statement's root
         void park_operands(ast_node* node, uint32_t phase, size_t index, std::vector<script_value> partial);

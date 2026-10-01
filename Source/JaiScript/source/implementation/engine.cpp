@@ -3314,9 +3314,38 @@ type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
     type_info temp = *array_type;
     temp.dynamic_slot = true;
     temp.cached_reference_type = nullptr;
+    temp.cached_declared_reference_type = nullptr;
     auto result = impl->type_infos_.emplace(key, temp);
     type_info* ptr = &result.first->second;
     impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
+    return ptr;
+}
+
+type_info* engine::get_type_info_declared_reference(type_info* referenced_type) {
+    if (!referenced_type) { return nullptr; }
+    if (referenced_type->cached_declared_reference_type) { return referenced_type->cached_declared_reference_type; }
+    implementation::type_key key{script_value_type::jai_reference_type, referenced_type->id, 1};
+    type_info* ptr = nullptr;
+    auto it = impl->type_infos_.find(key);
+    if (it != impl->type_infos_.end()) {
+        ptr = &it->second;
+    } else {
+        impl->deny_type_intern_in_region();
+        type_info temp = *get_type_info_reference(referenced_type);
+        temp.declared_reference = true;
+        temp.cached_reference_type = nullptr;
+        temp.cached_declared_reference_type = nullptr;
+        auto result = impl->type_infos_.emplace(key, temp);
+        ptr = &result.first->second;
+        impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
+    }
+    // the get_type_info_reference rule: only a type this engine interned, never inside a parallel region
+    if (!parallel_region_active()) {
+        auto owned = impl->type_id_index_.find(referenced_type->id);
+        if (owned != impl->type_id_index_.end() && owned->second == referenced_type) {
+            referenced_type->cached_declared_reference_type = ptr;
+        }
+    }
     return ptr;
 }
 

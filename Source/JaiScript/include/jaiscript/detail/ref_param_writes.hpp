@@ -149,6 +149,14 @@ namespace jai::detail {
 				return nullptr;
 			}
 			bool rooted(const expression* e) const {
+				while (e && e->get_type() == node_type::cast_expr) { e = static_cast<const cast_expr*>(e)->operand.get(); }
+				if (e && e->get_type() == node_type::ternary_expr) {   // a conditional of lvalues writes whichever arm it picks
+					auto* t = static_cast<const ternary_expr*>(e);
+					return rooted(t->then_expression.get()) || rooted(t->else_expression.get());
+				}
+				if (e && e->get_type() == node_type::assignment_expr && static_cast<const assignment_expr*>(e)->yields_reference) {
+					return rooted(static_cast<const assignment_expr*>(e)->target.get());
+				}
 				const identifier_expr* r = chain_root(e);
 				return r && !r->global_qualified && is_root(r->name);
 			}

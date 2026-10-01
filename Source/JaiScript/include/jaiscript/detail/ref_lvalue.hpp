@@ -617,11 +617,68 @@ namespace jai::detail {
 		return {};
 	}
 
+	// The declared type of a reference (`int& r = v`, cast<int&>(v)): null for var&/auto& and every minted reference
+	inline type_info* ref_declared_type(const script_value& ref) {
+		const type_info* t = ref.type_info_raw();
+		return t && t->declared_reference && !t->type_params.empty() ? t->type_params[0].get() : nullptr;
+	}
+
+	// Stamps the declared type where the storage would not already apply T's table (a var, an untyped element), so a store
+	// through a reference to typed storage keeps its fast paths
+	inline void ref_declare(script_value& ref, type_info* declared, engine* eng) {
+		if (!declared || !ref.is_reference() || declared->base_type == script_value_type::jai_any_type ||
+		    declared->base_type == script_value_type::jai_reference_type || declared->type_name == "auto") {
+			return;
+		}
+		const auto* holder = ref.get_reference_holder();
+		if (!holder || holder->property || holder->component_base) { return; }
+		const type_info* enforced = holder->container_element_type ? holder->container_element_type.get()
+		                          : holder->plain_cell() ? ref.deref().type_info_raw() : nullptr;
+		if (enforced && !var_slot(enforced) && enforced->base_type == declared->base_type) { return; }
+		ref.set_type_info(eng->get_type_info_declared_reference(declared));
+	}
+
+	// A store through a reference with a declared type T runs T's table first (Dev ruling 2026-09-30: `var v; int& r = v;
+	// r = 2.5` stores int 2), a class T its operator= on the referent; the storage's own rules follow. nullopt when the
+	// operator wrote it.
+	inline std::optional<checked_result<script_value>> ref_declared_convert(const script_value& refLocal, type_info* declared,
+	                                                                        const script_value& value, engine* eng) {
+		if (declared->base_type == script_value_type::jai_object_type) {
+			auto current = ref_checked_deref(refLocal);
+			if (current) {
+				if (auto assigned = user_assign_operator(current.value(), value, eng)) {
+					if (!*assigned) { return checked_result<script_value>(assigned->error_value()); }
+					return std::nullopt;
+				}
+			}
+		}
+		const script_value& plain = value.deref();
+		const size_t vi = plain.raw_storage_index();
+		if ((vi == script_value::TYPEID_INT && declared->base_type == script_value_type::jai_int_type && !declared->is_byte_element()) ||
+		    (vi == script_value::TYPEID_FLOAT && declared->base_type == script_value_type::jai_float_type)) {
+			return script_value(plain);   // the identity row
+		}
+		return typed_store_convert(clone_for_assignment(plain), type_info_ptr{declared}, eng,
+		                           []() { return slot_site{slot_kind::assignment, {}, {}}; });
+	}
+
+	inline checked_result<void> ref_store_through_storage(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer);
+
 	// Identifier-assignment through a reference local: unconstrained refs keep today's
 	// exact clone-through-deref line; constrained element/field refs enforce like the
 	// subscript-assign paths do.
 	inline checked_result<void> ref_store_through(script_value& refLocal, script_value& value,
 	                                              engine* eng, string_symbolizer* symbolizer) {
+		if (type_info* declared = ref_declared_type(refLocal)) [[unlikely]] {
+			auto converted = ref_declared_convert(refLocal, declared, value, eng);
+			if (!converted) { return {}; }
+			if (!*converted) { return converted->error_value(); }
+			return ref_store_through_storage(refLocal, converted->value(), eng, symbolizer);
+		}
+		return ref_store_through_storage(refLocal, value, eng, symbolizer);
+	}
+
+	inline checked_result<void> ref_store_through_storage(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer) {
 		const auto* holder = refLocal.get_reference_holder();
 		if (holder && holder->plain_cell() && !holder->container_element_type) {
 			return variable_store(refLocal.deref(), value, eng);
@@ -721,6 +778,14 @@ namespace jai::detail {
 					return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 						"Unknown compound assignment operator");
 			}
+		}
+		if (type_info* declared = ref_declared_type(refLocal)) [[unlikely]] {
+			auto converted = ref_declared_convert(refLocal, declared, resultValue, eng);
+			if (!converted) { return resultValue; }
+			if (!*converted) { return converted->error_value(); }
+			auto stored = ref_store_through_storage(refLocal, converted->value(), eng, symbolizer);
+			if (!stored) { return stored.error_value(); }
+			return resultValue;
 		}
 		const auto* holder = refLocal.get_reference_holder();
 		type_info_ptr constraint = holder ? holder->container_element_type : nullptr;

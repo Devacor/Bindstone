@@ -332,6 +332,15 @@ engine stays usable", not by `check_throws`.
   right side first, under the rules of the storage it names (a variable's declared type, a typed element, a field, a
   static, a component; `detail::ref_target_assign`, vm `op_ref_target_store`), and the checker checks the stored value
   against `T`. A static (`C::s`, `ns::x`) binds its storage as a `cast<T&>` operand and as a `-> T&` return operand.
+  The reference's declared type governs a store through it (Dev ruling 2026-09-30): `var v = 1; cast<int&>(v) = 2.5` and
+  `int& r = v; r = 2.5` leave v int 2 (the declared `T&` twin, `engine::get_type_info_declared_reference`, stamped only where
+  the storage would not already apply T's table; var&/auto& keep the referent's rule).
+- **Every C++ lvalue is an assignment target** (`docs/diagnostics.md` "Assignment targets"): besides names, members,
+  elements and `cast<T&>`, a call returning `T&` (function, method, static, `operator[]`; a by-value result raises after
+  the call), a conditional of lvalues, `(a = b) = c` and `++x = v`. The parser rewrites a conditional's arms and an inner
+  assignment's target into implicit reference casts (`cast_expr::implicit_ref`, `assignment_expr::yields_reference`,
+  `.jaibite` version 30); both backends store through `detail::ref_target_assign`. A true non-lvalue raises a text naming
+  what was written (`Cannot assign to a call result: 'f' returns by value`), at load under strict.
 - **One conversion table for every typed slot** (`detail/typed_slot.hpp` +
   `class_definition.hpp` `convert_for_typed_slot_core`): declaration, `=`, by-value parameter,
   typed return and field store all run the assignment table (`docs/static_checking.md` rule

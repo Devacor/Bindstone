@@ -1329,6 +1329,8 @@ namespace jai::vm {
         op_status define_decl_value(frame& f, const variable_decl* decl, script_value value, bool box_cell = false) {
             return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), box_cell, decl);
         }
+        // `int& r = e`: the reference carries its declared type (detail::ref_declare)
+        op_status define_ref_decl(frame& f, const variable_decl* decl, script_value value);
 
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type,
                                                                 std::string_view var_name = {},
@@ -2126,6 +2128,7 @@ namespace jai::vm {
         op_status exec_ref_return_bind(frame& f, const vm_instruction& ins);
         op_status exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
         op_status exec_ref_target_store(frame& f, const vm_instruction& ins);
+        op_status non_lvalue_target(const expression* target);
         op_status exec_cast(frame& f, const vm_instruction& ins);
 
         vm_coroutine_state& coroutine_fiber_state(coroutine_handle& handle);

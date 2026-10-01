@@ -7,6 +7,7 @@
 // the parse-time passes classify without the runtime kernel's headers.
 
 #include <jaiscript/detail/ast.hpp>
+#include <string>
 
 namespace jai::detail {
 
@@ -57,6 +58,143 @@ namespace jai::detail {
 	// (see the element-share branch in resolve_ref_lvalue).
 	inline bool is_member_final_ref_lvalue(const expression* e) {
 		return e && e->get_type() == node_type::member_expr && is_ref_bindable_lvalue(e);
+	}
+
+	inline bool is_prefix_incdec(const expression* e) {
+		if (e->get_type() != node_type::unary_expr) { return false; }
+		const auto* u = static_cast<const unary_expr*>(e);
+		return !u->is_postfix && (u->op.type == token_type::plus_plus || u->op.type == token_type::minus_minus);
+	}
+
+	// What can name storage as an assignment target (C++ lvalues): a name, a member, an element, cast<T&>, a call (a T&
+	// result, decided when it runs), a conditional of lvalues, an assignment and a prefix ++/--
+	inline bool lvalue_capable(const expression* e) {
+		if (!e) { return false; }
+		switch (e->get_type()) {
+			case node_type::identifier_expr:
+			case node_type::member_expr:
+			case node_type::call_expr:
+				return true;
+			case node_type::binary_expr:
+				return static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
+			case node_type::cast_expr:
+				return static_cast<const cast_expr*>(e)->by_reference;
+			case node_type::ternary_expr: {
+				const auto* t = static_cast<const ternary_expr*>(e);
+				return lvalue_capable(t->then_expression.get()) && lvalue_capable(t->else_expression.get());
+			}
+			case node_type::assignment_expr: {
+				const auto* a = static_cast<const assignment_expr*>(e);
+				return !a->postfix_old_result && lvalue_capable(a->target.get());
+			}
+			default:
+				return is_prefix_incdec(e) && static_cast<const unary_expr*>(e)->operand->get_type() == node_type::identifier_expr;
+		}
+	}
+
+	// An assignment target that evaluates to the reference it stores through (after the parser's rewrite): cast<T&>(e), a
+	// call, a conditional whose arms are (implicit casts), an assignment that yields its destination
+	inline bool reference_target(const expression* t) {
+		switch (t->get_type()) {
+			case node_type::cast_expr:
+				return static_cast<const cast_expr*>(t)->by_reference;
+			case node_type::call_expr:
+				return true;
+			case node_type::ternary_expr: {
+				const auto* c = static_cast<const ternary_expr*>(t);
+				return reference_target(c->then_expression.get()) && reference_target(c->else_expression.get());
+			}
+			case node_type::assignment_expr:
+				return static_cast<const assignment_expr*>(t)->yields_reference;
+			default:
+				return false;
+		}
+	}
+
+	inline std::string target_spelling(const expression* e) {
+		if (!e) { return "..."; }
+		switch (e->get_type()) {
+			case node_type::identifier_expr: {
+				const auto* id = static_cast<const identifier_expr*>(e);
+				return (id->global_qualified ? "::" : "") + std::string(id->name);
+			}
+			case node_type::this_expr:
+				return "this";
+			case node_type::member_expr: {
+				const auto* m = static_cast<const member_expr*>(e);
+				return target_spelling(m->object.get()) + (m->is_static ? "::" : m->null_safe ? "?." : m->is_arrow ? "->" : ".") + std::string(m->member);
+			}
+			case node_type::binary_expr: {
+				const auto* b = static_cast<const binary_expr*>(e);
+				if (b->op.type != token_type::left_bracket) { return "..."; }
+				const node_type k = b->right->get_type();
+				return target_spelling(b->left.get()) + "[" + (k == node_type::identifier_expr || k == node_type::literal_expr ? target_spelling(b->right.get()) : "...") + "]";
+			}
+			case node_type::literal_expr: {
+				const script_value& v = static_cast<const literal_expr*>(e)->value;
+				return v.raw_storage_index() == script_value::TYPEID_INT ? std::to_string(v.unchecked_as_int()) : "...";
+			}
+			case node_type::call_expr:
+				return target_spelling(static_cast<const call_expr*>(e)->callee.get()) + "(...)";
+			default:
+				return "...";
+		}
+	}
+
+	// The text an assignment to an expression that names no storage raises (docs/diagnostics.md "Assignment targets"); the
+	// checker reports it at load with a lowercase first letter
+	inline std::string non_lvalue_target_text(const expression* t) {
+		switch (t->get_type()) {
+			case node_type::literal_expr:
+				return "Cannot assign to a literal";
+			case node_type::cast_expr: {
+				const auto* c = static_cast<const cast_expr*>(t);
+				if (c->implicit_ref) { return non_lvalue_target_text(c->operand.get()); }
+				const std::string type = c->target ? c->target->canonical_name() : std::string("T");
+				const std::string operand = target_spelling(c->operand.get());
+				std::string text = "Cannot assign to the result of cast<" + type + ">(" + operand + "): it is a temporary value";
+				const node_type k = c->operand->get_type();
+				if (operand.find("...") == std::string::npos && (k == node_type::identifier_expr || k == node_type::member_expr || k == node_type::binary_expr)) {
+					text += " (cast<" + type + "&>(" + operand + ") names the " + (k == node_type::identifier_expr ? "variable" : "storage") + ")";
+				}
+				return text;
+			}
+			case node_type::call_expr: {
+				const std::string callee = target_spelling(static_cast<const call_expr*>(t)->callee.get());
+				return "Cannot assign to a call result: '" + callee + "' returns by value";
+			}
+			case node_type::unary_expr: {
+				const auto* u = static_cast<const unary_expr*>(t);
+				if (u->is_postfix) { return "Cannot assign to " + target_spelling(u->operand.get()) + std::string(u->op.lexeme) + ": it yields the old value"; }
+				return "Cannot assign to the result of '" + std::string(u->op.lexeme) + "': it is a temporary value";
+			}
+			case node_type::assignment_expr: {
+				const auto* a = static_cast<const assignment_expr*>(t);
+				if (a->postfix_old_result) {
+					return "Cannot assign to " + target_spelling(a->target.get()) + (a->op.type == token_type::plus_equal ? "++" : "--") + ": it yields the old value";
+				}
+				return lvalue_capable(a->target.get()) ? "Cannot assign to this expression: it names no storage" : non_lvalue_target_text(a->target.get());
+			}
+			case node_type::binary_expr:
+				return "Cannot assign to the result of '" + std::string(static_cast<const binary_expr*>(t)->op.lexeme) + "': it is a temporary value";
+			case node_type::ternary_expr: {
+				const auto* c = static_cast<const ternary_expr*>(t);
+				const expression* arm = !lvalue_capable(c->then_expression.get()) ? c->then_expression.get() : c->else_expression.get();
+				return "Cannot assign to a conditional: its arm '" + target_spelling(arm) + "' names no storage";
+			}
+			case node_type::this_expr:
+				return "Cannot assign to 'this'";
+			case node_type::new_expr:
+				return "Cannot assign to a new object: it is a temporary value";
+			case node_type::lambda_expr:
+				return "Cannot assign to a lambda";
+			case node_type::array_literal_expr:
+				return "Cannot assign to an array literal";
+			case node_type::map_literal_expr:
+				return "Cannot assign to a map literal";
+			default:
+				return "Cannot assign to this expression: it names no storage";
+		}
 	}
 
 } // namespace jai::detail

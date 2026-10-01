@@ -55,7 +55,7 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 
 | Section | Claims | BEFORE pinned | BEFORE thin | BEFORE none | BEFORE contradicted | AFTER pinned | AFTER thin | AFTER none | AFTER contradicted |
 |---|---|---|---|---|---|---|---|---|---|
-| 1. CLAUDE.md language rules, integer_semantics.md, char_semantics.md (C-) | 366 | 325 | 24 | 16 | 1 | 350 | 13 | 2 | 1 |
+| 1. CLAUDE.md language rules, integer_semantics.md, char_semantics.md (C-) | 370 | 329 | 24 | 16 | 1 | 354 | 13 | 2 | 1 |
 | 2. diagnostics.md, static_checking.md, type_proofs_design.md (D-, S-, P-) | 530 | 375 | 49 | 101 | 5 | 423 | 38 | 64 | 5 |
 | 3. reference_model, namespaces, global_shadowing, EXCEPTION_DESIGN, closures, LOCAL_VARIABLES, script_extensible (R, N, G, E, L, V, X) | 315 | 246 | 20 | 47 | 2 | 289 | 10 | 15 | 1 |
 | 4. parallel_design, parallel_prove_or_serial, invariants, typed_regions_design, typed_array_design (PD-, PS-, I-, TR-, TA-) | 177 | 134 | 28 | 10 | 5 | 139 | 23 | 10 | 5 |
@@ -64,7 +64,7 @@ One row per claim a specification document makes. BEFORE counts only pins outsid
 | 7. Access control (AC-) | 14 | 3 | 2 | 7 | 2 | 13 | 1 | 0 | 0 |
 | 8. The rulings of 2026-09-27: captures of globals, assignment order, `auto`'s static type, call arguments; host exceptions (RL-) | 18 | 3 | 1 | 11 | 3 | 18 | 0 | 0 | 0 |
 | 9. The rulings of 2026-09-28 (RL2-) | 30 | 0 | 0 | 29 | 1 | 30 | 0 | 0 | 0 |
-| **Total** | **2602** | **1959** | **283** | **325** | **35** | **2205** | **224** | **145** | **28** |
+| **Total** | **2606** | **1963** | **283** | **325** | **35** | **2209** | **224** | **145** | **28** |
 
 ## Script the runtime calls
 
@@ -517,10 +517,14 @@ Source codes: CL = `Source/JaiScript/CLAUDE.md`, IS = `docs/integer_semantics.md
 | C-360 | break, continue and yield behave as in an array loop | CS Iterating | language/range_based_for_tests.cpp:break_and_continue_in_string_range_for; language/coroutine_tests.cpp:yield_inside_string_range_for | no | pinned |
 | C-361 | The loop never modifies the string | CS Iterating | language/range_based_for_tests.cpp:string_iteration_is_by_value | no | pinned |
 | C-362 | Literals, `const auto`, typed `char c` and nested reads (`m["k"]`) iterate | CS Iterating | language/range_based_for_tests.cpp:string_iteration_sources | no | pinned |
-| C-363 | `cast<T&>(e)` is an lvalue: `=`, `op=` and `++`/`--` store through it by the rules of the storage it names (a variable's declared type, a typed element, a field, a static, a map entry, a component), the right side first; postfix yields the old value, a consumed store the stored one | CL cast | semantics/strong_types_tests.cpp:cast_reference_is_an_assignment_target | no | pinned |
+| C-363 | `cast<T&>(e)` is an lvalue: `=`, `op=` and `++`/`--` store through it by its declared type and the rules of the storage it names (a variable's declared type, a typed element, a field, a static, a map entry, a component), the right side first; postfix yields the old value, a consumed store the stored one | CL cast | semantics/strong_types_tests.cpp:cast_reference_is_an_assignment_target | no | pinned |
 | C-364 | A store through `cast<T&>` checks against `T` at load (`cannot assign 'string' to a cast<int&> target declared 'int'`); at run time it raises the storage's own text | CL cast; sc Casts | semantics/strong_types_tests.cpp:cast_reference_is_an_assignment_target | no | pinned |
 | C-365 | A store through a reference runs the storage's rules: a compound into a typed variable converts back to its type, a class variable or field runs its `operator=` | CL One table | semantics/strong_types_tests.cpp:reference_stores_run_the_storage_rules; semantics/strong_types_tests.cpp:cast_reference_is_an_assignment_target | no | pinned |
 | C-366 | A static (`C::s`) or namespace variable (`ns::x`) binds its storage as a `cast<T&>` operand and as a `-> T&` return operand | CL cast | semantics/strong_types_tests.cpp:a_static_member_is_a_reference_return; semantics/strong_types_tests.cpp:cast_reference_is_an_assignment_target | no | pinned |
+| C-367 | A call returning `T&` (function, method, static method, `operator[]`) is an assignment target for `=`, `op=` and `++`/`--`; a by-value result raises after the call (`Cannot assign to a call result: 'f' returns by value`) | CL lvalues | semantics/strong_types_tests.cpp:a_reference_result_is_an_assignment_target; language/review_regression_tests.cpp:assignment_to_a_by_value_call_result_raises_after_the_call | no | pinned |
+| C-368 | A conditional whose arms are both lvalues, `(a = b) = c` and `++x = v` are assignment targets (the right side first, then the condition once) | CL lvalues | semantics/strong_types_tests.cpp:a_reference_result_is_an_assignment_target | no | pinned |
+| C-369 | A target that names no storage raises a text naming what was written, before anything runs; strict reports it at load, lowercased | CL lvalues; D Assignment targets | semantics/strong_types_tests.cpp:a_non_lvalue_target_names_what_was_written | no | pinned |
+| C-370 | The reference's declared type governs a store through it: `var v = 1; cast<int&>(v) = 2.5` and `int& r = v; r = 2.5` leave v int 2; `var&`/`auto&` keep the var | CL cast | semantics/strong_types_tests.cpp:a_reference_stores_by_its_declared_type | no | pinned |
 
 ## 2. diagnostics.md, static_checking.md, type_proofs_design.md
 

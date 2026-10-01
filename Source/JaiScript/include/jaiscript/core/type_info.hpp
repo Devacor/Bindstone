@@ -84,11 +84,17 @@ namespace jai {
         // interned as a twin via engine::get_type_info_array_dynamic. Excluded from equals().
         bool dynamic_slot = false;
 
+        // A reference whose DECLARED type is T (`int& r = v`, cast<int&>(v); Dev ruling 2026-09-30): the T& twin a store through
+        // it converts by T's table before the storage's own rules. Same name/id/element as the plain T&; interned via
+        // engine::get_type_info_declared_reference. Excluded from equals().
+        bool declared_reference = false;
+
         // Engine-interned "T&" twin cache (engine::get_type_info_reference fast path -
         // elides the intern-map lookup on every reference mint). Only meaningful on the
         // INTERNED instance; pre-intern copies carry a discarded value. Excluded from
         // equals(). Written only outside parallel regions (workers read prewarmed values).
         type_info* cached_reference_type = nullptr;
+        type_info* cached_declared_reference_type = nullptr;   // the declared_reference twin, the same way
 
         // Constructors
         type_info(script_value_type type) : base_type(type) {}

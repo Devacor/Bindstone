@@ -24,6 +24,8 @@
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
+#include <jaiscript/detail/lvalue_shape.hpp>
+#include <cctype>
 
 #include <algorithm>
 #include <optional>
@@ -2691,6 +2693,11 @@ private:
 				// store proof (tentative, like every reference); cast<shared_ptr<T>>(e): the handle
 				// spelling. The operand is the explicit typed boundary - never checked against T.
 				auto* c = static_cast<cast_expr*>(e);
+				if (c->implicit_ref) {   // a piece of an assignment target read as a reference: its operand's type
+					ctype operand_t = infer(c->operand.get());
+					operand_t.tentative = true;
+					return operand_t;
+				}
 				ctype operand_t = infer(c->operand.get());
 				ctype t = ctype_from_type_info(c->target.get());
 				if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_globals_.count(std::string(t.cls))) {
@@ -3295,18 +3302,47 @@ private:
 				return element.is_unknown() ? stored : element;
 			}
 		}
-		if (target->get_type() == node_type::cast_expr && static_cast<cast_expr*>(target)->by_reference) {
-			// cast<T&>(e) is an lvalue of T (its operand already is a T): the store checks against T
+		if (detail::reference_target(target)) {
+			// cast<T&>(e) (its operand already is a T), f() returning T&, a conditional of lvalues, an assignment: the store
+			// checks against the referent's type; a call the checker resolves to by-value overloads only names no storage
+			if (target->get_type() == node_type::call_expr && call_returns_by_value(static_cast<call_expr*>(target))) {
+				non_lvalue_target(a->location, target);
+				infer(target);
+				return rhs;
+			}
 			ctype t = infer(target);
 			if (t.is_unknown()) { return rhs; }
 			t.tentative = false;
 			const std::string name = ctype_name(t);
-			check_store(rhs, compound, base_op, t, name, "a cast<" + name + "&> target", a->location, 0, 0);
+			const bool spelled_cast = target->get_type() == node_type::cast_expr && !static_cast<cast_expr*>(target)->implicit_ref;
+			check_store(rhs, compound, base_op, t, name, spelled_cast ? "a cast<" + name + "&> target" : std::string("the reference"), a->location, 0, 0);
 			return t;
 		}
+		non_lvalue_target(a->location, target);
 		infer(target);
 		return rhs;
 	}
+
+    void non_lvalue_target(const source_location& loc, const expression* target) {
+        std::string text = detail::non_lvalue_target_text(target);
+        if (!text.empty()) { text[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0]))); }
+        diag(diag_level::error, loc, text);
+    }
+
+    // A call whose callee resolves to the program's free functions or a class's constructors, none returning a reference
+    bool call_returns_by_value(const call_expr* c) {
+        if (!c->callee || c->callee->get_type() != node_type::identifier_expr) { return false; }
+        auto* id = static_cast<const identifier_expr*>(c->callee.get());
+        if (id->global_qualified || find_local(id->name) || class_ctx_) { return false; }
+        if (auto it = functions_.find(id->name); it != functions_.end()) {
+            if (it->second.empty()) { return false; }
+            for (const auto* fn : it->second) {
+                if (fn->return_type && fn->return_type->is_reference()) { return false; }
+            }
+            return true;
+        }
+        return find_sclass(id->name) != nullptr;
+    }
 
     // Dev ruling 2026-07: compound assign on a typed target behaves like C++ —
     // `x op= rhs` is `x = T(x op rhs)` — so it checks exactly like plain assignment

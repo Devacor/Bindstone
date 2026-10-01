@@ -352,6 +352,34 @@ public:
             )");
         });
 
+        // stores through int& over typed storage (a parameter, a local): the declared-type check on the store path
+        benchmark("Reference Stores (int& over int, 200 iterations)", [this]() {
+            test_engine->execute(R"(
+                function bump(int& x) { x = x + 1; }
+                int n = 0;
+                for (int i = 0; i < 200; i++) { bump(n); int& r = n; r = r + 1; r += 2; }
+                n;
+            )");
+        });
+
+        // int& over a var: the declared type converts every store (Dev ruling 2026-09-30)
+        benchmark("Reference Stores (int& over var, 200 iterations)", [this]() {
+            test_engine->execute(R"(
+                var w = 0;
+                for (int i = 0; i < 200; i++) { int& q = w; q = q + 1; q += 2; }
+                w;
+            )");
+        });
+
+        benchmark("Increments (int and var locals, 200 iterations)", [this]() {
+            test_engine->execute(R"(
+                var v = 0;
+                int k = 0;
+                for (int i = 0; i < 200; i++) { v++; k++; ++v; --k; }
+                v + k;
+            )");
+        });
+
         benchmark("Variable Lookup Heavy", [this]() {
             test_engine->execute(R"(
                 auto a = 1;

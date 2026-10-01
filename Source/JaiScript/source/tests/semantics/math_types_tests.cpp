@@ -762,7 +762,11 @@ public:
             using adapter_hosts::point3;
             const std::pair<const char*, const char*> rows[] = {
                 {"loop", "s += k;"},
+                {"raw_fn_no_binder", "s += fraw(k);"},
+                {"binder_no_dispatch", "s += fbound(k);"},
                 {"scalar", "s += fs(k);"},
+                {"scalar_statement", "fs(k);"},
+                {"script_fn_scalar", "s += sfs(k);"},
                 {"generic_value", "s += sink(p);"},
                 {"vec_arg_decode", "s += fv(p);"},
                 {"vec_arg_built", "s += fv(math::vec3(k, 2, 3));"},
@@ -777,6 +781,12 @@ public:
                 e->add_function("fv", [](point3 p) { return static_cast<double>(p.x + p.y + p.z); });
                 e->add_function("vf", [](double k) { return point3(static_cast<float>(k), 2.0f, 3.0f); });
                 e->execute("function sfv(math::vec3 v) -> float { return v.x + v.y + v.z; }");
+                e->execute("function sfs(float k) -> float { return k + 1.0; }");
+                // a plain global script_function (no overload set, no binder) and the binder's function without the set's dispatcher
+                e->add_functionWithArity("fraw", [eng = e.get()](const std::vector<jai::script_value>& a) -> jai::checked_result<jai::script_value> {
+                    return jai::script_value(a[0].unchecked_as_float() + 1.0, eng);
+                }, 1);
+                e->add_functionWithArity("fbound", jai::make_functionBinder([](double k) { return k + 1.0; }, e.get()).bind(), 1);
                 double loop_ns = 0;
                 for (const auto& [name, body] : rows) {
                     const std::string src = std::string("function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); float s = 0.0; float k = 1.5; "

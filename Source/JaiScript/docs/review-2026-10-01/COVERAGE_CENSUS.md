@@ -169,6 +169,44 @@ What the census supports:
    none of these four is.
 5. **String and map lanes** show up only in JaiDOOM's sprite and lump tables and GLOOM's text assembly, a few percent of time.
 
+## The fuzzer's parts
+
+A bug that fires only inside a block is invisible to a fuzz part whose loops never close (the call-argument miss of `71ea148c`
+survived every part until the call-argument band). `jaiscript_fuzz --census` runs each generated program on the vm alone and reports,
+per segment label (each band, the main program, the reload; `--order-band` / `--order-args` for the ordering programs), the share
+of programs that compiled a closed loop, entered a block and entered a closed block, the refused loops by class and first offending
+instruction, and in a coverage build the operations in cells and the general form's reasons (`engine::vm_coverage_summary`, the
+report's totals as numbers). `--census --run FILE` (or `--seed N`) prints one program's facts. Any build reads the compiled loops
+from the listing sink and the entries from `engine::cells_counters`.
+
+Seeds 0..499, every band on, a coverage build **[measured]** ("mean share" is the per-program share of operations in cells;
+the pooled share is dominated by the few programs that run into the budget):
+
+| part | before: >=1 closed block | after: >=1 closed block | after: mean share in cells | top refusals after (share of programs with one) |
+|---|---:|---:|---:|---|
+| main program | 0.8% | 84.0% | 36.8% | head (INCDEC) 25%, translation (CFOR_POP) 15%, translation (JUMP_IF_FALSE) 14% |
+| reload segment | 0.0% | 90.2% | 39.7% | translation (INDEX_FUSED) 11%, translation (BINARY) 9% |
+| math band | 1.8% | 56.2% | 6.2% | representation (GET_MEMBER) 29%, translation (BINARY_FUSED) 25%, effect (ITER_NEXT) 24% |
+| element band | 37.8% | 37.8% | 2.0% | head (LOAD) 28%, effect (PROBE_CALLEE) 24%, translation (INDEX) 16% |
+| call-argument band | 84.0% | 84.0% | 28.9% | effect (PROBE_CALLEE) 16% |
+| order band | 31.6% | 31.6% | 3.6% | translation (INDEX_COMPOUND_FUSED) 13%, representation (COMPOUND_FUSED) 12% |
+| order band, argument hazards | 30.8% | 30.8% | 3.5% | as the order band |
+
+Before, the main program's and the reload's loops stood at program scope, which the translation never attempts (their general
+operations were all "loop not attempted"), and the math band's loops read vector elements and members. The block shapes
+(`--block-shapes`, by default their own roll, half the programs; `fuzz_block_band.hpp`) run the main program's and the reload's
+statements inside a function led by a closable counted loop and drop more among them (typed local and program-scope arrays at plain
+`[i]`, typed accumulators, branches, math intrinsics, nested counted loops, grafted and kept helper calls, an occasional size head,
+`while` head, `break` or `continue`), and give the math band a function whose math locals the vm lowers. With the shapes off the
+generator emits master's programs byte for byte. Among the lowered-math shapes, `ivec3 + ivec3` refuses as a math translation gap and
+`ivec.x - e % 5` as a binary one, where the `vec` forms close.
+
+The first campaign over the shapes (seeds 0..7999 and 10000..13999 with miss injection off, 7, 5, 3 and 1, `--no-passes` once)
+found one engine bug and nothing in the blocks: a member compound with a reference right side (`p.x += e[1]`, an element or map
+read) raised `Cannot apply '+=' to float and float` on both backends, where the vm's lowered function computed it; at program scope
+both backends were boxed and agreed on the wrong error, so no earlier campaign saw it (fixed in `c5fdd927`). The smoke suite pins
+each part's floor (`every_part_closes_blocks`).
+
 ## Reproducing
 
 Each report is in `coverage/` (`gatorquest.txt`, `ossuary.txt` with lines mapped to the scene files, `gloom.txt`,

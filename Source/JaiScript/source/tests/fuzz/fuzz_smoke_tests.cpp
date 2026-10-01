@@ -7,6 +7,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 
+#include "fuzz/fuzz_census.hpp"
 #include "fuzz/fuzz_generator.hpp"
 #include "fuzz/fuzz_harness.hpp"
 #include "fuzz/fuzz_jaibite.hpp"
@@ -22,13 +23,14 @@ public:
 	fuzz_smoke_tests() : suite("Differential Fuzz Smoke") {}
 
 	void run_seed_range(uint64_t k_first_seed, uint64_t k_seed_count, bool proofs = true, fuzz::band_mode band = fuzz::band_mode::never,
-	                    fuzz::band_mode math = fuzz::band_mode::never, int lowering = 0, fuzz::band_mode call_args = fuzz::band_mode::never) {
+	                    fuzz::band_mode math = fuzz::band_mode::never, int lowering = 0, fuzz::band_mode call_args = fuzz::band_mode::never,
+	                    fuzz::band_mode blocks = fuzz::band_mode::never) {
 			constexpr double k_budget_seconds = 0.1; // budget-skips cost 2x this; keeps the suite fast
 
 			int divergences = 0;
 			std::string first_report;
 			for (uint64_t seed = k_first_seed; seed < k_first_seed + k_seed_count; ++seed) {
-				fuzz::program p = fuzz::generate_program(seed, 3, band, math, call_args);
+				fuzz::program p = fuzz::generate_program(seed, 3, band, math, call_args, blocks);
 				fuzz::compare_result cr = fuzz::compare_program(p, k_budget_seconds, proofs, true, true, 0, lowering);
 				if (cr.kind != fuzz::compare_result::diverge) continue;
 				if (!fuzz::match_suppression(p, cr.diff).empty()) continue; // known, in-flight fix
@@ -49,7 +51,7 @@ public:
 						" diverged (repro: jaiscript_fuzz --seed " + std::to_string(seed) +
 						" --max-depth 3 --minimize" + (proofs ? "" : " --no-proofs") +
 						(band == fuzz::band_mode::always ? " --element-band" : "") + (math == fuzz::band_mode::always ? " --math-band" : "") +
-							(call_args == fuzz::band_mode::always ? " --call-args-band" : "") +
+							(call_args == fuzz::band_mode::always ? " --call-args-band" : "") + (blocks == fuzz::band_mode::always ? " --block-shapes" : "") +
 							(lowering == 1 ? " --no-lowering" : lowering == 2 ? " --lowered-interp" : "") + ")\n" + cr.diff;
 				}
 			}
@@ -127,6 +129,34 @@ public:
 			// in a counted loop (a block's copied read resolving another argument's array diverged in 239 of 500 band seeds)
 			run_seed_range(0, 40, true, fuzz::band_mode::never, fuzz::band_mode::never, 0, fuzz::band_mode::always);
 			run_seed_range(0, 20, false, fuzz::band_mode::never, fuzz::band_mode::never, 0, fuzz::band_mode::always);
+		});
+		test("block_shapes_seeds_no_new_divergence", [this]() {
+			// every program carries the block shapes: the main program's statements inside a function among closable counted loops,
+			// the math band with a lowered-math loop (repro: jaiscript_fuzz --seed <N> --max-depth 3 --block-shapes)
+			run_seed_range(0, 40, true, fuzz::band_mode::never, fuzz::band_mode::never, 0, fuzz::band_mode::never, fuzz::band_mode::always);
+			run_seed_range(500, 30, true, fuzz::band_mode::never, fuzz::band_mode::always, 0, fuzz::band_mode::never, fuzz::band_mode::always);
+		});
+		test("every_part_closes_blocks", [this]() {
+			// the share of each part's programs whose vm run entered a closed cell block (a compiled closed loop and a block entry;
+			// jaiscript_fuzz --census reports it per part): a part whose loops never close is blind to every bug that fires only
+			// inside a block (the call-argument miss of 71ea148c survived every band whose loops stayed open). Floors sit well under
+			// the measured shares (in brackets) so a generator or compiler change that opens a part's loops fails here
+			using fuzz::band_mode;
+			struct row { const char* label; band_mode element, math, call_args, blocks; double floor; };
+			const row rows[] = {
+				{"main", band_mode::never, band_mode::never, band_mode::never, band_mode::always, 50.0},   // [80%]
+				{"element", band_mode::always, band_mode::never, band_mode::never, band_mode::never, 20.0},   // [40%]
+				{"math", band_mode::never, band_mode::always, band_mode::never, band_mode::always, 35.0},      // [62.5%]
+				{"call-args", band_mode::never, band_mode::never, band_mode::always, band_mode::never, 50.0},   // [80%]
+			};
+			for (const row& r : rows) {
+				uint64_t segments = 0;
+				const double share = fuzz::census::closed_block_share(r.label, 0, 40, r.element, r.math, r.call_args, r.blocks, 0.1, &segments);
+				check_eq(uint64_t(40), segments, std::string(r.label) + ": one segment per program");
+				check_ge(share, r.floor, std::string(r.label) + " programs entering a closed block: " + std::to_string(share) + "%");
+			}
+			const double order = fuzz::census::order_closed_block_share(0, 40, false, 0.1);   // [30%]
+			check_ge(order, 15.0, "order band programs entering a closed block: " + std::to_string(order) + "%");
 		});
 		test("fixed_seeds_no_new_divergence_no_proofs", [this]() {
 			// interp-vs-vm parity must hold in both proof states (docs/static_checking.md "Proofs")

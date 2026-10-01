@@ -57,6 +57,7 @@ namespace jai::fuzz {
 	struct program {
 		uint64_t seed = 0;
 		std::vector<std::string> segments;
+		std::vector<std::string> labels;   // per segment: the band or generator part that wrote it (the census attributes by it)
 		bool stdlib_math = false;   // the engine registers the stdlib math functions (the bare aliases sqrt, abs, floor)
 
 		std::string joined() const {
@@ -201,6 +202,8 @@ namespace jai::fuzz {
 		bool passes = true;                       // engine::ir_passes (the middle end's differential gate flips it)
 		int lowering = -1;                        // engine::aggregate_lowering: -1 the backend's default (interpreter boxed, vm lowered), else forced
 		uint32_t miss_every = 0;                  // engine::cells_miss_every (the miss injection gate; a build with the lever)
+		std::function<void(jai::engine&)> on_engine;                   // after the setup, before the first segment (the census)
+		std::function<void(size_t, jai::engine&)> after_segment;       // after each segment's execute (the census)
 	};
 
 	inline bool contains_ci(const std::string& hay, const std::string& needle) {
@@ -224,6 +227,7 @@ namespace jai::fuzz {
 		eng->execution_budget(cfg.budget_seconds);
 		eng->memory_cap(cfg.memory_cap_bytes);
 		if (p.stdlib_math) { stdlib::register_math_functions(*eng); }
+		if (cfg.on_engine) cfg.on_engine(*eng);
 
 		auto printed = std::make_shared<std::string>();
 		const size_t cap = cfg.print_cap;
@@ -264,6 +268,7 @@ namespace jai::fuzz {
 			double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - seg_start).count();
 			if (cfg.budget_seconds > 0 && elapsed >= cfg.budget_seconds * 0.9) out.budget_hit = true;
 			out.segment_results.push_back(std::move(r));
+			if (cfg.after_segment) cfg.after_segment(out.segment_results.size() - 1, *eng);
 		}
 		try {
 			out.alive = (eng->execute("1 + 1").as_int() == 2);
@@ -461,6 +466,7 @@ namespace jai::fuzz {
 			for (size_t i = 0; i < p.segments.size() && p.segments.size() > 1; ++i) {
 				program cand = p;
 				cand.segments.erase(cand.segments.begin() + i);
+				if (i < cand.labels.size()) cand.labels.erase(cand.labels.begin() + i);
 				if (check(cand)) { p = cand; ++stats.reductions; changed = true; break; }
 			}
 		}

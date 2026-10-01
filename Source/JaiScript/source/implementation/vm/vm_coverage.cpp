@@ -4,6 +4,7 @@
 
 #include <jaiscript/vm/vm_backend.hpp>
 #include <jaiscript/vm/coverage.hpp>
+#include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>
@@ -693,17 +694,68 @@ namespace {
 	const char* refused_name(int k) {
 		switch (k) { case 0: return "debugger or numeric operator"; case 1: return "no cell area (fiber or native frame)"; case 2: return "refusal valve"; default: return "entry guard or container site"; }
 	}
+	// why the general instruction at ip ran there: its site's reason and detail, a closed loop's by its run-time entries
+	void general_reason(const coverage_chunk& r, size_t ip, std::string& reason, std::string& detail, uint32_t& site_line, uint16_t& site_file) {
+		reason = "?";
+		detail.clear();
+		site_line = r.line[ip];
+		site_file = r.file[ip];
+		if (r.site[ip] < r.sites.size()) { const auto& s = r.sites[r.site[ip]]; reason = s.reason; detail = s.detail; site_line = s.line; site_file = s.file; }
+		if (r.region[ip] != coverage_region::closed || r.region_index[ip] >= r.loops.size()) return;
+		const auto& lr = r.loops[r.region_index[ip]];
+		uint64_t refused = 0; int top_k = 3;
+		for (int k = 0; k < 4; ++k) { refused += lr.refused[k]; if (lr.refused[k] > lr.refused[top_k]) top_k = k; }
+		if (refused > lr.entries) reason = std::string("closed loop: block entry refused at run time (") + refused_name(top_k) + ")";
+		else if (lr.misses * 2 > lr.entries && lr.misses > 0) reason = "closed loop: misses back to the general form";
+		else reason = "closed loop: iterations before the block entry";
+	}
+	std::vector<const coverage_chunk*> all_rows(const std::vector<std::shared_ptr<coverage_tables>>& tables, uint64_t& cell_dispatches) {
+		std::vector<const coverage_chunk*> rows;
+		cell_dispatches = 0;
+		for (const auto& t : tables) {
+			if (!t) continue;
+			cell_dispatches += t->cell_dispatches;
+			for (const auto& [k, r] : t->chunks) rows.push_back(&r);
+			for (const auto& r : t->retired) rows.push_back(&r);
+		}
+		return rows;
+	}
+}
+
+void coverage_summary(const std::vector<std::shared_ptr<coverage_tables>>& tables, vm_coverage_totals& out) {
+	out = vm_coverage_totals{};
+	uint64_t cell_dispatches = 0;
+	std::map<std::string, uint64_t> reasons;
+	std::string reason, detail;
+	uint32_t line = 0;
+	uint16_t file = 0;
+	for (const coverage_chunk* rp : all_rows(tables, cell_dispatches)) {
+		const coverage_chunk& r = *rp;
+		for (size_t ip = 0; ip < r.general.size(); ++ip) {
+			const opcode op = static_cast<opcode>(r.op[ip]);
+			if (const uint64_t n = r.cells[ip]) {
+				out.cells += n;
+				const coverage_region k = r.region[ip];
+				(k == coverage_region::frame_program ? out.cells_frame : k == coverage_region::straight ? out.cells_straight : out.cells_closed) += n;
+			}
+			const uint64_t n = r.general[ip];
+			if (!n) continue;
+			const fam f = family_of(op);
+			if (f == fam::block || f >= fam::cell_arith) { out.block_entry += n; continue; }
+			(typed_op(op) ? out.typed : out.untyped) += n;
+			general_reason(r, ip, reason, detail, line, file);
+			reasons[reason] += n;
+		}
+		for (const auto& lr : r.loops) { if (!lr.straight && !lr.frame_program && lr.entries) ++out.closed_entered; }
+	}
+	out.operations = out.cells + out.block_entry + out.typed + out.untyped;
+	for (const auto& [k, n] : reasons) out.reasons.emplace_back(k, n);
+	std::stable_sort(out.reasons.begin(), out.reasons.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
 }
 
 std::string coverage_report(const std::vector<std::shared_ptr<coverage_tables>>& tables, size_t top) {
-	std::vector<const coverage_chunk*> rows;
 	uint64_t cell_dispatches = 0;
-	for (const auto& t : tables) {
-		if (!t) continue;
-		cell_dispatches += t->cell_dispatches;
-		for (const auto& [k, r] : t->chunks) rows.push_back(&r);
-		for (const auto& r : t->retired) rows.push_back(&r);
-	}
+	const std::vector<const coverage_chunk*> rows = all_rows(tables, cell_dispatches);
 	uint64_t cells_ops = 0, block_entry = 0, typed = 0, untyped = 0;
 	uint64_t cell_fams[static_cast<size_t>(fam::count)] = {};
 	uint64_t cell_kinds[8] = {};   // by block kind: closed loop, straight region, frame program
@@ -742,22 +794,13 @@ std::string coverage_report(const std::vector<std::shared_ptr<coverage_tables>>&
 			const bool t = typed_op(op);
 			(t ? typed : untyped) += n;
 			(t ? gen_fams_typed : gen_fams_untyped)[static_cast<size_t>(f)] += n;
-			std::string reason = "?", detail;
-			uint32_t site_line = r.line[ip];
-			uint16_t site_file = r.file[ip];
-			if (r.site[ip] < r.sites.size()) { const auto& s = r.sites[r.site[ip]]; reason = s.reason; detail = s.detail; site_line = s.line; site_file = s.file; }
+			std::string reason, detail;
+			uint32_t site_line = 0;
+			uint16_t site_file = 0;
+			general_reason(r, ip, reason, detail, site_line, site_file);
 			const coverage_region rg = r.region[ip];
-			if ((rg == coverage_region::closed || rg == coverage_region::boundary || rg == coverage_region::straight || rg == coverage_region::frame_program) && r.region_index[ip] < r.loops.size()) {
+			if ((rg == coverage_region::closed || rg == coverage_region::boundary || rg == coverage_region::straight || rg == coverage_region::frame_program) && r.region_index[ip] < r.loops.size())
 				loop_general[r.region_index[ip]] += n;
-				if (rg == coverage_region::closed) {
-					const auto& lr = r.loops[r.region_index[ip]];
-					uint64_t refused = 0; int top_k = 3;
-					for (int k = 0; k < 4; ++k) { refused += lr.refused[k]; if (lr.refused[k] > lr.refused[top_k]) top_k = k; }
-					if (refused > lr.entries) reason = std::string("closed loop: block entry refused at run time (") + refused_name(top_k) + ")";
-					else if (lr.misses * 2 > lr.entries && lr.misses > 0) reason = "closed loop: misses back to the general form";
-					else reason = "closed loop: iterations before the block entry";
-				}
-			}
 			if (op == opcode::op_call_from_scratch || op == opcode::op_call_typed || op == opcode::op_call || op == opcode::op_call_method) {
 				general_call_count += n;
 				std::string d = instruction_detail_row(r, ip);

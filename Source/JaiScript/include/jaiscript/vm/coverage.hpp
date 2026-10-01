@@ -24,6 +24,7 @@
 namespace jai {
     class class_definition;
     class string_symbolizer;
+    struct vm_coverage_totals;
 }
 
 namespace jai::vm {
@@ -84,6 +85,8 @@ namespace jai::vm {
     // operations, the top source sites per reason, the receivers of member operations, the operand kinds of untyped
     // arithmetic and the closed loops' entries; top = the rows per ranked table
     std::string coverage_report(const std::vector<std::shared_ptr<coverage_tables>>& tables, size_t top);
+    // the report's class totals and reasons as numbers (engine::vm_coverage_summary)
+    void coverage_summary(const std::vector<std::shared_ptr<coverage_tables>>& tables, vm_coverage_totals& out);
 
 } // namespace jai::vm
 

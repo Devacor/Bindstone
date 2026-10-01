@@ -21010,7 +21010,6 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					frame_slot_set(callee, param.slot_index, script_value(arg));
 				} else if (detail::is_string_reference_temporary(param, arg) ||
 					detail::ref_parameter_takes_temporary(*engine_, parameters, callee_body ? callee_body : (alias_fn && alias_fn->name != "<lambda>" ? alias_fn->body.get() : nullptr), i, !parallel_worker_)) {
-					// string& accepts writable temporaries; other types keep the inferred read-only rule.
 					frame_slot_set(callee, param.slot_index, detail::make_reference_argument_temporary(param, arg, engine_));
 				} else {
 					return raise_(

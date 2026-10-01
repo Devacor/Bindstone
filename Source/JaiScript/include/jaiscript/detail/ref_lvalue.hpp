@@ -22,16 +22,15 @@
 
 namespace jai::detail {
 
-	// String temporaries are writable private cells; lvalue arguments bind their storage first.
-	inline bool is_string_reference_temporary(const parameter& a_parameter, const script_value& a_value) {
-		return a_parameter.is_reference && a_parameter.type &&
-			a_parameter.type->base_type == script_value_type::jai_string_type && a_value.is_string();
+	// a string& takes any string temporary, written or not, as a private cell (an lvalue argument binds before this)
+	inline bool is_string_reference_temporary(const parameter& param, const script_value& value) {
+		return param.is_reference && param.type && param.type->base_type == script_value_type::jai_string_type && value.is_string();
 	}
 
-	inline script_value make_reference_argument_temporary(const parameter& a_parameter, const script_value& a_value, engine* a_engine) {
-		// string& shares copy-on-write storage or detaches native memory; other parameter types keep their existing view.
-		script_value result = is_string_reference_temporary(a_parameter, a_value) ? clone_for_assignment(a_value) : script_value(a_value.deref());
-		return script_value::make_cell_reference(std::move(result), a_engine);
+	// a string temporary shares its copy-on-write node, a C++-bound one detaches from native storage
+	inline script_value make_reference_argument_temporary(const parameter& param, const script_value& value, engine* eng) {
+		return script_value::make_cell_reference(
+			is_string_reference_temporary(param, value) ? clone_for_assignment(value) : script_value(value.deref()), eng);
 	}
 
 	// Structural classifier for ref-bindable lvalue arguments: chains of plain member

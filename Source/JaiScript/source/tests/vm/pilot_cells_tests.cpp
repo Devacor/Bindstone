@@ -4169,6 +4169,112 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- call kept sq") == std::string::npos, "sq grafts in the push arguments: " + l);
 			check_true(l.find("-- inlined cheb") != std::string::npos, "cheb grafts after the name n: " + l);
 		});
+		test("by_value_parameters_of_any_type_graft_with_the_calls_copy", [this]() {
+			// Gator Quest's item_stat(worn[i], code): a by-value parameter of a class, an array or a string grafts; the argument lands in a temp
+			// in the call's order and the parameter's declaration binds it after every argument by the parameter's table and text, so a body
+			// writing its copy leaves the caller's value alone, a subclass element or a var argument binds as the call binds it, a mismatch
+			// raises the call's text and a nocopy instance raises where the call raises it
+			const std::string prelude =
+				"class Item { int base = -1; int pmag = 0; array<int> tags = [1, 2]; }\n"
+				"class Sword : Item { int edge = 2; }\n"
+				"array<Item> WORN;\n"
+				"int item_stat(Item it, int code) { if (it.base < 0) { return 0; } int v = it.pmag * code; it.pmag = 99; it.tags[0] = code; return v + it.tags[0]; }\n"
+				"int bonus(int code) { int v = 0; array<Item>& worn = WORN; for (int i = 0; i < worn.size(); ++i) { switch (i) { case 9: v = v - 1; } if (worn[i].base >= 0) { v = v + item_stat(worn[i], code); } } return v; }\n"
+				"int one() { var vi = WORN[1]; return item_stat(WORN[1], 5) + item_stat(WORN[2], 1) + item_stat(vi, 1); }\n"
+				"int bad() { var x = 5; return item_stat(x, 1); }\n"
+				"int asum(array<int> a, int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + a[i]; } a[0] = 100; return s + a[0]; }\n"
+				"array<int> NUMS = [4, 5, 6];\n"
+				"int same(string s, string t, int k) { if (s == t) { return k; } return -k; }\n"
+				"string NAME = \"gator\";\n"
+				"int run_all() { int a = asum(NUMS, 3); int b = same(NAME, \"gator\", 3) + same(NAME, \"croc\", 1); return a * 100 + b; }\n"
+				"for (int k = 0; k < 3; ++k) { Item t; t.base = k - 1; t.pmag = k * 3; WORN.push(t); }\n"
+				"Sword sw; sw.base = 2; sw.pmag = 1; WORN.push(sw);\n"
+				"var bad_text = \"\"; try { bad(); } catch (e) { bad_text = e; }\n";
+			const std::string run = "bad_text + \"|\" + to_string(bonus(2)) + \"|\" + to_string(bonus(2)) + \"|\" + to_string(one()) + \"|\" + to_string(run_all()) + \"|\" + to_string(WORN[1].pmag) + to_string(WORN[1].tags[0]) + to_string(NUMS[0]);";
+			both(prelude + run, "Cannot convert int to Item (no suitable single-argument constructor)|26|26|31|11502|314", "by-value class, array and string parameters");
+			both(prelude + run, "Cannot convert int to Item (no suitable single-argument constructor)|26|26|31|11502|314", "by-value class, array and string parameters, proofs off", false);
+			const std::string l = listing_run(prelude + "bonus(2); one(); run_all(); bad_text;");
+			check_true(l.find("-- inlined item_stat") != std::string::npos, "item_stat grafts: " + l);
+			check_true(l.find("-- call kept item_stat") == std::string::npos, "no kept call for item_stat: " + l);
+			check_true(l.find("-- inlined asum") != std::string::npos, "asum grafts: " + l);
+			check_true(l.find("-- inlined same") != std::string::npos, "same grafts: " + l);
+			// a nocopy argument raises the call's text after every argument ran
+			const std::string nc =
+				"nocopy class Ledger { int total = 1; }\n"
+				"int seen = 0;\n"
+				"int mark(int v) { seen = seen + v; return v; }\n"
+				"int peek(Ledger l, int k) { return l.total + k; }\n"
+				"Ledger LED;\n"
+				"int probe() { return peek(LED, mark(5)); }\n"
+				"var r = \"\"; try { r = to_string(probe()); } catch (e) { r = e; } r + \"|\" + to_string(seen);";
+			auto ie = engine::make(); auto ve = engine::make(); ve->set_backend(backend_type::vm);
+			stdlib::register_all(*ie); stdlib::register_all(*ve);
+			std::string iv, vv;
+			try { iv = ie->execute(nc).as_string(); } catch (const std::exception& ex) { iv = std::string("throw:") + ex.what(); }
+			try { vv = ve->execute(nc).as_string(); } catch (const std::exception& ex) { vv = std::string("throw:") + ex.what(); }
+			check_eq(iv, vv, "a nocopy argument: both backends");
+			check_true(vv.find("nocopy class 'Ledger'") != std::string::npos && vv.substr(vv.size() - 2) == "|5", "the call's text after the later argument ran: " + vv);
+		});
+		test("a_by_value_parameter_proof_over_a_global_of_any_type_holds_across_its_units_rerun", [this]() {
+			// a typed global of a class or a string another unit declares proves its argument; the graft re-checks the global's declared type
+			// by identity once a run moved the definition epoch, so after the declaring unit runs again with another type the call is the call
+			namespace fs = std::filesystem;
+			fs::path dir = fs::temp_directory_path() / "jai_any_type_global_proof";
+			fs::create_directories(dir);
+			const std::string data = "class Box { int v = 7; }\nBox BX;\nstring TAG = \"abc\";\n";
+			std::ofstream(dir / "data.jai") << data;
+			std::ofstream(dir / "lib.jai") << "import \"data.jai\";\nint boxv(Box b, int k) { return b.v + k; }\nint tagis(string s) { if (s == \"abc\") { return 1; } return 0; }\n"
+			                                 "int probe() { return boxv(BX, 1) * 10 + tagis(TAG); }\n";
+			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
+			auto run_file = [&](bool vm, std::string* listing) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				e->import_recheck_interval(0);
+				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
+				e->add_include_path(dir.string());
+				std::string out;
+				try { out = e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+				std::ofstream(dir / "data.jai") << "class Box { int v = 7; }\nint BX = 3;\nint TAG = 5;\n";
+				try {
+					out += "|" + e->execute("import \"data.jai\";\nvar r = \"\";\ntry { r = to_string(probe()); } catch (e) { r = e; }\nr;").as_string();
+				} catch (const std::exception& ex) { out += std::string("|throw:") + ex.what(); }
+				std::ofstream(dir / "data.jai") << data;
+				return out;
+			};
+			std::string l;
+			const std::string iv = run_file(false, nullptr), vv = run_file(true, &l);
+			check_eq(iv, vv, "a class and a string global as by-value arguments: both backends, before and after the declaring unit changed their types");
+			check_eq(std::string("81|"), vv.substr(0, 3), "the value before the reload: " + vv);
+			check_true(l.find("-- inlined boxv") != std::string::npos, "boxv grafts with BX: " + l);
+			check_true(l.find("-- inlined tagis") != std::string::npos, "tagis grafts with TAG: " + l);
+		});
+		test("reading_builtins_and_member_sizes_graft_in_a_body", [this]() {
+			// JaiDOOM's lump_num (`LUMP_INDEX.has(name)` then the map's element) and Gator Quest's item_stat (`d.aff_code.size()` over a class
+			// copied from a global's element): a reading builtin of a string, an array or a map the checker proved, on a name or a member chain,
+			// with arguments that cannot be callables, writes nothing and runs no user code, so the body grafts; a writing builtin keeps the call
+			const std::string prelude =
+				"map<string, int> IDX = {\"STBAR\": 3, \"PLAYA\": 7};\n"
+				"int lump_num(string name) { if (IDX.has(name)) { return IDX[name]; } return -1; }\n"
+				"class Def { array<int> codes = [1, 4, 1]; array<int> vals = [2, 5, 7]; }\n"
+				"array<Def> DEFS;\n"
+				"class It { int base = 0; int pmag = 1; }\n"
+				"int stat(It it, int code) { if (it.base < 0) { return 0; } int v = 0; Def d = DEFS[it.base]; for (int k = 0; k < d.codes.size(); ++k) { if (d.codes[k] == code) { v = v + d.vals[k]; } } d.vals[0] = 99; return v + it.pmag; }\n"
+				"int tail_of(string s) { if (s.starts_with(\"PL\")) { string t = s.substr(2); return t.size(); } return s.find(\"B\"); }\n"
+				"array<int> LOG;\n"
+				"int logs(int v) { LOG.push(v); return LOG.size(); }\n"
+				"int run() { array<It> worn; for (int i = 0; i < 2; ++i) { It t; t.base = i - 1; t.pmag = 3; worn.push(t); }\n"
+				"  int s = lump_num(\"STBAR\") * 1000 + lump_num(\"NOPE\") * 100;\n"
+				"  for (int i = 0; i < worn.size(); ++i) { switch (i) { case 9: s = s - 1; } s = s + stat(worn[i], 1); }\n"
+				"  return s + tail_of(\"PLAYA\") * 10000 + tail_of(\"STBAR\") * 100000 + logs(4) * 1000000; }\n"
+				"Def dd; DEFS.push(dd);\n";
+			const std::string run = "to_string(run()) + \"|\" + to_string(DEFS[0].vals[0]) + \"|\" + to_string(LOG.size());";
+			both(prelude + run, "1232912|2|1", "reading builtins and member sizes in a body");
+			both(prelude + run, "1232912|2|1", "reading builtins and member sizes in a body, proofs off", false);
+			const std::string l = listing_run(prelude + "run();");
+			check_true(l.find("-- inlined lump_num") != std::string::npos, "lump_num grafts with its map reads: " + l);
+			check_true(l.find("-- inlined stat") != std::string::npos, "stat grafts with its member size: " + l);
+			check_true(l.find("-- inlined tail_of") != std::string::npos, "tail_of grafts with its string reads: " + l);
+			check_true(l.find("-- call kept logs") != std::string::npos, "logs (a push) stays a call: " + l);
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

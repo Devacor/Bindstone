@@ -10983,6 +10983,34 @@ op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// a graft's by-value parameter (vm_inline.cpp) binds as the call binds it: the exact class copies, anything else converts by the
+// parameter's table and text, a handle shares, a value copies, and the slot keeps the bound value's own tag
+// (KEEP BYTE-PARALLEL with bind_parameters's by-value lane)
+op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) {
+	script_value arg = std::move(stack_.back());
+	stack_.pop_back();
+	const type_info_ptr& t = decl->type;
+	{
+		const script_value& derefed = arg.deref();
+		if (t && t->base_type == script_value_type::jai_object_type && derefed.storage_type() == script_value_type::jai_object_type &&
+		    derefed.get_type_info().get() == t.get() && !t->type_name.empty()) {
+			return define_decl_value(f, decl, derefed.clone());
+		}
+	}
+	auto converted_result = try_convert_for_parameter(arg, t, decl_site(decl));
+	if (!converted_result) {
+		return raise_from(converted_result);
+	}
+	script_value converted = std::move(converted_result.value());
+	const script_value& shared_probe = converted.deref();
+	const bool should_share = (t && t->base_type == script_value_type::jai_shared_ptr_type) ||
+	                          (shared_probe.get_type_info() && shared_probe.get_type_info()->base_type == script_value_type::jai_shared_ptr_type);
+	if (should_share) {
+		return define_decl_value(f, decl, script_value(shared_probe));
+	}
+	return define_decl_value(f, decl, converted.clone());
+}
+
 op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_d0 = __rdtsc();
@@ -11054,6 +11082,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	else { ++profile_decl_paths_[1]; }
 #endif
+	if (decl->site_kind == variable_decl::site_parameter && has_init) [[unlikely]] { return bind_graft_parameter(f, decl); }
 
 	const bool is_weak_ptr = decl->type && decl->type->base_type == script_value_type::jai_weak_ptr_type;
 	const bool is_shared_ptr = decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type;
@@ -11515,17 +11544,26 @@ bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_s
 bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
 	const uint64_t epoch = engine_->definition_epoch();
 	if (site.globals_epoch == epoch) return true;
-	for (const auto& [sym, kind] : site.proof_globals) {
+	for (const proof_global& g : site.proof_globals) {
+		const uint64_t sym = g.symbol;
+		const uint16_t kind = g.kind;
 		const script_value* v = environment_ ? environment_->get_value_ptr(sym) : nullptr;
 		if (!v) return false;
 		if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
 		const auto base = static_cast<script_value_type>(kind & 0xFF);
-		if (kind & call_expr::k_proof_function) {   // a call's result: the name binds a script function declared to return that scalar
+		if (kind & proof_global::k_function) {   // a call's result: the name binds a script function declared to return that type
 			if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
 			const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
 			if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) return false;
 			const type_info* rt = thunk->payload.fn->return_type.get();
-			if (!rt || rt->is_reference() || rt->base_type != base) return false;
+			if (!rt || rt->is_reference()) return false;
+			if (kind & proof_global::k_type) { if (rt != g.type && !(g.type && rt->equals(*g.type))) return false; }
+			else if (rt->base_type != base) return false;
+			continue;
+		}
+		if (kind & proof_global::k_type) {   // any other declared type: the cell keeps the declaration's type, compared by identity
+			const type_info* vt = v->type_info_raw();
+			if (!vt || !g.type || (vt != g.type && !vt->equals(*g.type))) return false;
 			continue;
 		}
 		if (base == script_value_type::jai_array_type) {

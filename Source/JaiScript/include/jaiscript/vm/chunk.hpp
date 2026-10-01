@@ -578,7 +578,7 @@ namespace jai::vm {
             mutable uint64_t holds_epoch = 0;
             // the program-scope names the call's argument proofs read (call_expr::proof_globals: symbol id, kind): the guard holds only
             // while each still holds its kind, re-checked when a run moved engine::definition_epoch past globals_epoch
-            std::vector<std::pair<uint64_t, uint16_t>> proof_globals;
+            std::vector<proof_global> proof_globals;
             mutable uint64_t globals_epoch = 0;
         };
         std::vector<inline_site> inline_sites;

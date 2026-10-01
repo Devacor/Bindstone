@@ -1451,8 +1451,6 @@ private:
         return op == token_type::equal && p && p->declared && same_type(ctype_from_type_info(p->declared), rhs);
     }
 
-    // C1: one statically resolved same-script callee, exact arity, no defaults in play, no
-    // reference params. Per-argument same_type (an untyped/var parameter binds as identity).
     // a scalar (int, float, bool) as its base type, an array of scalars as jai_array_type | the element's base type << 8, else 0
     static uint16_t certain_kind(const type_info* t) {
         if (!t || t->is_reference()) return 0;
@@ -1463,10 +1461,25 @@ private:
         if (!el || el->is_reference() || !scalar(el->base_type)) return 0;
         return static_cast<uint16_t>(static_cast<uint16_t>(script_value_type::jai_array_type) | (static_cast<uint16_t>(el->base_type) << 8));
     }
+    // a declared type a proof may rest on: spelled, not a reference, not var, auto or a function
+    static bool certain_type(const type_info* t) {
+        if (!t || t->is_reference()) return false;
+        switch (t->base_type) {
+        case script_value_type::jai_any_type: case script_value_type::jai_function_type: case script_value_type::jai_null_type: return false;
+        default: return t->type_name != "auto";
+        }
+    }
+    static proof_global proof_of(uint64_t symbol, const type_info* t) {
+        proof_global g; g.symbol = symbol;
+        const uint16_t k = certain_kind(t);
+        if (k != 0) { g.kind = k; } else { g.kind = proof_global::k_type; g.type = t; }
+        return g;
+    }
     // a program-scope name whose declared type changes only when its declaring unit runs again: this unit's own typed top-level
-    // declaration, or the one spelled declaration another unit of the program makes, a scalar or an array of scalars; a name a field
-    // could shadow (inside a class) or a runtime include could declare stays uncertain. The name and the kind join deps
-    bool certain_global(const identifier_expr* id, std::vector<std::pair<uint64_t, uint16_t>>& deps) {
+    // declaration, or the one spelled declaration another unit of the program makes, of any type a proof may rest on; a name a field
+    // could shadow (inside a class) or a runtime include could declare stays uncertain. The name and its proof join deps; declared
+    // receives the declared type
+    bool certain_global(const identifier_expr* id, std::vector<proof_global>& deps, const type_info** declared = nullptr) {
         if (has_dynamic_includes_ || class_ctx_ || id->symbol_id == UINT64_MAX) return false;
         size_t scope = SIZE_MAX;
         const type_info* t = nullptr;
@@ -1479,15 +1492,15 @@ private:
             if (!g) return false;
             t = g->type.get();
         }
-        const uint16_t kind = certain_kind(t);
-        if (kind == 0) return false;
-        deps.emplace_back(id->symbol_id, kind);
+        if (!certain_type(t)) return false;
+        deps.push_back(proof_of(id->symbol_id, t));
+        if (declared) { *declared = t; }
         return true;
     }
     // an argument whose static type an include cannot change: a literal, a local or a parameter (a frame slot), a certain program-scope
     // name (certain_global; its kind recorded in deps), an element of a local or certain array, and arithmetic, a unary, a ternary, a cast
     // or a math intrinsic over those
-    bool certain_argument(const expression* e, std::vector<std::pair<uint64_t, uint16_t>>& deps) {
+    bool certain_argument(const expression* e, std::vector<proof_global>& deps) {
         if (!e) return false;
         switch (e->get_type()) {
         case node_type::literal_expr: return true;
@@ -1500,13 +1513,15 @@ private:
             if (b->op.type == token_type::left_bracket) {
                 if (!b->left || b->left->get_type() != node_type::identifier_expr) return false;
                 auto* base = static_cast<const identifier_expr*>(b->left.get());
+                const type_info* declared = nullptr;
                 if (base->slot_index == SIZE_MAX) {
-                    if (!certain_global(base, deps)) return false;
-                    if ((deps.back().second & 0xFF) != static_cast<uint16_t>(script_value_type::jai_array_type)) return false;
+                    if (!certain_global(base, deps, &declared)) return false;
                 } else {
-                    const var_entry* v = find_named(base);   // a local declared an array of scalars by value: a reference's declared type no bind checks
-                    if (!v || v->dynamic || v->is_reference || certain_kind(v->declared) == 0) return false;
+                    const var_entry* v = find_named(base);   // a local declared an array by value: a reference's declared type no bind checks
+                    if (!v || v->dynamic || v->is_reference || !certain_type(v->declared)) return false;
+                    declared = v->declared;
                 }
+                if (declared->base_type != script_value_type::jai_array_type) return false;
                 return certain_argument(b->right.get(), deps);
             }
             return certain_argument(b->left.get(), deps) && certain_argument(b->right.get(), deps);
@@ -1517,15 +1532,17 @@ private:
         case node_type::call_expr: {
             auto* ce = static_cast<const call_expr*>(e);
             if (ce->callee && ce->callee->get_type() == node_type::identifier_expr) {
-                // a free script function declared to return a scalar: its result converts to that type whatever the arguments; the name and
-                // the kind join deps (call_expr::k_proof_function), since a redefinition may declare another return type
+                // a free script function with a declared return: its result converts to that type whatever the arguments; the name and the
+                // return join deps (proof_global::k_function), since a redefinition may declare another return type
                 auto* id = static_cast<const identifier_expr*>(ce->callee.get());
                 if (has_dynamic_includes_ || class_ctx_ || id->slot_index != SIZE_MAX || id->global_qualified || id->symbol_id == UINT64_MAX) return false;
                 const auto fn = ce->proven_callee_decl.lock();
                 if (!fn || fn->is_coroutine) return false;
-                const uint16_t kind = certain_kind(fn->return_type.get());
-                if (kind == 0 || (kind & 0xFF) == static_cast<uint16_t>(script_value_type::jai_array_type)) return false;
-                deps.emplace_back(id->symbol_id, static_cast<uint16_t>(kind | call_expr::k_proof_function));
+                if (!certain_type(fn->return_type.get())) return false;
+                proof_global g = proof_of(id->symbol_id, fn->return_type.get());
+                if ((g.kind & 0xFF) == static_cast<uint16_t>(script_value_type::jai_array_type) && g.type == nullptr) { g.kind = proof_global::k_type; g.type = fn->return_type.get(); }
+                g.kind = static_cast<uint16_t>(g.kind | proof_global::k_function);
+                deps.push_back(g);
                 return true;
             }
             if (!ce->callee || ce->callee->get_type() != node_type::member_expr || detail::math_intrinsic_for_call(static_cast<const member_expr*>(ce->callee.get())) == detail::math_fn::none) return false;
@@ -1536,6 +1553,8 @@ private:
         }
     }
 
+    // C1: one statically resolved same-script callee, exact arity, no defaults in play, no
+    // reference params. Per-argument same_type (an untyped/var parameter binds as identity).
     void stamp_call_proofs(call_expr* c, const std::vector<const function_decl*>* ov, const std::vector<ctype>& args, bool free_callee) {
         if (proofs_ == proof_mode::leave) { return; }
         const size_t n = c->arguments.size();
@@ -1558,7 +1577,7 @@ private:
         }
         c->static_arg_proofs.assign(n, proof_none);
         c->proof_globals.clear();
-        std::vector<std::pair<uint64_t, uint16_t>> deps;
+        std::vector<proof_global> deps;
         for (size_t i = 0; i < n; ++i) {
             const parameter& p = fn->parameters[i];
             if (p.is_reference) { continue; }   // a reference parameter binds, never converts: no proof, no count
@@ -3221,10 +3240,10 @@ private:
 			if (!recv.tentative && !m->is_static) { check_builtin_member(recv, m); }
 			stamp(c->builtin_receiver, proven, uint8_t(0));
 			{
-				std::vector<std::pair<uint64_t, uint16_t>> deps;
+				std::vector<proof_global> deps;
 				auto* rid = m->object && m->object->get_type() == node_type::identifier_expr ? static_cast<identifier_expr*>(m->object.get()) : nullptr;
 				const bool certain = stamping() && proven && rid && rid->slot_index == SIZE_MAX && certain_global(rid, deps);
-				c->receiver_global = certain ? deps.back() : std::pair<uint64_t, uint16_t>{UINT64_MAX, 0};
+				c->receiver_global = certain ? deps.back() : proof_global{};
 			}
 			if (proven && c->arguments.empty() && (m->member == "size" || m->member == "length")) { return ctype::make(ctype::int_k); }   // every kind's size is its count
 			if (proven) {

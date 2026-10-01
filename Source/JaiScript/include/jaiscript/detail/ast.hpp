@@ -335,6 +335,19 @@ namespace jai {
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
             : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}    };
 
+    // a program-scope name an argument proof read and what the proof took of it (call_expr::proof_globals): a graft re-checks it once a run
+    // moved the definition epoch (the declaring unit may have run again with another type). kind: a scalar's base type, an array of scalars
+    // as jai_array_type | element base type << 8, k_type for any other declared type (type, compared by identity); k_function marks a
+    // function name whose declared return the proof took (a call's result)
+    struct proof_global {
+        static constexpr uint16_t k_function = 0x8000;
+        static constexpr uint16_t k_type = 0x4000;
+        uint64_t symbol = UINT64_MAX;
+        uint16_t kind = 0;
+        const type_info* type = nullptr;
+        bool operator==(const proof_global& o) const noexcept { return symbol == o.symbol && kind == o.kind && type == o.type; }
+    };
+
     // Function call expression
     class call_expr : public expression {
     public:
@@ -343,14 +356,11 @@ namespace jai {
         // Per-argument proof_same_type against the ONE statically resolved same-script callee
         // (identified by body); empty = unproven call
         mutable std::vector<uint8_t> static_arg_proofs;
-        // the program-scope names the argument proofs read (a typed global another unit declares, or this unit's): each name's symbol id
-        // and the kind the proof took, base_type | element base_type << 8 (an array of scalars), which a graft re-checks when a run moved the
-        // definition epoch (the declaring unit may have re-run with another type)
-        mutable std::vector<std::pair<uint64_t, uint16_t>> proof_globals;
-        static constexpr uint16_t k_proof_function = 0x8000;
-        // a builtin method's receiver that is a certain program-scope typed global (name, kind as proof_globals): a graft in its arguments
-        // re-checks it, since the graft runs ahead of the receiver's read
-        mutable std::pair<uint64_t, uint16_t> receiver_global{UINT64_MAX, 0};   // a proof_globals kind naming a free function's declared scalar return (a call's result)
+        // the program-scope names the argument proofs read (a typed global another unit declares, or this unit's)
+        mutable std::vector<proof_global> proof_globals;
+        // a builtin method's receiver that is a certain program-scope typed global: a graft in its arguments re-checks it, since the graft
+        // runs ahead of the receiver's read
+        mutable proof_global receiver_global;
         mutable const block_stmt* proven_callee_body = nullptr;
         // weak: the resolved declaration may belong to a program that dies before this site compiles (a dropped jaibite, an evicted parse-cache entry, a redefinition)
         mutable std::weak_ptr<const class function_decl> proven_callee_decl;

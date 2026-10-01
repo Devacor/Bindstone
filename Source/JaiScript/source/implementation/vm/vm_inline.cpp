@@ -11,6 +11,7 @@
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/transient_read.hpp>
+#include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/core/engine.hpp>
 
@@ -86,6 +87,14 @@ bool scalar_type(const type_info* t) {
 	}
 }
 bool any_type(const type_info* t) { return !t || t->base_type == script_value_type::jai_any_type; }
+// a by-value parameter of any registered type but a scalar or var (a string, an instance, a handle, a container, a math vector, a host type):
+// its declaration binds the argument by the parameter's own lane (vm_backend::bind_graft_parameter)
+bool value_param(const parameter& p) {
+	const type_info* t = p.type.get();
+	return !p.is_reference && t && !t->is_reference() && t->base_type != script_value_type::jai_any_type && t->base_type != script_value_type::jai_function_type &&
+	       t->base_type != script_value_type::jai_null_type && t->type_name != "auto" &&
+	       !(t->base_type == script_value_type::jai_int_type || t->base_type == script_value_type::jai_float_type || t->base_type == script_value_type::jai_bool_type);
+}
 bool void_type(const type_info* t) { return t && t->base_type == script_value_type::jai_null_type; }   // `void` is the null type
 bool var_reference(const type_info* t) { return t && t->is_reference() && any_type(t->element_type().get()); }
 bool math_call(const call_expr* ce) {
@@ -102,11 +111,21 @@ bool alias_call(const call_expr* ce, const engine* eng) {
 	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
 	return !id->global_qualified && id->slot_index == SIZE_MAX && eng->math_alias_fn(id->symbol_id) < engine::k_math_alias_rows;
 }
-// `name.size()` on a receiver the checker proved an array: it reads the array and runs no user code (the builtin call guards the kind)
+// a receiver a body names: a name, or a member chain over one (each step a member read the body may make anyway)
+bool named_receiver(const expression* e) {
+	while (e && e->get_type() == node_type::member_expr) {
+		auto* m = static_cast<const member_expr*>(e);
+		if (m->is_static || m->null_safe) return false;
+		e = m->object.get();
+	}
+	return e && e->get_type() == node_type::identifier_expr;
+}
+// `name.size()` (or `a.b.size()`) on a receiver the checker proved an array: it reads the array and runs no user code (the builtin call
+// guards the kind)
 bool size_call(const call_expr* ce) {
 	if (!ce->callee || ce->callee->get_type() != node_type::member_expr || !ce->arguments.empty() || ce->builtin_receiver != 2) return false;
 	auto* m = static_cast<const member_expr*>(ce->callee.get());
-	return !m->is_static && !m->null_safe && m->member == "size" && m->object && m->object->get_type() == node_type::identifier_expr;
+	return !m->is_static && !m->null_safe && m->member == "size" && named_receiver(m->object.get());
 }
 // a loop anywhere in a body (a graft into a fiber frame runs it without a block)
 bool body_has_loop(const statement* s) {
@@ -227,6 +246,24 @@ script_value_type arith_kind(token_type op, script_value_type l, script_value_ty
 	default: return K::jai_null_type;
 	}
 }
+// a reading builtin (detail::ref_write_reading_method: has, find, substr, keys, ...) of a string, an array or a map the checker proved, on a
+// named receiver: it writes nothing and runs no user code while no argument can be a callable (a literal, a value of a scalar kind, or a
+// name declared a type that is no function and no var)
+script_value_type value_kind(const expression* e, const inline_context& c);
+bool reading_builtin_call(const call_expr* ce, const inline_context& c) {
+	if (!ce->callee || ce->callee->get_type() != node_type::member_expr || ce->builtin_receiver == 0) return false;
+	auto* m = static_cast<const member_expr*>(ce->callee.get());
+	if (m->is_static || m->null_safe || !named_receiver(m->object.get()) || !detail::ref_write_reading_method(m->member)) return false;
+	for (const auto& a : ce->arguments) {
+		if (a->get_type() == node_type::literal_expr || value_kind(a.get(), c) != script_value_type::jai_null_type) continue;
+		if (a->get_type() != node_type::identifier_expr) return false;
+		const size_t s = static_cast<const identifier_expr*>(a.get())->slot_index;
+		const type_info* t = s < c.slot_types.size() ? c.slot_types[s] : nullptr;
+		if (!t || t->is_reference() || t->base_type == script_value_type::jai_any_type || t->base_type == script_value_type::jai_function_type) return false;
+	}
+	return true;
+}
+
 // the kind a value of the callee's body has at run time, from its own declarations: a literal, a name declared a scalar (a reference
 // parameter's declared type, which the rename requires of the caller's variable), plain arithmetic, a comparison, a negation, a cast to
 // a scalar, a ternary whose arms agree; jai_null_type otherwise
@@ -588,7 +625,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 	case node_type::call_expr: {
 		auto* ce = static_cast<const call_expr*>(e.get());
 		if (c.replace && ce == c.replace) { ++c.nodes; return c.result ? copy_identifier(c.result.get(), e->location, c) : nullptr; }   // the statement: the call is its temp (null: a void call alone)
-		if (!c.replace && !math_call(ce) && !size_call(ce)) {
+		if (!c.replace && !math_call(ce) && !size_call(ce) && !reading_builtin_call(ce, c)) {
 			if (!alias_call(ce, c.lc.eng) && !nested_call(ce, &c.lc)) { c.fail("a call in the body"); return nullptr; }
 			// the alias makes the real call when its name binds anything else, a nested leaf when its guard fails: that callee may write
 			// anything, so nothing the statement reads before the graft stays in place behind it
@@ -879,6 +916,8 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0) || (any_type(rt) && untyped_result_kind(call, fn, frame) != script_value_type::jai_null_type))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
 	if (detail::requires_return_value(rt) && !detail::has_complete_return(*fn)) return "a callee with an incomplete required return";
+	std::vector<uint8_t> captures;   // the arguments a later argument may write (detail/arg_capture.hpp): a value argument among them binds through the call
+	if (std::any_of(fn->parameters.begin(), fn->parameters.end(), value_param)) { detail::transient_read_marker::stamp_arg_captures(call->arguments, captures); }
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
 		const expression* a = call->arguments[i].get();
@@ -925,6 +964,14 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 			if (a->get_type() == node_type::literal_expr) continue;
 			if (arg_kind(a, frame) != script_value_type::jai_null_type) continue;   // a scalar value: binding it copies it, before or after the next argument alike
 			return "a var parameter bound to more than a scalar value or a literal";
+		}
+		if (value_param(p)) {
+			// its argument lands in a temp in the call's order and the declaration binds it after every argument by the parameter's own
+			// table and text (a conversion, a copy, a nocopy refusal); a handle's sharing rules are the bind's, so a handle takes a proof
+			const bool handle = p.type->base_type == script_value_type::jai_shared_ptr_type || p.type->base_type == script_value_type::jai_weak_ptr_type;
+			if (handle && !proven) return "an unproven argument";
+			if (i < captures.size() && captures[i] != 0) return "a value argument a later argument may write";
+			continue;
 		}
 		return "a parameter type the graft does not take";
 	}
@@ -1066,7 +1113,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 				bool held = ce->builtin_receiver != 0 && !m->is_static && !m->null_safe && rid && !rid->global_qualified;
 				if (held && rid->slot_index != SIZE_MAX) { held = private_local(rid) && !args_call; }
 				else if (held) {
-					held = ce->receiver_global.first == rid->symbol_id && !probe.writes_global;
+					held = ce->receiver_global.symbol == rid->symbol_id && !probe.writes_global;
 					if (held) { out.receiver_globals.push_back(ce->receiver_global); }
 				}
 				if (!held) { out.why = "a method call's argument"; return false; }
@@ -1361,8 +1408,10 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		}
 		std::shared_ptr<identifier_expr> r;
 		if (!void_type(fn->return_type.get())) { r = std::make_shared<identifier_expr>(call->location, std::string_view("\x01inl"), uint64_t(1)); r->slot_index = temp_next_ + temps; r->names_value_decl = true; }
+		size_t value_temps = 0;
+		for (const parameter& p : fn->parameters) { if (value_param(p)) { ++value_temps; } }
 		inline_context dry;
-		setup(dry, temp_next_ + temps + (r ? 1 : 0), r);
+		setup(dry, temp_next_ + temps + (r ? 1 : 0) + value_temps, r);
 		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (fn->parameters[i].is_reference && call->arguments[i]->get_type() == node_type::identifier_expr) { rename(dry, i); } }
 		if (r) { dry.pins.push_back(r); }
 		(void)clone_body(fn->body->declarations, dry, true);
@@ -1456,6 +1505,8 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	}
 	std::shared_ptr<identifier_expr> result;
 	if (!void_type(fn->return_type.get())) { result = inline_temp(call->location); }
+	std::vector<std::shared_ptr<identifier_expr>> value_temp(fn->parameters.size());   // a value parameter's argument, evaluated in the call's order
+	for (size_t i = 0; i < fn->parameters.size(); ++i) { if (value_param(fn->parameters[i])) { value_temp[i] = inline_temp(call->location); } }
 
 	chunk::inline_site site;
 	if (plan.receiver) {
@@ -1494,15 +1545,29 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	// the parameters: a by-value parameter is a declaration of the callee's type from the argument (the assignment table
 	// bind_parameters runs; the checker proved the type, so nothing converts); a reference parameter bound to an identifier is a
 	// renaming, bound to an element lvalue an alias declaration (a rebind)
+	// a value parameter: its argument into its temp in the call's order, its declaration binding it after every argument by the parameter's
+	// own lane (exec_decl_var: a conversion, a copy, a nocopy refusal where the call raises them)
 	std::vector<std::shared_ptr<variable_decl>> params;
+	std::vector<size_t> param_arg;   // per entry of params: the argument index whose value lands in a temp first (SIZE_MAX: a declaration)
+	std::vector<std::shared_ptr<variable_decl>> deferred;
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
 		const expression_ptr& a = call->arguments[i];
 		if (p.is_reference && a->get_type() == node_type::identifier_expr) { rename(ctx, i); continue; }
+		if (value_temp[i]) {
+			params.push_back(nullptr); param_arg.push_back(i);
+			auto d = std::make_shared<variable_decl>(call->location, p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), copy_identifier(value_temp[i].get(), a->location, ctx));
+			d->slot_index = base + p.slot_index;
+			d->site_kind = variable_decl::site_parameter; d->site_owner = fn->name;
+			d->decl_fast_flags = 0;   // the declaration binds by the parameter's lane (exec_decl_var), never a declaration's fast store
+			ctx.pins.push_back(d);
+			deferred.push_back(d);
+			continue;
+		}
 		auto d = std::make_shared<variable_decl>(call->location, p.is_reference ? inline_ref_type() : p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), a);   // an element: its alias, as the call binds it
 		d->slot_index = base + p.slot_index;
 		ctx.pins.push_back(d);
-		params.push_back(d);
+		params.push_back(d); param_arg.push_back(SIZE_MAX);
 	}
 	std::vector<declaration_ptr> body = clone_body(fn->body->declarations, ctx, true);
 	graft_tree_nodes_ += ctx.nodes;
@@ -1519,7 +1584,17 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	loops_.back().kind = region_kind::graft;
 	loops_.back().scope_depth = scope_depth_;
 	inlining_off_ = was_off;   // a leaf in an argument grafts inside its parameter's declaration, after this guard (the callee before the arguments)
-	for (const auto& d : params) { compile_variable_decl(d); }
+	for (size_t k = 0; k < params.size(); ++k) {
+		if (params[k]) { compile_variable_decl(params[k]); continue; }
+		const size_t i = param_arg[k];
+		compile_expression(call->arguments[i]);
+		emit(opcode::op_call_temp, static_cast<uint32_t>(value_temp[i]->slot_index));
+	}
+	for (const auto& d : deferred) {
+		compile_expression(d->initializer);
+		callable_.slot_types[static_cast<uint32_t>(d->slot_index)] = d->type.get();
+		emit(opcode::op_decl_var, add_node(d), 1, 1);
+	}
 	current_stmt_ = site.call_stmt;
 	chunk_->inline_sites[site_index].begin_ip = static_cast<uint32_t>(chunk_->code.size());   // the arguments are the caller's (a raise there names no callee)
 	graft_bodies_.push_back(fn->body.get());

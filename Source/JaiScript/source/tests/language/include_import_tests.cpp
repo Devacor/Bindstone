@@ -1057,6 +1057,156 @@ public:
             }
         });
 
+        test("an_import_checks_the_modules_its_module_imported_and_re_runs_a_changed_one_alone", [=, this]() {
+            // while (running) { import("big.jai"); }: a pass checks big, then every module big's run imported (transitively,
+            // each once however many paths reach it) with its own includes; a changed nested module re-runs on its own, checked
+            // before any of it runs, and big does not; a broken edit raises a catchable error and changes nothing
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 0;
+            auto write = [&](const char* name, const std::string& body) {
+                const auto path = dir / name;
+                put_file(path, body);
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            write("nm_big.jai", "big_ran();\nimport \"nm_mod.jai\";\nimport \"nm_side.jai\";\nint big_value() { return mod_value() + 100; }\n");
+            write("nm_side.jai", "import \"nm_mod.jai\";\nint side_value() { return 7; }\n");
+            write("nm_mod.jai", "mod_ran();\ninclude \"nm_inc.jai\";\nint mod_value() { return INC_BASE + 1; }\n");
+            write("nm_inc.jai", "int INC_BASE = 10;\n");
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(dir.string());
+            int big_runs = 0, mod_runs = 0;
+            eng->add_function("big_ran", [&big_runs]() { ++big_runs; });
+            eng->add_function("mod_ran", [&mod_runs]() { ++mod_runs; });
+            eng->import_recheck_interval(1.0e6);   // every pass below is opened on purpose
+            eng->execute("void frame() { import(\"nm_big.jai\"); }\nframe();");
+            check_true(big_runs == 1 && mod_runs == 1, "the first frame loads the tree, the module reached twice once");
+            check_eq(script_int(111), eng->execute("big_value();").as_int());
+            const uint64_t warm = eng->import_stat_count();
+            eng->execute("for (int i = 0; i < 50; i++) { frame(); }");
+            check_eq(warm, eng->import_stat_count(), "between passes the tree is not queried");
+            auto pass = [&](const char* what) {
+                eng->import_recheck_interval(1.0e6);
+                const uint64_t before = eng->import_stat_count();
+                eng->execute("frame();");
+                check_eq(before + 4, eng->import_stat_count(), std::string("one query per module and include of the tree: ") + what);
+            };
+            pass("unchanged");
+            check_true(big_runs == 1 && mod_runs == 1, "an unchanged tree does not re-run");
+
+            write("nm_mod.jai", "mod_ran();\ninclude \"nm_inc.jai\";\nint mod_value() { return INC_BASE + 2; }\n");
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("frame();");
+            check_eq(2, mod_runs, "an edited nested module re-runs");
+            check_eq(1, big_runs, "its importer does not");
+            check_eq(script_int(112), eng->execute("big_value();").as_int(), "the importer calls the new code");
+            pass("after a nested re-run");
+            check_true(big_runs == 1 && mod_runs == 2, "and the next pass runs nothing");
+
+            write("nm_inc.jai", "int INC_BASE = 30;\n");
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("frame();");
+            check_true(big_runs == 1 && mod_runs == 3, "an edited include of a nested module re-runs that module alone");
+            check_eq(script_int(132), eng->execute("big_value();").as_int());
+
+            write("nm_mod.jai", "mod_ran();\nint mod_value() { return INC_BASE + ; }\n");
+            eng->import_recheck_interval(1.0e6);
+            const std::string caught = eng->execute("var m = \"\";\ntry { frame(); } catch (e) { m = e; }\nm;").to_string();
+            check_false(caught.empty(), "a broken nested module raises a catchable error");
+            check_true(big_runs == 1 && mod_runs == 3, "nothing of it ran");
+            check_eq(script_int(132), eng->execute("big_value();").as_int(), "the program keeps the code it had");
+            eng->import_recheck_interval(1.0e6);
+            check_eq(std::string(""), eng->execute("var m = \"\";\ntry { frame(); } catch (e) { m = e; }\nm;").to_string(), "the failed stamp waits quietly");
+            check_eq(3, mod_runs);
+
+            write("nm_mod.jai", "mod_ran();\ninclude \"nm_inc.jai\";\nint mod_value() { return INC_BASE + 3; }\n");
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("frame();");
+            check_true(big_runs == 1 && mod_runs == 4, "the fix re-runs the nested module alone");
+            check_eq(script_int(133), eng->execute("big_value();").as_int());
+            for (const char* f : {"nm_big.jai", "nm_side.jai", "nm_mod.jai", "nm_inc.jai"}) {
+                std::filesystem::remove(dir / f);
+                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+            }
+        });
+
+        test("an_import_tree_is_what_the_module_last_run_imported", [=, this]() {
+            // the tree holds the imports a module's last run executed, by the path each resolved to: a conditional import only
+            // when its branch ran, a computed one as it resolved; a re-run of the module rebuilds it (an import no longer reached
+            // drops out, its module stays loaded); a module also reached on its own each frame is queried once per pass
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 0;
+            auto write = [&](const char* name, const std::string& body) {
+                const auto path = dir / name;
+                put_file(path, body);
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            const std::string a_text = "a_ran();\nif (use_y()) { import(\"tr_y.jai\"); }\nimport(\"tr_w.jai\");\nimport(z_path());\n";
+            write("tr_a.jai", a_text);
+            write("tr_y.jai", "y_ran();\nint y_value() { return 1; }\n");
+            write("tr_w.jai", "int w_value() { return 3; }\n");
+            write("tr_z.jai", "z_ran();\nint z_value() { return 2; }\n");
+            write("tr_q.jai", "int q_value() { return 4; }\n");
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(dir.string());
+            bool use_y = false;
+            std::string z = "tr_z.jai";
+            int a_runs = 0, y_runs = 0, z_runs = 0;
+            eng->add_function("use_y", [&use_y]() { return use_y; });
+            eng->add_function("z_path", [&z]() { return z; });
+            eng->add_function("a_ran", [&a_runs]() { ++a_runs; });
+            eng->add_function("y_ran", [&y_runs]() { ++y_runs; });
+            eng->add_function("z_ran", [&z_runs]() { ++z_runs; });
+            eng->import_recheck_interval(1.0e6);
+            eng->execute("void tick() { import(\"tr_w.jai\"); }\nvoid frame() { import(\"tr_a.jai\"); tick(); }\nframe();");
+            check_true(a_runs == 1 && z_runs == 1 && y_runs == 0, "the untaken branch imports nothing");
+            auto pass = [&](uint64_t queries, const std::string& what) {
+                eng->import_recheck_interval(1.0e6);
+                const uint64_t before = eng->import_stat_count();
+                eng->execute("frame();");
+                if (queries) { check_eq(before + queries, eng->import_stat_count(), what); }
+            };
+            pass(3, "a, w (in the tree and reached by tick, queried once) and z");
+            write("tr_y.jai", "y_ran();\nint y_value() { return 10; }\n");
+            pass(3, "an import whose branch did not run is not in the tree");
+            check_eq(0, y_runs);
+
+            z = "tr_q.jai";
+            write("tr_a.jai", a_text);
+            pass(0, "a re-runs and imports what the path resolves to now");
+            check_eq(2, a_runs);
+            write("tr_z.jai", "z_ran();\nint z_value() { return 20; }\n");
+            pass(3, "the tree follows the computed path: a, w, q");
+            check_eq(1, z_runs, "a module a no longer imports is not checked");
+            check_eq(script_int(2), eng->execute("z_value();").as_int(), "and stays loaded as it was");
+
+            use_y = true;
+            write("tr_a.jai", a_text);
+            pass(0, "a re-runs and takes the branch");
+            check_true(a_runs == 3 && y_runs == 1, "the taken branch loads y");
+            pass(4, "a, y, w, q");
+            write("tr_y.jai", "y_ran();\nint y_value() { return 11; }\n");
+            pass(0, "y changed");
+            check_true(y_runs == 2 && a_runs == 3, "a module imported in a taken branch re-runs alone");
+            check_eq(script_int(11), eng->execute("y_value();").as_int());
+
+            use_y = false;
+            write("tr_a.jai", a_text);
+            pass(0, "a re-runs without the branch");
+            check_eq(4, a_runs);
+            write("tr_y.jai", "y_ran();\nint y_value() { return 12; }\n");
+            pass(3, "the import its last run did not reach dropped out: a, w, q");
+            check_eq(2, y_runs, "y is no longer checked");
+            check_eq(script_int(11), eng->execute("y_value();").as_int(), "y stays loaded");
+            for (const char* f : {"tr_a.jai", "tr_y.jai", "tr_w.jai", "tr_z.jai", "tr_q.jai"}) {
+                std::filesystem::remove(dir / f);
+                std::filesystem::remove((dir / f).replace_extension(".jaibite"));
+            }
+        });
+
         test("an_import_runs_a_module_only_from_text_read_under_its_stamp", [=, this]() {
             // a save landing while a module is read (its stamp queried after the read disagrees with the one before) holds a
             // module that ran before until a pass reads it whole; a first load reads again at once. A saver thread moves the

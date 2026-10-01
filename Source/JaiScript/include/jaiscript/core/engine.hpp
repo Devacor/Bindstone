@@ -14,6 +14,7 @@
 #include "bound_map.hpp"
 #include "jaibite.hpp"
 #include "privilege.hpp"
+#include "hot_reload_report.hpp"
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/detail/first_type.hpp>
 #include <jaiscript/serialization/serialization_metadata.hpp>
@@ -461,6 +462,15 @@ namespace jai {
         // fields-unchanged reload proves itself by migrating zero instances).
         size_t hot_reload_field_migrations() const { return hot_reload_field_migrations_; }
         void count_hot_reload_field_migration() { ++hot_reload_field_migrations_; }
+
+		// Optional migration diagnostics. Poll after execute/import; reports aggregate
+		// until cleared. Disabled by default; ordinary field access does no report work.
+		void hot_reload_reporting(bool a_enabled) { hot_reload_reporting_ = a_enabled; }
+		bool hot_reload_reporting() const noexcept { return hot_reload_reporting_; }
+		const std::vector<field_migration_report>& hot_reload_reports() const noexcept { return hot_reload_reports_; }
+		void clear_hot_reload_reports() { hot_reload_reports_.clear(); }
+		void record_field_migration(std::string_view a_className, uint64_t a_fieldId,
+			field_migration_outcome a_outcome, const script_value* a_before, const script_value* a_after);
 
         // Serializes IN-REGION chunk compiles engine-wide (unsafe-mode method dispatch
         // lazily compiles on worker threads; compilation copies AST literal strong_ptrs
@@ -1249,6 +1259,8 @@ namespace jai {
         std::unique_ptr<implementation> impl;
 
         size_t hot_reload_field_migrations_ = 0;
+		bool hot_reload_reporting_ = false;
+		std::vector<field_migration_report> hot_reload_reports_;
         void register_location_builtins();   // engine-core script builtins: root/current_script_dir, resolve_path, app dirs
         void register_privilege_builtins();
         void set_privileges(privilege flags, bool enabled);

@@ -160,7 +160,8 @@ public:
     // Hot-reload field migration; defined out-of-line (needs class_definition + the
     // conversion kernel for declared-type retypes).
     void migrate_fields(const std::set<uint64_t>& old_field_ids,
-                       const std::unordered_map<uint64_t, script_value>& new_field_defaults);
+                        const std::unordered_map<uint64_t, script_value>& new_field_defaults,
+						bool a_preseeded = false);
 
     script_value get_method(uint64_t id, bool throw_if_missing = true) const;
 
@@ -706,7 +707,7 @@ public:
     void replace_field_declared_types(std::unordered_map<uint64_t, type_info_ptr> new_types, bool mark_changes) {
         auto same_type = [](type_info_ptr a, type_info_ptr b) {
             if (!a || !b) return a == b;
-            return a->base_type == b->base_type && a->type_name == b->type_name;
+			return a->equals(b);
         };
         bool changed = field_declared_types_.size() != new_types.size();
         if (!changed) {
@@ -2012,6 +2013,10 @@ public:
                 for (const auto& [name, default_value] : new_field_defaults) {
                     if (!instance->has_field(name)) {
                         instance->set_field(name, default_value.clone());
+						if (engine_ && engine_->hot_reload_reporting()) {
+							engine_->record_field_migration(name_, name, field_migration_outcome::added,
+								nullptr, instance->find_field_value(name));
+						}
                     }
                 }
 
@@ -2031,7 +2036,7 @@ public:
                     }
                 }
 
-                instance->migrate_fields(old_fields, new_field_defaults);
+                instance->migrate_fields(old_fields, new_field_defaults, true);
                 if (engine_) { engine_->count_hot_reload_field_migration(); }
             }
 
@@ -3376,8 +3381,15 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
 }
 
 inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_ids,
-                                           const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
-    (void)old_field_ids;
+                                           const std::unordered_map<uint64_t, script_value>& new_field_defaults,
+										   bool a_preseeded) {
+	const bool reporting = engine_ && engine_->hot_reload_reporting();
+	auto record = [&](uint64_t a_id, field_migration_outcome a_outcome,
+		const script_value* a_before, const script_value* a_after) {
+		if (reporting && (!a_preseeded || old_field_ids.count(a_id) || a_outcome == field_migration_outcome::removed)) {
+			engine_->record_field_migration(class_name_, a_id, a_outcome, a_before, a_after);
+		}
+	};
     // IN-PLACE per-id migration: kept fields keep their storage CELL, so script_value
     // addresses stay stable — suspended coroutines' env chains and this-capturing
     // closures cache pointers to field cells, and a wholesale rebuild would dangle
@@ -3396,8 +3408,10 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             // never run script and never brick an instance. Same-type fields pass the
             // kernel's same-type fast path and keep their value.
             if (auto converted = detail::field_store_convert_no_script(*existing, declared, engine_)) {
+				record(id, field_migration_outcome::converted, existing, &*converted);
                 *existing = std::move(*converted);
             } else {
+				record(id, field_migration_outcome::reset, existing, &default_value);
                 *existing = default_value.clone();
             }
             continue;
@@ -3410,10 +3424,14 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             bool retyped = !default_value.is_null() &&
                 existing->deref().current_type() != default_value.deref().current_type();
             if (retyped) {
+				record(id, field_migration_outcome::reset, existing, &default_value);
                 *existing = default_value.clone();
+            } else {
+				record(id, field_migration_outcome::preserved, existing, existing);
             }
         } else {
             materialize_field(id, default_value.clone());
+			record(id, field_migration_outcome::added, nullptr, find_field_value(id));
         }
     }
 
@@ -3432,6 +3450,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             }
             const uint64_t id = class_def_->slot_field(static_cast<uint32_t>(slot));
             if (id != cpp_id && new_field_defaults.find(id) == new_field_defaults.end()) {
+				record(id, field_migration_outcome::removed, v, nullptr);
                 *v = script_value::make_invalid(engine_);
             }
         }
@@ -3439,6 +3458,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
     if (overflow_fields_) {
         for (auto it = overflow_fields_->begin(); it != overflow_fields_->end();) {
             if (it->first != cpp_id && new_field_defaults.find(it->first) == new_field_defaults.end()) {
+				record(it->first, field_migration_outcome::removed, &it->second, nullptr);
                 it = overflow_fields_->erase(it);
             } else {
                 ++it;

@@ -21,6 +21,39 @@ public:
     }
 
     void forge_tests() override {
+		test("migration_reports_aggregate_actual_field_operations", [this]() {
+			for (auto backend : {jai::backend_type::interpreter, jai::backend_type::vm}) {
+				auto engine = jai::foundry::make_engine();
+				engine->set_backend(backend);
+				engine->execute("class R { int kept = 1; int converted = 7; string reset = \"bad\"; int removed = 4; } R one = R(); R two = R();");
+				check(engine->hot_reload_reports().empty(), "reports are disabled by default");
+				engine->hot_reload_reporting(true);
+				engine->execute("class R { int kept = 99; string converted = \"new\"; int reset = 12; int added = 25; }");
+				check_eq(jai::script_int(1), engine->execute("one.kept").as_int());
+				check_eq(std::string("7"), engine->execute("one.converted").as_string());
+				check_eq(jai::script_int(12), engine->execute("one.reset").as_int());
+				for (const auto& [field, expected] : std::initializer_list<std::pair<std::string_view, jai::field_migration_outcome>>{
+					{"kept", jai::field_migration_outcome::preserved},
+					{"converted", jai::field_migration_outcome::converted},
+					{"reset", jai::field_migration_outcome::reset},
+					{"added", jai::field_migration_outcome::added},
+					{"removed", jai::field_migration_outcome::removed}}) {
+					bool found = false;
+					for (const auto& report : engine->hot_reload_reports()) {
+						if (report.class_name == "R" && report.field_name == field && report.outcome == expected) {
+							check_eq(std::size_t(2), report.count);
+							found = true;
+						}
+					}
+					check(found, std::string(field) + " migration reported");
+				}
+				engine->clear_hot_reload_reports();
+				engine->hot_reload_reporting(false);
+				engine->execute("class R { int kept = 99; string converted = \"new\"; int reset = 12; int added = 25; int silent = 0; }");
+				check(engine->hot_reload_reports().empty(), "disabled reporting stays empty");
+			}
+		});
+
         test("basic_class_redefinition", [this]() {
             auto engine = jai::foundry::make_engine();
             

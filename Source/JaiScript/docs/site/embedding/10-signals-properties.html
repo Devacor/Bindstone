@@ -61,8 +61,7 @@ public:
 Door door;
 door.configure(eng.get());
 
-auto cppConn    = door.onOpen.connect([](int w) { std::cout &lt;&lt; &quot;C++ receiver: opened to &quot; &lt;&lt; w &lt;&lt; &quot;
-&quot;; });
+auto cppConn    = door.onOpen.connect([](int w) { std::cout &lt;&lt; &quot;C++ receiver: opened to &quot; &lt;&lt; w &lt;&lt; &quot;\n&quot;; });
 auto scriptConn = door.onOpen.connect(
     &quot;print(\&quot;script receiver: opened to \&quot; + to_string(width));&quot;);
 
@@ -85,14 +84,12 @@ jai::property_manager mgr;
 jai::observable_property&lt;int&gt; hp(mgr, &quot;hp&quot;, 100);
 
 auto watch = hp.on_change.connect([](const int&amp; oldV, const int&amp; newV) {
-    std::cout &lt;&lt; &quot;hp: &quot; &lt;&lt; oldV &lt;&lt; &quot; -&gt; &quot; &lt;&lt; newV &lt;&lt; &quot;
-&quot;;
+    std::cout &lt;&lt; &quot;hp: &quot; &lt;&lt; oldV &lt;&lt; &quot; -&gt; &quot; &lt;&lt; newV &lt;&lt; &quot;\n&quot;;
 });
 hp = 75;              // emits (100 -&gt; 75)
 hp += 10;             // arithmetic ops emit too (75 -&gt; 85)
 hp.set_silent(50);    // NO signal — the loading/initialization path
-std::cout &lt;&lt; &quot;final hp: &quot; &lt;&lt; hp.get() &lt;&lt; &quot;
-&quot;;   // 50</code></pre></div>
+std::cout &lt;&lt; &quot;final hp: &quot; &lt;&lt; hp.get() &lt;&lt; &quot;\n&quot;;   // 50</code></pre></div>
 <p>Output: <code>hp: 100 -&gt; 75</code>, <code>hp: 75 -&gt; 85</code>, <code>final hp: 50</code>.</p>
 <p>Semantics from the header (<code>properties/observable_property.hpp</code>): assignment emits only on <strong>actual change</strong> (<code>old != new</code>); <code>on_change</code> is a public <code>signal&lt;void(const T&amp;, const T&amp;)&gt;</code> over a private emitter (same idiom); <code>++</code>/<code>--</code>/compound ops all emit; <code>set_silent</code> mutates without notifying. Properties register themselves with their <code>property_manager</code> (that&#x27;s what powers schema-driven <code>auto_bind</code> and automatic serialization of <code>JAI_PROPERTY</code> fields).</p>
 <p>One linking gotcha: a standalone TU that instantiates <code>property&lt;T&gt;</code> needs <code>properties/property_serialization.hpp</code> (or anything that pulls <code>serialization/archive_impl.hpp</code>). The property&#x27;s virtual <code>serialize</code> methods are defined there. <code>dynamic_binder.hpp</code> includes it already, so binder-using TUs never notice.</p>

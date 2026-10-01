@@ -69,10 +69,10 @@ coroutine function plain()           { yield true; }
 
 print(to_string(ticks().resume()) + &quot; &quot; + names().resume() + &quot; &quot; +
       to_string(guess().resume()) + &quot; &quot; + to_string(plain().resume()));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 a 2.500000 true</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 a 2.5 true</code></pre></div>
 <p>The bare form drops <code>function</code> as well (<code>coroutine g() { &hellip; }</code> and
 <code>coroutine g() -&gt; int { &hellip; }</code>), and the same prefix works on methods, static ones
-included. Coroutines cannot return references, and they are not allowed inside a namespace body yet
+included. Coroutines cannot return references, and they are not allowed inside a namespace body
 (both are parse errors). The full rule is <a href="https://github.com/Devacor/JaiScript/blob/master/docs/grammar.md"><code>docs/grammar.md</code></a>&#x27;s function-declaration
 production; the language-side tour, covering independent instances per call, receiver pinning (a method coroutine keeps its object alive while suspended) and the edges, is
 the guide&#x27;s <a href="../guide/08-coroutines.html">Coroutines</a> chapter.</p>
@@ -85,7 +85,7 @@ auto b = Boss();
 auto c = b.fight();
 print(to_string(c.resume()) + &quot; phase=&quot; + to_string(b.phase));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10 phase=1</code></pre></div>
-<p>All of it (yield/resume sequencing, <code>done()</code> transitions, multiple simultaneous handles, range-for driving) behaves identically on both backends; the test suite holds them to it. The checker treats a coroutine call as yielding a handle of unknown type, and does not check yield or return types (see the <a href="06-static-checking.html">Static Checking</a> precision map), so a wrong-typed <code>yield</code> is a run-time error, never a load error.</p>
+<p>All of it (yield/resume sequencing, <code>done()</code> transitions, multiple simultaneous handles, range-for driving) behaves identically on both backends; the test suite holds them to it. The checker treats a coroutine call as yielding a handle of unknown type, and does not check yield or return types (see the <a href="06-static-checking.html">Static Checking</a> precision map). A <code>return</code> the declared type rejects is a run-time error at the final <code>resume()</code> (<code>Cannot return string from 'k' (declared -&gt; int)</code>), never a load error; a <code>yield</code> hands its value out as it is, whatever the declared type.</p>
 <h2 id="driving-from-c-pattern-1-through-executes-the-simple-way">Driving from C++, pattern 1: through executes (the simple way)<a class="hlink" href="#driving-from-c-pattern-1-through-executes-the-simple-way" aria-label="link">&#8203;</a></h2>
 <p>A handle stored in an engine global persists <strong>across separate <code>execute()</code> calls</strong>. Each execute resumes exactly where the last left off. This is the frame-loop pattern: create behaviors once, tick them per frame with tiny resume scripts. (The strict checker is happy with this: <code>c</code> is declared by the first execute, and later executes on the same engine see it as a declared global.)</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(R&quot;( coroutine int spawner(int n) {

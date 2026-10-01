@@ -37,7 +37,7 @@ both answers: the design that makes the VM quick, the cost model that makes <em>
 and every measured number: microbenchmarks against Lua, Squirrel, and ChaiScript (head-to-head suites
 in <code>source/tests/performance/</code>, MSVC x64 Release, min-of-5), the embedding cost sheet, and
 complete games measured end-to-end. The long-form report is <a href="https://github.com/Devacor/JaiScript/blob/master/docs/PERFORMANCE.md"><code>docs/PERFORMANCE.md</code></a>;
-this page adds a newer machine&#x27;s numbers on top of it, and says which is which at the top of
+this page adds a second machine&#x27;s numbers beside it, and says which is which at the top of
 the <a href="#measured-results">measured section</a>. One caveat travels with all of it: the
 benchmark harness reports integer µs with real run-to-run variance. Compare bands and medians,
 not &plusmn;1&nbsp;µs deltas.</p>
@@ -139,7 +139,8 @@ stdlib cost hundreds of warm executes. Reuse engines; never build one per evalua
 <ul><li><strong>Call-dense recursion.</strong> Lua runs fib(15) ~4.5&times; faster and Squirrel ~2.4&times;;
 the cost is per-call frame setup, not opcode count. Bare self tail calls are the exception: on the VM,
 <code>return f(args)</code> reuses the live frame (constant stack space, no depth limit, ~40 ns per
-call), so accumulator-style tail recursion runs at loop speed and any depth. The caveat applies to
+call), so accumulator-style tail recursion runs at loop speed and any depth. The interpreter keeps its
+call-depth cap (256 active calls by default, <a href="05-safety-rails.html">Safety Rails</a>). The caveat applies to
 non-tail shapes like fib&#x27;s <code>f(n-1) + f(n-2)</code>: most game scripts are loop- and
 method-shaped, where the gap is small to none. Keep naive deep <em>non-tail</em> recursion out of
 per-frame hot paths, or express the algorithm iteratively.</li>
@@ -150,8 +151,8 @@ older report machine measured the same pair at ~3.7&times;): by-value deep-copie
 recursion level, and that copy is the whole difference.</li>
 <li><strong>Bulk per-element pixel pushing.</strong> Software rendering (tens of thousands of scripted
 element reads and stores per frame) is where any tagged-value VM pays list price against Lua
-(GLOOM serial takes 3.55&times; Lua 5.4.8 time in the matched
-2026-09-08 snapshot at <code>c85ea0dd</code>; the padding bands appear below). The
+(GLOOM serial takes about 3.5&times; Lua 5.4.8&#x27;s time per tick in the
+<a href="#whole-games-measured">GLOOM row</a> below). The
 mitigations, in order: typed arrays for the grids, <code>parallel_transform</code> for the bulk stages
 (it roughly halved GLOOM&#x27;s dominant stage), and binding the one innermost loop to C++ if the budget
 still doesn&#x27;t close. Full game <em>sim</em> is not the problem: DOOM&#x27;s entire playsim ticks in
@@ -167,8 +168,8 @@ from the other.</strong> The <em>report machine</em> is a 2016-era 4-core/8-thre
 <a href="https://github.com/Devacor/JaiScript/blob/master/docs/PERFORMANCE.md"><code>docs/PERFORMANCE.md</code></a> in July 2026, and the cost sheet, the dispatch regimes, the aliasing table,
 the parallel-scaling figures and the five-way GLOOM report all come from it. The <em>reference machine</em>
 is a current desktop-class 24-thread CPU: the head-to-head table, the GLOOM row and the DOOM rows were
-measured there, at a later build. It runs everything faster, and the VM&#x27;s call path improved between the
-two runs, so the recursion gap reads ~4.5&times; against Lua here and ~6.7&times; in the report. Read ratios
+measured there, at a later build. It runs everything faster, and the two runs are different builds of the
+VM, so the recursion gap reads ~4.5&times; against Lua here and ~6.7&times; in the report. Read ratios
 within one table.</p></div>
 <h3 id="embedding-costs">The embedding cost sheet<a class="hlink" href="#embedding-costs" aria-label="link">&#8203;</a></h3>
 <p>Order-of-magnitude operation costs from <a href="https://github.com/Devacor/JaiScript/blob/master/docs/PERFORMANCE.md"><code>docs/PERFORMANCE.md</code></a> (interp / VM):</p>
@@ -235,15 +236,14 @@ redistribute, so its two rows are a described measurement, not one you can rerun
 and rewriting the enemy brains as coroutines and the movers/weapons as classes measured
 <strong>free</strong> (the band did not move)</td></tr>
 <tr><td><strong>DOOM timedemo, 2026-09-09</strong>: 3,984 recorded tics of E1M1 at 120&times;78,
-one full replay warming the same engine before the measured replay; one P core,
-<code>d6c9959b</code></td><td><strong>4.707 ms/tic</strong>,
+one full replay warming the same engine before the measured replay; one P core</td><td><strong>4.707 ms/tic</strong>,
 padding median <strong>4.750</strong><br>
 Padding band: +0.65% to +1.09%</td><td>Six accepted processes per layout in three interleaved
 rounds of the paired JaiScript comparison. Both replay hashes match 1746772898.
 The script timer excludes level/demo setup.</td></tr>
 <tr><td><strong>GLOOM, 2026-09-09 snapshot</strong>: 600 measured ticks after 600 warm-up ticks,
 seed 666, 100&times;40 quad output. One P core for serial configurations; eight for parallel
-JaiScript. MSVC Release with LTCG, Core Ultra 9 285HX, <code>d6c9959b</code>.</td><td>
+JaiScript. MSVC Release with LTCG, Core Ultra 9 285HX.</td><td>
 JaiScript VM serial: <strong>1.401 ms/tick</strong> (padding -2.01% to -1.10%)<br>
 JaiScript VM 8 workers: <strong>0.973 ms/tick</strong> (padding -3.09% to +7.84%)<br>
 Lua 5.4.8: <strong>0.395 ms/tick</strong> (padding -4.09% to -1.62%)<br>
@@ -251,13 +251,9 @@ Lua 5.5.1: <strong>0.395 ms/tick</strong> (padding -1.41% to +2.05%)<br>
 LuaJIT 2.1 JIT: <strong>0.102 ms/tick</strong> (padding -20.71% to +12.49%)</td><td>All frame and state hashes match. Three A B A B rounds give six accepted
 runs per layout. The GLOOM/Lua window accepted 60 timings and excluded 23 busy
 attempts under a 1.0-core desktop background screen across 24 cores.
-The paired b306133b-to-d6c9959b run improves eight-worker GLOOM 21.63% normal
-and 22.89% padded (candidate padding band -1.53% to +0.37%). Serial GLOOM and
-JaiDOOM have no consistent improvement across layouts.
-The accepted worker padding outlier remains in its band. Small changes in the
-wide-band LuaJIT JIT result are unresolved. Lua 5.4.8 and 5.5.1 have overlapping
-observed ranges. LuaJIT JIT is a runtime code generation ceiling outside the iOS
-shipping target.
+Lua 5.4.8 and 5.5.1 have overlapping observed ranges, and the LuaJIT JIT band is
+wide. LuaJIT JIT is a runtime code generation ceiling outside the iOS shipping
+target.
 <a href="https://github.com/Devacor/JaiScript/blob/master/examples/gloom/ports/RESULTS_2026-09-09.md">Full results, control medians, versions and methodology</a>.</td></tr>
 <tr><td><strong>Demoreel</strong> (<code>examples/demoreel</code>): thirteen truecolor scenes at
 100&times;40 = 4,000 cells per frame, the whole reel including transitions

@@ -466,9 +466,10 @@ public:
             // conversion fails with a READABLE text (the result message used to be a view
             // of the dead exception's what() - freed memory)
             std::string msg;
-            try { eng->execute("class NoBase : Creature { int extra = 1; } array<NoBase> nb = [NoBase()]; count(nb)"); }
+            try { eng->execute("class NoBase : Creature { int extra = 1; NoBase() {} } array<NoBase> nb = [NoBase()]; count(nb)"); }
             catch (const std::exception& ex) { msg = ex.what(); }
             check_true(msg.find("_cpp_object") != std::string::npos, "hybrid without super() reports the missing C++ object by name: " + msg);
+            check_eq((int64_t)1, eng->execute("class Plain : Creature { int extra = 1; } array<Plain> ps = [Plain()]; count(ps)").as_int(), "a constructor-less hybrid default-constructs its C++ base");
         });
 
         test("script_value_vector_view_is_array_var_only", [this]() {

@@ -2540,7 +2540,7 @@ void engine::record_field_migration(std::string_view class_name, uint64_t field_
         const auto& value = stored->deref();
         if (value.is_null()) { return "null"; }
         if (auto type = value.get_type_info(); type && type->base_type != script_value_type::jai_any_type && type->type_name != "auto") {
-            return type->canonical_name();
+            return type->spelling();
         }
         return detail::slot_source_type_name(value, this);
     };
@@ -5231,9 +5231,17 @@ bool engine::script_layer_save(const std::shared_ptr<class_instance>& layer, std
     script_class_name = class_def->get_name();
     script_value fields = script_value::make_map(get_type_info_string(), nullptr, this);
     auto& fieldMap = const_cast<script_map&>(fields.as_map());
+    // the layer's own state: instance fields the script classes of the chain declare (a C++ property is the object's)
+    std::unordered_set<uint64_t> script_fields;
+    std::function<void(const class_definition&)> collect = [&](const class_definition& def) {
+        if (!def.is_script_class()) { return; }
+        for (const auto& parent : def.get_parent_classes()) { if (parent) { collect(*parent); } }
+        for (uint64_t id : def.field_order()) { if (!def.has_static_field(id)) { script_fields.insert(id); } }
+    };
+    collect(*class_def);
     uint64_t cpp_object_id = layer->get_cpp_object_field_id();
     layer->for_each_field([&](uint64_t id, const script_value& value) {
-        if (id == cpp_object_id) { return; }
+        if (id == cpp_object_id || !script_fields.count(id)) { return; }
         fieldMap.emplace(script_value(std::string(get_symbolizer()->get_string(id)), this), value);
     });
     serialization::json_archive_writer writer(-1, this);

@@ -17340,6 +17340,7 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 	auto instance = class_def->create_instance();
 
 	auto this_value = script_value::make_class_object(*class_def, instance, engine_);
+	JAISCRIPT_TRY(detail::construct_cpp_base_default(*instance, *class_def, engine_));
 
 	if (!aggregate.fills() && class_def->chain_initializers_all_literal()) {
 		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(instance, class_def, false); }

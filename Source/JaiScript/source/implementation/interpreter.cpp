@@ -13835,6 +13835,7 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
     // Use class_def's registered name and type_id to handle namespaces correctly
     // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
     auto this_value = script_value::make_class_object(*class_def, instance, engine_);
+    JAISCRIPT_TRY(detail::construct_cpp_base_default(*instance, *class_def, engine_));
 
     // Find the root (global) environment with cycle detection
     std::unordered_set<environment*> visited;

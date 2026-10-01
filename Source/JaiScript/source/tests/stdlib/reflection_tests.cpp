@@ -10,6 +10,7 @@
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <map>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -144,6 +145,30 @@ public:
             // References answer what they hold, never the wrapper
             check_eq(eng->execute(
                 "var c = Creature(); var& r = c; reflect::type_name(r)").as<std::string>(), "Creature");
+        });
+
+        test("type_names_spell_their_element_types", [this]() {
+            auto eng = make_reflective_engine();
+            check_eq(eng->execute("array<int> a = [1]; reflect::type_name(a)").as<std::string>(), "array<int>");
+            check_eq(eng->execute("map<string, float> m = {\"k\": 1.0}; reflect::type_name(m)").as<std::string>(), "map<string,float>");
+            check_eq(eng->execute("array<array<string>> n = [[\"x\"]]; reflect::type_name(n)").as<std::string>(), "array<array<string>>");
+            check_eq(eng->execute("var u = [1, \"x\"]; reflect::type_name(u)").as<std::string>(), "array");
+            eng->execute("class Bag { array<int> items = []; static array<string> names = []; static int count = 0; map<string, int> tally; var loose; auto inferred = 1; }");
+            auto fields = eng->execute("reflect::fields(\"Bag\")");
+            std::map<std::string, std::string> types;
+            for (const auto& entry : fields.as_array()) {
+                const auto& m = entry.as_map();
+                types[m.at(script_value(std::string("name"), eng.get())).as<std::string>()] =
+                    m.at(script_value(std::string("type"), eng.get())).as<std::string>();
+            }
+            check_eq(std::string("array<int>"), types["items"], "a typed field");
+            check_eq(std::string("array<string>"), types["names"], "a typed static");
+            check_eq(std::string("int"), types["count"], "a scalar static");
+            check_eq(std::string("map<string,int>"), types["tally"], "a typed map field");
+            check_eq(std::string("var"), types["loose"], "var");
+            check_eq(std::string("auto"), types["inferred"], "auto");
+            check_eq(eng->execute("function f(array<int> a, map<string, bool> b) {} reflect::function_arguments(\"f\")[0][0][\"type\"]").as<std::string>(),
+                     "array<int>", "a parameter's declared type");
         });
 
         test("has_field_and_has_method_walk_the_chain", [this]() {

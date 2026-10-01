@@ -387,6 +387,10 @@ namespace jai::vm {
         // identifier_expr behind an op_load / op_store / op_binary_fused_store /
         // op_return_ident, read live for field proofs; k_invalid_u32 = none
         std::vector<uint32_t> ident_nodes;
+        // per frame slot of a slot-resident `T& name = e;` declaration with a concrete T: T and its kind byte
+        // (detail::declared_ref_kind); a store through the name decides by them, nothing is stamped at the binding
+        std::vector<type_info*> slot_declared_refs;
+        std::vector<uint8_t> slot_declared_kinds;
         std::vector<call_site> call_sites;
         std::vector<function_proto> function_protos;
         std::vector<closure_proto> closure_protos;

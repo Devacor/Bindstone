@@ -60,6 +60,31 @@ namespace jai::detail {
 		return e && e->get_type() == node_type::member_expr && is_ref_bindable_lvalue(e);
 	}
 
+	// The storage index a value of T's kind has (int, float, bool, string), 0xFF when every store runs T's table, 0 for no
+	// declared type (var, auto, an unknown referent)
+	inline uint8_t declared_ref_kind(const type_info* t) {
+		if (!t || t->base_type == script_value_type::jai_any_type || t->base_type == script_value_type::jai_reference_type ||
+		    t->type_name == "auto") {
+			return 0;
+		}
+		if (t->is_byte_element()) { return 0xFF; }
+		switch (t->base_type) {
+			case script_value_type::jai_int_type: return static_cast<uint8_t>(script_value::TYPEID_INT);
+			case script_value_type::jai_float_type: return static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+			case script_value_type::jai_bool_type: return static_cast<uint8_t>(script_value::TYPEID_BOOL);
+			case script_value_type::jai_string_type: return static_cast<uint8_t>(script_value::TYPEID_STRING);
+			default: return 0xFF;
+		}
+	}
+
+	// The declared referent of a `T& p` parameter (the parser keeps T and the reference flag apart; a `var&` spells T as
+	// var), null for a by-value one
+	inline const type_info* parameter_declared_ref(const parameter& p) {
+		if (!p.is_reference || !p.type) { return nullptr; }
+		const type_info* t = p.type->base_type == script_value_type::jai_reference_type ? p.type->element_type().get() : p.type.get();
+		return declared_ref_kind(t) ? t : nullptr;
+	}
+
 	inline bool is_prefix_incdec(const expression* e) {
 		if (e->get_type() != node_type::unary_expr) { return false; }
 		const auto* u = static_cast<const unary_expr*>(e);

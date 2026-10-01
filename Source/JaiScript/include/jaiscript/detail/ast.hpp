@@ -103,6 +103,9 @@ namespace jai {
         // (bare-identifier ref argument / ref-decl source), so value binding boxes its
         // storage into a cell (see reference_holder cell mode)
         bool ref_escaping = false;
+        // Parser escape analysis for a `T& p` parameter: its reference reaches another binding (a call argument), so the call
+        // marks it with T (detail::ref_declare) for the bindings that cannot see the name
+        bool declared_ref_escapes = false;
         mutable uint64_t symbol_id = UINT64_MAX;  // Cached symbol ID for optimization
         mutable size_t slot_index = SIZE_MAX;     // Slot index for fast local access (SIZE_MAX = not assigned)
         // A reference parameter the body never writes through takes a temporary
@@ -229,6 +232,11 @@ namespace jai {
         // local, a parameter, a program-level declaration of this unit); false for reference declarations and
         // for names the unit does not declare. A reference bound to such a name dereferences a cell, never a getter.
         bool names_known_value = false;
+        // Parser resolution: the name is a slot-resident `T& name = e;` declaration with a concrete T (Dev ruling 2026-09-30:
+        // the declared type governs a store through it); the kind byte is the storage index a value of T's kind has, 0xFF
+        // when every store runs T's table (detail::declared_ref_kind)
+        type_info* declared_ref = nullptr;
+        uint8_t declared_ref_kind = 0;
         // Field proof (bare this-field read/write inside a method): the receiver's certain class
         // object, its flat field slot, the field_shape_epoch at stamp time, the declared type and
         // whether a write may bypass the accessor ladder. Raw pointers like mcache_*: script
@@ -815,6 +823,9 @@ namespace jai {
         // Parser escape analysis: the variable may be bound by reference, so its
         // declaration boxes the value into a cell (storage IS the cell from birth)
         bool ref_escaping = false;
+        // Parser resolution: `T& name = x;` over a value declared T already (int& r = n with int n): the storage applies T's
+        // table itself, so the declared type adds nothing at the stores or the binding
+        bool declared_ref_storage_enforced = false;
         size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = global/class member)
 
         // Construction-time classification for both backends' decl fast path

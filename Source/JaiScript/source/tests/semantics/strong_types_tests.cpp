@@ -2066,6 +2066,30 @@ public:
             check_both("function f() -> int { var v = 1; int& r = v; r = 3.5; return v; } to_string(f())", "3", "a function's slot local");
             check_both("var v = 1; float& r = v; r += 1; var w = 1; float& s = w; s++; type_of(v) + \":\" + to_string(v) + \",\" + type_of(w) + \":\" + to_string(w)", "float:2.0,float:2.0", "a float& over an int: the result takes the declared kind");
             check_both("var v = 1; int& r = v; r += 2; r *= 3; r++; type_of(v) + \":\" + to_string(v)", "int:10", "matching kinds take the storage's own path");
+            // a function's `T& name` is decided at its stores from the name; one whose reference reaches another binding carries
+            // the declared type with it, so every route agrees
+            check_both("function f() -> string { var v = 1; int& q = v; q = 2.5; return type_of(v) + to_string(v); } f()", "int2", "a slot-resident int& over a var");
+            check_both("function f() -> string { var v = 1; int& q = v; q += 0.5; v = 1.5; q++; return type_of(v) + to_string(v); } f()", "int2", "compound and ++ through a slot-resident int&");
+            check_both("function g(var& p) { p = 2.5; } function f() -> string { var v = 1; int& q = v; g(q); return type_of(v) + to_string(v); } f()", "int2", "passed on to a var& parameter");
+            check_both("function f() -> string { var v = 1; int& q = v; auto& r = q; r = 2.5; return type_of(v) + to_string(v); } f()", "int2", "aliased by auto&");
+            check_both("function f() -> string { var v = 1; int& q = v; var h = [&]() { q = 2.5; }; h(); return type_of(v) + to_string(v); } f()", "int2", "captured by reference");
+            check_both("function f() -> string { var v = 1; var w = 1; int& q = v; (true ? q : w) = 2.5; return type_of(v) + to_string(v); } f()", "int2", "an arm of a conditional target");
+            check_both("function f() -> string { var v = 1; float& q = v; q = 2; q += 1; return type_of(v) + to_string(v); } f()", "float3.0", "a slot-resident float& over a var holding an int");
+        });
+
+        test("a_reference_parameter_stores_by_its_declared_type", [this, check_both]() {
+            // Dev ruling 2026-09-30: `void f(int& p)` over a var stores ints, decided at the stores from the parameter's declared type
+            check_both("function f(int& p) { p = 2.5; } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:2", "a converting store");
+            check_both("function f(int& p) { p += 0.5; p++; } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:2", "compound and ++");
+            check_both("function f(int& p) { p = p + 1; p += 2; p++; } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:5", "matching kinds");
+            check_both("function f(float& p) { p = 2; p += 1; } var v = 1.5; f(v); type_of(v) + \":\" + to_string(v)", "float:3.0", "an int stored through float& into a var");
+            check_both("class Cnt { int n = 0; function operator=(int x) { n = x * 10; } } function f(Cnt& c) { c = 3; } var c = Cnt(); f(c); to_string(c.n)", "30", "a class's operator=");
+            check_both("function f(var& p) { p = 2.5; } function g(auto& p) { p = \"s\"; } var v = 1; f(v); var w = 1; g(w); type_of(v) + \",\" + type_of(w)", "float,string", "var& and auto& keep the var");
+            check_both("function g(var& q) { q = 2.5; } function f(int& p) { g(p); } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:2", "passed on to a var& parameter");
+            check_both("class K { void set(int& p) { p = 7.9; } } var v = 1; K().set(v); type_of(v) + \":\" + to_string(v)", "int:7", "a method's parameter");
+            check_both("function f(int& p) { p = p + 1; } function h() -> int { int n = 1; f(n); f(n); return n; } to_string(h())", "3", "a typed local argument");
+            check_both("function f(int& p) { p = 2.5; } function h() -> string { var w = 1; f(w); return type_of(w) + to_string(w); } h()", "int2", "a var local argument");
+            check_both("function f(int& p) { var g = [&]() { p = 4.5; }; g(); } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:4", "captured by reference");
         });
 
         test("typed_field_set_field_cpp_api", [this]() {

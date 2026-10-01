@@ -784,6 +784,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
 		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
 #endif
 		if (p.is_reference && p.slot_index != SIZE_MAX) { chunk_->reference_slots.push_back(static_cast<uint32_t>(p.slot_index)); }   // its load dereferences the caller's binding, possibly through a getter
+		if (const type_info* declared = p.slot_index != SIZE_MAX ? detail::parameter_declared_ref(p) : nullptr) { note_slot_declared_ref(p.slot_index, declared); }
 	}
 	{
 		body_walker walker;
@@ -6873,16 +6874,37 @@ void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_dec
 					: ident->names_known_value;
 				if (plain) { callable_.plain_refs[static_cast<uint32_t>(decl->slot_index)] = decl->name_id; std::erase(chunk_->reference_slots, static_cast<uint32_t>(decl->slot_index)); }
 			}
-			emit(opcode::op_decl_ref_ident, add_node(decl), add_symbol(ident->symbol_id));
+			emit(opcode::op_decl_ref_ident, add_node(decl), add_symbol(ident->symbol_id), declared_ref_at_bind(decl.get()));
 		} else {
 			compile_expression(decl->initializer);
-			emit(opcode::op_decl_ref_value, add_node(decl));
+			emit(opcode::op_decl_ref_value, add_node(decl), 0, declared_ref_at_bind(decl.get()));
+		}
+		if (callable_.active && decl->slot_index != SIZE_MAX && !decl->declared_ref_storage_enforced) {
+			note_slot_declared_ref(decl->slot_index, decl->type->element_type().get());
 		}
 		return;
 	}
 
 	if (decl->initializer) { compile_decl_value(decl, decl->initializer); return; }
 	emit(opcode::op_decl_var, add_node(decl), 0, 0);
+}
+
+void vm_compiler::note_slot_declared_ref(size_t slot, const type_info* referent) {
+	const uint8_t kind = detail::declared_ref_kind(referent);
+	if (!kind) { return; }
+	if (chunk_->slot_declared_kinds.size() <= slot) {
+		chunk_->slot_declared_kinds.resize(slot + 1, 0);
+		chunk_->slot_declared_refs.resize(slot + 1, nullptr);
+	}
+	chunk_->slot_declared_kinds[slot] = kind;
+	chunk_->slot_declared_refs[slot] = const_cast<type_info*>(referent);
+}
+
+// `T& name = e;` with a concrete T marks its reference at the binding only when the name does not decide its stores: no
+// frame slot holds it, or its reference reaches another binding (ref_escaping)
+uint32_t vm_compiler::declared_ref_at_bind(const variable_decl* decl) const {
+	if (!decl->type || decl->declared_ref_storage_enforced || !detail::declared_ref_kind(decl->type->element_type().get())) { return 0; }
+	return callable_.active && decl->slot_index != SIZE_MAX && !decl->ref_escaping ? 0u : 1u;
 }
 
 // The declaration's value lands by the declaration's own rule: the move row for an identifier or a literal, the fused

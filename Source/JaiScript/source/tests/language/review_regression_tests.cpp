@@ -5401,6 +5401,8 @@ public:
                    " auto d = D(); to_string(d.get());", "1", "a base method reads its own class's static, not a same-named subclass static");
             expect("class B { static int n = 1; } class D : B { static int m = 2; void touch() { m += n; } } class E : D {}"
                    " auto e = E(); e.touch(); to_string(D::m);", "3", "an inherited method run on a grandchild reads and stores its class's statics");
+            expect(defs + " auto d = Derived(); to_string(Derived::count) + \" \" + to_string(Derived::seed());", "1 101", "a base static and static method through the subclass name");
+            expect(defs + " Derived::count = 5; Derived::count += 1; to_string(Base::count);", "6", "a base static stored through the subclass name");
         });
 
         test("builtins_see_through_element_references", [this, run_both]() {

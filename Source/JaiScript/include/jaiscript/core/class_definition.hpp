@@ -1008,6 +1008,11 @@ public:
         return nullptr;
     }
 
+    script_value static_method_in_chain(uint64_t id) {
+        const script_value* found = find_static_method_in_chain(id);
+        return found ? *found : script_value::make_null(engine_);
+    }
+
     std::vector<std::string_view> get_static_field_names() const {
         std::vector<std::string_view> names;
         names.reserve(static_fields_.size());

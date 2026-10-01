@@ -460,8 +460,8 @@ public:
                 engine->execute("Base b = Base(); b.method();");
             });
 
-            // Derived::method() - static methods are NOT inherited (C++ semantics)
-            // Derived doesn't have its own static method, so this should fail
+            // Derived::method() - Derived's instance method hides Base's static (C++ name hiding),
+            // so the qualified call names no static
             check_throws([&]() {
                 engine->execute("Derived::method();");
             });

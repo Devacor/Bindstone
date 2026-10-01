@@ -108,21 +108,23 @@ convention.</p>
 
 auto other = jai::engine::make();                 // a DIFFERENT engine (other process, other run)
 jai::stdlib::register_all(other);
-other-&gt;add_function(&quot;host_bonus&quot;, ...);
+other-&gt;add_function(&quot;host_bonus&quot;, [](jai::script_int base) -&gt; jai::script_int { return base + 7; });
+other-&gt;execute(&quot;var acc = 0;&quot;);
 auto loaded = other-&gt;jaibite_load_bytes(bytes);   // or other-&gt;jaibite_load(path)
-loaded.execute();</code></pre></div>
-<p>A bite saved from one engine (107 bytes for the demo script) loads into a fresh engine and
-runs, using the <em>loading</em> engine&#x27;s registrations (a <code>host_bonus</code> returning +7 there
-produced <code>7</code>).</p>
+loaded.execute();                                 // 7</code></pre></div>
+<p>A bite saved from one engine (a hundred-odd bytes for the demo script) loads into a fresh engine
+and runs, using the <em>loading</em> engine&#x27;s registrations and globals: the <code>host_bonus</code>
+registered there returns <code>7</code>.</p>
 <p>What is serialized is the <strong>parsed AST, never the compiled chunk</strong>. A loaded bite
 recompiles lazily like a fresh one. Loading <strong>re-interns every symbol and type name into the
 loading engine</strong>, which is exactly why one <code>.jaibite</code> file serves any engine while live
 bites serve only their own. <code>save_bytes()</code> exists specifically for host VFS/pack-file routing.
 <code>jaibite_load*</code> throws <code>jai::runtime_error</code> on a missing file, bad format, version
-mismatch, or corrupt data.</p>
+mismatch, or corrupt data (<code>jaibite: failed to open file: level.jaibite</code>,
+<code>jaibite: truncated header</code>, ...).</p>
 <p>The format is <strong>versioned</strong>, and the number moves whenever the
 parser gains a node, so a bite is readable only by builds that share its format version. An explicit
-<code>jaibite_load*</code> of an older file throws (<code>unsupported format version 9 (expected 20)</code>);
+<code>jaibite_load*</code> of a file from another version throws (<code>jaibite: unsupported format version 9 (expected 34)</code>);
 a stale <em>sibling</em> in the automatic disk cache is simply reparsed and rewritten, silently. Practical
 rule: ship bites from the same build you ship the engine from, and never hand-carry a
 <code>.jaibite</code> across versions.</p>
@@ -138,10 +140,21 @@ design intention.</p>
 plain global function registrations (with an arity-class marker), classes, and template types.
 <code>save_bytes()</code> stamps it into the header; <code>jaibite_load*</code> compares it against the
 loading engine and sets <code>bite.registration_mismatch()</code> on difference.</p>
-<p><strong>Advisory only.</strong> A mismatched bite still loads and runs; errors surface at
-<code>execute()</code> only if the script actually touches the missing registration:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto bare = jai::engine::make();                  // no host_bonus registered
+<p>The flag itself is advisory; what a mismatch costs is a fresh check. The bite&#x27;s checked-clean
+stamp is trusted only under a matching fingerprint (below), so under strict checking (the default) a
+mismatched bite is re-checked against the loading engine at load, and a name the loading engine does
+not have fails there, before anything runs. Under <code>warn</code> or <code>off</code> the bite loads
+and runs, and the error surfaces at <code>execute()</code> only if the script actually touches the
+missing registration:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// compiled and run against the library
+auto bare = jai::engine::make();                  // no host_bonus registered
 jai::stdlib::register_all(bare);
+bare-&gt;execute(&quot;var acc = 0;&quot;);
+bare-&gt;jaibite_load_bytes(bytes);                  // strict: throws jai::static_check_error
+// static check failed:
+// &lt;script&gt;:1:7: error: use of undeclared identifier &#x27;host_bonus&#x27;
+
+bare-&gt;static_checking(jai::check_mode::warn);
 auto risky = bare-&gt;jaibite_load_bytes(bytes);
 risky.registration_mismatch();                    // true
 risky.execute();                                  // throws &quot;Undefined variable &#x27;host_bonus&#x27;&quot;</code></pre></div>

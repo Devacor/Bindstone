@@ -199,11 +199,10 @@ object outlives the engine). One engine serves one thread at a time. Two engines
 locks, because nothing is global.</p>
 <p>Passing a bound property by reference follows the spelling: <code>gate.level</code> or, inside a method of
 a script class that derives <code>Spawner</code>, <code>this.level</code> handed to a <code>&amp;</code>
-parameter binds the property itself, so the callee's writes land in the C++ member. The bare name has no cell
-to alias: inside such a method a bare <code>level</code> reads and stores through the accessors like
-<code>this.level</code>, but <code>[=]</code> and <code>[&amp;]</code> both snapshot it, and <code>f(level)</code>
-into a <code>&amp;</code> parameter is the error <code>Cannot take reference of undefined variable</code>,
-exactly as for a method name.</p>
+parameter binds the property itself, so the callee's writes land in the C++ member. Inside such a method a
+bare <code>level</code> is the same property: it reads and stores through the accessors like
+<code>this.level</code>, and <code>f(level)</code> into a <code>&amp;</code> parameter writes back into it. A
+<code>[=]</code> lambda copies its value at creation; a <code>[&amp;]</code> lambda reads the live property.</p>
 
 <h2 id="reflected">Reflected<a class="hlink" href="#reflected" aria-label="link">&#8203;</a></h2>
 <p>Job two: reflected. The same declaration is a runtime reflection surface. This is what editor inspectors and
@@ -321,7 +320,18 @@ rules, the <code>migrate</code> hook, and the it-always-succeeds contract are in
 <p>Under the registrar sits <code>jai::dynamic_binder&lt;T&gt;</code>
 (<code>include/jaiscript/core/dynamic_binder.hpp</code>), the fluent builder you can also drive directly for
 types that aren't <code>property_owner</code>s. The classic value-type example:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::dynamic_binder&lt;Vec2&gt;(*eng, "Vec2")
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Vec2 {
+    double x = 0, y = 0;
+    Vec2() = default;
+    Vec2(double x, double y) : x(x), y(y) {}
+    double length() const { return std::sqrt(x * x + y * y); }
+    Vec2&amp; scale(double k) { x *= k; y *= k; return *this; }
+    Vec2&amp; translate(double dx, double dy) { x += dx; y += dy; return *this; }
+    Vec2 operator+(const Vec2&amp; o) const { return {x + o.x, y + o.y}; }
+    bool operator==(const Vec2&amp; o) const { return x == o.x &amp;&amp; y == o.y; }
+};
+
+jai::dynamic_binder&lt;Vec2&gt;(*eng, "Vec2")
     .constructor&lt;&gt;()
     .constructor&lt;double, double&gt;()             // overloaded ctors resolve by arity + type
     .method("length", &amp;Vec2::length)
@@ -345,14 +355,14 @@ print("eq {}", Vec2(1.0, 2.0) == Vec2(1.0, 2.0));
 print("neq {}", Vec2(1.0, 2.0) != Vec2(9.0, 2.0));   // != falls back to negated ==
 print("axes {}", Vec2::axes());
 print("dot {}", Vec2::dot(Vec2(1.0, 2.0), Vec2(3.0, 4.0)));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">length 5.000000
-sum (4.000000, 6.000000)
-chain 4.000000
-after write 30.265492
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">length 5.0
+sum (4.0, 6.0)
+chain 4.0
+after write 30.265491900843113
 eq true
 neq true
 axes 2
-dot 11.000000</code></pre></div>
+dot 11.0</code></pre></div>
 <p>Two behaviors in that transcript deserve a sentence each. The chain
 <code>Vec2(1,1).scale(3).translate(1,0).x</code> runs entirely on C++ temporaries: a method returning
 <code>T&amp;</code> into its receiver stays valid because the bound receiver is kept alive across the chain.
@@ -366,8 +376,8 @@ The idiom is safe by construction, not by luck. And <code>!=</code> worked witho
 If you register none, <code>build()</code> adds a default constructor for default-constructible types.</li>
 <li><code>.method(name, &amp;T::fn)</code>: member function pointer, const or not.</li>
 <li><code>.method(name, lambda)</code>: a lambda whose first parameter is <code>T&amp;</code> or
-<code>const T&amp;</code> becomes a method (that parameter is <code>self</code>); without it, a method that
-ignores the instance. Same-arity overloads of one name resolve by C++ parameter signature: registering
+<code>const T&amp;</code> becomes a method (that parameter is <code>self</code>). The first parameter must be
+the receiver: a function that ignores the instance is a <code>.static_method</code>. Same-arity overloads of one name resolve by C++ parameter signature: registering
 <code>set(double, double)</code> after <code>set(int64_t, int64_t)</code> adds an overload rather than
 clobbering it. Passing a member <em>data</em> pointer here is a compile error that tells you to use
 <code>.property()</code>. The ordinary call and the VM&#x27;s direct lane invoke one copy of the lambda, so a
@@ -394,8 +404,10 @@ pairs; pass <code>nullptr</code> as the setter for read-only.</li>
 registered yet throws at registration time with a fix-it message; this tag acknowledges a deliberate circular
 dependency and skips the check. The classic case is self-reference: <code>class Node { std::shared_ptr&lt;Node&gt; next; }</code>
 binds <code>next</code> before <code>Node</code> itself is registered.</li>
-<li><code>.static_property(name, &amp;var)</code> / <code>.static_property(name, getter, setter)</code>:
-class-level values.</li>
+<li><code>.static_property(name, &amp;var)</code>: a class-level value scripts read and assign as
+<code>Vec2::name</code>. It starts from <code>var</code>&#x27;s value at registration and is the class&#x27;s own
+copy from then on: script stores do not reach <code>var</code> and later C++ writes are not seen. For a live
+C++ variable use <code>add_global_ref</code>.</li>
 <li><code>.base_class&lt;Base&gt;()</code>: inheritance edge. Methods and properties of the base become
 callable on the derived, virtual dispatch preserved, and the polymorphic-load type check learns that a
 <code>Base</code> slot may hold this type. <code>static_assert</code>-guarded; diamond inheritance throws.</li>
@@ -540,6 +552,50 @@ taken by a different type simply waits for its own registration, exactly as befo
 <code>super(...)</code> calling the bound constructor) were demonstrated in the hot-reload section. That
 direction works with zero extra registration.</p>
 
+<h2 id="plain-structs-and-templates-static-binders">Plain structs and templates: static binders<a class="hlink" href="#plain-structs-and-templates-static-binders" aria-label="link">&#8203;</a></h2>
+<p>A plain struct or a class template can carry its binding as a compile-time declaration beside the type, at
+namespace scope outside any namespace: <code>JAI_STATIC_BINDER(Type, "Name", ...)</code> for a type,
+<code>JAI_TEMPLATE_BINDER(Template, "Name", ...)</code> for every instantiation of a one-parameter template
+(<code>JAI_TEMPLATE_BINDER_2</code> for two). The chain inside takes <code>.property</code> and
+<code>.method</code>, written against <code>T</code> in a template binder. Nothing reaches an engine until the
+host asks for the instantiations it wants:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/static_binder.hpp&gt;
+#include &lt;jaiscript/core/static_binder_impl.hpp&gt;
+#include &lt;jaiscript/core/template_binder.hpp&gt;
+
+struct Point { double x = 0, y = 0; double sum() const { return x + y; } };
+JAI_STATIC_BINDER(Point, "Point",
+    .property("x", &amp;Point::x)
+    .property("y", &amp;Point::y)
+    .method("sum", &amp;Point::sum)
+);
+
+template &lt;typename T&gt; struct Box { T value{}; T get() const { return value; } };
+JAI_TEMPLATE_BINDER(Box, "Box",
+    .property("value", &amp;Box&lt;T&gt;::value)
+    .method("get", &amp;Box&lt;T&gt;::get)
+);
+
+eng-&gt;bind_static_types&lt;Point, Box&lt;int64_t&gt;, Box&lt;double&gt;&gt;();   // or bind_static_type&lt;T&gt;() one at a time</code></pre></div>
+<div class="codeblock cb-jai" data-host="Point / Box static binders"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">Point p;
+p.x = 1.5;
+p.y = 2.0;
+print("sum {}", p.sum());
+Box&lt;int&gt; b;
+b.value = 4;
+Box&lt;float&gt; f;
+f.value = 2.5;
+Box&lt;int32&gt; w;            // Box&lt;int32_t&gt;, bound with Box&lt;int64_t&gt;
+print("{} {} {}", b.get(), f.get(), w.get());
+print(type_of(b), " ", type_of(f), " ", type_of(w));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">sum 3.5
+4 2.5 0
+Box&lt;int&gt; Box&lt;float&gt; Box&lt;int32&gt;</code></pre></div>
+<p>An instantiation is named the way a script spells it, so <code>Box&lt;int64_t&gt;</code> is
+<code>Box&lt;int&gt;</code> and <code>Box&lt;double&gt;</code> is <code>Box&lt;float&gt;</code>; binding one width
+of a numeric argument binds its 32/64-bit sibling as well (<code>Box&lt;int32&gt;</code> above). The naming rules
+are the last two items of the next section. The type gets a default constructor; for constructor overloads,
+operators, base classes or signals use <code>dynamic_binder</code>.</p>
 <h2 id="what-this-doesn-t-do-and-what-to-use-instead">What this doesn't do (and what to use instead)<a class="hlink" href="#what-this-doesn-t-do-and-what-to-use-instead" aria-label="link">&#8203;</a></h2>
 <ul>
 <li><strong>Auto-binding covers primitive, string, and signal properties.</strong> <code>JAI_PROPERTY</code>

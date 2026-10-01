@@ -1541,6 +1541,22 @@ std::optional<checked_result<bool>> vm_backend::object_equality_via_method(const
 	return std::nullopt;
 }
 
+// KEEP BYTE-PARALLEL with interpreter::object_inequality_via_method
+std::optional<checked_result<bool>> vm_backend::object_inequality_via_method(const script_value& left, const script_value& right) {
+	if (parallel_worker_ || !left.is_object() || right.is_null() || left.type() != right.type()) { return std::nullopt; }
+	auto target = resolve_member_target(left);
+	if (!target) { return std::nullopt; }
+	script_value method_val = target.method(op_bang_equal_id_);
+	if (!method_val.is_function()) { return std::nullopt; }
+	auto result = make_bound_method(left, method_val).as_function()(std::vector<script_value>{right});
+	if (!result) {
+		if (is_unwinding_) { return checked_result<bool>(false); }
+		return checked_result<bool>(result.error_value());
+	}
+	if (result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
+	return std::nullopt;
+}
+
 std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 	// Safe-mode workers: no operator dispatch (increment B); callers' type-mismatch
 	// fallback is loud, so no divergence gate is needed here
@@ -2841,6 +2857,10 @@ checked_result<script_value> vm_backend::handle_not_equal(const script_value& le
 			}
 		}
 		return script_value(!is_expired, engine_);
+	}
+	if (auto custom = object_inequality_via_method(left, right)) {
+		if (!*custom) { return custom->error_value(); }
+		return script_value(custom->value(), engine_);
 	}
 
 	auto eq_result = handle_equal(left, right);

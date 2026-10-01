@@ -274,6 +274,7 @@ public:
 		call_argument_capture();
 		simplification_audit_fixes();
 		rulings_2026_09_28();
+		rulings_2026_10_01();
 		handle_field_admission();
 		reentrant_destructors_and_operand_order();
 		handle_admission();
@@ -2630,6 +2631,70 @@ private:
 		reflect_bind();
 		field_reference_stores();
 		nan_comparisons();
+	}
+
+	// Dev's rulings of 2026-10-01
+	void rulings_2026_10_01() {
+		comparison_rewriting();
+	}
+
+	void comparison_rewriting() {
+		test("a_class_with_only_spaceship_gets_the_four_relational_operators", [this]() {
+			// C++20 rewriting: a < b is (a <=> b) < 0, a <= b is (a <=> b) <= 0, a > b is (a <=> b) > 0, a >= b is (a <=> b) >= 0;
+			// the class chain answers it (a subclass inherits), a float result compares with zero too
+			expect("rewritten relational", R"(
+				class V { int n = 0; V(int x) { n = x; } int operator<=>(V o) { return n < o.n ? -1 : n > o.n ? 1 : 0; } }
+				class D : V { D(int x) : super(x) {} }
+				class G { float n = 0.0; G(float x) { n = x; } float operator<=>(G o) { return n - o.n; } }
+				V a = V(1); V b = V(2);
+				string rel = "" + (a < b) + " " + (a <= b) + " " + (a > b) + " " + (a >= b) + " " + (b > a) + " " + (a <= V(1)) + " " + (a >= V(1)) + " " + (a < V(1));
+				string sub = "" + (D(3) < D(4)) + " " + (D(3) >= D(4));
+				string fl = "" + (G(0.5) < G(0.75)) + " " + (G(0.75) > G(0.5)) + " " + (G(0.5) >= G(0.5));
+				string branch = "";
+				if (a < b) { branch += "lt"; }
+				if (!(a > b)) { branch += "!gt"; }
+				int k = 0;
+				for (V i = V(0); i < V(3); i = V(i.n + 1)) { k += 1; }
+				rel + "|" + sub + "|" + fl + "|" + branch + " " + k;
+			)", "true true false false true true true false|true false|true true true|lt!gt 3");
+		});
+		test("a_declared_relational_operator_wins_over_the_rewrite", [this]() {
+			// C++20: a non-rewritten candidate beats the rewritten one; only the missing operators come from <=>
+			expect("declared wins", R"(
+				class W { int n = 0; W(int x) { n = x; } int operator<=>(W o) { return n - o.n; } bool operator<(W o) { return true; } }
+				class B { int n = 0; B(int x) { n = x; } bool operator>=(B o) { return false; } }
+				class C : B { C(int x) : super(x) {} int operator<=>(C o) { return n - o.n; } }
+				"" + (W(5) < W(1)) + " " + (W(5) > W(1)) + " " + (W(1) > W(5)) + " " + (W(1) <= W(5)) + "|" + (C(5) >= C(1)) + " " + (C(5) > C(1));
+			)", "true true false true|false true");
+		});
+		test("equality_is_not_synthesized_from_spaceship", [this]() {
+			// C++20: == never comes from a user operator<=>; without operator== a class instance compares memberwise
+			expect("no == from <=>", R"(
+				class Z { int n = 0; Z(int x) { n = x; } int operator<=>(Z o) { return 0; } }
+				"" + (Z(1) == Z(2)) + " " + (Z(1) != Z(2)) + " " + (Z(1) <= Z(2)) + " " + (Z(1) >= Z(2)) + " " + (Z(3) == Z(3)) + " " + (Z(1) <=> Z(2));
+			)", "false true true true true 0");
+		});
+		test("inequality_rewrites_from_equality_and_a_declared_inequality_wins", [this]() {
+			// C++20: a != b is !(a == b) through operator==; a declared operator!= is asked first, where operator== would be
+			// (a class instance against a non-null value of its kind), so x != null stays the null test
+			expect("!= from ==", R"(
+				class E { int n = 0; E(int x) { n = x; } bool operator==(E o) { return true; } }
+				class F { int n = 0; F(int x) { n = x; } bool operator==(F o) { return true; } bool operator!=(F o) { return true; } }
+				class H : F { H(int x) : super(x) {} }
+				F f = F(1); var nul = null;
+				"" + (E(1) != E(2)) + " " + (E(1) == E(2)) + " " + (F(1) != F(1)) + " " + (F(1) == F(1)) + " " + (H(1) != H(2)) + " " + (f != nul) + " " + (f != 5);
+			)", "false true true true true true true", check_mode::warn);
+		});
+		test("a_spaceship_rewrite_raises_what_the_operator_raises", [this]() {
+			// the operator's own error or throw is the comparison's; a result that is no number leaves the invalid-operands text;
+			// a builtin left operand keeps the builtin text (the left operand's class decides, as for every operator)
+			expect("rewrite errors", R"(
+				class T { int n = 0; T(int x) { n = x; } int operator<=>(T o) { if (o.n == 0) { throw "zero"; } return n - o.n; } }
+				class S { int n = 0; S(int x) { n = x; } string operator<=>(S o) { return "x"; } }
+				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				t([]() { return T(1) < T(0); }) + "|" + t([]() { return T(1) < T(2); }) + "|" + t([]() { return S(1) < S(2); }) + "|" + t([]() { return 1 < T(2); });
+			)", "zero|true|Invalid operands for < operator|Invalid operands for < operator", check_mode::warn);
+		});
 	}
 
 	void nan_comparisons() {

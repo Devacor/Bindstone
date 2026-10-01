@@ -2625,6 +2625,23 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
     return std::nullopt;
 }
 
+// A declared operator!= wins over !(a == b) (C++20, Dev ruling 2026-10-01), asked where operator== would be: a class
+// instance against a non-null value of its kind. KEEP BYTE-PARALLEL with vm_backend::object_inequality_via_method
+std::optional<checked_result<bool>> interpreter::object_inequality_via_method(const script_value& left, const script_value& right) {
+    if (parallel_worker_ || !left.is_object() || right.is_null() || left.type() != right.type()) { return std::nullopt; }
+    auto target = resolve_member_target(left);
+    if (!target) { return std::nullopt; }
+    script_value method_val = target.method(op_bang_equal_id_);
+    if (!method_val.is_function()) { return std::nullopt; }
+    auto result = create_bound_method(left, method_val).as_function()(std::vector<script_value>{right});
+    if (!result) {
+        if (is_unwinding_) { return checked_result<bool>(false); }
+        return checked_result<bool>(result.error_value());
+    }
+    if (result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
+    return std::nullopt;
+}
+
 // Generic helper for comparison operators (<, <=, >, >=) via custom methods
 std::optional<checked_result<bool>> interpreter::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     // Safe-mode workers: no operator dispatch (increment B; type-mismatch fallback is loud)

@@ -2884,3 +2884,16 @@ chapter, 02/04/05/07/09 = guide chapters. Pins are relative to `Source/JaiScript
 | RL2-34 | `obj.method` without a call is an error (user, builtin and host methods; the strict checker at load for a script class's method); `reflect::bind(obj, "name")` binds a class instance, handle or host object; a value type's methods take a lambda | Dev ruling 2026-09-30 (replacing R-q5) | spec:a_method_read_without_a_call_is_an_error; spec:reflect_bind_binds_a_method_to_its_object | no | pinned |
 | RL2-35 | A store through a field reference (plain and compound) runs the field's table and text | Dev ruling 2026-09-30 (R-q7); simplification audit F-4 | spec:a_store_through_a_field_reference_runs_the_fields_table | no | pinned |
 | RL2-36 | Ordinary NaN comparisons follow IEEE; public `<=>` groups NaNs last and signed zeros equivalent; a map finds a NaN key again | Builtin-order consistency, 2026-10-02 (supersedes R-q8 spaceship restriction) | spec:nan_relations_are_ieee_and_spaceship_has_a_total_order | no | pinned |
+
+## 10. The rulings of 2026-10-01
+
+Pins are relative to `Source/JaiScript/source/tests`; `spec:` is `semantics/spec_conformance_tests.cpp`. Every row runs on the
+interpreter and the VM, with type proofs on and off.
+
+| ID | Claim | Source | Pinned by | Fuzzer | Verdict |
+|---|---|---|---|---|---|
+| RL3-1 | A class whose chain declares `operator<=>` and no `operator<` / `<=` / `>` / `>=` gets them by C++20 rewriting: `a < b` is `(a <=> b) < 0` and so on, an int or float result compared with zero (a subclass inherits it) | Dev ruling 2026-10-01; C++20 [over.match.oper] | spec:a_class_with_only_spaceship_gets_the_four_relational_operators | no | pinned |
+| RL3-2 | A relational operator the chain declares wins over the rewrite; only the missing ones come from `<=>` | Dev ruling 2026-10-01; C++20 | spec:a_declared_relational_operator_wins_over_the_rewrite | no | pinned |
+| RL3-3 | `==` never comes from a user `operator<=>`: without `operator==` a class value compares memberwise | Dev ruling 2026-10-01; C++20 | spec:equality_is_not_synthesized_from_spaceship | no | pinned |
+| RL3-4 | `a != b` is `!(a == b)` through `operator==`; a declared `operator!=` is asked first, where `operator==` would be (a class instance against a non-null value of its kind) | Dev ruling 2026-10-01; C++20 | spec:inequality_rewrites_from_equality_and_a_declared_inequality_wins | no | pinned |
+| RL3-5 | A rewritten comparison raises what `operator<=>` raises; a result that is no number, or a builtin left operand, keeps `Invalid operands for < operator` | Dev ruling 2026-10-01 | spec:a_spaceship_rewrite_raises_what_the_operator_raises | no | pinned |

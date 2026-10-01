@@ -415,6 +415,7 @@ engine stays usable", not by `check_throws`.
   generic call, the vm's `park_callee`, `exec_probe_member`, the stack and member call ops), so ordinary calls compile and
   run unchanged; a `function` slot still takes only a function or null (wrap an instance in a lambda). Unary `+` is the
   number itself, a char promotes.
+- **C++20 comparison rewriting** (Dev ruling 2026-10-01): with no `operator<`/`<=`/`>`/`>=` in the chain, `a < b` is `(a <=> b) < 0` etc. (`object_comparison_via_method`, `spaceship_rewritten` in `core/overload_resolution.hpp`); a declared one wins; `!=` asks a declared `operator!=` (`object_inequality_via_method`, where `==`'s would be asked) before `!(a == b)`; `==` never comes from `<=>`.
 - **Methods are called, not read** (Dev ruling 2026-09-30, replacing R-q5): `obj.method` without a call is an error for user,
   builtin and host methods (`'heal' is a method of Player; call it with player.heal() or bind it with reflect::bind(player,
   "heal")`, a value type's method: `... or wrap the call in a lambda`), raised where a member read would mint a bound method

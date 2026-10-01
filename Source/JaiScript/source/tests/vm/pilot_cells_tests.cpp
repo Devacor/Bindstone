@@ -4109,7 +4109,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- call kept imax") == std::string::npos, "no kept call for imax: " + l);
 		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
-			// Gator Quest's walk_at -> tile_now inside `for (int m = 0; m < MOB_KIND.size(); ++m)`: a loop the first compile refused holds no
+			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second
 			// compile; in a loop that closes the same leaf stays a call (the block's door), and both loops keep their verdicts
 			const std::string prelude =
@@ -4117,7 +4117,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"array<D> DEFS;\n"
 				"array<int> XS = [0, 1, 2, 1, 0, 2];\n"
 				"int after_of(int t) { int a = DEFS[t].after; return a + t; }\n"
-				"int open_sum() { int s = 0; for (int i = 0; i < XS.size(); ++i) { s = s + after_of(XS[i]); } return s; }\n"
+				// a switch in the body is a statement no block takes (an effect at CASE_EQ), so the loop stays refused
+				"int open_sum() { int s = 0; for (int i = 0; i < XS.size(); ++i) { switch (i) { case 9: s = s - 1; } s = s + after_of(XS[i]); } return s; }\n"
 				"int closed_sum(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + after_of(i % 3); } return s; }\n"
 				"for (int k = 0; k < 3; ++k) { D d; d.after = k * 10; DEFS.push(d); }\n";
 			both(prelude + "to_string(open_sum()) + \"|\" + to_string(closed_sum(6));", "66|66", "a leaf in an open loop and in a closed one");

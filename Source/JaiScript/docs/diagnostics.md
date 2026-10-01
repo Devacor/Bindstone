@@ -405,6 +405,14 @@ Each is recognized only in that position, so a script using one of these words a
 | `A map entry binds two names, the key and the value: for (auto [k, v] : m)` | parse error: another count of names |
 | `a structured binding takes a map's entries, its key and value: cannot bind 'array' to [k, v]` | checker (load error) when the container's static type is not a map; a dynamic container that is not a map raises the member text of `.first` when the loop runs |
 
+## Host call failures
+
+A `checked_result` host call (`fn.as_function()(args)`, a method or static method value, `coroutine_handle::resume`) carries
+every failure in its result (Dev ruling 2026-10-01): a run-time error keeps its own code and text; an uncaught script throw, a
+missing module or a failed reload comes back as `evaluation_failed` with the text `execute()` would throw (the thrown text,
+`Could not find include/import file`, the check listing). `convert_script_function` refuses a value that is neither a function
+nor null: `Cannot convert a value that is not a function to a std::function callback`.
+
 ## Includes inside a function body
 
 A literal include inside a function body is the function's own text (Dev ruling 2026-10-01): a class the included file

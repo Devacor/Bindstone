@@ -208,6 +208,10 @@ engine.execution_budget(1.0/60);   // wall-clock seconds per host entry (execute
                                    // Checked at loop back-edges + call entry (clock sampled every
                                    // 1024 ticks — no measurable hot-path cost).
 ```
+Host call failure routes (Dev ruling 2026-10-01): a `checked_result` call (`fn.as_function()(args)`, the method/static dispatchers,
+`coroutine_handle::resume`) reports every failure in its result through `engine::checked_host_entry` (uncaught throw, failed
+import/reload included; never throws for script failures); a throwing call (`execute*`, `convert_script_function`'s
+`std::function`) throws for every failure; null converts to an empty `std::function`.
 A reference to an `add_global_ref` variable (`auto& r = hp`, an `int&` parameter; Dev ruling 2026-10-01) stores through the box into C++ (a CELL holding a cpp_bound box: `variable_store`, `assign_through`), the name stays bound.
 
 ---

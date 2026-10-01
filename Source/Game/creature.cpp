@@ -410,7 +410,9 @@ TargetPolicy::~TargetPolicy() {
 
 void TargetPolicy::target(int64_t a_targetId, float a_range, std::function<void(TargetPolicy &)> a_succeed, std::function<void(TargetPolicy &)> a_fail /*= std::function<void(TargetPolicy &)>()*/) {
 	if (!selfCreature->alive()) {
-		a_fail(*this);
+		if (a_fail) {
+			a_fail(*this);
+		}
 	}
         auto a_target = std::dynamic_pointer_cast<ServerCreature>(self()->gameInstance.creature(a_targetId));
         

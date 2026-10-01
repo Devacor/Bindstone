@@ -17,14 +17,15 @@ namespace detail {
 	template<typename R, typename... Args>
 	struct script_function_wrapper<R(Args...)> {
 		static std::function<R(Args...)> wrap(script_value fn) {
+			// a null callback is an empty std::function, as a null function pointer converts in C++; any other non-function is
+			// the conversion's failure
+			if (fn.deref().is_null()) { return {}; }
+			if (!fn.is_function() || !fn.get_engine()) { throw runtime_error("Cannot convert a value that is not a function to a std::function callback"); }
 			return [fn = std::move(fn)](Args... args) -> R {
 				engine* eng = fn.get_engine();
-				if (!eng || !fn.is_function()) {
-					if constexpr (!std::is_void_v<R>) { return R{}; } else { return; }
-				}
 				engine::external_call_guard scope(eng);
-				// A script error is the host call's error: it throws through to the host (a host function called from script
-				// hands it back to the script as that call's runtime error, text included)
+				// Every failure throws to the host (the throwing flavor, Dev ruling 2026-10-01); a host function called from script
+				// hands it back to the script as that call's runtime error, text included
 				std::vector<script_value> values;
 				values.reserve(sizeof...(Args));
 				(values.push_back(eng->make_value(args)), ...);

@@ -50,8 +50,8 @@ checked_result<script_value> coroutine_handle::resume(engine* eng) {
     }
 
     execution_backend* backend = eng->get_execution_backend();
-    if (!backend->is_executing()) { eng->note_host_entry(); }
-    return backend->resume_coroutine(*this);
+    if (backend->is_executing() || backend->is_unwinding()) { return backend->resume_coroutine(*this); }
+    return eng->checked_host_entry([](execution_backend& be, void* self) { return be.resume_coroutine(*static_cast<coroutine_handle*>(self)); }, this);
 }
 
 } // namespace jai

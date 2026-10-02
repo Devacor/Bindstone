@@ -1435,7 +1435,7 @@ public:
             check_both("int x = 10; x -= 2.5; to_string(x)", "7", "int -=");
             check_both("int x = 10; x *= 2.5; to_string(x)", "25", "int *=");
             check_both("int x = 10; x /= 4.0; to_string(x)", "2", "int /= truncates 2.5 -> 2");
-            check_both("int x = 10; x %= 4.5; to_string(x)", "1", "int %= math::fmod then truncate");
+            check_both("int x = 10; x %= 4.5; to_string(x)", "1", "int %= fmod then truncate");
         });
 
         test("compound_truncates_toward_zero", [this, check_both]() {
@@ -1899,9 +1899,9 @@ public:
             check_both("var i = 97; to_string(cast<char>(i)) + \":\" + type_of(cast<char>(i))", "a:char", "int -> char in range");
             check_both("to_string(cast<char>(0) == '\\x00') + \",\" + to_string(cast<char>(255) == '\\xFF')", "true,true", "int -> char range ends");
             check_both("var s = \"a\"; to_string(cast<char>(s)) + \":\" + type_of(cast<char>(s))", "a:char", "one-character string -> char");
-            check_both("to_string(cast<char>(cast<int>('z')) == 'z')", "true", "char -> int -> char math::round trip");
-            check_both("to_string(cast<char>(cast<string>('q')) == 'q')", "true", "char -> string -> char math::round trip");
-            check_both("to_string(cast<int>(cast<char>(200)))", "200", "int -> char -> int math::round trip");
+            check_both("to_string(cast<char>(cast<int>('z')) == 'z')", "true", "char -> int -> char round trip");
+            check_both("to_string(cast<char>(cast<string>('q')) == 'q')", "true", "char -> string -> char round trip");
+            check_both("to_string(cast<int>(cast<char>(200)))", "200", "int -> char -> int round trip");
             check_both("char c = cast<char>(65); to_string(c) + \":\" + type_of(c)", "A:char", "cast<char> is a parse-proven typed store");
             check_both("int code = cast<int>('a'); to_string(code)", "97", "cast<int> of a char into a typed local");
             check_both("var i = 256; var c = \"\"; try { var bad = cast<char>(i); } catch (e) { c = e; } c", "Cannot cast 'int' to 'char'", "int above 255 fails");
@@ -2858,8 +2858,8 @@ public:
             expect("array<array<uint8>> g = [[1, 2], [3]]; g[1].push(255); to_json(g)", "[[1,2],[3,255]]", "nested byte buffers");
             expect(caught("array<array<uint8>> g = [[1]]; int v = 256; g[0].push(v)"), "Cannot store 256 in array<uint8> (0..255)", "a nested byte buffer keeps its range");
             expect("class P { array<uint8> data; } P p; p.data.push(7); p.data.push(200); P q = from_json(to_json(p)); int v = 256; string r = \"none\"; try { q.data.push(v); } catch (e) { r = e; } to_json(q.data) + \" \" + r",
-                   "[7,200] Cannot store 256 in array<uint8> (0..255)", "json math::round trip keeps the declared kind");
-            expect("class P { array<int8> data; } P p; p.data.push(-5); P q = from_binary(to_binary(p)); to_json(q.data)", "[-5]", "binary archive math::round trip");
+                   "[7,200] Cannot store 256 in array<uint8> (0..255)", "json round trip keeps the declared kind");
+            expect("class P { array<int8> data; } P p; p.data.push(-5); P q = from_binary(to_binary(p)); to_json(q.data)", "[-5]", "binary archive round trip");
             expect("array<uint8> b = [1, 2, 3, 4]; parallel_for (auto& x : b) { x = x * 2; } to_json(b)", "[2,4,6,8]", "parallel_for writes a byte buffer in place");
             // a scalar byte is an int; the checker reads literals against the range
             check(run("uint8 x = 5; x", false, true).find("is an array element type only") != std::string::npos, "a scalar uint8 is a parse error");

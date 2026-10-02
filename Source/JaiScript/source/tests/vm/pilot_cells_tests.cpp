@@ -928,7 +928,7 @@ public:
 			both(script, "", "math temps");
 			both(script, "", "math temps, proofs off", false);
 			const std::string vm = run_on(true, script);
-			check_true(vm.rfind("6,31,131,8", 0) == 0, "band, math::clamp, texel and the float expression: " + vm);
+			check_true(vm.rfind("6,31,131,8", 0) == 0, "band, clamp, texel and the float expression: " + vm);
 			check_true(vm.find(",10,throw:") != std::string::npos, "the int forms and the conversion error: " + vm);
 			const std::string interp = run_on(false, script);
 			const size_t tail = vm.rfind(",throw:");

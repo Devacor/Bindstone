@@ -471,7 +471,7 @@ public:
             check_eq((int64_t)INT64_MIN, e->execute("1 << 63").as_int());   // literal spelling too
             check_eq((int64_t)-2, e->execute("auto y = 9223372036854775807; y << 1").as_int());
             auto g = e->execute("auto g = (0x9E3779B9 << 32) | 0x7F4A7C15; g");   // the GLOOM seed idiom
-            check_true(g.as_int() < 0, "shift into the math::sign bit wraps negative, no error");
+            check_true(g.as_int() < 0, "shift into the sign bit wraps negative, no error");
             check_eq((int64_t)0x9E3779B9, e->execute("auto g = (0x9E3779B9 << 32) | 0x7F4A7C15; (g >> 32) & 0xFFFFFFFF").as_int());
             check_eq((int64_t)0x7F4A7C15, e->execute("auto g = (0x9E3779B9 << 32) | 0x7F4A7C15; g & 0xFFFFFFFF").as_int());
         });
@@ -5490,7 +5490,7 @@ public:
             expect("to_json({\"a\": 1, \"b\": [1, 2]}, 0);", "{\"a\":1,\"b\":[1,2]}", "indent 0 is compact");
             expect("to_json(5, 2);", "5", "a scalar is unchanged");
             expect("var v = {\"a\": [1, 2.5, \"s\", true, null], \"m\": {\"x\": {\"y\": 1}}}; to_json(from_json(to_json(v, 2))) == to_json(v);",
-                   "true", "an indented document math::round-trips through from_json");
+                   "true", "an indented document round-trips through from_json");
             expect("class P { int x = 1; array<int> v = [2]; } to_json(P(), 2);",
                    "{\n  \"_type_\": \"P\",\n  \"x\": 1,\n  \"v\": [\n    2\n  ]\n}", "a class instance");
         });

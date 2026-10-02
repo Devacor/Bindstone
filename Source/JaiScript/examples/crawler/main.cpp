@@ -101,9 +101,9 @@ struct turn_perf {
 		if (!enabled || turns == 0) { return; }
 		std::fprintf(stderr,
 			"\n--time over %d key->frame turns (ms):\n"
-			"  turn logic   math::min %7.3f  avg %7.3f  math::max %8.3f\n"
-			"  frame build  math::min %7.3f  avg %7.3f  math::max %8.3f\n"
-			"  console blit math::min %7.3f  avg %7.3f  math::max %8.3f\n"
+			"  turn logic   min %7.3f  avg %7.3f  max %8.3f\n"
+			"  frame build  min %7.3f  avg %7.3f  max %8.3f\n"
+			"  console blit min %7.3f  avg %7.3f  max %8.3f\n"
 			"  total        avg %7.3f\n",
 			turns,
 			logic_min, logic_sum / turns, logic_max,

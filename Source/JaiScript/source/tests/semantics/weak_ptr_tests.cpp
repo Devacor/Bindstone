@@ -844,7 +844,7 @@ public:
             // shared_ptr<T>(args...) forwards args to T's constructor
             // So shared_ptr<LifetimeTracker>(b) tries to call LifetimeTracker(LifetimeTracker_object)
             // This fails because the constructor expects int, not a LifetimeTracker
-            // This naturally prevents the confusing "math::wrap a variable" pattern
+            // This naturally prevents the confusing "wrap a variable" pattern
             try {
                 eng->execute(R"(
                     auto b = LifetimeTracker(42);

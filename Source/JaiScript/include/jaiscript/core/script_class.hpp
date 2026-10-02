@@ -142,7 +142,7 @@ public:
     // C++ implicit construction: a base chain that runs code (a declared constructor or a C++ class above) must be
     // constructed by a class that declares no constructor of its own
     bool base_needs_construction() const {
-        auto parent = get_parent();   // the base super() reaches
+        const class_definition* parent = parent_ptr();   // the base super() reaches
         if (!parent) { return false; }
         if (!parent->is_script_class()) { return true; }
         const auto& script_parent = static_cast<const script_class_definition&>(*parent);

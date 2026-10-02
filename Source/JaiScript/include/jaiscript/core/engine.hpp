@@ -410,6 +410,11 @@ namespace jai {
         // call entry, so straight-line C++ bindings are never interrupted mid-call.
         void execution_budget(double seconds);
         double execution_budget() const;
+        // A clock-free bound beside it for harnesses that must not depend on load: at most `checks` budget checks (each one
+        // per 1024 loop back-edges and call entries) per host entry, then the same terminal budget error. Deterministic per
+        // backend and program; zero (the default) disables it.
+        void execution_step_budget(uint64_t checks);
+        uint64_t execution_step_budget() const;
 
         // Maximum active call depth for each built-in backend: interpreter 256,
         // VM 10000 by default. Configure between executions; depth must be in
@@ -933,6 +938,9 @@ namespace jai {
 
         // Engine-owned script namespace registry (namespace_id -> data); survives across backends
         std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();
+        // Names an enum declaration defined (both backends note them): `E::v` reads the value through the enum's variable
+        void note_enum_name(uint64_t name_id);
+        bool is_enum_name(uint64_t name_id) const;
 
         // Get string symbolizer for interning identifiers
         string_symbolizer* get_symbolizer();
@@ -1461,7 +1469,9 @@ namespace jai {
     // One resolution ladder for include, import, the checker's closure gather and the
     // resolve_path builtin: absolute as given; relative against from_file's folder, then the
     // include paths in order, then the working directory. Canonical spelling on success.
-    checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file);
+    // A miss raises `Failed to open include file: <path>` (`import file` for an import)
+    checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file,
+                                                     bool for_import = false);
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);   // from the executing file
 
     // typeid(engine) taken where engine is complete; archives compare context requests against it.

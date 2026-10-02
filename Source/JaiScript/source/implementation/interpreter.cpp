@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
+#include <jaiscript/detail/enum_value.hpp>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/stdlib/containers.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
@@ -2343,7 +2344,22 @@ void interpreter::init_builtin_methods() {
 // tried against the folder of the file doing the asking (from_file), then each include path
 // in order, then the working directory. The answer is the canonical spelling, which is the
 // key the unit caches and executes under.
-checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file) {
+namespace {
+// The body again on a fresh native stack segment; the depth text when no segment is left (the vm raises the same text, so
+// parity holds whichever bound stops a recursion)
+template <class Body>
+checked_result<script_value> on_fresh_native_stack(detail::native_stack_segments& segments, Body&& body) {
+    std::optional<checked_result<script_value>> result;
+    auto run = [&]() { result.emplace(body()); };
+    using run_t = decltype(run);
+    if (!segments.run([](void* raw) { (*static_cast<run_t*>(raw))(); }, &run) || !result) {
+        return detail::raise_call_depth();
+    }
+    return std::move(*result);
+}
+}
+
+checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file, bool for_import) {
     if (engine_ptr) {
         auto allowed = engine_ptr->require_privilege(privilege::filesystem);
         if (!allowed) { return allowed.error_value(); }
@@ -2384,7 +2400,9 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
         }
         if (rung(p)) return out;
     }
-    return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found), "Could not find include/import file");
+    return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found),
+        for_import ? "Failed to open import file: {0}" : "Failed to open include file: {0}",
+        engine_ptr ? engine_ptr->symbolize(path) : 0);
 }
 
 // The statement forms ask from the file whose code is executing
@@ -4083,6 +4101,10 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         if (!result) {
                             return result.error_value();
                         }
+                        if (want_string_target && !result.value().is_reference() && !is_unwinding_) {   // KEEP BYTE-PARALLEL with the vm
+                            return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target),
+                                detail::by_value_subscript_store_text);
+                        }
                         push_value(std::move(result.value()));
                         return {};
                     }
@@ -4097,6 +4119,10 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         if (!result) {
                             // Function returned error - propagate it up
                             return result.error_value();
+                        }
+                        if (want_string_target && !result.value().is_reference() && !is_unwinding_) {
+                            return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target),
+                                detail::by_value_subscript_store_text);
                         }
                         push_value(std::move(result.value()));
                         return {};
@@ -5770,7 +5796,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                     }
                     if (store_through) {
-                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind));
+                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind, identifier->name));
                     } else {
                         // Parse-proven typed store: an IDENTICAL interned type tag (raw
                         // pointer compare - int/float tags are engine-canonical) makes
@@ -5921,7 +5947,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 };
                 if (store_through) {
                     // This is a reference - assign through it (deep copy the value)
-                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind));
+                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind, identifier->name));
                 } else if (currentVal && currentVal->is_cpp_bound()) {
                     // This is a C++ bound value - use assign_through
                     currentVal->assign_through(value);
@@ -6384,8 +6410,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // Check if it's an object
             if (!dereferenced.is_object()) {
                 // Set exception state instead of throwing
-                active_exception_value_ = make_value(std::string("Cannot assign to member of non-object type"));
-                current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
+                const std::string_view cls = class_named_by_dot_receiver(memberExpr->object.get(), dereferenced, engine_);
+                const std::string text = cls.empty() ? std::string("Cannot assign to member of non-object type")
+                                                     : class_dot_member_text(cls, memberExpr->member);
+                active_exception_value_ = make_value(text);
+                current_exception_ = script_exception(text, memberExpr->location);
                 is_unwinding_ = true;
                 push_value(make_value());
                 return {};
@@ -6880,8 +6909,9 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 // Mark the type as shared_ptr to ensure reference semantics
                 value.set_type_info(decl->type);
                 JAISCRIPT_TRY(define_variable(std::move(value)));
-            } else {
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
+            } else {   // a primitive or a container: family D's declaration shape (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+                return detail::typed_slot_rejection(value, *decl->type,
+                    detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_);
             }
         }
     } else if (is_reference) {
@@ -8351,6 +8381,14 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
             }
+            if (ident_expr && engine_->is_enum_name(name_id)) {   // KEEP BYTE-PARALLEL with the vm
+                if (auto enum_var = environment_->get(name_id); enum_var && enum_var.value().deref().is_map()) {
+                    auto value = detail::enum_scoped_value(enum_var.value().deref().as_map(), name_id, expr->member, expr->member_id, engine_);
+                    if (!value) { return value.error_value(); }
+                    push_value(std::move(value.value()));
+                    return {};
+                }
+            }
             // no namespace and no class of that name: the class is what `C::m` names (docs/diagnostics.md, undefined names)
             return checked_result<void>(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", name_id);
         }
@@ -8895,6 +8933,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     if (!objectValue.is_object()) {
         if (objectValue.is_null()) {
             return checked_result<void>(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
+        }
+        if (const std::string_view cls = class_named_by_dot_receiver(expr->object.get(), objectValue, engine_); !cls.empty()) {
+            const auto [text, symbol] = class_dot_member_error(*string_symbolizer_, parallel_worker_, cls, expr->member);
+            return checked_result<void>(make_error_code(runtime_error_code::member_not_found), text, symbol);
         }
         return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
             scalar_member_message, base_type_ids_[objectValue.type()], expr->member_id);
@@ -12408,6 +12450,8 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));  // [ErrorText] Base class is not a valid class definition
                 }
+            } else if (auto ns_class = detail::namespace_class(*engine_, base_name)) {   // KEEP BYTE-PARALLEL with the vm
+                base_class_def = std::move(ns_class);
             } else {
                 // Try to find a C++ class using the class lookup callback
                 if (class_lookup_callback_) {
@@ -13178,9 +13222,9 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
     std::string resolved_path = std::move(resolve_result.value());
 
     std::string content;
-    if (!engine_ptr->read_include_file(resolved_path, content)) {
-        // [ErrorText] Failed to open include file
-        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
+    if (!engine_ptr->read_include_file(resolved_path, content)) {   // KEEP BYTE-PARALLEL with the vm
+        return checked_result<void>(make_error_code(runtime_error_code::file_not_found), "Failed to open include file: {0}",
+                                    string_symbolizer_->intern(resolved_path));
     }
 
     // Execute the included file. Pass the resolved path so every node in the included
@@ -13506,8 +13550,14 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                              std::optional<detail::call_depth_guard>& initializer_depth,
                                                              size_t delegation_depth,
                                                              std::vector<script_value>* captured_out) {
-    if (delegation_depth > detail::k_max_constructor_delegation_depth || detail::native_stack_low()) {
+    if (delegation_depth > detail::k_max_constructor_delegation_depth) {
         return detail::raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
+    }
+    if (detail::native_stack_low()) [[unlikely]] {
+        return on_fresh_native_stack(stack_segments_, [&]() {
+            return initialize_members(class_def, definition_env, instance, this_value, matching_ctor, args, initializer_depth,
+                                      delegation_depth, captured_out);
+        });
     }
     // Create a regular environment for field initializers and constructor initializer arguments
     // Use the captured definition environment as the parent
@@ -13588,15 +13638,8 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                     if (parent_script_class) {
                         // Find matching parent constructor (fewest defaults used wins)
                         const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
-                        std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the arity match
-                        size_t parent_defaults = SIZE_MAX;
-                        if (!parent_ctor) for (const auto& ctor_ast : parent_ctor_asts) {
-                            if (arity_accepts(ctor_ast->parameters, init_args.size()) &&
-                                ctor_ast->parameters.size() - init_args.size() < parent_defaults) {
-                                parent_ctor = ctor_ast;
-                                parent_defaults = ctor_ast->parameters.size() - init_args.size();
-                            }
-                        }
+                        std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the sole arity match
+                        if (!parent_ctor) { parent_ctor = sole_arity_candidate(parent_ctor_asts, init_args.size()); }
                         if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
                             parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the vm
                         }
@@ -13664,15 +13707,8 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                 // Ancestor is a script class - find matching constructor and add to chain
                                                 // (fewest defaults used wins)
                                                 const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
-                                                std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the arity match
-                                                size_t ancestor_defaults = SIZE_MAX;
-                                                if (!ancestor_ctor) for (const auto& ac : ancestor_ctors) {
-                                                    if (arity_accepts(ac->parameters, ancestor_args.size()) &&
-                                                        ac->parameters.size() - ancestor_args.size() < ancestor_defaults) {
-                                                        ancestor_ctor = ac;
-                                                        ancestor_defaults = ac->parameters.size() - ancestor_args.size();
-                                                    }
-                                                }
+                                                std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the sole arity match
+                                                if (!ancestor_ctor) { ancestor_ctor = sole_arity_candidate(ancestor_ctors, ancestor_args.size()); }
                                                 if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
                                                     ancestor_ctor = ancestor_script->implicit_default_constructor();
                                                 }
@@ -13769,6 +13805,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                             // Parent has no explicit constructors (only default constructor)
                             // and super() called with no arguments - this is valid, nothing to do
                             // The parent fields will be initialized with their default values
+                        } else if (!parent_ctor_asts.empty()) {   // KEEP BYTE-PARALLEL with the vm
+                            return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+                                parent_script_class->get_type_id(), init_args.data(), init_args.size(), engine_, true);
                         } else {
                             if (init_args.empty()) { return detail::no_default_constructor(parent_script_class->get_type_id()); }
                             return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
@@ -13851,18 +13890,11 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
             
             // Find matching constructor in same class (fewest defaults used wins)
             const auto& ctor_asts = class_def->get_constructor_asts();
-            // the delegation target through the one scorer (typed exact > conversion > var), else the arity match
+            // the delegation target through the one scorer (typed exact > conversion > var), else the sole arity match
             std::vector<std::shared_ptr<function_decl>> other_ctors;
             for (const auto& ctor_ast : ctor_asts) { if (ctor_ast != matching_ctor) { other_ctors.push_back(ctor_ast); } }
             std::shared_ptr<function_decl> target_ctor = pick_best_overload(other_ctors, init_args);
-            size_t target_defaults = SIZE_MAX;
-            if (!target_ctor) for (const auto& ctor_ast : ctor_asts) {
-                if (ctor_ast != matching_ctor && arity_accepts(ctor_ast->parameters, init_args.size()) &&
-                    ctor_ast->parameters.size() - init_args.size() < target_defaults) {
-                    target_ctor = ctor_ast;
-                    target_defaults = ctor_ast->parameters.size() - init_args.size();
-                }
-            }
+            if (!target_ctor) { target_ctor = sole_arity_candidate(other_ctors, init_args.size()); }
             
             if (!target_ctor) {
                 return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
@@ -13914,8 +13946,11 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
                                                               const std::vector<script_value>& args) {
     // Initializers execute before call_function owns the constructor's activation.
     // Hand the same depth back before each body call rather than counting it twice.
-    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
         return detail::raise_call_depth();
+    }
+    if (detail::native_stack_low()) [[unlikely]] {
+        return on_fresh_native_stack(stack_segments_, [&]() { return construct_instance(class_def, definition_env, args); });
     }
     std::optional<detail::call_depth_guard> initializer_depth;
     initializer_depth.emplace(current_call_depth_);
@@ -13931,14 +13966,8 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
     // The class's constructor overloads through the one script-overload scorer (calls, methods and constructors rank alike:
     // typed exact > conversion > var; KEEP BYTE-PARALLEL with vm_backend's constructor selection)
     std::shared_ptr<function_decl> matching_ctor = pick_best_overload(ctor_asts, args);
-    if (!matching_ctor) {   // no viable overload: the arity match (fewest defaults) raises its parameter's own text at the binding
-        size_t fewest_defaults = SIZE_MAX;
-        for (const auto& ctor_ast : ctor_asts) {
-            if (arity_accepts(ctor_ast->parameters, args.size()) && ctor_ast->parameters.size() - args.size() < fewest_defaults) {
-                matching_ctor = ctor_ast;
-                fewest_defaults = ctor_ast->parameters.size() - args.size();
-            }
-        }
+    if (!matching_ctor) {   // no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss
+        matching_ctor = sole_arity_candidate(ctor_asts, args.size());
     }
 
     if (!matching_ctor) {
@@ -13989,8 +14018,11 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
         if (!aggregate.fills()) { return detail::aggregate_answer(aggregate, *class_def, args, engine_); }
     }
 
-    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
         return detail::raise_call_depth();
+    }
+    if (detail::native_stack_low()) [[unlikely]] {
+        return on_fresh_native_stack(stack_segments_, [&]() { return construct_default_instance(class_def, args); });
     }
     if (!aggregate.fills() && class_def->base_needs_construction()) {
         // C++: the implicit default constructor constructs the base ahead of the fields (KEEP BYTE-PARALLEL with the vm)
@@ -14500,12 +14532,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
         return detail::raise_call_depth();
     }
-    // Wide native frames (constructor chains especially) can exhaust the native stack
-    // long before the depth cap - fail catchably instead of dying on 0xC00000FD.
-    // Same message as the depth cap: the vm never trips this on script recursion
-    // (in-loop frames), so a distinct text here breaks backend error parity.
+    // Wide native frames exhaust a small host stack long before the cap: the call continues on a fresh segment
     if (detail::native_stack_low()) [[unlikely]] {
-        return detail::raise_call_depth();
+        return on_fresh_native_stack(stack_segments_, [&]() { return call_function(function, args, method_ctx); });
     }
 
     if (execution_limit_exhausted()) [[unlikely]] {
@@ -14812,7 +14841,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     argv = &held_args;
                 }
                 auto convert_result = try_convert_for_parameter(arg, param.type,
-                    detail::slot_site{detail::slot_kind::parameter, param.name, function.name});
+                    detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference});
                 if (!convert_result) {
                     cleanup();
                     return convert_result.error_value();
@@ -14863,7 +14892,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (!param.is_reference || !param.type) { continue; }
         const script_value* bound = call_stack_[frame_index].get_local(param.slot_index);
         if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
-            auto rejection = detail::typed_slot_rejection(bound->deref(), *param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function.name}, engine_);
+            auto rejection = detail::typed_slot_rejection(bound->deref(), *param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference}, engine_);
             cleanup();
             return rejection;
         }
@@ -15169,8 +15198,11 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
     // Check before activating or moving any coroutine state. A first resume is
     // counted by call_function; continuation replay below owns its own guard.
-    if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+    if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
         return detail::raise_call_depth();
+    }
+    if (detail::native_stack_low()) [[unlikely]] {
+        return on_fresh_native_stack(stack_segments_, [&]() { return resume_coroutine(handle); });
     }
     // the body resolves in the unit that declared the coroutine on every resume (continuation replay runs it without call_function)
     auto declared = handle.get_function();
@@ -15578,6 +15610,7 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
     }
 
     environment_->define(decl->name_id, std::move(enum_map));
+    engine_->note_enum_name(decl->name_id);
     return {};
 }
 

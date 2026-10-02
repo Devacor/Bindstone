@@ -1,6 +1,9 @@
 #pragma once
 
 #include <jaiscript/detail/ast.hpp>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace jai {
 
@@ -33,6 +36,27 @@ inline std::string_view null_member_message(const expression* receiver, bool as_
 // A non-null receiver with no member table at all (int, float, bool, char, function, ...):
 // {0} = the receiver's base type spelling, {1} = the member
 inline constexpr std::string_view scalar_member_message = "{0} has no member '{1}'";
+
+// `C.s` where C names a class (its value is the constructor): a dot reaches an instance's members, a class's own are C::s.
+// The class name when the receiver is that shape, else empty.
+template <class Engine>
+inline std::string_view class_named_by_dot_receiver(const expression* receiver, const script_value& value, Engine* eng) {
+    if (!eng || !receiver || receiver->get_type() != node_type::identifier_expr || !value.is_function()) { return {}; }
+    const auto* id = static_cast<const identifier_expr*>(receiver);
+    return eng->get_class_definition(std::string(id->name)) ? id->name : std::string_view{};
+}
+
+inline std::string class_dot_member_text(std::string_view cls, std::string_view member) {
+    return "'" + std::string(cls) + "' is a class; use " + std::string(cls) + "::" + std::string(member);
+}
+
+// The raise's (text, symbol): a frozen symbolizer (a parallel worker) gets the name-free shape
+template <class Symbolizer>
+inline std::pair<std::string_view, uint64_t> class_dot_member_error(Symbolizer& symbols, bool frozen, std::string_view cls,
+                                                                    std::string_view member) {
+    if (frozen) { return {"A class's members are reached with '::'", 0}; }
+    return {"{0}", symbols.intern(class_dot_member_text(cls, member))};
+}
 
 // The name a call site can attribute to its callee: an identifier's symbol, a member's
 // member id, 0 for a computed callee (fs[0](x), pick()(x))

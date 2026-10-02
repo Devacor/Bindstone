@@ -1497,7 +1497,7 @@ private:
 				{"overload list cap", "class M { int m(int a) { return a; } int m(int a, int b) { return b; } }", "M().m(1, 2, 3, 4, 5, 6, 7);", "No overload of 'm' takes (int, int, int, int, int, int, ...)", check_mode::off},
 				{"namespace overloads", "namespace ns { function f(int a, int b) { return 1; } function f(string s) { return 2; } }", "ns::f(1, 2, 3);", "No overload of 'f' takes (int, int, int)", check_mode::off},
 				{"constructor overloads", "class Vec2 { Vec2(int x) {} Vec2(int x, int y) {} }", "Vec2(\"s\", 1, 2);", "No constructor of 'Vec2' takes (string, int, int)", check_mode::off},
-				{"direct super", "class Base { Base(int x) {} } class D : Base { D() : super(\"s\", 2) {} }", "D();", "No matching parent constructor found for super()", check_mode::off},
+				{"direct super", "class Base { Base(int x) {} } class D : Base { D() : super(\"s\", 2) {} }", "D();", "No constructor of 'Base' takes (string, int)", check_mode::off},
 				{"ancestor initializer", "class A { A(int x) {} } class B : A { B(int y) : super(\"s\", 1) {} } class C : B { C() : super(1) {} }", "C();", "No constructor of 'A' takes (string, int)", check_mode::off},
 				{"delegation", "class Vec2 { Vec2(int x) {} Vec2() : this(\"s\", 1) {} }", "Vec2();", "No constructor of 'Vec2' takes (string, int)", check_mode::off},
 				{"builtin push", "var a = [];", "a.push();", "push() takes exactly one argument", check_mode::off},
@@ -1561,7 +1561,7 @@ private:
 			});
 		});
 		test("host_configuration_and_uncaught_suffix_texts", [this]() {
-			every_config("host texts", "max_call_depth must be between 1 and INT_MAX|Maximum recursion depth exceeded - possible infinite recursion: Maximum environment recursion depth exceeded|Cannot access 'x' on null ('v8' is null): Member access on null value", [](engine& e) {
+			every_config("host texts", "max_call_depth must be between 1 and INT_MAX|Maximum recursion depth exceeded - possible infinite recursion|Cannot access 'x' on null ('v8' is null): Member access on null value", [](engine& e) {
 				std::string out;
 				try { e.max_call_depth(backend_type::interpreter, 0); out += "accepted"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";
@@ -3678,7 +3678,7 @@ private:
 				t([]() { string x = "a"; var& r = x; r = 5; return type_of(x) + ":" + x; }) + "|" +
 				t([]() { var x = 1; var& r = x; r = "free"; return type_of(x); }) + "|" +
 				t([]() { int u = 1; set37(u); return type_of(u) + ":" + u; });
-			)", "Cannot assign string to a variable declared int|int:2|string:5|string|int:3", check_mode::warn);
+			)", "Cannot assign string to 'r' (declared int&)|int:2|string:5|string|int:3", check_mode::warn);
 		});
 		test("a_store_through_a_reference_copies_like_the_variables_own_store", [this]() {
 			// value semantics hold through the reference: the typed variable takes a copy, never the source's node
@@ -3720,7 +3720,7 @@ private:
 				var vi = 1; var vf = 1.5;
 				t([]() { set(vf); return vf; }) + "|" + t([]() { set(vi); return vi; }) + "|" + t([]() { B b = B(); seta(b); return b.v; }) + "|" +
 				t([]() { var x = 5; any(x); return x; }) + "|" + t([]() { var s = "x"; seta(s); return 1; });
-			)", "Cannot pass float to parameter 'a' of 'set' (declared int)|7|9|s|Cannot pass string to parameter 'r' of 'seta' (declared A)", check_mode::warn);
+			)", "Cannot pass float to parameter 'a' of 'set' (declared int&)|7|9|s|Cannot pass string to parameter 'r' of 'seta' (declared A&)", check_mode::warn);
 			every_config("checker", "1|0", [](engine& e) {
 				auto bad = e.check("function set(int& a) { a = 7; } float u = 1.5; set(u);");
 				auto ok = e.check("function set(int& a) { a = 7; } int n = 1; set(n); var v = 2.5; set(v);");
@@ -3738,7 +3738,7 @@ private:
 				var one = 1; var two = "s";
 				t([]() { var b = Bare(one, two); });
 			)", "Too many initializers for 'Bare': it has 1 field, got 2", check_mode::warn);
-			every_config("checker text", "Too many initializers for 'Bare': it has 1 field, got 2", [](engine& e) {
+			every_config("checker text", "too many initializers for 'Bare': it has 1 field, got 2", [](engine& e) {
 				auto r = e.check("class Bare { int v = 1; } var b = Bare(1, \"s\");");
 				for (const auto& d : r.diagnostics) { if (d.message.find("initializers") != std::string::npos) { return d.message; } }
 				return std::string("no diagnostic");
@@ -3749,7 +3749,7 @@ private:
 				var one = 1; var two = "s";
 				t([]() { var b = Hidden(one, two); });
 			)", "No constructor of 'Hidden' takes (int, string)", check_mode::warn);
-			every_config("checker text, not an aggregate", "No constructor of 'Hidden' takes (int, string)", [](engine& e) {
+			every_config("checker text, not an aggregate", "no constructor of 'Hidden' takes (int, string)", [](engine& e) {
 				auto r = e.check("class Hidden { private: int v = 1; } var b = Hidden(1, \"s\");");
 				for (const auto& d : r.diagnostics) { if (d.message.find("constructor") != std::string::npos) { return d.message; } }
 				return std::string("no diagnostic");

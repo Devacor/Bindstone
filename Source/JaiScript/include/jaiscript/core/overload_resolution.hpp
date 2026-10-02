@@ -267,6 +267,18 @@ inline std::shared_ptr<function_decl> pick_best_overload(
     return pick_best_overload(overloads, args.data(), args.size());
 }
 
+// Constructor selection when the scorer finds no viable overload: the one constructor the arity admits binds (its parameter
+// converts the argument its slot's way or raises its own text); with several, none does and the caller raises the overload miss
+inline std::shared_ptr<function_decl> sole_arity_candidate(const std::vector<std::shared_ptr<function_decl>>& overloads, size_t argc) {
+    std::shared_ptr<function_decl> sole;
+    for (const auto& o : overloads) {
+        if (!arity_accepts(o->parameters, argc)) { continue; }
+        if (sole) { return nullptr; }
+        sole = o;
+    }
+    return sole;
+}
+
 // Cache-aware instance-method overload resolution over method_overloads_.
 // Cache rules preserved exactly: entries keyed (name_id, arity); read only when
 // there is more than one overload; written only when more than one overload exists

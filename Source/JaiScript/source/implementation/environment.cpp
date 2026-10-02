@@ -8,6 +8,9 @@
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/typed_slot.hpp>
 #include <algorithm>
+#include <exception>
+#include <memory>
+#include <utility>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -59,6 +62,69 @@ bool native_stack_low() noexcept {
     return false;
 #endif
 }
+
+#if defined(_WIN32) && !defined(__SANITIZE_ADDRESS__)
+struct native_stack_segments::segment {
+    void* fiber = nullptr;
+    void* caller = nullptr;
+    void (*fn)(void*) = nullptr;
+    void* ctx = nullptr;
+    std::exception_ptr error;
+};
+
+namespace {
+// Reserved per segment (committed as it is used); the budget bounds a raised cap's native memory
+constexpr SIZE_T k_segment_reserve = 16 * 1024 * 1024;
+constexpr size_t k_max_segments = 16;
+
+void WINAPI native_segment_main(void* raw) {
+    auto* s = static_cast<native_stack_segments::segment*>(raw);
+    for (;;) {
+        try { s->fn(s->ctx); } catch (...) { s->error = std::current_exception(); }
+        SwitchToFiber(s->caller);
+    }
+}
+}
+
+native_stack_segments::~native_stack_segments() {
+    for (segment* s : pool_) {
+        if (s->fiber) { DeleteFiber(s->fiber); }
+        delete s;
+    }
+}
+
+bool native_stack_segments::run(void (*fn)(void*), void* ctx) {
+    if (active_ >= k_max_segments) { return false; }
+    if (active_ == pool_.size()) {
+        auto s = std::make_unique<segment>();
+        s->fiber = CreateFiberEx(64 * 1024, k_segment_reserve, FIBER_FLAG_FLOAT_SWITCH, native_segment_main, s.get());
+        if (!s->fiber) { return false; }
+        pool_.push_back(s.release());
+    }
+    const bool outermost = active_ == 0;
+    if (outermost && !IsThreadAFiber()) {
+        if (!ConvertThreadToFiberEx(nullptr, FIBER_FLAG_FLOAT_SWITCH)) { return false; }
+        converted_thread_ = true;
+    }
+    segment* s = pool_[active_];
+    s->caller = GetCurrentFiber();
+    s->fn = fn;
+    s->ctx = ctx;
+    ++active_;
+    SwitchToFiber(s->fiber);
+    --active_;
+    if (outermost && converted_thread_) {
+        ConvertFiberToThread();
+        converted_thread_ = false;
+    }
+    if (s->error) { std::rethrow_exception(std::exchange(s->error, nullptr)); }
+    return true;
+}
+#else
+struct native_stack_segments::segment {};
+native_stack_segments::~native_stack_segments() = default;
+bool native_stack_segments::run(void (*)(void*), void*) { return false; }
+#endif
 
 // Out-of-line door for class_definition.hpp's field kernel (typed_slot.hpp holds the body)
 checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value,

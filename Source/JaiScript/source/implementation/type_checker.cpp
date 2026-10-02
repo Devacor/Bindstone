@@ -13,6 +13,7 @@
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/method_value.hpp>
+#include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -2233,6 +2234,21 @@ private:
         return false;
     }
 
+    // A builtin method of a declared container or string read without a call (the runtime's text, detail::method_value_text): a
+    // builtin name wins over a map's key of the same name, so a map is certain too
+    void builtin_method_value(const ctype& recv, const member_expr* m) {
+        int kind = -1;
+        const char* owner = nullptr;
+        switch (recv.kind) {
+            case ctype::array_k: kind = 0; owner = "array"; break;
+            case ctype::map_k: kind = 1; owner = "map"; break;
+            case ctype::string_k: kind = 2; owner = "string"; break;
+            case ctype::utf8_k: kind = 3; owner = "utf8_string"; break;
+            default: return;
+        }
+        if (!eng_.builtin_method_ids(kind).count(eng_.symbolize(m->member))) { return; }
+        diag(diag_level::error, m->location, detail::method_value_text(m->member, owner, detail::method_value_receiver(m), true));
+    }
     static size_t edit_distance(std::string_view a, std::string_view b) {
         std::vector<size_t> row(b.size() + 1);
         for (size_t j = 0; j <= b.size(); ++j) { row[j] = j; }
@@ -2751,7 +2767,7 @@ private:
                 case aggregate_shape::unknown: return;
                 case aggregate_shape::aggregate:
                     if (args.size() > fields.size()) {   // the runtime's text (detail::too_many_initializers)
-                        diag(diag_level::error, loc, "Too many initializers for '" + std::string(cls_name) + "': it has " +
+                        diag(diag_level::error, loc, "too many initializers for '" + std::string(cls_name) + "': it has " +
                              std::to_string(fields.size()) + (fields.size() == 1 ? " field" : " fields") + ", got " + std::to_string(args.size()),
                              c.foreign ? 0 : c.decl->location.line, c.foreign ? 0 : c.decl->location.column);
                         return;
@@ -2770,7 +2786,7 @@ private:
                 std::string list = "(";
                 for (size_t i = 0; i < args.size() && i < 6; ++i) { if (i) { list += ", "; } list += ctype_name(args[i]); }
                 if (args.size() > 6) { list += ", ..."; }
-                diag(diag_level::error, loc, "No constructor of '" + std::string(cls_name) + "' takes " + list + ")",
+                diag(diag_level::error, loc, "no constructor of '" + std::string(cls_name) + "' takes " + list + ")",
                      c.foreign ? 0 : c.decl->location.line, c.foreign ? 0 : c.decl->location.column);
             }
             return;
@@ -3099,9 +3115,11 @@ private:
 			recv.kind == ctype::string_k || recv.kind == ctype::utf8_k || recv.kind == ctype::function_k || recv.kind == ctype::weak_k || recv.kind == ctype::null_k ||
 			recv.kind == ctype::int_k || recv.kind == ctype::float_k || recv.kind == ctype::char_k ||
 			recv.kind == ctype::bool_k) {
+			if (!writing && !recv.tentative && !m->is_static) { builtin_method_value(recv, m); }
 			return {};   // builtin methods / map keys / dynamic: lenient
 		}
 		if (extended_members_.count(m->member)) { return {}; }
+		if (class_dot_receiver(m, recv)) { return {}; }
 		if (recv.kind == ctype::enum_ref_k) {
 			if (const enum_decl* e = find_enum(recv.cls)) {
 				for (const auto& [vname, _] : e->values) {
@@ -3375,6 +3393,7 @@ private:
 				}
 			}
 			if (recv.const_key && string_mutator_name(m->member)) { map_key_mutation(m->location, m->object.get()); }
+			if (class_dot_receiver(m, recv)) { return {}; }
 			if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) {
 				bool want_static = (recv.kind == ctype::class_ref_k);
 				member_hit hit = lookup_member(recv.cls, m->member, want_static);
@@ -3577,6 +3596,12 @@ private:
 				const ctype recv = declared_container_receiver(subscript->left.get(), infer(subscript->left.get()));
 				infer(subscript->right.get());
 				stamp(subscript->static_operand_class, operand_class_unknown, operand_class_unknown);
+				if (recv.kind == ctype::object_k && !recv.tentative && subscript_returns_by_value(recv.cls)) {
+					std::string text(detail::by_value_subscript_store_text);
+					text[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0])));
+					diag(diag_level::error, a->location, text);
+					return rhs;
+				}
 				if (recv.kind == ctype::string_k || recv.kind == ctype::utf8_k) {
 					// a string character takes a char or a string (its text replaces the character)
 					const ctype character = ctype::make(recv.kind == ctype::string_k ? ctype::char_k : ctype::utf8_k);
@@ -3621,6 +3646,23 @@ private:
         std::string text = detail::non_lvalue_target_text(target);
         if (!text.empty()) { text[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0]))); }
         diag(diag_level::error, loc, text);
+    }
+
+    // `C.s` on a class name (the runtime's text, class_dot_member_text): reported, true
+    bool class_dot_receiver(const member_expr* m, const ctype& recv) {
+        if (recv.kind != ctype::class_ref_k || m->is_static || !m->object || m->object->get_type() != node_type::identifier_expr) { return false; }
+        diag(diag_level::error, m->location, class_dot_member_text(recv.cls, m->member));
+        return true;
+    }
+
+    // The class's operator[] (its chain's, and every override a derived receiver could reach) returns by value only
+    bool subscript_returns_by_value(std::string_view cls) {
+        member_hit hit = lookup_member(cls, "[]", /*want_static=*/false);
+        if (!hit.found || !hit.methods || hit.methods->empty()) { return false; }
+        const auto by_value = [](const function_decl* fn) { return !fn->return_type || !fn->return_type->is_reference(); };
+        for (const auto* fn : *hit.methods) { if (!by_value(fn)) { return false; } }
+        for (const auto* fn : overrides_of(cls, "[]")) { if (!by_value(fn)) { return false; } }
+        return true;
     }
 
     // A call whose callee resolves to the program's free functions or a class's constructors, none returning a reference
@@ -4110,7 +4152,7 @@ private:
 					 std::string(decl->name) + "' without a non-null initializer (use var, or an explicit shared_ptr<T>)");
 				entry.dynamic = true;   // recovery: no cascades
 			} else if (!init.is_unknown() && init.kind != ctype::object_k) {
-				// runtime: "Cannot initialize shared_ptr with this type"
+				// runtime: family D's declaration shape (Cannot initialize 'p' (declared shared_ptr<auto>) with int)
 				diag(diag_level::error, decl->location, "cannot initialize '" + std::string(decl->name) +
 					 "' declared 'shared_ptr<auto>' with '" + ctype_name(init) + "'");
 				entry.dynamic = true;   // recovery: no cascades

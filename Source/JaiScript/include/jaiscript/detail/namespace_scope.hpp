@@ -21,6 +21,17 @@
 
 namespace jai::detail {
 
+	// A class a script namespace declares, by its qualified spelling (`ns::Base`, `a::b::C`): a qualified base class names it
+	inline std::shared_ptr<class_definition> namespace_class(engine& eng, std::string_view qualified) {
+		const size_t cut = qualified.rfind("::");
+		if (cut == std::string_view::npos) { return nullptr; }
+		auto& namespaces = eng.script_namespaces();
+		auto ns = namespaces.find(eng.symbolize(qualified.substr(0, cut)));
+		if (ns == namespaces.end() || !ns->second) { return nullptr; }
+		auto cls = ns->second->classes.find(eng.symbolize(qualified.substr(cut + 2)));
+		return cls != ns->second->classes.end() ? cls->second : nullptr;
+	}
+
 	inline const std::shared_ptr<environment>& namespace_scope(engine& eng, script_namespace_data& ns) {
 		if (!ns.scope) {
 			ns.scope = std::make_shared<environment>(eng.get_global_environment(), eng.get_symbolizer());

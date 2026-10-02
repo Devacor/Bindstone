@@ -878,6 +878,8 @@ namespace jai {
 
         // Call depth tracking for recursion limit
         int current_call_depth_ = 0;
+        // A call below the cap that finds the native stack low continues on a fresh segment
+        detail::native_stack_segments stack_segments_;
 
         // Execution budget state (see execution_budget()/arm_execution_deadline above)
         std::chrono::nanoseconds execution_budget_{std::chrono::seconds(5)};
@@ -1156,6 +1158,7 @@ namespace jai {
             // fresh deadline when the session ends.
             const auto now = std::chrono::steady_clock::now();
             limits_->note_clock_sample(now);
+            if (limits_->step_budget_spent()) [[unlikely]] { limits_->terminal_error = true; return true; }   // the clock-free bound (vm twin)
             if (!budget_active_ || debug_hook_) { return false; }
             if (now < execution_deadline_) { return false; }
             // Budget overruns are TERMINAL: no script catch may swallow a timeout

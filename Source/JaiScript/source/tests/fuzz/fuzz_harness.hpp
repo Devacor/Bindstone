@@ -197,6 +197,7 @@ namespace jai::fuzz {
 		// where the wall-clock budget's 1024-tick gate never accumulates; the cap makes
 		// them terminate deterministically.
 		size_t memory_cap_bytes = 64 * 1024 * 1024;
+		uint64_t step_budget = 0;                 // engine::execution_step_budget: a clock-free bound (gates that must not depend on load)
 		bool proofs = true;                       // engine::type_proofs (the proof differential gate flips it)
 		bool param_alias = true;                  // engine::parameter_alias (the elision differential gate flips it)
 		bool passes = true;                       // engine::ir_passes (the middle end's differential gate flips it)
@@ -225,6 +226,7 @@ namespace jai::fuzz {
 		if (cfg.miss_every) eng->cells_miss_every(cfg.miss_every);
 		eng->static_checking(check_mode::warn);   // generated programs are not statically clean; this measures runtime parity
 		eng->execution_budget(cfg.budget_seconds);
+		eng->execution_step_budget(cfg.step_budget);
 		eng->memory_cap(cfg.memory_cap_bytes);
 		if (p.host_math_aliases) {
 			// Test-owned bindings, rather than incidental standard-library globals.
@@ -385,10 +387,8 @@ namespace jai::fuzz {
 			// Both backends run under the interpreter's call-depth cap (run_program), so a deep recursion raises at the same
 			// call on both; what remains of this accepted class (Dev rulings 2026-07-09 / 2026-07-14) is the vm's bare self
 			// tail call, which reuses its frame (guide ch.6, G06-080) and completes where the interpreter raises
+			// (uncaught or caught: the text is the same)
 			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's depth cap raises",
-				{}, {"Maximum environment recursion depth exceeded"}},
-			// Same class when the error is CAUGHT and printed: only the outer message reaches the output
-			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's depth cap raises (caught)",
 				{}, {"Maximum recursion depth exceeded"}},
 			// The 2026-07 FZ-* matchers (typed-fn-no-return, undef-var eval order,
 			// neg-zero, overflow op names, float divzero text, recursion text,

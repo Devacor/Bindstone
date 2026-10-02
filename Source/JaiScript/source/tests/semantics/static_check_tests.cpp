@@ -1420,9 +1420,11 @@ public:
             // Read-only by-value parameter elision: per generated program, each backend must
             // produce identical segment results, printed output and liveness with
             // engine::parameter_alias on and off (the alias is a proof-gated copy elision, never
-            // a semantic). Same protocol as proof_differential_gate.
+            // a semantic). Same protocol as proof_differential_gate, bounded by budget checks instead of the clock, so the
+            // programs compared and the binds counted do not depend on the machine's load (the wall-clock budget only backstops).
             constexpr uint64_t k_seed_count = 200;
-            constexpr double k_budget_seconds = 0.1;
+            constexpr uint64_t k_step_budget = 32;
+            constexpr double k_backstop_seconds = 30.0;
             int compared_programs = 0;
             int divergences = 0;
             uint64_t elided_binds = 0;
@@ -1438,7 +1440,8 @@ public:
                     for (int al = 0; al < 2 && !budget; ++al) {
                         fuzz::run_config cfg;
                         cfg.use_vm = be == 1;
-                        cfg.budget_seconds = k_budget_seconds;
+                        cfg.budget_seconds = k_backstop_seconds;
+                        cfg.step_budget = k_step_budget;
                         cfg.param_alias = al == 1;
                         runs[be][al] = fuzz::run_program(p, cfg);
                         budget = runs[be][al].budget_hit;

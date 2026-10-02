@@ -75,8 +75,14 @@ namespace jai::detail {
 		void memory_charge_deferred(size_t bytes) noexcept { memory_used += bytes; }
 		bool memory_tripped() const noexcept { return memory_used > memory_limit; }
 
+		// engine::execution_step_budget: budget checks one host entry may take (0 = unlimited), counted on the engine thread
+		uint64_t step_budget = 0;
+		uint64_t steps_taken = 0;
+		bool step_budget_spent() noexcept { return step_budget != 0 && ++steps_taken > step_budget; }
+
 		void reset_for_execute() noexcept {
 			terminal_error = false;
+			steps_taken = 0;
 			memory_used = 0;
 			memory_raises = 0;
 			import_pass_open = false;

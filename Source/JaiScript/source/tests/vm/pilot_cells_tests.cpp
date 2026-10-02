@@ -4591,6 +4591,29 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto section = [&](const char* fn) { const size_t at = l.find(fn); return at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at); };
 			check_true(section("== by_enum ").find("CAPTURE_ARG") == std::string::npos, "no capture ahead of an enum value: " + section("== by_enum "));
 			check_true(section("== by_getter ").find("CAPTURE_ARG") != std::string::npos, "a capture ahead of a getter: " + section("== by_getter "));
+			// the enum another unit of the program declares (Gator Quest's gq_enums.jai): the same constant
+			namespace fs = std::filesystem;
+			fs::path dir = fs::temp_directory_path() / "jai_enum_constant_import";
+			fs::create_directories(dir);
+			std::ofstream(dir / "enums.jai") << "enum Fx { fire, poison }\n";
+			std::ofstream(dir / "main.jai") << "import \"enums.jai\";\narray<int> X = [1, 2, 3, 4];\narray<int> LOG;\n"
+			                                  "void fx_at(int x, int k) { LOG.push(x * 10 + k); }\n"
+			                                  "int by_enum() { for (int m = 0; m < X.size(); ++m) { fx_at(X[m], Fx.poison); } return LOG.size(); }\n"
+			                                  "to_string(by_enum()) + \"|\" + to_string(LOG[3]);\n";
+			auto run_file = [&](bool vm, std::string* listing) -> std::string {
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				e->import_recheck_interval(0);
+				if (listing) { e->disassembly_sink([listing](const std::string& text, const std::string&) { *listing += text; *listing += "\n"; }); }
+				e->add_include_path(dir.string());
+				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			std::string il;
+			const std::string iv = run_file(false, nullptr), vv = run_file(true, &il);
+			check_eq(iv, vv, "an imported enum argument: both backends");
+			check_eq(std::string("4|41"), vv, "the values");
+			const size_t at = il.find("== by_enum ");
+			const std::string bl = at == std::string::npos ? il : il.substr(at, il.find("\n== ", at + 1) - at);
+			check_true(bl.find("CAPTURE_ARG") == std::string::npos, "no capture ahead of an imported enum value: " + bl);
 		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no

@@ -291,6 +291,7 @@ public:
         program_classes_ = opts.program_classes;
         program_functions_ = opts.program_functions;
         program_globals_ = opts.program_globals;
+        program_enums_ = opts.program_enums;
         deferred_out_ = opts.deferred_classes;
         observer_ = opts.observer;
     }
@@ -384,6 +385,7 @@ private:
     const program_class_map* program_classes_ = nullptr;
     const program_function_map* program_functions_ = nullptr;
     const program_global_map* program_globals_ = nullptr;
+    const program_enum_map* program_enums_ = nullptr;
     bool deferred_ = false;   // a program-table class met before the engine defined it: the unit's proofs re-stamp after the next import
     std::vector<std::string>* deferred_out_ = nullptr;   // their names, for the engine's re-stamp test
     std::unordered_map<std::string_view, sclass> program_sclasses_;
@@ -3090,6 +3092,22 @@ private:
 		return {};
 	}
 
+    // an enum's value by the enum's own name (this unit's enum, or the one enum of that name another unit of the program declares):
+    // no local, field or variable of the program takes the name and no runtime include could
+    bool enum_value_read(const member_expr* m, const ctype& recv, const ctype& t) {
+        if (m->is_static || m->null_safe || !m->object || m->object->get_type() != node_type::identifier_expr || has_dynamic_includes_) return false;
+        auto* id = static_cast<const identifier_expr*>(m->object.get());
+        const std::string name(id->name);
+        if (program_global(name)) return false;
+        if (recv.kind == ctype::enum_ref_k) return t.kind == ctype::int_k;
+        if (!recv.is_unknown() || class_ctx_ || id->slot_index != SIZE_MAX || id->global_qualified || !program_enums_) return false;
+        if (find_named(id) || functions_.count(id->name) || enums_.count(id->name)) return false;
+        const auto it = program_enums_->find(name);
+        if (it == program_enums_->end() || it->second.size() != 1 || !it->second.begin()->second) return false;
+        for (const auto& [vname, _] : it->second.begin()->second->values) { if (vname == m->member) return true; }
+        return false;
+    }
+
     ctype infer_member(member_expr* m, bool writing, const variable_decl** typed_field_out = nullptr,
                        ctype* recv_out = nullptr, member_hit* hit_out = nullptr,
                        std::optional<field_proof>* proof_out = nullptr) {
@@ -3098,11 +3116,7 @@ private:
         ctype t = infer_member_impl(m, writing, typed_field_out, &recv, hit_out, fp);
         if (recv_out) { *recv_out = recv; }
         stamp_field(m, fp);
-        // an enum's value by the enum's own name: the program declares no variable of that name and no runtime include could
-        const bool enum_value = !writing && recv.kind == ctype::enum_ref_k && t.kind == ctype::int_k && !m->is_static && !m->null_safe &&
-                                m->object && m->object->get_type() == node_type::identifier_expr && !has_dynamic_includes_ &&
-                                !program_global(std::string(static_cast<const identifier_expr*>(m->object.get())->name));
-        stamp(m->enum_constant, enum_value, false);
+        stamp(m->enum_constant, !writing && enum_value_read(m, recv, t), false);
         if (proof_out) { *proof_out = fp; }
         return t;
     }
@@ -4862,6 +4876,16 @@ void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::
         if (d && d->get_type() == node_type::variable_decl) {
             auto vd = std::static_pointer_cast<const variable_decl>(d);
             out[std::string(vd->name)][unit_path].push_back(std::move(vd));
+        }
+    }
+}
+
+void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_enum_map& out) {
+    for (auto& [name, units] : out) { units.erase(unit_path); }   // a re-gather replaces the unit's own entries
+    for (const auto& d : decls) {
+        if (d && d->get_type() == node_type::enum_decl) {
+            auto ed = std::static_pointer_cast<const enum_decl>(d);
+            out[std::string(ed->name)][unit_path] = std::move(ed);
         }
     }
 }

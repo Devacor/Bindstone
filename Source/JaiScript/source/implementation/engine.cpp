@@ -920,6 +920,7 @@ struct engine::implementation {
     // the same units' class declarations (a subclass resolves a parent another unit declares).
     std::unordered_set<std::string> program_names_;
     detail::program_class_map program_classes_;
+    detail::program_enum_map program_enums_;   // the closure units' top-level enums (an enum value read is no user code: member_expr::enum_constant)
     detail::program_function_map program_functions_;   // the closure units' free functions (docs/static_checking.md "Programs"; the inliner's cross-unit leaves)
     detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (docs/static_checking.md "Proofs")
     struct closure_unit {
@@ -1049,6 +1050,7 @@ struct engine::implementation {
             literal_unit_paths(unit.entry->declarations, nested);
             detail::collect_unit_names(unit.entry->declarations, program_names_);
             detail::collect_unit_classes(unit.entry->declarations, program_classes_);
+            detail::collect_unit_enums(unit.entry->declarations, unit.path, program_enums_);
             detail::collect_unit_functions(unit.entry->declarations, unit.path, program_functions_);
             detail::collect_unit_globals(unit.entry->declarations, unit.path, program_globals_);
             std::string unit_path = unit.path;
@@ -1084,7 +1086,7 @@ struct engine::implementation {
         o.proofs = type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
         o.stats = &last_proof_stats_;
         o.program_names = &program_names_;
-        o.program_classes = &program_classes_;
+        o.program_classes = &program_classes_; o.program_enums = &program_enums_;
         o.program_functions = &program_functions_;
         o.program_globals = &program_globals_;
         entry.deferred_classes.clear();
@@ -1131,7 +1133,7 @@ struct engine::implementation {
             o.diagnostics = true;
             o.proofs = detail::check_options::proofs_t::leave;
             o.program_names = &program_names_;
-            o.program_classes = &program_classes_;
+            o.program_classes = &program_classes_; o.program_enums = &program_enums_;
             o.program_functions = &program_functions_;
             o.program_globals = &program_globals_;
             entry.check_result = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
@@ -1167,6 +1169,7 @@ struct engine::implementation {
             if (entry.closure_root) {
                 detail::collect_unit_names(entry.declarations, program_names_);
                 detail::collect_unit_classes(entry.declarations, program_classes_);
+                detail::collect_unit_enums(entry.declarations, entry.source_path, program_enums_);
                 detail::collect_unit_functions(entry.declarations, entry.source_path, program_functions_);
                 detail::collect_unit_globals(entry.declarations, entry.source_path, program_globals_);
                 std::unordered_set<std::string> visited;
@@ -1262,7 +1265,7 @@ struct engine::implementation {
         detail::check_options o;
         o.proofs = detail::check_options::proofs_t::leave;
         o.program_names = &program_names_;
-        o.program_classes = &program_classes_;
+        o.program_classes = &program_classes_; o.program_enums = &program_enums_;
         o.program_functions = &program_functions_;
         o.program_globals = &program_globals_;
         return detail::run_static_check(self, checked_declarations(entry), &extra, o);
@@ -2539,6 +2542,7 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         o.stats = &impl->last_proof_stats_;
         o.program_names = &impl->program_names_;
         o.program_classes = &impl->program_classes_;
+        o.program_enums = &impl->program_enums_;
         o.program_functions = &impl->program_functions_;
         o.program_globals = &impl->program_globals_;
         if (!need_check) { impl->lowering_view(*this, bite.declarations_, lowering); }   // this walk is the proof pass
@@ -5034,6 +5038,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 if (!entries[k]) { continue; }
                 detail::collect_unit_names(entries[k]->declarations, I.program_names_);
                 detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
+                detail::collect_unit_enums(entries[k]->declarations, units[idx[k]].resolved, I.program_enums_);
                 detail::collect_unit_functions(entries[k]->declarations, units[idx[k]].resolved, I.program_functions_);
                 detail::collect_unit_globals(entries[k]->declarations, units[idx[k]].resolved, I.program_globals_);
             }

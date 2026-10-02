@@ -117,7 +117,7 @@ public:
 					"array<int> a = [1]; a[0] += source;",
 					"var loose = [source]; array<int> a = loose;",
 					"var loose = {\"k\": source}; map<string, int> m = loose;",
-					"class Box { array<int> items = []; } auto box = Box(); box.items = [source];",
+					"auto box = EmptyBox(); box.items = [source];",
 					"array<int> take(array<int> xs) { return xs; } take([source]);",
 					"array<int> a = [1]; a[0] *= source;",
 					"array<int> a = [1]; var& r = a[0]; r = source;",
@@ -126,7 +126,7 @@ public:
 					"array<array<int>> aa = [[1]]; aa[0][0] = source;",
 					"map<string, int> m = {\"x\": 1}; m[\"x\"] = source;",
 					"map<string, int> m = {\"x\": 1}; m[\"x\"] += source;",
-					"class Box { array<int> items = [1]; } auto box = Box(); box.items[0] = source;"}) {
+					"auto box = OneBox(); box.items[0] = source;"}) {
 					// once at top level (environment slots) and once inside a function (frame slots,
 					// the reference-lvalue kernel): the lanes differ, the verdict may not
 					for (const std::string wrap : {"{0}", "void run() { {0} } run();"}) {
@@ -134,7 +134,8 @@ public:
 						eng->add_global("input", script_value(input, eng.get()));
 						std::string body = wrap;
 						body.replace(body.find("{0}"), 3, action);
-						auto result = eng->execute("var source = input; string message = \"\"; try { " + body +
+						auto result = eng->execute("class EmptyBox { array<int> items = []; } class OneBox { array<int> items = [1]; } "
+							"var source = input; string message = \"\"; try { " + body +
 							" } catch (e) { message = e; } message;");
 						check_eq(expected, result.as_string(), action + " / " + wrap);
 						check_eq(script_int{42}, eng->execute("40 + 2;").as_int());

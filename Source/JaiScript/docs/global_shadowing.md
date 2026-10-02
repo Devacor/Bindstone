@@ -48,7 +48,8 @@ function body a literal include (`include "file"` or `include("file")`) is splic
 C++'s is: the included text is parsed into the function, so it reads and writes the function's
 parameters and locals, the locals and functions it declares are the function's own (a function is a nested
 function, gone when the body returns, and a program-scope function of its name is untouched: the checker warns),
-a class it declares is a parse error (a class is a program-scope type; import the file; Dev ruling 2026-10-01), and the checker
+a class it declares is a parse error, as a class written in any function, method or lambda body is (a class is a
+program-scope type; declare it there or import the file; Dev ruling 2026-10-01), and the checker
 and both backends see one function; a change to the included file re-parses the includer on every cache
 tier (the parse cache, the file cache's fast path and the literal cache's fast path all revalidate the spliced
 files' stamps before a hit runs), and such a unit keeps no jaibite sibling. A computed path (`include(p)`) stays a runtime include: it runs in the

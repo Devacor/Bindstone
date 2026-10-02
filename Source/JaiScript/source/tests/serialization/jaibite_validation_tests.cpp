@@ -273,22 +273,21 @@ public:
             check_eq(script_int(0), loaded.execute().as_int());
         });
 
-        test("valid_constructor_initializer_outer_slots_preserve_bytes", [this]() {
+        test("valid_constructor_initializer_preserves_bytes", [this]() {
+            // a class is a program-scope type (Dev ruling 2026-10-01): its delegating initializer reads a program-scope name
             auto eng = make_engine();
             auto bite = eng->jaibite(R"(
-                int outer() {
-                    int a = 1; int b = 2; int seed = 3;
-                    class Inner {
-                        int value = 0;
-                        Inner() : this(seed) {}
-                        Inner(int n) { value = n; }
-                    }
-                    return 0;
+                int seed = 3;
+                class Inner {
+                    int value = 0;
+                    Inner() : this(seed) {}
+                    Inner(int n) { value = n; }
                 }
-                0;
+                int outer() { int a = 1; int b = 2; Inner i; return i.value; }
+                outer();
             )");
             auto loaded = load_unchanged(*eng, bite.save_bytes());
-            check_eq(script_int(0), loaded.execute().as_int());
+            check_eq(script_int(3), loaded.execute().as_int());
         });
 
         test("valid_by_value_parallel_parameter_preserves_bytes", [this]() {

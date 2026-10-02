@@ -557,7 +557,7 @@ engine stays usable", not by `check_throws`.
   the included text becomes the function's own (its parameters and locals visible, its declarations the function's;
   the parse cache stamps the spliced files; no jaibite sibling for such a unit; `.jaibite` version 18, so a sibling
   written before the splice re-parses); a computed `include(p)` stays a
-  runtime include that sees the environment only. Functions without includes pay nothing. Dev ruling 2026-10-01: its functions are nested ones (the checker warns when one hides a program-scope function, `warn_spliced_function`); a class there is a parse error pointing to import (`parser::splice_include`).
+  runtime include that sees the environment only. Functions without includes pay nothing. Dev ruling 2026-10-01: its functions are nested ones (the checker warns when one hides a program-scope function, `warn_spliced_function`); a class there is a parse error pointing to import, as a class written in any function, method or lambda body is (`parser::reject_class_in_function_body`).
 - **Program-scope redeclarations shadow by unit** (Dev ruling 2026-09-12; `docs/global_shadowing.md`): each
   executed source is a unit (a file by path, a literal by content), numbered at first execution; a variable
   declared again by ANOTHER unit gets its own cell; code resolves a name to its own unit's cell, else to the

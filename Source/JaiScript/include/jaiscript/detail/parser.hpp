@@ -62,8 +62,10 @@ namespace jai {
         // (the engine stamps them: a change re-parses the includer), the chain being spliced (a cycle guard) and its depth
         std::vector<std::string> spliced_files_;
         std::vector<std::string> splice_active_;
+        std::vector<std::string> splice_spelled_;   // the paths as written, for the include's own texts
         int splice_depth_ = 0;
         bool splice_include(const declaration_ptr& decl, std::vector<declaration_ptr>& out);
+        void reject_class_in_function_body(const token& at);
 
         // Current namespace context for nested namespace declarations
         std::vector<std::string> current_namespace_path_;

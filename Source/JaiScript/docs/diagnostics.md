@@ -413,7 +413,11 @@ missing module or a failed reload comes back as `evaluation_failed` with the tex
 `Could not find include/import file`, the check listing). `convert_script_function` refuses a value that is neither a function
 nor null: `Cannot convert a value that is not a function to a std::function callback`.
 
-## Includes inside a function body
+## Classes and includes inside a function body
+
+A class is a program-scope type (Dev ruling 2026-10-01): one declared in a function, method or lambda body is a parse error,
+`a class cannot be declared inside a function body (a class is a program-scope type); declare it at program scope or import
+its file`, located at the `class` (or `nocopy`) keyword.
 
 A literal include inside a function body is the function's own text (Dev ruling 2026-10-01): a class the included file
 declares there is a parse error, `an include inside a function body cannot declare class 'K' (a class is a program-scope

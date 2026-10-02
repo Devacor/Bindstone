@@ -33,7 +33,7 @@ public:
                     float distanceTo(Point other) {
                         auto dx = x - other.x;
                         auto dy = y - other.y;
-                        return sqrt(dx * dx + dy * dy);
+                        return math::sqrt(dx * dx + dy * dy);
                     }
                 }
                 

@@ -1506,7 +1506,7 @@ bool vm_backend::object_defines_custom_equality(const script_value& v) const {
 	auto holder = const_cast<script_value&>(d).get_object_holder();
 	if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
 	auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
-	return cd && cd->defines_method(eq_method_id_);
+	return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(op_spaceship_id_));
 }
 
 std::optional<checked_result<bool>> vm_backend::object_equality_via_method(const script_value& left, const script_value& right) {
@@ -1554,6 +1554,68 @@ std::optional<checked_result<bool>> vm_backend::object_inequality_via_method(con
 		return checked_result<bool>(result.error_value());
 	}
 	if (result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
+	return std::nullopt;
+}
+
+// KEEP BYTE-PARALLEL with the interpreter's three <=> twins (Dev ruling 2026-10-01)
+std::optional<checked_result<bool>> vm_backend::object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+	auto target = resolve_member_target(right);
+	if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
+	script_value method_val = target.method(op_spaceship_id_);
+	if (!method_val.is_function()) { return std::nullopt; }
+	auto result = make_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+	if (!result) {
+		if (is_unwinding_) { return std::nullopt; }
+		return checked_result<bool>(result.error_value());
+	}
+	const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
+	                    : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
+	if (auto answer = spaceship_rewritten(reversed_comparison(op), result.value())) { return checked_result<bool>(*answer); }
+	return std::nullopt;
+}
+
+std::optional<checked_result<script_value>> vm_backend::object_spaceship_reversed_via_method(const script_value& left, const script_value& right) {
+	if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+	auto target = resolve_member_target(right);
+	if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
+	script_value method_val = target.method(op_spaceship_id_);
+	if (!method_val.is_function()) { return std::nullopt; }
+	auto result = make_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+	if (!result) {
+		if (is_unwinding_) { return std::nullopt; }
+		return checked_result<script_value>(result.error_value());
+	}
+	bool nan = false;
+	if (auto sign = reversed_spaceship_sign(result.value(), nan)) { return checked_result<script_value>(script_value(*sign, engine_)); }
+	if (nan) { return detail::nan_order_error<checked_result<script_value>>(); }
+	return std::nullopt;
+}
+
+std::optional<checked_result<bool>> vm_backend::object_spaceship_equality_via_method(const script_value& left, const script_value& right) {
+	if (parallel_worker_ || !left.is_object() || !right.is_object()) { return std::nullopt; }
+	const auto call = [this](const script_value& self, const script_value& method_val, const script_value& arg, bool spaceship) -> std::optional<checked_result<bool>> {
+		auto result = make_bound_method(self, method_val).as_function()(std::vector<script_value>{arg});
+		if (!result) {
+			if (is_unwinding_) { return checked_result<bool>(false); }
+			return checked_result<bool>(result.error_value());
+		}
+		const script_value& r = result.value().deref();
+		if (!spaceship) { return r.is_bool() ? std::optional<checked_result<bool>>(checked_result<bool>(r.unchecked_as_bool())) : std::nullopt; }
+		if (r.is_int()) { return checked_result<bool>(r.as_int() == 0); }
+		if (r.is_float()) { return checked_result<bool>(r.as_float() == 0.0); }
+		return std::nullopt;
+	};
+	if (auto lt = resolve_member_target(left); lt && !lt.method(eq_method_id_).is_function() && binary_operator_accepts(lt.class_def, op_spaceship_id_, right)) {
+		if (script_value m = lt.method(op_spaceship_id_); m.is_function()) { return call(left, m, right, true); }
+	}
+	if (auto rt = resolve_member_target(right)) {
+		if (script_value eq = rt.method(eq_method_id_); eq.is_function()) {
+			if (binary_operator_accepts(rt.class_def, eq_method_id_, left)) { return call(right, eq, left, false); }
+		} else if (binary_operator_accepts(rt.class_def, op_spaceship_id_, left)) {
+			if (script_value m = rt.method(op_spaceship_id_); m.is_function()) { return call(right, m, left, true); }
+		}
+	}
 	return std::nullopt;
 }
 
@@ -2485,6 +2547,11 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 	if (is_unwinding_) {
 		return script_value(false, engine_);
 	}
+	if (auto reversed = object_comparison_reversed_via_method(left, right, op_less_id_)) {
+		if (!*reversed) { return reversed->error_value(); }
+		return script_value(reversed->value(), engine_);
+	}
+	if (is_unwinding_) { return script_value(false, engine_); }
 
 	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
 }
@@ -2558,6 +2625,11 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 	if (is_unwinding_) {
 		return script_value(false, engine_);
 	}
+	if (auto reversed = object_comparison_reversed_via_method(left, right, op_less_equal_id_)) {
+		if (!*reversed) { return reversed->error_value(); }
+		return script_value(reversed->value(), engine_);
+	}
+	if (is_unwinding_) { return script_value(false, engine_); }
 
 	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
 }
@@ -2631,6 +2703,11 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 	if (is_unwinding_) {
 		return script_value(false, engine_);
 	}
+	if (auto reversed = object_comparison_reversed_via_method(left, right, op_greater_id_)) {
+		if (!*reversed) { return reversed->error_value(); }
+		return script_value(reversed->value(), engine_);
+	}
+	if (is_unwinding_) { return script_value(false, engine_); }
 
 	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
 }
@@ -2704,6 +2781,11 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 	if (is_unwinding_) {
 		return script_value(false, engine_);
 	}
+	if (auto reversed = object_comparison_reversed_via_method(left, right, op_greater_equal_id_)) {
+		if (!*reversed) { return reversed->error_value(); }
+		return script_value(reversed->value(), engine_);
+	}
+	if (is_unwinding_) { return script_value(false, engine_); }
 
 	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
 }
@@ -2791,6 +2873,10 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 	if (custom_result.has_value()) {
 		if (!*custom_result) { return custom_result->error_value(); }
 		return script_value(custom_result->value(), engine_);
+	}
+	if (auto from_spaceship = object_spaceship_equality_via_method(left, right)) {
+		if (!*from_spaceship) { return from_spaceship->error_value(); }
+		return script_value(from_spaceship->value(), engine_);
 	}
 
 	// Script class instances: same class, fieldwise (a user operator== was consulted above)
@@ -2900,6 +2986,9 @@ checked_result<script_value> vm_backend::handle_spaceship(const script_value& le
 	if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 		return detail::math::ordering_error(left, right);
 	if (auto custom = object_arithmetic_via_method(left, right, op_spaceship_id_)) { return *custom; }
+	if (!is_unwinding_) {
+		if (auto reversed = object_spaceship_reversed_via_method(left, right)) { return *reversed; }
+	}
 	return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <=> operator");
 }
 

@@ -2626,13 +2626,17 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
 }
 
 // A declared operator!= wins over !(a == b) (C++20, Dev ruling 2026-10-01), asked where operator== would be: a class
-// instance against a non-null value of its kind. KEEP BYTE-PARALLEL with vm_backend::object_inequality_via_method
+// instance against a non-null value of its kind, or any value one of its != overloads takes when the chain declares <=>.
+// KEEP BYTE-PARALLEL with vm_backend::object_inequality_via_method
 std::optional<checked_result<bool>> interpreter::object_inequality_via_method(const script_value& left, const script_value& right) {
-    if (parallel_worker_ || !left.is_object() || right.is_null() || left.type() != right.type()) { return std::nullopt; }
+    if (parallel_worker_ || !left.is_object() || right.is_null()) { return std::nullopt; }
     auto target = resolve_member_target(left);
     if (!target) { return std::nullopt; }
     script_value method_val = target.method(op_bang_equal_id_);
     if (!method_val.is_function()) { return std::nullopt; }
+    if (left.type() != right.type() && (!target.method(op_spaceship_id_).is_function() || !binary_operator_accepts(target.class_def, op_bang_equal_id_, right))) {
+        return std::nullopt;
+    }
     auto result = create_bound_method(left, method_val).as_function()(std::vector<script_value>{right});
     if (!result) {
         if (is_unwinding_) { return checked_result<bool>(false); }
@@ -2672,16 +2676,15 @@ std::optional<checked_result<script_value>> interpreter::object_spaceship_revers
         if (is_unwinding_) { return std::nullopt; }
         return checked_result<script_value>(result.error_value());
     }
-    bool nan = false;
-    if (auto sign = reversed_spaceship_sign(result.value(), nan)) { return checked_result<script_value>(make_int_fast(*sign)); }
-    if (nan) { return detail::nan_order_error<checked_result<script_value>>(); }
+    if (auto sign = reversed_spaceship_sign(result.value())) { return checked_result<script_value>(make_int_fast(*sign)); }
     return std::nullopt;
 }
 
-// == from <=> (Dev ruling 2026-10-01): a class value whose chain declares no operator== and an applicable <=> compares as
-// (a <=> b) == 0, the left operand's first, then the right operand's operator== or <=>
+// <=> drives == (Dev ruling 2026-10-01): an operand whose chain declares <=> answers a == b, the left operand first, then the
+// right one: its operator== when an overload takes the other operand, else its <=> as (a <=> b) == 0 when one does; any other
+// operand, a class without <=> included, keeps its own == (memberwise between values of one class, false otherwise)
 std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_method(const script_value& left, const script_value& right) {
-    if (parallel_worker_ || !left.is_object() || !right.is_object()) { return std::nullopt; }
+    if (left.is_null() || right.is_null()) { return std::nullopt; }
     const auto call = [this](const script_value& self, const script_value& method_val, const script_value& arg, bool spaceship) -> std::optional<checked_result<bool>> {
         auto result = create_bound_method(self, method_val).as_function()(std::vector<script_value>{arg});
         if (!result) {
@@ -2694,17 +2697,24 @@ std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_m
         if (r.is_float()) { return checked_result<bool>(r.as_float() == 0.0); }
         return std::nullopt;
     };
-    if (auto lt = resolve_member_target(left); lt && !lt.method(eq_method_id_).is_function() && binary_operator_accepts(lt.class_def, op_spaceship_id_, right)) {
-        if (script_value m = lt.method(op_spaceship_id_); m.is_function()) { return call(left, m, right, true); }
-    }
-    if (auto rt = resolve_member_target(right)) {
-        if (script_value eq = rt.method(eq_method_id_); eq.is_function()) {
-            if (binary_operator_accepts(rt.class_def, eq_method_id_, left)) { return call(right, eq, left, false); }
-        } else if (binary_operator_accepts(rt.class_def, op_spaceship_id_, left)) {
-            if (script_value m = rt.method(op_spaceship_id_); m.is_function()) { return call(right, m, left, true); }
+    const auto side = [&](const script_value& self, const script_value& other) -> std::optional<checked_result<bool>> {
+        if (!self.is_object()) { return std::nullopt; }
+        auto target = resolve_member_target(self);
+        if (!target) { return std::nullopt; }
+        script_value spaceship = target.method(op_spaceship_id_);
+        if (!spaceship.is_function()) { return std::nullopt; }
+        if (parallel_worker_) [[unlikely]] {
+            return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation),
+                "custom operator dispatch on class instances is not admitted in a parallel body");
         }
-    }
-    return std::nullopt;
+        if (script_value eq = target.method(eq_method_id_); eq.is_function() && binary_operator_accepts(target.class_def, eq_method_id_, other)) {
+            return call(self, eq, other, false);
+        }
+        if (binary_operator_accepts(target.class_def, op_spaceship_id_, other)) { return call(self, spaceship, other, true); }
+        return std::nullopt;
+    };
+    if (auto answer = side(left, right)) { return answer; }
+    return side(right, left);
 }
 
 // Generic helper for comparison operators (<, <=, >, >=) via custom methods
@@ -2719,7 +2729,7 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
     // Look for the operator method by symbol ID
     auto method_val = target.method(op_symbol_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-        if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function()) {
+        if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {
             auto result = create_bound_method(left, spaceship).as_function()(std::vector<script_value>{right});
             if (!result) {
                 if (is_unwinding_) { return std::nullopt; }

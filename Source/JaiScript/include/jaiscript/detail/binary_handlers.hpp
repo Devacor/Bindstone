@@ -244,7 +244,15 @@ namespace jai::detail {
 		// null-ness is a storage property: a typed-but-uninitialized slot compares like null
 		if (unwrapped_left.is_null() || unwrapped_right.is_null()) { return h.make_bool(unwrapped_left.is_null() && unwrapped_right.is_null()); }
 		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return h.make_bool(math::equal(left, right)); }
-		if (unwrapped_left.type() != unwrapped_right.type()) { return h.make_bool(false); }
+		if (unwrapped_left.type() != unwrapped_right.type()) {
+			if (unwrapped_left.is_object() || unwrapped_right.is_object()) {   // a class's <=> may take the other kind (Dev ruling 2026-10-01)
+				if (auto mixed = h.object_spaceship_equality(left, right)) {
+					if (!*mixed) { return mixed->error_value(); }
+					return h.make_bool(mixed->value());
+				}
+			}
+			return h.make_bool(false);
+		}
 		if (unwrapped_left.is_string() && unwrapped_right.is_string()) { return h.make_bool(unwrapped_left.unchecked_as_string() == unwrapped_right.unchecked_as_string()); }
 		if (unwrapped_left.is_bool() && unwrapped_right.is_bool()) { return h.make_bool(unwrapped_left.unchecked_as_bool() == unwrapped_right.unchecked_as_bool()); }
 		// opaque host pointers (an unregistered make_value(T*)): the same live pointer

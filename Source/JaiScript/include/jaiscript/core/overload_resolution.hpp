@@ -83,12 +83,12 @@ inline token_type reversed_comparison(token_type op) {
     }
 }
 
-// 0 <=> r for a reversed a <=> b answered by b's <=>; nullopt for a result that is no number
-inline std::optional<script_int> reversed_spaceship_sign(const script_value& result, bool& nan) {
+// 0 <=> r for a reversed a <=> b answered by b's <=>, in the builtin <=> order (signed zeros equivalent, NaN last); nullopt
+// for a result that is no number
+inline std::optional<script_int> reversed_spaceship_sign(const script_value& result) {
     const script_value& r = result.deref();
-    nan = false;
     if (r.is_int()) { const script_int v = r.as_int(); return v < 0 ? 1 : v > 0 ? -1 : 0; }
-    if (r.is_float()) { const double v = r.as_float(); if (v != v) { nan = true; return std::nullopt; } return v < 0 ? 1 : v > 0 ? -1 : 0; }
+    if (r.is_float()) { const double v = r.as_float(); return v != v ? -1 : v < 0 ? 1 : v > 0 ? -1 : 0; }
     return std::nullopt;
 }
 

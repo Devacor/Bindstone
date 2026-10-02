@@ -210,6 +210,16 @@ namespace jai {
             }
             return caller;
         }
+        // A free function's call scope (vm): one that defined nothing is invisible to lookups while the activations above it
+        // run, so a call made under it is parented past it and a recursion's chain stays as deep as the source's nesting
+        void set_call_scope() noexcept { call_scope_ = true; }
+        static std::shared_ptr<environment> past_idle_call_scopes(std::shared_ptr<environment> env, bool block_defined) {
+            while (env && env->call_scope_ && env->parent_ && env->local_ids_.empty() && !env->access_context_) {
+                env = env->parent_;
+                while (!block_defined && env->block_scope_ && env->parent_) { env = env->parent_; }
+            }
+            return env;
+        }
 
         // Static method environment accessors (only valid when kind == static_method)
         std::shared_ptr<class_definition> get_class_definition() const { return class_def_; }
@@ -341,6 +351,7 @@ namespace jai {
         uint64_t local_epoch_ = 0;   // generation serial; 0 = never cache (see local_epoch())
         bool vm_pinned_scope_ = false;   // see vm_pinned_scope(); reset paths clear it
         bool block_scope_ = false;       // see block_scope(); reset paths clear it
+        bool call_scope_ = false;        // see set_call_scope(); reset paths clear it
 
         // Storage for bound methods (used by method and static_method kinds)
         mutable script_value bound_method_storage_;

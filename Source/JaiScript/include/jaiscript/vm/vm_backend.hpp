@@ -1186,6 +1186,9 @@ namespace jai::vm {
         void convert_cpp_exception_in_frame(const script_exception& e);
         void pop_records_to(size_t records_base, frame*& fp);
         script_value run_program(std::shared_ptr<chunk> program, bool textual = false);   // textual: an include, run in the current environment
+        // A deep recursion leaves the record pool, the value stack and the frame list at their high-water size; the end of a
+        // top-level run gives back what a shallow program never needs
+        void release_deep_call_storage();
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args,
                                                           const call_site* site = nullptr,

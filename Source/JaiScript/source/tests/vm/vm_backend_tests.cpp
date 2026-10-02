@@ -456,6 +456,7 @@ public:
 				f(100000);
 			)";
 			auto e = vm_engine();
+			e->max_call_depth(jai::backend_type::vm, 10000);
 			check_eq((int64_t)-999, e->execute(src).as_int());
 			auto ie = jai::engine::make();
 			check_eq((int64_t)-999, ie->execute(src).as_int());   // parity: same shape both backends

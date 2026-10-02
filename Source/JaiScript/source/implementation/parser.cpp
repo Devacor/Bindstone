@@ -2792,12 +2792,15 @@ checked_result<declaration_ptr> parser::declaration_body() {
     if (foreign_word_at_statement()) { return make_error_code(parse_error_code::unexpected_token); }
 
     if (match(token_type::nocopy_keyword)) {
+        const token at = previous();
         JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'"));
+        reject_class_in_function_body(at);
         JAISCRIPT_TRY_ASSIGN(auto result, class_declaration(true));
         match(token_type::semicolon);
         return result;
     }
     if (match(token_type::class_keyword)) {
+        reject_class_in_function_body(previous());
         JAISCRIPT_TRY_ASSIGN(auto result, class_declaration());
         match(token_type::semicolon);  // Consume optional semicolon after class
         return result;
@@ -3529,6 +3532,18 @@ checked_result<statement_ptr> parser::block_statement() {
     return std::make_shared<block_stmt>(leftBrace.location, std::move(declarations));
 }
 
+// A class is a program-scope type: a function or lambda body cannot declare one, written there or pasted in by an include
+// (Dev ruling 2026-10-01)
+void parser::reject_class_in_function_body(const token& at) {
+    if (function_scope_stack_.empty()) { return; }
+    if (!splice_spelled_.empty()) {
+        report_error("an include inside a function body cannot declare class '" + std::string(peek().lexeme) +
+                     "' (a class is a program-scope type and the included text is the function's own); import '" + splice_spelled_.back() + "' instead", at);
+        return;
+    }
+    report_error("a class cannot be declared inside a function body (a class is a program-scope type); declare it at program scope or import its file", at);
+}
+
 // A literal include inside a function body is textual at parse time, as C++'s is: the included file's declarations are
 // parsed here, in this scope, so the function's parameters and locals are theirs and theirs are the function's, and the
 // checker and both backends see one function. A computed path stays a runtime include (it runs in the environment and
@@ -3562,24 +3577,18 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     const size_t saved_current = current_;
     const std::optional<token> saved_pushed_back = pushed_back_token_;
     stream_ = &tokens; current_ = 0; pushed_back_token_.reset();
-    ++splice_depth_; splice_active_.push_back(resolved.value());
+    ++splice_depth_; splice_active_.push_back(resolved.value()); splice_spelled_.push_back(path);
     while (!is_at_end()) {
         const size_t errors_before = errors_.size();
-        const token at = peek();
         auto d = declaration();
         if (!d) {
             if (errors_.size() == errors_before && d.error() != std::error_code()) { report_error(format_error(d, *symbolizer_), peek()); }
             synchronize();
             continue;
         }
-        // pasted text cannot make a class local: a class is a program-scope type (Dev ruling 2026-10-01)
-        if (d.value() && d.value()->get_type() == node_type::class_decl) {
-            report_error("an include inside a function body cannot declare class '" + std::string(static_cast<const class_decl*>(d.value().get())->name) +
-                         "' (a class is a program-scope type and the included text is the function's own); import '" + path + "' instead", at);
-            continue;
-        }
         if (d.value() && !splice_include(d.value(), out)) { out.push_back(std::move(d.value())); }
     }
+    splice_spelled_.pop_back();
     splice_active_.pop_back(); --splice_depth_;
     stream_ = saved_stream; current_ = saved_current; pushed_back_token_ = saved_pushed_back;
     spliced_files_.push_back(resolved.value());

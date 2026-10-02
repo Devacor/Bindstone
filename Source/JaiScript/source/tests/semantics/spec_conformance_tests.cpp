@@ -2640,6 +2640,7 @@ private:
 		host_call_failure_routes();
 		host_global_references();
 		spaceship_everywhere();
+		classes_in_function_bodies();
 	}
 
 	void spaceship_everywhere() {
@@ -2680,6 +2681,22 @@ private:
 				string nested = "" + (xs == ys) + " " + (xs != ys);
 				z + "|" + declared + "|" + reversed + "|" + plain + "|" + nested;
 			)", "true false false true false true|false true|true false true false false|true false|true false", check_mode::warn);
+		});
+	}
+
+	void classes_in_function_bodies() {
+		test("a_class_declared_in_a_function_body_is_a_parse_error", [this]() {
+			// Dev ruling 2026-10-01: a class is a program-scope type, so a function or lambda body cannot declare one
+			const std::string text = "a class cannot be declared inside a function body (a class is a program-scope type); declare it at program scope or import its file";
+			for (const char* src : {"function f() -> int { class L { int q = 3; } return 1; }",
+			                        "var g = []() { class L { int q = 3; } return 1; };",
+			                        "class C { int m() { class L { int q = 3; } return 1; } }"}) {
+				every_config(std::string("class in body: ") + src, "rejected", [&](engine& e) {
+					try { e.execute(src); return std::string("loaded"); }
+					catch (const std::exception& ex) { const std::string what = ex.what(); return what.find(text) != std::string::npos ? std::string("rejected") : what; }
+				}, check_mode::off);
+			}
+			expect("program scope stands", "class L { int q = 3; } function f() -> int { L l; return l.q; } f();", "<3>");
 		});
 	}
 

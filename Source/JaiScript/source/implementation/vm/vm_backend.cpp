@@ -12923,82 +12923,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 		callee = std::move(call_operator);
 	}
 
-	// Inline the invoke tail: an extra callee frame per script call would blow the
-	// native stack before JAI_MAX_CALL_DEPTH is reached in Debug builds
-	const script_function& func = callee.as_function();
-	const auto* thunk = func.target<script_callable_thunk>();
-	const bool direct = thunk && thunk->eng == engine_ &&
-	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
-	// Bound-method thunk fallback (args already collected — the slice entry lives in
-	// this op's PEEK section above; this vector path serves arity-window shapes)
-	if (thunk && thunk->eng == engine_ &&
-	    thunk->payload.kind == script_callable::kind_type::bound_method &&
-	    thunk->payload.this_obj && thunk->payload.bound_dispatch &&
-	    !parallel_worker_) {
-#ifdef JAISCRIPT_VM_PROFILE
-		profile_bound_method_paths_[0]++;
-#endif
-		const auto* dispatch = thunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
-		if (dispatch && dispatch->eng == engine_) {
-			auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
-			if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
-#ifdef JAISCRIPT_VM_PROFILE
-				profile_bound_method_paths_[1]++;
-#endif
-				script_value method_val = *thunk->payload.bound_dispatch;
-				script_value receiver = *thunk->payload.this_obj;
-				return enter_script_method(f, std::move(method_val), *dispatch,
-				                           resolved.value(), std::move(receiver), arguments, site);
-			}
-		}
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	if (thunk && thunk->payload.kind == script_callable::kind_type::bound_method) {
-		profile_bound_method_paths_[2]++;
-	} else if (!direct) {
-		profile_bound_method_paths_[3]++;
-	}
-#endif
-	if (!direct) {
-		op_status st{};
-		if (enter_static_method(f, callee, arguments, site, st)) { return st; }
-	}
-	std::optional<checked_result<script_value>> callOutcome;
-	try {
-		if (direct) {
-			callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, &f, f.code));
-		} else {
-			// Opaque invoke: arm the pending call-site context for the callee's bind
-			pending_call_site saved_pending = pending_site_ctx_;
-			pending_site_ctx_ = arguments.empty() ? saved_pending
-			                                      : pending_call_site{&site, &f, f.code, &arguments};
-			struct pending_restore {
-				vm_backend* vm; pending_call_site saved;
-				~pending_restore() { vm->pending_site_ctx_ = saved; }
-			} restore_pending{this, saved_pending};
-			callOutcome.emplace(func(arguments));
-		}
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	}
-	checked_result<script_value>& result_checked = *callOutcome;
-
-	if (!result_checked) {
-		return raise_from(result_checked);
-	}
-
-	stack_.push_back(std::move(result_checked.value()));
-	return {};
+	return invoke_callee(f, std::move(callee), arguments, site);
 }
 
 template <typename Call>
@@ -13034,7 +12959,7 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	const auto* thunk = func.target<script_callable_thunk>();
 	const bool direct = thunk && thunk->eng == engine_ &&
 	                    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn;
-	const bool in_loop = direct && arguments.size() == thunk->payload.fn->parameters().size();
+	const bool in_loop = direct && (argc == thunk->payload.fn->parameters().size() || arity_accepts(thunk->payload.fn->parameters(), argc));
 
 	// Bound-method thunk (the env method-fallback mint for bare sibling calls): enter
 	// the method IN-LOOP through the same machinery as op_call_method — no lambda hop,
@@ -13058,6 +12983,16 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 				script_value receiver = *thunk->payload.this_obj;
 				return enter_script_method(f, std::move(method_val), *dispatch,
 				                           resolved.value(), std::move(receiver), arguments, site);
+			}
+		}
+	}
+	// A bound method value (reflect::bind, a callable object's operator()): the same in-loop entry
+	if (const auto* bound = func.target<bound_method_fn>(); bound && bound->method.is_function() && !parallel_worker_) {
+		const auto* dispatch = bound->method.as_function().target<script_method_dispatch>();
+		if (dispatch && dispatch->eng == engine_) {
+			auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
+			if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
+				return enter_script_method(f, script_value(bound->method), *dispatch, resolved.value(), script_value(bound->this_obj), arguments, site);
 			}
 		}
 	}
@@ -20471,6 +20406,7 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	}
 	truncate_detached(pending_callees_, entry_pending);   // a callee parked when the run ended uncaught
 	environment_ = f.entry_env;
+	if (!isolation.reentrant) { release_deep_call_storage(); }
 
 	// Every in-loop pop path must decrement exactly once (no RAII on that path)
 	assert(current_call_depth_ == entry_call_depth);
@@ -20487,6 +20423,17 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 		return out;
 	}
 	return make_null();
+}
+
+void vm_backend::release_deep_call_storage() {
+	constexpr size_t k_retained_records = 1024, k_retained_slots = size_t(1) << 16;
+	if (call_records_.size() > k_retained_records && call_records_top_ <= k_retained_records) {
+		call_records_.resize(k_retained_records);
+		call_records_.shrink_to_fit();
+	}
+	if (stack_.cap > k_retained_slots && stack_.count <= k_retained_slots) { stack_.relocate_to(k_retained_slots); }
+	if (frames_.capacity() > k_retained_records) { frames_.shrink_to_fit(); }
+	if (try_records_.capacity() > k_retained_records) { try_records_.shrink_to_fit(); }
 }
 
 void vm_backend::precompile_parallel_method(const function_decl& decl) {
@@ -21632,7 +21579,8 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 			JAI_ENV_CENSUS(2); environment_ = acquire_scope_env(function.closure_env);
 		}
 	} else {
-		JAI_ENV_CENSUS(3); environment_ = acquire_scope_env(environment::call_parent(prev_env, function.block_defined));   // past the caller's block scopes (KEEP BYTE-PARALLEL with the interpreter's call_function)
+		JAI_ENV_CENSUS(3); environment_ = acquire_scope_env(environment::past_idle_call_scopes(environment::call_parent(prev_env, function.block_defined), function.block_defined));   // past the caller's block scopes (KEEP BYTE-PARALLEL with the interpreter's call_function)
+		environment_->set_call_scope();
 	}
 }
 
@@ -22080,6 +22028,9 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				df.entry_env = environment_;
 				df.stack_base = stack_.size();
 				df.top_level = false;
+				if (detail::native_stack_low()) [[unlikely]] {
+					return raise_from(detail::raise_native_stack());
+				}
 				auto dr = run(df);
 				if (!dr) {
 					return raise_from(dr);

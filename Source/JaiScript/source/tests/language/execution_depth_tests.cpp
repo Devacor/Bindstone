@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/reflection.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <limits>
 
 namespace jai::foundry::tests {
@@ -42,7 +43,7 @@ public:
 		test("defaults_are_backend_specific", [this]() {
 			auto eng = make_engine();
 			check_eq(size_t(256), configured(*eng, backend_type::interpreter));
-			check_eq(size_t(10000), configured(*eng, backend_type::vm));
+			check_eq(size_t(200000), configured(*eng, backend_type::vm));
 		});
 
 		test("interpreter_default_bounds_non_tail_recursion", [this]() {
@@ -57,6 +58,105 @@ public:
 			eng->execution_budget(0);
 			check_eq(script_int(5000), eng->execute(
 				"int descend(int n) { if (n == 0) { return 0; } return descend(n - 1) + 1; } descend(5000);").as_int());
+		});
+
+		// Every script-to-script call shape runs as an in-loop frame: 50000 levels need no native stack, and a
+		// recursion whose frames carry an environment (a try per level) stays linear
+		test("vm_deep_recursion_of_every_call_shape", [this]() {
+			const std::pair<const char*, const char*> shapes[] = {
+				{"function", "int d(int n) { if (n == 0) { return 0; } return d(n - 1) + 1; } d(50000);"},
+				{"method", "class C { int f(int n) { if (n == 0) { return 0; } return f(n - 1) + 1; } } C().f(50000);"},
+				{"method through a handle", "class C { shared_ptr<C> self; int f(int n) { if (n == 0) { return 0; } return self.f(n - 1) + 1; } } shared_ptr<C> c = new C(); c.self = c; int r = c.f(50000); c.self = null; r;"},
+				{"static method", "class C { static int f(int n) { if (n == 0) { return 0; } return C::f(n - 1) + 1; } } C::f(50000);"},
+				{"constructor", "class C { int d = 0; C(int n) { if (n > 0) { auto child = C(n - 1); d = child.d + 1; } } } C(50000).d;"},
+				{"constructor through new", "class C { int d = 0; C(int n) { if (n > 0) { shared_ptr<C> child = new C(n - 1); d = child.d + 1; } } } C(50000).d;"},
+				{"mutual recursion", "int a(int n) { if (n == 0) { return 0; } return b(n - 1) + 1; } int b(int n) { if (n == 0) { return 0; } return a(n - 1) + 1; } a(50000);"},
+				{"lambda in a global", "var f = function(int n) { if (n == 0) { return 0; } return f(n - 1) + 1; }; f(50000);"},
+				{"lambda in a local", "int run(int n) { function f; f = [&](int k) -> int { if (k == 0) { return 0; } return f(k - 1) + 1; }; return f(n); } run(50000);"},
+				{"function value", "int d(int n) { if (n == 0) { return 0; } var g = d; return g(n - 1) + 1; } d(50000);"},
+				{"default argument", "int d(int n, int k = 1) { if (n == 0) { return 0; } return d(n - 1) + k; } d(50000);"},
+				{"bound method", "class C { int f(int n) { if (n == 0) { return 0; } return reflect::bind(this, \"f\")(n - 1) + 1; } } C().f(50000);"},
+				{"callable object", "class V { int operator()(int n) { if (n == 0) { return 0; } return this(n - 1) + 1; } } auto v = V(); v(50000);"},
+				{"try per level", "int d(int n) { if (n == 0) { return 0; } try { return d(n - 1) + 1; } catch (e) { throw e; } } d(50000);"},
+				{"range-for per level", "int d(int n) { if (n == 0) { return 0; } int s = 0; for (auto x : [1]) { s = d(n - 1) + x; } return s; } d(50000);"},
+			};
+			for (const auto& [shape, source] : shapes) {
+				auto eng = engine::make();
+				jai::stdlib::register_reflection_functions(eng);
+				eng->set_backend(backend_type::vm);
+				eng->execution_budget(30.0);
+				std::string outcome;
+				try { outcome = std::to_string(eng->execute(source).as_int()); }
+				catch (const std::exception& error) { outcome = error.what(); }
+				check_eq(std::string("50000"), outcome, shape);
+				check_eq(script_int(42), eng->execute("40 + 2;").as_int());
+			}
+		});
+
+		test("vm_cap_bounds_deep_recursion_and_unwinds", [this]() {
+			auto eng = engine::make();
+			eng->set_backend(backend_type::vm);
+			eng->execution_budget(0);
+			configure(*eng, backend_type::vm, 60000);
+			eng->execute("int descend(int n) { if (n == 0) { return 0; } return descend(n - 1) + 1; }");
+			check_eq(script_int(59999), eng->execute("descend(59999);").as_int());
+			check_true(depth_error(*eng, "descend(60000);").starts_with("Maximum recursion depth exceeded - possible infinite recursion"));
+			check_eq(script_int(42), eng->execute("int r = 0; try { descend(60000); } catch (e) { r = 42; } r;").as_int());
+			check_eq(script_int(59999), eng->execute("descend(59999);").as_int());
+		});
+
+		test("vm_throw_unwinds_deep_frames", [this]() {
+			auto eng = engine::make();
+			eng->set_backend(backend_type::vm);
+			eng->execution_budget(0);
+			check_eq(script_int(7), eng->execute(R"(
+				int d(int n) { if (n == 0) { throw "bottom"; } return d(n - 1) + 1; }
+				int r = 0;
+				try { d(50000); } catch (e) { if (e == "bottom") { r = 7; } }
+				r;
+			)").as_int());
+			check_eq(script_int(2000), eng->execute(R"(
+				int hops = 0;
+				int rethrow(int n) { if (n == 0) { throw "deep"; } try { return rethrow(n - 1); } catch (e) { hops += 1; throw e; } }
+				try { rethrow(2000); } catch (e) { }
+				hops;
+			)").as_int());
+			check_eq(script_int(49999), eng->execute("int up(int n) { if (n == 0) { return 0; } return up(n - 1) + 1; } up(49999);").as_int());
+		});
+
+		// A recursion through a host callback re-enters run() natively per level: the native-stack headroom check raises
+		// its own catchable text at the re-entry (the cap is out of reach), and the engine stays usable
+		test("vm_host_reentry_recursion_fails_cleanly", [this]() {
+			auto eng = engine::make();
+			eng->set_backend(backend_type::vm);
+			eng->execution_budget(0);
+			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
+			eng->add_function("host_call", [](script_value f, script_int k) { return convert_script_function<script_int(script_int)>(f)(k); });
+			eng->execute("int d(int n) { if (n == 0) { return 0; } return host_call(d, n - 1) + 1; }");
+			std::string message;
+			try { eng->execute("d(100000000);"); }
+			catch (const std::exception& error) { message = error.what(); }
+			check_true(message.find("Native stack exhausted before the call-depth cap") != std::string::npos, "got: " + message);
+			check_eq(script_int(1), eng->execute(R"(
+				int caught = 0;
+				try { d(100000000); } catch (e) { if (e.find("Native stack exhausted") == 0) { caught = 1; } }
+				caught;
+			)").as_int());
+			check_eq(script_int(100), eng->execute("d(100);").as_int());
+		});
+
+		test("vm_default_argument_recursion_fails_cleanly", [this]() {
+			auto eng = engine::make();
+			eng->set_backend(backend_type::vm);
+			eng->execution_budget(0);
+			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
+			eng->execute("int left = 0; int f(int d = left > 0 ? g() : 0) { return d + 1; } int g() { left -= 1; return f(); }");
+			check_eq(script_int(11), eng->execute("left = 10; f();").as_int());
+			std::string message;
+			try { eng->execute("left = 100000000; f();"); }
+			catch (const std::exception& error) { message = error.what(); }
+			check_true(message.find("Native stack exhausted before the call-depth cap") != std::string::npos, "got: " + message);
+			check_eq(script_int(11), eng->execute("left = 10; f();").as_int());
 		});
 
 		test("configured_boundary_and_recovery", [this]() {
@@ -81,7 +181,7 @@ public:
 			check_eq(size_t(12), configured(*first, backend_type::interpreter));
 			check_eq(size_t(48), configured(*first, backend_type::vm));
 			check_eq(size_t(256), configured(*second, backend_type::interpreter));
-			check_eq(size_t(10000), configured(*second, backend_type::vm));
+			check_eq(size_t(200000), configured(*second, backend_type::vm));
 		});
 
 		test("invalid_caps_leave_configuration_unchanged", [this]() {
@@ -161,6 +261,7 @@ public:
 			configure(*eng, eng->get_backend_type(), 64);
 			check_eq(script_int(40), eng->execute(source).as_int());
 		});
+
 
 		test("vm_tail_calls_do_not_consume_additional_depth", [this]() {
 			auto eng = engine::make();

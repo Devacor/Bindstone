@@ -23,7 +23,7 @@ namespace jai::detail {
 		int vm_call_depth_limit = JAI_MAX_CALL_DEPTH;
 #else
 		int interpreter_call_depth_limit = 256;
-		int vm_call_depth_limit = 10000;
+		int vm_call_depth_limit = 200000;   // in-loop frames: heap records of 1-3 KB a level in Release
 #endif
 
 		// Terminal-error latch: while set, EVERY script catch handler is skipped -

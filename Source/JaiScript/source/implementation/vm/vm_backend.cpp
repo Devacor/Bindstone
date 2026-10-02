@@ -17057,7 +17057,8 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 	// The init env serves initializer-list arguments and non-literal field
 	// initializers; a literal-only chain with no initializer list never reads it
 	std::shared_ptr<environment> init_env;
-	if (!class_def->effective_initializers(*matching_ctor).empty() || !class_def->chain_initializers_all_literal()) {
+	const auto& initializers = class_def->effective_initializers(*matching_ctor);
+	if (!initializers.empty() || !class_def->chain_initializers_all_literal()) {
 		init_env = std::make_shared<environment>(definition_env, symbolizer_);
 		init_env->define(symbolizer_->get_this_id(), this_value);
 		init_env->set_access_context(class_def.get());   // field initializers are class-body code
@@ -17083,7 +17084,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 	// delegating ctor must not re-run field initializers afterward
 	bool delegated_to_this = false;
 
-	for (const auto& initializer : class_def->effective_initializers(*matching_ctor)) {
+	for (const auto& initializer : initializers) {
 		if (initializer.target == "super") {
 			if (class_def->get_parent()) {
 				std::vector<script_value> init_args;

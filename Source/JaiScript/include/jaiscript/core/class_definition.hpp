@@ -1391,6 +1391,11 @@ public:
         return nullptr;
     }
 
+    // get_parent() without the shared_ptr copy (construction paths ask it per instance)
+    const class_definition* parent_ptr() const {
+        return !parent_classes_.empty() ? parent_classes_[0].get() : cpp_base_class_.get();
+    }
+
     bool has_diamond_inheritance() const {
         if (parent_classes_.size() <= 1) {
             return false;

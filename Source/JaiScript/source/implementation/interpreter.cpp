@@ -397,206 +397,163 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         return ctx.make_value(static_cast<script_int>(self.unchecked_array_node()->size()));
     }},
 
-        {symbolizer->intern("slice"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 2) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "slice() takes exactly two arguments");
-        }
-        if (!args[0].is_int() || !args[1].is_int()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "slice() arguments must be integers");
-        }
-        const script_array* node = self.unchecked_array_node();
-        script_int start = args[0].unchecked_as_int();
-        script_int end = args[1].unchecked_as_int();
+		{symbolizer->intern("slice"), [](const builtin_method_context& a_context, script_value& a_self, const std::vector<script_value>& a_args) -> checked_result<script_value> {
+			if (a_args.size() > 2) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "slice() takes zero to two arguments");
+			}
+			if ((!a_args.empty() && !a_args[0].is_int()) || (a_args.size() == 2 && !a_args[1].is_int())) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "slice() arguments must be integers");
+			}
+			const script_array* node = a_self.unchecked_array_node();
+			script_int start = a_args.empty() ? 0 : a_args[0].unchecked_as_int();
+			script_int end = a_args.size() == 2 ? a_args[1].unchecked_as_int() : static_cast<script_int>(node->size());
 
-        // Handle negative indices
-        if (start < 0) start = static_cast<script_int>(node->size()) + start;
-        if (end < 0) end = static_cast<script_int>(node->size()) + end;
+			if (start < 0) {
+				start = static_cast<script_int>(node->size()) + start;
+			}
+			if (end < 0) {
+				end = static_cast<script_int>(node->size()) + end;
+			}
+			start = std::max<script_int>(0, std::min<script_int>(start, static_cast<script_int>(node->size())));
+			end = std::max<script_int>(0, std::min<script_int>(end, static_cast<script_int>(node->size())));
+			if (start > end) {
+				start = end;
+			}
 
-        // Clamp to valid range
-        start = std::max<script_int>(0, std::min<script_int>(start, static_cast<script_int>(node->size())));
-        end = std::max<script_int>(0, std::min<script_int>(end, static_cast<script_int>(node->size())));
+			if (!a_context.copy_array_result) {
+				a_self.unchecked_get_array_storage()->retain_range(static_cast<size_t>(start), static_cast<size_t>(end));
+				return a_self;
+			}
+			// Preserve the receiver's declared element type in the copy.
+			auto self_type = a_self.get_type_info();
+			type_info_ptr element_type = self_type && self_type->base_type == script_value_type::jai_array_type ? self_type->element_type() : nullptr;
+			script_value result = script_value::make_array(element_type, a_context.get_engine());
+			auto& result_node = *result.unchecked_get_array_storage();
+			for (script_int i = start; i < end; ++i) {
+				result_node.push(node->get(static_cast<size_t>(i), a_context.get_engine()).clone_element());
+			}
+			return result;
+		}},
 
-        if (start > end) start = end;
+		{symbolizer->intern("filter"), [](const builtin_method_context& a_context, script_value& a_self, const std::vector<script_value>& a_args) -> checked_result<script_value> {
+			if (a_args.size() != 1) { return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "filter() takes exactly one argument"); }
+			if (!a_args[0].is_function()) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument"); }
+			auto* eng = a_context.get_engine();
+			const auto array = a_self.unchecked_get_array_storage();
+			const element_callback callback(a_args[0], 0, a_self);
+			script_value result = a_context.copy_array_result ? script_value::make_array(callback.element_type, eng) : a_context.make_value();
+			std::vector<uint8_t> selected;
+			const size_t count = array->size();
+			if (!a_context.copy_array_result) { selected.reserve(count); }
+			for (size_t i = 0; i < count && i < array->size(); ++i) {
+				auto answer = callback.call(array, i, nullptr, eng);
+				if (!answer) { return answer.error_value(); }
+				if (a_context.unwinding()) { return a_context.make_value(); }
+				const bool keep = predicate_true(answer.value()) && i < array->size();
+				if (a_context.copy_array_result) {
+					if (keep) { result.unchecked_get_array_storage()->push(array->get(i, eng).clone_element()); }
+				} else { selected.push_back(keep ? uint8_t{1} : uint8_t{0}); }
+			}
+			if (a_context.copy_array_result) { return result; }
+			array->retain_selected(selected);
+			return a_self;
+		}},
 
-        // the slice has the receiver's element type (a typed array's slice is typed)
-        auto self_type = self.get_type_info();
-        type_info_ptr element_type = self_type && self_type->base_type == script_value_type::jai_array_type ? self_type->element_type() : nullptr;
-        script_value result = script_value::make_array(element_type, ctx.get_engine());
-        auto& result_node = *result.unchecked_get_array_storage();
-        for (script_int i = start; i < end; ++i) {
-            result_node.push(node->get(static_cast<size_t>(i), ctx.get_engine()).clone());
-        }
-        return result;
-    }},
+		{symbolizer->intern("sort"), [](const builtin_method_context& a_context, script_value& a_self, const std::vector<script_value>& a_args) -> checked_result<script_value> {
+			if (a_args.size() > 1) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "sort() takes zero or one argument");
+			}
+			if (!a_args.empty() && !a_args[0].is_function()) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
+			}
+			auto& node = *a_self.unchecked_get_array_storage();
+			auto* backend = a_context.get_engine()->get_execution_backend();
+			if (a_args.empty() && node.is_typed() && backend && backend->native_less_available()) {
+				// Direct buffer sorting: no boxing, snapshot or script comparison calls.
+				switch (node.kind()) {
+					case script_array::kind_t::i64:
+						std::sort(node.ints().begin(), node.ints().end()); return a_context.make_value();
+					case script_array::kind_t::f64:
+						if (std::any_of(node.floats().begin(), node.floats().end(), [](script_float a_value) { return std::isnan(a_value); })) {
+							std::sort(node.floats().begin(), node.floats().end(), [](script_float a_left, script_float a_right) { return detail::float_order(a_left,a_right) < 0; });
+						} else { std::sort(node.floats().begin(), node.floats().end()); }
+						return a_context.make_value();
+					case script_array::kind_t::b8:
+					case script_array::kind_t::c8:
+					case script_array::kind_t::u8:
+						// Language chars promote to unsigned bytes (0..255) before <.
+						std::sort(node.bytes().begin(), node.bytes().end()); return a_context.make_value();
+					case script_array::kind_t::i8:
+						std::sort(node.bytes().begin(), node.bytes().end(), [](uint8_t a_left, uint8_t a_right) {
+							return static_cast<int8_t>(a_left) < static_cast<int8_t>(a_right);
+						});
+						return a_context.make_value();
+					case script_array::kind_t::str:
+						std::sort(node.strs().begin(), node.strs().end(), [](const strong_ptr<script_string>& a_left, const strong_ptr<script_string>& a_right) {
+							return *a_left < *a_right;
+						});
+						return a_context.make_value();
+					default: break;
+				}
+			}
 
-        {symbolizer->intern("filter"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "filter() takes exactly one argument");
-        }
-        if (!args[0].is_function()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
-        }
-
-        // Snapshot first: func is user script that may mutate THIS array (shared
-        // storage), reallocating the buffer and invalidating the iterator.
-        const script_array* self_node = self.unchecked_array_node();
-        std::vector<script_value> arr = self_node->is_typed()
-            ? self_node->materialize_values(ctx.get_engine()) : self_node->values();
-        const auto& func = args[0].unchecked_as_function();
-        const uint32_t lvalues = callback_lvalue_positions(args[0], 1);
-        script_value result = script_value::make_array(nullptr, ctx.get_engine());
-        auto& resultPtr = result.unchecked_get_array_storage()->values();
-
-        for (auto& elem : arr) {
-            auto call_result = lvalues ? call_with_lvalues(func, lvalues, {&elem}, ctx.get_engine()) : func({elem});
-            if (!call_result) {
-                return call_result.error_value();
-            }
-            if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
-                resultPtr.push_back(elem.clone());
-            }
-        }
-        return result;
-    }},
-
-        {symbolizer->intern("sort"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() > 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "sort() takes zero or one argument");
-        }
-
-        auto& node = *self.unchecked_get_array_storage();
-        if (node.is_typed() && args.empty() && node.kind() != script_array::kind_t::obj && !script_array::is_vec_kind(node.kind())) {
-            // raw buffer sort: no comparator, so no user script can mutate mid-sort
-            switch (node.kind()) {
-                case script_array::kind_t::i64: std::sort(node.ints().begin(), node.ints().end()); break;
-                case script_array::kind_t::f64: std::sort(node.floats().begin(), node.floats().end()); break;
-                case script_array::kind_t::c8:
-                    // chars order as script_char (signed), exactly like the boxed compare
-                    std::sort(node.bytes().begin(), node.bytes().end(), [](uint8_t a, uint8_t b) {
-                        return static_cast<script_char>(a) < static_cast<script_char>(b);
-                    });
-                    break;
-                case script_array::kind_t::i8:
-                    std::sort(node.bytes().begin(), node.bytes().end(), [](uint8_t a, uint8_t b) {
-                        return static_cast<int8_t>(a) < static_cast<int8_t>(b);
-                    });
-                    break;
-                case script_array::kind_t::str:
-                    std::sort(node.strs().begin(), node.strs().end(),
-                              [](const strong_ptr<script_string>& a, const strong_ptr<script_string>& b) { return *a < *b; });
-                    break;
-                default: std::sort(node.bytes().begin(), node.bytes().end()); break;   // b8: false < true; u8: 0..255
-            }
-            return ctx.make_value();
-        }
-
-        // Sort a SNAPSHOT, then write it back. The comparator (default or custom) can
-        // run user script that mutates THIS array; sorting the live buffer while it
-        // reallocates is undefined behavior / a crash. (A user-supplied comparator
-        // that isn't a strict weak ordering is still the caller's responsibility, as
-        // in C++ — but it can no longer corrupt the container.)
-        std::vector<script_value> tmp = node.is_typed()
-            ? node.materialize_values(ctx.get_engine()) : node.values();
-
-        if (args.empty()) {
-            // Default order: numerics by value (int/float mixed too), other primitives by script_value's total <=> order.
-            // An instance, a container or a callable has no built-in order (CLAUDE.md: ordering stays off containers and
-            // instances): it sorts by the language's `<` - a user operator< on the left element's class - and without one
-            // raises the < operator's own rejection; never by storage address, which differs between runs and backends.
-            engine* eng = ctx.get_engine();
-            auto* backend = eng->get_execution_backend();
-            const uint64_t less_id = ctx.get_string_symbolizer()->intern("<");
-            std::optional<error_propagator> order_error;
-            bool order_threw = false;
-            auto unordered = [](const script_value& v) {
-                const size_t k = v.raw_storage_index();
-                return k == script_value::TYPEID_OBJECT || k == script_value::TYPEID_SHARED_PTR || k == script_value::TYPEID_ARRAY ||
-                       k == script_value::TYPEID_MAP || k == script_value::TYPEID_FUNCTION || k == script_value::TYPEID_WEAK_PTR;
-            };
-            std::sort(tmp.begin(), tmp.end(), [&](const script_value& a_in, const script_value& b_in) {
-                if (order_error || order_threw) return false;   // the first failure ends the calls; the array stays as it was
-                const script_value& a = a_in.is_reference() ? a_in.deref() : a_in;
-                const script_value& b = b_in.is_reference() ? b_in.deref() : b_in;
-                const bool an = a.is_int() || a.is_float();
-                const bool bn = b.is_int() || b.is_float();
-                if (an && bn) {
-                    double av = a.is_int() ? static_cast<double>(a.unchecked_as_int()) : a.unchecked_as_float();
-                    double bv = b.is_int() ? static_cast<double>(b.unchecked_as_int()) : b.unchecked_as_float();
-                    return av < bv;
-                }
-                if (script_value::is_math_index(a.raw_storage_index()) || script_value::is_math_index(b.raw_storage_index())) {
-                    order_error = detail::math::ordering_error(a, b).error_value();   // math values have no script order (design 5.2)
-                    return false;
-                }
-                if (!unordered(a) && !unordered(b)) {
-                    return a < b;  // total order via operator<=> (numerics have lowest type ids)
-                }
-                auto view = detail::resolve_slot_class(a, eng);
-                script_value method(std::monostate{}, eng);
-                if (view.def) { method = view.def->get_method(less_id, false); }
-                if (!method.is_invalid() && method.is_function()) {
-                    script_value bound = make_bound_method(a, method);
-                    auto result = bound.as_function()({b});
-                    if (!result) {
-                        order_error = result.error_value();
-                        return false;
-                    }
-                    if (backend && backend->is_unwinding()) {
-                        order_threw = true;
-                        return false;
-                    }
-                    if (result.value().is_bool()) return result.value().unchecked_as_bool();
-                }
-                order_error = error_propagator{make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator"};
-                return false;
-            });
-            if (order_error) {
-                return *order_error;
-            }
-            if (order_threw) {
-                return ctx.make_value();
-            }
-        } else {
-            // Custom comparator
-            if (!args[0].is_function()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
-            }
-            const auto& comparator = args[0].unchecked_as_function();
-            const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
-            auto* backend = ctx.get_engine()->get_execution_backend();
-            std::optional<error_propagator> comparator_error;
-            bool comparator_threw = false;
-            std::sort(tmp.begin(), tmp.end(), [&](const script_value& a, const script_value& b) {
-                if (comparator_error || comparator_threw) return false;   // the first failure ends the calls; the array stays as it was
-                // an lvalue comparator writes the elements the sort holds (not const: they are tmp's or the sort's own)
-                auto result = lvalues ? call_with_lvalues(comparator, lvalues, {const_cast<script_value*>(&a), const_cast<script_value*>(&b)}, ctx.get_engine())
-                                      : comparator({a, b});
-                if (!result) {
-                    comparator_error = result.error_value();
-                    return false;
-                }
-                if (backend && backend->is_unwinding()) {
-                    comparator_threw = true;
-                    return false;
-                }
-                return result.value().is_bool() && result.value().unchecked_as_bool();
-            });
-            if (comparator_error) {
-                return *comparator_error;
-            }
-            if (comparator_threw) {
-                return ctx.make_value();
-            }
-        }
-        if (node.is_typed()) {
-            // snapshot wins wholesale (matches the hetero write-back below)
-            node.clear();
-            for (auto& v : tmp) { node.push(std::move(v)); }
-        } else {
-            node.values() = std::move(tmp);
-        }
-        return ctx.make_value();
-    }},
+			// Pin the starting receiver even if callback reentry replaces its variable.
+			auto pinnedNode = a_self.unchecked_get_array_storage();
+			// User comparisons operate on a snapshot: callback reentry cannot invalidate
+			// std::sort's iterators. Commit the ordering only after every comparison succeeds.
+			std::vector<script_value> values = node.is_typed() ? node.materialize_values(a_context.get_engine()) : node.values();
+			const script_function* predicate = a_args.empty() ? nullptr : &a_args[0].unchecked_as_function();
+			const bool hasNaN = a_args.empty() && backend && backend->native_less_available() && std::any_of(values.begin(), values.end(), [](const script_value& a_value) { return a_value.is_float() && std::isnan(a_value.unchecked_as_float()); });
+			const uint32_t lvalues = predicate ? callback_lvalue_positions(a_args[0], 2) : 0;
+			std::vector<script_value> arguments;
+			if (predicate && !lvalues) { arguments.resize(2, a_context.make_value()); }
+			std::optional<error_propagator> error;
+			struct SortAborted {};
+			try {
+				std::sort(values.begin(), values.end(), [&](const script_value& a_left, const script_value& a_right) {
+					if (!predicate) {
+						if (!backend) {
+							error = error_propagator{make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator"};
+							throw SortAborted{};
+						}
+						if (hasNaN && (a_left.is_int() || a_left.is_float()) && (a_right.is_int() || a_right.is_float())) {
+							const auto left = a_left.is_int() ? static_cast<script_float>(a_left.unchecked_as_int()) : a_left.unchecked_as_float();
+							const auto right = a_right.is_int() ? static_cast<script_float>(a_right.unchecked_as_int()) : a_right.unchecked_as_float();
+							if (std::isnan(left) || std::isnan(right)) { return detail::float_order(left,right) < 0; }
+						}
+						auto result = backend->language_less(a_left, a_right);
+						if (!result) { error = result.error_value(); throw SortAborted{}; }
+						if (backend->is_unwinding()) { throw SortAborted{}; }
+						return result.value();
+					}
+					checked_result<script_value> result = [&]() {
+						if (lvalues) {
+							return call_with_lvalues(*predicate, lvalues, {const_cast<script_value*>(&a_left), const_cast<script_value*>(&a_right)}, a_context.get_engine());
+						}
+						arguments[0] = a_left;
+						arguments[1] = a_right;
+						return (*predicate)(arguments);
+					}();
+					if (!result) { error = result.error_value(); throw SortAborted{}; }
+					if (backend && backend->is_unwinding()) { throw SortAborted{}; }
+					if (!result.value().is_bool()) {
+						error = error_propagator{make_error_code(runtime_error_code::type_mismatch), "sort() comparator must return bool"};
+						throw SortAborted{};
+					}
+					return result.value().unchecked_as_bool();
+				});
+			} catch (const SortAborted&) {
+				if (error) { return *error; }
+				return a_context.make_value(); // preserve the backend's script throw
+			}
+			if (node.is_typed()) {
+				node.clear();
+				for (auto& value : values) { node.push(std::move(value)); }
+			} else {
+				node.values() = std::move(values);
+			}
+			return a_context.make_value();
+		}},
 
         {symbolizer->intern("reverse"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
@@ -625,45 +582,48 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     }},
 
         {symbolizer->intern("remove_if"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_if() takes exactly one argument");
-        }
-        if (!args[0].is_function()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
-        }
+		if (args.size() != 1) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "remove_if() takes exactly one argument");
+		}
+		if (!args[0].is_function()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "remove_if() requires a function argument");
+		}
 
-        auto& node = *self.unchecked_get_array_storage();
-        const auto& predicate = args[0].unchecked_as_function();
-        const uint32_t lvalues = callback_lvalue_positions(args[0], 1);
-        script_int removed_count = 0;
+		const auto storage = self.unchecked_get_array_storage();
+		auto& node = *storage;
+		const auto& predicate = args[0].unchecked_as_function();
+		const uint32_t lvalues = callback_lvalue_positions(args[0], 1);
+		script_int removed_count = 0;
 
-        // Snapshot the elements before iterating: the predicate is user script that
-        // can mutate THIS array (arrays share strong_ptr storage), and a push/clear
-        // would reallocate the buffer and dangle a live iterator. Evaluate against the
-        // snapshot, collect survivors, then write them back.
-        std::vector<script_value> snapshot = node.is_typed()
-            ? node.materialize_values(ctx.get_engine()) : node.values();
-        std::vector<script_value> kept;
-        kept.reserve(snapshot.size());
-        for (auto& elem : snapshot) {
-            auto call_result = lvalues ? call_with_lvalues(predicate, lvalues, {&elem}, ctx.get_engine()) : predicate({elem});
-            if (!call_result) {
-                return call_result.error_value();
-            }
-            if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
-                ++removed_count;          // dropped
-            } else {
-                kept.push_back(elem);     // survivor
-            }
-        }
-        if (node.is_typed()) {
-            node.clear();
-            for (auto& v : kept) { node.push(std::move(v)); }
-        } else {
-            node.values() = std::move(kept);
-        }
-        return ctx.make_value(removed_count);
-    }},
+		// Snapshot the elements before iterating: the predicate is user script that
+		// can mutate THIS array (arrays share strong_ptr storage), and a push/clear
+		// would reallocate the buffer and dangle a live iterator. Evaluate against the
+		// snapshot, collect survivors, then write them back.
+		std::vector<script_value> snapshot = node.is_typed()
+			? node.materialize_values(ctx.get_engine()) : node.values();
+		std::vector<script_value> kept;
+		kept.reserve(snapshot.size());
+		for (auto& elem : snapshot) {
+			auto call_result = lvalues ? call_with_lvalues(predicate, lvalues, {&elem}, ctx.get_engine()) : predicate({elem});
+			if (!call_result) {
+				return call_result.error_value();
+			}
+			if (ctx.unwinding()) { return ctx.make_value(); }
+			if (call_result.value().is_bool() && call_result.value().unchecked_as_bool()) {
+				++removed_count;          // dropped
+			} else {
+				kept.push_back(elem);     // survivor
+			}
+		}
+		if (node.is_typed()) {
+			node.clear();
+			for (auto& v : kept) { node.push(std::move(v)); }
+		} else {
+			node.values() = std::move(kept);
+		}
+		return ctx.make_value(removed_count);
+	}},
+
 
         {symbolizer->intern("join"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() > 1) {
@@ -715,46 +675,54 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         return ctx.make_value(std::move(result));
     }},
 
-        // map(f): a new array of f(element) in order; array<T> when f declares its return type T, else array<var>
+		// Dot map retains the input T in place; array::map selects the callback's declared result type.
         {symbolizer->intern("map"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "map() takes exactly one argument");
-        }
-        if (!args[0].is_function()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "map() requires a function argument");
-        }
-        engine* eng = ctx.get_engine();
-        const strong_ptr<script_array> array = self.unchecked_get_array_storage();
-        const element_callback callback(args[0], 0, self);
-        type_info_ptr declared;
-        callback_parameters(args[0], &declared);
-        const bool typed = declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != script_value_type::jai_null_type &&
-                           declared->base_type != script_value_type::jai_reference_type && declared->base_type != script_value_type::jai_function_type &&
-                           declared->base_type != script_value_type::jai_invalid_type && declared->base_type != script_value_type::jai_cpp_bound_type;
-        type_info_ptr element_type = typed ? declared : nullptr;
-        script_value result = script_value::make_array(element_type, eng);
-        const size_t count = array->size();
-        for (size_t i = 0; i < count && i < array->size(); ++i) {
-            auto mapped = callback.call(array, i, nullptr, eng);
-            if (!mapped) { return mapped.error_value(); }
-            if (ctx.unwinding()) { return ctx.make_value(); }
-            script_value value = mapped.value().is_reference() ? script_value(mapped.value().deref()) : std::move(mapped.value());
-            if (element_type) {
-                if (!detail::container_element_compatible(value, element_type, eng)) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
-                        ctx.get_string_symbolizer()->intern(detail::container_value_type_name(value)),
-                        ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
-                }
-                auto converted = detail::convert_container_element(eng, value, element_type);
-                if (!converted) { return converted.error_value(); }
-                value = std::move(converted.value());
-            }
-            result.unchecked_get_array_storage()->push(std::move(value));
-        }
-        return result;
-    }},
+		if (args.size() != 1) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "map() takes exactly one argument");
+		}
+		if (!args[0].is_function()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "map() requires a function argument");
+		}
+		engine* eng = ctx.get_engine();
+		const strong_ptr<script_array> array = self.unchecked_get_array_storage();
+		const element_callback callback(args[0], 0, self);
+		type_info_ptr declared;
+		callback_parameters(args[0], &declared);
+		const bool typed = declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != script_value_type::jai_null_type &&
+						   declared->base_type != script_value_type::jai_reference_type && declared->base_type != script_value_type::jai_function_type &&
+						   declared->base_type != script_value_type::jai_invalid_type && declared->base_type != script_value_type::jai_cpp_bound_type;
+		type_info_ptr element_type = ctx.copy_array_result ? (typed ? declared : nullptr) : callback.element_type;
+		script_value result = script_value::make_array(element_type, eng);
+		const size_t count = array->size();
+		for (size_t i = 0; i < count && i < array->size(); ++i) {
+			auto mapped = callback.call(array, i, nullptr, eng);
+			if (!mapped) { return mapped.error_value(); }
+			if (ctx.unwinding()) { return ctx.make_value(); }
+			script_value value = mapped.value().is_reference() ? mapped.value().deref().clone_element() : std::move(mapped.value());
+			if (element_type) {
+				if (!detail::container_element_compatible(value, element_type, eng)) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
+						ctx.get_string_symbolizer()->intern(detail::container_value_type_name(value)),
+						ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
+				}
+				auto converted = detail::convert_container_element(eng, value, element_type);
+				if (!converted) { return converted.error_value(); }
+				value = std::move(converted.value());
+			}
+			result.unchecked_get_array_storage()->push(std::move(value));
+		}
+		if (ctx.copy_array_result) { return result; }
+		// Move the completed storage, preserving the original node's live reference count.
+		auto& target = *array;
+		auto& output = *result.unchecked_get_array_storage();
+		const uint32_t refs = target.live_elem_refs;
+		target = std::move(output);
+		target.live_elem_refs = refs;
+		return self;
+	}},
 
-        // reduce(f, init): f(accumulator, element) over the elements in order, starting from init; reduce(f) starts from the first element
+		// reduce(f, init): f(accumulator, element) over the elements in order, starting from init; reduce(f) starts from the first element
+
         {symbolizer->intern("reduce"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.empty() || args.size() > 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reduce() takes a function and an optional initial value");
@@ -822,7 +790,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             auto answer = callback.call(array, i, nullptr, eng);
             if (!answer) { return answer.error_value(); }
             if (ctx.unwinding()) { return ctx.make_value(); }
-            if (predicate_true(answer.value()) && i < array->size()) { return array->get(i, eng).clone(); }
+            if (predicate_true(answer.value()) && i < array->size()) { return array->get(i, eng).clone_element(); }
         }
         return ctx.make_value();
     }},
@@ -891,42 +859,39 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     }},
 
         // concat(other): a new array, this one's elements then other's (copies), with this array's element type
-        {symbolizer->intern("concat"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "concat() takes exactly one argument");
-        }
-        const script_value& other = args[0].deref();
-        if (!other.is_array()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "concat() requires an array argument");
-        }
-        engine* eng = ctx.get_engine();
-        auto self_type = self.get_type_info();
-        type_info_ptr element_type = self_type && self_type->base_type == script_value_type::jai_array_type ? self_type->element_type() : nullptr;
-        if (element_type && (element_type->base_type == script_value_type::jai_any_type || element_type->base_type == script_value_type::jai_null_type)) { element_type = nullptr; }
-        const script_array* left = self.unchecked_array_node();
-        const script_array* right = other.unchecked_array_node();
-        script_value result = script_value::make_array(element_type, eng);
-        auto& out = *result.unchecked_get_array_storage();
-        out.reserve(left->size() + right->size());
-        for (size_t i = 0; i < left->size(); ++i) { out.push(left->get(i, eng).clone()); }
-        for (size_t i = 0; i < right->size(); ++i) {
-            script_value value = right->get(i, eng).clone();
-            if (element_type) {
-                if (!detail::container_element_compatible(value, element_type, eng)) {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
-                        ctx.get_string_symbolizer()->intern(detail::container_value_type_name(value)),
-                        ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
-                }
-                auto converted = detail::convert_container_element(eng, value, element_type);
-                if (!converted) { return converted.error_value(); }
-                value = std::move(converted.value());
-            }
-            out.push(std::move(value));
-        }
-        return result;
-    }},
+		{symbolizer->intern("concat"), [](const builtin_method_context& a_context, script_value& a_self, const std::vector<script_value>& a_args) -> checked_result<script_value> {
+			if (a_args.size() != 1) { return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "append/concat() takes one array argument"); }
+			const auto& other = a_args[0].deref();
+			if (!other.is_array()) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "append/concat() requires an array argument"); }
+			auto* eng = a_context.get_engine();
+			script_value result = a_context.copy_array_result ? a_self.clone() : script_value(a_self);
+			const auto target = result.unchecked_get_array_storage();
+			const auto input = other.unchecked_get_array_storage();
+			if (target->append_same_kind(*input)) { return result; }
+			auto tag = result.get_type_info();
+			type_info_ptr type = tag ? tag->element_type() : nullptr;
+			if (type && (type->base_type == script_value_type::jai_any_type || type->base_type == script_value_type::jai_null_type)) { type = nullptr; }
+			std::vector<script_value> values;
+			const size_t count = input->size();
+			values.reserve(count);
+			for (size_t i = 0; i < count && i < input->size(); ++i) {
+				script_value value = input->get(i, eng).clone_element();
+				if (type) {
+					if (!detail::container_element_compatible(value, type, eng)) {
+						return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
+							a_context.get_string_symbolizer()->intern(detail::container_value_type_name(value)), a_context.get_string_symbolizer()->intern(detail::type_info_display_name(type)));
+					}
+					auto converted = detail::convert_container_element(eng, value, type);
+					if (!converted) { return converted.error_value(); }
+					value = std::move(converted.value());
+				}
+				values.push_back(std::move(value));
+			}
+			target->reserve(target->size() + values.size());
+			for (auto& value : values) { target->push(std::move(value)); }
+			return result;
+		}},
 
-        // insert(index, value): value placed at index (0..size), the elements from there moving up one
         {symbolizer->intern("insert"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "insert() takes an index and a value");
@@ -969,6 +934,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     }}
     };
 
+	// Index-removal spelling shared with the existing remove implementation.
+	out.array_methods.emplace(symbolizer->intern("erase"), out.array_methods.at(symbolizer->intern("remove")));
+	out.array_methods.emplace(symbolizer->intern("append"), out.array_methods.at(symbolizer->intern("concat")));
+
     // Map methods
     out.map_methods = {
         {symbolizer->intern("size"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1002,15 +971,6 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         return ctx.make_value(map.find(args[0]) != map.end());
     }},
 
-        {symbolizer->intern("erase"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 1) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "erase() takes exactly one argument");
-        }
-        auto& mapPtr = self.unchecked_get_map_storage();
-        mapPtr->erase(args[0]);
-        return ctx.make_value();
-    }},
-
         {symbolizer->intern("keys"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "keys() takes no arguments");
@@ -1020,7 +980,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         auto& arrayPtr = result.unchecked_get_array_storage()->values();
         arrayPtr.reserve(map.size());
         for (const auto& [key, value] : map) {
-            arrayPtr.push_back(key.clone());
+            arrayPtr.push_back(key.clone_element());
         }
         return result;
     }},
@@ -1034,7 +994,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         auto& arrayPtr = result.unchecked_get_array_storage()->values();
         arrayPtr.reserve(map.size());
         for (const auto& [key, value] : map) {
-            arrayPtr.push_back(value.clone());
+            arrayPtr.push_back(value.clone_element());
         }
         return result;
     }},
@@ -1048,15 +1008,15 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     }},
 
         {symbolizer->intern("get"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        if (args.size() != 2) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "get() takes exactly two arguments (key, default)");
+        if (args.empty() || args.size() > 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "get() takes one or two arguments (key, [default])");
         }
         const auto& map = self.unchecked_as_map();
         auto it = map.find(args[0]);
         if (it != map.end()) {
             return it->second;
         }
-        return args[1];  // Return default value
+        return args.size() == 2 ? args[1] : ctx.make_value();  // Missing keys never insert
     }},
 
         {symbolizer->intern("length"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1116,20 +1076,30 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
         }
 
-        const auto& map = self.unchecked_as_map();
+        script_value receiver = self;
+        const auto source = receiver.unchecked_get_map_storage();
+        const auto& map = *source;
         const auto& predicate = args[0].unchecked_as_function();
         const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
-        script_value result = script_value::make_map(nullptr, nullptr, ctx.get_engine());
+        auto tag = self.get_type_info();
+        script_value result = script_value::make_map(tag ? tag->key_type() : nullptr, tag ? tag->value_type() : nullptr, ctx.get_engine());
         auto& resultPtr = result.unchecked_get_map_storage();
 
-        for (const auto& [key, value] : map) {
-            auto call_result = lvalues ? call_map_entry(predicate, lvalues, self, key, ctx.get_engine()) : predicate({key, value});
+        std::vector<script_value> keys;
+        keys.reserve(map.size());
+        for (const auto& [key, value] : map) { keys.push_back(key); }
+        for (const auto& key : keys) {
+            auto found = map.find(key);
+            if (found == map.end()) { continue; }
+            auto call_result = lvalues ? call_map_entry(predicate, lvalues, receiver, key, ctx.get_engine()) : predicate({key, found->second});
             if (!call_result) {
                 return call_result.error_value();
             }
+            if (ctx.unwinding()) { return ctx.make_value(); }
             const auto& val = call_result.value();
             if (val.is_bool() && val.unchecked_as_bool()) {
-                (*resultPtr)[key.clone()] = value.clone();
+                auto current = map.find(key);
+                if (current != map.end()) { (*resultPtr)[key.clone_element()] = current->second.clone_element(); }
             }
         }
         return result;
@@ -1148,17 +1118,32 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         for (const auto& [key, value] : map) {
             script_value pair = script_value::make_array(nullptr, ctx.get_engine());
             auto& pairPtr = pair.unchecked_get_array_storage()->values();
-            pairPtr.push_back(key.clone());
-            pairPtr.push_back(value.clone());
+            pairPtr.push_back(key.clone_element());
+            pairPtr.push_back(value.clone_element());
             arrayPtr.push_back(std::move(pair));
         }
         return result;
     }}
     };
 
+	// Both map removal spellings report whether an entry existed.
+	out.map_methods.emplace(symbolizer->intern("erase"), out.map_methods.at(symbolizer->intern("remove")));
+
     // String methods - enable str.length(), str.substr(), etc.
     // Observer methods return values; mutating methods modify in place and return self
     out.string_methods = {
+		{symbolizer->intern("append"), [](const builtin_method_context& a_context, script_value& a_self, const std::vector<script_value>& a_args) -> checked_result<script_value> {
+			if (a_args.empty()) { return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "append() requires at least one text argument"); }
+			size_t extra = 0;
+			for (const auto& argument : a_args) {
+				if (!argument.is_text()) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "append() requires text arguments"); }
+				extra += argument.unchecked_text().size();
+			}
+			auto& text = a_self.unchecked_text_ref();
+			text.reserve(text.size() + extra);
+			for (const auto& argument : a_args) { text.append(argument.unchecked_text()); }
+			return a_self;
+		}},
         // ============================================================
         // Observer methods (non-mutating)
         // ============================================================
@@ -1203,8 +1188,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "at() index out of bounds");
             }
 
-            // Return single character as string
-            return ctx.make_value(std::string(1, str[static_cast<size_t>(idx)]));
+            // A byte char, like []: inline value, no temporary string or allocation.
+            return ctx.make_value(str[static_cast<size_t>(idx)]);
         }},
 
         {symbolizer->intern("front"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1215,7 +1200,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "front() called on empty string");
             }
-            return ctx.make_value(std::string(1, str.front()));
+            return ctx.make_value(str.front());
         }},
 
         {symbolizer->intern("back"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1226,7 +1211,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (str.empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "back() called on empty string");
             }
-            return ctx.make_value(std::string(1, str.back()));
+            return ctx.make_value(str.back());
         }},
 
         {symbolizer->intern("substr"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1606,7 +1591,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }},
 
         {symbolizer->intern("trim"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-            std::string chars = " \t\r\n";
+            std::string_view chars = k_whitespace_text;
             if (args.size() > 0) {
                 if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim() argument must be a string");
@@ -1629,7 +1614,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }},
 
         {symbolizer->intern("trim_left"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-            std::string chars = " \t\r\n";
+            std::string_view chars = k_whitespace_text;
             if (args.size() > 0) {
                 if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim_left() argument must be a string");
@@ -1651,7 +1636,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }},
 
         {symbolizer->intern("trim_right"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-            std::string chars = " \t\r\n";
+            std::string_view chars = k_whitespace_text;
             if (args.size() > 0) {
                 if (!args[0].is_text()) {
                     return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "trim_right() argument must be a string");
@@ -2552,6 +2537,38 @@ bool interpreter::object_defines_custom_equality(const script_value& v) const {
     return cd && cd->defines_method(eq_method_id_);
 }
 
+// The language's <: honor the global override before builtin/class ordering.
+checked_result<script_value> interpreter::array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) {
+	auto context = builtin_ctx();
+	context.copy_array_result = true;
+	auto found = array_methods_.find(a_member);
+	if (found == array_methods_.end()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "Unknown array transform"); }
+	const auto name = string_symbolizer_->get_string(a_member);
+	if (name == "sort" || name == "reverse") {
+		script_value result = a_self.clone();
+		context.copy_array_result = false;
+		auto answer = found->second(context, result, a_args);
+		if (!answer) { return answer.error_value(); }
+		return result;
+	}
+	return found->second(context, a_self, a_args);
+}
+
+checked_result<bool> interpreter::language_less(const script_value& a_left, const script_value& a_right) {
+	const auto& left = a_left.deref();
+	const auto& right = a_right.deref();
+	if (operator_table_) {
+		if (const script_value* function = operator_table_->entry(detail::op_slot::less)) {
+			auto result = function->as_function()({left, right});
+			if (!result) { return result.error_value(); }
+			return is_truthy(result.value());
+		}
+	}
+	auto result = handle_less(left, right);
+	if (!result) { return result.error_value(); }
+	return is_truthy(result.value());
+}
+
 // The language's ==: a global operator== first, then the value's own (a class operator==, memberwise, numeric across kinds)
 checked_result<bool> interpreter::language_equal(const script_value& left, const script_value& right) {
     const script_value& l = left.deref();
@@ -2620,6 +2637,17 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
     // Look for the operator method by symbol ID
     auto method_val = target.method(op_symbol_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+        if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function()) {
+            auto result = create_bound_method(left, spaceship).as_function()(std::vector<script_value>{right});
+            if (!result) {
+                if (is_unwinding_) { return std::nullopt; }
+                return checked_result<bool>(result.error_value());
+            }
+            const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
+                                : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
+            if (auto answer = spaceship_rewritten(op, result.value())) { return checked_result<bool>(*answer); }
+            return std::nullopt;
+        }
         // Check if this is a transparent wrapper - if so, unwrap and retry
         if (target.class_def && target.class_def->is_transparent_wrapper()) {
             script_value mutable_left = left;  // Need mutable copy for unwrap
@@ -3458,6 +3486,16 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
 
 // Gate on STORAGE, not declared type: a typed-but-uninitialized variable (`int x;`) holds monostate
 checked_result<bool> interpreter::scalar_lane(token_type op, const script_value& left, const script_value& right, bool concat) {
+	if (op == token_type::spaceship) {
+		const size_t leftKind = left.raw_storage_index(), rightKind = right.raw_storage_index();
+		if (leftKind == script_value::TYPEID_INT && rightKind == script_value::TYPEID_INT) {
+			push_value(make_int_fast(detail::order_sign(left.unchecked_as_int() <=> right.unchecked_as_int()))); return true;
+		}
+		if (detail::numeric_storage(leftKind) && detail::numeric_storage(rightKind)) {
+			push_value(make_int_fast(detail::float_order(detail::as_script_float(left,leftKind), detail::as_script_float(right,rightKind)))); return true;
+		}
+		return false;
+	}
     if (!detail::scalar_arith_op(op) && !detail::scalar_compare_op(op)) { return false; }
     const size_t li = left.raw_storage_index();
     const size_t ri = right.raw_storage_index();
@@ -8512,7 +8550,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 // Return a bound "resume" method
                 auto captured_handle = handle;
                 auto* eng = engine_;
-                script_function resume_method = [captured_handle, eng](const std::vector<script_value>& /*args*/) -> checked_result<script_value> {
+                script_function resume_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+                    if (!a_args.empty()) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "resume() takes no arguments");
+                    }
                     return captured_handle->resume(eng);
                 };
                 push_value(script_value::make_function(resume_method, engine_));
@@ -8523,7 +8564,10 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 // Return a bound "done" method
                 auto captured_handle = handle;
                 auto* eng = engine_;
-                script_function done_method = [captured_handle, eng](const std::vector<script_value>& /*args*/) -> checked_result<script_value> {
+                script_function done_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+                    if (!a_args.empty()) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "done() takes no arguments");
+                    }
                     return script_value(captured_handle->done(), eng);
                 };
                 push_value(script_value::make_function(done_method, engine_));

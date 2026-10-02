@@ -129,6 +129,9 @@ namespace jai {
         void clear() noexcept;
         void reserve(size_t n);
         inline size_t capacity() const noexcept;
+        inline bool append_same_kind(const script_array& a_source);
+		inline void retain_range(size_t a_start, size_t a_end);
+		inline void retain_selected(const std::vector<uint8_t>& a_selected);
         inline void truncate(size_t n);   // drop elements past n (no default construction)
 
         std::vector<script_value>& values() noexcept { return values_; }

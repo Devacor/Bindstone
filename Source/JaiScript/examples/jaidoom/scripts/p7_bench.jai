@@ -115,7 +115,7 @@ function main() -> int {
 	// (staged in the spawn corridor: the autopilot run ends wall-stuck, momentum dead)
 	P_X = 1056.0;
 	P_Y = -3550.0;
-	P_ANG = PI / 2.0;
+	P_ANG = math::PI / 2.0;
 	P_MOMX = 0.0;
 	P_MOMY = 0.0;
 	P_FLOORZ = SE_FLOORH[sector_at(P_X, P_Y)];

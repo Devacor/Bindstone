@@ -1,0 +1,162 @@
+API consistency review — approved implementation (2026-10-02)
+
+Convention priority: C++ first, then JavaScript, then C#.
+The source and canonical docs/site reference are updated in the working tree.
+Validation and the reviewable patch are recorded in out/astra/api-consistency-20261001.
+
+1. Removal spelling/results — IMPLEMENTED
+   array.erase(index) aliases remove(index); map.erase(key) and remove(key) return
+   bool presence. An absent index/key returns false without a change.
+
+2. Slice bounds — IMPLEMENTED
+   slice() / slice(start) / slice(start,end), defaults 0 and size, exclusive end,
+   negative indices relative to the end, clamped bounds. Dot slice now retains the
+   range in place; array::slice copies only the selected range.
+
+3. Sorting and language comparison — IMPLEMENTED
+   sort() uses language <, including class <=> rewriting when explicit < is absent.
+   sort(predicate) requires bool: true means the left item comes first. No signed
+   JavaScript/C# comparator convention. Integer, float, byte, char, bool and string
+   buffers retain native sorting where builtin ordering applies. Generic/callback
+   sorting works from a shallow snapshot and commits only after comparisons succeed.
+   Callback side effects remain observable. Equal elements may reorder.
+
+4. Signatures and argument checking — IMPLEMENTED
+   The catalog lists complete callable signatures, defaults, effects, providers and
+   fields/constants. Generated builtin method arities reject known bad calls during
+   checking; dynamic calls still validate at runtime. It is a source audit, rather
+   than a claim that every signature has a separate exhaustive execution test.
+
+5. map.get(key[,fallback=null]) — IMPLEMENTED
+   Missing returns null or the explicit fallback. Lookup does not insert.
+
+6. Byte access — IMPLEMENTED, INTENTIONAL COMPATIBILITY CHANGE
+   string.at/front/back return char, as [] does. The VM at shortcut also returns
+   inline char rather than allocating a one-byte string. UTF methods continue to
+   return one-character utf8_string. Byte access never decodes the whole string.
+
+7. Whitespace — IMPLEMENTED
+   Default trim uses string::whitespace consistently: space, tab, CR, LF, VT and FF.
+   Explicit custom whitespace arguments retain their meaning.
+
+8. Filter constraints — IMPLEMENTED
+   array filters retain T; map filters retain K,V. Reference callback parameters
+   address live inputs and writes follow ordinary typed store rules. A typed map
+   in a dynamic var/auto slot retains its current contents' constraints while the
+   variable itself can still be rebound. In-place array selection moves retained
+   values without cloning. Copying filters clone selected values only.
+
+9. Math namespace — IMPLEMENTED, INTENTIONAL COMPATIBILITY CHANGE
+   Standard scalar/vector math, constants and RNG live in core math:: on every
+   engine. register_math remains an idempotent host entry point. No production
+   global numeric aliases remain. Direct calls keep shared intrinsic lowering;
+   first-class math:: function values use the same kernel. Explicit test-owned
+   host aliases retain optimizer/fuzz coverage without restoring stdlib globals.
+   RNG is the one engine-owned seeded stream: inclusive bounds; random(int,int)
+   returns int, mixed bounds float; random_int requires ints and random_range
+   always returns float. Names/constants in the host namespace are read-only.
+
+10. Array/string pairs — IMPLEMENTED, INTENTIONAL COMPATIBILITY CHANGE
+    Dot append/concat, filter, map and slice mutate and return their receiver.
+    Core array:: counterparts return new value arrays; array::sort and reverse
+    return copies too. Dot sort/reverse retain C++-style void results. Observers
+    (size/find/contains/front/etc.) remain observers. Dot map preserves input T
+    and converts outputs; array::map uses declared callback R or var. Global
+    append/concatenate are removed. Text append follows the existing string pair:
+    string.append mutates, string::append returns new text of the first input kind.
+
+11. Reload defaults/live state — DOCUMENTED, EXISTING MIGRATION API
+    Same-name/type instance fields survive; a changed initializer is the default
+    for new instances. Class hot_reload_migrate runs after a field-layout change;
+    an initializer-only/method-only edit does not run that hook. Existing unit
+    hot_reload_migrate(previous) and explicit update functions cover deliberate
+    state changes. Program variables with initializers reinitialize on re-run;
+    declarations without initializers preserve state. No second migration system.
+
+12. Coroutine arity — IMPLEMENTED
+    resume()/done() reject extra arguments on bound and optimized VM call paths.
+    No send-value API or new ordinary-call state/per-call bookkeeping is added.
+
+13. Builtin ordering — IMPLEMENTED
+    <=> returns negative/zero/positive (builtin results -1/0/1). Bool orders false
+    before true; arrays lexicographically; maps by ordered key/value entries (keys
+    retain private map identity/type semantics); vectors/colors by components;
+    functions, coroutine and shared/weak handles by identity. References resolve.
+    Class values require their comparison operators. Identity order is useful
+    within a process and is not a portable persistent ID.
+    Public numeric <=> groups NaNs last and signed zeros equivalent. Ordinary
+    numeric == != < <= > >= retain IEEE behavior. Default numeric sort uses the
+    NaN grouping; explicit predicates supply their own order. Private map-key
+    ordering/hash remain a separate, consistent contract. Raw scalar/typed-array
+    paths avoid deep input copies; user comparisons use shallow pinned snapshots.
+
+14. Effects — DOCUMENTATION UPDATED
+    Signatures identify mutation, copying, callbacks, cursor advancement and return
+    types. The guide/bridges distinguish dot transforms from namespace copies.
+
+15. Console/arrows — DOCUMENTATION UPDATED
+    read_key is runner-specific nonblocking queued key-edge polling, string result,
+    empty when no event, lowercase printable/named special keys. Polling example
+    and function-expression/arrow syntax agree with the implementation.
+
+16. Availability — DOCUMENTATION UPDATED
+    Core versus register_all/area registration versus runner bindings are listed
+    explicitly. Host-only console/files/networking/signals are not universal APIs.
+
+17. Vector registration comment — FIXED
+    register_all no longer describes an absent optional vector.hpp. Native math
+    values are core; adapters for host vector types are separately opt-in.
+
+18. Copies and handles — AUDITED/FIXED
+    Selected array/map projections use clone_element: class values copy; explicit
+    shared handles retain identity, including null handles. Ordinary clone() of a
+    bare handle remains the explicit pointee clone for hosts. In-place slice/filter
+    never clone retained objects; map callbacks borrow reference inputs. Merge
+    selects final entries before copying, so overwritten nocopy values are not
+    cloned; result constraints follow the first map. Read-only structural ordering
+    snapshots handles shallowly to survive callback re-entry, not deep value copies.
+    remove_if pins its original receiver across callbacks and preserves script
+    throws before committing survivors. Regression groups cover receiver rebinding,
+    nocopy inputs, typed constraints, handle identity,
+    comparator exceptions, coroutine arity and both backend/proof modes.
+
+Migration examples
+==================
+old a.filter(p) returning a copy  -> array::filter(a,p)
+old a.map(f) returning a copy     -> array::map(a,f)
+old a.slice(start,end) copying    -> array::slice(a,start,end)
+old a.concat(b) returning a copy  -> array::concat(a,b)
+old append(a,b)/concatenate(a,b)  -> array::append(a,b) or string::append(a,b)
+old sqrt(x), min(a,b), PI         -> math::sqrt(x), math::min(a,b), math::PI
+old string result from s.at(i)    -> char result; explicitly convert when text is needed
+
+Remaining uneven elements / suggestions
+=======================================
+- map.filter still copies, unlike array.filter. Consider a map::filter copying pair
+  and an in-place map.filter in a separate compatibility decision; this task's
+  receiver/namespace request specifically targeted arrays and strings.
+- Some mutators return self, while sort/reverse/insert/push return void. The latter
+  follow C++; keep signatures explicit before considering fluent return changes.
+- Byte methods use char while UTF methods use character text, because a Unicode
+  character may span multiple bytes. Keep the distinction visible in bridge docs.
+- random bounds are inclusive, unlike JavaScript/C# range APIs. Keep endpoint/type
+  rules explicit; no hidden second random stream or global alias.
+- A lone scalar is not a vector splat. If splats are desired, define a deliberate
+  library convention rather than assuming an ISO C++ constructor contract.
+- Map assignment targets materialize missing slots before typed value conversion;
+  a failing write can therefore leave a new null entry. Existing-key failures keep
+  the old value. This follows the existing lvalue protocol; reconsider typed
+  default insertion/transaction semantics separately, with reference/callback tests.
+- remove_if evaluates reference callbacks against its snapshot, whereas filter
+  and for_each expose live elements. Consider unifying that reference contract
+  in a separate change with callback mutation/re-entry coverage.
+- array::map's callback return constraints are stronger at runtime than the checker
+  can infer for every first-class callback. Improve static callback-result inference
+  when evidence is available without making dynamic functions restrictive.
+- The scalar <=> path is direct, but comparing its result to zero is another
+  expression. A five-run Release sanity probe found (a <=> b) < 0 about twice
+  the time of a < b in a VM loop (14.1 vs 7.0 ms for 200k iterations). Consider
+  fusing proven numeric three-way comparisons with zero, preserving global/user
+  operators and the NaN policy. Standalone <=> and byte .at results were in the
+  same broad cost range as their corresponding operations; these are limited
+  machine-local loop measurements, not general performance guarantees.

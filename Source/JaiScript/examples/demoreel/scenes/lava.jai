@@ -24,7 +24,7 @@ function lava_row(int y) -> array<int> {
 	float lx = -0.45;
 	float ly = -0.55;
 	float lz = 0.70;
-	float hl = 1.0 / sqrt(lx * lx + ly * ly + (lz + 1.0) * (lz + 1.0));
+	float hl = 1.0 / math::sqrt(lx * lx + ly * ly + (lz + 1.0) * (lz + 1.0));
 	float hx = lx * hl;
 	float hy = ly * hl;
 	float hz = (lz + 1.0) * hl;
@@ -52,10 +52,10 @@ function lava_row(int y) -> array<int> {
 			// its gradient is the field gradient over f^2, vertical at the rim
 			float rim = 1.0 - 1.0 / f;
 			rim = rim < 0.004 ? 0.004 : rim;
-			float kz = rr / (f * f * sqrt(rim));
+			float kz = rr / (f * f * math::sqrt(rim));
 			float nx = gx * kz;
 			float ny = gy * kz;
-			float il = 1.0 / sqrt(nx * nx + ny * ny + 1.0);
+			float il = 1.0 / math::sqrt(nx * nx + ny * ny + 1.0);
 			nx *= il; ny *= il;
 			float d = nx * lx + ny * ly + il * lz;
 			d = d < 0.0 ? 0.0 : d;
@@ -130,8 +130,8 @@ class Lava : Scene {
 	void update(float t, float dt) override {
 		tt = t;
 		for (int i = 0; i < nb; ++i) {
-			bx[i] = w * (0.5 + 0.38 * sin(t * fa[i] * 2.0 + pa[i]));
-			by[i] = h * (0.5 + 0.42 * sin(t * fb[i] * 2.0 + pb[i]));
+			bx[i] = w * (0.5 + 0.38 * math::sin(t * fa[i] * 2.0 + pa[i]));
+			by[i] = h * (0.5 + 0.42 * math::sin(t * fb[i] * 2.0 + pb[i]));
 		}
 	}
 

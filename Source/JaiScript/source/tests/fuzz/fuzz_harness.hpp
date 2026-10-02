@@ -7,7 +7,7 @@
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
-#include <jaiscript/stdlib/math.hpp>
+#include <cmath>
 
 #include <cstdint>
 #include <functional>
@@ -58,7 +58,7 @@ namespace jai::fuzz {
 		uint64_t seed = 0;
 		std::vector<std::string> segments;
 		std::vector<std::string> labels;   // per segment: the band or generator part that wrote it (the census attributes by it)
-		bool stdlib_math = false;   // the engine registers the stdlib math functions (the bare aliases sqrt, abs, floor)
+		bool host_math_aliases = false;   // explicit host aliases exercise float-parameter conversion and the alias optimizer
 
 		std::string joined() const {
 			std::string out;
@@ -226,7 +226,17 @@ namespace jai::fuzz {
 		eng->static_checking(check_mode::warn);   // generated programs are not statically clean; this measures runtime parity
 		eng->execution_budget(cfg.budget_seconds);
 		eng->memory_cap(cfg.memory_cap_bytes);
-		if (p.stdlib_math) { stdlib::register_math_functions(*eng); }
+		if (p.host_math_aliases) {
+			// Test-owned bindings, rather than incidental standard-library globals.
+			eng->add_function("host_sqrt", [](script_float a_value) { return std::sqrt(a_value); });
+			eng->add_function("host_abs", [](script_float a_value) { return std::fabs(a_value); });
+			eng->add_function("host_floor", [](script_float a_value) { return std::floor(a_value); });
+			eng->add_function("host_ceil", [](script_float a_value) { return std::ceil(a_value); });
+			eng->register_math_alias("host_sqrt", "sqrt");
+			eng->register_math_alias("host_abs", "abs");
+			eng->register_math_alias("host_floor", "floor");
+			eng->register_math_alias("host_ceil", "ceil");
+		}
 		if (cfg.on_engine) cfg.on_engine(*eng);
 
 		auto printed = std::make_shared<std::string>();

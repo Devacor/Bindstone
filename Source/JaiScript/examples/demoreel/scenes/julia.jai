@@ -42,11 +42,11 @@ function julia_row(int y) -> array<int> {
 			k = k + 1;
 		}
 		if (k >= mi) {
-			int tl = sqrt(trap) * 40.0;
+			int tl = math::sqrt(trap) * 40.0;
 			out.push(JU_INNER + 31 - (tl > 31 ? 31 : tl));
 		} else {
-			float nu = k + 1.0 - log2(log2(x2 + y2) * 0.5);
-			int ci = sqrt(nu) * 52.0;
+			float nu = k + 1.0 - math::log2(math::log2(x2 + y2) * 0.5);
+			int ci = math::sqrt(nu) * 52.0;
 			out.push((ci + JU_PHASE) & 255);
 		}
 	}
@@ -70,9 +70,9 @@ class Julia : Scene {
 	}
 
 	void render(var& grid) override {
-		float zoom = 1.05 + 0.3 * sin(tt * 0.4);
-		JU_CA = 0.7885 * cos(tt * 0.31 + 2.0);
-		JU_CB = 0.7885 * sin(tt * 0.23 + 2.0);
+		float zoom = 1.05 + 0.3 * math::sin(tt * 0.4);
+		JU_CA = 0.7885 * math::cos(tt * 0.31 + 2.0);
+		JU_CB = 0.7885 * math::sin(tt * 0.23 + 2.0);
 		JU_SC = 3.3 / (w * zoom);
 		JU_X0 = 0.0 - w * 0.5 * JU_SC;
 		JU_Y0 = 0.0 - h * 0.5 * JU_SC;

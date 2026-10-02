@@ -32,8 +32,8 @@ namespace jai {
     // both backends bind the receiver LVALUE for exactly these names
     // (detail/string_mutator_receiver.hpp) - a name missing here mutates a copy and the
     // write is lost, a name wrongly here costs an observer a receiver resolve.
-    inline constexpr std::array<std::string_view, 17> k_string_mutator_method_names = {
-        std::string_view{"to_lower"}, std::string_view{"to_upper"}, std::string_view{"trim"},
+    inline constexpr std::array<std::string_view, 18> k_string_mutator_method_names = {
+        std::string_view{"append"}, std::string_view{"to_lower"}, std::string_view{"to_upper"}, std::string_view{"trim"},
         std::string_view{"trim_left"}, std::string_view{"trim_right"}, std::string_view{"pad_left"},
         std::string_view{"pad_right"}, std::string_view{"pad_center"}, std::string_view{"replace_first"},
         std::string_view{"replace_last"}, std::string_view{"replace_all"}, std::string_view{"insert"},
@@ -54,6 +54,7 @@ namespace jai {
         checked_result<bool> (*equal_fn)(void*, const script_value&, const script_value&) = nullptr;
         bool (*unwinding_fn)(void*) = nullptr;
         void* backend_self = nullptr;
+		bool copy_array_result = false; // namespace transforms create a result; dot forms mutate
 
         engine* get_engine() const { return engine_ref; }
         string_symbolizer* get_string_symbolizer() const { return symbolizer; }

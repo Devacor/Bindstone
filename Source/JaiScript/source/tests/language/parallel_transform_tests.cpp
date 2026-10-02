@@ -138,7 +138,7 @@ public:
 			const std::string src = R"(
 				var a = [];
 				for (var i = 0; i < 128; i++) { a.push(1.0 + i * 0.37); }
-				float f(float x) { return sqrt(x) * 2.0 + pow(x, 0.25) - floor(x); }
+				float f(float x) { return math::sqrt(x) * 2.0 + math::pow(x, 0.25) - math::floor(x); }
 				var pout = parallel_transform(a, f);
 				var sout = [];
 				for (auto x : a) { sout.push(f(x)); }
@@ -153,7 +153,7 @@ public:
 			const std::string src = R"(
 				var a = [];
 				for (var i = 0; i < 100; i++) { a.push(0.1 + i * 1.7); }
-				float f(float x) { return sqrt(x) / (x + 0.5) * 3.14159; }
+				float f(float x) { return math::sqrt(x) / (x + 0.5) * 3.14159; }
 				return parallel_transform(a, f);
 			)";
 			e->parallel_thread_count(1);
@@ -2973,7 +2973,7 @@ public:
 					array<int> lifetime_lookup = [1];
 					var lifetime_input = [];
 					for (int i = 0; i < 256; i++) { lifetime_input.push(i); }
-					int lifetime_wrapper(int x) { return x + sign() + lifetime_lookup[0]; }
+					int lifetime_wrapper(int x) { return x + math::sign() + lifetime_lookup[0]; }
 				)");
 				fixture.call = fixture.eng->jaibite("parallel_transform(lifetime_input, lifetime_wrapper).size();");
 				fault_trace trace;

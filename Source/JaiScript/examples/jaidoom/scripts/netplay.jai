@@ -468,7 +468,7 @@ class Session {
 			if (TH_TYPE[t] == want) {
 				sx.push(TH_X[t] * 1.0);
 				sy.push(TH_Y[t] * 1.0);
-				sa.push(TH_ANG[t] * PI / 180.0);
+				sa.push(TH_ANG[t] * math::PI / 180.0);
 			}
 		}
 		np_loadout_coop();
@@ -485,7 +485,7 @@ class Session {
 			P_ANG = sa[pick];
 		} else {
 			for (int t2 = 0; t2 < TH_TYPE.size(); ++t2) {
-				if (TH_TYPE[t2] == 1) { P_X = TH_X[t2] * 1.0; P_Y = TH_Y[t2] * 1.0; P_ANG = TH_ANG[t2] * PI / 180.0; break; }
+				if (TH_TYPE[t2] == 1) { P_X = TH_X[t2] * 1.0; P_Y = TH_Y[t2] * 1.0; P_ANG = TH_ANG[t2] * math::PI / 180.0; break; }
 			}
 		}
 		P_MOMX = 0.0;

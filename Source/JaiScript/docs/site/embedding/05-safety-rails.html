@@ -62,12 +62,12 @@ eng-&gt;enable(&quot;savegame.write&quot;);                            // filesy
 bool allowed = eng-&gt;is_enabled({&quot;filesystem&quot;, &quot;savegame.write&quot;});  // true
 auto checked = eng-&gt;require_privilege(&quot;savegame.write&quot;);  // checked_result&lt;void&gt;
 eng-&gt;disable(&quot;savegame.write&quot;);                           // later calls are refused</code></pre></div>
-<p><code>register_privilege(name)</code> explicitly registers a custom name and returns nothing. A new name starts disabled; registering it again leaves its grant unchanged. Registering <code>&quot;filesystem&quot;</code> refers to the built-in flag and also leaves its current grant unchanged. Use a name string for one requirement or an initializer list of names for several: <strong>all must pass</strong>. These forms work with <code>enable</code>, <code>disable</code>, <code>is_enabled</code>, <code>require_privilege</code>, and the optional requirement on free, variadic or bound-method registration. The original <code>jai::filesystem</code> flag forms remain available.</p>
+<p><code>register_privilege(name)</code> explicitly registers a custom name and returns nothing. A new name starts disabled; registering it again leaves its grant unchanged. Registering <code>"filesystem"</code> refers to the built-in flag and also leaves its current grant unchanged. Use a name string for one requirement or an initializer list of names for several: <strong>all must pass</strong>. These forms work with <code>enable</code>, <code>disable</code>, <code>is_enabled</code>, <code>require_privilege</code>, and the optional requirement on free, variadic or bound-method registration. The original <code>jai::filesystem</code> flag forms remain available.</p>
 <p>Permission names are reusable across engines, but registration and grants are independent in each engine. Querying an unknown name returns false; enabling, disabling, requiring, or attaching an unknown name to a callable rejects it instead of auto-registering it. Register custom names before binding functions that require them. Names live in the engine&#x27;s string interner, and binding resolves requirements once into engine-local slot IDs: invocation checks do not look up names or allocate. Registration and binding may allocate. There is no extra global registry or synchronization.</p>
 <p>A registered but disabled permission produces <code>Insufficient privilege: savegame.write.</code> in this example. Multiple requirements report a missing built-in first, then the first missing custom permission in registration order, independent of the supplied list order. Defining a name does not intercept any API automatically: attach it to each callable it protects or check it inside the host implementation.</p>
 <p>Scripts query custom permissions by name. On a fresh engine with no host-defined <code>savegame.write</code> permission:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::is_enabled(&quot;filesystem&quot;));
-print(reflect::is_enabled(jai::filesystem, &quot;savegame.write&quot;));</code></pre></div>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::is_enabled("filesystem"));
+print(reflect::is_enabled(jai::filesystem, "savegame.write"));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">true
 false</code></pre></div>
 <h2 id="1-execution-budget-terminal-uncatchable-by-script">1. Execution budget: terminal, uncatchable by script<a class="hlink" href="#1-execution-budget-terminal-uncatchable-by-script" aria-label="link">&#8203;</a></h2>
@@ -90,9 +90,9 @@ eng-&gt;execute(&quot;2 + 2&quot;).as_int();    // 4 — the engine survives; ea
 <p>Accounting is a <strong>high-water mark</strong> charged at the heavy-value chokepoints: container growth (<code>push</code>/insert/repeat/concat), string concat, <code>clone</code>, environment growth. Frees are <em>not</em> credited back (v1 approximation, documented in <code>engine.hpp</code>). An allocation that would cross the cap is <strong>denied in place</strong> (the object never grows) and raises:</p>
 <ul><li><strong>First raise per execute: an ordinary catchable script error</strong>, and the counter re-arms to zero so the script can free caches and continue working. This is the legit recovery path:</li></ul>
 <div class="codeblock cb-jai" data-host="memory_cap(256 * 1024)"><span class="cb-label">jaiscript &middot; under the 256 KB cap above</span><pre><code class="lang-jai">var a = [];
-try { while (true) { a.push(&quot;xxxxxxxxxx&quot;); } }
-catch (err) { a = []; }     // err == &quot;Script memory cap exceeded (262144 bytes) -
-                            //         raise engine::memory_cap or break up the work&quot;</code></pre></div>
+try { while (true) { a.push("xxxxxxxxxx"); } }
+catch (err) { a = []; }     // err == "Script memory cap exceeded (262144 bytes) -
+                            //         raise engine::memory_cap or break up the work"</code></pre></div>
 <p>The number in the text is the cap you set, in bytes.</p>
 <ul><li><strong>Second raise in the same execute: terminal</strong>, exactly like a budget overrun. Every catch is skipped and <code>execute()</code> fails to the host: first raise caught by script, second raise thrown to C++.</li></ul>
 <ul><li>Fresh execute = fresh allowance and raise count; reentrant executes share the outer call&#x27;s allowance.</li></ul>

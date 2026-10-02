@@ -43,7 +43,7 @@ function ch_trace(float ox, float oy, float oz, float dx, float dy, float dz, in
 		float b = qx * dx + qy * dy + qz * dz;
 		float disc = b * b - (qx * qx + qy * qy + qz * qz - CH_R0 * CH_R0);
 		if (disc > 0.0) {
-			float t = 0.0 - b - sqrt(disc);
+			float t = 0.0 - b - math::sqrt(disc);
 			if (t > 0.001 && t < best) { best = t; hit = 0; hr = CH_R0; hx = CH_X0; hy = CH_Y0; hz = CH_Z0; }
 		}
 	}
@@ -52,7 +52,7 @@ function ch_trace(float ox, float oy, float oz, float dx, float dy, float dz, in
 		float b1 = qx1 * dx + qy1 * dy + qz1 * dz;
 		float disc1 = b1 * b1 - (qx1 * qx1 + qy1 * qy1 + qz1 * qz1 - CH_R1 * CH_R1);
 		if (disc1 > 0.0) {
-			float t1 = 0.0 - b1 - sqrt(disc1);
+			float t1 = 0.0 - b1 - math::sqrt(disc1);
 			if (t1 > 0.001 && t1 < best) { best = t1; hit = 1; hr = CH_R1; hx = CH_X1; hy = CH_Y1; hz = CH_Z1; }
 		}
 	}
@@ -61,7 +61,7 @@ function ch_trace(float ox, float oy, float oz, float dx, float dy, float dz, in
 		float b2 = qx2 * dx + qy2 * dy + qz2 * dz;
 		float disc2 = b2 * b2 - (qx2 * qx2 + qy2 * qy2 + qz2 * qz2 - CH_R2 * CH_R2);
 		if (disc2 > 0.0) {
-			float t2 = 0.0 - b2 - sqrt(disc2);
+			float t2 = 0.0 - b2 - math::sqrt(disc2);
 			if (t2 > 0.001 && t2 < best) { best = t2; hit = 2; hr = CH_R2; hx = CH_X2; hy = CH_Y2; hz = CH_Z2; }
 		}
 	}
@@ -110,7 +110,7 @@ function ch_row(int y) -> array<int> {
 		float dx = bx + CH_RX * u;
 		float dy = by;
 		float dz = bz + CH_RZ * u;
-		float il = 1.0 / sqrt(dx * dx + dy * dy + dz * dz);
+		float il = 1.0 / math::sqrt(dx * dx + dy * dy + dz * dz);
 		dx *= il; dy *= il; dz *= il;
 		float best = 1000000.0;
 		int hit = -1;
@@ -119,21 +119,21 @@ function ch_row(int y) -> array<int> {
 		float b = qx * dx + qy * dy + qz * dz;
 		float disc = b * b - (qx * qx + qy * qy + qz * qz - CH_R0 * CH_R0);
 		if (disc > 0.0) {
-			float t = 0.0 - b - sqrt(disc);
+			float t = 0.0 - b - math::sqrt(disc);
 			if (t > 0.001) { best = t; hit = 0; cx = CH_X0; cy = CH_Y0; cz = CH_Z0; cr = CH_R0; }
 		}
 		float qx1 = ex - CH_X1; float qy1 = ey - CH_Y1; float qz1 = ez - CH_Z1;
 		float b1 = qx1 * dx + qy1 * dy + qz1 * dz;
 		float disc1 = b1 * b1 - (qx1 * qx1 + qy1 * qy1 + qz1 * qz1 - CH_R1 * CH_R1);
 		if (disc1 > 0.0) {
-			float t1 = 0.0 - b1 - sqrt(disc1);
+			float t1 = 0.0 - b1 - math::sqrt(disc1);
 			if (t1 > 0.001 && t1 < best) { best = t1; hit = 1; cx = CH_X1; cy = CH_Y1; cz = CH_Z1; cr = CH_R1; }
 		}
 		float qx2 = ex - CH_X2; float qy2 = ey - CH_Y2; float qz2 = ez - CH_Z2;
 		float b2 = qx2 * dx + qy2 * dy + qz2 * dz;
 		float disc2 = b2 * b2 - (qx2 * qx2 + qy2 * qy2 + qz2 * qz2 - CH_R2 * CH_R2);
 		if (disc2 > 0.0) {
-			float t2 = 0.0 - b2 - sqrt(disc2);
+			float t2 = 0.0 - b2 - math::sqrt(disc2);
 			if (t2 > 0.001 && t2 < best) { best = t2; hit = 2; cx = CH_X2; cy = CH_Y2; cz = CH_Z2; cr = CH_R2; }
 		}
 		if (hit < 0) {
@@ -236,23 +236,23 @@ class Chrome : Scene {
 	void update(float t, float dt) override {
 		tt = t;
 		for (int i = 0; i < 3; ++i) {
-			float bounce = sin(t * (1.9 + i * 0.37) + i * 2.1);
+			float bounce = math::sin(t * (1.9 + i * 0.37) + i * 2.1);
 			bounce = bounce < 0.0 ? -bounce : bounce;
 			float a = t * 0.45 + i * 2.0944;
-			bx[i] = cos(a) * 1.45;
-			bz[i] = sin(a) * 1.45;
+			bx[i] = math::cos(a) * 1.45;
+			bz[i] = math::sin(a) * 1.45;
 			by[i] = rad[i] + bounce * (1.1 - i * 0.2);
 		}
 		float ca = t * 0.18 + 0.4;
-		ex = sin(ca) * 5.2;
-		ez = cos(ca) * 5.2;
-		ey = 1.5 + 0.35 * sin(t * 0.3);
+		ex = math::sin(ca) * 5.2;
+		ez = math::cos(ca) * 5.2;
+		ey = 1.5 + 0.35 * math::sin(t * 0.3);
 		float tx = 0.0 - ex;
 		float ty = 0.8 - ey;
 		float tz = 0.0 - ez;
-		float il = 1.0 / sqrt(tx * tx + ty * ty + tz * tz);
+		float il = 1.0 / math::sqrt(tx * tx + ty * ty + tz * tz);
 		fx = tx * il; fy = ty * il; fz = tz * il;
-		float rl = 1.0 / sqrt(fx * fx + fz * fz);
+		float rl = 1.0 / math::sqrt(fx * fx + fz * fz);
 		rx = 0.0 - fz * rl;
 		rz = fx * rl;
 		ux = 0.0 - rz * fy;
@@ -268,7 +268,7 @@ class Chrome : Scene {
 		CH_FX = fx; CH_FY = fy; CH_FZ = fz;
 		CH_RX = rx; CH_RZ = rz;
 		CH_UX = ux; CH_UY = uy; CH_UZ = uz;
-		float ll = 1.0 / sqrt(0.5 * 0.5 + 0.75 * 0.75 + 0.43 * 0.43);
+		float ll = 1.0 / math::sqrt(0.5 * 0.5 + 0.75 * 0.75 + 0.43 * 0.43);
 		CH_LX = 0.5 * ll; CH_LY = 0.75 * ll; CH_LZ = 0.43 * ll;
 		CH_W = w;
 		CH_H = h;

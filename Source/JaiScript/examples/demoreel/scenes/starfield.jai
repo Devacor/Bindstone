@@ -146,8 +146,8 @@ class Starfield : Scene {
 		float cx = ww * 0.5;
 		float cy = hh * 0.5;
 		float f = ww * 0.45;
-		float ca = cos(roll);
-		float sa = sin(roll);
+		float ca = math::cos(roll);
+		float sa = math::sin(roll);
 		float trail = 0.02 + speed * 0.05;
 		var& xs = sx;
 		var& ys = sy;

@@ -21,13 +21,13 @@ print("last(): " + arr.last());
 print("length(): " + arr.length());
 
 // Test slice
-var sliced = arr.slice(1, 3);
+var sliced = array::slice(arr, 1, 3);
 print("slice(1, 3): " + sliced);
-var sliced_neg = arr.slice(-3, -1);
+var sliced_neg = array::slice(arr, -3, -1);
 print("slice(-3, -1): " + sliced_neg);
 
 // Test filter
-var evens = arr.filter([](auto x) -> auto { return x % 2 == 0; });
+var evens = array::filter(arr, [](auto x) -> auto { return x % 2 == 0; });
 print("filter(evens): " + evens);
 
 // Test sort/reverse

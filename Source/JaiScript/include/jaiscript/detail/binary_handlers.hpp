@@ -16,6 +16,7 @@
 //   checked_result<script_value> equal(l, r)   // the backend's == entry, for memberwise element comparison
 
 #include <jaiscript/core/value.hpp>
+#include <jaiscript/detail/structural_ordering.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/scalar_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
@@ -160,6 +161,7 @@ namespace jai::detail {
 		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) { return h.make_bool(ordered<Op>(l.unchecked_as_int(), r.unchecked_as_int())); }
 		if (numeric_storage(li) && numeric_storage(ri)) { return h.make_bool(ordered<Op>(as_script_float(l, li), as_script_float(r, ri))); }
 		if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) { return h.make_bool(ordered<Op>(l.unchecked_as_string(), r.unchecked_as_string())); }
+		if (li == script_value::TYPEID_BOOL && ri == script_value::TYPEID_BOOL) { return h.make_bool(ordered<Op>(l.unchecked_as_bool(), r.unchecked_as_bool())); }
 		return std::nullopt;
 	}
 
@@ -176,6 +178,11 @@ namespace jai::detail {
 		}
 		if (char_operands_promote(li, ri)) [[unlikely]] {
 			return binary_ordering<Op>(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
+		}
+		if (auto fast = ordering_on_values<Op>(h, left, right, li, ri)) { return std::move(*fast); }
+		if (auto builtin = builtin_order(left, right, h.engine(), h.equality_depth(), [&](const script_value& a, const script_value& b) { return h.spaceship(a,b); }, [&] { return h.unwinding(); })) {
+			if (!*builtin) { return builtin->error_value(); }
+			return h.make_bool(ordered<Op>(builtin->value().unchecked_as_int(), script_int{0}));
 		}
 		if (!object_storage(li) && !object_storage(ri)) {
 			if (auto result = ordering_on_values<Op>(h, left, right, li, ri)) { return std::move(*result); }
@@ -216,6 +223,7 @@ namespace jai::detail {
 			return binary_equal(h, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
 		}
 		if (auto expired = weak_equals_null(left, right)) { return h.make_bool(*expired); }
+		if (auto identity = builtin_identity_equal(left, right)) { return h.make_bool(*identity); }
 
 		const script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
 		const script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
@@ -270,6 +278,9 @@ namespace jai::detail {
 
 	template <class Host>
 	checked_result<script_value> binary_spaceship(Host& h, uint64_t method_id, const script_value& left, const script_value& right) {
+		if (left.raw_storage_index() == script_value::TYPEID_CPP_BOUND || right.raw_storage_index() == script_value::TYPEID_CPP_BOUND) {
+			return binary_spaceship(h, method_id, left.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, right.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+		}
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
 			return utf8_rewrapped(binary_spaceship(h, method_id, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
 		}
@@ -283,10 +294,10 @@ namespace jai::detail {
 		if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
 			const script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 			const script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-			if (lf != lf || rf != rf) [[unlikely]] { return nan_order_error<checked_result<script_value>>(); }   // IEEE: NaN is unordered (Dev ruling 2026-09-30)
-			return sign(lf <=> rf);
+			return h.make_int(float_order(lf, rf));
 		}
 		if (left.is_string() && right.is_string()) { return sign(left.unchecked_as_string().compare(right.unchecked_as_string())); }
+		if (auto builtin = builtin_order(left, right, h.engine(), h.equality_depth(), [&](const script_value& a, const script_value& b) { return h.spaceship(a,b); }, [&] { return h.unwinding(); })) { return std::move(*builtin); }
 		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return math::ordering_error(left, right); }
 		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
 		return type_mismatch_error("Invalid operands for <=> operator");

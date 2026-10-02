@@ -25,9 +25,9 @@ class Tunnel : Scene {
 			for (int x = 0; x < tw; ++x) {
 				float dx = x - w + 0.5;
 				float dy = y - h + 0.5;
-				float r = sqrt(dx * dx + dy * dy);
+				float r = math::sqrt(dx * dx + dy * dy);
 				r = r < 1.0 ? 1.0 : r;
-				ang.push(itrunc((atan2(dy, dx) + 3.14159265) * 40.7436654) & 255);
+				ang.push(itrunc((math::atan2(dy, dx) + 3.14159265) * 40.7436654) & 255);
 				dep.push(itrunc(2600.0 / r));
 				int s = itrunc(r * 12.0 / rmax);
 				fog.push((s > 11 ? 11 : s) * 16);
@@ -74,9 +74,9 @@ class Tunnel : Scene {
 
 	void update(float t, float dt) override {
 		tt = t;
-		float sp = 34.0 + 22.0 * sin(t * 0.37);
+		float sp = 34.0 + 22.0 * math::sin(t * 0.37);
 		travel += dt * sp;
-		spin += dt * (0.9 * sin(t * 0.29));
+		spin += dt * (0.9 * math::sin(t * 0.29));
 	}
 
 	void render(var& grid) override {
@@ -87,11 +87,11 @@ class Tunnel : Scene {
 		var& de = dep;
 		var& fo = fog;
 		var& tx = tex;
-		int ox = itrunc(w * 0.5 + w * 0.34 * sin(tt * 0.53));
-		int oy = itrunc(h * 0.5 + h * 0.30 * sin(tt * 0.71 + 0.9));
+		int ox = itrunc(w * 0.5 + w * 0.34 * math::sin(tt * 0.53));
+		int oy = itrunc(h * 0.5 + h * 0.30 * math::sin(tt * 0.71 + 0.9));
 		int mv = itrunc(travel);
 		int rot = itrunc(spin * 40.0) + 4096;
-		int twist = itrunc(6.0 + 5.0 * sin(tt * 0.23));
+		int twist = itrunc(6.0 + 5.0 * math::sin(tt * 0.23));
 		int idx = 0;
 		for (int y = 0; y < hh; ++y) {
 			int trow = (y + oy) * tww + ox;

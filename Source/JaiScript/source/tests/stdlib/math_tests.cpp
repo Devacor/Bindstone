@@ -20,7 +20,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("abs(5.5);");
+            script_value result = engine->execute("math::abs(5.5);");
             check_eq(result.as<double>(), 5.5);
         });
 
@@ -28,7 +28,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("abs(-5.5);");
+            script_value result = engine->execute("math::abs(-5.5);");
             check_eq(result.as<double>(), 5.5);
         });
 
@@ -36,7 +36,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("sign(42.0);");
+            script_value result = engine->execute("math::sign(42.0);");
             check_eq(result.as<script_int>(), 1);
         });
 
@@ -44,7 +44,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("sign(-42.0);");
+            script_value result = engine->execute("math::sign(-42.0);");
             check_eq(result.as<script_int>(), -1);
         });
 
@@ -52,7 +52,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("sign(0.0);");
+            script_value result = engine->execute("math::sign(0.0);");
             check_eq(result.as<script_int>(), 0);
         });
 
@@ -60,7 +60,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("min(3.0, 7.0);");
+            script_value result = engine->execute("math::min(3.0, 7.0);");
             check_eq(result.as<double>(), 3.0);
         });
 
@@ -68,7 +68,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("max(3.0, 7.0);");
+            script_value result = engine->execute("math::max(3.0, 7.0);");
             check_eq(result.as<double>(), 7.0);
         });
 
@@ -76,7 +76,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("clamp(5.0, 0.0, 10.0);");
+            script_value result = engine->execute("math::clamp(5.0, 0.0, 10.0);");
             check_eq(result.as<double>(), 5.0);
         });
 
@@ -84,7 +84,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("clamp(-5.0, 0.0, 10.0);");
+            script_value result = engine->execute("math::clamp(-5.0, 0.0, 10.0);");
             check_eq(result.as<double>(), 0.0);
         });
 
@@ -92,7 +92,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("clamp(15.0, 0.0, 10.0);");
+            script_value result = engine->execute("math::clamp(15.0, 0.0, 10.0);");
             check_eq(result.as<double>(), 10.0);
         });
 
@@ -104,7 +104,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("floor(3.7);");
+            script_value result = engine->execute("math::floor(3.7);");
             check_eq(result.as<double>(), 3.0);
         });
 
@@ -112,7 +112,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("ceil(3.2);");
+            script_value result = engine->execute("math::ceil(3.2);");
             check_eq(result.as<double>(), 4.0);
         });
 
@@ -120,7 +120,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("round(3.5);");
+            script_value result = engine->execute("math::round(3.5);");
             check_eq(result.as<double>(), 4.0);
         });
 
@@ -128,7 +128,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("trunc(-3.7);");
+            script_value result = engine->execute("math::trunc(-3.7);");
             check_eq(result.as<double>(), -3.0);
         });
 
@@ -140,7 +140,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("sqrt(16.0);");
+            script_value result = engine->execute("math::sqrt(16.0);");
             check_eq(result.as<double>(), 4.0);
         });
 
@@ -148,7 +148,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("pow(2.0, 3.0);");
+            script_value result = engine->execute("math::pow(2.0, 3.0);");
             check_eq(result.as<double>(), 8.0);
         });
 
@@ -156,7 +156,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("exp(1.0);");
+            script_value result = engine->execute("math::exp(1.0);");
             check(std::abs(result.as<double>() - 2.71828182845904523536) < 0.0001);
         });
 
@@ -164,7 +164,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("log(E);");
+            script_value result = engine->execute("math::log(math::E);");
             check(std::abs(result.as<double>() - 1.0) < 0.0001);
         });
 
@@ -176,7 +176,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("sin(0.0);");
+            script_value result = engine->execute("math::sin(0.0);");
             check_eq(result.as<double>(), 0.0);
         });
 
@@ -184,7 +184,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("cos(0.0);");
+            script_value result = engine->execute("math::cos(0.0);");
             check_eq(result.as<double>(), 1.0);
         });
 
@@ -192,7 +192,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("sin(PI / 2.0);");
+            script_value result = engine->execute("math::sin(math::PI / 2.0);");
             check(std::abs(result.as<double>() - 1.0) < 0.0001);
         });
 
@@ -205,7 +205,7 @@ public:
             stdlib::register_all(*engine);
 
             // mix(0, 100, 0.5) should return 50
-            script_value result = engine->execute("mix(0.0, 100.0, 0.5);");
+            script_value result = engine->execute("math::mix(0.0, 100.0, 0.5);");
             check_eq(result.as<double>(), 50.0);
         });
 
@@ -213,7 +213,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("mix(10.0, 20.0, 0.0);");
+            script_value result = engine->execute("math::mix(10.0, 20.0, 0.0);");
             check_eq(result.as<double>(), 10.0);
         });
 
@@ -221,7 +221,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("mix(10.0, 20.0, 1.0);");
+            script_value result = engine->execute("math::mix(10.0, 20.0, 1.0);");
             check_eq(result.as<double>(), 20.0);
         });
 
@@ -230,7 +230,7 @@ public:
             stdlib::register_all(*engine);
 
             // unmix(0, 100, 50) should return 0.5
-            script_value result = engine->execute("unmix(0.0, 100.0, 50.0);");
+            script_value result = engine->execute("math::unmix(0.0, 100.0, 50.0);");
             check_eq(result.as<double>(), 0.5);
         });
 
@@ -238,7 +238,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("unmix(10.0, 20.0, 10.0);");
+            script_value result = engine->execute("math::unmix(10.0, 20.0, 10.0);");
             check_eq(result.as<double>(), 0.0);
         });
 
@@ -246,7 +246,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("unmix(10.0, 20.0, 20.0);");
+            script_value result = engine->execute("math::unmix(10.0, 20.0, 20.0);");
             check_eq(result.as<double>(), 1.0);
         });
 
@@ -255,7 +255,7 @@ public:
             stdlib::register_all(*engine);
 
             // mix_in with strength 2 at t=0.5: pow(0.5, 2) = 0.25, result = 25
-            script_value result = engine->execute("mix_in(0.0, 100.0, 0.5, 2.0);");
+            script_value result = engine->execute("math::mix_in(0.0, 100.0, 0.5, 2.0);");
             check_eq(result.as<double>(), 25.0);
         });
 
@@ -264,7 +264,7 @@ public:
             stdlib::register_all(*engine);
 
             // mix_out with strength 2 at t=0.5: 1 - pow(0.5, 2) = 0.75, result = 75
-            script_value result = engine->execute("mix_out(0.0, 100.0, 0.5, 2.0);");
+            script_value result = engine->execute("math::mix_out(0.0, 100.0, 0.5, 2.0);");
             check_eq(result.as<double>(), 75.0);
         });
 
@@ -276,9 +276,9 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            check_eq(engine->execute("saturate(0.5);").as<double>(), 0.5);
-            check_eq(engine->execute("saturate(-0.5);").as<double>(), 0.0);
-            check_eq(engine->execute("saturate(1.5);").as<double>(), 1.0);
+            check_eq(engine->execute("math::saturate(0.5);").as<double>(), 0.5);
+            check_eq(engine->execute("math::saturate(-0.5);").as<double>(), 0.0);
+            check_eq(engine->execute("math::saturate(1.5);").as<double>(), 1.0);
         });
 
         test("wrap_function", [this]() {
@@ -286,7 +286,7 @@ public:
             stdlib::register_all(*engine);
 
             // wrap(0, 360, 450) should return 90
-            script_value result = engine->execute("wrap(0.0, 360.0, 450.0);");
+            script_value result = engine->execute("math::wrap(0.0, 360.0, 450.0);");
             check_eq(result.as<double>(), 90.0);
         });
 
@@ -295,7 +295,7 @@ public:
             stdlib::register_all(*engine);
 
             // remap(5, 0, 10, 0, 100) should return 50
-            script_value result = engine->execute("remap(5.0, 0.0, 10.0, 0.0, 100.0);");
+            script_value result = engine->execute("math::remap(5.0, 0.0, 10.0, 0.0, 100.0);");
             check_eq(result.as<double>(), 50.0);
         });
 
@@ -304,7 +304,7 @@ public:
             stdlib::register_all(*engine);
 
             // hypot(3, 4) = 5 (3-4-5 triangle)
-            script_value result = engine->execute("hypot(3.0, 4.0);");
+            script_value result = engine->execute("math::hypot(3.0, 4.0);");
             check_eq(result.as<double>(), 5.0);
         });
 
@@ -312,7 +312,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("lerp(0.0, 100.0, 0.25);");
+            script_value result = engine->execute("math::lerp(0.0, 100.0, 0.25);");
             check_eq(result.as<double>(), 25.0);
         });
 
@@ -324,7 +324,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("PI;");
+            script_value result = engine->execute("math::PI;");
             check(std::abs(result.as<double>() - 3.14159265358979323846) < 0.0001);
         });
 
@@ -332,7 +332,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("E;");
+            script_value result = engine->execute("math::E;");
             check(std::abs(result.as<double>() - 2.71828182845904523536) < 0.0001);
         });
 
@@ -340,7 +340,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("TAU;");
+            script_value result = engine->execute("math::TAU;");
             check(std::abs(result.as<double>() - 6.28318530717958647692) < 0.0001);
         });
 
@@ -352,7 +352,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("random();");
+            script_value result = engine->execute("math::random();");
             double val = result.as<double>();
             check(val >= 0.0 && val < 1.0);
         });
@@ -361,7 +361,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("random_int(1, 10);");
+            script_value result = engine->execute("math::random_int(1, 10);");
             script_int val = result.as<script_int>();
             check(val >= 1 && val <= 10);
         });
@@ -370,7 +370,7 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
 
-            script_value result = engine->execute("random_range(5.0, 10.0);");
+            script_value result = engine->execute("math::random_range(5.0, 10.0);");
             double val = result.as<double>();
             check(val >= 5.0 && val < 10.0);
         });

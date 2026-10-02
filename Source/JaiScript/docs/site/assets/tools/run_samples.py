@@ -243,7 +243,7 @@ def main():
     if not runner.exists():
         print("runner not found: %s" % runner)
         return 2
-    out = pathlib.Path(args.out) if args.out else SITE / "assets" / "tools" / "_samples"
+    out = (pathlib.Path(args.out) if args.out else SITE / "assets" / "tools" / "_samples").resolve()
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)

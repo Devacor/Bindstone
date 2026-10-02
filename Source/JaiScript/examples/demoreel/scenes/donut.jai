@@ -34,7 +34,7 @@ function donut_row(int y) -> array<int> {
 	float oo = ox * ox + oy * oy + oz * oz;
 	for (int x = 0; x < ww; ++x) {
 		float u = (x + 0.5 - ww * 0.5) * sc;
-		float il = 1.0 / sqrt(u * u + v * v + 1.0);
+		float il = 1.0 / math::sqrt(u * u + v * v + 1.0);
 		float wx = u * il;
 		float wy = v * il;
 		float wz = il;
@@ -45,7 +45,7 @@ function donut_row(int y) -> array<int> {
 		float b = ox * dx + oy * dy + oz * dz;
 		float disc = b * b - oo + 9.3;
 		if (disc <= 0.0) { out.push(y); continue; }
-		float sq = sqrt(disc);
+		float sq = math::sqrt(disc);
 		float t = 0.0 - b - sq;
 		float tfar = 0.0 - b + sq;
 		int hit = 0;
@@ -54,9 +54,9 @@ function donut_row(int y) -> array<int> {
 			px = ox + dx * t;
 			py = oy + dy * t;
 			pz = oz + dz * t;
-			ring = sqrt(px * px + pz * pz);
+			ring = math::sqrt(px * px + pz * pz);
 			float qx = ring - 2.0;
-			float d = sqrt(qx * qx + py * py) - 1.0;
+			float d = math::sqrt(qx * qx + py * py) - 1.0;
 			if (d < 0.004) { hit = 1; break; }
 			t += d;
 			if (t > tfar) { break; }
@@ -67,7 +67,7 @@ function donut_row(int y) -> array<int> {
 		float nx = px - px * rs;
 		float ny = py;
 		float nz = pz - pz * rs;
-		float nl = 1.0 / sqrt(nx * nx + ny * ny + nz * nz);
+		float nl = 1.0 / math::sqrt(nx * nx + ny * ny + nz * nz);
 		nx *= nl; ny *= nl; nz *= nl;
 		float dl = nx * DN_LX + ny * DN_LY + nz * DN_LZ;
 		dl = dl < 0.0 ? 0.0 : dl;
@@ -77,11 +77,11 @@ function donut_row(int y) -> array<int> {
 		float s4 = s2 * s2;
 		float s8 = s4 * s4;
 		float s16 = s8 * s8;
-		float phi = atan2(pz, px);
+		float phi = math::atan2(pz, px);
 		int m = 0;
-		if (ny > -0.22 + 0.16 * sin(phi * 5.0 + 2.0 * sin(phi * 3.0))) {
+		if (ny > -0.22 + 0.16 * math::sin(phi * 5.0 + 2.0 * math::sin(phi * 3.0))) {
 			m = 1;
-			float th = atan2(ny, nx * px / ring + nz * pz / ring);
+			float th = math::atan2(ny, nx * px / ring + nz * pz / ring);
 			float fp = (phi + 3.14159265) * 9.5;
 			float ft = (th + 3.14159265) * 3.5;
 			int cp = fp;
@@ -137,17 +137,17 @@ class Donut : Scene {
 
 	void render(var& grid) override {
 		// object-from-world rotation: the transpose of Rz(b) * Rx(a)
-		float ca = cos(tt * 0.9);
-		float sa = sin(tt * 0.9);
-		float cb = cos(tt * 0.53 + 1.2);
-		float sb = sin(tt * 0.53 + 1.2);
+		float ca = math::cos(tt * 0.9);
+		float sa = math::sin(tt * 0.9);
+		float cb = math::cos(tt * 0.53 + 1.2);
+		float sb = math::sin(tt * 0.53 + 1.2);
 		DN_M00 = cb;        DN_M01 = sb;        DN_M02 = 0.0;
 		DN_M10 = 0.0 - sb * ca; DN_M11 = cb * ca; DN_M12 = sa;
 		DN_M20 = sb * sa;   DN_M21 = 0.0 - cb * sa; DN_M22 = ca;
 		// light and half vector, world space (camera looks down +z), into the donut's frame
 		float lx = -0.42; float ly = 0.66; float lz = -0.62;
 		float hx = lx; float hy = ly; float hz = lz - 1.0;
-		float hl = 1.0 / sqrt(hx * hx + hy * hy + hz * hz);
+		float hl = 1.0 / math::sqrt(hx * hx + hy * hy + hz * hz);
 		hx *= hl; hy *= hl; hz *= hl;
 		DN_LX = DN_M00 * lx + DN_M01 * ly + DN_M02 * lz;
 		DN_LY = DN_M10 * lx + DN_M11 * ly + DN_M12 * lz;

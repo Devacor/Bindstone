@@ -89,6 +89,19 @@ namespace stdlib {
             return false;
         };
 
+		sign("append", {2, 255, {text, text}, any, true});
+		def("append", [=](engine* a_engine, const std::vector<const script_value*>& a_args) -> R {
+			if (a_args.size() < 2) { return count_error("string::append expects at least 2 text arguments"); }
+			size_t size = 0;
+			for (const auto* argument : a_args) {
+				if (!argument->is_text()) { return type_error("string::append expects text arguments"); }
+				size += argument->unchecked_text().size();
+			}
+			std::string result;
+			result.reserve(size);
+			for (const auto* argument : a_args) { result.append(argument->unchecked_text()); }
+			return a_args[0]->is_utf8_string() ? script_value::make_utf8(std::move(result), a_engine) : script_value(std::move(result), a_engine);
+		});
         def("from_code", [=](engine* e, const std::vector<const script_value*>& a) -> R {
             if (a.size() != 1) return count_error("string::from_code expects exactly 1 argument");
             if (!a[0]->is_int()) return type_error("string::from_code expects an int code point");
@@ -125,7 +138,7 @@ namespace stdlib {
             if (a.size() != 1) return count_error("string::trim expects exactly 1 argument");
             if (!a[0]->is_text()) return type_error("string::trim expects a string argument");
             const std::string& s = a[0]->unchecked_text();
-            const auto space = [](char c) { return c == ' ' || (c >= '\t' && c <= '\r'); };
+            const auto space = is_string_whitespace;
             size_t b = 0, n = s.size();
             while (b < n && space(s[b])) ++b;
             while (n > b && space(s[n - 1])) --n;

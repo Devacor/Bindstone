@@ -27,7 +27,7 @@ function main() -> int {
 		if (TH_TYPE[t] == 1) {
 			px = TH_X[t];
 			py = TH_Y[t];
-			ang = TH_ANG[t] * PI / 180.0;
+			ang = TH_ANG[t] * math::PI / 180.0;
 			break;
 		}
 	}

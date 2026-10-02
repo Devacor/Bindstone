@@ -913,15 +913,15 @@ public:
             std::shared_ptr<ImplicitRegBase> original = derived;
 
             auto fromJson = roundtrip_json(*eng, original);
-            check(fromJson != nullptr, "json round-trip returned null");
+            check(fromJson != nullptr, "json math::round-trip returned null");
             auto jsonDerived = std::dynamic_pointer_cast<ImplicitRegDerived>(fromJson);
-            check(jsonDerived != nullptr, "dynamic type lost through json round-trip");
+            check(jsonDerived != nullptr, "dynamic type lost through json math::round-trip");
             check_eq(std::string("round"), jsonDerived->derivedTag.get());
 
             auto fromBinary = roundtrip_binary(*eng, original);
-            check(fromBinary != nullptr, "binary round-trip returned null");
+            check(fromBinary != nullptr, "binary math::round-trip returned null");
             auto binaryDerived = std::dynamic_pointer_cast<ImplicitRegDerived>(fromBinary);
-            check(binaryDerived != nullptr, "dynamic type lost through binary round-trip");
+            check(binaryDerived != nullptr, "dynamic type lost through binary math::round-trip");
             check_eq(std::string("round"), binaryDerived->derivedTag.get());
         });
 
@@ -955,7 +955,7 @@ public:
                 "test premise: MIRawRight subobject must be at a non-zero offset");
 
             auto loaded = roundtrip_json(*eng, asRight);
-            check(loaded != nullptr, "manual MI round-trip returned null");
+            check(loaded != nullptr, "manual MI math::round-trip returned null");
             check_eq(6, loaded->r);                    // adjusted base data correct
             auto full = std::dynamic_pointer_cast<MIRawDerived>(loaded);
             check(full != nullptr, "manual MI dynamic type lost");
@@ -985,7 +985,7 @@ public:
             check(json.find("\"RenamedRegType\"") == std::string::npos, "implicit name must not be used once an explicit one exists: " + json);
 
             auto loaded = roundtrip_json(*eng, original);
-            check(std::dynamic_pointer_cast<RenamedRegType>(loaded) != nullptr, "round-trip through the explicit name failed");
+            check(std::dynamic_pointer_cast<RenamedRegType>(loaded) != nullptr, "math::round-trip through the explicit name failed");
         });
 
         test("in_class_jai_type_name_pins_the_name", [&]() {
@@ -999,7 +999,7 @@ public:
             check(json.find("InClassNamedType") == std::string::npos, "derived class identifier must not leak into the data: " + json);
 
             auto loaded = roundtrip_json(*eng, original);
-            check(std::dynamic_pointer_cast<InClassNamedType>(loaded) != nullptr, "round-trip through the pinned name failed");
+            check(std::dynamic_pointer_cast<InClassNamedType>(loaded) != nullptr, "math::round-trip through the pinned name failed");
         });
 
         test("unregistered_polymorphic_save_throws", [&]() {
@@ -1244,7 +1244,7 @@ public:
         check_eq((script_int)4, eng->execute("loadedDeep.fangs").as_int(), "leaf-class script field survives");
 
         auto loadedBin = roundtrip_binary(*eng, original);
-        check(loadedBin != nullptr && loadedBin->health == 64, "binary round trip");
+        check(loadedBin != nullptr && loadedBin->health == 64, "binary math::round trip");
         check(eng->script_layer(*loadedBin) != nullptr, "binary re-attach");
     }
 
@@ -1287,7 +1287,7 @@ public:
         auto loaded = roundtrip_binary(*eng, base);
         check(loaded != nullptr && loaded->health == 55);
         check_layer(eng, loaded, "loadedExtended", speak, 12, 55);
-        check_eq((script_int)11, eng->execute("loadedExtended.untouched").as_int(), "an initialized, never-written field survives the round trip");
+        check_eq((script_int)11, eng->execute("loadedExtended.untouched").as_int(), "an initialized, never-written field survives the math::round trip");
     }
 
     // A plain C++ object crossing the boundary registers no layer.

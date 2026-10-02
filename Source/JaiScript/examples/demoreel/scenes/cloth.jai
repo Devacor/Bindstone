@@ -162,11 +162,11 @@ class BannerFall : Scene {
 		float sdt = dt > 0.05 ? 0.05 : dt;
 		float dt2 = sdt * sdt;
 		// wind program: steady breeze, then the gale ramps in with layered gusts
-		float A = 9.0 + 2.4 * sin(t * 0.7);
+		float A = 9.0 + 2.4 * math::sin(t * 0.7);
 		if (t > 5.0) {
 			float g = (t - 5.0) * 0.4;
 			g = g > 1.0 ? 1.0 : g;
-			A = A + g * (14.0 + 6.0 * sin(t * 1.9) + 3.0 * sin(t * 3.7));
+			A = A + g * (14.0 + 6.0 * math::sin(t * 1.9) + 3.0 * math::sin(t * 3.7));
 		}
 		if (free_t >= 0.0) {   // the gust dies the moment the banner parts: the tumble stays framed
 			float dk = (t - free_t) * 0.55;
@@ -192,10 +192,10 @@ class BannerFall : Scene {
 		var& rf_ = rowf;
 		// traveling waves, sampled per column/row — never per point
 		for (int i = 0; i < cww; ++i) {
-			cf_[i] = 1.0 + 0.35 * sin(t * 4.2 - i * 0.42);
-			cz_[i] = sin(t * 5.1 - i * 0.55) + 0.5 * sin(t * 2.3 - i * 0.21 + 1.7);
+			cf_[i] = 1.0 + 0.35 * math::sin(t * 4.2 - i * 0.42);
+			cz_[i] = math::sin(t * 5.1 - i * 0.55) + 0.5 * math::sin(t * 2.3 - i * 0.21 + 1.7);
 		}
-		for (int j = 0; j < chn; ++j) { rf_[j] = 0.82 + 0.36 * sin(t * 1.6 + j * 0.5); }
+		for (int j = 0; j < chn; ++j) { rf_[j] = 0.82 + 0.36 * math::sin(t * 1.6 + j * 0.5); }
 		// gravity while flown; once the banner parts, the gust's updraft carries
 		// the scraps so the burst stays framed
 		float grav = free_t >= 0.0 ? 2.6 : 9.5;

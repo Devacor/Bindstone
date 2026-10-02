@@ -17,6 +17,7 @@
 #include <jaiscript/vm/disassembler.hpp>
 #include <jaiscript/vm/chunk_manifest.hpp>
 #include <cstring>
+#include <cmath>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <vector>
@@ -61,10 +62,33 @@ public:
 		}
 	)";
 
+	static void register_host_math_fixture(engine& a_engine) {
+		// Exercise the host alias optimization explicitly; stdlib no longer adds globals.
+		a_engine.add_function("host_hypot", [](script_float a_x, script_float a_y) { return std::hypot(a_x,a_y); });
+		a_engine.add_function("host_sqrt", [](script_float a_value) { return std::sqrt(a_value); });
+		a_engine.register_math_alias("host_sqrt", "sqrt");
+		a_engine.add_function("host_floor", [](script_float a_value) { return std::floor(a_value); });
+		a_engine.register_math_alias("host_floor", "floor");
+		a_engine.add_function("host_ceil", [](script_float a_value) { return std::ceil(a_value); });
+		a_engine.register_math_alias("host_ceil", "ceil");
+		a_engine.add_function("host_abs", [](script_float a_value) { return std::abs(a_value); });
+		a_engine.register_math_alias("host_abs", "abs");
+		a_engine.add_function("host_sin", [](script_float a_value) { return std::sin(a_value); });
+		a_engine.register_math_alias("host_sin", "sin");
+		a_engine.add_function("host_cos", [](script_float a_value) { return std::cos(a_value); });
+		a_engine.register_math_alias("host_cos", "cos");
+		a_engine.add_function("host_tan", [](script_float a_value) { return std::tan(a_value); });
+		a_engine.register_math_alias("host_tan", "tan");
+		a_engine.add_function("host_degrees", [](script_float a_value) { return a_value * (180.0 / 3.14159265358979323846); });
+		a_engine.register_math_alias("host_degrees", "radians_to_degrees");
+		a_engine.add_function("host_radians", [](script_float a_value) { return a_value * (3.14159265358979323846 / 180.0); });
+		a_engine.register_math_alias("host_radians", "degrees_to_radians");
+	}
+
 	std::string run_on(bool vm, const std::string& script, bool proofs = true) {
 		auto e = engine::make();
 		if (vm) { e->set_backend(backend_type::vm); }
-		stdlib::register_all(*e);
+		stdlib::register_all(*e); register_host_math_fixture(*e);
 		if (!proofs) { e->type_proofs(false); }
 		try { return e->execute(script).as_string(); }
 		catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -74,7 +98,7 @@ public:
 	std::string listing_of(const std::string& source) {
 		auto e = engine::make();
 		e->set_backend(backend_type::vm);
-		stdlib::register_all(*e);
+		stdlib::register_all(*e); register_host_math_fixture(*e);
 		auto* symbolizer = e->get_symbolizer();
 		auto templates = e->get_registered_template_types();
 		jai::lexer lex(source, symbolizer);
@@ -93,7 +117,7 @@ public:
 	std::string listing_run(const std::string& source) {
 		auto e = engine::make();
 		e->set_backend(backend_type::vm);
-		stdlib::register_all(*e);
+		stdlib::register_all(*e); register_host_math_fixture(*e);
 		std::string out;
 		e->disassembly_sink([&out](const std::string& listing, const std::string&) { out += listing; out += "\n"; });
 		try { e->execute(source); } catch (const std::exception& ex) { out += std::string("throw:") + ex.what(); }
@@ -215,7 +239,7 @@ public:
 					auto e = engine::make();
 					if (backend == 1) { e->set_backend(backend_type::vm); }
 					e->type_proofs(proofs);
-					stdlib::register_all(*e);
+					stdlib::register_all(*e); register_host_math_fixture(*e);
 					dynamic_binder<probe_box>(*e, "probe_box")
 						.property("values", [](probe_box& b) { ++b.reads; return b.values; }, nullptr)
 						.build();
@@ -248,7 +272,7 @@ public:
 			for (int backend = 0; backend < 2; ++backend) {
 				auto e = engine::make();
 				if (backend == 1) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->execute(spin);
 				script_value fn = e->get_variable("spin");
 				std::vector<script_value> warm{ script_value(static_cast<script_int>(10), e.get()), script_value(static_cast<script_int>(1), e.get()) };
@@ -645,7 +669,7 @@ public:
 					order_box box;
 					auto e = engine::make();
 					if (backend == 1) { e->set_backend(backend_type::vm); }
-					stdlib::register_all(*e);
+					stdlib::register_all(*e); register_host_math_fixture(*e);
 					dynamic_binder<order_box>(*e, "order_box")
 						.property("values", [](order_box& b) { if (b.armed) { throw std::runtime_error("GETTER_FIRST"); } return b.values; }, nullptr)
 						.property("n", [](order_box& b) { if (b.armed) { throw std::runtime_error("GETTER_FIRST"); } return b.n; }, nullptr)
@@ -715,7 +739,7 @@ public:
 				shadow_box box;
 				auto e = engine::make();
 				if (backend == 1) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				dynamic_binder<shadow_box>(*e, "shadow_box")
 					.constructor<>()
 					.property("values", [](shadow_box& b) { if (b.armed) { throw std::runtime_error("GETTER_FIRST"); } return b.values; }, nullptr)
@@ -830,7 +854,7 @@ public:
 			check_true(vm.size() >= 4 && vm.compare(vm.size() - 4, 4, ",2,7") == 0, "the shared cell and the var slot: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			const char* script = "array<int> PIX = [0, 0, 0, 0]; var S = [[1, 2, 3]];"
 			                     " var f = function(var& pix, var& strip, int cy0, int cy1, int vw, int px0, int tstep) {"
@@ -872,7 +896,7 @@ public:
 			check_true(vm.rfind("110,110,", 0) == 0, "the array and the map land the same sum: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var f = function(var& tp, var& pal, int n, int j) { int s = 0; for (int i = 0; i < n; ++i) { int base = i * 2; s = s + pal[base + tp[i + j]]; } return s; };";
 			auto templates = e->get_registered_template_types();
@@ -904,14 +928,14 @@ public:
 			both(script, "", "math temps");
 			both(script, "", "math temps, proofs off", false);
 			const std::string vm = run_on(true, script);
-			check_true(vm.rfind("6,31,131,8", 0) == 0, "band, clamp, texel and the float expression: " + vm);
+			check_true(vm.rfind("6,31,131,8", 0) == 0, "band, math::clamp, texel and the float expression: " + vm);
 			check_true(vm.find(",10,throw:") != std::string::npos, "the int forms and the conversion error: " + vm);
 			const std::string interp = run_on(false, script);
 			const size_t tail = vm.rfind(",throw:");
 			check_true(tail != std::string::npos && vm.substr(tail) == interp.substr(interp.rfind(",throw:")), "the read-first and call-first texts agree: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var f = function(var& flat, int bb, float z, float wx, float wy) { int b = bb + math::itrunc(z * 0.001953125); return b + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; };";
 			auto templates = e->get_registered_template_types();
@@ -949,7 +973,7 @@ public:
 			check_true(vm.rfind("131,40,throw:", 0) == 0, "the texel, the tree and the conversion error: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var f = function(var& flat, float wx, float wy, int k) { int v = flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; int w = flat[(k + 1) * 2 - v]; return v + w; };";
 			auto templates = e->get_registered_template_types();
@@ -998,7 +1022,7 @@ public:
 			check_true(vm.rfind("-3,0,0,62,44,10,throw:", 0) == 0 && vm.find("|6") != std::string::npos, "diamonds, the guarded arm, continue, break and the overflow in the arm: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			auto listing_of = [&](const char* src) {
 				auto templates = e->get_registered_template_types();
@@ -1037,7 +1061,7 @@ public:
 			check_true(vm.rfind("", 0) == 0 && vm.find(",") != std::string::npos, "ran: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var VW = 4; var f = function(var& pix, var& pal, var& tp, int x, int n) { int y = 0; while (y < n) { int iv = (y * 5) % 8 - 2; if (iv < 0) { iv = iv + 8; } pix[y * VW + x] = pal[tp[iv]]; y = y + 1; } return y; };";
 			auto templates = e->get_registered_template_types();
@@ -1094,7 +1118,7 @@ public:
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find(",") != std::string::npos, "ran: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "var VW = 4; var CENTERY = 3; var VIEW_X = 0.5; var VIEW_Y = 0.25;"
 			                 " var f = function(var& pix, var& palcm, var& flat, int x, int y0, int y1, float dz, float raydx, float raydy, int bandbase) {"
@@ -1169,7 +1193,7 @@ public:
 			check_true(vm.rfind("14,", 0) == 0 && vm.find("throw:Integer overflow in '+='") != std::string::npos, "the clear and the overflow text: " + vm);
 			auto e = engine::make();
 			e->set_backend(backend_type::vm);
-			stdlib::register_all(*e);
+			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
 			const char* fn = "array<int> PIX = []; var VW = 8; var VH = 8; var f = function(int color) { int n = VW * VH; for (int i = 0; i < n; ++i) { PIX[i] = color; } return n; };";
 			auto templates = e->get_registered_template_types();
@@ -1273,7 +1297,7 @@ public:
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
 			// a while whose condition computes before its compare (a temp, an env value, an element read), the float family of
-			// math on int and float values (abs of INT64_MIN takes the kernel's overflow text), x += y and ++x on var slots
+			// math on int and float values (host_abs of INT64_MIN takes the kernel's overflow text), x += y and ++x on var slots
 			// (kinds at run time: a kind change on the slot lands through the general conversion); the same on both backends
 			const char* defs =
 				"var LIMIT = 6; array<int> B = [3, 1, 4, 1, 5, 9, 2, 6];"
@@ -1291,7 +1315,7 @@ public:
 			both(script, "", "head spans, math, compounds");
 			both(script, "", "head spans, math, compounds, proofs off", false);
 			const std::string vm = run_on(true, script);
-			check_true(vm.rfind("45,36,", 0) == 0 && vm.find("throw:Integer overflow in math::abs") != std::string::npos, "the head spans and the abs overflow: " + vm);
+			check_true(vm.rfind("45,36,", 0) == 0 && vm.find("throw:Integer overflow in math::abs") != std::string::npos, "the head spans and the host_abs overflow: " + vm);
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(9), closed, "every loop closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
@@ -1832,7 +1856,7 @@ var across = function(int n) { string s = ""; try { s = to_string(looping(n)); }
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
 				e->add_function("host_swap_f", [raw]() { raw->execute("f = f2;"); });
@@ -1903,7 +1927,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 			auto run_passes_off = [&](bool vm, const std::string& script) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->ir_passes(false);
 				try { return e->execute(script).as_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -1912,7 +1936,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 			{
 				auto e = engine::make();
 				e->set_backend(backend_type::vm);
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				auto* symbolizer = e->get_symbolizer();
 				auto templates = e->get_registered_template_types();
 				jai::lexer lex(defs, symbolizer);
@@ -1941,7 +1965,7 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			auto run_with = [&](bool vm, const std::string& script, bool proofs, bool same_unit) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				e->disable(jai::filesystem);
 				engine* raw = e.get();
@@ -2005,7 +2029,7 @@ var via_callee = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
 				dynamic_binder<stepper>(*e, "Stepper").constructor<>()
@@ -2072,7 +2096,7 @@ var private_stays = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; 
 				stepper source;   // outlives the engine below
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
 				dynamic_binder<stepper>(*e, "Stepper")
@@ -2132,7 +2156,7 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 				stepper source;   // outlives the engine below
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
 				dynamic_binder<stepper>(*e, "Stepper")
@@ -2178,7 +2202,7 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 				nulls source; source.flips = flips;
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
 				dynamic_binder<nulls>(*e, "Nulls")
@@ -2212,7 +2236,7 @@ var conversion = function(int n) { array<int> Q = [0, 1, 2, 3]; int total = 0; i
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				try { return e->execute(script).as_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -2262,7 +2286,7 @@ var MIXED = [3, 1, 4, 1, 5, "s", 2, 6];
 			auto capped = [&](bool vm) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->memory_cap(65536);
 				try { return e->execute(std::string(defs) + " var big = function(int n) { var s = \"\"; try { for (int i = 0; i < n; ++i) { s += WORDS[i % 3]; s += HALFG; } } catch (e) { return \"caught|\" + e; } return \"no cap\"; }; big(100000);").as_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -2295,7 +2319,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				stepper source;   // outlives the engine below
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
 				dynamic_binder<stepper>(*e, "Stepper")
@@ -2597,7 +2621,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (bool vm : { false, true }) {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->execution_budget(0.00001);
 				std::string got;
 				try { got = e->execute(spin).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
@@ -2658,7 +2682,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
 				if (!proofs) { e->type_proofs(false); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				source_t source{ e.get(), mode };
 				dynamic_binder<source_t>(*e, "Source").property("number", [](source_t& s) -> script_int {
 					if (!s.armed) { return 1; }
@@ -2941,7 +2965,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto budget_run = [&](bool vm, bool proofs, const std::string& src) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				e->execution_budget(0.05);
 				try { return "ok:" + e->execute(src).as_string(); }
@@ -3036,7 +3060,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
 				if (every) { e->cells_miss_every(every); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(body).to_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
@@ -3117,7 +3141,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(refl.find("CALL_TEMP") == std::string::npos, "a partner the call names as an argument keeps the stack form (the binary reads x before the call writes it): " + refl);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "calls as operands under an injected miss at every " + std::to_string(every)); }
@@ -3162,7 +3186,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto capped = [&](bool vm) -> std::string {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->memory_cap(65536);
 				try { return e->execute(prelude + "capped(100000);").as_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -3176,7 +3200,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string vm = run_on(true, prelude + body);
 			auto injected = [&](const std::string& src, uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
@@ -3211,7 +3235,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop over p.x closes: " + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member read sites under an injected miss at every " + std::to_string(every)); }
@@ -3245,7 +3269,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("-- cell loop") >= 4, "the loops over the aliases close: " + std::to_string(count("-- cell loop")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias member sites under an injected miss at every " + std::to_string(every)); }
@@ -3278,7 +3302,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("C_MSTORE") >= 6, "the stores are block sites: " + std::to_string(count("C_MSTORE")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member stores under an injected miss at every " + std::to_string(every)); }
@@ -3306,7 +3330,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("C_PROBE") + count("-- inlined ") >= 3, "the loops with the calls close through the door or take the leaf inline: " + std::to_string(count("C_PROBE")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias arguments under an injected miss at every " + std::to_string(every)); }
@@ -3328,7 +3352,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3339,7 +3363,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("C_LOAD2") >= 1, "the element loads pair: " + std::to_string(count("C_LOAD2")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "fused pairs under an injected miss at every " + std::to_string(every)); }
@@ -3361,7 +3385,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3372,7 +3396,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (const char* op : { "C_LOAD_F ", "C_JLT_FFK ", "C_JGE_FF ", "C_JGT_IIK " }) { check_true(l.find(op) != std::string::npos, std::string("the listing names ") + op + "\n" + l); }
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "pinned by kind under an injected miss at every " + std::to_string(every));
 			}
@@ -3393,7 +3417,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3417,7 +3441,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "moves at their definitions under an injected miss at every " + std::to_string(every));
 			}
@@ -3441,7 +3465,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3449,7 +3473,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("C_SIZE") != std::string::npos && l.find("SIZE_TEMP") != std::string::npos, "the size lands in a temp and the block reads it\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "a program-scope size under an injected miss at every " + std::to_string(every));
 			}
@@ -3472,7 +3496,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3485,7 +3509,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "logical chains as values under an injected miss at every " + std::to_string(every));
 			}
@@ -3510,7 +3534,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos && l.find("C_BAIL", at) != std::string::npos, "scan's loop closes with a bail\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "a door the block cannot land under an injected miss at every " + std::to_string(every));
 			}
@@ -3537,7 +3561,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, "95060|354612|456.0|24", "element arguments from different arrays, proofs off", false);
 			const std::string vm = run_on(true, prelude + body);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3546,7 +3570,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos && l.find("C_ARGS", at) != std::string::npos, "run2's loop closes over the call\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "element arguments under an injected miss at every " + std::to_string(every));
 			}
@@ -3568,7 +3592,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3577,7 +3601,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at != std::string::npos && l.find("C_JTRUTH", at) != std::string::npos, "scan's block branches on the landed result\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "a call's result as a branch under an injected miss at every " + std::to_string(every));
 			}
@@ -3599,7 +3623,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3609,7 +3633,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at != std::string::npos && l.substr(at, end == std::string::npos ? std::string::npos : end - at).find("-- cell loop") != std::string::npos, "count_mon's loop closes\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "enum values read by name under an injected miss at every " + std::to_string(every));
 			}
@@ -3630,7 +3654,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3642,7 +3666,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "while (true) loops under an injected miss at every " + std::to_string(every));
 			}
@@ -3670,7 +3694,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, "25|21|3|4.5|0", "loops entered at their heads, proofs off", false);
 			const std::string vm = run_on(true, prelude + body);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3683,7 +3707,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "loops entered at their heads under an injected miss at every " + std::to_string(every));
 			}
@@ -3707,7 +3731,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off (no graft) agrees");
 			}
@@ -3716,7 +3740,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes around the grafts: " + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "inlined leaves under an injected miss at every " + std::to_string(every)); }
@@ -3739,7 +3763,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts");
 			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts, proofs off", false);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(std::string("50.0,8,20.0,9.0,60.0,12.0"), off, "the middle end's switch off (no graft) agrees");
 			}
@@ -3750,7 +3774,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string vm = run_on(true, prelude + body);
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, injected(every), "method grafts under an injected miss at every " + std::to_string(every)); }
@@ -3764,7 +3788,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var run = function(Q& q, int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + q.get(); } return s; };\n"
 				"Q qq = Q();\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(qq, 4);").to_string();
@@ -3797,7 +3821,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, "", "element member reads, proofs off", false);
 			check_true(interp.find("226.0,32.0,3,3.0,1|") == 0, interp.c_str());
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(interp, off, "the middle end's switch off agrees");
 			}
@@ -3809,7 +3833,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the element member loop closes: " + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(interp, injected(every), "element member reads under an injected miss at every " + std::to_string(every)); }
@@ -3853,7 +3877,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "45,112.5,200,21,9", "lambda grafts");
 			both(script, "45,112.5,200,21,9", "lambda grafts, proofs off", false);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(script).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(std::string("45,112.5,200,21,9"), off, "the middle end's switch off agrees");
 			}
@@ -3905,7 +3929,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "28,51.0,4,26.5,0", "untyped lambda grafts");
 			both(script, "28,51.0,4,26.5,0", "untyped lambda grafts, proofs off", false);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(script).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(std::string("28,51.0,4,26.5,0"), off, "the middle end's switch off agrees");
 			}
@@ -3920,7 +3944,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int f(int a) { return a * 2; }\n"
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(i); } return s; };\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(6);").to_string();
@@ -3941,7 +3965,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int leaf(int a) { return a * 2 + 1; }\n"
 				"int caller(int n) { int s = 0; for (int i = 0; i < n; ++i) { int v = leaf(i); s = s + v; } return s; }\n";
 			auto sequence = [&](bool vm, bool redefine, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				try {
 					{ auto bite = e->jaibite(program); bite.execute(); }
@@ -3963,7 +3987,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int f(int a) { return 100 / a; }\n"
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(3 - i); } return s; };\n";
 			both(prelude + "run(6);", "", "a raise inside an inlined body");
-			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e); register_host_math_fixture(*e);
 			std::string text;
 			try { e->execute(prelude + "run(6);"); } catch (const std::exception& ex) { text = ex.what(); }
 			check_true(text.find("zero") != std::string::npos || text.find("Zero") != std::string::npos, "the division text: " + text);
@@ -4130,7 +4154,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int lim(int a) { return a + 10; }\n"
 				"var run = function(int n) { int c = 0; for (int i = 0; i < n; ++i) { if (lim(i) > 12) { c = c + 1; } } return c; };\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(5);").to_string();
@@ -4169,7 +4193,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                  "var probe = function(int x) { if (cell_at(x, 1) != 0) { return 7; } return add1(x); };\n"
 			                                  "to_string(run(6)) + \"|\" + to_string(probe(0)) + \"|\" + to_string(probe(1));\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
 				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -4195,7 +4219,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "float walk(int n) { float acc = 0.0; for (int i = 0; i < n; ++i) { acc = acc + span(i * 1.0); } return acc; }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nG = new World();\nto_string(sum(8)) + \"|\" + to_string(walk(4)) + \"|\" + to_string(width());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
 				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -4222,7 +4246,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int once() { return add1(MX[0]); }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nto_string(total(4)) + \"|\" + to_string(once());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -4260,7 +4284,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int probe() { int n = 0; if (live(0)) { n = n + 1; } if (live(1)) { n = n + 10; } if (live(7)) { n = n + 100; } int d = cheb(1, 2, 4, -3); return n + d; }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -4364,7 +4388,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int probe() { return boxv(BX, 1) * 10 + tagis(TAG); }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -4607,9 +4631,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// the stored element copies deep afterwards (slice clones each element), which needs its engine
 			const std::string src =
 				"var v7 = [4, 5, 12]; v7[1] = 11;\n"
-				"function f() -> string { var v = [4, 5, 12]; v[1] = 11; return to_json(v.slice(0, 2)); }\n"
-				"function g() -> string { var v = [0, 0, 0, 0]; for (int i = 0; i < 4; ++i) { v[i] = 7; v[i] = 2.5; } return to_json(v.slice(1, 3)); }\n"
-				"to_json(v7.slice(0, 2)) + f() + g();";
+				"function f() -> string { var v = [4, 5, 12]; v[1] = 11; return to_json(array::slice(v, 0, 2)); }\n"
+				"function g() -> string { var v = [0, 0, 0, 0]; for (int i = 0; i < 4; ++i) { v[i] = 7; v[i] = 2.5; } return to_json(array::slice(v, 1, 3)); }\n"
+				"to_json(array::slice(v7, 0, 2)) + f() + g();";
 			both(src, "[4,11][4,11][2.5,2.5]", "constant element stores");
 			both(src, "[4,11][4,11][2.5,2.5]", "constant element stores, proofs off", false);
 		});
@@ -4635,7 +4659,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 
 		// row 187: a bare call to a stdlib math builtin lowers to the math temp while the name binds the registered function
 		test("stdlib_math_calls_lower_to_math_temps", [this]() {
-			const std::string src = "function f(float x, float y) -> float { float a = sqrt(x * x + y * y); float b = sin(x) + cos(y); return a + b + floor(y * 0.5) + ceil(x) + tan(0.25) + degrees(radians(x)); }\n"
+			const std::string src = "function f(float x, float y) -> float { float a = host_sqrt(x * x + y * y); float b = host_sin(x) + host_cos(y); return a + b + host_floor(y * 0.5) + host_ceil(x) + host_tan(0.25) + host_degrees(host_radians(x)); }\n"
 				"to_string(f(3.0, 4.0)) + \",\" + to_string(f(1, 2));";
 			both(src, "", "the aliases");
 			check_true(run_on(true, src).rfind("throw:", 0) != 0, "runs: " + run_on(true, src));
@@ -4649,76 +4673,76 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(temps == 8 && guards >= 3, "every alias lands in a math temp, a computed argument behind a guard: " + l);
 			check_true(l.find("PROBE_CALLEE") == std::string::npos, "no alias call is a probe: " + l);
 		});
-		test("stdlib_math_alias_numbers_match_the_builtin", [this]() {
-			const std::string src = "function r(var v) -> string { return to_string(sqrt(v)) + \":\" + type_of(sqrt(v)) + \" \" + to_string(floor(v)) + \" \" + to_string(sin(v)); }\n"
-				"function k(int i) -> string { return to_string(sqrt(i)) + \" \" + to_string(cos(i)); }\n"
-				"r(4) + \"|\" + r(2.25) + \"|\" + r(-1.5) + \"|\" + r(9007199254740993) + \"|\" + k(7) + \"|\" + k(-9223372036854775807) + \"|\" + to_string(sqrt(-1.0) == sqrt(-1.0));";
+		test("host_math_alias_numbers_match_the_builtin", [this]() {
+			const std::string src = "function r(var v) -> string { return to_string(host_sqrt(v)) + \":\" + type_of(host_sqrt(v)) + \" \" + to_string(host_floor(v)) + \" \" + to_string(host_sin(v)); }\n"
+				"function k(int i) -> string { return to_string(host_sqrt(i)) + \" \" + to_string(host_cos(i)); }\n"
+				"r(4) + \"|\" + r(2.25) + \"|\" + r(-1.5) + \"|\" + r(9007199254740993) + \"|\" + k(7) + \"|\" + k(-9223372036854775807) + \"|\" + to_string(host_sqrt(-1.0) == host_sqrt(-1.0));";
 			both(src, "", "int and float arguments");
 			check_true(run_on(true, src).rfind("2.0:float 4.0 ", 0) == 0, "runs: " + run_on(true, src));
 			both(src, "", "int and float arguments, proofs off", false);
 		});
-		test("stdlib_math_alias_non_numeric_arguments_take_the_builtin", [this]() {
+		test("host_math_alias_non_numeric_arguments_take_the_builtin", [this]() {
 			const std::string src = "class F { float to_float() { return 16.0; } }\n"
-				"function g(var v) -> string { try { var r = sqrt(v); return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
-				"function h(var v) -> string { try { float r = sin(v * 1) + 1.0; return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"function g(var v) -> string { try { var r = host_sqrt(v); return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"function h(var v) -> string { try { float r = host_sin(v * 1) + 1.0; return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
 				"g(true) + \"|\" + g(\"x\") + \"|\" + g(null) + \"|\" + g([1]) + \"|\" + g(F()) + \"|\" + h(\"s\") + \"|\" + h(false) + \"|\" + h(2);";
 			both(src, "", "non-numeric arguments");
 			check_true(run_on(true, src).rfind("E:script_value is not a float or integer. Actual type: 6|E:No viable candidates for function call|", 0) == 0, "the builtin's own texts: " + run_on(true, src));
 		});
-		test("stdlib_math_alias_follows_a_rebinding", [this]() {
+		test("host_math_alias_follows_a_rebinding", [this]() {
 			// rebound between calls, from inside a loop, from inside its own argument (the callee resolved first), to a
 			// non-callable and to a function taking its parameter by reference
-			const std::string src = "function f(float x) -> float { return sqrt(x * 2.0) + sqrt(x); }\n"
-				"function twice(float x) -> float { sqrt = function(float v) { return v + 1000.0; }; return x * 2.0; }\n"
-				"function g(float x) -> float { return sqrt(twice(x) + 0.0) + sqrt(x); }\n"
-				"function loop() -> string { string s = \"\"; for (int i = 0; i < 4; ++i) { s += to_string(sqrt(i * 4.0)) + \" \"; if (i == 1) { sqrt = function(float v) { return -v; }; } } return s; }\n"
+			const std::string src = "function f(float x) -> float { return host_sqrt(x * 2.0) + host_sqrt(x); }\n"
+				"function twice(float x) -> float { host_sqrt = function(float v) { return v + 1000.0; }; return x * 2.0; }\n"
+				"function g(float x) -> float { return host_sqrt(twice(x) + 0.0) + host_sqrt(x); }\n"
+				"function loop() -> string { string s = \"\"; for (int i = 0; i < 4; ++i) { s += to_string(host_sqrt(i * 4.0)) + \" \"; if (i == 1) { host_sqrt = function(float v) { return -v; }; } } return s; }\n"
 				"string out = to_string(f(8.0));\n"
-				"sqrt = function(float v) { return v + 100.0; };\n"
+				"host_sqrt = function(float v) { return v + 100.0; };\n"
 				"out += \",\" + to_string(f(8.0));\n"
-				"sqrt = SQRT0;\n"
+				"host_sqrt = SQRT0;\n"
 				"out += \",\" + to_string(g(8.0)) + \",\" + to_string(g(8.0));\n"
-				"sqrt = SQRT0;\n"
+				"host_sqrt = SQRT0;\n"
 				"out += \",\" + loop();\n"
-				"sqrt = function(float& v) { v = v + 1.0; return v; };\n"
-				"function byref(float x) -> string { float y = x; float r = sqrt(y) + 0.0; return to_string(r) + \"/\" + to_string(y); }\n"
+				"host_sqrt = function(float& v) { v = v + 1.0; return v; };\n"
+				"function byref(float x) -> string { float y = x; float r = host_sqrt(y) + 0.0; return to_string(r) + \"/\" + to_string(y); }\n"
 				"out += \",\" + byref(2.0);\n"
-				"sqrt = 5;\n"
-				"function nc(float x) -> string { try { return to_string(sqrt(x * 1.0)); } catch (e) { return \"E:\" + e; } }\n"
-				"function nc2(float x) -> string { try { return to_string(sqrt(nope * 1.0)); } catch (e) { return \"E:\" + e; } }\n"
-				"function nc3(float x) -> string { try { return to_string(sqrt(x)); } catch (e) { return \"E:\" + e; } }\n"
+				"host_sqrt = 5;\n"
+				"function nc(float x) -> string { try { return to_string(host_sqrt(x * 1.0)); } catch (e) { return \"E:\" + e; } }\n"
+				"function nc2(float x) -> string { try { return to_string(host_sqrt(nope * 1.0)); } catch (e) { return \"E:\" + e; } }\n"
+				"function nc3(float x) -> string { try { return to_string(host_sqrt(x)); } catch (e) { return \"E:\" + e; } }\n"
 				"out += \",\" + nc(1.0) + \",\" + nc2(1.0) + \",\" + nc3(1.0);\n"
 				"out;";
-			const std::string prelude = "[[warn_mode]]\nvar SQRT0 = sqrt;\n";
-			const std::string expected = "6.82842712474619,224.0,1012.0,2024.0,0.0 2.0 -8.0 -12.0 ,3.0/3.0,E:Cannot call 'sqrt': it is an int, not a function,"
-				"E:Cannot call 'sqrt': it is an int, not a function,E:Cannot call 'sqrt': it is an int, not a function";
+			const std::string prelude = "[[warn_mode]]\nvar SQRT0 = host_sqrt;\n";
+			const std::string expected = "6.82842712474619,224.0,1012.0,2024.0,0.0 2.0 -8.0 -12.0 ,3.0/3.0,E:Cannot call 'host_sqrt': it is an int, not a function,"
+				"E:Cannot call 'host_sqrt': it is an int, not a function,E:Cannot call 'host_sqrt': it is an int, not a function";
 			both(prelude + src, expected, "rebinding");
 			both(prelude + src, expected, "rebinding, proofs off", false);
 		});
-		test("stdlib_math_alias_member_named_like_the_builtin", [this]() {
-			const std::string src = "class V { float k = 10.0; float sqrt(float x) { return x * k; } float g(float y) { return sqrt(y * 1.0) + sqrt(y) + cos(y * 0.0); } }\n"
-				"class W { float cos = 3.0; float g(float y) { try { return cos(y * 2.0); } catch (e) { return -1.0; } } }\n"
-				"var v = V(); var w = W(); to_string(v.g(2.0)) + \",\" + to_string(w.g(1.0)) + \",\" + to_string(sqrt(16.0));";
+		test("host_math_alias_member_named_like_the_builtin", [this]() {
+			const std::string src = "class V { float k = 10.0; float host_sqrt(float x) { return x * k; } float g(float y) { return host_sqrt(y * 1.0) + host_sqrt(y) + host_cos(y * 0.0); } }\n"
+				"class W { float host_cos = 3.0; float g(float y) { try { return host_cos(y * 2.0); } catch (e) { return -1.0; } } }\n"
+				"var v = V(); var w = W(); to_string(v.g(2.0)) + \",\" + to_string(w.g(1.0)) + \",\" + to_string(host_sqrt(16.0));";
 			both(src, "41.0,-1.0,4.0", "a member named like the builtin");
 		});
-		test("stdlib_math_alias_host_reregistration", [this]() {
+		test("host_math_alias_host_reregistration", [this]() {
 			auto run = [](bool vm) {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string out;
-				out += e->execute("function f(float x) -> string { return to_string(sqrt(x * 1.0)) + \" \" + to_string(sqrt(x)); } f(16.0);").as_string();
-				e->add_function("sqrt", [](const std::string& s) -> script_float { return static_cast<script_float>(s.size()); });
-				out += "," + e->execute("f(16.0) + \" \" + to_string(sqrt(\"abc\"));").as_string();
+				out += e->execute("function f(float x) -> string { return to_string(host_sqrt(x * 1.0)) + \" \" + to_string(host_sqrt(x)); } f(16.0);").as_string();
+				e->add_function("host_sqrt", [](const std::string& s) -> script_float { return static_cast<script_float>(s.size()); });
+				out += "," + e->execute("f(16.0) + \" \" + to_string(host_sqrt(\"abc\"));").as_string();
 				return out;
 			};
 			const std::string interp = run(false), vm = run(true);
-			check_eq(interp, vm, "a host that registers sqrt again");
+			check_eq(interp, vm, "a host that registers host_sqrt again");
 			check_eq(std::string("4.0 4.0,4.0 4.0 3.0"), vm, "the overload set answers");
 		});
 		// row 188: a loop whose body evaluates a stdlib alias closes; the name holds at the entry and after each call's landing
-		test("stdlib_math_alias_loops_close_as_cell_blocks", [this]() {
+		test("host_math_alias_loops_close_as_cell_blocks", [this]() {
 			const std::string src = "array<float> XS = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5];\n"
-				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float x = XS[i & 7]; float d = sqrt(x * x + 1.0) - 0.5; s += d + sin(x) + floor(x); } return s; }\n"
+				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float x = XS[i & 7]; float d = host_sqrt(x * x + 1.0) - 0.5; s += d + host_sin(x) + host_floor(x); } return s; }\n"
 				"to_string(run(64)) + \",\" + to_string(run(3));";
 			both(src, "", "an alias loop");
 			both(src, "", "an alias loop, proofs off", false);
@@ -4729,21 +4753,21 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every) + " re-runs the alias from its guard's mark");
 			}
 		});
-		test("stdlib_math_alias_loop_follows_a_rebinding_by_a_call", [this]() {
+		test("host_math_alias_loop_follows_a_rebinding_by_a_call", [this]() {
 			// a call in the body rebinds the name: the landing's check misses and the general form makes the real call from then on;
 			// a call between an alias's guard and its op keeps the loop open
-			const std::string src = "var SQRT0 = sqrt;\n"
-				"function rb(int i) -> int { if (i == 5) { sqrt = function(float v) { return -v; }; } return i; }\n"
-				"function run() -> float { float s = 0.0; for (int i = 0; i < 12; ++i) { float x = i * 1.5; s += sqrt(x * x + 1.0); int k = rb(i); s += k; } return s; }\n"
+			const std::string src = "var SQRT0 = host_sqrt;\n"
+				"function rb(int i) -> int { if (i == 5) { host_sqrt = function(float v) { return -v; }; } return i; }\n"
+				"function run() -> float { float s = 0.0; for (int i = 0; i < 12; ++i) { float x = i * 1.5; s += host_sqrt(x * x + 1.0); int k = rb(i); s += k; } return s; }\n"
 				"function ab(float x) -> float { return x * 2.0; }\n"
-				"function run2() -> float { float s = 0.0; for (int i = 0; i < 12; ++i) { float x = i * 0.25; s += sqrt(ab(x) + 1.0); } return s; }\n"
-				"string a = to_string(run()); sqrt = SQRT0; a += \",\" + to_string(run2()); sqrt = function(float v) { return v * 10.0; }; a + \",\" + to_string(run2());";
+				"function run2() -> float { float s = 0.0; for (int i = 0; i < 12; ++i) { float x = i * 0.25; s += host_sqrt(ab(x) + 1.0); } return s; }\n"
+				"string a = to_string(run()); host_sqrt = SQRT0; a += \",\" + to_string(run2()); host_sqrt = function(float v) { return v * 10.0; }; a + \",\" + to_string(run2());";
 			both(src, "", "a rebinding call inside the loop");
 			both(src, "", "a rebinding call inside the loop, proofs off", false);
 		});
@@ -4785,11 +4809,11 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "4.0,31.5,4.0", "a graft in a method, proofs off", false);
 		});
 		// row 190: a callee whose only calls are stdlib aliases or math:: intrinsics grafts; the alias keeps its guard inside the graft
-		test("stdlib_math_alias_callees_graft", [this]() {
+		test("host_math_alias_callees_graft", [this]() {
 			const std::string src = "float K = 2.0;\n"
-				"function len3(float x, float y, float z) -> float { float d = sqrt(x * x + y * y + z * z); return d; }\n"
-				"function len3r(float x, float y, float z) -> float { return sqrt(x * x + y * y + z * z); }\n"
-				"function wav(float x) -> float { float s = sin(x * K); float c = cos(x); float r = s * c + floor(x) + math::sqrt(x * x + 1.0); return r; }\n"
+				"function len3(float x, float y, float z) -> float { float d = host_sqrt(x * x + y * y + z * z); return d; }\n"
+				"function len3r(float x, float y, float z) -> float { return host_sqrt(x * x + y * y + z * z); }\n"
+				"function wav(float x) -> float { float s = host_sin(x * K); float c = host_cos(x); float r = s * c + host_floor(x) + math::sqrt(x * x + 1.0); return r; }\n"
 				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.25; t += len3(x, 1.0, 2.0); float w = wav(x); t += w; } return t; }\n"
 				"function one(float a) -> float { float d = len3r(a, a, a) - 1.0; return d; }\n"
 				"to_string(run(40)) + \",\" + to_string(one(3.0));";
@@ -4798,20 +4822,20 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(src);
 			check_true(l.find("-- inlined len3 ") != std::string::npos && l.find("-- inlined wav") != std::string::npos && l.find("-- inlined len3r") != std::string::npos, "the alias callees graft: " + l.substr(0, 3000));
 		});
-		test("stdlib_math_alias_graft_follows_rebinding_and_members", [this]() {
+		test("host_math_alias_graft_follows_rebinding_and_members", [this]() {
 			// the alias inside a graft rebound to a function that writes a global the statement reads; a caller method whose class has a
 			// member named like the alias; the alias's value on the stack (a return, an argument, a compound's right side)
-			const std::string src = "[[warn_mode]]\nvar SQRT0 = sqrt;\nfloat G = 1.0;\n"
-				"function len2(float x, float y) -> float { float d = sqrt(x * x + y * y); return d; }\n"
+			const std::string src = "[[warn_mode]]\nvar SQRT0 = host_sqrt;\nfloat G = 1.0;\n"
+				"function len2(float x, float y) -> float { float d = host_sqrt(x * x + y * y); return d; }\n"
 				"function st(float a) -> float { float r = G + len2(a, 1.0); return r; }\n"
 				"function lp() -> float { float t = 0.0; for (int i = 0; i < 5; ++i) { t += len2(i, 2.0); } return t; }\n"
-				"function stackers(float a) -> string { float s = 0.0; s += sqrt(a); return to_string(sqrt(a * 4.0)) + \" \" + to_string(max(sqrt(a), 0.5)) + \" \" + to_string(s); }\n"
-				"class M { float sqrt(float v) { return v * 100.0; } float m(float a) { float r = len2(a, 0.0) + 0.0; return r; } }\n"
+				"function stackers(float a) -> string { float s = 0.0; s += host_sqrt(a); return to_string(host_sqrt(a * 4.0)) + \" \" + to_string(math::max(host_sqrt(a), 0.5)) + \" \" + to_string(s); }\n"
+				"class M { float host_sqrt(float v) { return v * 100.0; } float m(float a) { float r = len2(a, 0.0) + 0.0; return r; } }\n"
 				"string out = to_string(st(3.0)) + \",\" + to_string(lp()) + \",\" + stackers(9.0) + \",\" + to_string(M().m(4.0));\n"
-				"sqrt = function(float v) { G = G + 10.0; return v; };\n"
+				"host_sqrt = function(float v) { G = G + 10.0; return v; };\n"
 				"out += \",\" + to_string(st(3.0)) + \",\" + to_string(lp()) + \",\" + stackers(9.0) + \",\" + to_string(M().m(4.0)) + \",\" + to_string(G);\n"
 				"function nc() -> string { try { return to_string(len2(1.0, 1.0)); } catch (e) { return \"E:\" + e; } }\n"
-				"function nc2() -> string { try { return to_string(sqrt(4.0)); } catch (e) { return \"E:\" + e; } }\n"
+				"function nc2() -> string { try { return to_string(host_sqrt(4.0)); } catch (e) { return \"E:\" + e; } }\n"
 				"out + \",\" + nc() + \",\" + nc2();";
 			both(src, "", "alias grafts under rebinding");
 			both(src, "", "alias grafts under rebinding, proofs off", false);
@@ -4830,7 +4854,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -4840,7 +4864,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		// after it, the source order, so the binary keeps its fused form and the loop around it closes
 		test("temp_reads_ahead_of_an_environment_partner", [this]() {
 			const std::string src = "[[warn_mode]]\nfloat G = 0.25; array<float> A = [1.0, 4.0, 9.0, 16.0];\n"
-				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.5; float da = (sqrt(x * x + 1.0) - G) * 0.74; float db = A[i & 3] - G; t += da + db; } return t; }\n"
+				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.5; float da = (host_sqrt(x * x + 1.0) - G) * 0.74; float db = A[i & 3] - G; t += da + db; } return t; }\n"
 				"function oob() -> string { try { float v = A[9] - nope; return to_string(v); } catch (e) { return \"E:\" + e; } }\n"
 				"function und() -> string { try { float v = A[1] - nope; return to_string(v); } catch (e) { return \"E:\" + e; } }\n"
 				"string out = to_string(run(40)) + \",\" + oob() + \",\" + und(); G = -3.0; out + \",\" + to_string(run(7));";
@@ -4861,7 +4885,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function thr(int n) -> int { if (n > 2) { throw \"big \" + to_string(n); } return n; }\n"
 				"function rec(int n) -> int { if (n < 2) { return n; } int a = rec(n - 1); int b = rec(n - 2); return a + b; }\n"
 				"function run() -> string { string out = \"\";\n"
-				"  int a = fi(3, 4); float b = ff(1.5, true, 'a'); float c = fv(2); int d = fv(7); float e = max(2.5, 1.0) + ff(0.5, false, 'b');\n"
+				"  int a = fi(3, 4); float b = ff(1.5, true, 'a'); float c = fv(2); int d = fv(7); float e = math::max(2.5, 1.0) + ff(0.5, false, 'b');\n"
 				"  int g = rec(12); float h = fi(2, 2); out += to_string(a) + \" \" + to_string(b) + \" \" + to_string(c) + \" \" + type_of(c) + \" \" + to_string(d) + \" \" + to_string(e) + \" \" + to_string(g) + \" \" + to_string(h) + \" \" + type_of(h);\n"
 				"  for (int i = 0; i < 5; ++i) { try { int t = thr(i); out += \" t\" + to_string(t); } catch (err) { out += \" E:\" + err; } }\n"
 				"  try { int s = fv(\"str\"); out += \" s\" + to_string(s); } catch (err) { out += \" E2:\" + err; }\n"
@@ -4899,7 +4923,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -4932,24 +4956,24 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// row 199: an environment name ahead of a hoisted read (`q + A * sin(q * 1.3)`) reads into a temp first and the loop closes; a leaf whose
-		// return the checker cannot prove (`return sqrt(x) + 1.0`) grafts into a loop when its declared result is a scalar, the block landing it
+		// row 199: an environment name ahead of a hoisted read (`q + A * host_sin(q * 1.3)`) reads into a temp first and the loop closes; a leaf whose
+		// return the checker cannot prove (`return host_sqrt(x) + 1.0`) grafts into a loop when its declared result is a scalar, the block landing it
 		// by that type
 		test("environment_partners_and_unproven_scalar_returns", [this]() {
 			const std::string src = "[[warn_mode]]\nfloat A = 0.2; array<float> T = [1.0, 2.0, 3.0, 4.0];\n"
-				"function inner(float x) -> float { return sqrt(x) + 1.0; }\n"
+				"function inner(float x) -> float { return host_sqrt(x) + 1.0; }\n"
 				"function half(int k) -> float { return k / 2; }\n"
-				"function g3(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.001; float w = q + A * sin(q * 1.3); float v = A * T[i & 3] + q; s = s + w + v; } return s; }\n"
+				"function g3(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.001; float w = q + A * host_sin(q * 1.3); float v = A * T[i & 3] + q; s = s + w + v; } return s; }\n"
 				"function g3i(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.001; float w = q + A * math::sin(q * 1.3); s = s + w; } return s; }\n"
 				"function g8(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float d = inner(i * 0.01); float h = half(i); s = s + d + h; } return s; }\n"
 				"string out = to_string(g3(50)) + \",\" + to_string(g3i(50)) + \",\" + to_string(g8(40));\n"
-				"sin = function(float v) { A = A + 0.5; return v; }; sqrt = function(float v) { return v * 3.0; };\n"
+				"host_sin = function(float v) { A = A + 0.5; return v; }; host_sqrt = function(float v) { return v * 3.0; };\n"
 				"out + \",\" + to_string(g3(5)) + \",\" + to_string(g8(5));";
 			both(src, "", "environment partners and unproven returns");
 			both(src, "", "environment partners and unproven returns, proofs off", false);
@@ -4963,7 +4987,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -4984,8 +5008,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string src =
 				"float SK_T = 0.0; float SK_S = 0.0; float SK_K = 0.0; float SK_TW = 0.0; float SK_WA = 0.0; float SK_MG = 0.0; float SK_MP = 0.0; float SK_MD = 0.0; float SK_CX = 0.0;\n"
 				"class Scene { float cxs = 0.1;\n"
-				"  void set_world(float t) { SK_T = t; SK_S = 0.8 + 0.07 * sin(t * 0.37); SK_K = 0.45 * sin(t * 0.21 + 0.6); SK_TW = 0.11 * sin(t * 0.29 + 1.3); SK_WA = 0.18 + 0.14 * sin(t * 0.33 + 2.0);\n"
-				"    float ph = t * 0.19; float a = 0.5 + 0.5 * cos(ph); float b = 0.5 + 0.5 * cos(ph - 2.0944); float c = 0.5 + 0.5 * cos(ph + 2.0944);\n"
+				"  void set_world(float t) { SK_T = t; SK_S = 0.8 + 0.07 * host_sin(t * 0.37); SK_K = 0.45 * host_sin(t * 0.21 + 0.6); SK_TW = 0.11 * host_sin(t * 0.29 + 1.3); SK_WA = 0.18 + 0.14 * host_sin(t * 0.33 + 2.0);\n"
+				"    float ph = t * 0.19; float a = 0.5 + 0.5 * host_cos(ph); float b = 0.5 + 0.5 * host_cos(ph - 2.0944); float c = 0.5 + 0.5 * host_cos(ph + 2.0944);\n"
 				"    a = a * a * a; b = b * b * b; c = c * c * c; float sum = a + b + c; SK_MG = a / sum; SK_MP = b / sum; SK_MD = c / sum; SK_CX = cxs; } }\n"
 				"Scene s = Scene(); float acc = 0.0;\n"
 				"for (int i = 0; i < 40; ++i) { s.set_world(i * 0.1); acc += SK_S + SK_K + SK_TW + SK_WA + SK_MG + SK_MP * 2.0 + SK_MD * 3.0 + SK_CX; }\n"
@@ -4994,7 +5018,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 7; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5003,7 +5027,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		// row 198: a leaf whose body calls another leaf grafts, the inner leaf grafted inside it (one level), each behind its own guard
 		test("nested_leaves_graft", [this]() {
 			const std::string src = "[[warn_mode]]\nfloat S = 0.5;\n"
-				"function field(float x, float y) -> float { float s = sin(x * S); float c = cos(y); float r = s * c + x * y; return r; }\n"
+				"function field(float x, float y) -> float { float s = host_sin(x * S); float c = host_cos(y); float r = s * c + x * y; return r; }\n"
 				"function world(float x, float y) -> float { float g = field(x, y); float r = (g < 0.0 ? -g : g) - 0.25; return r; }\n"
 				"function march(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float d = world(i * 0.5, t); t += d * 0.1; } return t; }\n"
 				"function one(float a) -> float { float w = world(a, a) + 1.0; return w; }\n"
@@ -5022,13 +5046,13 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string ml = mb == std::string::npos ? l : l.substr(mb, l.find("\n== ", mb + 1) - mb);
 			check_true(ml.find("-- inlined world") != std::string::npos && ml.find("-- inlined field") != std::string::npos && ml.find("open loop") == std::string::npos, "both leaves graft into the closed loop: " + ml);
 		});
-		test("stdlib_math_alias_under_parallel_transform", [this]() {
-			const std::string src = "function row(int i) -> float { float x = i * 0.5; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
+		test("math_namespace_under_parallel_transform", [this]() {
+			const std::string src = "function row(int i) -> float { float x = i * 0.5; return math::sqrt(x * x + 1.0) + math::sin(x) * math::cos(x * 0.5) + math::floor(x * 0.25); }\n"
 				"array<int> idx = []; for (int i = 0; i < 400; ++i) { idx.push(i); }\n"
 				"function serial() -> string { float s = 0.0; for (int i = 0; i < 400; ++i) { s += row(i); } return to_string(s); }\n"
 				"function par() -> string { var r = parallel_transform(idx, row); float s = 0.0; for (int i = 0; i < 400; ++i) { s += r[i]; } return to_string(s); }\n"
 				"string a = serial() + \"=\" + par();\n"
-				"sqrt = function(float v) { return v * 2.0; };\n"
+				"host_sqrt = function(float v) { return v * 2.0; };\n"
 				"a + \",\" + serial() + \"=\" + par();";
 			both(src, "", "the workers' aliases");
 			check_true(run_on(true, src).rfind("throw:", 0) != 0, "runs: " + run_on(true, src));
@@ -5061,7 +5085,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 7; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5075,11 +5099,11 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function tailcall(int x) -> int { int v = x * 7 + 1; int w = v * v - x; int y = w % 13 + v * 3; int z = y * y - w + v; int q = z + x * 2; int r = q * 3 - z + y; return mul3(r, 5); }\n"
 				"function loopret(int n) -> int { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc * 3 + i; if (acc > 1000) { return mul3(acc, 2); } } return acc; }\n"
 				"class R { int s = 5; int raw() { int v = s; v = v ^ (v >> 3); v = v ^ (v << 5); v = v ^ (v >> 7); v = v * 3 + 1; s = v & 65535; return mul3(v & 255, 7); } }\n"
-				"function early(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += i * 0.5; if (t > 5.0) { return sqrt(t) + 1.0; } } return t; }\n"
-				"function rowr(int i) -> float { float x0 = i * 0.5; float y = x0 * x0 + 1.0; float z = y * 0.5 - x0; float w = z * z + y * 0.25; float x = w - z * 0.125 + y * 0.01; return sqrt(x * x + 1.0) + sin(x) * cos(x * 0.5) + floor(x * 0.25); }\n"
+				"function early(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += i * 0.5; if (t > 5.0) { return host_sqrt(t) + 1.0; } } return t; }\n"
+				"function rowr(int i) -> float { float x0 = i * 0.5; float y = x0 * x0 + 1.0; float z = y * 0.5 - x0; float w = z * z + y * 0.25; float x = w - z * 0.125 + y * 0.01; return host_sqrt(x * x + 1.0) + host_sin(x) * host_cos(x * 0.5) + host_floor(x * 0.25); }\n"
 				"function run() -> string { string out = \"\"; for (int i = 0; i < 4; ++i) { out += to_string(tailcall(i)) + \" \" + to_string(loopret(i * 4)) + \" \"; } R r = R(); for (int i = 0; i < 4; ++i) { out += to_string(r.raw()) + \" \"; }\n"
 				"  var ea = early; var rw = rowr; for (int i = 0; i < 8; ++i) { out += to_string(ea(i)) + \" \" + to_string(rw(i)) + \" \"; } return out; }\n"
-				"string first = run(); sqrt = function(float v) { return v * 2.0; }; first + \",\" + run();";
+				"string first = run(); host_sqrt = function(float v) { return v * 2.0; }; first + \",\" + run();";
 			both(src, "", "exit after a graft");
 			both(src, "", "exit after a graft, proofs off", false);
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
@@ -5092,7 +5116,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 4; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5137,7 +5161,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 7; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5166,39 +5190,39 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// G6: bare abs is a stdlib alias (the float abs: an int argument converts first, as the builtin's float parameter converts it)
+		// G6: bare host_abs is a stdlib alias (the float host_abs: an int argument converts first, as the builtin's float parameter converts it)
 		test("stdlib_abs_alias_is_the_float_builtin", [this]() {
-			const std::string src = "function r(var v) -> string { return to_string(abs(v)) + \":\" + type_of(abs(v)); }\n"
-				"function k(int i) -> string { return to_string(abs(i)) + \" \" + to_string(abs(i * 1)); }\n"
-				"function x(float f) -> string { float y = abs(f) + 0.0; return to_string(y) + \" \" + to_string(abs(f * 1.0)); }\n"
-				"r(4) + \"|\" + r(-2.25) + \"|\" + r(-0.0) + \"|\" + r(9007199254740993) + \"|\" + k(-7) + \"|\" + k(-9223372036854775807 - 1) + \"|\" + x(-0.0) + \"|\" + x(-INF)"
-				" + \"|\" + x(NAN_VALUE) + \"|\" + x(-NAN_VALUE) + \"|\" + to_string(abs(-3) == 3.0);";
+			const std::string src = "function r(var v) -> string { return to_string(host_abs(v)) + \":\" + type_of(host_abs(v)); }\n"
+				"function k(int i) -> string { return to_string(host_abs(i)) + \" \" + to_string(host_abs(i * 1)); }\n"
+				"function x(float f) -> string { float y = host_abs(f) + 0.0; return to_string(y) + \" \" + to_string(host_abs(f * 1.0)); }\n"
+				"r(4) + \"|\" + r(-2.25) + \"|\" + r(-0.0) + \"|\" + r(9007199254740993) + \"|\" + k(-7) + \"|\" + k(-9223372036854775807 - 1) + \"|\" + x(-0.0) + \"|\" + x(-math::INF)"
+				" + \"|\" + x(math::NAN_VALUE) + \"|\" + x(-math::NAN_VALUE) + \"|\" + to_string(host_abs(-3) == 3.0);";
 			both(src, "", "int, float and edge arguments");
 			both(src, "", "int, float and edge arguments, proofs off", false);
 			check_true(run_on(true, src).rfind("4.0:float|2.25:float|0.0:float|", 0) == 0, "the builtin's numbers: " + run_on(true, src));
 			const std::string loop = "array<float> XS = [0.5, -1.5, 2.5, -3.5, -0.0, 5.5, -6.5, 7.5];\n"
-				"function mag(float v) -> float { float a = abs(v); return a * 2.0; }\n"
-				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = XS[i & 7]; int j = i - 5; float mq = mag(q); s += abs(q) + abs(j) + mq; } return s; }\n"
+				"function mag(float v) -> float { float a = host_abs(v); return a * 2.0; }\n"
+				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = XS[i & 7]; int j = i - 5; float mq = mag(q); s += host_abs(q) + host_abs(j) + mq; } return s; }\n"
 				"to_string(run(64)) + \",\" + to_string(run(3));";
-			both(loop, "", "an abs loop");
-			both(loop, "", "an abs loop, proofs off", false);
+			both(loop, "", "an host_abs loop");
+			both(loop, "", "an host_abs loop, proofs off", false);
 			const std::string l = listing_run(loop);
 			const size_t fbeg = l.find("== run ");
 			const std::string fl = fbeg == std::string::npos ? l : l.substr(fbeg, l.find("\n== ", fbeg + 1) - fbeg);
-			check_true(fl.find("open loop") == std::string::npos && fl.find("C_MATH") != std::string::npos && fl.find("-- inlined mag") != std::string::npos, "the loop closes over abs and grafts its leaf: " + fl);
-			const std::string rebind = "[[warn_mode]]\nvar ABS0 = abs;\nfunction f(float x) -> float { return abs(x * 2.0) + abs(x); }\n"
-				"string out = to_string(f(-8.0)); abs = function(float v) { return v + 100.0; }; out += \",\" + to_string(f(-8.0)); abs = ABS0; out += \",\" + to_string(f(-8.0)); out;";
+			check_true(fl.find("open loop") == std::string::npos && fl.find("C_MATH") != std::string::npos && fl.find("-- inlined mag") != std::string::npos, "the loop closes over host_abs and grafts its leaf: " + fl);
+			const std::string rebind = "[[warn_mode]]\nvar ABS0 = host_abs;\nfunction f(float x) -> float { return host_abs(x * 2.0) + host_abs(x); }\n"
+				"string out = to_string(f(-8.0)); host_abs = function(float v) { return v + 100.0; }; out += \",\" + to_string(f(-8.0)); host_abs = ABS0; out += \",\" + to_string(f(-8.0)); out;";
 			both(rebind, "24.0,176.0,24.0", "a rebinding");
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, loop);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(loop).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5213,7 +5237,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"  for (int i = 0; i < n; ++i) { int j1 = (i + 1) & 7; int j2 = (i + 2) & 7; float a = A[i & 7]; float b = A[j1]; float c = A[j2]; int f = i % 13 - 2;\n"
 				"    int facet = (a > 0.0 ? 1 : 0) + (b > 0.0 ? 2 : 0) + (c > 0.0 ? 4 : 0);\n"
 				"    float lit = 0.25 + a * b * 0.6 + (c > 0.85 ? 0.6 : 0.0);\n"
-				"    float g = sqrt(a < 0.0 ? 0.0 : a) - 0.55; float h = math::floor(b > c ? b : (c > 1.0 ? c : -c)) + 1.0;\n"
+				"    float g = host_sqrt(a < 0.0 ? 0.0 : a) - 0.55; float h = math::floor(b > c ? b : (c > 1.0 ? c : -c)) + 1.0;\n"
 				"    float z = c + (i > 2 ? 1 : 0.5);\n"
 				"    acc += (f < 0 ? 0 : (f > 9 ? 9 : f)) + facet + K;\n"
 				"    s += lit + g + h + z + (f != 3 ? a : b) * 0.5; }\n"
@@ -5231,7 +5255,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function seth(float v) -> bool { H = v; return v > 0.0; }\n"
 				"function run() -> string { string out = \"\";\n"
 				"  for (int k = 0; k < 2; ++k) { G = 1; int r = G + (bumpg() ? 1 : 2); int r2 = G; G = 1; r2 += G + (G * 2 + (bumpg() ? 1 : 2)); out += to_string(r) + \" \" + to_string(r2) + \" \"; }\n"
-				"  H = 2.0; float q = H * (H + (seth(5.0) ? H : 0.0)); H = 2.0; float q2 = sqrt(seth(9.0) ? H : 0.0) + H; H = 2.0; float q3 = H + sqrt(seth(16.0) ? H : 0.0);\n"
+				"  H = 2.0; float q = H * (H + (seth(5.0) ? H : 0.0)); H = 2.0; float q2 = host_sqrt(seth(9.0) ? H : 0.0) + H; H = 2.0; float q3 = H + host_sqrt(seth(16.0) ? H : 0.0);\n"
 				"  H = 2.0; float q4 = H + math::floor(seth(3.5) ? H : 0.0); out += to_string(q) + \" \" + to_string(q2) + \" \" + to_string(q3) + \" \" + to_string(q4);\n"
 				"  return out; }\n"
 				"run();";
@@ -5240,7 +5264,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5280,7 +5304,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5360,7 +5384,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (const std::string* p : { &src, &more, &scope, &loop }) {
 				const std::string oracle = run_on(false, *p);
 				for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-					auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+					auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 					std::string got;
 					try { got = e->execute(*p).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 					check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5401,7 +5425,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5421,7 +5445,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function run() -> string { string out = \"\";\n"
 				"  for (int k = 0; k < 2; ++k) {\n"
 				"    M[\"a\"] = 1; int a = M[\"a\"] - math::abs(wm()); out += to_string(a) + \" \";\n"
-				"    M[\"a\"] = 1; float b = M[\"a\"] - sqrt(wg()); out += to_string(b) + \" \";\n"
+				"    M[\"a\"] = 1; float b = M[\"a\"] - host_sqrt(wg()); out += to_string(b) + \" \";\n"
 				"    MF[\"a\"] = 1.5; float c = MF[\"a\"] + math::floor(wf()); out += to_string(c) + \" \";\n"
 				"    MV[\"b\"] = 2.5; var d = MV[\"b\"] * math::itrunc(wv()); out += to_string(d) + \" \";\n"
 				"    M[\"a\"] = 1; int e = (M[\"a\"] + math::abs(wm())) * 2; out += to_string(e) + \" | \";\n"
@@ -5434,7 +5458,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5452,7 +5476,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"    int y = 1; int b = y + ((y * 2) - (mutate(y) ? 2 : 1)); out += to_string(b) + \" \";\n"
 				"    int z = 1; int c = z + wrap(bump(z)); out += to_string(c) + \" \";\n"
 				"    int w = 1; float d = w + math::abs(bump(w)); out += to_string(d) + \" \";\n"
-				"    int u = 1; float e = u + sqrt(bump(u)); out += to_string(e) + \" \";\n"
+				"    int u = 1; float e = u + host_sqrt(bump(u)); out += to_string(e) + \" \";\n"
 				"    int v = 1; int f = (v * 3) + (v + (mutate(v) ? 1 : 2)); out += to_string(f) + \" | \";\n"
 				"  }\n"
 				"  return out; }\n"
@@ -5463,7 +5487,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5493,7 +5517,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5546,7 +5570,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5572,7 +5596,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5597,7 +5621,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5614,7 +5638,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"  int ai = 0; int n = 2; var v = 0.25; var u = 0.25; float fb = 0.0; float fc = 0.0;\n"
 				"  for (int i = 0; i < 3; i++) { int r = G0 * (-w5()); ai = ai + r; }\n"
 				"  for (int i = 0; i < 4; i++) { fb = fb + math::abs(v - 2.0) * 1.0 + (G0 * (-n)); v = v + 0.25; }\n"
-				"  for (int i = 0; i < 4; i++) { fc = fc + sqrt(u * u * 36.0) + (-n) * G0; u = u + 0.25; }\n"
+				"  for (int i = 0; i < 4; i++) { fc = fc + host_sqrt(u * u * 36.0) + (-n) * G0; u = u + 0.25; }\n"
 				"  return to_string(ai) + \" \" + to_string(A[2]) + \" \" + to_string(fb) + \" \" + to_string(fc); }\n"
 				"run();";
 			const std::string expected = "-45 2.75 -18.5 -9.0";
@@ -5625,7 +5649,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5650,7 +5674,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5680,7 +5704,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5702,7 +5726,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, oracle, "nested calls in raw arguments, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 6u, 7u, 9u, 11u, 13u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5731,7 +5755,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5743,7 +5767,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto session = [](bool vm) {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string out;
 				try {
 					e->execute("int g(int x) { return x * 2; }\nint f(int n) { if (n < 1) { return 0; } return f(n - 1) + g(n); }\nfloat h(float x) { if (x < 1.0) { return x; } return h(x - 1.0) + 0.5; }\nfloat w(int n) { return h(n); }");
@@ -5778,7 +5802,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const size_t tb = l.find("== tail_store ");
 			const std::string tl = tb == std::string::npos ? l : l.substr(tb, l.find("\n== ", tb + 1) - tb);
 			check_true(tl.find("(boundaries") != std::string::npos && tl.find("C_BOUNDARY") != std::string::npos && tl.find("-- open loop") == std::string::npos, "tail_store's loop closes with a boundary: " + tl);
-			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e); register_host_math_fixture(*e);
 			e->execute(defs);
 			struct shape { const char* call; uint64_t iterations; uint64_t boundaries_per_iteration; };
 			for (const shape& sh : { shape{ "tail_store();", 1000, 1 }, shape{ "mid_store();", 1000, 1 }, shape{ "while_store();", 1000, 1 }, shape{ "writes_cell();", 200, 1 } }) {
@@ -5827,9 +5851,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 						for (int x = x0; x <= x1; ++x) { set_tile(w, x, y, t); }
 					}
 				}
-				array<int> building(int w, int x0, int y0, int bw, int bh, int wall, int floor) {
+				array<int> building(int w, int x0, int y0, int bw, int bh, int wall, int host_floor) {
 					fill_rect(w, x0, y0, x0 + bw - 1, y0 + bh - 1, wall);
-					fill_rect(w, x0 + 1, y0 + 1, x0 + bw - 2, y0 + bh - 2, floor);
+					fill_rect(w, x0 + 1, y0 + 1, x0 + bw - 2, y0 + bh - 2, host_floor);
 					int dx = x0 + bw / 2;
 					int dy = y0 + bh - 1;
 					set_tile(w, dx, dy, 9);
@@ -6007,7 +6031,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(wl.find("-- frame program") != std::string::npos && wl.find("(general entry only)") != std::string::npos, "w is a frame program entered generally: " + wl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("-5.75 1 21"), got, "a miss at every " + std::to_string(every));
@@ -6020,7 +6044,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto session = [](bool vm) {
 				auto e = engine::make();
 				if (vm) { e->set_backend(backend_type::vm); }
-				stdlib::register_all(*e);
+				stdlib::register_all(*e); register_host_math_fixture(*e);
 				engine* raw = e.get();
 				int flips = 0;
 				e->add_function("redefine", [raw, &flips](script_int n) -> script_int {
@@ -6070,7 +6094,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6080,24 +6104,24 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		// to code that rebinds the enclosing name leaves the enclosing call on the function it named first (a leaf, a stdlib alias, a
 		// function no graft takes, three levels, in loops)
 		test("an_enclosing_callee_resolves_before_its_arguments", [this]() {
-			const std::string src = "[[warn_mode]]\nvar SQRT0 = sqrt;\n"
+			const std::string src = "[[warn_mode]]\nvar SQRT0 = host_sqrt;\n"
 				"function inner(float x) -> float { return x + 1.0; }\n"
 				"function outer(float x) -> float { return x * 2.0; }\n"
 				"function mid(float x) -> float { return x - 3.0; }\n"
 				"function big(float x) -> float { for (int i = 0; i < 3; ++i) { if (i == 2) { return x * 5.0; } } return 0.0; }\n"
-				"function evil(float x) -> float { outer = function(float v) { return v * 100.0; }; mid = function(float v) { return v * 1000.0; }; big = function(float v) { return v * 7.0; }; sqrt = function(float v) { return v * 10000.0; }; hypot = function(float a, float b) { return a * 3.0; }; return x + 1.0; }\n"
-				"function leafs(float x) -> float { return sqrt(x) + 1.0; }\n"
-				"var OUTER0 = outer; var MID0 = mid; var BIG0 = big; var INNER0 = inner; var HYPOT0 = hypot;\n"
-				"function reset() -> void { outer = OUTER0; mid = MID0; big = BIG0; sqrt = SQRT0; hypot = HYPOT0; }\n"
+				"function evil(float x) -> float { outer = function(float v) { return v * 100.0; }; mid = function(float v) { return v * 1000.0; }; big = function(float v) { return v * 7.0; }; host_sqrt = function(float v) { return v * 10000.0; }; host_hypot = function(float a, float b) { return a * 3.0; }; return x + 1.0; }\n"
+				"function leafs(float x) -> float { return host_sqrt(x) + 1.0; }\n"
+				"var OUTER0 = outer; var MID0 = mid; var BIG0 = big; var INNER0 = inner; var HYPOT0 = host_hypot;\n"
+				"function reset() -> void { outer = OUTER0; mid = MID0; big = BIG0; host_sqrt = SQRT0; host_hypot = HYPOT0; }\n"
 				"function r1(float x) -> float { return outer(inner(x)); }\n"
 				"function r2(float x) -> float { float r = outer(inner(x)) + 0.5; return r; }\n"
 				"function r3(float x) -> float { float t = 0.0; for (int i = 0; i < 3; ++i) { t += outer(inner(x)); } return t; }\n"
-				"function r4(float x) -> float { float r = sqrt(inner(x)) + 0.0; return r; }\n"
+				"function r4(float x) -> float { float r = host_sqrt(inner(x)) + 0.0; return r; }\n"
 				"function r5(float x) -> float { float r = big(inner(x)) + 0.0; return r; }\n"
 				"function r6(float x) -> float { return outer(mid(inner(x))); }\n"
 				"function r7(float x) -> float { float r = 1.0 + outer(leafs(x)); return r; }\n"
-				"function r8(float x) -> float { float t = 0.0; for (int i = 0; i < 3; ++i) { float r = sqrt(inner(x)) + 0.0; t += r; } return t; }\n"
-				"function r9(float x) -> float { float r = hypot(inner(x), 0.0) + 0.0; return r; }\n"
+				"function r8(float x) -> float { float t = 0.0; for (int i = 0; i < 3; ++i) { float r = host_sqrt(inner(x)) + 0.0; t += r; } return t; }\n"
+				"function r9(float x) -> float { float r = host_hypot(inner(x), 0.0) + 0.0; return r; }\n"
 				"function all() -> string { string s = \"\";\n"
 				"  reset(); s += to_string(r1(1.0)) + \" \"; s += to_string(r1(1.0)) + \" \";\n"
 				"  reset(); s += to_string(r2(1.0)) + \" \"; s += to_string(r2(1.0)) + \" \";\n"
@@ -6110,14 +6134,14 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"  return s; }\n"
 				"string out = all(); inner = evil; out += \"| \" + all(); inner = INNER0; reset();\n"
 				"out += \"| \" + to_string(r7(4.0));\n"
-				"sqrt = function(float v) { outer = function(float w) { return w * 100.0; }; return v; };\n"
+				"host_sqrt = function(float v) { outer = function(float w) { return w * 100.0; }; return v; };\n"
 				"out += \" \" + to_string(r7(4.0)) + \" \" + to_string(r7(4.0)); out;";
 			const std::string expected = "4.0 4.0 4.5 4.5 12.0 2.0 2.0 10.0 10.0 -2.0 -2.0 6.0 2.0 2.0 | 4.0 200.0 4.5 200.5 404.0 2.0 40000.0 10.0 14.0 -2.0 2e+05 80002.0 2.0 6.0 | 7.0 11.0 501.0";
 			both(src, expected, "enclosing callees");
 			both(src, expected, "enclosing callees, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(expected, got, "a miss at every " + std::to_string(every));
@@ -6140,7 +6164,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, expected, "element references, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(expected, got, "a miss at every " + std::to_string(every));
@@ -6178,18 +6202,18 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		// rows guard), so the block runs its pinned forms; a rebinding to a function returning an int or a string keeps the general values
 		// and texts
 		test("a_stdlib_alias_operand_is_a_float_operand", [this]() {
-			const std::string src = "[[warn_mode]]\nvar SIN0 = sin;\nfloat W = 0.5; float T = 0.25;\n"
-				"function f(float q) -> float { float wx = q + W * sin(q * 1.3 + T * 0.7); return wx; }\n"
-				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; float wx = q + W * sin(q * 1.3 + T * 0.7); s += wx + f(q); } return s; }\n"
-				"function rb(int i) -> int { if (i == 5) { sin = function(float v) { return 3; }; } return i; }\n"
-				"function run2(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; s += q + W * sin(q); int k = rb(i); s += k; } return s; }\n"
+			const std::string src = "[[warn_mode]]\nvar SIN0 = host_sin;\nfloat W = 0.5; float T = 0.25;\n"
+				"function f(float q) -> float { float wx = q + W * host_sin(q * 1.3 + T * 0.7); return wx; }\n"
+				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; float wx = q + W * host_sin(q * 1.3 + T * 0.7); s += wx + f(q); } return s; }\n"
+				"function rb(int i) -> int { if (i == 5) { host_sin = function(float v) { return 3; }; } return i; }\n"
+				"function run2(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float q = i * 0.1; s += q + W * host_sin(q); int k = rb(i); s += k; } return s; }\n"
 				"float probe_f = f(0.1);\n"   // a program-scope call compiles f itself (run's call grafts it)
 				"string out = to_string(run(40)) + \" \" + to_string(run2(10));\n"
-				"sin = function(float v) { return \"x\"; };\n"
-				"function bad() -> string { try { float q = 1.0; float r = q + W * sin(q); return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
-				"function bad2() -> string { try { float z = sin(1.0); return to_string(z); } catch (e) { return \"E:\" + e; } }\n"
-				"function bad3() -> string { try { int k = sin(1.0); return to_string(k); } catch (e) { return \"E:\" + e; } }\n"
-				"out += \" \" + bad() + \" \" + bad2() + \" \" + bad3(); sin = SIN0; out + \" \" + to_string(run(3));";
+				"host_sin = function(float v) { return \"x\"; };\n"
+				"function bad() -> string { try { float q = 1.0; float r = q + W * host_sin(q); return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
+				"function bad2() -> string { try { float z = host_sin(1.0); return to_string(z); } catch (e) { return \"E:\" + e; } }\n"
+				"function bad3() -> string { try { int k = host_sin(1.0); return to_string(k); } catch (e) { return \"E:\" + e; } }\n"
+				"out += \" \" + bad() + \" \" + bad2() + \" \" + bad3(); host_sin = SIN0; out + \" \" + to_string(run(3));";
 			both(src, "", "alias operands");
 			both(src, "", "alias operands, proofs off", false);
 			const std::string l = listing_run(src);
@@ -6199,7 +6223,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6237,7 +6261,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6264,7 +6288,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(r3.find("-- inlined outer2") != std::string::npos && r3.find("-- inlined inner") != std::string::npos && r3.find("-- cell loop") != std::string::npos, "the nested leaves over the callee's own local graft: " + r3);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("75091 276 98"), got, "a miss at every " + std::to_string(every));
@@ -6315,7 +6339,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(fl.find("-- inlined A") != std::string::npos && fl.find("-- inlined sq") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "an argument of arithmetic grafts and the loop closes: " + fl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -6354,7 +6378,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(rb.find("-- call kept A") != std::string::npos, "a local stored two kinds keeps the call: " + rb);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -6417,7 +6441,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 40; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6460,7 +6484,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6470,15 +6494,15 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		// inner leaf grafts inside the outer's parameter and the loop closes; the alias rebound by a call in the loop, the outer rebound by
 		// the rebound alias, and a function no graft takes as the enclosing call keep the general form's values
 		test("a_leaf_with_an_alias_grafts_as_another_leafs_argument", [this]() {
-			const std::string src = "[[warn_mode]]\nvar SQRT0 = sqrt; float K = 0.5;\n"
-				"function len2(float x, float y) -> float { return sqrt(x * x + y * y); }\n"
+			const std::string src = "[[warn_mode]]\nvar SQRT0 = host_sqrt; float K = 0.5;\n"
+				"function len2(float x, float y) -> float { return host_sqrt(x * x + y * y); }\n"
 				"function shade(float d) -> float { return d * K + 1.0; }\n"
-				"function rb(int i) -> int { if (i == 5) { sqrt = function(float v) { shade = function(float w) { return w * 100.0; }; return -v; }; } return i; }\n"
+				"function rb(int i) -> int { if (i == 5) { host_sqrt = function(float v) { shade = function(float w) { return w * 100.0; }; return -v; }; } return i; }\n"
 				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.25; t += shade(len2(x, 1.0)); } return t; }\n"
 				"function run2(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float x = i * 0.25; t += shade(len2(x, 1.0)); int k = rb(i); t += k; } return t; }\n"
 				"var SHADE0 = shade;\n"
 				"string out = to_string(run(40)) + \",\" + to_string(run2(12)) + \",\" + to_string(run2(12));\n"
-				"sqrt = SQRT0; shade = SHADE0; out + \",\" + to_string(run(3));";
+				"host_sqrt = SQRT0; shade = SHADE0; out + \",\" + to_string(run(3));";
 			both(src, "", "a leaf with an alias as an argument");
 			both(src, "", "a leaf with an alias as an argument, proofs off", false);
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
@@ -6490,7 +6514,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));

@@ -49,7 +49,7 @@ public:
 				if (first_report.empty()) {
 					first_report = "fuzz seed " + std::to_string(seed) +
 						" diverged (repro: jaiscript_fuzz --seed " + std::to_string(seed) +
-						" --max-depth 3 --minimize" + (proofs ? "" : " --no-proofs") +
+						" --math::max-depth 3 --minimize" + (proofs ? "" : " --no-proofs") +
 						(band == fuzz::band_mode::always ? " --element-band" : "") + (math == fuzz::band_mode::always ? " --math-band" : "") +
 							(call_args == fuzz::band_mode::always ? " --call-args-band" : "") + (blocks == fuzz::band_mode::always ? " --block-shapes" : "") +
 							(lowering == 1 ? " --no-lowering" : lowering == 2 ? " --lowered-interp" : "") + ")\n" + cr.diff;
@@ -74,7 +74,7 @@ public:
 				for (bool use_vm : { false, true }) {
 					const auto valid = fuzz::load_mutant_bytes(first.original, use_vm, true);
 					check_true(valid.accepted, valid.loader_error + valid.unexpected_error);
-					check_true(valid.stable_bytes, "valid generator bytes round-trip without rewriting");
+					check_true(valid.stable_bytes, "valid generator bytes math::round-trip without rewriting");
 					check_true(valid.alive, "engine remains usable after valid load");
 				}
 			}

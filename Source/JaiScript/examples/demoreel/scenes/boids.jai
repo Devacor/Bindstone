@@ -57,7 +57,7 @@ class Boids : Scene {
 				float g = (y * 1.0 / h) * 9.0;
 				float dx = x - sunx;
 				float dy = (y - suny) * 1.3;
-				float d = sqrt(dx * dx + dy * dy);
+				float d = math::sqrt(dx * dx + dy * dy);
 				float glow = d < sr ? 15.0 : 13.0 - (d - sr) * 0.22;
 				float tone = glow > g ? glow : g;
 				int it = itrunc(tone * 2.0);
@@ -81,8 +81,8 @@ class Boids : Scene {
 			b2.x = w * 0.3 + rng.next(w * 4) * 0.1;
 			b2.y = h * 0.2 + rng.next(h * 4) * 0.1;
 			float a2 = rng.next(628) * 0.01;
-			b2.vx = cos(a2) * 12.0;
-			b2.vy = sin(a2) * 12.0;
+			b2.vx = math::cos(a2) * 12.0;
+			b2.vy = math::sin(a2) * 12.0;
 			b2.px = b2.x;
 			b2.py = b2.y;
 			flock.push(b2);
@@ -93,8 +93,8 @@ class Boids : Scene {
 		tt = t;
 		if (dt <= 0.0) { return; }
 		// wander target keeps the flock touring the sky, above the rooftops
-		float wx = w * (0.5 + 0.36 * sin(t * 0.37));
-		float wy = h * (0.38 + 0.2 * sin(t * 0.53 + 1.7));
+		float wx = w * (0.5 + 0.36 * math::sin(t * 0.37));
+		float wy = h * (0.38 + 0.2 * math::sin(t * 0.53 + 1.7));
 		hawk_update(dt);
 		for (int i = 0; i < nb; ++i) {
 			steer_one(i, wx, wy, dt);
@@ -113,7 +113,7 @@ class Boids : Scene {
 		cy /= nb;
 		hvx += (cx - hx) * 0.6 * dt;
 		hvy += (cy - hy) * 0.6 * dt;
-		float psp = sqrt(hvx * hvx + hvy * hvy);
+		float psp = math::sqrt(hvx * hvx + hvy * hvy);
 		if (psp > 15.0) { hvx *= 15.0 / psp; hvy *= 15.0 / psp; }
 		hx += hvx * dt;
 		hy += hvy * dt;
@@ -173,7 +173,7 @@ class Boids : Scene {
 		}
 		b.vx += ax * dt;
 		b.vy += ay * dt;
-		float sp = sqrt(b.vx * b.vx + b.vy * b.vy);
+		float sp = math::sqrt(b.vx * b.vx + b.vy * b.vy);
 		if (sp > 24.0) { b.vx *= 24.0 / sp; b.vy *= 24.0 / sp; }
 		if (sp < 7.0 && sp > 0.001) { b.vx *= 7.0 / sp; b.vy *= 7.0 / sp; }
 		b.px = bx;
@@ -220,7 +220,7 @@ class Boids : Scene {
 			var& b2 = flock[k2];
 			int bx = itrunc(b2.x);
 			int by = itrunc(b2.y);
-			float sp = sqrt(b2.vx * b2.vx + b2.vy * b2.vy) + 0.001;
+			float sp = math::sqrt(b2.vx * b2.vx + b2.vy * b2.vy) + 0.001;
 			int nx = itrunc(b2.x + b2.vx / sp * 1.2);
 			int ny = itrunc(b2.y + b2.vy / sp * 1.2);
 			if (bx >= 0 && bx < w && by >= 0 && by < h) { grid[by * w + bx] = sk[by * w + bx] - sk[by * w + bx] % 8 + 7; }

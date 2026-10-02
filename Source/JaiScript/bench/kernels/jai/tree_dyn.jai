@@ -59,7 +59,7 @@ function insert(var& root, var x) {
 	if (equal == null) {
 		equal = new Node();
 		equal.x = x;
-		equal.y = random_int(0, 2147483647);
+		equal.y = math::random_int(0, 2147483647);
 	}
 	var tmp = null;
 	merge(lower, equal, tmp);

@@ -3189,33 +3189,40 @@ inline std::string typed_slot_rejection_text(const script_value& source, const t
     return format_error_message(slot_rejection_message_unnamed(site.kind, declared), src, declared);
 }
 
-// A var slot's tag: the any tag, or a var-held typed array's twin (the array keeps its element type, the slot stays dynamic)
+// A var slot's tag: any, or a typed container's twin (contents keep their constraints; the slot stays dynamic)
 inline bool var_slot(const type_info* t) noexcept {
-    return t && (t->base_type == script_value_type::jai_any_type || t->dynamic_slot);
+	return t && (t->base_type == script_value_type::jai_any_type || t->dynamic_slot);
 }
 
-// The tag a value takes in a var slot (Dev ruling 2026-09-28): a typed array keeps its element type through the dynamic
+// The tag a value takes in a var slot (Dev ruling 2026-09-28): a typed container keeps its constraints through the dynamic
 // twin, anything else takes `any_tag` (the slot's own any)
 inline void var_stamp(script_value& value, const type_info_ptr& any_tag, engine* eng) {
-    const type_info_ptr& tag = value.get_type_info();
-    if (tag && tag->base_type == script_value_type::jai_array_type && eng && value.raw_storage_index() == script_value::TYPEID_ARRAY) {
-        if (tag->dynamic_slot) { return; }
-        const type_info_ptr element = tag->element_type();
-        if (element && element->base_type != script_value_type::jai_any_type && element->base_type != script_value_type::jai_null_type) {
-            value.set_type_info(eng->get_type_info_array_dynamic(tag.get()));
-            return;
-        }
-    }
-    value.set_type_info(any_tag && any_tag->base_type == script_value_type::jai_any_type ? any_tag
-                        : type_info_ptr(eng ? eng->get_type_info_any() : nullptr));
+	const type_info_ptr& tag = value.get_type_info();
+	if (tag && tag->base_type == script_value_type::jai_array_type && eng && value.raw_storage_index() == script_value::TYPEID_ARRAY) {
+		if (tag->dynamic_slot) { return; }
+		const type_info_ptr element = tag->element_type();
+		if (element && element->base_type != script_value_type::jai_any_type && element->base_type != script_value_type::jai_null_type) {
+			value.set_type_info(eng->get_type_info_array_dynamic(tag.get()));
+			return;
+		}
+	}
+	if (tag && tag->base_type == script_value_type::jai_map_type && eng && value.raw_storage_index() == script_value::TYPEID_MAP) {
+		if (tag->dynamic_slot) { return; }
+		const auto key = tag->key_type(), mapped = tag->value_type();
+		auto concrete = [](const type_info_ptr& a_type) { return a_type && a_type->base_type != script_value_type::jai_any_type && a_type->base_type != script_value_type::jai_null_type; };
+		if (concrete(key) || concrete(mapped)) { value.set_type_info(eng->get_type_info_map_dynamic(tag.get())); return; }
+	}
+	value.set_type_info(any_tag && any_tag->base_type == script_value_type::jai_any_type ? any_tag
+						: type_info_ptr(eng ? eng->get_type_info_any() : nullptr));
 }
 
-// A typed declaration's copy of a var-held typed array: the plain spelling again (auto locks to it)
+// A typed declaration's copy of a var-held typed container: the plain spelling again (auto locks to it)
 inline void drop_var_slot(script_value& value, engine* eng) {
-    const type_info_ptr& tag = value.get_type_info();
-    if (tag && tag->dynamic_slot && eng) {
-        value.set_type_info(eng->get_type_info_array(tag->element_type().get()));
-    }
+	const type_info_ptr& tag = value.get_type_info();
+	if (tag && tag->dynamic_slot && eng) {
+		if (tag->base_type == script_value_type::jai_map_type) { value.set_type_info(eng->get_type_info_map(tag->key_type().get(),tag->value_type().get())); }
+		else { value.set_type_info(eng->get_type_info_array(tag->element_type().get())); }
+	}
 }
 
 // The typed store: the full table (script rows included) plus the store-ready shaping. KEEP the same-base head inline -

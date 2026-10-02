@@ -384,7 +384,7 @@ engine stays usable", not by `check_throws`.
   instance VALUES fieldwise (same class only; a user `operator==` takes precedence at every level),
   early out on size/class mismatch and the first unequal member; `shared_ptr` handles compare by
   pointer like `std::shared_ptr`; `same_object(x, y)` (engine-core builtin) is identity (refs resolve,
-  handles unwrap, primitives/strings by value). Ordering stays off containers/instances. The C++-level
+  handles unwrap, primitives/strings by value). Public builtin ordering is documented below; class instances require an explicit comparison operator. The C++-level
   `script_value::operator==`/`<=>` are unchanged (map-key identity ordering).
 - **Unsafe parallel mode trusts the script's data, never the runtime's structures**
   (`engine::allow_unsafe_parallel(true)`, `docs/parallel_design.md`): the admission walk still
@@ -433,9 +433,9 @@ engine stays usable", not by `check_throws`.
 - **Stores through references** (Dev ruling 2026-09-30, R-q7): `auto& r = o.f; r = v` (and `r op= v`) runs the direct field
   store's table and text (`detail::field_store_convert` via `ref_field_store`); an element reference runs the direct subscript
   store's kernel. There is no second, narrower reference table.
-- **NaN** (Dev ruling 2026-09-30, R-q8): `== != < <= > >=` follow IEEE on every lane (a NaN operand compares false, and unequal);
-  `<=>` with a NaN operand raises `Cannot order NaN with <=>` (`detail::nan_order_error`); map keys keep their total strong order.
-- **Array helpers** (2026-10-01, registry `init_builtin_method_registries`): `map` (an `array<T>` when the callback declares `T`), `reduce(f[, init])`, `for_each`, `find` (copy or null), `find_index` (-1), `some`, `every`, `concat`, `insert(i, v)`; a callback gets (element) or (element, index), a `T&` element parameter is the live element (`make_element_reference`), a predicate counts only a bool true; `parallel_transform.cpp` `builtin_runs_script` lists the callback ones.
+- **NaN** (2026-10-02, builtin-order consistency): `== != < <= > >=` follow IEEE on every lane (a NaN operand compares false, and unequal);
+  `<=>` uses a total numeric order: signed zeros are equivalent and all NaNs form the final equivalent group. Default float sorting follows this order; ordinary relational operators retain IEEE behavior. Map keys keep their separate total strong order.
+- **Array helpers** (2026-10-02, registry `init_builtin_method_registries`): dot `append`/`concat`, `slice`, `filter`, and `map` mutate and return the receiver; `sort` and `reverse` mutate with void results. Core `array::` counterparts return value copies. Dot `map` retains input constraints; `array::map` uses the declared callback return type, or var. Filters retain input constraints, including typed maps. `reduce(f[, init])`, `for_each`, `find` (copy or null), `find_index` (-1), `some`, `every`, `insert(i, v)`; a callback gets (element) or (element, index), a `T&` element parameter is the live element (`make_element_reference`), a predicate counts only a bool true; `parallel_transform.cpp` `builtin_runs_script` lists the callback ones.
 - **Arrow functions** `(params) => expr` / `(params) => { body }` / `x => expr`: a `[&]` lambda like `function(...)` (parser `arrow_function_ahead` scans to the matching `)` for `=>`); no declared return type.
 - **`??` / `??=` / optional chains**: `a ?? b` is a binary_expr (token `question_question`; interpreter short-circuit beside `&&`, vm `op_null_guard` + jump, a short-circuit op to the inliner and `return_conv`); `a ??= b` parses to `a ?? (a = b)` over a re-parsed side-effect-free target; `x?.a.b` skips the rest of its chain (parser `null_chain_rest`: `(null != x) ? x.a.b : null` for a side-effect-free base, `((p) => (null != p) ? p.a.b : null)(x)` otherwise).
 - **`print(obj)`** shows the class's `to_string()` (`engine::text_of`, both print implementations); such a text is never a format string.
@@ -779,3 +779,7 @@ and the fuzz differential gate pin it).
 
 **Workflow:** edit → build Debug (`--target jaiscript_tests`) → run suite → fix → final Release
 pass. Reproduce a bug as a foundry test first, confirm it's red, then fix to green.
+
+- **Public builtin ordering** (2026-10-02, `detail/structural_ordering.hpp`): bool false before true; arrays lexicographic; maps lexicographic over ordered key/value entries (keys use private map-key semantics); vectors/colors lexicographic by component; functions, coroutine handles and shared/weak handles by identity. Records require `<` or `<=>`. Raw typed arrays compare without boxing; callbacks use shallow snapshots and pinned nodes, never deep-copy read-only inputs.
+- **Standard namespaces** (2026-10-02): all math operations/constants are engine-core `math::`; `register_math()` remains an idempotent host entry point. No global math/append/concatenate aliases. `string::whitespace` is the shared trim default; byte string `at/front/back` return char as `[]` does, while UTF methods return character text. `map.get(key[, fallback=null])` does not insert. Coroutine `resume/done` accept no arguments.
+- **Dynamic container slots**: var/auto tags retain a typed array's T or map's K,V through a dynamic-slot twin; reassignment of the variable remains dynamic, while stores into the current container enforce its constraints. `drop_var_slot` restores the ordinary container tag at typed boundaries.

@@ -276,7 +276,7 @@ function main() -> int {
 	float vez = MO_Z[victim] + 32.0;
 	bool parked = false;
 	for (int pa2 = 0; pa2 < 8 && !parked; ++pa2) {
-		float aang2 = pa2 * PI / 4.0;
+		float aang2 = pa2 * math::PI / 4.0;
 		float gx2 = vex + math::cos(aang2) * 80.0;
 		float gy2 = vey + math::sin(aang2) * 80.0;
 		if (!sight_clear(gx2, gy2, vex, vey, vez)) { continue; }

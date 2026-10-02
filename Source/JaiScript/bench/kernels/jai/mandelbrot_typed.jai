@@ -10,7 +10,7 @@ int level(float x, float y) {
 		zi = zr * zi + zi * zr + y;
 		zr = nr;
 		l = l + 1;
-		if (sqrt(zr * zr + zi * zi) > 2.0 || l > 255) { break; }
+		if (math::sqrt(zr * zr + zi * zi) > 2.0 || l > 255) { break; }
 	}
 	return l - 1;
 }

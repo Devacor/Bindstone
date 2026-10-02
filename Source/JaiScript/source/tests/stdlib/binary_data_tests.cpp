@@ -70,7 +70,7 @@ public:
             expect("array<var> v = [104, 105]; string::from_bytes(v)", "hi", "an array<var>");
             expect(caught("array<int8> s = [104, -1]; string::from_bytes(s)"), "string::from_bytes expects bytes (0 to 255): element 1 is -1", "an array<int8> element below 0");
             expect("string::from_bytes([]).size()", "0", "an empty array");
-            expect(all256 + "var s = string::from_bytes(ALL); to_string(s.size()) + \" \" + to_string(s.to_bytes() == ALL)", "256 true", "all 256 values round trip");
+            expect(all256 + "var s = string::from_bytes(ALL); to_string(s.size()) + \" \" + to_string(s.to_bytes() == ALL)", "256 true", "all 256 values math::round trip");
             expect(all256 + "var s = string::from_bytes(ALL); to_string(host_echo(s) == s) + \" \" + to_string(host_echo(s).size())", "true 256", "the host boundary keeps every byte");
             expect(caught("string::from_bytes([1, 256])"), "string::from_bytes expects bytes (0 to 255): element 1 is 256", "a value above a byte");
             expect(caught("array<int> b = [5, -1]; string::from_bytes(b)"), "string::from_bytes expects bytes (0 to 255): element 1 is -1", "a negative value");
@@ -106,7 +106,7 @@ public:
         test("floats_round_trip_through_their_bits", [expect]() {
             expect("binary::writer w; w.float32(1.5).float64(-2.25); var r = w.to_string().reader(); to_string(r.float32()) + \" \" + to_string(r.float64())", "1.5 -2.25", "float32 and float64");
             expect("binary::writer w; w.float32(0.1); to_string(w.to_string().reader().float32())", "0.10000000149011612", "float32 widens to the script float");
-            expect("binary::writer w; w.float64(-0.0); var r = w.to_string().reader(); to_string(r.float64()) + \" \" + to_string(math::atan2(w.to_string().reader().float64(), -1.0) < 0.0)", "-0.0 true", "negative zero keeps its sign");
+            expect("binary::writer w; w.float64(-0.0); var r = w.to_string().reader(); to_string(r.float64()) + \" \" + to_string(math::atan2(w.to_string().reader().float64(), -1.0) < 0.0)", "-0.0 true", "negative zero keeps its math::sign");
             expect("binary::writer w; w.float64(-0.0); to_json(w.to_string().to_bytes())", "[0,0,0,0,0,0,0,128]", "negative zero bits");
             expect("var nan = string::from_bytes([1, 0, 0, 0, 0, 0, 248, 127]); binary::writer w; w.float64(nan.reader().float64()); w.to_string() == nan", "true", "a float64 NaN keeps its payload");
             expect("var nan = string::from_bytes([1, 0, 192, 127]); binary::writer w; w.float32(nan.reader().float32()); w.to_string() == nan", "true", "a quiet float32 NaN keeps its payload");

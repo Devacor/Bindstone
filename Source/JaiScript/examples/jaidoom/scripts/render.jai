@@ -224,7 +224,7 @@ function draw_sky_col(int x, int y0, int y1) -> void {
 	if (y1 >= VIEWH) { y1 = VIEWH - 1; }
 	if (SKY_TEX < 0) { return; }
 	float xfrac = (x - CENTERX) / FOCAL;
-	float adeg = (VIEW_ANG - math::atan2(xfrac, 1.0)) * 180.0 / PI;
+	float adeg = (VIEW_ANG - math::atan2(xfrac, 1.0)) * 180.0 / math::PI;
 	int ucol = math::itrunc(adeg * (256.0 / 90.0));
 	int tc = ucol % 256;
 	if (tc < 0) { tc = tc + 256; }
@@ -717,8 +717,8 @@ function draw_sprite(int m) -> void {
 	if (fi >= MO_ANIM[m].size()) { fi = MO_ANIM[m].size() - 1; }
 	string frame = MO_ANIM[m].substr(fi, 1);
 	float rel = math::atan2(VIEW_Y - MO_Y[m], VIEW_X - MO_X[m]) - MO_ANG[m];
-	while (rel < 0.0) { rel = rel + TAU; }
-	int rot = math::itrunc((rel + PI / 8.0) / (PI / 4.0)) & 7;
+	while (rel < 0.0) { rel = rel + math::TAU; }
+	int rot = math::itrunc((rel + math::PI / 8.0) / (math::PI / 4.0)) & 7;
 	int lump = sprite_lookup(MO_SPR[m], frame, rot);
 	if (lump < 0) { return; }
 	SPRITES_DRAWN = SPRITES_DRAWN + 1;

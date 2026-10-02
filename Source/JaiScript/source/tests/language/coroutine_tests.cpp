@@ -1327,7 +1327,7 @@ public:
                          "coroutine int gen() { return fp((yield 1) == null ? 5 : 0); }\n"
                          "auto h = gen(); var a = h.resume(); fp = repl; var b = h.resume(); to_string(a) + \"|\" + to_string(b)",
                 "1|105", "the callee parked before the yield is the one invoked");
-            both_drained("coroutine int inner() { yield 1; return 2; }\ncoroutine int gen() { auto hi = inner(); return hi.done((yield 1) == null ? 0 : 0) == false ? 3 : 4; }\n"
+            both_drained("coroutine int inner() { yield 1; return 2; }\ncoroutine int gen() { auto hi = inner(); try { hi.done((yield 1) == null ? 0 : 0); } catch (e) { if (e == \"done() takes no arguments\") { return 3; } throw e; } return 4; }\n"
                          "auto h = gen(); var a = h.resume(); var b = h.resume(); to_string(a) + \"|\" + to_string(b) + \"|\" + to_string(h.done())",
                 "1|3|true", "a builtin handle method with a yield in its argument list runs after the resume");
         });

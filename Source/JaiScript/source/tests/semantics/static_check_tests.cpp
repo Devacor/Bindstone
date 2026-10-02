@@ -99,6 +99,32 @@ public:
     static_check_tests() : suite("Static Type Checking") {}
 
     void forge_tests() override {
+		test("known_builtin_call_arities_come_from_api_catalog", [this]() {
+			auto e = make_engine();
+			for (const auto& source : {
+				"array<int> values = [1]; array::slice(values, 0, 1, 2);",
+				"array<int> values = [1]; values.sort((a,b) => a < b, 7);",
+				"array<int> values = [1]; values.reverse(0);",
+				"map<string,int> values = {\"a\": 1}; values.get();",
+				"string value = \"7\"; value.to_int(null, 10, 2);",
+				"string value = \" x \"; value.trim(\" \", \"x\");",
+				"utf8_string value = \"abc\"; value.substr(0, 1, 2);"
+			}) {
+				auto result = e->check(source);
+				check_true(result.has_errors(), result.format(source));
+				check_true(has_diag(result, dlevel::error, "expects"), result.format(source));
+			}
+			for (const auto& source : {
+				"array<int> values = [1]; array::slice(values); array::slice(values, 0); array::slice(values, 0, 1); values.erase(0);",
+				"string value = \"7\"; value.to_int(); value.to_int(0); value.to_int(0, 10); value.split(); value.split(\",\", 2);",
+				"string value = \" x \"; value.trim(); value.trim(\" \");",
+				"map<string,int> values = {\"a\": 1}; values.get(\"a\"); values.get(\"a\", 0);"
+			}) {
+				auto result = e->check(source);
+				check_eq(std::size_t(0), result.error_count(), result.format(source));
+			}
+		});
+
         // ------------------------------------------------------------ mode API
 
         test("member_global_collision_warns", [this]() {
@@ -856,7 +882,7 @@ public:
 				auto e = make_engine();
 				e->set_backend(backend);
 				check_eq(std::string("VALUE 22"), outcome(*e,
-					"array<int> a = [1]; var b = a; var c = a.slice(0, 1); int caught = 0; "
+					"array<int> a = [1]; var b = a; var c = array::slice(a, 0, 1); int caught = 0; "
 					"try { b.push(\"x\"); } catch (err) { caught += 1; } "
 					"try { c.push(\"x\"); } catch (err) { caught += 1; } "
 					"array<var> d = a; d.push(\"x\"); caught * 10 + d.size();"));

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "value.hpp"
+#include "runtime_errors.hpp"
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
@@ -112,6 +113,16 @@ namespace detail {
 class execution_backend {
 public:
     virtual ~execution_backend() = default;
+
+	// Cold library bridge: sorting uses the backend's ordinary < expression semantics.
+	// Primitive buffers bypass this only while the backend's < has no global override.
+	virtual checked_result<bool> language_less(const script_value&, const script_value&) {
+		return checked_result<bool>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
+	}
+	virtual bool native_less_available() const { return false; }
+	virtual checked_result<script_value> array_transform(uint64_t, script_value&, const std::vector<script_value>&) {
+		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), "Array namespace transforms are unavailable on this backend");
+	}
 
     // Parallel workers: barrier-provisioned class-method pins for the active region
     // (null outside regions and on engine backends). A worker method wall consults it —

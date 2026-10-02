@@ -57,35 +57,35 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
             auto result = engine->execute("var s = \"hello\"; s.at(1);");
-            check_eq(result.as<std::string>(), "e");
+            check_eq(result.as<script_char>(), 'e');
         });
 
         test("at_negative_index", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
             auto result = engine->execute("var s = \"hello\"; s.at(-1);");
-            check_eq(result.as<std::string>(), "o");
+            check_eq(result.as<script_char>(), 'o');
         });
 
         test("at_negative_index_second_last", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
             auto result = engine->execute("var s = \"hello\"; s.at(-2);");
-            check_eq(result.as<std::string>(), "l");
+            check_eq(result.as<script_char>(), 'l');
         });
 
         test("front", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
             auto result = engine->execute("var s = \"hello\"; s.front();");
-            check_eq(result.as<std::string>(), "h");
+            check_eq(result.as<script_char>(), 'h');
         });
 
         test("back", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
             auto result = engine->execute("var s = \"hello\"; s.back();");
-            check_eq(result.as<std::string>(), "o");
+            check_eq(result.as<script_char>(), 'o');
         });
 
         test("substr_two_args", [this]() {

@@ -11,11 +11,11 @@ function profile_it(string name, function fn) -> float {
 		for (int i = 0; i < n; ++i) { fn(); }
 		total = batch.elapsed() * 1000.0;
 		if (total >= PROFILE_BUDGET_MS || n >= 1000000000) { break; }
-		float per = max(total / n, 0.000001);
+		float per = math::max(total / n, 0.000001);
 		int next = cast<int>(PROFILE_BUDGET_MS / per * 1.2);
-		next = min(next, 100 * n);
-		next = max(next, n + 1);
-		n = min(next, 1000000000);
+		next = math::min(next, 100 * n);
+		next = math::max(next, n + 1);
+		n = math::min(next, 1000000000);
 	}
 	float seconds = total / 1000.0 / n;
 	print("\"{}\", {:.8f}, {}", name, seconds, n);

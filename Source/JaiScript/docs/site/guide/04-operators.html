@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Operators &amp; Arithmetic — JaiScript Guide</title>
+<title>Operators &amp; Arithmetic â€” JaiScript Guide</title>
 <meta name="description" content="The full C++ operator set with checked overflow, no undefined behavior, char promotion, and operator overloading on script classes.">
 <meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
-<meta property="og:title" content="Operators &amp; Arithmetic — JaiScript Guide">
+<meta property="og:title" content="Operators &amp; Arithmetic â€” JaiScript Guide">
 <meta property="og:description" content="The full C++ operator set with checked overflow, no undefined behavior, char promotion, and operator overloading on script classes.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
@@ -33,17 +33,18 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="operators-arithmetic">Operators &amp; Arithmetic<a class="hlink" href="#operators-arithmetic" aria-label="link">&#8203;</a></h1>
 <p>The full C++ operator set with C++ precedence, minus the undefined behavior: integer overflow raises a catchable error instead of wrapping silently, division by zero raises on ints <em>and</em> floats, and nothing in the arithmetic core is UB.</p>
+<p><code>&lt;=&gt;</code> returns a negative, zero, or positive ordering. Numbers and text compare by value; bool orders false before true; arrays and vectors compare lexicographically; maps compare ordered key/value entries using map key identity rules; shared/weak handles and function values compare identity. References compare their referents. A class supplies its own <code>operator&lt;=&gt;</code>; an explicit relational operator wins over rewriting through it. Float <code>&lt;=&gt;</code> treats signed zeros as equivalent and places all NaNs after numbers, while ordinary float equality and relational operators keep IEEE behavior.</p>
 <h2 id="the-table">The table<a class="hlink" href="#the-table" aria-label="link">&#8203;</a></h2>
-<div class="tablewrap"><table><thead><tr><th>Category</th><th>Operators</th><th>Notes</th></tr></thead><tbody><tr><td>Arithmetic</td><td><code>+ - * / %</code></td><td><code>int op int</code> stays int (<code>7 / 2</code> → <code>3</code>); any float operand promotes</td></tr><tr><td>Unary</td><td><code>- + ! ~ ++ --</code></td><td><code>++</code>/<code>--</code> in both prefix and postfix form; <code>+</code> is the number itself and promotes a char to its int</td></tr><tr><td>Compound assign</td><td><code>= += -= *= /= %= &amp;= |= ^= &lt;&lt;= &gt;&gt;=</code></td><td>typed targets convert C++-style (see <a href="02-type-ladder.html#compound-assignment-typed-targets-convert-c-style-var-keeps-the-dynamic-result">Type Ladder</a>); the target is evaluated once. The bitwise forms take integer (or char) operands like their binary operators.</td></tr><tr><td>Comparison</td><td><code>== != &lt; &gt; &lt;= &gt;= &lt;=&gt;</code></td><td><code>&lt;=&gt;</code> returns -1 / 0 / 1; <code>1 == 1.0</code> is true; <code>==</code> is memberwise on arrays, maps and class values (<a href="#equality">below</a>)</td></tr><tr><td>Logical</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td><td>short-circuit</td></tr><tr><td>Bitwise</td><td><code>&amp;</code> <code>|</code> <code>^</code> <code>~</code> <code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>on integers</td></tr><tr><td>Null</td><td><code>?? ??=</code></td><td><code>a ?? b</code> is <code>a</code> unless it is null, else <code>b</code>; <code>a ??= b</code> stores <code>b</code> only into a null <code>a</code> (<a href="#null-chains-and-defaults">below</a>)</td></tr><tr><td>Ternary</td><td><code>?:</code></td><td>right-associative</td></tr><tr><td>Member/index</td><td><code>. -&gt; [] ?. ::</code></td><td><code>-&gt;</code> is a synonym for <code>.</code> (values and handles alike), <code>?.</code> is null-safe and skips the rest of its chain (<a href="#null-chains-and-defaults">below</a>), <code>::</code> reaches statics/namespaces</td></tr><tr><td>Cast</td><td><code>cast&lt;T&gt;(e)</code> <code>cast&lt;T&amp;&gt;(e)</code> <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code></td><td>the explicit typed boundary: copy, reference, handle. See <a href="02-type-ladder.html#cast-the-explicit-boundary">Type Ladder</a></td></tr></tbody></table></div>
-<p>String <code>+</code> concatenates (<code>&quot;a&quot; + &quot;b&quot;</code>), and <code>+</code> with a string operand stringifies the other side (<code>&quot;a&quot; + 5</code> is <code>&quot;a5&quot;</code>). <code>+=</code> onto a string is stricter: it appends strings and chars, and raises on anything else. Write <code>s += to_string(n)</code> when you mean it. Comparison on strings is lexicographic. <code>char</code> operands promote to int (unsigned, 0–255) in every numeric context (see <a href="#chars-promote">below</a>).</p>
+<div class="tablewrap"><table><thead><tr><th>Category</th><th>Operators</th><th>Notes</th></tr></thead><tbody><tr><td>Arithmetic</td><td><code>+ - * / %</code></td><td><code>int op int</code> stays int (<code>7 / 2</code> â†’ <code>3</code>); any float operand promotes</td></tr><tr><td>Unary</td><td><code>- + ! ~ ++ --</code></td><td><code>++</code>/<code>--</code> in both prefix and postfix form; <code>+</code> is the number itself and promotes a char to its int</td></tr><tr><td>Compound assign</td><td><code>= += -= *= /= %= &amp;= |= ^= &lt;&lt;= &gt;&gt;=</code></td><td>typed targets convert C++-style (see <a href="02-type-ladder.html#compound-assignment-typed-targets-convert-c-style-var-keeps-the-dynamic-result">Type Ladder</a>); the target is evaluated once. The bitwise forms take integer (or char) operands like their binary operators.</td></tr><tr><td>Comparison</td><td><code>== != &lt; &gt; &lt;= &gt;= &lt;=&gt;</code></td><td><code>&lt;=&gt;</code> returns -1 / 0 / 1; <code>1 == 1.0</code> is true; <code>==</code> is memberwise on arrays, maps and class values (<a href="#equality">below</a>)</td></tr><tr><td>Logical</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td><td>short-circuit</td></tr><tr><td>Bitwise</td><td><code>&amp;</code> <code>|</code> <code>^</code> <code>~</code> <code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>on integers</td></tr><tr><td>Null</td><td><code>?? ??=</code></td><td><code>a ?? b</code> is <code>a</code> unless it is null, else <code>b</code>; <code>a ??= b</code> stores <code>b</code> only into a null <code>a</code> (<a href="#null-chains-and-defaults">below</a>)</td></tr><tr><td>Ternary</td><td><code>?:</code></td><td>right-associative</td></tr><tr><td>Member/index</td><td><code>. -&gt; [] ?. ::</code></td><td><code>-&gt;</code> is a synonym for <code>.</code> (values and handles alike), <code>?.</code> is null-safe and skips the rest of its chain (<a href="#null-chains-and-defaults">below</a>), <code>::</code> reaches statics/namespaces</td></tr><tr><td>Cast</td><td><code>cast&lt;T&gt;(e)</code> <code>cast&lt;T&amp;&gt;(e)</code> <code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code></td><td>the explicit typed boundary: copy, reference, handle. See <a href="02-type-ladder.html#cast-the-explicit-boundary">Type Ladder</a></td></tr></tbody></table></div>
+<p>String <code>+</code> concatenates (<code>"a" + "b"</code>), and <code>+</code> with a string operand stringifies the other side (<code>"a" + 5</code> is <code>"a5"</code>). <code>+=</code> onto a string is stricter: it appends strings and chars, and raises on anything else. Write <code>s += to_string(n)</code> when you mean it. Comparison on strings is lexicographic. <code>char</code> operands promote to int (unsigned, 0â€“255) in every numeric context (see <a href="#chars-promote">below</a>).</p>
 <h2 id="arithmetic-precedence-inc-dec">Arithmetic, precedence, inc/dec<a class="hlink" href="#arithmetic-precedence-inc-dec" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;7 / 2   = {}&quot;, 7 / 2);         // int / int stays int
-print(&quot;7.0 / 2 = {}&quot;, 7.0 / 2);       // any float operand promotes
-print(&quot;7 % 3   = {}&quot;, 7 % 3);
-print(&quot;2 + 3 * 4 = {}&quot;, 2 + 3 * 4);   // usual precedence
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("7 / 2   = {}", 7 / 2);         // int / int stays int
+print("7.0 / 2 = {}", 7.0 / 2);       // any float operand promotes
+print("7 % 3   = {}", 7 % 3);
+print("2 + 3 * 4 = {}", 2 + 3 * 4);   // usual precedence
 auto x = 5;
-print(&quot;x++ = {}, then x = {}&quot;, x++, x);
-print(&quot;--x = {}&quot;, --x);
+print("x++ = {}, then x = {}", x++, x);
+print("--x = {}", --x);
 -x;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7 / 2   = 3
 7.0 / 2 = 3.5
@@ -53,15 +54,15 @@ x++ = 5, then x = 6
 --x = 5
 == result: -5</code></pre></div>
 <h2 id="comparisons-short-circuit">Comparisons, <code>&lt;=&gt;</code>, short-circuit<a class="hlink" href="#comparisons-short-circuit" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;3 &lt;=&gt; 7  = {}&quot;, 3 &lt;=&gt; 7);      // spaceship: -1 / 0 / 1
-print(&quot;7 &lt;=&gt; 7  = {}&quot;, 7 &lt;=&gt; 7);
-print(&quot;9 &lt;=&gt; 7  = {}&quot;, 9 &lt;=&gt; 7);
-print(&quot;\&quot;a\&quot; &lt; \&quot;b\&quot; = {}&quot;, &quot;a&quot; &lt; &quot;b&quot;);
-print(&quot;1 == 1.0 = {}&quot;, 1 == 1.0);
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("3 &lt;=&gt; 7  = {}", 3 &lt;=&gt; 7);      // spaceship: -1 / 0 / 1
+print("7 &lt;=&gt; 7  = {}", 7 &lt;=&gt; 7);
+print("9 &lt;=&gt; 7  = {}", 9 &lt;=&gt; 7);
+print("\"a\" &lt; \"b\" = {}", "a" &lt; "b");
+print("1 == 1.0 = {}", 1 == 1.0);
 auto side_effects = 0;
 function tick() { side_effects += 1; return true; }
 auto r = false &amp;&amp; tick();             // short-circuit: tick never runs
-print(&quot;side_effects = {}&quot;, side_effects);
+print("side_effects = {}", side_effects);
 true || tick();
 side_effects;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 &lt;=&gt; 7  = -1
@@ -71,18 +72,18 @@ side_effects;</code></pre></div>
 1 == 1.0 = true
 side_effects = 0
 == result: 0</code></pre></div>
-<p>Float comparisons follow IEEE: a NaN operand makes <code>==</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> false and <code>!=</code> true, on every path (a condition, a loop head, an array compared element by element). NaN has no order, so <code>&lt;=&gt;</code> with a NaN operand raises <code>Cannot order NaN with &lt;=&gt;</code>. Map keys keep a total order that places NaN, so a NaN key is found again.</p>
+<p>Float comparisons follow IEEE: a NaN operand makes <code>==</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> false and <code>!=</code> true, on every path (a condition, a loop head, an array compared element by element). <code>&lt;=&gt;</code> supplies a total numeric order: signed zeros are equivalent and all NaNs form the final equivalent group. Default float sorting uses this order. Map keys keep their separate total order, so a NaN key is found again.</p>
 <h2 id="null-chains-and-defaults">Null: <code>?.</code>, <code>??</code> and <code>??=</code><a class="hlink" href="#null-chains-and-defaults" aria-label="link">&#8203;</a></h2>
 <p><code>x?.member</code> is <code>null</code> when <code>x</code> is null, and the rest of the chain after it is skipped: <code>x?.a.b</code>, <code>x?.items[0]</code> and <code>x?.f().g()</code> are all null for a null <code>x</code>. Only the value in front of the <code>?.</code> is tested, as in JavaScript and C#: a null <code>x.a</code> still raises at <code>.b</code>, so a nullable link needs its own <code>?.</code>. <code>a ?? b</code> is <code>a</code> when it is not null and <code>b</code> otherwise, and <code>b</code> runs only then; <code>0</code>, <code>false</code> and <code>""</code> are values, not null. <code>a ??= b</code> assigns <code>b</code> only when <code>a</code> holds null, and its value is what <code>a</code> holds afterwards:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Weapon { string name = &quot;axe&quot;; }
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Weapon { string name = "axe"; }
 class Hero { var weapon = null; }
 Hero bare;
 Hero armed;
 armed.weapon = Weapon();
 var nobody = null;
-print(bare.weapon?.name ?? &quot;fists&quot;, &quot; &quot;, armed.weapon?.name ?? &quot;fists&quot;, &quot; &quot;, nobody?.weapon.name ?? &quot;no hero&quot;);
-var settings = {&quot;volume&quot;: 7};
-print(settings[&quot;volume&quot;] ?? 5, &quot; &quot;, settings[&quot;music&quot;] ?? 5, &quot; &quot;, 0 ?? 5);
+print(bare.weapon?.name ?? "fists", " ", armed.weapon?.name ?? "fists", " ", nobody?.weapon.name ?? "no hero");
+var settings = {"volume": 7};
+print(settings["volume"] ?? 5, " ", settings["music"] ?? 5, " ", 0 ?? 5);
 var cache = null;
 cache ??= [1, 2];
 cache ??= [9];
@@ -93,11 +94,11 @@ print(to_json(cache));</code></pre></div>
 <p><code>??</code> binds more loosely than <code>||</code> and more tightly than <code>?:</code>, and groups to the right: <code>a ?? b || c</code> is <code>a ?? (b || c)</code> and <code>a ?? b ? x : y</code> is <code>(a ?? b) ? x : y</code>. A missing map key reads as null, so <code>m[k] ?? fallback</code> reads a default without inserting (<code>m.get(k, fallback)</code> says the same). The target of <code>??=</code> is read and then perhaps stored, so it is a variable, a member or an element whose index runs no code; <code>a[i++] ??= v</code> is an error at load that asks for a local.</p>
 <h2 id="evaluation-order-is-a-contract">Evaluation order is a contract<a class="hlink" href="#evaluation-order-is-a-contract" aria-label="Link to this section">&#8203;</a></h2>
 <p>In a call, the callee expression is evaluated <strong>before</strong> any argument, and arguments go <strong>left to right</strong>. Binary operators evaluate their left operand first. This is the C++17 rule, it holds on both backends, and it is the order errors surface in too: if the callee and the first argument both fail, you see the callee&#x27;s error.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function a() { print(&quot;argument a&quot;); return 1; }
-function b() { print(&quot;argument b&quot;); return 2; }
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function a() { print("argument a"); return 1; }
+function b() { print("argument b"); return 2; }
 function add(x, y) { return x + y; }
-function pick() { print(&quot;callee&quot;); return add; }
-print(&quot;sum = &quot;, pick()(a(), b()));</code></pre></div>
+function pick() { print("callee"); return add; }
+print("sum = ", pick()(a(), b()));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">callee
 argument a
 argument b
@@ -108,27 +109,27 @@ sum = 3</code></pre></div>
 function bump() { scores[1] = 99; return 1; }
 function add(x, y) { return x + y; }
 function add_ref(int&amp; x, y) { return x + y; }
-print(&quot;by value:     &quot;, add(scores[1], bump()));
+print("by value:     ", add(scores[1], bump()));
 scores[1] = 20;
-print(&quot;by reference: &quot;, add_ref(scores[1], bump()));</code></pre></div>
+print("by reference: ", add_ref(scores[1], bump()));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">by value:     21
 by reference: 100</code></pre></div>
 <p>Assignment runs the other way, again as in C++17: in <code>target = value</code> and <code>target op= value</code> the right side is evaluated first, then the target. For <code>obj.f op= e</code>, <code>this.f op= e</code>, <code>C::s op= e</code> and <code>ns::x op= e</code> that means <code>e</code>, then the receiver, then the member&#x27;s read (a user getter included), the arithmetic and the store; for <code>a[j] = e</code> and <code>a[j] op= e</code>, <code>e</code>, then <code>a</code>, then <code>j</code>, then the element. An error in the right side is the one you see, and the target is never touched:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string log = &quot;&quot;;
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string log = "";
 class Box { int v = 1; }
 shared_ptr&lt;Box&gt; b = new Box();
-function target() -&gt; shared_ptr&lt;Box&gt; { log += &quot;target &quot;; return b; }
-function value() -&gt; int { log += &quot;value &quot;; return 5; }
+function target() -&gt; shared_ptr&lt;Box&gt; { log += "target "; return b; }
+function value() -&gt; int { log += "value "; return 5; }
 target().v += value();
-print(log + &quot;-&gt; &quot; + b.v);</code></pre></div>
+print(log + "-&gt; " + b.v);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">value target -&gt; 6</code></pre></div>
 <h2 id="bitwise">Bitwise<a class="hlink" href="#bitwise" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;6 &amp; 3  = {}&quot;, 6 &amp; 3);
-print(&quot;6 | 3  = {}&quot;, 6 | 3);
-print(&quot;6 ^ 3  = {}&quot;, 6 ^ 3);
-print(&quot;~0     = {}&quot;, ~0);
-print(&quot;1 &lt;&lt; 4 = {}&quot;, 1 &lt;&lt; 4);
-print(&quot;32 &gt;&gt; 2 = {}&quot;, 32 &gt;&gt; 2);
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("6 &amp; 3  = {}", 6 &amp; 3);
+print("6 | 3  = {}", 6 | 3);
+print("6 ^ 3  = {}", 6 ^ 3);
+print("~0     = {}", ~0);
+print("1 &lt;&lt; 4 = {}", 1 &lt;&lt; 4);
+print("32 &gt;&gt; 2 = {}", 32 &gt;&gt; 2);
 auto flags = 0b0001;
 flags |= 0b0100;           // flags = flags | 0b0100, flags evaluated once
 flags;</code></pre></div>
@@ -140,37 +141,37 @@ flags;</code></pre></div>
 32 &gt;&gt; 2 = 8
 == result: 5</code></pre></div>
 <h2 id="chars-promote">Chars promote like C++<a class="hlink" href="#chars-promote" aria-label="link">&#8203;</a></h2>
-<p>A <code>char</code> operand enters every binary numeric context (arithmetic, bitwise, <em>and</em> comparisons) as an integer in <strong>0–255, always unsigned</strong> (signed char is a binary-data footgun this language opts out of). <code>s[i]</code> reads a char from a string, so byte-level parsing is ordinary arithmetic:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var s = &quot;abc&quot;;
-print(&quot;&#x27;z&#x27; - &#x27;a&#x27;  = {}&quot;, &#x27;z&#x27; - &#x27;a&#x27;);
-print(&quot;s[1] == &#x27;b&#x27;: {}&quot;, s[1] == &#x27;b&#x27;);
-print(&quot;s[0] == 97:  {}&quot;, s[0] == 97);
-print(&quot;s[0] + 0   = {}&quot;, s[0] + 0);
-print(&quot;&#x27;a&#x27; &amp; 0x7F = {}&quot;, &#x27;a&#x27; &amp; 0x7F);
-type_of(&#x27;a&#x27; + 1);</code></pre></div>
+<p>A <code>char</code> operand enters every binary numeric context (arithmetic, bitwise, <em>and</em> comparisons) as an integer in <strong>0â€“255, always unsigned</strong> (signed char is a binary-data footgun this language opts out of). <code>s[i]</code> reads a char from a string, so byte-level parsing is ordinary arithmetic:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var s = "abc";
+print("'z' - 'a'  = {}", 'z' - 'a');
+print("s[1] == 'b': {}", s[1] == 'b');
+print("s[0] == 97:  {}", s[0] == 97);
+print("s[0] + 0   = {}", s[0] + 0);
+print("'a' &amp; 0x7F = {}", 'a' &amp; 0x7F);
+type_of('a' + 1);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&#x27;z&#x27; - &#x27;a&#x27;  = 25
 s[1] == &#x27;b&#x27;: true
 s[0] == 97:  true
 s[0] + 0   = 97
 &#x27;a&#x27; &amp; 0x7F = 97
 == result: int</code></pre></div>
-<p>Promotion never crosses into the string domain: <code>&#x27;a&#x27; == &quot;a&quot;</code> is false, and <code>char + string</code> concatenates as text. And there is no implicit int→char either: <code>type_of(&#x27;a&#x27; + 1)</code> is <code>int</code>, and <code>char c = 65</code> is a type error. The char↔int door is <code>cast&lt;T&gt;</code> (<code>cast&lt;char&gt;(n)</code> for an int in 0..255, <code>cast&lt;int&gt;(c)</code> for the code point), with <code>to_char(n)</code> as the stdlib function form of the same range-checked rule, and <code>\xNN</code> literals for bytes you know at write time:</p>
+<p>Promotion never crosses into the string domain: <code>'a' == "a"</code> is false, and <code>char + string</code> concatenates as text. And there is no implicit intâ†’char either: <code>type_of('a' + 1)</code> is <code>int</code>, and <code>char c = 65</code> is a type error. The charâ†”int door is <code>cast&lt;T&gt;</code> (<code>cast&lt;char&gt;(n)</code> for an int in 0..255, <code>cast&lt;int&gt;(c)</code> for the code point), with <code>to_char(n)</code> as the stdlib function form of the same range-checked rule, and <code>\xNN</code> literals for bytes you know at write time:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">char c = cast&lt;char&gt;(65);          // int -&gt; char, range-checked 0..255
-int  n = cast&lt;int&gt;(&#x27;a&#x27;);          // char -&gt; int: the code point
-print(c, &quot; &quot;, n, &quot; &quot;, cast&lt;string&gt;(&#x27;z&#x27;) + &quot;!&quot;, &quot; &quot;, cast&lt;char&gt;(&quot;q&quot;));
+int  n = cast&lt;int&gt;('a');          // char -&gt; int: the code point
+print(c, " ", n, " ", cast&lt;string&gt;('z') + "!", " ", cast&lt;char&gt;("q"));
 print(to_char(66));               // the stdlib function form of the same rule
-try { var bad = cast&lt;char&gt;(256); } catch (e) { print(&quot;caught: &quot;, e); }</code></pre></div>
+try { var bad = cast&lt;char&gt;(256); } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">A 97 z! q
 B
 caught: Cannot cast &#x27;int&#x27; to &#x27;char&#x27;</code></pre></div>
-<p>The byte-work recipes (<code>s[i] - &#x27;0&#x27;</code>, little-endian words, <code>out += to_char(b)</code>) are in <a href="09-containers-strings.html">Containers &amp; Strings</a>.</p>
+<p>The byte-work recipes (<code>s[i] - '0'</code>, little-endian words, <code>out += to_char(b)</code>) are in <a href="09-containers-strings.html">Containers &amp; Strings</a>.</p>
 <h2 id="checked-overflow-raises-never-wraps-never-ub">Checked overflow: raises, never wraps, never UB<a class="hlink" href="#checked-overflow-raises-never-wraps-never-ub" aria-label="link">&#8203;</a></h2>
 <p>The default build policy is <code>JAISCRIPT_CHECKED_OVERFLOW</code> (&quot;safe by default&quot;): overflowing <code>+ - *</code>, unary <code>-</code>, and <code>INT64_MIN / -1</code> raise a <strong>catchable</strong> run-time error. The alternative build policy (<code>JAISCRIPT_WRAP_ON_OVERFLOW</code>) wraps two&#x27;s- complement instead. Either way, integer arithmetic is <strong>never undefined behavior</strong>. Internally it is computed in unsigned. <code>engine::throw_on_overflow()</code> reports which policy the build uses.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto big = 9223372036854775807;   // INT64_MAX
 try {
     big = big + 1;                // checked overflow raises, never wraps or UB
 } catch (e) {
-    print(&quot;caught: {}&quot;, e);
+    print("caught: {}", e);
 }
 big;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Integer overflow in &#x27;+&#x27;
@@ -178,24 +179,24 @@ big;</code></pre></div>
 <p>Note the value is untouched after the failed operation. <code>++</code>/<code>--</code> are covered by the same policy, as are the intermediate results of compound assignments.</p>
 <p><strong>When wraparound is the point</strong> (a hash, a checksum, a random generator), say so: <code>math::wrap_add(a, b)</code>, <code>math::wrap_sub(a, b)</code> and <code>math::wrap_mul(a, b)</code> compute the two&#x27;s-complement result modulo 2<sup>64</sup> in every build, with no mask to keep a product small, and the shifts <code>&lt;&lt;</code> / <code>&gt;&gt;</code> always wrap. An FNV-1a hash:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int h = -3750763034362895579;             // the FNV-1a offset basis, 0xcbf29ce484222325, as an int
-for (auto c : &quot;abc&quot;) {
+for (auto c : "abc") {
     h = math::wrap_mul(h ^ c, 1099511628211); // the FNV prime; the product wraps modulo 2^64
 }
-print(&quot;fnv1a(\&quot;abc\&quot;) = {}&quot;, h);</code></pre></div>
+print("fnv1a(\"abc\") = {}", h);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">fnv1a(&quot;abc&quot;) = -1792535898324117685</code></pre></div>
 <h2 id="division-by-zero">Division by zero<a class="hlink" href="#division-by-zero" aria-label="link">&#8203;</a></h2>
 <p>Both integer <strong>and</strong> float division by zero raise a catchable error (floats do not produce IEEE infinity):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {
     auto x = 1 / 0;
 } catch (e) {
-    print(&quot;int:   caught {}&quot;, e);
+    print("int:   caught {}", e);
 }
 try {
     auto y = 1.0 / 0.0;    // float division by zero also raises (no IEEE inf)
 } catch (e) {
-    print(&quot;float: caught {}&quot;, e);
+    print("float: caught {}", e);
 }
-&quot;still running&quot;;</code></pre></div>
+"still running";</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int:   caught Division by zero
 float: caught Division by zero
 == result: still running</code></pre></div>
@@ -205,20 +206,20 @@ float: caught Division by zero
 Stats a = Stats();
 Stats b = Stats();                 // a second value with the same fields
 Stats c = Stats(); c.buffs.push(3);
-print(&quot;values:  {} {}&quot;, a == b, a == c);
-print(&quot;arrays:  {} {}&quot;, [1, [2, 3]] == [1, [2, 3]], [1, 2] == [1, 2, 3]);
-print(&quot;maps:    {}&quot;, {&quot;x&quot;: 1, &quot;y&quot;: 2} == {&quot;y&quot;: 2, &quot;x&quot;: 1});
+print("values:  {} {}", a == b, a == c);
+print("arrays:  {} {}", [1, [2, 3]] == [1, [2, 3]], [1, 2] == [1, 2, 3]);
+print("maps:    {}", {"x": 1, "y": 2} == {"y": 2, "x": 1});
 var h1 = new Stats();
 var h2 = h1;                       // a var copy of a handle shares it
 var h3 = new Stats();              // a different object with equal fields
-print(&quot;handles: {} {}&quot;, h1 == h2, h1 == h3);
-print(&quot;identity: {} {} {}&quot;, same_object(a, b), same_object(h1, h2), same_object(a, a));</code></pre></div>
+print("handles: {} {}", h1 == h2, h1 == h3);
+print("identity: {} {} {}", same_object(a, b), same_object(h1, h2), same_object(a, a));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">values:  true false
 arrays:  true false
 maps:    true
 handles: true false
 identity: false true true</code></pre></div>
-<p>Map keys compare under the map&#x27;s own ordering, so <code>{1: &quot;a&quot;}</code> and <code>{1.0: &quot;a&quot;}</code> hold different keys and are not equal even though <code>1 == 1.0</code>. Ordering operators stay off containers and instances: <code>[1] &lt; [2]</code> raises <code>Invalid operands for &lt; operator</code>. Value nesting past 200 levels raises <code>Cannot compare: the values nest deeper than 200 levels</code>; a cycle cannot arise, since a value cannot contain its owner and handles compare by pointer.</p>
+<p>Map keys compare under the map&#x27;s own ordering, so <code>{1: "a"}</code> and <code>{1.0: "a"}</code> hold different keys and are not equal even though <code>1 == 1.0</code>. Ordering operators stay off containers and instances: <code>[1] &lt; [2]</code> raises <code>Invalid operands for &lt; operator</code>. Value nesting past 200 levels raises <code>Cannot compare: the values nest deeper than 200 levels</code>; a cycle cannot arise, since a value cannot contain its owner and handles compare by pointer.</p>
 <h2 id="operator-overloading">Operator overloading<a class="hlink" href="#operator-overloading" aria-label="link">&#8203;</a></h2>
 <p>Script classes define operators as methods, with class instances or even primitives on the right-hand side. C++-bound classes get the same treatment through <code>dynamic_binder</code> (see <a href="../embedding/02-dynamic-binder.html">Embedding</a>). One detail worth knowing: an operand that flows into your operator arrives as written. A <code>char</code> is not promoted on the way in.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec {
@@ -231,10 +232,10 @@ identity: false true true</code></pre></div>
 auto a = Vec(1, 2);
 auto b = Vec(3, 4);
 auto c = a + b;
-print(&quot;a + b = ({}, {})&quot;, c.x, c.y);
-print(&quot;equals: {}&quot;, c == Vec(4, 6));
+print("a + b = ({}, {})", c.x, c.y);
+print("equals: {}", c == Vec(4, 6));
 auto d = a * 3;
-print(&quot;a * 3 = ({}, {})&quot;, d.x, d.y);</code></pre></div>
+print("a * 3 = ({}, {})", d.x, d.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a + b = (4, 6)
 equals: true
 a * 3 = (3, 6)</code></pre></div>
@@ -253,8 +254,8 @@ a * 3 = (3, 6)</code></pre></div>
 Bits flags = Bits(5);
 flags |= Bits(8);
 flags &lt;&lt;= 1;
-print(&quot;{} {} {} {}&quot;, flags.v, (~flags).v, !Bits(0), (-flags).v);
-print(&quot;{}&quot;, Bits(3) &lt;=&gt; Bits(7));</code></pre></div>
+print("{} {} {} {}", flags.v, (~flags).v, !Bits(0), (-flags).v);
+print("{}", Bits(3) &lt;=&gt; Bits(7));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">26 229 true -26
 -1</code></pre></div>
 <p>An <code>operator()</code> makes instances callable. A call whose callee holds such an instance runs it with the call&#x27;s arguments, at any arity and with overloads chosen as for any method, whether the instance sits in a local, a global, a field, an array element or a <code>shared_ptr</code>. It keeps its state between calls (more in <a href="07-classes.html#callable-objects">Classes</a>). An <code>operator[]</code> that returns <code>T&amp;</code> makes the subscript an lvalue, so <code>g[i] = v</code> and <code>g[i] op= v</code> store through it; one that returns by value makes <code>g[i]</code> a read, and a store to it raises <code>Cannot assign to rvalue expression</code>:</p>
@@ -265,14 +266,14 @@ print(&quot;{}&quot;, Bits(3) &lt;=&gt; Bits(7));</code></pre></div>
 Grid g;
 g[2] = 7;
 g[2] += 1;
-print(&quot;{} {}&quot;, g[2], to_json(g.cells));
+print("{} {}", g[2], to_json(g.cells));
 
 class Adder {
     int calls = 0;
     int operator()(int a, int b) { calls += 1; return a + b; }
 }
 Adder add;
-print(&quot;{} {} calls={}&quot;, add(2, 3), add(4, 5), add.calls);</code></pre></div>
+print("{} {} calls={}", add(2, 3), add(4, 5), add.calls);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">8 [0,0,8,0]
 5 9 calls=2</code></pre></div><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/03-value-semantics.html"><span>&larr; previous</span>Value Semantics &amp; References</a><a class="next" rel="next" href="../guide/05-control-flow.html"><span>next &rarr;</span>Control Flow</a></nav></article>
 </main>

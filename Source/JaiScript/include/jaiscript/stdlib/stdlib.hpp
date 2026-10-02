@@ -8,13 +8,12 @@
 #include "strings.hpp"
 #include "reflection.hpp"
 #include "time.hpp"
-// Optional: #include "vector.hpp"  // Vec2/Vec3 types - many engines have their own
+// Native math:: vectors and colors are core language values; host adapters are opt-in.
 
 namespace jai {
 namespace stdlib {
 
     // Register all standard library functions with an engine
-    // NOTE: Does NOT register Vec2/Vec3 by default - call register_vector_types() separately if needed
     inline void register_all(engine& eng_ref) {
         // Core functions
         register_json_functions(eng_ref);
@@ -27,7 +26,6 @@ namespace stdlib {
                                                   // without reflection
         register_time_functions(eng_ref);         // time:: over the engine's time source
 
-        // Optional: register_vector_types(eng_ref);  // Vec2/Vec3 with move_towards
     }
     
     // Overloads for shared_ptr / raw-pointer convenience (engine::make() returns a

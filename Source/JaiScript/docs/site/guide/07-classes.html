@@ -32,10 +32,10 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li class="current"><a href="../guide/07-classes.html" aria-current="page">Classes</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li><li><a href="../guide/15-math.html">Math: Vectors &amp; Colors</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="classes">Classes<a class="hlink" href="#classes" aria-label="link">&#8203;</a></h1>
-<p>Script classes: fields with initializers (run in <strong>declaration order</strong>), constructors with overloading and <code>: this(...)</code> delegation, inheritance with <code>super</code>, statics, and hot reload with instance migration. All methods are virtual; overriding requires the explicit <code>override</code> keyword. Remember from <a href="../guide/03-value-semantics.html">Value Semantics</a>: instances are <strong>values</strong>: assignment copies; when you want sharing, hold a <em>handle</em> (<code>shared_ptr&lt;T&gt;</code>, which <code>new T(&hellip;)</code> spells for you).</p>
+<p>Script classes: fields with initializers (run in <strong>declaration order</strong>), constructors with overloading and <code>: this(...)</code> delegation, inheritance with <code>super</code>, statics, and hot reload with instance migration. All methods are virtual; overriding requires the explicit <code>override</code> keyword. Remember from <a href="../guide/03-value-semantics.html">Value Semantics</a>: instances are <strong>values</strong>: assignment copies; when you want sharing, hold a <em>handle</em> (<code>shared_ptr&lt;T&gt;</code>, which <code>new T(…)</code> spells for you).</p>
 <h2 id="fields-constructors-implicit-self">Fields, constructors, implicit self<a class="hlink" href="#fields-constructors-implicit-self" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature {
-    string name = &quot;anonymous&quot;;
+    string name = "anonymous";
     int health = 100;
     int max_health = health;
 
@@ -43,12 +43,12 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 
     void take_damage(int amount) {
         health -= amount;
-        if (health &lt;= 0) { print(&quot;{} died&quot;, name); }
+        if (health &lt;= 0) { print("{} died", name); }
     }
 
-    auto describe() { return name + &quot; (&quot; + to_string(health) + &quot;/&quot; + to_string(max_health) + &quot;)&quot;; }
+    auto describe() { return name + " (" + to_string(health) + "/" + to_string(max_health) + ")"; }
 }
-auto goblin = Creature(&quot;goblin&quot;);
+auto goblin = Creature("goblin");
 goblin.take_damage(30);
 print(goblin.describe());
 goblin.take_damage(80);
@@ -56,14 +56,14 @@ goblin.describe();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">goblin (70/100)
 goblin died
 == result: goblin (-10/100)</code></pre></div>
-<p><code>max_health = health</code> works because field initializers run top-to-bottom in declaration order. Methods access fields directly (implicit self). Construction is a plain call: <code>Creature(&quot;goblin&quot;)</code> makes a <em>value</em>; <code>new Creature(&quot;goblin&quot;)</code> makes a <code>shared_ptr</code> handle instead (see <a href="../guide/03-value-semantics.html#escape-hatch-5-shared-ptr-opt-in-reference-semantics">Value Semantics</a> for when you want which). <code>private:</code> / <code>public:</code> section labels work C++-style. See <a href="#access-control">Access control</a> below.</p>
+<p><code>max_health = health</code> works because field initializers run top-to-bottom in declaration order. Methods access fields directly (implicit self). Construction is a plain call: <code>Creature("goblin")</code> makes a <em>value</em>; <code>new Creature("goblin")</code> makes a <code>shared_ptr</code> handle instead (see <a href="../guide/03-value-semantics.html#escape-hatch-5-shared-ptr-opt-in-reference-semantics">Value Semantics</a> for when you want which). <code>private:</code> / <code>public:</code> section labels work C++-style. See <a href="#access-control">Access control</a> below.</p>
 <h2 id="constructor-overloading-and-this-delegation">Constructor overloading and <code>: this(...)</code> delegation<a class="hlink" href="#constructor-overloading-and-this-delegation" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
     int x = 0;
     int y = 0;
     Point() : this(0, 0) {}
     Point(int v) : this(v, v) {}
-    Point(int px, int py) { x = px; y = py; print(&quot;main ctor ({}, {})&quot;, px, py); }
+    Point(int px, int py) { x = px; y = py; print("main ctor ({}, {})", px, py); }
 }
 auto a = Point();
 auto b = Point(3);
@@ -80,7 +80,7 @@ main ctor (1, 2)
     Money(int d, int c) { dollars = d; cents = c; }
     Money(int d) : this(d, 0) {}          // a true one-parameter constructor: converting
 }
-void pay(Money m) { print(&quot;paid {}.{}&quot;, m.dollars, m.cents); }
+void pay(Money m) { print("paid {}.{}", m.dollars, m.cents); }
 Money price = 5;                          // declaration, through Money(int)
 pay(7);                                   // by-value parameter, the same table
 pay(price);</code></pre></div>
@@ -89,39 +89,39 @@ paid 5.0</code></pre></div>
 <p>Two deliberate C++ divergences keep this predictable. A constructor that reaches one parameter only through defaults (<code>Money(float a, int _ignored = 0)</code>) is <em>not</em> converting, so a defaulted sentinel is how you opt out, and there is no <code>explicit</code> keyword to remember. And conversion is always a single step: the argument must fit the constructor&#x27;s parameter directly, never <code>x.to_int()</code> first and <code>Money(int)</code> second.</p>
 <h2 id="aggregate-initialization">Aggregate initialization<a class="hlink" href="#aggregate-initialization" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cell { int row; int col; }
-class Move { Cell from; Cell to; int cost = 1; string note = &quot;step&quot;; }
+class Move { Cell from; Cell to; int cost = 1; string note = "step"; }
 Cell a{1, 2};                     // fields in declaration order
 auto b = Cell(3, 4);              // parentheses work too, as in C++20
 Move m{a, b};                     // cost and note keep their initializers
-print(&quot;{} {} -&gt; {} {}, cost {}, {}&quot;, m.from.row, m.from.col, m.to.row, m.to.col, m.cost, m.note);
+print("{} {} -&gt; {} {}, cost {}, {}", m.from.row, m.from.col, m.to.row, m.to.col, m.cost, m.note);
 Move{a, b, 5}.cost;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 -&gt; 3 4, cost 1, step
 == result: 5</code></pre></div>
-<p>A class that declares no constructor is an aggregate, as in C++: <code>T x{a, b}</code>, <code>T{a, b}</code>, <code>T x(a, b)</code> and <code>T(a, b)</code> fill its instance fields in declaration order, base classes&#x27; fields first, each initializer converting through its field&#x27;s typed slot like a field store. Fields past the last initializer run their own initializers, in order, so a later initializer reads the earlier fields; an initialized field&#x27;s own initializer never runs. One argument of the class itself (or a subclass) copies it instead. More initializers than fields raise <code>Too many initializers for &#x27;Cell&#x27;: it has 2 fields, got 3</code>. A class is no aggregate when a class in its chain declares a constructor or is a C++ class, or an instance field is <code>private:</code> or a reference; those keep the constructor text <code>No constructor of &#x27;T&#x27; takes (int)</code>. Methods never disqualify a class (script methods dispatch dynamically without a <code>virtual</code> keyword). Nested braces (<code>Move m{{1, 2}, {3, 4}}</code>) are not part of it: spell each member&#x27;s type, <code>Move m{Cell{1, 2}, Cell{3, 4}}</code>.</p>
+<p>A class that declares no constructor is an aggregate, as in C++: <code>T x{a, b}</code>, <code>T{a, b}</code>, <code>T x(a, b)</code> and <code>T(a, b)</code> fill its instance fields in declaration order, base classes&#x27; fields first, each initializer converting through its field&#x27;s typed slot like a field store. Fields past the last initializer run their own initializers, in order, so a later initializer reads the earlier fields; an initialized field&#x27;s own initializer never runs. One argument of the class itself (or a subclass) copies it instead. More initializers than fields raise <code>Too many initializers for 'Cell': it has 2 fields, got 3</code>. A class is no aggregate when a class in its chain declares a constructor or is a C++ class, or an instance field is <code>private:</code> or a reference; those keep the constructor text <code>No constructor of 'T' takes (int)</code>. Methods never disqualify a class (script methods dispatch dynamically without a <code>virtual</code> keyword). Nested braces (<code>Move m{{1, 2}, {3, 4}}</code>) are not part of it: spell each member&#x27;s type, <code>Move m{Cell{1, 2}, Cell{3, 4}}</code>.</p>
 <h2 id="constructor-exits-and-destructors">Constructor exits and destructors<a class="hlink" href="#constructor-exits-and-destructors" aria-label="link">&#8203;</a></h2>
-<p>A bare <code>return;</code> ends a constructor body early, and the call still yields the instance. <code>return expr;</code> in a constructor&#x27;s own body is the parse error <code>A constructor cannot return a value (a bare &#x27;return;&#x27; ends it early and the call yields the instance)</code>; a lambda or nested function inside it returns freely. A <code>throw</code> leaves the constructor like any function: the assignment target keeps its old value and the half-built instance runs no destructor.</p>
+<p>A bare <code>return;</code> ends a constructor body early, and the call still yields the instance. <code>return expr;</code> in a constructor&#x27;s own body is the parse error <code>A constructor cannot return a value (a bare 'return;' ends it early and the call yields the instance)</code>; a lambda or nested function inside it returns freely. A <code>throw</code> leaves the constructor like any function: the assignment target keeps its old value and the half-built instance runs no destructor.</p>
 <p><code>~Name() { ... }</code> declares a destructor. It runs when the object goes away: a value instance when the scope that holds it ends, a shared object when its last handle drops:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Torch {
     string name;
     Torch(string n) {
         name = n;
-        if (n == &quot;&quot;) { return; }          // a bare return ends the constructor; the call yields the instance
-        print(&quot;lit {}&quot;, name);
+        if (n == "") { return; }          // a bare return ends the constructor; the call yields the instance
+        print("lit {}", name);
     }
-    ~Torch() { print(&quot;out {}&quot;, name); }
+    ~Torch() { print("out {}", name); }
 }
 function visit() {
-    Torch t = Torch(&quot;hall&quot;);
-    print(&quot;visiting&quot;);
+    Torch t = Torch("hall");
+    print("visiting");
 }
 visit();
 {
-    auto lamp = new Torch(&quot;lamp&quot;);
+    auto lamp = new Torch("lamp");
     auto other = lamp;                    // two handles, one object
-    print(&quot;two handles&quot;);
+    print("two handles");
 }
-Torch dark = Torch(&quot;&quot;);
-print(&quot;dark is &#x27;{}&#x27;&quot;, dark.name);</code></pre></div>
+Torch dark = Torch("");
+print("dark is '{}'", dark.name);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">lit hall
 visiting
 out hall
@@ -133,12 +133,12 @@ dark is &#x27;&#x27;</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;
     Cat(int v) { a = v; }
-    auto speak() { return &quot;meow &quot; + to_string(a); }
+    auto speak() { return "meow " + to_string(a); }
 }
 class Tiger : Cat {
     Tiger() : super(5) {}
     auto speak() override {
-        return &quot;ROAR! (base said: &quot; + super::speak() + &quot;)&quot;;
+        return "ROAR! (base said: " + super::speak() + ")";
     }
 }
 auto t = Tiger();
@@ -148,8 +148,8 @@ type_of(c);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ROAR! (base said: meow 5)
 == result: Tiger</code></pre></div>
 <p>Redefining a base method <strong>without</strong> <code>override</code> is an error, raised when the class declaration runs. The message is explicit:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat { auto speak() { return &quot;meow&quot;; } }
-class Tiger : Cat { auto speak() { return &quot;ROAR&quot;; } }   // no override
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat { auto speak() { return "meow"; } }
+class Tiger : Cat { auto speak() { return "ROAR"; } }   // no override
 Tiger().speak();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Method &#x27;speak&#x27; shadows base class method. Use &#x27;override&#x27; keyword if this is intentional</code></pre></div>
 <p>Assigning a derived instance to a base-typed variable is allowed; the reverse (parent to child), siblings, and structurally-identical unrelated classes are rejected.</p>
@@ -172,7 +172,7 @@ cast&lt;Tiger&amp;&gt;(c).stripes = 5;        // and so do writes
 print(cast&lt;Tiger&amp;&gt;(c).stripes);
 var anything = c;                   // a var receiver is unchecked: members resolve at run time
 print(anything.stripes);
-try { cast&lt;Tiger&amp;&gt;(Cat()).stripes; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+try { cast&lt;Tiger&amp;&gt;(Cat()).stripes; } catch (e) { print("caught: {}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">12
 5
 5
@@ -181,19 +181,19 @@ caught: Cannot cast &#x27;Cat&#x27; to &#x27;Tiger&amp;&#x27;</code></pre></div>
 <h2 id="deriving-a-c-class-and-extend">Deriving a C++ class, and <code>extend</code><a class="hlink" href="#deriving-a-c-class-and-extend" aria-label="link">&#8203;</a></h2>
 <p>A class may derive a class the host bound from C++. Constructing it (<code>Voidkin()</code>) constructs the C++ object underneath; an object the host already owns is given the class with <code>extend(object, Class)</code>, <strong>in place</strong>: the handle you pass, and every other handle to that object, is the new class from then on. <code>extend</code> re-classes pure script instances the same way, which is what lets the sample below run on its own. Swap the script <code>Creature</code> for one the host bound from C++ and the remaining lines do not change:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature {
-    string name = &quot;grunt&quot;;
-    string speak() { return &quot;...&quot;; }
+    string name = "grunt";
+    string speak() { return "..."; }
 }
 class Voidkin : Creature {
     int chomp = 3;
-    string speak() override { return &quot;voidkin&quot;; }
+    string speak() override { return "voidkin"; }
 }
-auto raw = new Creature();          // a handle the &quot;host&quot; already holds
+auto raw = new Creature();          // a handle the "host" already holds
 auto same = raw;                    // another handle to the same object
 extend(raw, Voidkin);               // re-class it in place
 raw.chomp = 17;
-print(raw.speak(), &quot; &quot;, raw.chomp);
-print(same.speak(), &quot; &quot;, same.chomp, &quot; &quot;, same.name);</code></pre></div>
+print(raw.speak(), " ", raw.chomp);
+print(same.speak(), " ", same.chomp, " ", same.name);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">voidkin 17
 voidkin 17 grunt</code></pre></div>
 <p><code>extend</code> is a no-op for the class the object already is and re-derives for another class that derives the object&#x27;s C++ class (fields both classes declare keep their values; the new class&#x27;s own fields take their initializers). Overrides of C++ methods need <code>override</code> like any other; bare members and inherited C++ methods resolve inside methods as usual. When the object arrives from the host rather than from script (a <code>raw</code> the engine injected before the file ran), tell the checker it exists with <code>extern raw;</code> at the top of the file, otherwise the name is an undeclared-identifier load error (see <a href="13-strict-checking.html#escape-hatches">the escape hatches in Chapter 13</a>). The host side, ownership, and serialization of these <em>hybrids</em> are in <a href="../embedding/13-script-extensible.html">Script-Extensible Objects</a>.</p>
@@ -212,40 +212,40 @@ auto copy = l;</code></pre></div>
 }
 auto s = Stats();
 s.hp = 3.9;
-print(&quot;hp = {} ({})&quot;, s.hp, type_of(s.hp));
-s.anything = &quot;free&quot;;
-print(&quot;anything = {}&quot;, s.anything);
-var bad = &quot;not a number&quot;;
+print("hp = {} ({})", s.hp, type_of(s.hp));
+s.anything = "free";
+print("anything = {}", s.anything);
+var bad = "not a number";
 try {
     s.hp = bad;
 } catch (e) {
-    print(&quot;caught: {}&quot;, e);
+    print("caught: {}", e);
 }
 s.hp;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp = 3 (int)
 anything = free
 caught: Cannot assign string to field &#x27;hp&#x27; of Stats (declared int)
 == result: 3</code></pre></div>
-<p>Write the literal directly (<code>s.hp = &quot;not a number&quot;;</code>) and it is a load error instead: <code>error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27; (declared at 2:9)</code>, and the <code>try</code> never runs. Enforcement covers direct assigns, implicit-<code>this</code> assigns in methods/ctors, compound assigns, inherited fields, the C++ <code>set_field</code> API, and JSON round-trips.</p>
+<p>Write the literal directly (<code>s.hp = "not a number";</code>) and it is a load error instead: <code>error: cannot assign 'string' to field 'hp' declared 'int' (declared at 2:9)</code>, and the <code>try</code> never runs. Enforcement covers direct assigns, implicit-<code>this</code> assigns in methods/ctors, compound assigns, inherited fields, the C++ <code>set_field</code> API, and JSON round-trips.</p>
 <h2 id="access-control">Access control: <code>public:</code> / <code>private:</code><a class="hlink" href="#access-control" aria-label="link">&#8203;</a></h2>
-<p>Section labels control access, and there are two levels. Members start public: everyone reaches them. A member after a <code>private:</code> label is reachable from the class that declares it and from every class derived from it, by a bare name in a method, through <code>this.</code>, and through any object of that class family. <code>protected:</code> is accepted as a synonym of <code>private:</code>, so C++ habits compile and read the same. Code outside the family (a free function, top-level code, an unrelated class) gets <code>Cannot access private member &#x27;x&#x27; of class &#x27;C&#x27;</code> for every read, write, call, compound assignment and <code>++</code>/<code>--</code>:</p>
+<p>Section labels control access, and there are two levels. Members start public: everyone reaches them. A member after a <code>private:</code> label is reachable from the class that declares it and from every class derived from it, by a bare name in a method, through <code>this.</code>, and through any object of that class family. <code>protected:</code> is accepted as a synonym of <code>private:</code>, so C++ habits compile and read the same. Code outside the family (a free function, top-level code, an unrelated class) gets <code>Cannot access private member 'x' of class 'C'</code> for every read, write, call, compound assignment and <code>++</code>/<code>--</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Chest {
 private:
     int gold = 250;
 public:
     int looted = 0;
-    auto peek() { return gold; }              // the class&#x27;s own code sees private members
+    auto peek() { return gold; }              // the class's own code sees private members
 }
 class Vault : Chest {
     int double_gold() { return gold * 2; }    // so does every class derived from it
 }
 auto v = Vault();
-print(&quot;peek() = {}, double_gold() = {}&quot;, v.peek(), v.double_gold());
+print("peek() = {}, double_gold() = {}", v.peek(), v.double_gold());
 var anyone = v;
 try {
     anyone.gold;
 } catch (e) {
-    print(&quot;caught: {}&quot;, e);
+    print("caught: {}", e);
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">peek() = 250, double_gold() = 500
 caught: Cannot access private member &#x27;gold&#x27; of class &#x27;Chest&#x27;</code></pre></div>
@@ -268,14 +268,14 @@ print(c.gold);</code></pre></div>
     auto backing() { return target; }               // a bare name inside the class is the field
 }
 auto t = Thermostat();
-print(&quot;t.target = {}&quot;, t.target);
+print("t.target = {}", t.target);
 t.target = 5;
-print(&quot;field = {}, t.target = {}&quot;, t.backing(), t.target);</code></pre></div>
+print("field = {}, t.target = {}", t.backing(), t.target);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">t.target = 200
 field = 6, t.target = 60</code></pre></div>
-<p>The checker types <code>obj.x</code> from the accessor when the declaration is unambiguous: one parameterless getter with a declared (non-<code>var</code>) return type gives reads that type, one single-parameter by-value setter gives writes theirs, so <code>t.target = &quot;warm&quot;;</code> is the load error <code>cannot assign &#x27;string&#x27; to property &#x27;target&#x27; declared &#x27;int&#x27;</code>, and <code>char c = t.target;</code> fails the same way. Anything murkier (two overloads, a <code>var</code>/<code>auto</code> getter, a getter with parameters, a reference or untyped setter parameter, an accessor on a class the engine registered from C++) leaves the member unchecked and the run-time conversion does the work. A property the host binds with <a href="../embedding/02-dynamic-binder.html">dynamic_binder</a> arrives in script as an accessor pair of this kind.</p>
+<p>The checker types <code>obj.x</code> from the accessor when the declaration is unambiguous: one parameterless getter with a declared (non-<code>var</code>) return type gives reads that type, one single-parameter by-value setter gives writes theirs, so <code>t.target = "warm";</code> is the load error <code>cannot assign 'string' to property 'target' declared 'int'</code>, and <code>char c = t.target;</code> fails the same way. Anything murkier (two overloads, a <code>var</code>/<code>auto</code> getter, a getter with parameters, a reference or untyped setter parameter, an accessor on a class the engine registered from C++) leaves the member unchecked and the run-time conversion does the work. A property the host binds with <a href="../embedding/02-dynamic-binder.html">dynamic_binder</a> arrives in script as an accessor pair of this kind.</p>
 <h2 id="reference-returns-and-keyword-names">Reference returns and keyword method names<a class="hlink" href="#reference-returns-and-keyword-names" aria-label="link">&#8203;</a></h2>
-<p>A method declared with a reference return type (<code>int&amp; slot(int i)</code>, <code>Box&amp; pick()</code>, <code>int&amp; operator[](int i)</code>) returns the storage itself, so its call is an assignment target: <code>=</code>, every compound assignment and <code>++</code>/<code>--</code> store through it, as in C++. A call that returns by value is not: <code>s.get() = 4</code> raises <code>Cannot assign to a call result: &#x27;s.get&#x27; returns by value</code>.</p>
+<p>A method declared with a reference return type (<code>int&amp; slot(int i)</code>, <code>Box&amp; pick()</code>, <code>int&amp; operator[](int i)</code>) returns the storage itself, so its call is an assignment target: <code>=</code>, every compound assignment and <code>++</code>/<code>--</code> store through it, as in C++. A call that returns by value is not: <code>s.get() = 4</code> raises <code>Cannot assign to a call result: 's.get' returns by value</code>.</p>
 <p>A keyword names a method: <code>delete</code>, <code>default</code>, <code>for</code> and the rest are method names in a class body and member names after a dot (or <code>?.</code>, <code>-&gt;</code>), so a host API or a data shape that uses one keeps its spelling. A field cannot take a keyword name.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Slots {
     array&lt;int&gt; items = [0, 0, 0];
@@ -304,8 +304,8 @@ print(to_json(s.items));</code></pre></div>
 auto a = Counter();
 auto b = Counter();
 auto c = Counter();
-print(&quot;Counter::count = {}&quot;, Counter::count);
-print(&quot;Counter::twice_count() = {}&quot;, Counter::twice_count());
+print("Counter::count = {}", Counter::count);
+print("Counter::twice_count() = {}", Counter::twice_count());
 Counter::PI;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Counter::count = 3
 Counter::twice_count() = 6
@@ -314,23 +314,23 @@ Counter::twice_count() = 6
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Registry {
     static int count = 0;
     static float ratio = 3;       // the initializer converts: holds 3.0
-    static int last_id;           // no initializer: an int&#x27;s default, 0
+    static int last_id;           // no initializer: an int's default, 0
 }
 Registry::count = 2.9;            // the same table as an instance field: truncates
-print(&quot;count = {} ({}), ratio = {}, last_id = {}&quot;, Registry::count, type_of(Registry::count), Registry::ratio, Registry::last_id);
-var bad = &quot;many&quot;;
-try { Registry::count = bad; } catch (e) { print(&quot;caught: {}&quot;, e); }
-try { Registry.count; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+print("count = {} ({}), ratio = {}, last_id = {}", Registry::count, type_of(Registry::count), Registry::ratio, Registry::last_id);
+var bad = "many";
+try { Registry::count = bad; } catch (e) { print("caught: {}", e); }
+try { Registry.count; } catch (e) { print("caught: {}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.0, last_id = 0
 caught: Cannot assign string to static &#x27;count&#x27; of Registry (declared int)
 caught: function has no member &#x27;count&#x27;</code></pre></div>
-<p>(<code>Registry::count = &quot;many&quot;;</code> written as a literal is the load error <code>cannot assign &#x27;string&#x27; to field &#x27;count&#x27; declared &#x27;int&#x27;</code>.) Statics are inherited names, as in C++: a class&#x27;s code sees its own and its bases&#x27; statics bare, a base method running for a subclass instance reads its own class&#x27;s statics, and <code>Derived::count</code> names the base&#x27;s static unless <code>Derived</code> declares a member of that name:</p>
+<p>(<code>Registry::count = "many";</code> written as a literal is the load error <code>cannot assign 'string' to field 'count' declared 'int'</code>.) Statics are inherited names, as in C++: a class&#x27;s code sees its own and its bases&#x27; statics bare, a base method running for a subclass instance reads its own class&#x27;s statics, and <code>Derived::count</code> names the base&#x27;s static unless <code>Derived</code> declares a member of that name:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { static int count = 0; static int bump() { count += 1; return count; } }
 class Derived : Base {
-    auto bump_twice() { bump(); return bump(); }   // a base&#x27;s statics by bare name
+    auto bump_twice() { bump(); return bump(); }   // a base's statics by bare name
 }
 print(Derived().bump_twice());
-Derived::count += 10;                              // the base&#x27;s static, through the derived name
+Derived::count += 10;                              // the base's static, through the derived name
 print(Base::count);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2
 12</code></pre></div>
@@ -351,11 +351,11 @@ print(Base::count);</code></pre></div>
     int hp = 7;
     auto probe() {
         auto bare = [this]() { return hp; };        // resolves hp when called, like the method body
-        auto copy = [=]() { return hp; };        // captures the field&#x27;s value now
+        auto copy = [=]() { return hp; };        // captures the field's value now
         auto live = [&amp;]() { hp += 1; return hp; }; // shares the live field
-        print(&quot;bare {} copy {} live {}&quot;, bare(), copy(), live());
+        print("bare {} copy {} live {}", bare(), copy(), live());
         hp = 100;
-        print(&quot;after hp = 100: bare {} copy {} field {}&quot;, bare(), copy(), hp);
+        print("after hp = 100: bare {} copy {} field {}", bare(), copy(), hp);
     }
 }
 Tank().probe();</code></pre></div>
@@ -364,17 +364,17 @@ after hp = 100: bare 100 copy 7 field 100</code></pre></div>
 <p>Third, <code>[this]</code> captures the instance itself, as C++ captures the <code>this</code> pointer: the lambda reads and writes the object it was made in, never a copy (<code>[this]() { v = 9; }</code> sets that instance&#x27;s <code>v</code>).</p>
 <p>The checker (on by default) emits <strong>warning-severity</strong> shadowing diagnostics, never errors, even in strict mode, because shadowing is legal: a local/parameter/range-for/catch variable that shadows a <em>field</em> of the enclosing class (&quot;local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 4:2)&quot;), a local that shadows an outer local, and a declaration that shadows a global the same function already read. Constructor parameters named after the field they initialize (<code>C(int hp) { this.hp = hp; }</code>) are the established idiom and stay silent.</p>
 <h2 id="methods-as-values">Methods are called, not read<a class="hlink" href="#methods-as-values" aria-label="link">&#8203;</a></h2>
-<p><code>player.heal</code> without the parentheses reads too easily as a call, so it is an error, for your methods, a host class&#x27;s methods and the builtin ones (<code>arr.push</code>, <code>s.to_upper</code>, <code>co.resume</code>) alike. The strict checker reports it at load when it can see the receiver&#x27;s class; otherwise it raises when it runs, and the text says what to write instead. To keep a method as a value, bind it: <code>reflect::bind(player, &quot;heal&quot;)</code> holds the object and keeps it alive (see <a href="12-reflection.html">Reflection</a>). A string, array or map is a value, so its methods go in a lambda. A field that holds a callable is a value and reads as one. Inside a method the bare name is the same thing: <code>heal</code> without the parentheses is an error (<code>call it with heal() or bind it with reflect::bind(this, &quot;heal&quot;)</code>), and so is binding a reference to it (<code>auto&amp; r = heal</code>), while a local or parameter of that name still wins, and a static method stays a function value.</p>
+<p><code>player.heal</code> without the parentheses reads too easily as a call, so it is an error, for your methods, a host class&#x27;s methods and the builtin ones (<code>arr.push</code>, <code>s.to_upper</code>, <code>co.resume</code>) alike. The strict checker reports it at load when it can see the receiver&#x27;s class; otherwise it raises when it runs, and the text says what to write instead. To keep a method as a value, bind it: <code>reflect::bind(player, "heal")</code> holds the object and keeps it alive (see <a href="12-reflection.html">Reflection</a>). A string, array or map is a value, so its methods go in a lambda. A field that holds a callable is a value and reads as one. Inside a method the bare name is the same thing: <code>heal</code> without the parentheses is an error (<code>call it with heal() or bind it with reflect::bind(this, "heal")</code>), and so is binding a reference to it (<code>auto&amp; r = heal</code>), while a local or parameter of that name still wins, and a static method stays a function value.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Player { int hp = 5; void heal() { hp += 1; } }
 Player player;
-var heal = reflect::bind(player, &quot;heal&quot;);
+var heal = reflect::bind(player, "heal");
 heal();
-string name = &quot;kim&quot;;
+string name = "kim";
 var shout = []() { name.to_upper(); };
 shout();
-print(&quot;{} {}&quot;, player.hp, name);
+print("{} {}", player.hp, name);
 var anyone = player;   // a var: the checker cannot see its class, so the run raises
-try { var f = anyone.heal; } catch (e) { print(&quot;{}&quot;, e); }</code></pre></div>
+try { var f = anyone.heal; } catch (e) { print("{}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6 KIM
 &#x27;heal&#x27; is a method of Player; call it with anyone.heal() or bind it with reflect::bind(anyone, &quot;heal&quot;)</code></pre></div>
 <h2 id="callable-objects">Operators and callable objects<a class="hlink" href="#callable-objects" aria-label="link">&#8203;</a></h2>
@@ -389,26 +389,26 @@ function twice(function f) -&gt; int { f(); return f(); }
 Counter c;
 c();
 c(10);
-print(&quot;{}&quot;, c.n);
-print(&quot;{}&quot;, twice([]() { return c(); }));</code></pre></div>
+print("{}", c.n);
+print("{}", twice([]() { return c(); }));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">11
 13</code></pre></div>
 <h2 id="hot-reload-with-permissive-migration">Hot reload with permissive migration<a class="hlink" href="#hot-reload-with-permissive-migration" aria-label="link">&#8203;</a></h2>
 <p>Re-executing a <code>class</code> declaration on the same engine <strong>reloads</strong> the class. Live instances migrate permissively: fields that still exist <strong>keep their current values</strong> (including still-default ones), brand-new fields get the new defaults, removed fields drop. The two <code>execute()</code> calls below run on one engine (marked <code>//=== execute</code>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config {
     auto version = 1;
-    auto name = &quot;default&quot;;
+    auto name = "default";
 }
 auto cfg = Config();
-cfg.name = &quot;production&quot;;
-print(&quot;before reload: v{} {}&quot;, cfg.version, cfg.name);
+cfg.name = "production";
+print("before reload: v{} {}", cfg.version, cfg.name);
 //=== execute
 class Config {
     auto version = 2;
-    auto name = &quot;default&quot;;
+    auto name = "default";
     auto retries = 3;
 }
-print(&quot;after reload:  v{} {} retries={}&quot;, cfg.version, cfg.name, cfg.retries);</code></pre></div>
+print("after reload:  v{} {} retries={}", cfg.version, cfg.name, cfg.retries);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">before reload: v1 production
 == result: null
 after reload:  v1 production retries=3

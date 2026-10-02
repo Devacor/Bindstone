@@ -48,7 +48,7 @@ class Tearel : CreatureKind {
 				if (tare != null) { vitality = vitality + 1.0 * tare.health() / tare.maxHealth(); tare.fall(); }
 				if (tear != null) { vitality = vitality + 1.0 * tear.health() / tear.maxHealth(); tear.fall(); }
 				if (drip != null) { vitality = vitality + 1.0 * drip.health() / drip.maxHealth(); drip.fall(); }
-				int reformed = round(vitality / 3.0 * maxHealth()) + 10;
+				int reformed = math::round(vitality / 3.0 * maxHealth()) + 10;
 				if (reformed > stats().health) { reformed = stats().health; }
 				changeHealth(reformed - health());
 				tareId = 0;

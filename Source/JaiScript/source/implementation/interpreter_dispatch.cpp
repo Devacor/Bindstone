@@ -46,6 +46,7 @@ struct interpreter::binary_host {
     bool unwinding() const noexcept { return in.is_unwinding_; }
     bool parallel_worker() const noexcept { return in.parallel_worker_; }
     size_t& equality_depth() noexcept { return in.structural_equality_depth_; }
+    checked_result<script_value> spaceship(const script_value& a, const script_value& b) { return in.handle_spaceship(a,b); }
     checked_result<script_value> equal(const script_value& l, const script_value& r) { return in.handle_equal(l, r); }
 };
 

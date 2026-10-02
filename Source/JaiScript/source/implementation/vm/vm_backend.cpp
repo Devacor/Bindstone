@@ -1,3 +1,4 @@
+#include <jaiscript/detail/structural_ordering.hpp>
 #include <charconv>
 #include <jaiscript/vm/vm_backend.hpp>
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
@@ -1550,6 +1551,17 @@ std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(con
 	}
 	auto method_val = target.method(op_symbol_id);
 	if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
+		if (script_value spaceship = target.method(op_spaceship_id_); spaceship.is_function()) {   // KEEP BYTE-PARALLEL with the interpreter
+			auto result = make_bound_method(left, spaceship).as_function()(std::vector<script_value>{right});
+			if (!result) {
+				if (is_unwinding_) { return std::nullopt; }
+				return checked_result<bool>(result.error_value());
+			}
+			const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
+			                    : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
+			if (auto answer = spaceship_rewritten(op, result.value())) { return checked_result<bool>(*answer); }
+			return std::nullopt;
+		}
 		if (target.class_def && target.class_def->is_transparent_wrapper()) {
 			script_value mutable_left = left;
 			script_value unwrapped = target.class_def->unwrap(mutable_left);
@@ -2408,6 +2420,10 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() < right.unchecked_as_string(), engine_);
 		}
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() < 0, engine_);
+	}
 		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
@@ -2432,6 +2448,10 @@ checked_result<script_value> vm_backend::handle_less(const script_value& left, c
 		return script_value(unwrapped_left.unchecked_as_string() < unwrapped_right.unchecked_as_string(), engine_);
 	}
 
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() < 0, engine_);
+	}
 	auto custom_result = object_comparison_via_method(left, right, op_less_id_);
 	if (custom_result.has_value()) {
 		if (!*custom_result) { return custom_result->error_value(); }
@@ -2473,6 +2493,10 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() <= right.unchecked_as_string(), engine_);
 		}
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() <= 0, engine_);
+	}
 		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for <= operator");
@@ -2497,6 +2521,10 @@ checked_result<script_value> vm_backend::handle_less_equal(const script_value& l
 		return script_value(unwrapped_left.unchecked_as_string() <= unwrapped_right.unchecked_as_string(), engine_);
 	}
 
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() <= 0, engine_);
+	}
 	auto custom_result = object_comparison_via_method(left, right, op_less_equal_id_);
 	if (custom_result.has_value()) {
 		if (!*custom_result) { return custom_result->error_value(); }
@@ -2538,6 +2566,10 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() > right.unchecked_as_string(), engine_);
 		}
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() > 0, engine_);
+	}
 		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for > operator");
@@ -2562,6 +2594,10 @@ checked_result<script_value> vm_backend::handle_greater(const script_value& left
 		return script_value(unwrapped_left.unchecked_as_string() > unwrapped_right.unchecked_as_string(), engine_);
 	}
 
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() > 0, engine_);
+	}
 	auto custom_result = object_comparison_via_method(left, right, op_greater_id_);
 	if (custom_result.has_value()) {
 		if (!*custom_result) { return custom_result->error_value(); }
@@ -2603,6 +2639,10 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 		if (li_raw == script_value::TYPEID_STRING && ri_raw == script_value::TYPEID_STRING) {
 			return script_value(left.unchecked_as_string() >= right.unchecked_as_string(), engine_);
 		}
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() >= 0, engine_);
+	}
 		if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 			return detail::math::ordering_error(left, right);
 		return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for >= operator");
@@ -2627,6 +2667,10 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 		return script_value(unwrapped_left.unchecked_as_string() >= unwrapped_right.unchecked_as_string(), engine_);
 	}
 
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) {
+		if (!*builtin) { return builtin->error_value(); }
+		return script_value(builtin->value().unchecked_as_int() >= 0, engine_);
+	}
 	auto custom_result = object_comparison_via_method(left, right, op_greater_equal_id_);
 	if (custom_result.has_value()) {
 		if (!*custom_result) { return custom_result->error_value(); }
@@ -2642,6 +2686,7 @@ checked_result<script_value> vm_backend::handle_greater_equal(const script_value
 }
 
 checked_result<script_value> vm_backend::handle_equal(const script_value& left, const script_value& right) {
+	if (auto identity = detail::builtin_identity_equal(left, right)) { return script_value(*identity, engine_); }
 	// Integral promotion: char operands compare as int64 0..255, so 'a' == 97 and the
 	// binary idiom s[i] == 0x1A hold (char_promotion.hpp; was silently false pre-ruling)
 	if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
@@ -2739,6 +2784,32 @@ checked_result<script_value> vm_backend::handle_equal(const script_value& left, 
 	return script_value(false, engine_);
 }
 
+bool vm_backend::native_less_available() const {
+	return !operator_table_ || !operator_table_->entry(detail::op_slot::less);
+}
+
+checked_result<script_value> vm_backend::array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) {
+	auto context = builtin_ctx();
+	context.copy_array_result = true;
+	auto found = builtins_.array_methods.find(a_member);
+	if (found == builtins_.array_methods.end()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "Unknown array transform"); }
+	const auto name = symbolizer_->get_string(a_member);
+	if (name == "sort" || name == "reverse") {
+		script_value result = a_self.clone();
+		context.copy_array_result = false;
+		auto answer = found->second(context, result, a_args);
+		if (!answer) { return answer.error_value(); }
+		return result;
+	}
+	return found->second(context, a_self, a_args);
+}
+
+checked_result<bool> vm_backend::language_less(const script_value& a_left, const script_value& a_right) {
+	auto result = binary_general(token_type::less, a_left.deref(), a_right.deref());
+	if (!result) { return result.error_value(); }
+	return is_truthy(result.value());
+}
+
 checked_result<bool> vm_backend::language_equal(const script_value& a, const script_value& b) {
 	auto equal = binary_general(token_type::equal_equal, a.deref(), b.deref());
 	if (!equal) { return equal.error_value(); }
@@ -2773,6 +2844,10 @@ checked_result<script_value> vm_backend::handle_not_equal(const script_value& le
 }
 
 checked_result<script_value> vm_backend::handle_spaceship(const script_value& left, const script_value& right) {
+	if (left.is_reference() || right.is_reference()) { return handle_spaceship(left.deref(), right.deref()); }
+	if (left.raw_storage_index() == script_value::TYPEID_CPP_BOUND || right.raw_storage_index() == script_value::TYPEID_CPP_BOUND) {
+		return handle_spaceship(left.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? left.bound_decoded_temp() : left, right.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right);
+	}
 	// Integral promotion: char operands compare as int64 0..255 (char_promotion.hpp)
 	if (detail::utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 		return detail::utf8_rewrapped(handle_spaceship(detail::utf8_unwrapped(left, engine_), detail::utf8_unwrapped(right, engine_)), engine_);
@@ -2786,9 +2861,7 @@ checked_result<script_value> vm_backend::handle_spaceship(const script_value& le
 	if ((left.is_int() || left.is_float()) && (right.is_int() || right.is_float())) {
 		script_float lf = left.is_int() ? script_float(left.unchecked_as_int()) : left.unchecked_as_float();
 		script_float rf = right.is_int() ? script_float(right.unchecked_as_int()) : right.unchecked_as_float();
-		if (lf != lf || rf != rf) [[unlikely]] { return detail::nan_order_error<checked_result<script_value>>(); }   // IEEE: NaN is unordered (KEEP BYTE-PARALLEL with detail::binary_spaceship)
-		auto cmp = lf <=> rf;
-		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
+		return script_value(detail::float_order(lf,rf), engine_);
 	}
 
 	if (left.is_string() && right.is_string()) {
@@ -2796,6 +2869,7 @@ checked_result<script_value> vm_backend::handle_spaceship(const script_value& le
 		return script_value(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0)), engine_);
 	}
 
+	if (auto builtin = detail::builtin_order(left, right, engine_, structural_equality_depth_, [&](const script_value& a, const script_value& b) { return handle_spaceship(a,b); }, [&] { return is_unwinding_; })) { return std::move(*builtin); }
 	if (detail::math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]]
 		return detail::math::ordering_error(left, right);
 	if (auto custom = object_arithmetic_via_method(left, right, op_spaceship_id_)) { return *custom; }
@@ -13423,7 +13497,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 				auto captured_handle = handle;
 				auto* eng = engine_;
-				script_function resume_method = [captured_handle, eng](const std::vector<script_value>&) -> checked_result<script_value> {
+				script_function resume_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+					if (!a_args.empty()) {
+						return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "resume() takes no arguments");
+					}
 					return captured_handle->resume(eng);
 				};
 				out = script_value::make_function(resume_method, engine_);
@@ -13433,7 +13510,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				if (!as_callee) { return raise_method_value(expr, objectValue, false); }
 				auto captured_handle = handle;
 				auto* eng = engine_;
-				script_function done_method = [captured_handle, eng](const std::vector<script_value>&) -> checked_result<script_value> {
+				script_function done_method = [captured_handle, eng](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+					if (!a_args.empty()) {
+						return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "done() takes no arguments");
+					}
 					return script_value(captured_handle->done(), eng);
 				};
 				out = script_value::make_function(done_method, engine_);
@@ -15113,7 +15193,7 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 				if (a0.is_int()) {
 					script_int idx = a0.unchecked_as_int();
 					if (idx < 0) idx += len;
-					if (idx >= 0 && idx < len) { result.emplace(std::string(1, str[static_cast<size_t>(idx)]), engine_); }
+					if (idx >= 0 && idx < len) { result.emplace(str[static_cast<size_t>(idx)], engine_); }
 				}
 				break;
 			}
@@ -15492,11 +15572,13 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 			}
 			// Coroutine resume()/done() dispatch directly: the native branch mints a fresh
 			// closure + function value PER RESUME just to forward to the handle. Same
-			// handle call, same checked_result propagation; the minted lambdas ignore
-			// their arguments, so this drops them identically. Any other member falls
+			// handle call, same argument-count and checked_result propagation. Any other member falls
 			// through for member_access_value's coroutine error spelling.
 			if (holder && holder->type_id == coroutine_handle_type_id_ && holder->data &&
 			    (member->member_id == resume_id_ || member->member_id == done_id_)) {
+				if (!arguments.empty()) {
+					return raise_(make_error_code(runtime_error_code::argument_count_mismatch), member->member_id == resume_id_ ? "resume() takes no arguments" : "done() takes no arguments");
+				}
 				auto handle = std::static_pointer_cast<coroutine_handle>(holder->data);
 				if (member->member_id == resume_id_) {
 					return guarded_native_call([&] { return handle->resume(engine_); });

@@ -45,7 +45,7 @@ taken from <code>source/tests/serialization/polymorphic_serialization_tests.cpp<
 creature does. C++ never names a script class; it hands the creature over and the script extends it:</p>
 <div class="codeblock cb-jai" data-host="Creature registration + self"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern self;                       // the host binds `self` (its callback slots) after load
 
-class Voidling : Creature {        // Creature is the host&#x27;s bound C++ class
+class Voidling : Creature {        // Creature is the host's bound C++ class
     int chompCount = 0;
     double blinkCooldown = 0.0;
     bool tick(double dt) override { blinkCooldown = blinkCooldown - dt; return false; }
@@ -115,17 +115,17 @@ and thrown from the C++ entry point.</li>
 <h3 id="try-it-without-a-host">Try it without a host<a class="hlink" href="#try-it-without-a-host" aria-label="link">&#8203;</a></h3>
 <p>Nothing above needs C++. Script classes re-derive under the same rule, so you can watch
 <code>extend</code> work in the standalone runner:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Pt  { int x = 1; string what() { return &quot;Pt&quot;; } }
-class Pt2 : Pt  { int y = 2; string what() override { return &quot;Pt2&quot;; } }
-class Pt3 : Pt2 { int z = 3; string what() override { return &quot;Pt3&quot;; } }
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Pt  { int x = 1; string what() { return "Pt"; } }
+class Pt2 : Pt  { int y = 2; string what() override { return "Pt2"; } }
+class Pt3 : Pt2 { int z = 3; string what() override { return "Pt3"; } }
 
 var p = Pt2();
 p.x = 17;                                  // a field Pt3 also declares
 
 extend(p, Pt3);                            // re-derive in place
-print(p.what() + &quot; x=&quot; + to_string(p.x) + &quot; y=&quot; + to_string(p.y) + &quot; z=&quot; + to_string(p.z));
+print(p.what() + " x=" + to_string(p.x) + " y=" + to_string(p.y) + " z=" + to_string(p.z));
 
-try { extend(p, Pt); } catch (e) { print(&quot;refused: &quot; + to_string(e)); }</code></pre></div>
+try { extend(p, Pt); } catch (e) { print("refused: " + to_string(e)); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Pt3 x=17 y=2 z=3
 refused: extend: &#x27;Pt&#x27; does not derive &#x27;Pt3&#x27;</code></pre></div>
 <p><code>x</code> survives because both classes declare it; <code>z</code> takes <code>Pt3</code>&#x27;s

@@ -20,6 +20,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/builtin_api_arities.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
@@ -2007,6 +2008,8 @@ private:
             case math_fn::vec2_: return math_ctype(script_value_type::jai_vec2_type);
             case math_fn::vec3_: return math_ctype(script_value_type::jai_vec3_type);
             case math_fn::ivec2_: return math_ctype(script_value_type::jai_ivec2_type);
+            case math_fn::sign_: case math_fn::random_int_: return ctype::make(ctype::int_k);
+            case math_fn::is_nan_: case math_fn::is_inf_: return ctype::make(ctype::bool_k);
             case math_fn::ivec3_: return math_ctype(script_value_type::jai_ivec3_type);
             case math_fn::vec4_: return math_ctype(script_value_type::jai_vec4_type);
             case math_fn::color_: case math_fn::mix_rgb_: case math_fn::mix_hsv_: return math_ctype(script_value_type::jai_color_type);
@@ -2075,7 +2078,8 @@ private:
             }
         }
         ctype t;
-        if (sig.result_follows_first && !args.empty() && (args[0].kind == ctype::string_k || args[0].kind == ctype::utf8_k)) { t = ctype::make(args[0].kind); }
+        if (sig.result_follows_first && !args.empty() && (args[0].kind == ctype::string_k || args[0].kind == ctype::utf8_k || args[0].kind == ctype::array_k)) { t = args[0]; }
+        else if (sig.result == script_value_type::jai_array_type) { t = ctype::make(ctype::array_k); }
         else if (sig.result == script_value_type::jai_string_type) { t = ctype::make(ctype::string_k); }
         else if (sig.result == script_value_type::jai_bool_type) { t = ctype::make(ctype::bool_k); }
         else if (sig.result == script_value_type::jai_int_type) { t = ctype::make(ctype::int_k); }
@@ -2086,7 +2090,7 @@ private:
             t.ti = ti;
         }
         else { return {}; }
-        t.tentative = true;
+        t.tentative = path != "array";
         return t;
     }
     static bool namespace_arg_accepts(const ctype& arg, script_value_type p) {
@@ -2155,6 +2159,25 @@ private:
         diag(diag_level::error, m->location, "no member '" + std::string(m->member) + "' on '" + ctype_name(recv) + "'" +
              (best.empty() ? std::string() : " (did you mean '" + best + "'?)"));
     }
+	void checkBuiltinArity(const ctype& a_receiver, const member_expr* a_member, const call_expr* a_call) {
+		uint8_t receiver;
+		switch (a_receiver.kind) {
+			case ctype::array_k: receiver = 0; break;
+			case ctype::map_k: receiver = 1; break;
+			case ctype::string_k: receiver = 2; break;
+			case ctype::utf8_k: receiver = 3; break;
+			default: return;
+		}
+		const auto* signature = findBuiltinArity(receiver, a_member->member);
+		if (!signature) { return; }
+		const size_t count = a_call->arguments.size();
+		if (count >= signature->minimum && count <= signature->maximum) { return; }
+		std::string expected = std::to_string(signature->minimum);
+		if (signature->minimum != signature->maximum) { expected += " to " + std::to_string(signature->maximum); }
+		diag(diag_level::error, a_call->location, "'" + std::string(a_member->member) + "' on '" +
+			ctype_name(a_receiver) + "' expects " + expected + " arguments, got " + std::to_string(count));
+	}
+
     // The return type a callback argument declares: a lambda's spelled one, or the one overload of a named script function
     const type_info* callback_declared_return(const expression* arg) const {
         if (!arg) { return nullptr; }
@@ -3342,7 +3365,10 @@ private:
 			if (!recv.tentative || recv.element_proof) {
 				proven = recv.kind == ctype::string_k ? 1 : recv.kind == ctype::array_k ? 2 : recv.kind == ctype::map_k ? 3 : 0;
 			}
-			if (!recv.tentative && !m->is_static) { check_builtin_member(recv, m); }
+			if (!recv.tentative && !m->is_static) {
+				check_builtin_member(recv, m);
+				checkBuiltinArity(recv, m, c);
+			}
 			stamp(c->builtin_receiver, proven, uint8_t(0));
 			{
 				std::vector<proof_global> deps;

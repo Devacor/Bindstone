@@ -60,15 +60,15 @@ b.x = 100.0;
 Vec2&amp; pilot = a;   // a reference, when you mean it
 pilot.y = 7.0;
 
-print(&quot;a = ({}, {})   b = ({}, {})&quot;, a.x, a.y, b.x, b.y);</code></pre></div>
+print("a = ({}, {})   b = ({}, {})", a.x, a.y, b.x, b.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a = (0.0, 7.0)   b = (100.0, 0.0)</code></pre></div>
 <p>That is the whole spooky-action-at-a-distance category of bug, gone. A function you hand an enemy to cannot quietly teleport yours; if it should, its parameter says <code>Enemy&amp;</code> and everyone can see it.</p>
 <h2 id="mistakes-die-early">Mistakes die before the program runs<a class="hlink" href="#mistakes-die-early" aria-label="link">&#8203;</a></h2>
 <p>Types are not decoration. The checker walks the whole program before the first statement executes, and in its default strict mode a typed mistake stops the load:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Ship { int hull = 100; string name = &quot;Wanderer&quot;; }
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Ship { int hull = 100; string name = "Wanderer"; }
 
 Ship s = Ship();
-s.hull = &quot;full&quot;;   // a string into an int field: caught before anything runs</code></pre></div>
+s.hull = "full";   // a string into an int field: caught before anything runs</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;script&gt;:4:9: error: cannot assign &#x27;string&#x27; to field &#x27;hull&#x27; declared &#x27;int&#x27; (declared at 1:18)
     s.hull = &quot;full&quot;;   // a string into an int field: caught before anything runs
             ^</code></pre></div>
@@ -76,19 +76,19 @@ s.hull = &quot;full&quot;;   // a string into an int field: caught before anythi
 <h2 id="a-swarm">A swarm in twenty lines<a class="hlink" href="#a-swarm" aria-label="link">&#8203;</a></h2>
 <p>Arrays of class instances, loops that edit them in place through <code>auto&amp;</code>, methods, and nothing you have to free.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy {
-    string kind = &quot;&quot;; float x = 0.0; int hp = 0;
+    string kind = ""; float x = 0.0; int hp = 0;
     Enemy(string k, float px, int h) { kind = k; x = px; hp = h; }
     void hit(int dmg) { hp -= dmg; }
     bool alive() { return hp &gt; 0; }
 }
 
-array&lt;Enemy&gt; swarm = [Enemy(&quot;drone&quot;, 0.0, 30), Enemy(&quot;brute&quot;, 5.0, 120), Enemy(&quot;drone&quot;, 9.0, 30)];
+array&lt;Enemy&gt; swarm = [Enemy("drone", 0.0, 30), Enemy("brute", 5.0, 120), Enemy("drone", 9.0, 30)];
 
 for (int wave = 1; wave &lt;= 3; ++wave) {
     for (auto&amp; e : swarm) { e.hit(45); e.x -= 1.5; }
     int standing = 0;
     for (auto&amp; e : swarm) { if (e.alive()) { standing += 1; } }
-    print(&quot;wave {}: {} standing&quot;, wave, standing);
+    print("wave {}: {} standing", wave, standing);
 }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">wave 1: 1 standing
 wave 2: 1 standing
@@ -126,12 +126,12 @@ lap 2: walk west</code></pre></div>
     string fire() { shots += 3; return `BRRRT x3 (shot ${shots})`; }
 }</code></pre></div>
 <p>The game keeps running across the change:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">include &quot;turret_v1.jai&quot;;
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">include "turret_v1.jai";
 var t = Turret();
 print(t.fire());
 print(t.fire());
 
-include &quot;turret_v2.jai&quot;;   // the edit lands: same turret, new trigger
+include "turret_v2.jai";   // the edit lands: same turret, new trigger
 print(t.fire());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">pew (shot 1)
 pew (shot 2)

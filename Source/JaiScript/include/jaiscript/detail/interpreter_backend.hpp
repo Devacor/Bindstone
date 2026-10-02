@@ -12,6 +12,14 @@ namespace jai {
  */
 class interpreter_backend : public execution_backend {
 public:
+	checked_result<bool> language_less(const script_value& a_left, const script_value& a_right) override {
+		return interpreter_->language_less(a_left, a_right);
+	}
+	bool native_less_available() const override { return interpreter_->native_less_available(); }
+	checked_result<script_value> array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override {
+		return interpreter_->array_transform(a_member, a_self, a_args);
+	}
+
     interpreter_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env)
         : interpreter_(std::make_shared<interpreter>(symbolizer, global_env)) {}
     

@@ -63,15 +63,15 @@ return value never lands in <code>seen</code>.</p>
 <p><code>coroutine</code> is a prefix on the function spellings you already have, so a script you ship can
 declare one however the rest of the file reads:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int ticks()                { yield 1; return 0; }
-coroutine function names() -&gt; string { yield &quot;a&quot;; return &quot;&quot;; }
+coroutine function names() -&gt; string { yield "a"; return ""; }
 coroutine function guess() -&gt; auto   { yield 2.5; return 0.0; }
 coroutine function plain()           { yield true; }
 
-print(to_string(ticks().resume()) + &quot; &quot; + names().resume() + &quot; &quot; +
-      to_string(guess().resume()) + &quot; &quot; + to_string(plain().resume()));</code></pre></div>
+print(to_string(ticks().resume()) + " " + names().resume() + " " +
+      to_string(guess().resume()) + " " + to_string(plain().resume()));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 a 2.5 true</code></pre></div>
-<p>The bare form drops <code>function</code> as well (<code>coroutine g() { &hellip; }</code> and
-<code>coroutine g() -&gt; int { &hellip; }</code>), and the same prefix works on methods, static ones
+<p>The bare form drops <code>function</code> as well (<code>coroutine g() { … }</code> and
+<code>coroutine g() -&gt; int { … }</code>), and the same prefix works on methods, static ones
 included. Coroutines cannot return references, and they are not allowed inside a namespace body
 (both are parse errors). The full rule is <a href="https://github.com/Devacor/JaiScript/blob/master/docs/grammar.md"><code>docs/grammar.md</code></a>&#x27;s function-declaration
 production; the language-side tour, covering independent instances per call, receiver pinning (a method coroutine keeps its object alive while suspended) and the edges, is
@@ -83,7 +83,7 @@ the guide&#x27;s <a href="../guide/08-coroutines.html">Coroutines</a> chapter.</
 }
 auto b = Boss();
 auto c = b.fight();
-print(to_string(c.resume()) + &quot; phase=&quot; + to_string(b.phase));</code></pre></div>
+print(to_string(c.resume()) + " phase=" + to_string(b.phase));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10 phase=1</code></pre></div>
 <p>All of it (yield/resume sequencing, <code>done()</code> transitions, multiple simultaneous handles, range-for driving) behaves identically on both backends; the test suite holds them to it. The checker treats a coroutine call as yielding a handle of unknown type, and does not check yield or return types (see the <a href="06-static-checking.html">Static Checking</a> precision map). A <code>return</code> the declared type rejects is a run-time error at the final <code>resume()</code> (<code>Cannot return string from 'k' (declared -&gt; int)</code>), never a load error; a <code>yield</code> hands its value out as it is, whatever the declared type.</p>
 <h2 id="driving-from-c-pattern-1-through-executes-the-simple-way">Driving from C++, pattern 1: through executes (the simple way)<a class="hlink" href="#driving-from-c-pattern-1-through-executes-the-simple-way" aria-label="link">&#8203;</a></h2>

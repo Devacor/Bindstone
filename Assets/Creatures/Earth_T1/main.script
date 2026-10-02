@@ -32,7 +32,7 @@ class Stonekind : CreatureKind {
 		}
 		// the slam grows with the crowd the shout pulled in: five per enemy pressing it
 		var crowd = enemiesInRange(2.5);
-		int slam = 5 * max(1, crowd.size());
+		int slam = 5 * math::max(1, crowd.size());
 		strike(target, slam);
 	}
 

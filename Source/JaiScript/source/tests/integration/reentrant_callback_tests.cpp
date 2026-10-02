@@ -163,7 +163,7 @@ public:
 			auto r = eng->execute(R"(
 				array<int> a = [3, 1, 2];
 				array<int> seen = [];
-				array<int> kept = a.filter([&](int x) -> bool {
+				array<int> kept = array::filter(a, [&](int x) -> bool {
 					array<int> b = [x];
 					b.push(x);
 					seen.push(b.size());

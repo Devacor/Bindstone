@@ -289,6 +289,9 @@ def build_pages():
                   SECTION_INDEX_DESC["reference/index.html"], page_sidebar(True),
                   prevnext(("../examples/index.html", "previous &middot; examples",
                             SECTION_TITLE["examples"]), None)))
+    pages.append(("reference/api.html", "reference", "../",
+                  "Full callable signatures, defaults, return types, effects and availability for builtins, the standard library and standalone runner.",
+                  page_sidebar(False), ""))
     return pages
 
 
@@ -343,6 +346,11 @@ def main():
             continue
         src = read_raw(path)
         out = rewrite(src, section, root, desc, sidebar, nav)
+        if rel == "reference/api.html":
+            out = out.replace("</body>", '<script src="../assets/api-reference.js"></script>\n</body>')
+            out = re.sub(r'<p class="foot-note">.*?</p>', '<p class="foot-note">Source-audited API reference &middot; built 2026-10-01</p>', out)
+            newline = "\r\n" if "\r\n" in src else "\n"
+            out = out.replace("\r\n", "\n").replace("\n", newline)
         if out != src:
             drifted.append(rel)
             if not args.check:

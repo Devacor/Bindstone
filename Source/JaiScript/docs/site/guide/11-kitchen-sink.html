@@ -36,13 +36,13 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <h2 id="enums">Enums<a class="hlink" href="#enums" aria-label="link">&#8203;</a></h2>
 <p><code>enum Name { a, b, c }</code> declares sequential integer constants (0-based), accessed with dot syntax. They compare naturally and work as <code>switch</code> cases:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
-print(&quot;east = {}&quot;, Direction.east);
+print("east = {}", Direction.east);
 auto d = Direction.south;
-print(&quot;d == south: {}&quot;, d == Direction.south);
+print("d == south: {}", d == Direction.south);
 switch (d) {
-    case Direction.north: print(&quot;going up&quot;);
-    case Direction.south: print(&quot;going down&quot;);
-    default: print(&quot;sideways&quot;);
+    case Direction.north: print("going up");
+    case Direction.south: print("going down");
+    default: print("sideways");
 }
 Direction.west;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">east = 2
@@ -51,13 +51,13 @@ going down
 == result: 3</code></pre></div>
 <p>Enum members are plain ints at runtime (<code>Direction.east</code> prints <code>2</code>). Membership, though, is checked at load: <code>Direction.zzz</code> is not a run-time lookup that returns null, it fails the load before anything runs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
-print(&quot;{}&quot;, Direction.zzz);</code></pre></div>
+print("{}", Direction.zzz);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
 &lt;script&gt;:2:23: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (declared at 1:6)
     print(&quot;{}&quot;, Direction.zzz);
                           ^</code></pre></div>
 <p>Members are reached with a dot (<code>Direction.east</code>); the <code>::</code> spelling is for namespaces and statics, and does not resolve an enum value.</p>
-<p>An enum declared inside a function or a block is local to it, like a C++ local enum: its values resolve there and it vanishes with the scope. The same holds for an enum in a file that an <code>include</code> runs inside a function. An enum of the same name at program scope keeps its values, and the checker warns when a local declaration hides one (<code>enum &#x27;Color&#x27; declared in function &#x27;reload&#x27; is local to it: the program-scope &#x27;Color&#x27; keeps its values</code>).</p>
+<p>An enum declared inside a function or a block is local to it, like a C++ local enum: its values resolve there and it vanishes with the scope. The same holds for an enum in a file that an <code>include</code> runs inside a function. An enum of the same name at program scope keeps its values, and the checker warns when a local declaration hides one (<code>enum 'Color' declared in function 'reload' is local to it: the program-scope 'Color' keeps its values</code>).</p>
 <h2 id="namespaces">Namespaces<a class="hlink" href="#namespaces" aria-label="link">&#8203;</a></h2>
 <p>Namespaces group functions, variables, and classes behind <code>::</code>. They are <strong>flat</strong>. <code>namespace my::nested::deep { }</code> is a single namespace whose name contains <code>::</code>, and &quot;nesting&quot; blocks composes the same way. Functions overload <strong>by arity</strong>; redefining an existing name+arity requires the <code>override</code> keyword (mirrors hot-reload discipline):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace utils {
@@ -73,11 +73,11 @@ print(&quot;{}&quot;, Direction.zzz);</code></pre></div>
 namespace my::nested::deep {                    // flat name with :: in it
     auto answer() { return 42; }
 }
-print(&quot;utils::add(1, 2) = {}&quot;, utils::add(1, 2));
-print(&quot;utils::add(1, 2, 3) = {}&quot;, utils::add(1, 2, 3));
-print(&quot;version {}&quot;, utils::VERSION);
+print("utils::add(1, 2) = {}", utils::add(1, 2));
+print("utils::add(1, 2, 3) = {}", utils::add(1, 2, 3));
+print("version {}", utils::VERSION);
 auto v = utils::Vec2(3, 4);
-print(&quot;len2 = {}&quot;, v.len2());
+print("len2 = {}", v.len2());
 my::nested::deep::answer();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">utils::add(1, 2) = 3
 utils::add(1, 2, 3) = 6
@@ -98,10 +98,10 @@ namespace stats {
 stats::record();
 stats::record();
 stats::hits += 5;
-print(&quot;stats::hits {} hits {} limit {}&quot;, stats::hits, hits, stats::limit);
-var bad = &quot;many&quot;;
-try { stats::hits = bad; } catch (e) { print(&quot;caught: {}&quot;, e); }
-try { string::to_lower = 3; } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+print("stats::hits {} hits {} limit {}", stats::hits, hits, stats::limit);
+var bad = "many";
+try { stats::hits = bad; } catch (e) { print("caught: {}", e); }
+try { string::to_lower = 3; } catch (e) { print("caught: {}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">stats::hits 7 hits 100 limit 20
 caught: Cannot assign string to &#x27;hits&#x27; (declared int)
 caught: Cannot assign to &#x27;to_lower&#x27;: it is read-only</code></pre></div>
@@ -114,16 +114,16 @@ caught: Cannot assign to &#x27;to_lower&#x27;: it is read-only</code></pre></div
 }
 using geo::twice, geo::Pt;           // the rest of this file reads twice as geo::twice, Pt as geo::Pt
 Pt p;
-print(&quot;{} {}&quot;, twice(3.0), p.x + p.y);</code></pre></div>
+print("{} {}", twice(3.0), p.x + p.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6.0 3</code></pre></div>
 <h2 id="destructuring">Destructuring<a class="hlink" href="#destructuring" aria-label="link">&#8203;</a></h2>
 <p><code>auto [a, b, c] = array;</code> unpacks positionally. Extra elements are ignored; missing ones bind <code>null</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto [x, y, z] = [1, 2, 3];
-print(&quot;{} {} {}&quot;, x, y, z);
+print("{} {} {}", x, y, z);
 auto [a, b] = [10, 20, 30];       // extras ignored
-print(&quot;{} {}&quot;, a, b);
+print("{} {}", a, b);
 auto [p, q, r] = [10, 20];        // missing become null
-print(&quot;{} {} {}&quot;, p, q, r == null ? &quot;null&quot; : to_string(r));
+print("{} {} {}", p, q, r == null ? "null" : to_string(r));
 auto pos = [4, 7];
 auto [px, py] = pos;
 px + py;</code></pre></div>
@@ -134,10 +134,10 @@ px + py;</code></pre></div>
 <h2 id="ternary">Ternary<a class="hlink" href="#ternary" aria-label="link">&#8203;</a></h2>
 <p>Right-associative, so the classic cascade reads top-down without parentheses:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto health = 40;
-auto status = health &gt; 0 ? &quot;alive&quot; : &quot;dead&quot;;
-auto level = health &gt; 75 ? &quot;healthy&quot; :
-             health &gt; 25 ? &quot;wounded&quot; : &quot;critical&quot;;
-print(&quot;{} and {}&quot;, status, level);
+auto status = health &gt; 0 ? "alive" : "dead";
+auto level = health &gt; 75 ? "healthy" :
+             health &gt; 25 ? "wounded" : "critical";
+print("{} and {}", status, level);
 health &gt; 50 ? 1 : 0;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">alive and wounded
 == result: 0</code></pre></div>
@@ -145,18 +145,18 @@ health &gt; 50 ? 1 : 0;</code></pre></div>
 <p><code>x?.member</code> and <code>x?.method(...)</code> evaluate to <code>null</code> when <code>x</code> is null instead of erroring; the call&#x27;s arguments are not evaluated then. On a non-null <code>x</code> it is the ordinary member access, a store included (<code>x?.hp = 5</code>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto obj = null;
 auto a = obj?.length();          // null-safe: short-circuits to null
-print(&quot;obj?.length() = {}&quot;, a == null ? &quot;null&quot; : to_string(a));
-auto s = &quot;hello&quot;;
-print(&quot;s?.length() = {}&quot;, s?.length());</code></pre></div>
+print("obj?.length() = {}", a == null ? "null" : to_string(a));
+auto s = "hello";
+print("s?.length() = {}", s?.length());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">obj?.length() = null
 s?.length() = 5</code></pre></div>
 <p>A null in front of a <code>?.</code> skips the rest of the chain, as in JavaScript and C#: <code>a?.b.c</code>, <code>a?.items[0]</code> and <code>a?.f().g()</code> are null when <code>a</code> is. Only the value in front of the <code>?.</code> is tested, so <code>a?.b.c</code> still raises when <code>a</code> is not null and <code>b</code> is; put a <code>?.</code> on every link that may be null. <code>??</code> supplies the default (<a href="04-operators.html#null-chains-and-defaults">Operators</a>):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 3; shared_ptr&lt;Node&gt; next; }
 auto head = new Node();
-print(&quot;{} {}&quot;, head?.v, head?.next?.v);      // next is null: the second ?. yields null
+print("{} {}", head?.v, head?.next?.v);      // next is null: the second ?. yields null
 shared_ptr&lt;Node&gt; none;
-print(&quot;{}&quot;, none?.next?.v);
-try { print(&quot;{}&quot;, head?.next.v); } catch (e) { print(&quot;caught: {}&quot;, e); }</code></pre></div>
+print("{}", none?.next?.v);
+try { print("{}", head?.next.v); } catch (e) { print("caught: {}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 null
 null
 caught: Cannot access &#x27;v&#x27; on null (&#x27;next&#x27; is null)</code></pre></div>

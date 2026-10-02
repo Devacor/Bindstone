@@ -6,6 +6,8 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow (overflow policy)
 #include <jaiscript/detail/math_intrinsics.hpp>
+#include <jaiscript/detail/math_namespace.hpp>
+#include <jaiscript/detail/array_namespace.hpp>
 #include <jaiscript/detail/aggregate_lowering.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
@@ -600,11 +602,14 @@ struct engine::implementation {
     // Composite key for type interning - avoids string construction on lookup
     struct type_key {
         script_value_type base_type;
+		bool dynamic_slot = false;
+		type_key(script_value_type a_base, uint64_t a_first = 0, uint64_t a_second = 0, bool a_dynamic = false) :
+			base_type(a_base), dynamic_slot(a_dynamic), param1_id(a_first), param2_id(a_second) {}
         uint64_t param1_id = 0;  // For array<T>, map<K,_>, weak_ptr<T>, reference<T>, etc.
         uint64_t param2_id = 0;  // For map<_,V>
 
         bool operator==(const type_key& other) const {
-            return base_type == other.base_type &&
+            return base_type == other.base_type && dynamic_slot == other.dynamic_slot &&
                    param1_id == other.param1_id &&
                    param2_id == other.param2_id;
         }
@@ -615,6 +620,7 @@ struct engine::implementation {
             size_t h = std::hash<int>{}(static_cast<int>(k.base_type));
             h ^= k.param1_id + 0x9e3779b9 + (h << 6) + (h >> 2);
             h ^= k.param2_id + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= static_cast<size_t>(k.dynamic_slot) << 1;
             return h;
         }
     };
@@ -2290,6 +2296,8 @@ void engine::initialize_engine_reference() {
     // Engine-core so a program answers the same on every host; the file IO that USES a path
     // (read_file, write_file, list_dir) stays the host's to grant. Defined after the impl so
     // the helpers above this constructor's TU position are visible: see location builtins below.
+	detail::register_math_namespace(*this);
+	detail::register_array_namespace(*this);
     register_privilege_builtins();
     register_location_builtins();
 
@@ -3668,6 +3676,22 @@ type_info* engine::get_type_info_array_dynamic(type_info* array_type) {
     type_info* ptr = &result.first->second;
     impl->type_id_index_.try_emplace(ptr->id, ptr);   // never displace the plain spelling
     return ptr;
+}
+
+type_info* engine::get_type_info_map_dynamic(type_info* a_mapType) {
+	if (!a_mapType || a_mapType->dynamic_slot) { return a_mapType; }
+	const auto keyType = a_mapType->key_type(), valueType = a_mapType->value_type();
+	implementation::type_key key{script_value_type::jai_map_type, keyType ? keyType->id : 0, valueType ? valueType->id : 0, true};
+	if (auto found = impl->type_infos_.find(key); found != impl->type_infos_.end()) { return &found->second; }
+	impl->deny_type_intern_in_region();
+	type_info temp = *a_mapType;
+	temp.dynamic_slot = true;
+	temp.cached_reference_type = nullptr;
+	temp.cached_declared_reference_type = nullptr;
+	auto result = impl->type_infos_.emplace(key,temp);
+	auto* ptr = &result.first->second;
+	impl->type_id_index_.try_emplace(ptr->id,ptr);
+	return ptr;
 }
 
 type_info* engine::get_type_info_declared_reference(type_info* referenced_type) {

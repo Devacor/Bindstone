@@ -127,6 +127,8 @@ namespace jai::detail {
                     }
                     return false;
                 }
+                case node_type::member_expr:
+                    return static_cast<const member_expr*>(e)->enum_constant;   // an enum's value; any other member may be a getter
                 default:
                     return false;   // member (getters), call, assignment, new, lambda, literals, ...
             }

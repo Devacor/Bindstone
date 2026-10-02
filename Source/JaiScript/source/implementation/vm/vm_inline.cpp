@@ -611,7 +611,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto o = clone_expr(m->object, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<member_expr>(m->location, o, m->member, m->member_id, m->is_arrow, m->is_static);
-		n->null_safe = m->null_safe; n->getter_id = m->getter_id;
+		n->null_safe = m->null_safe; n->getter_id = m->getter_id; n->enum_constant = m->enum_constant;
 		n->proven_class = m->proven_class; n->proven_slot = m->proven_slot; n->proven_epoch = m->proven_epoch; n->proven_field_type = m->proven_field_type; n->proven_field_write = m->proven_field_write;
 		return n;
 	}

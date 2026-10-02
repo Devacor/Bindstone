@@ -4572,6 +4572,26 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(want, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("an_enum_constant_argument_needs_no_capture", [this]() {
+			// an enum's value read by name runs no user code (its name holds a map<string,int>), so an earlier argument needs no capture ahead of
+			// it; a class member with a user getter is code, and the earlier argument keeps the value it had before the getter wrote it
+			const std::string prelude =
+				"enum Fx { fire, poison }\n"
+				"array<int> X = [1, 2, 3, 4];\n"
+				"array<int> LOG;\n"
+				"void fx_at(int x, int k) { LOG.push(x * 10 + k); }\n"
+				"int by_enum() { for (int m = 0; m < X.size(); ++m) { fx_at(X[m], Fx.poison); } return LOG.size(); }\n"
+				"class H { int _get_fire() { X[0] = 7; return 0; } }\n"
+				"H h;\n"
+				"int by_getter() { fx_at(X[0], h.fire); return LOG[LOG.size() - 1]; }\n";
+			const std::string run = "to_string(by_enum()) + \"|\" + to_string(by_getter()) + \"|\" + to_string(X[0]);";
+			both(prelude + run, "4|10|7", "an enum argument and a getter argument");
+			both(prelude + run, "4|10|7", "an enum argument and a getter argument, proofs off", false);
+			const std::string l = listing_run(prelude + "by_enum(); by_getter();");
+			auto section = [&](const char* fn) { const size_t at = l.find(fn); return at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at); };
+			check_true(section("== by_enum ").find("CAPTURE_ARG") == std::string::npos, "no capture ahead of an enum value: " + section("== by_enum "));
+			check_true(section("== by_getter ").find("CAPTURE_ARG") != std::string::npos, "a capture ahead of a getter: " + section("== by_getter "));
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

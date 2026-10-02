@@ -5829,6 +5829,14 @@ bool vm_compiler::compile_subscript_into_temp(const expression_ptr& e, uint8_t e
 }
 
 // The fused index shapes (the read-site twin of the store path): true when one instruction was emitted
+std::shared_ptr<identifier_expr> vm_compiler::take_subscript_guard(const binary_expr* read) {
+	const auto g = subscript_guards_.find(read);
+	if (g == subscript_guards_.end()) return nullptr;
+	auto held = std::move(g->second);
+	subscript_guards_.erase(g);
+	return held;
+}
+
 bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 	const size_t protos = chunk_->fused_index_protos.size();
 	const bool emitted = try_emit_fused_index_shape(expr, flags);
@@ -5836,19 +5844,23 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 	return emitted;
 }
 bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) {
+	// a graft statement's guard took the container ahead of the graft (vm_inline.cpp): every shape below reads its temp, in the always form
+	const std::shared_ptr<identifier_expr> held = expr->left->get_type() == node_type::identifier_expr ? take_subscript_guard(expr) : nullptr;
+	auto take_held = [&](fused_operand& container, uint32_t& guard) { container = make_fused_operand(expr->left); guard = static_cast<uint32_t>(held->slot_index); };
 	// Nested index `a[b[i]]` on a slot container: the inner read lands in a temp first (container a is a
 	// slot, so nothing that could raise precedes the inner read), then the outer read takes the ident/temp shape
 	if (expr->left->get_type() == node_type::identifier_expr && fusable_index_expr(expr->right.get()) &&
-	    (quiet_partner(expr->left.get()) || env_identifier(expr->left.get())) && typed_lowering_ && temps_active_ && chunk_->is_function_body) {
+	    (quiet_partner(expr->left.get()) || env_identifier(expr->left.get()) || held) && typed_lowering_ && temps_active_ && chunk_->is_function_body) {
 		fused_operand inner;
 		fused_operand container;
 		const bool ref_container = reference_slot_operand(expr->left.get());
 		// the outer binding is read before the inner read in the language's order: ahead of an inner read that may run user
 		// code its value is taken (a reference too: the callback may rebind what it names), ahead of a quiet one a reference
 		// is dereferenced (its getter); a private local needs neither
-		const bool snap_container = (!quiet_read(expr->right.get()) && !private_local(expr->left.get())) || env_identifier(expr->left.get());   // an environment name reads first either way (its binding may be a reference to a property by run time: its getter, or its error, precedes the inner read), through the always form, whose temp is a value at its own point
+		const bool snap_container = (!quiet_read(expr->right.get()) && !private_local(expr->left.get())) || env_identifier(expr->left.get()) || held;   // an environment name reads first either way (its binding may be a reference to a property by run time: its getter, or its error, precedes the inner read), through the always form, whose temp is a value at its own point
 		uint32_t guard = k_invalid_u32;
-		if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
+		if (held) { take_held(container, guard); }
+		else if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
 		else if (ref_container) { guard_container_temp(expr->left, container, guard, false); }
 		if (compile_subscript_into_temp(expr->right, operand_expect(static_cast<const binary_expr*>(expr->right.get())), inner)) {
 			fused_index_proto p;
@@ -5869,7 +5881,7 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 		fused_index_proto p;
 		p.container = make_fused_operand(expr->left);
 		p.index = make_fused_operand(expr->right);
-		if (const auto g = subscript_guards_.find(expr); g != subscript_guards_.end()) { p.container_guard = g->second; p.guard_always = true; subscript_guards_.erase(g); }
+		if (held) { p.container_guard = static_cast<uint32_t>(held->slot_index); p.guard_always = true; }
 		chunk_->fused_index_protos.push_back(p);
 		emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 		return true;
@@ -5897,6 +5909,7 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 				fused_index_proto p;
 				if (computed_mc) { p.container = make_fused_operand(computed_mc->object); p.container.member_node = add_node(expr->left); }
 				else { p.container = make_fused_operand(expr->left); }
+				if (held) { p.container_guard = static_cast<uint32_t>(held->slot_index); p.guard_always = true; }
 				binary_expr* inner = spine[depth - 1];
 				fused_binary_proto bp;
 				bp.op = static_cast<uint8_t>(inner->op.type);
@@ -5917,14 +5930,15 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				return true;
 			}
-			if (!computed_mc && depth == 1 && typed_lowering_ && temps_active_ && chunk_->is_function_body && quiet_partner(expr->left.get()) && index_read_partner_shape(rb)) {
+			if (!computed_mc && depth == 1 && typed_lowering_ && temps_active_ && chunk_->is_function_body && (quiet_partner(expr->left.get()) || held) && index_read_partner_shape(rb)) {
 				// the element-read operand lands in a temp first (left before right); the index binary then reads
 				// direct operands and the outer read takes the T_LOAD row when the binary's class is proven
 				fused_operand container;
 				const bool ref_container = reference_slot_operand(expr->left.get());
-				const bool snap_container = (observing_hoist_in(rb) && !private_local(expr->left.get())) || env_identifier(expr->left.get());   // read before the index's reads; a reference container's value too; an environment name reads first either way, through the always form
+				const bool snap_container = (observing_hoist_in(rb) && !private_local(expr->left.get())) || env_identifier(expr->left.get()) || held;   // read before the index's reads; a reference container's value too; an environment name reads first either way, through the always form
 				uint32_t guard = k_invalid_u32;
-				if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
+				if (held) { take_held(container, guard); }
+				else if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
 				else if (ref_container) { guard_container_temp(expr->left, container, guard, false); }   // its dereference precedes quiet reads
 				fused_binary_proto bp;
 				bp.op = static_cast<uint8_t>(rb->op.type);
@@ -5950,15 +5964,16 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				return true;
 			}
-			if (!computed_mc && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get())) && binary_lands_fused(rb)) {
+			if (!computed_mc && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get()) || held) && binary_lands_fused(rb)) {
 				// an arithmetic tree as the index: compile_binary emits one fused binary last, rewritten to land in a
 				// fresh temp, and the read is the ident-plus-temp shape (the T_LOAD row); a reference-slot or environment
 				// container's value is taken ahead of the index (the interpreter's container-before-index order)
 				const size_t temp_mark = temp_next_;
 				fused_operand container;
-				const bool snap_container = !private_local(expr->left.get());   // the tree holds a binary (a custom numeric operator is user code): the container's value precedes it
+				const bool snap_container = !private_local(expr->left.get()) || held;   // the tree holds a binary (a custom numeric operator is user code): the container's value precedes it
 				uint32_t guard = k_invalid_u32;
-				if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
+				if (held) { take_held(container, guard); }
+				else if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
 				compile_expression(expr->right);
 				vm_instruction& last = chunk_->code.back();
 				if (last.op != opcode::op_binary_fused) {
@@ -5987,6 +6002,7 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 			}
 		}
 	}
+	if (held) { subscript_guards_[expr] = held; }   // no shape took it: the stack form reads the guard's temp
 	return false;
 }
 
@@ -6156,7 +6172,8 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			flags |= index_flag_transient_read;
 		}
 		if (try_emit_fused_index(expr.get(), flags)) return;
-		compile_expression(expr->left);
+		if (const auto held = take_subscript_guard(expr.get())) { compile_expression(held); }   // the container a graft statement's guard took
+		else { compile_expression(expr->left); }
 		compile_expression(expr->right);
 		emit(opcode::op_index, flags);
 		return;

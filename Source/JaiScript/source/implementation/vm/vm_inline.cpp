@@ -59,8 +59,8 @@ struct inline_context {
 	bool in_loop = false;                                          // the graft sits inside a loop: every landing must be a block instruction
 	int loop_depth = 0;                                            // loops of the callee's own the clone is inside (a break or continue binds there)
 	std::vector<std::pair<const expression*, std::shared_ptr<identifier_expr>>> spills;   // the statement's clone: a spilled operand becomes its temp
-	std::vector<std::pair<const expression*, uint32_t>> container_guards;   // the statement's clone: an element read whose container a guard took (its temp)
-	std::vector<std::pair<const binary_expr*, uint32_t>> guarded_reads;     // their clones
+	std::vector<std::pair<const expression*, std::shared_ptr<identifier_expr>>> container_guards;   // the statement's clone: an element read whose container a guard took (its temp)
+	std::vector<std::pair<const binary_expr*, std::shared_ptr<identifier_expr>>> guarded_reads;     // their clones
 	std::shared_ptr<identifier_expr> receiver;                     // a method graft: `this` and the bare fields read through the caller's receiver
 	bool returns_proven = false;                                   // an untyped lambda whose returns the checker proved one scalar kind
 	std::unordered_map<const expression*, const call_expr*> origins;   // per cloned call: the call it copies
@@ -1498,29 +1498,28 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			fused_binary_proto p;
 			p.left = make_fused_operand(sub);
 			chunk_->fused_binary_protos.push_back(std::move(p));
-			// the container of an element read whose index is the call, a name or a literal: the guard's always form takes its value here and
-			// the read keeps the name as its container, reading the guard's temp (a block's site resolves the name once at entry; a temp in its
-			// place would be a container rewritten inside the body)
+			// the container of an element read: the guard's always form takes its value here and the read keeps the name as its container,
+			// reading the guard's temp whatever its index (a block's site resolves the name once at entry; a temp in its place would be a
+			// container rewritten inside the body)
 			const binary_expr* read = nullptr;
 			std::vector<expression_ptr> path;
 			if (sub->get_type() == node_type::identifier_expr && find_path(root, sub.get(), path) && path.size() >= 2 && path[path.size() - 2]->get_type() == node_type::binary_expr) {
 				auto* b = static_cast<const binary_expr*>(path[path.size() - 2].get());
-				const node_type rt = b->right ? b->right->get_type() : node_type::literal_expr;
-				// a value read: the statement itself, or an operand of arithmetic, a comparison or a non-mutating unary
+				// a value read: the statement itself, or an operand of arithmetic, a comparison, a non-mutating unary or a builtin method's argument
 				bool read_position = path.size() < 3;
 				if (!read_position) {
 					const expression* up = path[path.size() - 3].get();
 					switch (up->get_type()) {
 					case node_type::binary_expr: { auto* ub = static_cast<const binary_expr*>(up); read_position = !(ub->op.type == token_type::left_bracket && ub->left.get() == b); break; }
 					case node_type::unary_expr: read_position = !incdec_op(static_cast<const unary_expr*>(up)->op.type); break;
+					case node_type::call_expr: { auto* uc = static_cast<const call_expr*>(up); read_position = uc->builtin_receiver != 0 && uc->callee.get() != b; break; }   // a builtin method's argument: a value
 					default: break;
 					}
 				}
-				if (b->op.type == token_type::left_bracket && b->left.get() == sub.get() && read_position &&
-				    (b->right.get() == call.get() || rt == node_type::identifier_expr || rt == node_type::literal_expr)) { read = b; }
+				if (b->op.type == token_type::left_bracket && b->left.get() == sub.get() && read_position) { read = b; }
 			}
 			emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), static_cast<uint32_t>(tid->slot_index), read ? 2u : 0u);
-			if (read) { sc.container_guards.emplace_back(read, static_cast<uint32_t>(tid->slot_index)); }
+			if (read) { sc.container_guards.emplace_back(read, tid); }
 			else { sc.spills.emplace_back(sub.get(), tid); }
 			continue;
 		}

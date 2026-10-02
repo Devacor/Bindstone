@@ -1545,19 +1545,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "to_float() takes at most 1 argument (default)");
             }
 
-            const auto& str = self.unchecked_text();
-            const auto parsed = detail::parse_float_text(str.c_str());
-            if (parsed.end == str.c_str() || parsed.out_of_range) {
-                return default_val;
-            }
-            size_t pos = static_cast<size_t>(parsed.end - str.c_str());
-            // Check if entire string was consumed (ignoring trailing whitespace).
-            // isspace requires an unsigned-char value; a negative char is UB.
-            while (pos < str.size() && std::isspace(static_cast<unsigned char>(str[pos]))) ++pos;
-            if (pos != str.size()) {
-                return default_val;
-            }
-            return ctx.make_value(parsed.value);
+            const auto parsed = detail::parse_complete_float_text(self.unchecked_text());
+            return parsed ? ctx.make_value(*parsed) : default_val;
         }},
 
         // ============================================================

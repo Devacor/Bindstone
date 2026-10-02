@@ -503,7 +503,7 @@ namespace jai {
 
     // Equality operators for type_info_ptr - compares content, not addresses
     inline bool operator==(type_info_ptr lhs, type_info_ptr rhs) {
-        if (!lhs.ptr && !rhs.ptr) return true;
+        if (lhs.ptr == rhs.ptr) return true;
         if (!lhs.ptr || !rhs.ptr) return false;
         return lhs.ptr->equals(*rhs.ptr);
     }

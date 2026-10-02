@@ -676,6 +676,35 @@ bases (`G.player`) follow in their row. An element alias passed as a call argume
 flushes the alias (the reference its declaration binds, built into the slot) and pushes the slot's value as the general LOAD does,
 so a loop whose body calls a function on each element (`for (auto& p : pool) { step(p); }`) closes and lands without a miss.
 
+A named class reference (`Body& body = bodies[i]`) can use the same rebind operation even when the checker cannot prove its
+bind-time class admission. The plan records the original reference declaration. Each new binding checks the element's actual
+class against the declared class, including inheritance; a miss resumes the original declaration and its diagnostic. A
+post-call re-probe refreshes the existing reference and its dependent member sites without repeating admission: replacing a
+backing slot does not bind the reference again. Materializing the alias at a door attaches the original declared constraint,
+so a later store through the reference still enforces it. Other unproven reference kinds retain their existing admission rules.
+
+Outside a cell block, a local `LOAD` of a packed-array element reference takes its value snapshot directly from the live
+container and index. It avoids refreshing a scratch view merely to copy that view onto the operand stack. It still checks the
+index on every read, observes replacement of the element, and uses the ordinary dereference error when the element was
+removed. Property, field, map, string-character and other reference modes use their existing read paths.
+
+An ordinary member read whose receiver is a local identifier can encode that local directly in `GET_MEMBER.b` (`slot + 1`;
+zero keeps the stack-receiver form). This removes the receiver's separate `LOAD`. A guarded, cached plain-field hit copies the
+field value while borrowing the receiver; a miss takes an owned receiver snapshot before entering the full member ladder,
+including getters and callbacks. Component lvalues retain their original reference-producing form. When a consumer needs a
+member temporary for cell lowering, the compiler rewrites the direct-local form to the existing `MEMBER_TEMP` form.
+
+Member sites also accept one nested object field (`p.pos.x`, with `p` in a frame slot or an element alias). The prefix must be a
+present plain field containing a class instance. Accessors, non-public lookup chains, reference-valued prefixes and other
+payload kinds keep the general form. The final field uses the existing scalar read/store guards. Every alias rebind and
+post-call re-probe follows the current prefix object, so replacing `p.pos` in a callback refreshes the dependent sites. The
+prefix field's slot is cached per site in the call record's cell state, keyed by the class and its method epoch (the member
+ICs' guard) and cleared at every block entry, since another loop's site can sit at the same offset; a rebind then costs a class
+compare per site instead of a member probe. The entry and the post-call hold check resolve a frame-slot base's site through the
+same prefix, so `it.pos.x` never reads a field `x` of `it` itself.
+On the general form the prefix is evaluated once in the member read's original place, after the RHS for an assignment, with
+owned receiver values across getters and callbacks. The fast form adds no object copies.
+
 ### Straight-line regions
 
 A span of scalar statements outside every closed loop runs as a cell block of its own, a region with no back edge. The span

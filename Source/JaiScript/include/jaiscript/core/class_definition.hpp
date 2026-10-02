@@ -3246,6 +3246,13 @@ template <typename SiteFn>
 inline checked_result<script_value> typed_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng, SiteFn&& site_fn) {
     {
         const script_value& v = value.is_reference() ? value.deref() : value;
+        if (declared && declared->base_type == script_value_type::jai_shared_ptr_type && !declared->dynamic_pointee &&
+            (v.raw_storage_index() == script_value::TYPEID_NULL ||
+             (v.raw_storage_index() == script_value::TYPEID_OBJECT && v.type_info_raw() == declared.get()))) {
+            script_value result = v;
+            result.set_type_info(declared);
+            return result;
+        }
         size_t want = script_value::TYPEID_INVALID;
         switch (declared ? declared->base_type : script_value_type::jai_any_type) {
             case script_value_type::jai_int_type: want = script_value::TYPEID_INT; break;

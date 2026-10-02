@@ -450,7 +450,7 @@ namespace jai::vm {
             // an element alias declared in the body (`var& strip = STRIPS[sidx]`): the copy instruction that rebinds it, its cell (a compiler value of
             // kind reference: the element index is its payload, the source table its own site), the site index of its source table and the site
             // indices of the loads and stores through the alias, whose containers the rebind sets and the entry never resolves
-            struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint)
+            struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; uint32_t ref_decl = k_invalid_u32; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint); ref_decl: a class reference's declaration (its admission runs at each new binding, its constraint rides the flushed reference)
             std::vector<rebind> rebinds;
             std::vector<uint8_t> site_alias;   // per site: 1 = a site through an alias (its container the rebind's element; skipped by the entry and the hold check)
             std::vector<uint32_t> inline_sites;   // the inlined leaves inside the region (chunk::inline_sites indexes): their guards hold at the entry and after every effect point
@@ -655,6 +655,8 @@ namespace jai::vm {
             const class_definition* cd = nullptr;
             uint64_t epoch = 0;
             uint32_t slot = UINT32_MAX;
+            type_info* scalar_type = nullptr;   // a store site's int, float or bool field: its declared type and storage kind
+            uint8_t scalar_kind = 0;
         };
         mutable std::vector<member_ic_entry> member_ic;
         // Compile-time sticky-method-scope gate: true = no op parks per-call state in the

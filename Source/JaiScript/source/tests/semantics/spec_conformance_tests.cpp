@@ -123,6 +123,222 @@ public:
 	}
 
 	void forge_tests() override {
+		test("nested_member_regions_preserve_reads_stores_and_callbacks", [this]() {
+			expect("nested scalar updates", R"(
+				class Position { float x = 1.0; }
+				class Item { Position pos = Position(); Position vel = Position(); }
+				void update(array<Item>& items) { for (auto& item : items) { item.pos.x = item.pos.x + item.vel.x; } }
+				array<Item> items = [Item(),Item()]; update(items); update(items);
+				to_string(items[0].pos.x) + "|" + to_string(items[1].pos.x);
+			)", "3.0|3.0");
+			expect("prefix replaced by a callback", R"(
+				class Position { int x = 1; }
+				class Item { Position pos = Position(); }
+				void replace(var& item) { item.pos = Position(); item.pos.x = 8; }
+				int update(array<Item>& items) {
+					int result = 0;
+					for (auto& item : items) { item.pos.x = 2; replace(item); result += item.pos.x; }
+					return result;
+				}
+				array<Item> items = [Item(),Item()]; to_string(update(items));
+			)", "16");
+			expect("prefix getters run for each access", R"(
+				int reads = 0;
+				class Position { int x = 1; }
+				class Item { Position backing = Position(); Position _get_pos() { ++reads; return backing; } }
+				void update(array<Item>& items) { for (auto& item : items) { item.pos.x = item.pos.x + 1; } }
+				array<Item> items = [Item(),Item()]; update(items);
+				to_string(reads) + "|" + to_string(items[0].backing.x);
+			)", "4|1");
+			expect("nested sites on a local whose class has the final name", R"(
+				class Position { float x = 1.0; }
+				class Item { float x = 100.0; Position pos = Position(); Position vel = Position(); }
+				float run() {
+					Item it = Item(); float total = 0.0;
+					for (int i = 0; i < 4; ++i) { it.pos.x = it.pos.x + it.vel.x; total = total + it.pos.x; }
+					return total + it.x;
+				}
+				to_string(run());
+			)", "114.0");
+			expect("prefix slots follow the element's class", R"(
+				class Position { int x = 1; }
+				class A { Position pos = Position(); Position vel = Position(); }
+				class B { int pad = 0; Position vel = Position(); Position pos = Position(); }
+				int update(array<var>& items) {
+					int total = 0;
+					for (var& item : items) { item.pos.x = item.pos.x + item.vel.x + 1; total += item.pos.x; }
+					return total;
+				}
+				array<var> items = [A(), B(), A()]; items[1].vel.x = 5;
+				to_string(update(items)) + "|" + to_string(update(items));
+			)", "13|23");
+			every_config("prefix slots after a class reload", "4|6|1", [&](engine& e) {
+				e.execute(R"(
+					class Position { int x = 1; }
+					class Item { Position pos = Position(); Position vel = Position(); }
+					int update(array<Item>& items) { int t = 0; for (auto& item : items) { item.pos.x = item.pos.x + item.vel.x; t += item.pos.x; } return t; }
+					array<Item> items = [Item(), Item()]; int first = update(items);
+				)");
+				e.execute("class Item { Position vel = Position(); int extra = 0; Position pos = Position(); }");
+				return e.execute("to_string(first) + \"|\" + to_string(update(items)) + \"|\" + to_string(items[0].vel.x);").as_string();
+			});
+			expect("nested vector component stores", R"(
+				class Item { math::vec2 pos = math::vec2(1,2); }
+				void update(array<Item>& items) { for (auto& item : items) { item.pos.x = item.pos.x + 2.0; } }
+				array<Item> items = [Item()]; update(items); to_string(items[0].pos.x);
+			)", "3.0");
+		});
+		test("local_member_reads_pin_getter_receivers", [this]() {
+			expect("getter rebinds its source", R"(
+				class Item {
+					int n = 3;
+					int _get_value() { current = null; return n; }
+				}
+				shared_ptr<Item> current = new Item();
+				int read(shared_ptr<Item>& item) { return item.value; }
+				int result = read(current);
+				to_string(result) + "|" + to_string(current == null);
+			)", "3|true");
+			expect("cached fields remain live", R"(
+				class Item { int n = 1; }
+				int read(var& item) { return item.n; }
+				Item item; int first = read(item); item.n = 7; int second = read(item);
+				to_string(first) + "|" + to_string(second);
+			)", "1|7");
+		});
+		test("typed_element_reads_observe_live_storage", [this]() {
+			expect("string replacement", R"(
+				string read(array<string>& items) {
+					string& item = items[0]; string before = item;
+					items[0] = "after"; items.push("extra");
+					return before + "|" + item;
+				}
+				array<string> items = ["before"]; read(items);
+			)", "before|after");
+			expect("object replacement and identity", R"(
+				class Item { int n = 1; }
+				string read(array<Item>& items) {
+					Item& item = items[0]; int before = item.n;
+					items[0] = Item(); items[0].n = 7;
+					item.n = 9;
+					return to_string(before) + "|" + to_string(item.n) + "|" + to_string(items[0].n);
+				}
+				array<Item> items = [Item()]; read(items);
+			)", "1|9|9");
+			expect("scalar replacement and removal", R"(
+				string read(array<int>& items) {
+					int& item = items[0]; int before = item; items[0] = 7;
+					string result = to_string(before) + "|" + to_string(item);
+					items.clear();
+					try { int removed = item; } catch (e) { result += "|" + e; }
+					return result;
+				}
+				array<int> items = [1]; read(items);
+			)", "1|7|Reference to a removed array element");
+		});
+		test("inline_float_parse_preserves_fallback_and_text_contract", [this]() {
+			expect("complete parse and fallback", R"(
+				string good = " \t2.5\r\n"; string bad = "2.5suffix"; string huge = "1e9999";
+				class A {} shared_ptr<A> fallback = new A();
+				var value = bad.to_float(fallback);
+				to_string(good.to_float()) + "|" + to_string(bad.to_float() == null) + "|" +
+				to_string(huge.to_float(7)) + "|" + to_string(same_object(value, fallback)) + "|" +
+				to_string(math::is_nan("NaN".to_float()));
+			)", "2.5|true|7|true|true");
+			expect("fallback arguments evaluate on successful parse", R"(
+				int count = 0; int fallback() { count += 1; return 7; }
+				string text = "3.5"; float parsed = text.to_float(fallback());
+				to_string(parsed) + "|" + to_string(count);
+			)", "3.5|1");
+		});
+		test("cached_scalar_field_stores_obey_retypes_and_accessors", [this]() {
+			every_config("retype and accessor invalidate store cache", "int|float|2.5|7.0|70.0", [&](engine& e) {
+				e.execute(R"(
+					class A { int n = 0; }
+					var object = new A();
+					void put(var& target, var value) { target.n = value; }
+					for (int i=0; i<4; ++i) { put(object, i); }
+				)");
+				std::string before = e.execute("type_of(object.n);").as_string();
+				e.execute("class A { float n = 0.0; } put(object, 2.5);");
+				std::string after = e.execute("type_of(object.n) + \"|\" + to_string(object.n);").as_string();
+				e.execute(R"(
+					class A { float n = 0.0; float stored = 0.0; float _get_n() { return stored / 10.0; } void _set_n(float value) { stored = value * 10.0; } }
+					put(object, 7.0);
+				)");
+				return before + "|" + after + "|" + e.execute("to_string(object.n) + \"|\" + to_string(object.stored);").as_string();
+			});
+		});
+		test("typed_handle_parameter_binding_preserves_identity_and_escape", [this]() {
+			expect("by-value handle and escaping local alias", R"(
+				class A { int n = 1; }
+				int change(shared_ptr<A> value) {
+					value.n += 1; var& alias = value; alias = new A(); alias.n = 9; return value.n;
+				}
+				shared_ptr<A> original = new A();
+				int changed = change(original); to_string(changed) + "|" + to_string(original.n);
+			)", "9|2");
+			expect("typed null and static pointee rules", R"(
+				class A { int n = 1; } class D : A {}
+				shared_ptr<A> empty = null;
+				shared_ptr<A> identity(shared_ptr<A> value) { return value; }
+				int derived(shared_ptr<D> value) { return value.n; }
+				shared_ptr<A> base = new D(); bool rejected = false;
+				try { derived(base); } catch (e) { rejected = true; }
+				to_string(identity(empty) == null) + "|" + to_string(rejected);
+			)", "true|true", check_mode::off);
+		});
+		test("typed_class_element_aliases_keep_admission_and_store_constraints", [this]() {
+			expect("incompatible class at a later binding", R"(
+				class A { int n = 1; } class B { int n = 2; }
+				array<var> items = [A(), B()]; int total = 0; bool rejected = false;
+				function collect(array<var>& input) -> void {
+					int size = input.size(); for (int i=0; i<size; ++i) { A& item = input[i]; total += item.n; }
+				}
+				try { collect(items); } catch (e) { rejected = e.contains("Cannot initialize"); }
+				to_string(total) + "|" + to_string(rejected);
+			)", "1|true");
+			expect("derived class is admitted", R"(
+				class A { int n = 1; } class D : A { D() { n = 3; } }
+				array<var> items = [A(), D()]; int total = 0;
+				for (int i=0; i<items.size(); ++i) { A& item = items[i]; total += item.n; }
+				to_string(total);
+			)", "4");
+			expect("escaped reference keeps its declared class", R"(
+				class A { int n = 1; } class B { int n = 2; }
+				array<var> items = [A(), A()];
+				function pick(array<var>& input) -> A& {
+					int size = input.size(); for (int i=0; i<size; ++i) { A& item = input[i]; item.n += 1; if (i==1) { return item; } }
+					return input[0];
+				}
+				var& item = pick(items); bool rejected = false;
+				try { item = B(); } catch (e) { rejected = true; }
+				to_string(rejected) + "|" + to_string(items[1].n);
+			)", "true|2");
+			expect("a later storage replacement does not replay admission", R"(
+				class A { int n = 1; } class B { int n = 4; }
+				array<var> items = [A()];
+				void replace(array<var>& input) { input[0] = B(); }
+				int collect(array<var>& input) {
+					int total = 0;
+					int size = input.size(); for (int i=0; i<size; ++i) { A& item = input[i]; int before = item.n; replace(input); total += item.n; }
+					return total;
+				}
+				to_string(collect(items));
+			)", "4");
+			expect("materialized alias keeps the store constraint", R"(
+				class A { int n = 1; } class B { int n = 2; }
+				array<var> items = [A(), A()]; int count = 0;
+				void replace(var& value) { value = B(); }
+				void collect(array<var>& input) {
+					int size = input.size(); for (int i=0; i<size; ++i) {
+						A& item = input[i]; item.n += 1;
+						try { replace(item); } catch (e) { count += 1; }
+					}
+				}
+				collect(items); to_string(count) + "|" + to_string(items[0].n + items[1].n);
+			)", "2|4");
+		});
 		test("api_consistency_byte_chars_whitespace_and_map_default", [this]() {
 			expect("byte observers", R"(
 				string s = "abc"; char a = s.at(0); char b = s.front(); char c = s.back();

@@ -1,4 +1,5 @@
 #include <jaiscript/detail/structural_ordering.hpp>
+#include <jaiscript/detail/float_text.hpp>
 #include <charconv>
 #include <jaiscript/vm/vm_backend.hpp>
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
@@ -3599,6 +3600,16 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 	}
 	if (ins.a != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* local = frame_slot(f, ins.a)) {
+			// a live typed element's snapshot straight from its buffer (no scratch view refresh then copy); a removed element and every
+			// other reference mode dereference as before
+			if (local->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+				const auto* reference = local->get_reference_holder();
+				if (reference && !reference->has_cell && !reference->has_map_key && reference->container &&
+					reference->container->is_typed() && reference->container_index < reference->container->size()) {
+					stack_.push_back(reference->container->get(reference->container_index, engine_));
+					return {};
+				}
+			}
 			stack_.push_back(local->deref());
 			return {};
 		}
@@ -7700,9 +7711,14 @@ JAI_FORCEINLINE void vm_backend::cell_flush_one(frame& f, const chunk::cell_loop
 			const size_t element = static_cast<size_t>(cs.payload[k]);
 			// a callee shrank the table past the aliased element: the general form's reference is still bound and raises
 			// "Reference to a removed array element" at its next touch
-			frame_slot_set(f, loop.cells[k].slot, element < table->size()
+			script_value reference = element < table->size()
 				? script_value::make_element_reference(table, element, engine_, constraint)
-				: script_value::make_removed_element_reference(table, element, engine_, constraint));
+				: script_value::make_removed_element_reference(table, element, engine_, constraint);
+			if (rb.ref_decl != k_invalid_u32) {
+				const auto* decl = static_cast<const variable_decl*>(f.code->nodes[rb.ref_decl].get());
+				detail::ref_declare(reference, decl->type->element_type().get(), engine_);
+			}
+			frame_slot_set(f, loop.cells[k].slot, std::move(reference));
 			break;
 		}
 		return;
@@ -7929,7 +7945,7 @@ static opcode cell_first_op(opcode op) {
 	default: return op;
 	}
 }
-const script_value* vm_backend::cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site) {
+const script_value* vm_backend::cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site, size_t off) {
 	pin = nullptr;
 	const script_value* base = frame_slot(f, container.slot);
 	if (!base) return nullptr;
@@ -7944,10 +7960,11 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	if (base->raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
 	auto& holder = const_cast<script_value&>(*base).unchecked_get_object_storage();
 	if (!holder || !holder->is_class_instance_wrapper || !holder->data) return nullptr;
-	auto* inst = static_cast<class_instance*>(holder->data.get());
+	auto* expr = static_cast<member_expr*>(f.code->nodes[container.member_node].get());
+	auto* inst = cells_member_prefix(f, static_cast<class_instance*>(holder->data.get()), expr, off);
+	if (!inst) return nullptr;
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
-	auto* expr = static_cast<member_expr*>(f.code->nodes[container.member_node].get());
 	uint32_t slot;
 	if (cached_global_env_) {
 		// the site's own member_ic row (a copy ip is never a GET_MEMBER ip): the probe once per class and method epoch, as the field-read IC has it
@@ -7964,17 +7981,43 @@ const script_value* vm_backend::cells_member_container(frame& f, const fused_ope
 	return v ? &v->deref() : nullptr;
 }
 
+// the prefix of a nested member site (`p.pos` of `p.pos.x`): a plain field holding a class instance, its slot cached per site against
+// the class and its method epoch (the member ICs' guard); off = SIZE_MAX probes uncached
+class_instance* vm_backend::cells_member_prefix(frame& f, class_instance* inst, const member_expr* expr, size_t off) {
+	if (!expr->object || expr->object->get_type() != node_type::member_expr) return inst;
+	class_definition* cd = inst->get_class_definition();
+	if (!cd) return nullptr;
+	auto* prefix = static_cast<member_expr*>(expr->object.get());
+	uint32_t slot;
+	if (off == SIZE_MAX) { slot = member_read_slot_probe(cd, prefix); }
+	else {
+		cell_state& cs = *f.cells;
+		if (cs.site_prefix.size() <= off) { cs.site_prefix.resize(off + 1); }
+		cell_state::prefix_slot& entry = cs.site_prefix[off];
+		if (entry.cd == cd && entry.epoch == cd->method_epoch()) { slot = entry.slot; }
+		else { slot = member_read_slot_probe(cd, prefix); entry.cd = cd; entry.epoch = cd->method_epoch(); entry.slot = slot; }
+	}
+	if (slot == UINT32_MAX) return nullptr;
+	const script_value* value = inst->field_slot_value(slot);
+	if (!value || value->raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
+	const auto& holder = value->unchecked_object_handle();
+	if (!holder || !holder->is_class_instance_wrapper || !holder->data) return nullptr;
+	return static_cast<class_instance*>(holder->data.get());
+}
+
 // a member site's field of an instance (an alias's element at each rebind): the read-side probe answers the class's slot once per
 // class per site (a subclass element re-probes, a call between reads re-probes: a reload may have moved the fields), the field's
 // value dereferenced; a field that is not an int, a float or a bool is the general form's
 const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe) {
 	cell_state& cs = *f.cells;
+	auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
+	inst = cells_member_prefix(f, inst, expr, off);
+	if (!inst) return nullptr;
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
 	uint32_t slot;
 	if (!reprobe && cs.site_member_class[off] == cd) { slot = cs.site_member_slot[off]; }
 	else {
-		auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
 		slot = member_read_slot_probe(cd, expr);
 		if (slot == UINT32_MAX) { cs.site_member_class[off] = nullptr; return nullptr; }
 		cs.site_member_class[off] = cd; cs.site_member_slot[off] = slot;
@@ -8031,6 +8074,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const vm_instruction& ci = f.code->code[ip];
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
+		if (ip - loop.copy_head < cs.site_prefix.size()) { cs.site_prefix[ip - loop.copy_head].cd = nullptr; }
 		if (env_head && loop.site_env_cache[k] < f.code->env_lookup_cache.size()) {
 			const env_lookup_cache_entry& e = f.code->env_lookup_cache[loop.site_env_cache[k]];
 			if (e.fast_ptr && e.fast_env == env_now && e.fast_serial == epoch_now && e.fast_ptr->raw_storage_index() == script_value::TYPEID_ARRAY) {
@@ -8056,7 +8100,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			// accessor in the chain), the field's value kept for the copy; anything else keeps the block on the general form
 			fused_operand lc; lc.slot = ci.c; lc.member_node = ci.b; lc.direct = true;
 			const script_array* member_pin = nullptr;
-			const script_value* fv = cells_member_container(f, lc, member_pin, ip);
+			const script_value* fv = cells_member_container(f, lc, member_pin, ip, ip - loop.copy_head);
 			if (!fv) return refuse_site(ip, "a member read whose base is not an instance with that plain field");
 			const size_t fk = fv->raw_storage_index();
 			if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return refuse_site(ip, "a member read of a field that is not a scalar");
@@ -8207,6 +8251,14 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 		if (s.handle && s.handle->is_class_instance_wrapper && s.handle->data) { inst = static_cast<class_instance*>(s.handle->data.get()); }
 	}
 	if (!node && !inst) return false;
+	if (!reprobe && rb.ref_decl != k_invalid_u32) {
+		// admission belongs to each new binding, never a re-probe; a refusal resumes the declaration, which raises its own text
+		const auto* decl = static_cast<const variable_decl*>(f.code->nodes[rb.ref_decl].get());
+		const type_info* referent = decl->type->element_type().get();
+		class_definition* actual = inst ? inst->get_class_definition() : nullptr;
+		if (!actual || (actual->get_name() != referent->type_name &&
+			!detail::class_derives_from(engine_, actual->get_type_id(), referent->id))) { return false; }
+	}
 	for (const uint32_t d : rb.dependents) {
 		const uint32_t cip = loop.sites[d];
 		if (f.code->code[cip].op == opcode::op_c_mload || f.code->code[cip].op == opcode::op_c_mstore) {
@@ -8266,7 +8318,7 @@ bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool e
 			const vm_instruction& mi = f.code->code[loop.sites[k]];
 			fused_operand lc; lc.slot = mi.c; lc.member_node = mi.b; lc.direct = true;
 			const script_array* member_pin = nullptr;
-			if (cells_member_container(f, lc, member_pin, loop.sites[k]) != cs.site_member[loop.sites[k] - loop.copy_head]) return false;
+			if (cells_member_container(f, lc, member_pin, loop.sites[k], loop.sites[k] - loop.copy_head) != cs.site_member[loop.sites[k] - loop.copy_head]) return false;
 			continue;
 		}
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : env_ok ? cs.site_env[k] : nullptr;
@@ -14292,8 +14344,15 @@ op_status vm_backend::fused_member_container(frame& f, size_t site, const script
 
 op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
-	script_value object = std::move(stack_.back());
-	stack_.pop_back();
+	script_value object{std::monostate{}, nullptr};
+	const script_value* receiver = &object;
+	if (ins.op == opcode::op_get_member && ins.b != 0) {
+		if (const script_value* base = frame_slot(f, ins.b - 1)) { receiver = &base->deref(); }
+		else { object = make_null(); }
+	} else {
+		object = std::move(stack_.back());
+		stack_.pop_back();
+	}
 	// Field-read site IC (flat classes tier-1 stage B): epoch-validated {class, slot}
 	// per ip replaces the resolve ladder with one slot load. The fill probes mirror
 	// member_access_value's precedence EXACTLY (same_as, access, sp-builtin-name
@@ -14304,16 +14363,16 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	// V-M1 proven field read: node-borne class + shape-epoch guard, present cell (== the
 	// member_ic hit's raw cell copy); a miss falls to the IC / ladder below
 	if (expr->proven_class && cached_global_env_) {
-		if (script_value* cell = detail::proven_field_cell(object, expr->proven_class, expr->proven_epoch,
+		if (script_value* cell = detail::proven_field_cell(*receiver, expr->proven_class, expr->proven_epoch,
 		                                                   expr->proven_slot, nullptr)) {
 			stack_.push_back(*cell);
 			return {};
 		}
 	}
 	if (cached_global_env_) {
-		script_value& objd = object.deref();
+		const script_value& objd = receiver->deref();
 		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
-			auto& holder = objd.unchecked_get_object_storage();
+			const auto& holder = objd.unchecked_object_handle();
 			if (holder && holder->is_class_instance_wrapper && holder->data) {
 				auto* inst = static_cast<class_instance*>(holder->data.get());
 				if (class_definition* cd = inst->get_class_definition()) {
@@ -14349,6 +14408,8 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	profile_get_member_paths_[2]++;
 #endif
+	// the ladder may run a getter that rebinds the local: it owns the snapshot LOAD would have made
+	if (receiver != &object) { object = *receiver; }
 	if (expr->component_lvalue) [[unlikely]] {
 		script_value part = detail::math::evaluated_component_reference(object, expr, engine_);
 		if (part.is_reference()) {
@@ -14389,9 +14450,28 @@ op_status vm_backend::exec_size_temp(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+op_status vm_backend::local_member_receiver(frame& f, const member_expr* member, uint32_t slot, script_value& out) {
+	const script_value* base = frame_slot(f, slot);
+	if (member->object && member->object->get_type() == node_type::member_expr) {
+		// one prefix member, read in place (after the right side of a store) from an owned root, as LOAD then GET_MEMBER read it
+		script_value root = base ? script_value(base->deref()) : make_null();
+		return member_access_value(f, root, static_cast<member_expr*>(member->object.get()), out);
+	}
+	out = base ? *base : make_null();
+	return {};
+}
+
 op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 	const script_value* base = frame_slot(f, ins.c);
-	stack_.push_back(base ? *base : make_null());
+	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
+	if (member->object && member->object->get_type() == node_type::member_expr) {
+		script_value receiver = make_null();
+		VM_TRY(local_member_receiver(f, member, ins.c, receiver));
+		if (is_unwinding_) { frame_slot_set(f, ins.b, make_null()); return {}; }
+		stack_.push_back(std::move(receiver));
+	} else {
+		stack_.push_back(base ? *base : make_null());
+	}
 	VM_TRY(exec_get_member(f, ins));
 	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member temp across a frame switch"); }
 	script_value out = std::move(stack_.back());
@@ -14402,8 +14482,10 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 // a member store on a frame-slot base: the base pushed as its LOAD would have, then op_set_member whole (the value below it on the
 // stack, the proof in b, the result landed as it lands it)
 op_status vm_backend::exec_set_member_fused(frame& f, const vm_instruction& ins) {
-	const script_value* base = frame_slot(f, ins.c);
-	stack_.push_back(base ? *base : make_null());
+	script_value receiver = make_null();
+	VM_TRY(local_member_receiver(f, static_cast<member_expr*>(f.code->nodes[ins.a].get()), ins.c, receiver));
+	if (is_unwinding_) { return {}; }
+	stack_.push_back(std::move(receiver));
 	return exec_set_member(f, ins);
 }
 op_status vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
@@ -14545,8 +14627,10 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 		if (!vp) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "member store: the value operand did not resolve"); }
 		value = *vp;
 	}
-	const script_value* base = frame_slot(f, p.base);
-	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, p.proof, base ? script_value(*base) : make_null(), std::move(value), false);
+	script_value receiver = make_null();
+	VM_TRY(local_member_receiver(f, static_cast<member_expr*>(f.code->nodes[p.node].get()), p.base, receiver));
+	if (is_unwinding_) { return {}; }
+	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, p.proof, std::move(receiver), std::move(value), false);
 }
 
 // A vector buffer's element and component for a velem site: null when the container is not a vector buffer in a frame slot, the index
@@ -14668,7 +14752,7 @@ op_status vm_backend::exec_velem_store(frame& f, const vm_instruction& ins) {
 	stack_.push_back(std::move(base));
 	stack_.push_back(std::move(current));
 	stack_.push_back(std::move(value));
-	VM_TRY(exec_member_compound(f, vm_instruction{opcode::op_member_compound, p.node, p.proof, p.kind & ~compound_flag_value_first}));
+	VM_TRY(exec_member_compound(f, vm_instruction{opcode::op_member_compound, p.node, p.proof, p.kind & ~compound_flag_value_first}, ins_index));
 	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element store across a frame switch"); }
 	while (stack_.size() > depth) { stack_.pop_back(); }
 	return {};
@@ -14731,6 +14815,20 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 				auto& entry = code.member_ic[ins_index];
 				if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
 					if (entry.slot != UINT32_MAX) {
+						if (entry.scalar_type && value.raw_storage_index() == entry.scalar_kind) {
+							if (script_value* current = inst->field_slot_value(entry.slot);
+								current && current->raw_storage_index() == entry.scalar_kind) {
+								if (entry.scalar_kind == script_value::TYPEID_INT) { current->unchecked_set_int_payload(value.unchecked_as_int()); }
+								else if (entry.scalar_kind == script_value::TYPEID_FLOAT) { current->unchecked_set_float_payload(value.unchecked_as_float()); }
+								else { current->unchecked_set_bool_payload(value.unchecked_as_bool()); }
+								if (current->type_info_raw() != entry.scalar_type) { current->set_type_info(type_info_ptr{entry.scalar_type}); }
+							} else {
+								script_value incoming = value;
+								incoming.set_type_info(type_info_ptr{entry.scalar_type});
+								inst->field_slot_write(entry.slot, std::move(incoming));
+							}
+							return op_status{};
+						}
 						auto enforced = inst->enforce_field_write(member->member_id,
 						                                          clone_for_assignment(value));
 						if (!enforced) {
@@ -14755,6 +14853,14 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 					entry.cd = cd;
 					entry.epoch = cd->method_epoch();
 					entry.slot = slot;
+					entry.scalar_type = nullptr;
+					entry.scalar_kind = 0;
+					if (slot != UINT32_MAX) {
+						type_info* declared = cd->get_field_declared_type(member->member_id).get();
+						if (declared == ti_int_) { entry.scalar_type = declared; entry.scalar_kind = script_value::TYPEID_INT; }
+						else if (declared == ti_float_) { entry.scalar_type = declared; entry.scalar_kind = script_value::TYPEID_FLOAT; }
+						else if (declared == ti_bool_) { entry.scalar_type = declared; entry.scalar_kind = script_value::TYPEID_BOOL; }
+					}
 					// resolve through the ladder this once; hits serve from here on
 				}
 			}
@@ -14849,7 +14955,7 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, size_t ins_index) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool old_result = (ins.c & compound_flag_old_result) != 0;
@@ -15035,7 +15141,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins) 
 		return {};
 	}
 
-	if (auto landed = member_field_write_fast(f, static_cast<size_t>(&ins - f.code->code.data()), ins.b, member, objectValue, resultValue)) {
+	if (auto landed = member_field_write_fast(f, ins_index, ins.b, member, objectValue, resultValue)) {
 		if (*landed == op_status::failed) { return op_status::failed; }
 	} else {
 		VM_TRY(assign_member(f, objectValue, member, resultValue));
@@ -15392,6 +15498,11 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 				}
 				break;
 			}
+		} else if (inline_op == 12) {
+			const auto parsed = detail::parse_complete_float_text(recv.unchecked_as_string());
+			if (parsed) { result.emplace(*parsed, engine_); }
+			else if (argc) { result.emplace(stack_[base]); }
+			else { result.emplace(std::monostate{}, engine_); }
 		} else if (inline_op == 11) {
 			script_array& node = *const_cast<script_value&>(recv).unchecked_get_array_storage();
 			if (!node.empty()) {
@@ -18588,7 +18699,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_get_static: return exec_get_static(f, ins);
 		case opcode::op_set_member: return exec_set_member(f, ins);
 		case opcode::op_set_static: return exec_set_static(f, ins);
-		case opcode::op_member_compound: return exec_member_compound(f, ins);
+		case opcode::op_member_compound: return exec_member_compound(f, ins, static_cast<size_t>(&ins - f.code->code.data()));
 		case opcode::op_call_method: return exec_call_method(f, ins);
 		case opcode::op_call_builtin: return exec_call_builtin(f, ins);
 		case opcode::op_concat_append: return exec_concat_append(f);
@@ -22074,6 +22185,16 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_bind_paths_[3];
 #endif
+			// a handle (or null) already tagged with the parameter's exact type shares as it is: no conversion, nothing re-enters
+			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
+				const script_value& handle = arg.is_reference() ? arg.deref() : arg;
+				if (handle.type_info_raw() == param.type.get() &&
+					(handle.raw_storage_index() == script_value::TYPEID_OBJECT || handle.raw_storage_index() == script_value::TYPEID_NULL)) {
+					if (in_place && param.slot_index == i && !param.ref_escaping && !arg.is_reference()) { continue; }
+					frame_slot_set(callee, param.slot_index, boxed_param(script_value(handle)));
+					continue;
+				}
+			}
 			// Shallow copy shields the conversion: it can reenter script (conversion
 			// ctors / to_* methods) and reallocate stack_ under an on-stack arg
 			script_value arg_shield(arg);

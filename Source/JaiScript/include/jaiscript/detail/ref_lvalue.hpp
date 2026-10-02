@@ -76,6 +76,7 @@ namespace jai::detail {
 			case script_value_type::jai_shared_ptr_type:
 			case script_value_type::jai_weak_ptr_type: {
 				const type_info* held = value.get_type_info().get();
+				if (held == declared) { return true; }
 				if (!concrete_reference_type(declared) || !concrete_reference_type(held)) { return true; }
 				return held->equals(*declared);
 			}
@@ -665,6 +666,15 @@ namespace jai::detail {
 			return {};
 		}
 		type_info_ptr tag = storage.get_type_info();
+		if (tag && tag->base_type == script_value_type::jai_shared_ptr_type && !tag->dynamic_pointee &&
+			(value.raw_storage_index() == script_value::TYPEID_NULL ||
+			 (value.raw_storage_index() == script_value::TYPEID_OBJECT && value.type_info_raw() == tag.get()))) {
+			// a handle tagged with the slot's exact type (or null) shares as it is; a reference operand takes the path below
+			script_value result = value;
+			result.set_type_info(tag);
+			storage = std::move(result);
+			return {};
+		}
 		if (tag && var_slot(tag.get())) {   // a var stays a var (a typed array keeps its element type)
 			script_value v = clone_for_assignment(value);
 			if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { var_stamp(v, tag, eng); }

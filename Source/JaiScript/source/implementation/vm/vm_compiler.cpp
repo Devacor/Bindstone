@@ -3585,7 +3585,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				const auto* decl = static_cast<const variable_decl*>(c.nodes[code[ip + 1].a].get());
 				if (fp.index_chain_ext.size() > 2 || !array_target(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
-				if (decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask || decl->ref_escaping || (code[ip + 1].c & 2)) { refuse(chunk::cell_refusal_representation, ip); break; }   // an unproven admission runs at the declaration
+				const bool admission = (code[ip + 1].c & 2) != 0;
+				const type_info* referent = decl->type ? decl->type->element_type().get() : nullptr;
+				const bool classAdmission = admission && referent && referent->base_type == script_value_type::jai_object_type && !referent->type_name.empty();
+				if (decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask || decl->ref_escaping || (admission && !classAdmission)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint32_t aslot = static_cast<uint32_t>(decl->slot_index);
 				bool taken = find_cell(aslot) >= 0 || is_alias(aslot);
 				for (const ir_op& prior : ops) { if (prior.container == aslot) { taken = true; } }
@@ -3594,6 +3597,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				use_slot(aslot, static_cast<uint8_t>(script_value::TYPEID_REFERENCE), true, k_typed_dst_temp, nullptr, ip);
 				alias_slots.push_back(aslot);
 				op.kind = ir::rebind; op.a = aslot; op.proto = st.a; op.writes = aslot;
+				if (classAdmission) { op.ref_decl = code[ip + 1].a; }
 				ops.push_back(op);
 				op = ir_op{}; op.kind = ir::skip;   // the declaration is the pair's second instruction
 				++ip;
@@ -4618,7 +4622,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// the alias's declaration: its source read's site row for the copy (the container the general operand, resolved and pinned at entry;
 				// the index operands name cells) and the rebind record, whose source site and dependents are filled in with the site list
 				chunk::typed_site site;
-				chunk::cell_loop::rebind rb; rb.copy_ip = static_cast<uint32_t>(code.size()); rb.cell = dst_of(op.a);
+				chunk::cell_loop::rebind rb; rb.copy_ip = static_cast<uint32_t>(code.size()); rb.cell = dst_of(op.a); rb.ref_decl = op.ref_decl;
 				if (op.container == chunk::k_iter_container) {
 					// a range-for's by-reference loop variable: the iteration state's container at the index cell
 					site.cont_slot = chunk::k_iter_container; site.operands[0] = current[op.b]; site.orig = code[ip]; rb.iter = true;
@@ -5562,8 +5566,15 @@ uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return k_invalid_u32;
 	if (!e || e->get_type() != node_type::member_expr) return k_invalid_u32;
 	const auto* m = static_cast<const member_expr*>(e);
-	if (m->is_static || m->null_safe || !m->object || m->object->get_type() != node_type::identifier_expr) return k_invalid_u32;
-	auto* id = static_cast<identifier_expr*>(m->object.get());
+	if (m->is_static || m->null_safe || !m->object) return k_invalid_u32;
+	const expression* root = m->object.get();
+	if (root->get_type() == node_type::member_expr) {
+		const auto* prefix = static_cast<const member_expr*>(root);
+		if (prefix->is_static || prefix->null_safe || prefix->component_lvalue || !prefix->object) return k_invalid_u32;
+		root = prefix->object.get();
+	}
+	if (root->get_type() != node_type::identifier_expr) return k_invalid_u32;
+	auto* id = static_cast<identifier_expr*>(const_cast<expression*>(root));
 	if (id->global_qualified) return k_invalid_u32;
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
 	return slot != k_invalid_u32 && slot < k_typed_slot_mask ? slot : k_invalid_u32;
@@ -6932,6 +6943,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 					else if (name == "ends_with" && n == 1) inline_op = 6;
 					else if (name == "substr" && (n == 1 || n == 2)) inline_op = 7;
 					else if (name == "at" && n == 1) inline_op = 8;
+					else if (name == "to_float" && n <= 1) inline_op = 12;
 				} else if (builtin_kind == 2) {
 					if (name == "pop" && n == 0) inline_op = 11;
 				} else if (builtin_kind == 3) {
@@ -7032,6 +7044,14 @@ void vm_compiler::member_tail_into_temp(const expression* e) {
 	if (e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->component_lvalue) return;   // the read hands back a reference
 	auto& code = chunk_->code;
 	const size_t n = code.size();
+	if (n && code.back().op == opcode::op_get_member && code.back().b != 0 &&
+		code.back().a < chunk_->nodes.size() && chunk_->nodes[code.back().a].get() == e) {
+		const uint32_t t = static_cast<uint32_t>(temp_next_++);
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		code.back() = vm_instruction{opcode::op_member_temp, code.back().a, t, code.back().b - 1};
+		emit(opcode::op_load, t, temp_symbol_index(), 0);
+		return;
+	}
 	if (elem_member_operand(e)) {
 		// the subscript's code stays; its GET_MEMBER becomes the alias temp's landing, then the member temp over the alias and its load
 		if (n < 1 || code[n - 1].op != opcode::op_get_member) return;
@@ -7067,6 +7087,12 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 		compile_member_into_temp(expr, t);
 		emit(opcode::op_load, t.slot, temp_symbol_index(), 0);
 		return;
+	}
+	if (!expr->component_lvalue && expr->object && expr->object->get_type() == node_type::identifier_expr) {
+		if (const uint32_t base = member_base_slot(expr.get()); base != k_invalid_u32) {
+			emit(opcode::op_get_member, add_node(expr), base + 1);
+			return;
+		}
 	}
 	compile_expression(expr->object);
 	emit(opcode::op_get_member, add_node(expr));

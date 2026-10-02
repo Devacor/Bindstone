@@ -6,6 +6,9 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
+#include <cctype>
+#include <optional>
+#include <string>
 
 namespace jai::detail {
 
@@ -26,6 +29,16 @@ namespace jai::detail {
         const bool out_of_range = errno == ERANGE && (value == 0.0 || std::isinf(value));
         errno = saved;
         return { value, end, out_of_range };
+    }
+
+    // the whole text a float (trailing whitespace allowed; isspace takes an unsigned char), nullopt otherwise
+    inline std::optional<double> parse_complete_float_text(const std::string& text) noexcept {
+        const auto result = parse_float_text(text.c_str());
+        if (result.end == text.c_str() || result.out_of_range) return std::nullopt;
+        size_t pos = static_cast<size_t>(result.end - text.c_str());
+        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+        if (pos != text.size()) return std::nullopt;
+        return result.value;
     }
 
 } // namespace jai::detail

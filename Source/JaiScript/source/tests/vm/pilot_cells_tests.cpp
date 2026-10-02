@@ -4482,6 +4482,20 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined mob_at") != std::string::npos && l.find("-- inlined cheb") != std::string::npos, "both leaves graft: " + l);
 			check_true(l.find("-- open loop") == std::string::npos, "the loop closes: " + l);
 		});
+		test("a_typed_operations_refusal_is_a_translation_gap", [this]() {
+			// a loop refused at a typed instruction the translation has no row for (a typed element read in a kept call's argument zone)
+			// is a translation gap, never an effect: the census reads the refusal by its class
+			const std::string l = listing_run(
+				"array<int> A = [30, 60, 0, 90];\n"
+				"array<int> LOG;\n"
+				"void deal(int m, int v) { LOG.push(v); }\n"
+				"int run() { for (int m = 0; m < A.size(); ++m) { deal(m, 1 + A[m] / 30); } return LOG.size(); }\n"
+				"run();");
+			const size_t at = l.find("== run ");
+			const std::string rl = at == std::string::npos ? l : l.substr(at, l.find("\n== ", at + 1) - at);
+			check_true(rl.find("-- open loop") != std::string::npos && rl.find("translation at") != std::string::npos, "the refusal is a translation gap: " + rl);
+			check_true(rl.find("effect at") == std::string::npos, "no effect refusal: " + rl);
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

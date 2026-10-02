@@ -539,13 +539,14 @@ namespace jai::vm {
         // encoding is a translation gap; a call, an exit, a scope or a control effect is an effect; members, objects and
         // allocations are representations the model does not take
         static uint8_t cell_refusal_of(opcode op) {
+            if (op >= opcode::op_t_add_ii && op <= opcode::op_t_load) return cell_refusal_translation;   // the typed scalar set (opcode.hpp)
             switch (op) {
             case opcode::op_const: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup:
             case opcode::op_to_bool: case opcode::op_load: case opcode::op_store: case opcode::op_compound_store: case opcode::op_incdec:
             case opcode::op_decl_var: case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_index: case opcode::op_index_assign:
             case opcode::op_index_compound: case opcode::op_unary: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
             case opcode::op_compound_fused: case opcode::op_math: case opcode::op_index_store: case opcode::op_index_compound_fused:
-            case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_call_temp: case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_math_temp: case opcode::op_t_push: case opcode::op_push_fused:
+            case opcode::op_index_fused: case opcode::op_operand_temp: case opcode::op_call_temp: case opcode::op_member_temp: case opcode::op_set_member_fused: case opcode::op_math_temp: case opcode::op_push_fused:
             case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_loop_back: case opcode::op_cells_back:
             case opcode::op_cells_cfor_back: case opcode::op_fused_cmp_jump: case opcode::op_cast: case opcode::op_index_store_fused:
                 return cell_refusal_translation;

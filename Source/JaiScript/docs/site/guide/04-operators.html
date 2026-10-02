@@ -258,18 +258,25 @@ print("{} {} {} {}", flags.v, (~flags).v, !Bits(0), (-flags).v);
 print("{}", Bits(3) &lt;=&gt; Bits(7));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">26 229 true -26
 -1</code></pre></div>
-<p>The comparisons follow C++20&#x27;s rewriting. A class that declares <code>operator&lt;=&gt;</code> gets <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> from it: <code>a &lt; b</code> is <code>(a &lt;=&gt; b) &lt; 0</code>, <code>a &gt;= b</code> is <code>(a &lt;=&gt; b) &gt;= 0</code>, the result (an int or a float) compared with zero. An operator the class chain declares wins over the rewrite, so a class with its own <code>operator&lt;</code> keeps it and takes the other three from <code>&lt;=&gt;</code>. The right operand answers too when the left one has no operator for it: <code>5 &lt; v</code> is <code>0 &lt; (v &lt;=&gt; 5)</code> and <code>5 &lt;=&gt; v</code> is <code>0 &lt;=&gt; (v &lt;=&gt; 5)</code>, provided one of the class&#x27;s <code>operator&lt;=&gt;</code> overloads takes the left operand. Equality comes from <code>&lt;=&gt;</code> as well: a class value whose chain declares <code>&lt;=&gt;</code> and no <code>operator==</code> compares as <code>(a &lt;=&gt; b) == 0</code>, the left operand&#x27;s operators first, then the right one&#x27;s, in place of the memberwise default (<a href="#equality">above</a>). <code>a != b</code> is <code>!(a == b)</code>, unless the class declares <code>operator!=</code>, and <code>x == null</code> stays a null test. A class without <code>&lt;=&gt;</code> or <code>operator==</code> compares memberwise.</p>
+<p>The comparisons follow C++20&#x27;s rewriting. A class that declares <code>operator&lt;=&gt;</code> gets <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code> and <code>&gt;=</code> from it: <code>a &lt; b</code> is <code>(a &lt;=&gt; b) &lt; 0</code>, <code>a &gt;= b</code> is <code>(a &lt;=&gt; b) &gt;= 0</code>, the result (an int or a float) compared with zero. An operator the class chain declares wins over the rewrite, so a class with its own <code>operator&lt;</code> keeps it and takes the other three from <code>&lt;=&gt;</code>. <code>&lt;=&gt;</code> drives every comparison it can take, against any operand and in both orders. The right operand answers when the left one has no operator for it: <code>5 &lt; v</code> is <code>0 &lt; (v &lt;=&gt; 5)</code> and <code>5 &lt;=&gt; v</code> is <code>0 &lt;=&gt; (v &lt;=&gt; 5)</code>, in the builtin order (a NaN result orders last). Equality comes from it too: when an operand&#x27;s chain declares <code>&lt;=&gt;</code>, <code>a == b</code> is that class&#x27;s <code>operator==</code> if one of its overloads takes the other operand, else <code>(a &lt;=&gt; b) == 0</code>, the left operand first, then the right one, so <code>price == 500</code> and <code>500 == price</code> both work with an <code>operator&lt;=&gt;(int)</code>, and two values of the class compare through it in place of the memberwise default (<a href="#equality">above</a>). An overload counts only when its parameter takes the other operand; otherwise the builtin meaning stands (<code>Invalid operands for &lt; operator</code>, or <code>==</code> false). <code>a != b</code> is <code>!(a == b)</code>, unless the class declares <code>operator!=</code>, and <code>x == null</code> stays a null test. A class without <code>&lt;=&gt;</code> keeps its own <code>==</code>: memberwise between values of the class, false against anything else. <code>sort()</code> orders through the same <code>&lt;</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Version {
     int major = 0; int minor = 0;
     Version(int a, int b) { major = a; minor = b; }
     int operator&lt;=&gt;(Version o) { return major != o.major ? major - o.major : minor - o.minor; }
+    int operator&lt;=&gt;(int m) { return major - m; }   // against a bare major number
 }
 Version v1 = Version(1, 4);
 Version v2 = Version(2, 0);
 print(&quot;{} {} {} {}&quot;, v1 &lt; v2, v1 &gt;= v2, v2 &gt; v1, v1 &lt;= Version(1, 4));
-print(&quot;{} {}&quot;, v1 == Version(1, 4), v1 != v2);</code></pre></div>
+print(&quot;{} {}&quot;, v1 == Version(1, 4), v1 != v2);
+print(&quot;{} {} {}&quot;, v2 == 2, 1 &lt; v2, 3 &lt;=&gt; v1);
+array&lt;var&gt; versions = [v2, Version(0, 9), v1];
+versions.sort();
+print(&quot;{}.{}&quot;, versions[0].major, versions[0].minor);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">true false true true
-true true</code></pre></div>
+true true
+true true 1
+0.9</code></pre></div>
 <p>An <code>operator()</code> makes instances callable. A call whose callee holds such an instance runs it with the call&#x27;s arguments, at any arity and with overloads chosen as for any method, whether the instance sits in a local, a global, a field, an array element or a <code>shared_ptr</code>. It keeps its state between calls (more in <a href="07-classes.html#callable-objects">Classes</a>). An <code>operator[]</code> that returns <code>T&amp;</code> makes the subscript an lvalue, so <code>g[i] = v</code> and <code>g[i] op= v</code> store through it; one that returns by value makes <code>g[i]</code> a read, and a store to it raises <code>Cannot assign to rvalue expression</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Grid {
     array&lt;int&gt; cells = [0, 0, 0, 0];

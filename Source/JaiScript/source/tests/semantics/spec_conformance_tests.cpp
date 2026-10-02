@@ -2640,6 +2640,7 @@ private:
 		host_call_failure_routes();
 		host_global_references();
 		spaceship_everywhere();
+		spaceship_drives_mixed_operands();
 		classes_in_function_bodies();
 	}
 
@@ -2681,6 +2682,37 @@ private:
 				string nested = "" + (xs == ys) + " " + (xs != ys);
 				z + "|" + declared + "|" + reversed + "|" + plain + "|" + nested;
 			)", "true false false true false true|false true|true false true false false|true false|true false", check_mode::warn);
+		});
+	}
+
+	void spaceship_drives_mixed_operands() {
+		test("spaceship_drives_mixed_operands", [this]() {
+			// Dev ruling 2026-10-01 ("<=> can drive everything if it's implemented"): a <=> overload that takes the other operand
+			// answers == != < <= > >= <=> against any operand, both orders; a declared operator that takes it wins; null tests,
+			// classes without <=>, and overloads that cannot take the operand keep their meaning
+			expect("mixed", R"(
+				class Money { int cents = 0; Money(int c) { cents = c; } int operator<=>(Money o) { return cents - o.cents; } int operator<=>(int c) { return cents - c; } }
+				class Tagged { int n = 0; Tagged(int x) { n = x; } bool operator==(int k) { return k == 42; } int operator<=>(int k) { return n - k; } }
+				class OnlyEq { int n = 0; bool operator==(var o) { return true; } }
+				class S { int n = 0; S(int x) { n = x; } int operator<=>(S o) { return n - o.n; } }
+				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				Money m = Money(500); var nul = null; OnlyEq oe;
+				string money = "" + (m == 500) + " " + (500 == m) + " " + (m != 500) + " " + (500 != m) + " " + (m == 501) + " " + (m < 600) + " " +
+				    (600 > m) + " " + (m >= 500) + " " + (499 < m) + " " + (m <=> 500) + " " + (400 <=> m);
+				string tagged = "" + (Tagged(1) == 42) + " " + (Tagged(1) == 1) + " " + (42 == Tagged(1)) + " " + (Tagged(1) != 42) + " " + (Tagged(3) < 4);
+				string plain = "" + (oe == 5) + " " + (5 == oe);
+				string strict = "" + (S(1) == 1) + " " + (1 == S(1)) + " " + t([]() { return S(1) < 1; }) + " " + t([]() { return 1 < S(1); });
+				string nulls = "" + (m == nul) + " " + (m != nul);
+				class N { int k = 0; float operator<=>(int x) { return math::NAN_VALUE; } }
+				N nn;
+				nulls += " " + (5 <=> nn) + " " + (5 < nn) + " " + (nn == 5);   // the reversed <=> orders like the builtin one: NaN last
+				array<var> prices = [Money(300), 100, Money(200)];
+				string found = "" + (prices.contains(100)) + " " + (prices.index_of(200));
+				array<var> ms = [Money(300), Money(100), Money(200)]; ms.sort();
+				array<var> mix = [Money(300), 100, Money(200)]; mix.sort();
+				string sorted = "" + ms[0].cents + ms[1].cents + ms[2].cents + " " + (mix[0] == 100) + " " + (mix[1] == 200) + " " + (mix[2] == 300);
+				money + "|" + tagged + "|" + plain + "|" + strict + "|" + nulls + "|" + found + "|" + sorted;
+			)", "true true false false false true true true true 0 -1|true false true false true|false false|false false Invalid operands for < operator Invalid operands for < operator|false true -1 false false|true 2|100200300 true true true", check_mode::warn);
 		});
 	}
 

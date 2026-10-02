@@ -13,6 +13,7 @@
 //   std::optional<checked_result<bool>> object_comparison(l, r, uint64_t method_id)
 //   std::optional<checked_result<bool>> object_equality(l, r); bool defines_custom_equality(const script_value&)
 //   std::optional<checked_result<bool>> object_inequality(l, r)   // a declared operator!=, ahead of !(l == r)
+//   object_comparison_reversed(l, r, id), object_spaceship_reversed(l, r), object_spaceship_equality(l, r)   // <=> answers (Dev ruling 2026-10-01)
 //   bool unwinding(); bool parallel_worker(); size_t& equality_depth()
 //   checked_result<script_value> equal(l, r)   // the backend's == entry, for memberwise element comparison
 
@@ -201,6 +202,11 @@ namespace jai::detail {
 		}
 		// a script throw inside the operator method is in flight: it leaves, not the invalid-operands error
 		if (h.unwinding()) { return h.make_bool(false); }
+		if (auto reversed = h.object_comparison_reversed(left, right, method_id)) {
+			if (!*reversed) { return reversed->error_value(); }
+			return h.make_bool(reversed->value());
+		}
+		if (h.unwinding()) { return h.make_bool(false); }
 		return type_mismatch_error(order_invalid_text<Op>());
 	}
 
@@ -260,6 +266,10 @@ namespace jai::detail {
 			if (!*custom) { return custom->error_value(); }
 			return h.make_bool(custom->value());
 		}
+		if (auto from_spaceship = h.object_spaceship_equality(left, right)) {
+			if (!*from_spaceship) { return from_spaceship->error_value(); }
+			return h.make_bool(from_spaceship->value());
+		}
 		// script class instances: same class, fieldwise
 		if (auto structural = instances_equal(left, right, h.engine(), h.equality_depth(), element_equal)) { return std::move(*structural); }
 		// host objects and other holders: the same object_holder
@@ -305,6 +315,9 @@ namespace jai::detail {
 		if (auto builtin = builtin_order(left, right, h.engine(), h.equality_depth(), [&](const script_value& a, const script_value& b) { return h.spaceship(a,b); }, [&] { return h.unwinding(); })) { return std::move(*builtin); }
 		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return math::ordering_error(left, right); }
 		if (auto custom = h.object_arithmetic(left, right, method_id)) { return std::move(*custom); }
+		if (!h.unwinding()) {
+			if (auto reversed = h.object_spaceship_reversed(left, right)) { return std::move(*reversed); }
+		}
 		return type_mismatch_error("Invalid operands for <=> operator");
 	}
 

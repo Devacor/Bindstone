@@ -2534,7 +2534,7 @@ bool interpreter::object_defines_custom_equality(const script_value& v) const {
     auto holder = const_cast<script_value&>(d).get_object_holder();
     if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return false; }
     auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
-    return cd && cd->defines_method(eq_method_id_);
+    return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(op_spaceship_id_));
 }
 
 // The language's <: honor the global override before builtin/class ordering.
@@ -2639,6 +2639,71 @@ std::optional<checked_result<bool>> interpreter::object_inequality_via_method(co
         return checked_result<bool>(result.error_value());
     }
     if (result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
+    return std::nullopt;
+}
+
+// The right operand's <=> where the left operand has no operator (Dev ruling 2026-10-01): 5 < v is (v <=> 5) > 0, a
+// candidate only when its parameter takes the left operand. KEEP BYTE-PARALLEL with the vm twins below
+std::optional<checked_result<bool>> interpreter::object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+    if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+    auto target = resolve_member_target(right);
+    if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
+    script_value method_val = target.method(op_spaceship_id_);
+    if (!method_val.is_function()) { return std::nullopt; }
+    auto result = create_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+    if (!result) {
+        if (is_unwinding_) { return std::nullopt; }
+        return checked_result<bool>(result.error_value());
+    }
+    const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
+                        : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
+    if (auto answer = spaceship_rewritten(reversed_comparison(op), result.value())) { return checked_result<bool>(*answer); }
+    return std::nullopt;
+}
+
+std::optional<checked_result<script_value>> interpreter::object_spaceship_reversed_via_method(const script_value& left, const script_value& right) {
+    if (parallel_worker_) [[unlikely]] { return std::nullopt; }
+    auto target = resolve_member_target(right);
+    if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
+    script_value method_val = target.method(op_spaceship_id_);
+    if (!method_val.is_function()) { return std::nullopt; }
+    auto result = create_bound_method(right, method_val).as_function()(std::vector<script_value>{left});
+    if (!result) {
+        if (is_unwinding_) { return std::nullopt; }
+        return checked_result<script_value>(result.error_value());
+    }
+    bool nan = false;
+    if (auto sign = reversed_spaceship_sign(result.value(), nan)) { return checked_result<script_value>(make_int_fast(*sign)); }
+    if (nan) { return detail::nan_order_error<checked_result<script_value>>(); }
+    return std::nullopt;
+}
+
+// == from <=> (Dev ruling 2026-10-01): a class value whose chain declares no operator== and an applicable <=> compares as
+// (a <=> b) == 0, the left operand's first, then the right operand's operator== or <=>
+std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_method(const script_value& left, const script_value& right) {
+    if (parallel_worker_ || !left.is_object() || !right.is_object()) { return std::nullopt; }
+    const auto call = [this](const script_value& self, const script_value& method_val, const script_value& arg, bool spaceship) -> std::optional<checked_result<bool>> {
+        auto result = create_bound_method(self, method_val).as_function()(std::vector<script_value>{arg});
+        if (!result) {
+            if (is_unwinding_) { return checked_result<bool>(false); }
+            return checked_result<bool>(result.error_value());
+        }
+        const script_value& r = result.value().deref();
+        if (!spaceship) { return r.is_bool() ? std::optional<checked_result<bool>>(checked_result<bool>(r.unchecked_as_bool())) : std::nullopt; }
+        if (r.is_int()) { return checked_result<bool>(r.as_int() == 0); }
+        if (r.is_float()) { return checked_result<bool>(r.as_float() == 0.0); }
+        return std::nullopt;
+    };
+    if (auto lt = resolve_member_target(left); lt && !lt.method(eq_method_id_).is_function() && binary_operator_accepts(lt.class_def, op_spaceship_id_, right)) {
+        if (script_value m = lt.method(op_spaceship_id_); m.is_function()) { return call(left, m, right, true); }
+    }
+    if (auto rt = resolve_member_target(right)) {
+        if (script_value eq = rt.method(eq_method_id_); eq.is_function()) {
+            if (binary_operator_accepts(rt.class_def, eq_method_id_, left)) { return call(right, eq, left, false); }
+        } else if (binary_operator_accepts(rt.class_def, op_spaceship_id_, left)) {
+            if (script_value m = rt.method(op_spaceship_id_); m.is_function()) { return call(right, m, left, true); }
+        }
+    }
     return std::nullopt;
 }
 

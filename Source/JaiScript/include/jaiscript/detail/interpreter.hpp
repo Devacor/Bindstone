@@ -1225,6 +1225,9 @@ namespace jai {
         bool object_defines_custom_equality(const script_value& v) const;
         std::optional<checked_result<bool>> object_equality_via_method(const script_value& left, const script_value& right);
         std::optional<checked_result<bool>> object_inequality_via_method(const script_value& left, const script_value& right);
+        std::optional<checked_result<bool>> object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_spaceship_reversed_via_method(const script_value& left, const script_value& right);
+        std::optional<checked_result<bool>> object_spaceship_equality_via_method(const script_value& left, const script_value& right);
         std::optional<checked_result<bool>> object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~

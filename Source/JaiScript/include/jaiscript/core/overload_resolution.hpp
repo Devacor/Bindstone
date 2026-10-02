@@ -43,6 +43,55 @@ inline bool declares_unary_operator(const class_definition* def, uint64_t name_i
     return !script_declared && def && def->get_method(name_id, false).is_function();
 }
 
+// A typed parameter takes the argument with no mismatch (the scorer's rows: the class or a subclass, the same kind, int<->float)
+inline bool parameter_admits(const parameter& p, const script_value& raw) {
+    if (!p.type || p.type->type_name.empty() || p.type->type_name == "any" || p.type->base_type == script_value_type::jai_any_type) { return true; }
+    const script_value& arg = raw.deref();
+    const auto kind = arg.type();
+    if (kind == script_value_type::jai_object_type || kind == script_value_type::jai_shared_ptr_type) {
+        auto instance = const_cast<script_value&>(arg).get_class_instance();
+        auto def = instance ? instance->get_class_definition() : nullptr;
+        return def && (def->get_name() == p.type->type_name || def->is_subtype_of(p.type->type_name));
+    }
+    return kind == p.type->base_type ||
+           (kind == script_value_type::jai_int_type && p.type->base_type == script_value_type::jai_float_type) ||
+           (kind == script_value_type::jai_float_type && p.type->base_type == script_value_type::jai_int_type);
+}
+
+// The chain's binary operator `name_id` is a candidate for `arg`: the nearest script declaration has a one-argument overload
+// that takes it (C++: a candidate the argument cannot reach is not viable), or a host class's method of that name
+inline bool binary_operator_accepts(const class_definition* def, uint64_t name_id, const script_value& arg) {
+    for (const class_definition* c = def; c; c = c->get_parent().get()) {
+        const auto& overloads = c->script_method_overloads();
+        if (auto it = overloads.find(name_id); it != overloads.end()) {
+            for (const auto& d : it->second) {
+                if (arity_accepts(d->parameters, 1) && !d->parameters.empty() && parameter_admits(d->parameters[0], arg)) { return true; }
+            }
+            return false;
+        }
+    }
+    return def && def->get_method(name_id, false).is_function();
+}
+
+// A reversed comparison (Dev ruling 2026-10-01): a < b answered by b's <=> is (b <=> a) > 0, and so on
+inline token_type reversed_comparison(token_type op) {
+    switch (op) {
+        case token_type::less: return token_type::greater;
+        case token_type::less_equal: return token_type::greater_equal;
+        case token_type::greater: return token_type::less;
+        default: return token_type::less_equal;
+    }
+}
+
+// 0 <=> r for a reversed a <=> b answered by b's <=>; nullopt for a result that is no number
+inline std::optional<script_int> reversed_spaceship_sign(const script_value& result, bool& nan) {
+    const script_value& r = result.deref();
+    nan = false;
+    if (r.is_int()) { const script_int v = r.as_int(); return v < 0 ? 1 : v > 0 ? -1 : 0; }
+    if (r.is_float()) { const double v = r.as_float(); if (v != v) { nan = true; return std::nullopt; } return v < 0 ? 1 : v > 0 ? -1 : 0; }
+    return std::nullopt;
+}
+
 // C++20 comparison rewriting (Dev ruling 2026-10-01): with no operator< in the chain, a < b is (a <=> b) < 0, and so on for
 // <= > >=; the left operand's operator<=> result compares with zero (a NaN compares false), anything but a number is no answer
 inline std::optional<bool> spaceship_rewritten(token_type op, const script_value& result) {

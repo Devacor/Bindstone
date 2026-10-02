@@ -2639,6 +2639,48 @@ private:
 		comparison_rewriting();
 		host_call_failure_routes();
 		host_global_references();
+		spaceship_everywhere();
+	}
+
+	void spaceship_everywhere() {
+		test("a_right_operand_spaceship_answers_reversed_comparisons", [this]() {
+			// Dev ruling 2026-10-01: with no operator for the left operand, a right operand whose chain declares an applicable
+			// <=> answers: 5 < v is 0 < (v <=> 5), 5 <=> v is 0 <=> (v <=> 5); an overload that cannot take the left operand
+			// is no candidate, so the builtin text stands
+			expect("reversed", R"(
+				class V { int n = 0; V(int x) { n = x; } int operator<=>(V o) { return n - o.n; } int operator<=>(int k) { return n - k; } }
+				class S { int n = 0; S(int x) { n = x; } int operator<=>(S o) { return n - o.n; } }
+				class Plain { int n = 1; }
+				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				string rev = "" + (5 < V(7)) + " " + (5 <= V(5)) + " " + (5 > V(7)) + " " + (9 >= V(7)) + " " + (5 <=> V(7)) + " " + (9 <=> V(7)) + " " + (7 <=> V(7));
+				string fwd = "" + (V(7) > 5) + " " + (V(7) <=> 5);
+				string loops = "";
+				for (int i = 0; i < V(3); i += 1) { loops += to_string(i); }
+				rev + "|" + fwd + "|" + loops + "|" + t([]() { return 5 < S(1); }) + "|" + t([]() { Plain p; return p < V(1); }) + "|" + t([]() { return 5 <=> S(1); });
+			)", "true true false true -1 1 0|true 2|012|Invalid operands for < operator|Invalid operands for < operator|Invalid operands for <=> operator", check_mode::warn);
+		});
+		test("equality_comes_from_spaceship_when_no_operator_equal_is_declared", [this]() {
+			// Dev ruling 2026-10-01: == and != come from <=> ((a <=> b) == 0) for a class value whose chain declares <=> and no
+			// operator==, the left operand's first, then the right one's; a declared operator== wins, x == null stays a null
+			// test, a class without <=> compares memberwise, an overload that cannot take the other operand is no candidate
+			expect("== from <=>", R"(
+				class Z { int n = 0; Z(int x) { n = x; } int operator<=>(Z o) { return (n % 10) - (o.n % 10); } }
+				class E { int n = 0; E(int x) { n = x; } bool operator==(E o) { return false; } int operator<=>(E o) { return 0; } }
+				class Any { int k = 0; int operator<=>(var o) { return 0; } }
+				class Strict { int k = 0; int operator<=>(Strict o) { return 0; } }
+				class Plain { int n = 1; }
+				class M { int n = 0; M(int x) { n = x; } }
+				var nul = null;
+				string z = "" + (Z(13) == Z(3)) + " " + (Z(13) != Z(3)) + " " + (Z(13) == Z(4)) + " " + (Z(13) != Z(4)) + " " + (Z(1) == nul) + " " + (Z(1) != nul);
+				string declared = "" + (E(1) == E(1)) + " " + (E(1) != E(1));
+				Plain p; Any a; Strict s;
+				string reversed = "" + (p == a) + " " + (p != a) + " " + (a == p) + " " + (p == s) + " " + (s == p);
+				string plain = "" + (M(1) == M(1)) + " " + (M(1) == M(2));
+				array<var> xs = [Z(13), Z(24)]; array<var> ys = [Z(3), Z(4)];
+				string nested = "" + (xs == ys) + " " + (xs != ys);
+				z + "|" + declared + "|" + reversed + "|" + plain + "|" + nested;
+			)", "true false false true false true|false true|true false true false false|true false|true false", check_mode::warn);
+		});
 	}
 
 	// "<kind>:<key>" when the text holds the key, else "<kind>:<text>"
@@ -2829,12 +2871,13 @@ private:
 				"" + (W(5) < W(1)) + " " + (W(5) > W(1)) + " " + (W(1) > W(5)) + " " + (W(1) <= W(5)) + "|" + (C(5) >= C(1)) + " " + (C(5) > C(1));
 			)", "true true false true|false true");
 		});
-		test("equality_is_not_synthesized_from_spaceship", [this]() {
-			// C++20: == never comes from a user operator<=>; without operator== a class instance compares memberwise
-			expect("no == from <=>", R"(
+		test("spaceship_equality_replaces_the_memberwise_default", [this]() {
+			// Dev ruling 2026-10-01 (<=> as much as possible): a class with <=> and no operator== compares by (a <=> b) == 0,
+			// never fieldwise
+			expect("== from <=>", R"(
 				class Z { int n = 0; Z(int x) { n = x; } int operator<=>(Z o) { return 0; } }
 				"" + (Z(1) == Z(2)) + " " + (Z(1) != Z(2)) + " " + (Z(1) <= Z(2)) + " " + (Z(1) >= Z(2)) + " " + (Z(3) == Z(3)) + " " + (Z(1) <=> Z(2));
-			)", "false true true true true 0");
+			)", "true false true true true 0");
 		});
 		test("inequality_rewrites_from_equality_and_a_declared_inequality_wins", [this]() {
 			// C++20: a != b is !(a == b) through operator==; a declared operator!= is asked first, where operator== would be

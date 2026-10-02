@@ -116,6 +116,7 @@ is the writability question.
 | script constructor overloads | `No constructor found with matching arguments` | `No constructor of 'Vec2' takes (string)` |
 | a class without a constructor called with arguments | `Default constructor takes no arguments` | an aggregate (every class in the chain constructor-less, no private or reference instance field) takes one initializer per field: `Too many initializers for 'Bare': it has 1 field, got 2`; any other class: `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same texts when it knows the arguments) |
 | `: Base(...)` / ancestor initializer | `No matching constructor for ancestor class` | `No constructor of 'Base' takes (string)` |
+| an empty or implied `super()` (a constructor naming no initializer, a class declaring no constructor) over a base without a default constructor | (the base was never constructed) | `Base 'Cat' has no default constructor; call super(...)` (the strict checker reports it at load over script bases) |
 | `: this(...)` delegation | `No matching constructor found for this() delegation` | `No constructor of 'Vec2' takes (string)` |
 | C++ method overloads by count | `Method argument count mismatch: no overload accepts this number of arguments` | `No overload of 'dot' takes (int, string)` |
 | C++ method overloads by type | `No method overload matches the argument types` | `No overload of 'dot' takes (int, string)` |

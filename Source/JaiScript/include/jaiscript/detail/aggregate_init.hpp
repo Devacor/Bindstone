@@ -111,6 +111,16 @@ inline error_propagator no_default_constructor(uint64_t base_id) {
     return {make_error_code(runtime_error_code::no_constructor_found), "Base '{0}' has no default constructor; call super(...)", base_id, 0};
 }
 
+// A host class whose registered constructors all take arguments (the checker's host surface knows their arities)
+inline bool host_lacks_default_constructor(engine* eng, const std::string& class_name) {
+    std::vector<engine::host_overload_signature> signatures;
+    if (!eng || !eng->host_function_signatures(class_name, signatures)) { return false; }
+    for (const auto& signature : signatures) {
+        if (signature.arity == 0 || signature.arity == SIZE_MAX) { return false; }
+    }
+    return true;
+}
+
 inline bool is_constructor_miss(std::error_code ec) {
     return ec == make_error_code(runtime_error_code::no_constructor_found) || ec == make_error_code(runtime_error_code::argument_count_mismatch);
 }

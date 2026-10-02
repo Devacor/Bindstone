@@ -462,13 +462,9 @@ public:
             // Dev's shape: a base-typed array holding bound instances AND hybrid subclasses, handed over by the fast path
             check_eq((int64_t)6, eng->execute("class Sub : Creature { int extra = 1; Sub() : super() {} } array<Creature> mixed = [Creature(), Sub()]; sum_hp(mixed)").as_int());
             check_eq((int64_t)26, eng->execute("class Sub2 : Creature { int extra = 1; Sub2() : super() {} } array<Creature> mixed = [Creature(), Sub2()]; heal_all(mixed); sum_hp(mixed)").as_int());
-            // a hybrid whose constructor never called super() has no C++ base yet: the
-            // conversion fails with a READABLE text (the result message used to be a view
-            // of the dead exception's what() - freed memory)
-            std::string msg;
-            try { eng->execute("class NoBase : Creature { int extra = 1; NoBase() {} } array<NoBase> nb = [NoBase()]; count(nb)"); }
-            catch (const std::exception& ex) { msg = ex.what(); }
-            check_true(msg.find("_cpp_object") != std::string::npos, "hybrid without super() reports the missing C++ object by name: " + msg);
+            // a hybrid default-constructs its C++ base when its constructor names no super(...), or when it declares none
+            check_eq((int64_t)1, eng->execute("class NoBase : Creature { int extra = 1; NoBase() {} } array<NoBase> nb = [NoBase()]; count(nb)").as_int(),
+                     "a constructor without super() constructs its C++ base");
             check_eq((int64_t)1, eng->execute("class Plain : Creature { int extra = 1; } array<Plain> ps = [Plain()]; count(ps)").as_int(), "a constructor-less hybrid default-constructs its C++ base");
         });
 

@@ -164,7 +164,7 @@
       "patterns": [
         {
           "name": "keyword.control.jaiscript",
-          "match": "\\b(if|else|while|for|break|continue|return|try|catch|throw|switch|case|default|fallthrough|yield)\\b"
+          "match": "\\b(if|else|do|while|for|parallel_for|break|continue|return|try|catch|throw|switch|case|default|fallthrough|yield)\\b"
         }
       ]
     },
@@ -176,7 +176,7 @@
         },
         {
           "name": "storage.modifier.jaiscript",
-          "match": "\\b(const|static|override|public|private|protected|new|cast|import|include|extern)\\b"
+          "match": "\\b(const|static|inline|nocopy|override|public|private|protected|new|cast|import|include|extern)\\b"
         },
         {
           "name": "meta.attribute.jaiscript",
@@ -187,7 +187,7 @@
         },
         {
           "name": "storage.type.jaiscript",
-          "match": "\\b(int|float|bool|char|string|void|map|array|weak_ptr|shared_ptr|auto|var)\\b"
+          "match": "\\b(int|float|bool|char|string|void|map|array|weak_ptr|shared_ptr|auto|var|let)\\b"
         }
       ]
     },
@@ -222,8 +222,16 @@
           "match": "<=>"
         },
         {
+          "name": "storage.type.function.arrow.jaiscript",
+          "match": "=>"
+        },
+        {
           "name": "keyword.operator.assignment.compound.jaiscript",
-          "match": "(\\+=|-=|\\*=|/=|%=)"
+          "match": "(\\?\\?=|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=)"
+        },
+        {
+          "name": "keyword.operator.null-coalescing.jaiscript",
+          "match": "\\?\\?"
         },
         {
           "name": "keyword.operator.comparison.jaiscript",

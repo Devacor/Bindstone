@@ -185,7 +185,8 @@ private:
 				"class C { function f = null; void bad() { f = 42; } }",
 				"class C { static function f = null; } C::f = 42;",
 				"namespace N { function f = 42; }",
-				"class A {} function f = A();"
+				"class A {} function f = A();",
+				"void g(function cb) {} g(42);"
 			};
 			for (const char* source : sources) {
 				auto eng = make_engine();
@@ -218,7 +219,6 @@ private:
 				"auto f = 42; f = 43;",
 				"function f; f = []() { return 1; };",
 				"namespace N { function f = []() { return 1; }; }",
-				"void g(function cb) {} g(42);",
 				"class C { function f = null; } C c = C(); c.f = []() { return 1; }; function copy = c.f;",
 				"function f = [](int x) -> int { return x; }; f(\"bad\");"
 			};
@@ -249,7 +249,8 @@ private:
 			eng->static_checking(check_mode::off);
 			check_eq(std::string("Cannot initialize 'r' (declared int&) with string"),
 			         eng->execute("string s = \"s\"; var c = \"\"; try { int& r = s; } catch (e) { c = e; } c;").as_string());   // a reference must reference (Dev ruling 2026-09-30): the binding raises
-			check_eq(script_int{42}, eng->execute("function f = 42; f;").as_int());
+			check_eq(std::string("Cannot initialize 'f' (declared function) with int"),
+			         eng->execute("var c = \"\"; try { function f = 42; } catch (e) { c = e; } c;").as_string());   // a function slot takes a callable or null (std::function's rule)
 			check_eq(script_int{1}, eng->execute(
 				"class A {} class B {} shared_ptr<B> owner = new B(); weak_ptr<B> wb = owner; weak_ptr<A> wa = wb; 1;").as_int());
 		});

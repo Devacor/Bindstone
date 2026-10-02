@@ -242,8 +242,8 @@ parameter = type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creat
           | ":" IDENTIFIER ("=" expression)?           // auto shorthand: :x (like `auto x`)
 
 // Variable declarations (reference declarations alias the initializer's storage).
-// `function name = expr;` / `function name;` declares a function-typed variable
-// (auto semantics); also legal as a class field and in namespaces.
+// `function name = expr;` / `function name;` declares a callable-or-null variable;
+// also legal as a class field and in namespaces.
 variableDeclaration = type "&"? IDENTIFIER ("=" expression)? ";"
                     | type IDENTIFIER "{" argumentList? "}" ";"      // brace construction
                     | "function" IDENTIFIER ("=" expression)? ";"    // function-typed variable

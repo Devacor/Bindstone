@@ -2077,6 +2077,17 @@ public:
             check_both("function f() -> string { var v = 1.5; float& q = v; q = 2; q += 1; return type_of(v) + to_string(v); } f()", "float3.0", "a slot-resident float& over a var holding a float");
         });
 
+        test("a_function_slot_takes_only_a_callable_or_null", [this, check_both]() {
+            // a std::function's rule at every boundary, a null slot included: a callable or null, anything else raises naming `function`
+            check_both("function cb; var v = 5; var c = \"\"; try { cb = v; c = \"stored\"; } catch (e) { c = e; } c", "Cannot assign int to 'cb' (declared function)", "a null slot");
+            check_both("function cb = []() { return 1; }; var v = 5; var c = \"\"; try { cb = v; c = \"stored\"; } catch (e) { c = e; } c", "Cannot assign int to 'cb' (declared function)", "a slot holding a lambda");
+            check_both("class K { function f; } K k = K(); var v = 5; var c = \"\"; try { k.f = v; c = \"stored\"; } catch (e) { c = e; } c", "Cannot assign int to field 'f' of K (declared function)", "a field");
+            check_both("function g(function f) { return 1; } var v = 5; var c = \"\"; try { g(v); c = \"passed\"; } catch (e) { c = e; } c", "Cannot pass int to parameter 'f' of 'g' (declared function)", "a parameter");
+            check_both("function h() -> string { function local; var w = 7; string r = \"\"; try { local = w; r = \"stored\"; } catch (e) { r = e; } return r; } h()", "Cannot assign int to 'local' (declared function)", "a function's local");
+            check_both("function cb; cb = []() { return 3; }; cb = null; cb = []() { return 4; }; to_string(cb())", "4", "null resets and a callable stores again");
+            check_both("function t = to_string; t(5)", "5", "a host function");
+        });
+
         test("a_compound_takes_the_value_of_a_subscript_right_side", [this, check_both]() {
             // every compound target takes the value an element or map read yields (the read arrives as a reference)
             check_both("class C { float f = 1.0; } C o = C(); array<float> e = [0.5, 1.5]; o.f += e[1]; to_string(o.f)", "2.5", "a field");

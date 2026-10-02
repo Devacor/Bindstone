@@ -222,7 +222,7 @@ print(h.resume());</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function setup() : super(1) { return 3; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:19: Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors</code></pre></div>
 <h2 id="function-typed-variables">Function-typed variables and fields<a class="hlink" href="#function-typed-variables" aria-label="link">&#8203;</a></h2>
-<p><code>function name = expr;</code> declares a variable that holds a callable or null (the checker rejects any other value at load: <code>cannot assign 'int' to 'cb' declared 'function'</code>); <code>function name;</code> starts null for later assignment. Both work at top level, inside function bodies, in namespaces, and as class fields:</p>
+<p><code>function name = expr;</code> declares a variable that holds a callable or null (the checker rejects any other value at load: <code>cannot assign 'int' to 'cb' declared 'function'</code>, and a value it cannot see raises at the store: <code>Cannot assign int to 'cb' (declared function)</code>); <code>function name;</code> starts null for later assignment. Both work at top level, inside function bodies, in namespaces, and as class fields:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function scale = [](int v) { return v * 10; };
 print(scale(4));
 

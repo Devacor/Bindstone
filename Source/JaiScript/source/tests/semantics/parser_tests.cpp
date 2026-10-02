@@ -16,10 +16,9 @@ public:
     
     void forge_tests() override {
         test("function_spelling_is_kept_for_the_checker", [this]() {
-            // `function f = expr;` parses as an auto slot (the runtime slot is dynamic, like a
-            // function-typed parameter) that remembers its spelling at top level, in a body and
-            // as a field; the flag rides the jaibite so a re-check of a loaded bite sees it;
-            // `auto` and `var` declarations do not carry it
+            // `function f = expr;` parses as a callable-or-null slot that remembers its spelling at top
+            // level, in a body and as a field; the flag rides the jaibite so a re-check of a loaded bite
+            // sees it; `auto` and `var` declarations do not carry it
             auto eng = make_engine();
             auto* symbolizer = eng->get_symbolizer();
             const std::string code =
@@ -42,7 +41,9 @@ public:
                 check_false(decl_flag(decls[1]), std::string(label) + " auto g");
                 check_false(decl_flag(decls[2]), std::string(label) + " var h");
                 check_true(decl_flag(decls[3]), std::string(label) + " function later;");
-                check_true(!static_cast<const variable_decl*>(decls[0].get())->type, std::string(label) + " the slot stays auto");
+                const auto& slot_type = static_cast<const variable_decl*>(decls[0].get())->type;
+                check_true(slot_type && slot_type->base_type == script_value_type::jai_function_type && slot_type->type_params.empty(),
+                           std::string(label) + " the slot is the callable type");
                 auto* fn = static_cast<const function_decl*>(decls[4].get());
                 check_true(fn->body && fn->body->declarations.size() == 2 && decl_flag(fn->body->declarations[0]) &&
                            !decl_flag(fn->body->declarations[1]), std::string(label) + " body local");

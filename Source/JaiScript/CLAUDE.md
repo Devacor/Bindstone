@@ -531,8 +531,10 @@ engine stays usable", not by `check_throws`.
   statement (nested function/lambda bodies keep the enclosing mode); innermost wins, the engine
   mode is the default, off ignores them, the runtime never changes. `.jaibite` version 11.
 - **Declaration spellings the parser keeps for the checker**: `function f = expr;` / `function f;` (top level, body, field)
-  is an auto slot at runtime (the same as a function-typed parameter) that carries `variable_decl::function_spelling`,
-  so the strict checker can hold the slot to callables and null without the runtime changing; `ClassName& name = expr;` and
+  is the callable-or-null slot type (`type_info::make_callable`, spelled `function`; the same type a `function` parameter,
+  return or element takes): every store, a null slot's included, takes a callable or null and anything else raises
+  `Cannot assign int to 'cb' (declared function)` (a std::function's rule; `.jaibite` version 40); it also carries
+  `variable_decl::function_spelling` for the checker; `ClassName& name = expr;` and
   `ClassName& name;` at statement level are reference declarations (the same lookahead that reads `ClassName& name(` as a
   reference-return function; C++: whatever can be a declaration is one). `.jaibite` version 15.
 - **A namespace is a scope** (`docs/namespaces.md`): a namespace variable is one cell in the namespace's own

@@ -4541,6 +4541,37 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + run, "119|199|3|3", "the container before its index");
 			both(prelude + run, "119|199|3|3", "the container before its index, proofs off", false);
 		});
+		test("a_graft_statements_container_guard_takes_a_computed_index", [this]() {
+			// GLOOM's build_strip (`s.push(WALLT[tbase + tex_tone(...)])`): the container a graft statement reads ahead of the graft is the
+			// guard's always form whatever the index's shape, so the read keeps the name as its container and the loop runs as a block; a graft
+			// that rebinds the container leaves the read on the array the name held before it
+			const std::string prelude =
+				"array<int> WALLT = [3, 4, 5, 6, 7, 8, 9, 10];\n"
+				"function tex_tone(int kind, int tx, int ty) -> int { if (kind == 1) { int tone = ((tx >> 2) + (ty >> 2)) & 1; if ((ty & 7) == 7) { tone = 2; } return tone; } return (tx >> 3) & 1; }\n"
+				"function build_strip(int kind, int tx) -> array<int> { int tbase = kind * 3; array<int> s = []; for (int ty = 0; ty < 32; ++ty) { s.push(WALLT[tbase + tex_tone(kind, tx, ty)]); } return s; }\n"
+				"function strip_sum(int tx) -> int { array<int> s = build_strip(1, tx); int t = 0; for (int i = 0; i < s.size(); ++i) { t = t + s[i]; } return t; }\n"
+				"array<int> T2 = [1, 2, 3, 4];\n"
+				"array<int> U2 = [50, 60, 70, 80];\n"
+				"int swap_g(int k) { T2 = U2; return k; }\n"
+				"int swapread() { return T2[1 + swap_g(0)] + 0; }\n";
+			const std::string run = "to_string(strip_sum(5)) + \"|\" + to_string(strip_sum(12));";
+			both(prelude + run, "", "a graft statement's container guard over a computed index");
+			both(prelude + run, "", "a graft statement's container guard over a computed index, proofs off", false);
+			both(prelude + "to_string(swapread()) + \"|\" + to_string(T2[1]);", "2|60", "a graft that rebinds the container leaves the read on the old array");
+			const std::string l = listing_run(prelude + "strip_sum(5);");
+			const size_t at = l.find("== build_strip ");
+			const std::string bl = at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at);
+			check_true(bl.find("-- inlined tex_tone") != std::string::npos, "tex_tone grafts: " + bl);
+			check_true(bl.find("-- cell loop") != std::string::npos && bl.find("-- open loop") == std::string::npos, "build_strip's loop runs as a block: " + bl);
+			if (!engine::miss_injection_available()) { return; }
+			const std::string want = run_on(false, prelude + run);
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(want, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

@@ -197,6 +197,7 @@ namespace jai {
                     return "weak_ptr<" + elem + ">";
                 }
                 case script_value_type::jai_function_type: {
+                    if (type_params.empty()) { return "function"; }   // the `function` spelling: any callable or null
                     std::string ret = return_type() ? return_type()->canonical_name() : "void";
                     std::string args_str = "(";
                     auto args = arg_types();
@@ -447,6 +448,14 @@ namespace jai {
         }
 
         // Function<ReturnType(Args...)>
+        // The `function` spelling (a slot taking any callable or null, a std::function's rule)
+        static type_info make_callable(string_symbolizer& symbolizer) {
+            type_info info(script_value_type::jai_function_type);
+            info.type_name = "function";
+            info.id = symbolizer.intern(info.canonical_name());
+            return info;
+        }
+
         static type_info make_function(string_symbolizer& symbolizer, type_info_ptr return_type, std::vector<type_info_ptr> arg_types) {
             type_info info(script_value_type::jai_function_type);
             info.type_params.push_back(return_type);

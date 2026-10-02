@@ -1818,9 +1818,9 @@ checked_result<type_info_ptr> parser::parse_type() {
         return store_type_info(type_info::make_any(*symbolizer_));
     }
 
-    // Handle function keyword
+    // `function`: a callable-or-null slot (a std::function's rule) at every boundary
     if (match(token_type::function_keyword)) {
-        return type_info_ptr(nullptr);
+        return store_type_info(type_info::make_callable(*symbolizer_));
     }
 
     // Primitive types
@@ -2875,9 +2875,8 @@ checked_result<declaration_ptr> parser::declaration_body() {
     // (`function (` falls through to expression parsing — anonymous function expression)
     if (check(token_type::function_keyword) &&
         !(current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren)) {
-        // `function name = expr;` / `function name;` declares a function-typed VARIABLE
-        // (parse_type maps `function` to auto, matching function-typed parameters and the
-        // namespace path); `function name(` stays a function declaration.
+        // `function name = expr;` / `function name;` declares a callable-or-null VARIABLE
+        // (the parameter's and the namespace path's type); `function name(` stays a function declaration.
         if (current_ + 2 < stream_->size() &&
             (*stream_)[current_ + 1].type == token_type::identifier &&
             ((*stream_)[current_ + 2].type == token_type::equal ||
@@ -4295,10 +4294,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                    (*stream_)[current_ + 1].lexeme != "operator" &&
                    ((*stream_)[current_ + 2].type == token_type::equal ||
                     (*stream_)[current_ + 2].type == token_type::semicolon)) {
-            // `function name = expr;` / `function name;` is a function-typed FIELD
-            // (auto semantics, same as top level); fall through to the regular member
-            // branch whose parse_type maps `function` to auto. `function operator=` is
-            // excluded - that stays an operator method.
+            // `function name = expr;` / `function name;` is a callable-or-null FIELD (the top level's type);
+            // `function operator=` stays an operator method.
             advance(); // consume 'function'
             token name = advance();
             expression_ptr init = nullptr;
@@ -4315,7 +4312,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 synchronize_class_member(class_open_index);
                 continue;
             }
-            auto var_decl = std::make_shared<variable_decl>(name.location, nullptr, name.lexeme, get_symbol_id(name), init);
+            auto var_decl = std::make_shared<variable_decl>(name.location, store_type_info(type_info::make_callable(*symbolizer_)), name.lexeme, get_symbol_id(name), init);
             var_decl->function_spelling = true;
             member = var_decl;
         } else if (match(token_type::function_keyword) || (member_is_coroutine && bare_coroutine_head())) {
@@ -4378,6 +4375,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             }
             type_info_ptr type = std::move(type_result.value());
             if (reference_method_head()) { type = wrap_reference_return_type(std::move(type)); }   // float& px() { ... }
+            const type_info_ptr method_return_type = function_spelling ? nullptr : type;
 
             if (check(token_type::identifier) && reject_using_name(peek(), "member")) {
                 synchronize_class_member(class_open_index);
@@ -4434,7 +4432,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                     if (match(token_type::arrow)) {
                         if (check(token_type::left_brace)) {
                             // -> { adds no information: keep the leading type
-                            func->return_type = type;
+                            func->return_type = method_return_type;
                         } else {
                             auto return_type_result = parse_type();
                             if (!return_type_result) {
@@ -4442,15 +4440,15 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                                 continue;
                             }
                             func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
-                            if (type && func->return_type && func->return_type->id != type->id) {
-                                report_error("Conflicting return types '" + type->type_name + "' and '" +
+                            if (method_return_type && func->return_type && func->return_type->id != method_return_type->id) {
+                                report_error("Conflicting return types '" + method_return_type->type_name + "' and '" +
                                              func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
                                 synchronize_class_member(class_open_index);
                                 continue;
                             }
                         }
                     } else {
-                        func->return_type = type; // Use declared type
+                        func->return_type = method_return_type;
                     }
 
                     // Check for override keyword after parameters (alternative position)
@@ -4698,7 +4696,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 // Function declaration
                 auto func = std::make_shared<function_decl>(member_name.location, member_name.lexeme);
                 func->name_id = get_symbol_id(member_name);
-                func->return_type = type;
+                func->return_type = function_spelling ? nullptr : type;
 
                 // Parse parameters
                 auto params_result = parse_parameter_list();
@@ -4727,7 +4725,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                             continue;
                         }
                         func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
-                        if (type && func->return_type && func->return_type->id != type->id) {
+                        if (!function_spelling && type && func->return_type && func->return_type->id != type->id) {
                             report_error("Conflicting return types '" + type->type_name + "' and '" +
                                          func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
                             synchronize();
@@ -5086,7 +5084,8 @@ checked_result<declaration_ptr> parser::bare_coroutine_declaration() {
 }
 
 checked_result<declaration_ptr> parser::function_declaration() {
-    JAISCRIPT_TRY_ASSIGN(type_info_ptr return_type, parse_type());
+    type_info_ptr return_type;
+    if (!match(token_type::function_keyword)) { JAISCRIPT_TRY_ASSIGN(return_type, parse_type()); }   // `function f(...)` declares no return type
     return_type = wrap_reference_return_type(return_type);
 
     if (check(token_type::identifier) && reject_using_name(peek(), "function")) { return make_error_code(parse_error_code::unexpected_token); }

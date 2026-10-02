@@ -2878,7 +2878,7 @@ namespace detail { struct argument_capture_storage; }
             case kind_t::obj:
                 return view.raw_storage_index() == script_value::TYPEID_OBJECT &&
                        view.unchecked_object_handle().get() == objs_[i].handle.get() &&
-                       view.get_type_info() == objs_[i].tag;
+                       view.type_info_raw() == objs_[i].tag.get();
             case kind_t::str:
                 return view.raw_storage_index() == script_value::TYPEID_STRING &&
                        view.unchecked_string_handle().get() == strs_[i].get();

@@ -523,6 +523,10 @@ namespace jai::vm {
             std::vector<const script_value*> site_member;   // per copy instruction: a member read site's field value, resolved at entry (the instance's plain field)
             std::vector<class_definition*> site_member_class;   // per copy instruction: the class the member site's field slot was probed for (an alias site: per element; nullptr = probe)
             std::vector<uint32_t> site_member_slot;              // per copy instruction: that class's field slot
+            // per copy instruction of a nested member site (`p.pos.x`): the prefix field's slot for a (class, method epoch); sized when such a
+            // site first resolves, cleared at every entry (another loop's site may sit at the same offset)
+            struct prefix_slot { const class_definition* cd = nullptr; uint64_t epoch = 0; uint32_t slot = UINT32_MAX; };
+            std::vector<prefix_slot> site_prefix;
             // how each site's container is reached (recorded by the resolution): its frame slot, or its environment binding; a landing
             // after a call re-checks the node's identity through that path instead of resolving again. An environment cell's binding
             // and the environment and epoch at entry: while both hold, the bindings are re-read directly (the lookup cache's own rule)
@@ -1851,6 +1855,7 @@ namespace jai::vm {
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
         op_status exec_call_temp(frame& f, const vm_instruction& ins);   // a call's result into a compiler temp (op_call_temp)
         op_status exec_member_temp(frame& f, const vm_instruction& ins);
+        op_status local_member_receiver(frame& f, const member_expr* member, uint32_t slot, script_value& out);   // a member site's receiver from its base slot (a nested site's prefix read)
         op_status exec_set_member_fused(frame& f, const vm_instruction& ins);
         op_status exec_math_temp(frame& f, const vm_instruction& ins);
         op_status exec_math_alias(frame& f, const vm_instruction& ins);
@@ -2017,7 +2022,8 @@ namespace jai::vm {
         op_status exec_cells_resume(frame& f, const vm_instruction& ins);
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
-        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site);
+        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site, size_t off = SIZE_MAX);
+        class_instance* cells_member_prefix(frame& f, class_instance* inst, const member_expr* expr, size_t off);   // a nested member site's prefix instance (`p.pos` of `p.pos.x`); inst itself for a direct site; nullptr = the general form
         const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
         bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again
@@ -2229,7 +2235,7 @@ namespace jai::vm {
         op_status exec_get_static(frame& f, const vm_instruction& ins);
         op_status exec_set_member(frame& f, const vm_instruction& ins);
         op_status exec_set_static(frame& f, const vm_instruction& ins);
-        op_status exec_member_compound(frame& f, const vm_instruction& ins);
+        op_status exec_member_compound(frame& f, const vm_instruction& ins, size_t ins_index);   // ins_index: the member_ic row (ins may be a temporary)
         op_status exec_call_method(frame& f, const vm_instruction& ins);
         op_status exec_new(frame& f, const vm_instruction& ins);
         op_status exec_class_decl(frame& f, const vm_instruction& ins);

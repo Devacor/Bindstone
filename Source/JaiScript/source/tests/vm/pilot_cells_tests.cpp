@@ -157,6 +157,33 @@ public:
 	}
 
 	void forge_tests() override {
+		test("nested_object_fields_close_scalar_update_loops", [this]() {
+			const std::string listing = listing_run(R"(
+				class Position { float x = 1.0; }
+				class Item { Position pos = Position(); Position vel = Position(); }
+				void update(array<Item>& items) {
+					for (auto& item : items) { item.pos.x = item.pos.x + item.vel.x; }
+				}
+				array<Item> items = [Item(),Item()]; update(items);
+			)");
+			check_true(listing.find("C_MLOAD") != std::string::npos, "nested scalar reads use cell member sites");
+			check_true(listing.find("C_MSTORE") != std::string::npos, "nested scalar writes use cell member sites");
+			check_true(listing.find("-- open loop") == std::string::npos, "the update loop closes");
+		});
+		test("typed_class_references_close_with_guarded_rebinding", [this]() {
+			const std::string code = R"(
+				class Item { int n = 1; }
+				int collect(array<Item>& input) {
+					int total = 0;
+					for (int i=0; i<2; ++i) { Item& item = input[i]; total += item.n; }
+					return total;
+				}
+				array<Item> items = [Item(), Item()]; collect(items);
+			)";
+			const std::string listing = listing_run(code);
+			check(listing.find("C_REBIND") != std::string::npos, "typed class reference stays in the cell loop");
+			check(listing.find("throw:") == std::string::npos, "guarded loop executes successfully");
+		});
 		test("manifest_is_the_same_across_engines_and_names_no_runtime_state", [this]() {
 			// row 125: two engines intern different ids for the same names; the manifest names symbols by spelling
 			const std::string src = "float f = 1.0000001; function run() { int s = 0; int i = 0; while (i < 10) { s = s + i * 2; i = i + 1; } return s; } print(to_string(run()) + to_string(f));";

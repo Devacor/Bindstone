@@ -62,7 +62,7 @@ namespace jai::vm {
         op_super,           // push 'this' for super:: access (distinct error text)
         op_from_this,       // a=1 weak_from_this / 0 shared_from_this, b=symbol index (name for errors)
         op_null_guard,      // a=target; if top derefs to null, replace top with null and jump
-        op_get_member,      // a=node index (member_expr); pops object, pushes member/bound method
+        op_get_member,      // a=node index (member_expr); b=0 pops object, b=slot+1 reads that local; pushes member/bound method
         op_get_static,      // a=node index (member_expr with ::); pushes static member
         op_set_member,      // a=node index, b=assignment_expr::static_store_proof; stack [value, object] -> pushes value
         op_set_static,      // a=node index; stack [value] -> pushes value

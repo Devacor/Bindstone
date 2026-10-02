@@ -86,6 +86,7 @@ std::string type_info::to_string() const {
 }
 
 bool type_info::equals(const type_info& other) const {
+    if (this == &other) return true;
     if (base_type != other.base_type) {
         return false;
     }

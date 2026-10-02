@@ -118,6 +118,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				out << " argc=" << ins.a << " site=" << ins.b << " kind=" << (ins.c & 15u) << " inline=" << (ins.c >> 4);
 				break;
 			case opcode::op_get_member:
+				out << " node=" << ins.a;
+				if (ins.b != 0) { out << " base_slot=" << ins.b - 1; }
+				break;
 			case opcode::op_get_static:
 			case opcode::op_set_member:
 			case opcode::op_set_static:

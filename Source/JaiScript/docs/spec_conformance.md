@@ -17,6 +17,15 @@ and no test pins a reading of it.
 
 ## The suites
 
+- The typed VM performance regressions are covered by `typed_class_element_aliases_keep_admission_and_store_constraints`,
+  `typed_handle_parameter_binding_preserves_identity_and_escape`, `cached_scalar_field_stores_obey_retypes_and_accessors`,
+  `typed_element_reads_observe_live_storage`, `local_member_reads_pin_getter_receivers`,
+  `nested_member_regions_preserve_reads_stores_and_callbacks`, and
+  `inline_float_parse_preserves_fallback_and_text_contract` in Spec Conformance.
+  They check binding and store constraints, escaped references and handle identity, cache invalidation after class changes,
+  live array replacement and removal, and parsing/fallback evaluation. Cell Loops also checks that guarded class references
+  retain `C_REBIND` lowering and that nested object fields retain `C_MLOAD`/`C_MSTORE` lowering. These are semantic and
+  code-generation checks; workload timings are recorded separately.
 - `source/tests/semantics/spec_conformance_tests.cpp`, suite "Spec Conformance": one group per
   specification area (assignment values, declarations and constructors, returns and copies,
   memberwise equality, map keys, casts, catch variables, namespaces, utf8 caches, typed

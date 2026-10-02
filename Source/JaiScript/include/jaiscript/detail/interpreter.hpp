@@ -878,8 +878,6 @@ namespace jai {
 
         // Call depth tracking for recursion limit
         int current_call_depth_ = 0;
-        // A call below the cap that finds the native stack low continues on a fresh segment
-        detail::native_stack_segments stack_segments_;
 
         // Execution budget state (see execution_budget()/arm_execution_deadline above)
         std::chrono::nanoseconds execution_budget_{std::chrono::seconds(5)};

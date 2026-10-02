@@ -115,7 +115,7 @@ is the writability question.
 | host function overloads (`engine.cpp` dispatchers) | `No matching overload found for 'f' with <symbol#2> arguments` (the count was passed as a symbol id) | `No overload of 'f' takes (int, string)` |
 | host `[]` overloads | `No matching overload found for '[]' with <symbol> arguments` | `No overload of '[]' takes (string)` |
 | namespace function overloads | `No matching overload in namespace 'ns' for <symbol> arguments` | `No overload of 'f' takes (int)` |
-| script constructor overloads | `No constructor found with matching arguments` | `No constructor of 'Vec2' takes (string)`; when no overload is viable and exactly one takes that many arguments, that one binds (its parameter converts the argument or raises family D's parameter text), and with several (`V(int)` and `V(bool)` called `V("s")`) none does: the overload miss. The same rule picks an ancestor initializer's and a delegation's target (`detail::sole_arity_candidate`) |
+| script constructor overloads | `No constructor found with matching arguments` | `No constructor of 'Vec2' takes (string)`; when no overload is viable and exactly one takes that many arguments, that one binds (its parameter converts the argument or raises family D's parameter text), and with several (`V(int)` and `V(bool)` called `V("s")`) none does: the overload miss. The same rule picks an ancestor initializer's and a delegation's target (`detail::sole_arity_candidate`). Among several method or constructor overloads a string never makes a `bool` parameter viable (the runtime scorer and the strict checker, which reports `no overload of 'm' matches this call` at load); a lone function's `bool` slot still takes a string's truthiness, and a program's free functions of one name are redefinitions (the last takes every call), not an overload set |
 | a class without a constructor called with arguments | `Default constructor takes no arguments` | an aggregate (every class in the chain constructor-less, no private or reference instance field) takes one initializer per field: `Too many initializers for 'Bare': it has 1 field, got 2`; any other class: `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same texts at load with a lowercase first letter, `too many initializers for 'Bare': ...`, `no constructor of 'Bare' takes (int, int)`, when it knows the arguments) |
 | `: Base(...)` / ancestor initializer | `No matching constructor for ancestor class` | `No constructor of 'Base' takes (string)` |
 | an empty or implied `super()` (a constructor naming no initializer, a class declaring no constructor) over a base without a default constructor | (the base was never constructed) | `Base 'Cat' has no default constructor; call super(...)` (the strict checker reports it at load over script bases) |
@@ -284,20 +284,21 @@ the kernel does not spell reads `...`.
 
 ## Call-depth limits (`max_recursion_depth`)
 
-`Maximum recursion depth exceeded - possible infinite recursion`
+`Maximum recursion depth exceeded - possible infinite recursion` (the engine-owned call-depth cap)
+`Native stack exhausted before the call-depth cap: the host thread's stack bounds this recursion` (the Windows
+native-stack headroom check)
 
-The shared `detail/execution_limits.hpp` kernel supplies this number-free text for
-both backends, whether the engine-owned call-depth cap or a Windows native-stack
-headroom check fires. Recursion errors are catchable. The code's category message is
-`Maximum recursion depth exceeded`, which the text already begins with, so an uncaught
-error's `what()` is the text alone; a native callback boundary that wraps a C++ exception
-may append `: C++ exception`. That boundary suffix does not change the shared runtime text.
+The shared `detail/execution_limits.hpp` kernel supplies both number-free texts for both
+backends (`raise_call_depth`, `raise_native_stack`). Recursion errors are catchable. The code's
+category message is `Maximum recursion depth exceeded`: the cap's text already begins with it, so
+its uncaught `what()` is the text alone, and the stack's reads `...: Maximum recursion depth
+exceeded`; a native callback boundary that wraps a C++ exception may append `: C++ exception`.
 
-The cap, not the host thread's stack, bounds script recursion: an interpreter call,
-constructor or coroutine resume below the cap that finds the native stack low continues
-on a fresh native stack segment (Windows fibers, `detail::native_stack_segments`; each
-keeps the headroom margin), so `f(255)` completes on a 1 MB host thread. The segments
-are budgeted (16 of 16 MB reserved); past the budget the headroom check raises this text.
+The interpreter recurses natively per script call (about 7.5 KB of host stack per level in
+Release, several times that in Debug), so on a small host thread (a 1 MB main thread) the stack's
+text comes well before the cap of 256; the VM's script calls are in-loop frames and reach its cap
+on any stack (its native checks guard host reentry and constructor phases). This is a known
+divergence between the backends: deep-recursion tests above the interpreter's reach run on the VM.
 
 Default caps are 256 active calls for the interpreter and 10000 for the VM.
 `engine::max_call_depth(backend_type, depth)` sets either cap between executions;

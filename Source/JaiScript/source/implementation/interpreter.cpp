@@ -2344,21 +2344,6 @@ void interpreter::init_builtin_methods() {
 // tried against the folder of the file doing the asking (from_file), then each include path
 // in order, then the working directory. The answer is the canonical spelling, which is the
 // key the unit caches and executes under.
-namespace {
-// The body again on a fresh native stack segment; the depth text when no segment is left (the vm raises the same text, so
-// parity holds whichever bound stops a recursion)
-template <class Body>
-checked_result<script_value> on_fresh_native_stack(detail::native_stack_segments& segments, Body&& body) {
-    std::optional<checked_result<script_value>> result;
-    auto run = [&]() { result.emplace(body()); };
-    using run_t = decltype(run);
-    if (!segments.run([](void* raw) { (*static_cast<run_t*>(raw))(); }, &run) || !result) {
-        return detail::raise_call_depth();
-    }
-    return std::move(*result);
-}
-}
-
 checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file, bool for_import) {
     if (engine_ptr) {
         auto allowed = engine_ptr->require_privilege(privilege::filesystem);
@@ -3185,8 +3170,10 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
     std::optional<detail::call_depth_guard> reentry_depth;
     checked_result<void> entry_result;
     if (is_executing()) {
-        if (current_call_depth_ >= limits_->interpreter_call_depth_limit || detail::native_stack_low()) {
+        if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
             entry_result = detail::raise_call_depth();
+        } else if (detail::native_stack_low()) {
+            entry_result = detail::raise_native_stack();
         } else {
             reentry_depth.emplace(current_call_depth_);
         }
@@ -13554,10 +13541,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
         return detail::raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
     }
     if (detail::native_stack_low()) [[unlikely]] {
-        return on_fresh_native_stack(stack_segments_, [&]() {
-            return initialize_members(class_def, definition_env, instance, this_value, matching_ctor, args, initializer_depth,
-                                      delegation_depth, captured_out);
-        });
+        return detail::raise_native_stack();
     }
     // Create a regular environment for field initializers and constructor initializer arguments
     // Use the captured definition environment as the parent
@@ -13950,7 +13934,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
         return detail::raise_call_depth();
     }
     if (detail::native_stack_low()) [[unlikely]] {
-        return on_fresh_native_stack(stack_segments_, [&]() { return construct_instance(class_def, definition_env, args); });
+        return detail::raise_native_stack();
     }
     std::optional<detail::call_depth_guard> initializer_depth;
     initializer_depth.emplace(current_call_depth_);
@@ -14022,7 +14006,7 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
         return detail::raise_call_depth();
     }
     if (detail::native_stack_low()) [[unlikely]] {
-        return on_fresh_native_stack(stack_segments_, [&]() { return construct_default_instance(class_def, args); });
+        return detail::raise_native_stack();
     }
     if (!aggregate.fills() && class_def->base_needs_construction()) {
         // C++: the implicit default constructor constructs the base ahead of the fields (KEEP BYTE-PARALLEL with the vm)
@@ -14532,9 +14516,9 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     if (current_call_depth_ >= limits_->interpreter_call_depth_limit) {
         return detail::raise_call_depth();
     }
-    // Wide native frames exhaust a small host stack long before the cap: the call continues on a fresh segment
+    // Wide native frames can exhaust a small host stack before the cap: a catchable error of its own, never 0xC00000FD
     if (detail::native_stack_low()) [[unlikely]] {
-        return on_fresh_native_stack(stack_segments_, [&]() { return call_function(function, args, method_ctx); });
+        return detail::raise_native_stack();
     }
 
     if (execution_limit_exhausted()) [[unlikely]] {
@@ -15202,7 +15186,7 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         return detail::raise_call_depth();
     }
     if (detail::native_stack_low()) [[unlikely]] {
-        return on_fresh_native_stack(stack_segments_, [&]() { return resume_coroutine(handle); });
+        return detail::raise_native_stack();
     }
     // the body resolves in the unit that declared the coroutine on every resume (continuation replay runs it without call_function)
     auto declared = handle.get_function();

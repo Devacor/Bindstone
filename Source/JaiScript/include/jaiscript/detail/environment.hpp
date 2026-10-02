@@ -26,23 +26,6 @@ namespace jai {
         // margin - recursive native call paths raise the catchable recursion error
         // instead of dying on a hardware stack overflow (implemented in environment.cpp)
         bool native_stack_low() noexcept;
-
-        // Fresh native stack segments (Windows fibers) for a recursion the native stack cannot hold below its call-depth
-        // cap: the cap, not the host thread's stack, bounds script recursion, and each segment keeps native_stack_low's
-        // margin. run() declines (fn does not run) when the platform has none or the segment budget is spent.
-        class native_stack_segments {
-        public:
-            struct segment;
-            native_stack_segments() = default;
-            native_stack_segments(const native_stack_segments&) = delete;
-            native_stack_segments& operator=(const native_stack_segments&) = delete;
-            ~native_stack_segments();
-            bool run(void (*fn)(void*), void* ctx);
-        private:
-            std::vector<segment*> pool_;
-            size_t active_ = 0;
-            bool converted_thread_ = false;
-        };
     }
 
     // environment for storing variables in a scope

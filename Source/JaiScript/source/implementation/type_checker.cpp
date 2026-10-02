@@ -2518,13 +2518,15 @@ private:
         ctype result{};
     };
 
-    // args already inferred by the caller; foreign = the overloads belong to another unit's source
+    // args already inferred by the caller; foreign = the overloads belong to another unit's source; scored = the runtime picks
+    // among them by type (methods); a program's free functions of one name are redefinitions, the last one taking the call
     call_check check_script_overloads(std::string_view fname, const std::vector<const function_decl*>& overloads,
-                                      const std::vector<ctype>& args, const source_location& loc, bool foreign = false) {
+                                      const std::vector<ctype>& args, const source_location& loc, bool foreign = false,
+                                      bool scored = true) {
         const function_decl* only_viable = nullptr;
         int viable_count = 0;
         for (const auto* fn : overloads) {
-            if (script_fn_viable(fn, args)) {
+            if (script_fn_viable(fn, args, scored && overloads.size() > 1)) {
                 ++viable_count;
                 only_viable = fn;
             }
@@ -2564,7 +2566,9 @@ private:
         }
     }
 
-    bool script_fn_viable(const function_decl* fn, const std::vector<ctype>& args) {
+    // in_set: fn is one of several overloads, where a string's truthiness never makes a bool parameter viable (Dev ruling
+    // 2026-10-02, the runtime scorer's rule); a lone function's bool slot still takes it by assignment
+    bool script_fn_viable(const function_decl* fn, const std::vector<ctype>& args, bool in_set = false) {
         auto [min_a, max_a] = arity_range(fn);
         if (args.size() < min_a || args.size() > max_a) { return false; }
         for (size_t i = 0; i < args.size(); ++i) {
@@ -2572,6 +2576,10 @@ private:
             if (p.is_reference) {   // a T& binds a T (a class: T or a subclass); var& and auto& bind any
                 if (!reference_parameter_binds(p, args[i])) { return false; }
                 continue;
+            }
+            if (in_set && p.type && p.type->base_type == script_value_type::jai_bool_type &&
+                (args[i].kind == ctype::string_k || args[i].kind == ctype::utf8_k)) {
+                return false;
             }
             if (!assignable(args[i], ctype_from_type_info(p.type.get()))) {
                 return false;
@@ -2792,7 +2800,7 @@ private:
             return;
         }
         for (const auto* ctor : c.ctors) {
-            if (script_fn_viable(ctor, args)) { return; }
+            if (script_fn_viable(ctor, args, c.ctors.size() > 1)) { return; }
         }
         report_no_overload(cls_name, c.ctors, args, loc, c.foreign);
     }
@@ -3244,7 +3252,7 @@ private:
                 if (!args[i].const_key) { continue; }
                 bool aliasing = false, viable = false;
                 for (const auto* fn : *ov) {
-                    if (!script_fn_viable(fn, args)) { continue; }
+                    if (!script_fn_viable(fn, args, !free_callee && ov->size() > 1)) { continue; }
                     viable = true;
                     aliasing = i < fn->parameters.size() &&
                                (fn->parameters[i].is_reference || handle_type(fn->parameters[i].type.get()));
@@ -3261,7 +3269,7 @@ private:
                 std::vector<const function_decl*> by_ref;
                 bool all_ref = false;
                 for (const auto* fn : *ov) {
-                    if (!script_fn_viable(fn, args)) { continue; }
+                    if (!script_fn_viable(fn, args, !free_callee && ov->size() > 1)) { continue; }
                     all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference;   // a coroutine binds a copy
                     if (!all_ref) { break; }
                     by_ref.push_back(fn);
@@ -3319,7 +3327,7 @@ private:
 			if (auto it = functions_.find(id->name); it != functions_.end()) {
 				note_global_use(id->name);
 				ov = &it->second;
-				return check_script_overloads(id->name, it->second, args, c->location).result;
+				return check_script_overloads(id->name, it->second, args, c->location, false, false).result;
 			}
 			if (const sclass* sc = find_sclass(id->name)) {
 				check_ctor_call(id->name, *sc, args, c->location);

@@ -96,6 +96,13 @@ namespace jai::detail {
 			"Maximum recursion depth exceeded - possible infinite recursion" };
 	}
 
+	// The host thread's stack ran out below the call-depth cap (the interpreter recurses natively per script call, the vm on
+	// host reentry and constructor phases): its own text, so the cap and the stack read apart. Allocation-free like the cap's.
+	inline error_propagator raise_native_stack() noexcept {
+		return error_propagator{ make_error_code(runtime_error_code::max_recursion_depth),
+			"Native stack exhausted before the call-depth cap: the host thread's stack bounds this recursion" };
+	}
+
 	// A `: this(...)` chain deeper than this is a delegation cycle (ill-formed in C++): both backends raise the recursion text
 	inline constexpr size_t k_max_constructor_delegation_depth = 256;
 

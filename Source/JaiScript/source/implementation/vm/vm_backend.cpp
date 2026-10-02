@@ -905,8 +905,11 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 	}
 	// Fiber bodies recurse natively through resume, unlike ordinary in-loop calls.
 	// Count setup/default conversions too, and release the count on every exit.
-	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
 		return detail::raise_call_depth();
+	}
+	if (detail::native_stack_low()) {
+		return detail::raise_native_stack();
 	}
 	detail::call_depth_guard depth_guard(current_call_depth_);
 	auto& state = coroutine_fiber_state(handle);
@@ -17246,8 +17249,11 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
                                                             std::optional<detail::call_depth_guard>& initializer_depth,
                                                             size_t delegation_depth,
                                                             std::vector<script_value>* captured_out) {
-	if (delegation_depth > detail::k_max_constructor_delegation_depth || detail::native_stack_low()) {
+	if (delegation_depth > detail::k_max_constructor_delegation_depth) {
 		return detail::raise_call_depth();   // a delegation cycle (ill-formed in C++) raises instead of recursing without end
+	}
+	if (detail::native_stack_low()) {
+		return detail::raise_native_stack();
 	}
 	// (binding evaluates trailing defaults for omitted args; omitted params are simply
 	// absent here, like C++ field-inits that can't see ctor params)
@@ -17558,8 +17564,11 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
                                                             std::shared_ptr<function_decl>& matching_ctor_out,
                                                             std::vector<script_value>& captured_out) {
 	// This native phase owns the constructor depth only until a body takes over.
-	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
 		return detail::raise_call_depth();
+	}
+	if (detail::native_stack_low()) {
+		return detail::raise_native_stack();
 	}
 	std::optional<detail::call_depth_guard> initializer_depth;
 	initializer_depth.emplace(current_call_depth_);
@@ -17763,8 +17772,11 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 		if (!aggregate.fills()) { return detail::aggregate_answer(aggregate, *class_def, args, engine_); }
 	}
 
-	if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
 		return detail::raise_call_depth();
+	}
+	if (detail::native_stack_low()) {
+		return detail::raise_native_stack();
 	}
 	if (!aggregate.fills() && class_def->base_needs_construction()) {
 		// C++: the implicit default constructor constructs the base ahead of the fields (KEEP BYTE-PARALLEL with the interpreter)
@@ -20350,8 +20362,10 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	std::optional<detail::call_depth_guard> reentry_depth;
 	checked_result<void> entry_result;
 	if (is_executing()) {
-		if (current_call_depth_ >= limits_->vm_call_depth_limit || detail::native_stack_low()) {
+		if (current_call_depth_ >= limits_->vm_call_depth_limit) {
 			entry_result = detail::raise_call_depth();
+		} else if (detail::native_stack_low()) {
+			entry_result = detail::raise_native_stack();
 		} else {
 			reentry_depth.emplace(current_call_depth_);
 		}
@@ -22325,10 +22339,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	// The native entry path (constructor chains especially) stacks wide frames per
 	// level and can exhaust the native stack long before the depth cap - fail
 	// catchably instead of dying on 0xC00000FD (in-loop frames never recurse natively).
-	// Same message as the depth cap: which limit fires first differs per backend, so a
-	// distinct text here breaks backend error parity.
 	if (detail::native_stack_low()) [[unlikely]] {
-		return detail::raise_call_depth();
+		return detail::raise_native_stack();
 	}
 
 	if (execution_limit_exhausted()) [[unlikely]] {

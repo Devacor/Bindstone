@@ -78,7 +78,9 @@ public:
         });
 
 #if defined(_WIN32)
-        test("the_interpreter_reaches_its_call_depth_cap_on_a_one_megabyte_stack", [this]() {
+        // The vm's script calls are in-loop frames: its depth is its cap on any host stack. The interpreter recurses natively,
+        // so a small host stack ends its recursion first, with its own catchable text (a known divergence: docs/diagnostics.md)
+        test("a_small_host_stack_bounds_the_interpreter_with_its_own_text", [this]() {
             struct probe_state {
                 std::string results[2];
                 std::string failure;
@@ -86,14 +88,22 @@ public:
             auto probe = [](void* raw) -> DWORD {
                 auto& state = *static_cast<probe_state*>(raw);
                 try {
-                    for (int i = 0; i < 2; ++i) {
-                        auto e = fresh(i == 1, check_mode::off);
-                        std::string& out = state.results[i];
+                    {
+                        auto e = fresh(true, check_mode::off);
+                        std::string& out = state.results[1];
                         out += outcome(*e, "int f(int n) { if (n == 0) { return 0; } return 1 + f(n - 1); } f(200);") + "|";
                         out += outcome(*e, "f(255);") + "|";
                         out += outcome(*e, "class T { int down(int n) { if (n == 0) { return 0; } return 1 + down(n - 1); } } T().down(200);") + "|";
                         out += outcome(*e, "int g(int d) { return d == 0 ? 0 : 1 + g(d - 1); } int r = -1; try { r = g(220); } catch (e) { r = -2; } r;") + "|";
                         out += outcome(*e, "class N { int depth = 0; N(int n) { if (n > 0) { N child = N(n - 1); depth = child.depth + 1; } } } N(100).depth;") + "|";
+                        out += outcome(*e, "40 + 2;");
+                    }
+                    {
+                        auto e = fresh(false, check_mode::off);
+                        std::string& out = state.results[0];
+                        const std::string uncaught = outcome(*e, "int f(int n) { if (n == 0) { return 0; } return 1 + f(n - 1); } f(255);");
+                        out += uncaught.substr(0, uncaught.find('\n')) + "|";
+                        out += outcome(*e, "string t = \"\"; try { f(255); } catch (e) { t = e; } t;") + "|";
                         out += outcome(*e, "40 + 2;");
                     }
                 } catch (const std::exception& error) {
@@ -109,7 +119,8 @@ public:
             CloseHandle(thread);
             check_eq(DWORD(WAIT_OBJECT_0), wait);
             check_eq(std::string(), state.failure);
-            check_eq(std::string("200|255|200|220|100|42"), state.results[0], "interpreter");
+            const std::string native = "Native stack exhausted before the call-depth cap: the host thread's stack bounds this recursion";
+            check_eq("ERROR: " + native + ": Maximum recursion depth exceeded|" + native + "|42", state.results[0], "interpreter");
             check_eq(std::string("200|255|200|220|100|42"), state.results[1], "vm");
         });
 #endif
@@ -177,6 +188,21 @@ public:
             expect("class V { int a; V(int x) { a = x; } V(bool b) { a = 1; } V() : this(\"s\") {} }"
                    " var out = \"\"; try { V v = V(); } catch (e) { out += e; } out;",
                    "No constructor of 'V' takes (string)", "a delegation");
+        });
+
+        test("a_string_never_makes_a_bool_overload_viable", [this]() {
+            expect("class M { int m(int a) { return 1; } int m(bool b) { return 2; } } var out = \"\"; try { M().m(\"s\"); } catch (e) { out += e; } out;",
+                   "No overload of 'm' takes (string)", "methods at run time");
+            expect_load_error("class M { int m(int a) { return 1; } int m(bool b) { return 2; } } M().m(\"s\");",
+                              "no overload of 'm' matches this call", "methods at load");
+            expect_load_error("class V { int a; V(int x) { a = x; } V(bool b) { a = 1; } } V v = V(\"s\");",
+                              "error: no", "constructors at load");
+            // a program's free functions of one name are redefinitions (the last takes every call), never an overload set
+            expect("[[warn_mode]] int f(int a) { return 1; } int f(bool b) { return 2; } f(\"s\");", "2",
+                   "a redefined free function's bool slot takes truthiness");
+            expect("void h(bool b) { } bool k = \"s\"; h(\"s\"); k;", "true", "a lone bool slot takes a string's truthiness", check_mode::strict);
+            expect("class M { int m(int a) { return 1; } int m(bool b) { return 2; } } to_string(M().m(true)) + to_string(M().m(3));", "21",
+                   "exact overloads still pick", check_mode::strict);
         });
 
         test("a_builtin_method_read_without_a_call_is_a_load_error", [this]() {

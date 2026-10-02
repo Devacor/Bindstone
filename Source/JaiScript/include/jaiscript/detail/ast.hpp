@@ -418,6 +418,9 @@ namespace jai {
         // A math component a reference binds over an evaluated base (`f(a[i+1].x)`): the read hands back a COMPONENT reference
         // when the base evaluates to a reference (transient_read_marker stamps it; detail/math_component_store.hpp)
         mutable bool component_lvalue = false;
+        // the checker proved an enum's value read by name (the name holds a map<string,int>, whose member read runs no user code): a
+        // capture ahead of it is never needed (transient_read_marker::callout_free)
+        mutable bool enum_constant = false;
 
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}

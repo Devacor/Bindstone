@@ -3094,8 +3094,15 @@ private:
                        ctype* recv_out = nullptr, member_hit* hit_out = nullptr,
                        std::optional<field_proof>* proof_out = nullptr) {
         std::optional<field_proof> fp;
-        ctype t = infer_member_impl(m, writing, typed_field_out, recv_out, hit_out, fp);
+        ctype recv;
+        ctype t = infer_member_impl(m, writing, typed_field_out, &recv, hit_out, fp);
+        if (recv_out) { *recv_out = recv; }
         stamp_field(m, fp);
+        // an enum's value by the enum's own name: the program declares no variable of that name and no runtime include could
+        const bool enum_value = !writing && recv.kind == ctype::enum_ref_k && t.kind == ctype::int_k && !m->is_static && !m->null_safe &&
+                                m->object && m->object->get_type() == node_type::identifier_expr && !has_dynamic_includes_ &&
+                                !program_global(std::string(static_cast<const identifier_expr*>(m->object.get())->name));
+        stamp(m->enum_constant, enum_value, false);
         if (proof_out) { *proof_out = fp; }
         return t;
     }

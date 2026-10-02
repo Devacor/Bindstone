@@ -1353,9 +1353,11 @@ public:
         test("fuzz_corpus_false_positive_gate", [this]() {
             // 200 generator seeds: any program that runs clean must not produce strict
             // errors unless it genuinely violates declared types. The generator emits
-            // valid typing, so the expected FP count is zero.
+            // valid typing, so the expected FP count is zero. Bounded by budget checks, not the clock (the wall-clock
+            // budget only backstops), so the programs that run clean do not depend on the machine's load.
             constexpr uint64_t k_seed_count = 200;
-            constexpr double k_budget_seconds = 0.1;
+            constexpr uint64_t k_step_budget = 32;
+            constexpr double k_backstop_seconds = 30.0;
             int false_positives = 0;
             int clean_programs = 0;
             std::string first_report;
@@ -1363,7 +1365,8 @@ public:
                 fuzz::program p = fuzz::generate_program(seed, 3);
                 auto eng = make_engine();
                 eng->static_checking(check_mode::warn);   // strict would abort flagged programs before they can prove they run clean
-                eng->execution_budget(k_budget_seconds);
+                eng->execution_budget(k_backstop_seconds);
+                eng->execution_step_budget(k_step_budget);
                 eng->memory_cap(64 * 1024 * 1024);
                 jai::engine* raw = eng.get();
                 // the corpus presumes the host surface every real host provides
@@ -1469,9 +1472,11 @@ public:
             // program, each backend must produce identical segment results, printed output,
             // error text and liveness with type_proofs on and off - four fresh engines with
             // identical registrations per seed. Cross-backend agreement is the fuzz smoke
-            // suite's contract and is re-checked here modulo its known suppressions.
+            // suite's contract and is re-checked here modulo its known suppressions. Bounded by budget checks, not the
+            // clock (the wall-clock budget only backstops), so the programs compared do not depend on the machine's load.
             constexpr uint64_t k_seed_count = 200;
-            constexpr double k_budget_seconds = 0.1;
+            constexpr uint64_t k_step_budget = 32;
+            constexpr double k_backstop_seconds = 30.0;
             int compared_programs = 0;
             int proof_divergences = 0;
             int backend_divergences = 0;
@@ -1504,13 +1509,14 @@ public:
                     for (int pr = 0; pr < 2 && !budget; ++pr) {
                         fuzz::run_config cfg;
                         cfg.use_vm = be == 1;
-                        cfg.budget_seconds = k_budget_seconds;
+                        cfg.budget_seconds = k_backstop_seconds;
+                        cfg.step_budget = k_step_budget;
                         cfg.proofs = pr == 1;
                         runs[be][pr] = fuzz::run_program(p, cfg);
                         budget = runs[be][pr].budget_hit;
                     }
                 }
-                if (budget) { continue; }   // wall-clock territory: never a finding
+                if (budget) { continue; }   // a spent budget: never a finding
                 ++compared_programs;
                 for (int be = 0; be < 2; ++be) {
                     if (same(runs[be][0], runs[be][1])) { continue; }

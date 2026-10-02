@@ -25,6 +25,7 @@ namespace jai {
     class class_decl;
     class function_decl;
         class variable_decl;
+    class enum_decl;
     class type_info;
     using declaration_ptr = std::shared_ptr<declaration>;
 
@@ -140,6 +141,9 @@ namespace jai {
         // is typed by that declaration in the PROOF pass alone (diagnostics never read the table); a class-typed one is typed once
         // its class is defined, and a unit whose proofs waited re-stamps after each import completes (proof_stats::deferred).
         using program_global_map = std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::shared_ptr<const variable_decl>>>>;
+        // Program closure enums: name -> unit path -> the unit's top-level enum of that name. An enum exactly one unit declares names a
+        // map<string,int> cell; a read of one of its values runs no user code (member_expr::enum_constant)
+        using program_enum_map = std::unordered_map<std::string, std::unordered_map<std::string, std::shared_ptr<const enum_decl>>>;
 
         // One checker walk does two independent jobs: diagnostics (off -> the report stays
         // empty) and the proof pass (stamp = derive and write proofs onto the AST, clear =
@@ -160,6 +164,7 @@ namespace jai {
             const program_class_map* program_classes = nullptr;
             const program_function_map* program_functions = nullptr;
             const program_global_map* program_globals = nullptr;
+            const program_enum_map* program_enums = nullptr;
             std::vector<std::string>* deferred_classes = nullptr;   // out: the program-table classes the walk met before the engine defined them
             check_observer* observer = nullptr;
         };
@@ -173,6 +178,7 @@ namespace jai {
         // Every top-level free function `decls` declares, under the unit's path (its earlier entry replaced).
         void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_function_map& out);
         void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_global_map& out);
+        void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_enum_map& out);
         // Every literal import path below the unit's top level (an import runs at program scope wherever it is written)
         void collect_unit_imports(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out);
 

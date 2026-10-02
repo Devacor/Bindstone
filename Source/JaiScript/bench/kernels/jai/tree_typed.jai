@@ -59,7 +59,7 @@ void insert(shared_ptr<Node>& root, int x) {
 	if (equal == null) {
 		equal = new Node();
 		equal.x = x;
-		equal.y = random_int(0, 2147483647);
+		equal.y = math::random_int(0, 2147483647);
 	}
 	shared_ptr<Node> tmp = null;
 	merge(lower, equal, tmp);

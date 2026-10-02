@@ -1917,8 +1917,9 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
                     case TYPEID_FUNCTION:   return v.storage_.get_if<TYPEID_FUNCTION>()->get();
                     case TYPEID_SHARED_PTR: return v.storage_.get_if<TYPEID_SHARED_PTR>()->get();  // holder identity; runtime-unreachable (alt 11 never constructed)
                     case TYPEID_REFERENCE:  return v.storage_.get_if<TYPEID_REFERENCE>()->get();
+                    case TYPEID_WEAK_PTR:   return v.storage_.get_if<TYPEID_WEAK_PTR>()->owner_identity();
                     case TYPEID_PARALLEL_BORROW: return v.storage_.get_if<TYPEID_PARALLEL_BORROW>()->pointer();  // viewed container = stable identity (region-internal, defensive)
-                    default:                return nullptr;  // invalid/weak_ptr: treated as one equivalence class
+                    default:                return nullptr;  // invalid values form one equivalence class
                 }
             };
             const void* lp = identity(*this);
@@ -1973,6 +1974,7 @@ size_t script_value::map_key_hash() const noexcept {
                 case TYPEID_FUNCTION:   identity = storage_.get_if<TYPEID_FUNCTION>()->get(); break;
                 case TYPEID_SHARED_PTR: identity = storage_.get_if<TYPEID_SHARED_PTR>()->get(); break;
                 case TYPEID_REFERENCE:  identity = storage_.get_if<TYPEID_REFERENCE>()->get(); break;
+                case TYPEID_WEAK_PTR:   identity = storage_.get_if<TYPEID_WEAK_PTR>()->owner_identity(); break;
                 case TYPEID_PARALLEL_BORROW: identity = storage_.get_if<TYPEID_PARALLEL_BORROW>()->pointer(); break;
                 default: break;
             }

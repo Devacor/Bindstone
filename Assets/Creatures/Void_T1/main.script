@@ -17,7 +17,7 @@ class Voidling : CreatureKind {
 				if (phased != null) {
 					teleportNear(phasing, 3);
 					// every forward phase costs a quarter of its life, straight from health
-					changeHealth(-round(stats().health * 0.25));
+					changeHealth(-math::round(stats().health * 0.25));
 					// for three seconds after the blink every point the Voidling would take lands on its victim instead
 					phased.absorbFor(networkId(), 1.0, 1.0);
 					redirectTarget = phasing;
@@ -52,7 +52,7 @@ class Voidling : CreatureKind {
 				// never land inside the well's arrival radius: a blink is a strike, not a leak
 				if (d2 > 16.0 && wellD2 > 81.0 && teleportNear(prey, 2)) {
 					// every forward phase costs a quarter of its life, straight from health
-					changeHealth(-round(stats().health * 0.25));
+					changeHealth(-math::round(stats().health * 0.25));
 					blinkCooldown = 8.0;
 					activeTarget = 0;
 					targeting().clear();
@@ -78,7 +78,7 @@ class Voidling : CreatureKind {
 		var victimPos = game().creature(target).agent().gridPosition();
 		double fx = victimPos.x - mePos.x;
 		double fy = victimPos.y - mePos.y;
-		double fl = sqrt(fx * fx + fy * fy);
+		double fl = math::sqrt(fx * fx + fy * fy);
 		if (fl < 0.001) {
 			fx = 1.0;
 			fy = 0.0;
@@ -92,7 +92,7 @@ class Voidling : CreatureKind {
 				var p = others[i].agent().gridPosition();
 				double dx = p.x - mePos.x;
 				double dy = p.y - mePos.y;
-				double dl = sqrt(dx * dx + dy * dy);
+				double dl = math::sqrt(dx * dx + dy * dy);
 				if (dl > 0.001 && (dx * fx + dy * fy) / dl > 0.3) {
 					others[i].stun(0.25);
 					strike(others[i].networkId(), bite);

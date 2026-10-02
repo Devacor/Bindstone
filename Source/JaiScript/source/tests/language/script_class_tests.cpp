@@ -118,7 +118,7 @@ public:
         test("script_cpp_interop", [this]() {
             auto js_engine = make_engine();
             
-            js_engine->add_function("sqrt", [](double x) { return std::sqrt(x); });
+            js_engine->add_function("host_sqrt", [](double x) { return std::sqrt(x); });
 
             struct Vector2D {
                 double x, y;
@@ -145,7 +145,7 @@ public:
                     
                     double magnitude3D() {
                         auto mag2D = this.position.magnitude();
-                        return sqrt(mag2D * mag2D + this.z * this.z);
+                        return host_sqrt(mag2D * mag2D + this.z * this.z);
                     }
                 }
                 

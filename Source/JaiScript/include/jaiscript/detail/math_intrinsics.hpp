@@ -55,6 +55,8 @@ namespace jai::detail {
         // operator component computed in int64 and narrowed with the operator's text
         f32_, i32_, cstore_, vcomp_, acos_,
         i32_add_, i32_sub_, i32_mul_, i32_div_, i32_neg_,
+        // Complete scalar library; appended so existing intrinsic ids stay stable.
+        trunc_, cbrt_, exp_, exp2_, log_, log2_, log10_, asin_, acos_public_, atan_, sinh_, cosh_, tanh_, sign_, fmod_, hypot_, saturate_, wrap_, is_nan_, is_inf_, random_int_,
         count,
         none = count
     };
@@ -62,12 +64,17 @@ namespace jai::detail {
     inline math_fn math_intrinsic_from_name(std::string_view name) noexcept {
         switch (name.empty() ? '\0' : name.front()) {
             case 'a':
+                if (name == "asin") return math_fn::asin_;
+                if (name == "acos") return math_fn::acos_public_;
+                if (name == "atan") return math_fn::atan_;
                 if (name == "abs") return math_fn::abs_;
                 if (name == "atan2") return math_fn::atan2_;
                 if (name == "angle_between") return math_fn::angle_between_;
                 if (name == "acos$") return math_fn::acos_;
                 return math_fn::none;
             case 'c':
+                if (name == "cbrt") return math_fn::cbrt_;
+                if (name == "cosh") return math_fn::cosh_;
                 if (name == "cos") return math_fn::cos_;
                 if (name == "ceil") return math_fn::ceil_;
                 if (name == "clamp") return math_fn::clamp_;
@@ -76,6 +83,7 @@ namespace jai::detail {
                 if (name == "cstore$") return math_fn::cstore_;
                 return math_fn::none;
             case 'd':
+                if (name == "degrees") return math_fn::radians_to_degrees;
                 if (name == "distance") return math_fn::distance;
                 if (name == "distance_squared") return math_fn::distance_squared;
                 if (name == "degrees_to_radians") return math_fn::degrees_to_radians;
@@ -84,10 +92,13 @@ namespace jai::detail {
             case 'n':
                 return name == "normalize" ? math_fn::normalize_ : math_fn::none;
             case 'f':
+                if (name == "fmod") return math_fn::fmod_;
                 if (name == "floor") return math_fn::floor_;
                 if (name == "f32$") return math_fn::f32_;
                 return math_fn::none;
             case 'i':
+                if (name == "is_nan") return math_fn::is_nan_;
+                if (name == "is_inf") return math_fn::is_inf_;
                 if (name == "itrunc") return math_fn::itrunc;
                 if (name == "ifloor") return math_fn::ifloor;
                 if (name == "ivec2") return math_fn::ivec2_;
@@ -106,6 +117,9 @@ namespace jai::detail {
                 if (name == "vcomp$") return math_fn::vcomp_;
                 return math_fn::none;
             case 'l':
+                if (name == "log") return math_fn::log_;
+                if (name == "log2") return math_fn::log2_;
+                if (name == "log10") return math_fn::log10_;
                 if (name == "lerp") return math_fn::lerp_;
                 if (name == "length") return math_fn::length_;
                 if (name == "length_squared") return math_fn::length_squared_;
@@ -134,6 +148,9 @@ namespace jai::detail {
                 if (name == "perpendicular") return math_fn::perpendicular_;
                 return math_fn::none;
             case 'r':
+                if (name == "random_range") return math_fn::random_range;
+                if (name == "radians") return math_fn::degrees_to_radians;
+                if (name == "random_int") return math_fn::random_int_;
                 if (name == "random") return math_fn::random_;   // arity picks range form
                 if (name == "random_seed") return math_fn::random_seed;
                 if (name == "radians_to_degrees") return math_fn::radians_to_degrees;
@@ -143,15 +160,28 @@ namespace jai::detail {
                 if (name == "rotate") return math_fn::rotate_;
                 return math_fn::none;
             case 's':
+                if (name == "sinh") return math_fn::sinh_;
+                if (name == "sign") return math_fn::sign_;
+                if (name == "saturate") return math_fn::saturate_;
                 if (name == "sin") return math_fn::sin_;
                 if (name == "sqrt") return math_fn::sqrt_;
                 return math_fn::none;
             case 't':
+                if (name == "trunc") return math_fn::trunc_;
+                if (name == "tanh") return math_fn::tanh_;
                 return name == "tan" ? math_fn::tan_ : math_fn::none;
             case 'w':
+                if (name == "wrap") return math_fn::wrap_;
                 if (name == "wrap_add") return math_fn::wrap_add_;
                 if (name == "wrap_sub") return math_fn::wrap_sub_;
                 if (name == "wrap_mul") return math_fn::wrap_mul_;
+                return math_fn::none;
+            case 'h':
+                if (name == "hypot") return math_fn::hypot_;
+                return math_fn::none;
+            case 'e':
+                if (name == "exp") return math_fn::exp_;
+                if (name == "exp2") return math_fn::exp2_;
                 return math_fn::none;
             default:
                 return math_fn::none;
@@ -653,6 +683,27 @@ namespace jai::detail {
     struct math_arity { uint8_t low = 0; uint8_t high = 255; uint8_t also = 0; const char* text = nullptr; };
     constexpr math_arity math_arity_of(math_fn fn) noexcept {
         switch (fn) {
+            case math_fn::trunc_: return {1, 1, 0, "math::trunc expects 1 argument"};
+            case math_fn::cbrt_: return {1, 1, 0, "math::cbrt expects 1 argument"};
+            case math_fn::exp_: return {1, 1, 0, "math::exp expects 1 argument"};
+            case math_fn::exp2_: return {1, 1, 0, "math::exp2 expects 1 argument"};
+            case math_fn::log_: return {1, 1, 0, "math::log expects 1 argument"};
+            case math_fn::log2_: return {1, 1, 0, "math::log2 expects 1 argument"};
+            case math_fn::log10_: return {1, 1, 0, "math::log10 expects 1 argument"};
+            case math_fn::asin_: return {1, 1, 0, "math::asin expects 1 argument"};
+            case math_fn::acos_public_: return {1, 1, 0, "math::acos expects 1 argument"};
+            case math_fn::atan_: return {1, 1, 0, "math::atan expects 1 argument"};
+            case math_fn::sinh_: return {1, 1, 0, "math::sinh expects 1 argument"};
+            case math_fn::cosh_: return {1, 1, 0, "math::cosh expects 1 argument"};
+            case math_fn::tanh_: return {1, 1, 0, "math::tanh expects 1 argument"};
+            case math_fn::sign_: return {1, 1, 0, "math::sign expects 1 argument"};
+            case math_fn::fmod_: return {2, 2, 0, "math::fmod expects 2 arguments"};
+            case math_fn::hypot_: return {2, 2, 0, "math::hypot expects 2 arguments"};
+            case math_fn::saturate_: return {1, 1, 0, "math::saturate expects 1 argument"};
+            case math_fn::wrap_: return {3, 3, 0, "math::wrap expects 3 arguments"};
+            case math_fn::is_nan_: return {1, 1, 0, "math::is_nan expects 1 argument"};
+            case math_fn::is_inf_: return {1, 1, 0, "math::is_inf expects 1 argument"};
+            case math_fn::random_int_: return {2, 2, 0, "math::random_int expects 2 arguments"};
             case math_fn::floor_: return {1, 1, 0, "math::floor expects 1 argument"};
             case math_fn::ceil_: return {1, 1, 0, "math::ceil expects 1 argument"};
             case math_fn::round_: return {1, 1, 0, "math::round expects 1 argument"};
@@ -672,7 +723,8 @@ namespace jai::detail {
             case math_fn::distance_squared: return {2, 2, 4, "math::distance_squared expects 2 vectors or 4 arguments (x1, y1, x2, y2)"};
             case math_fn::radians_to_degrees: return {1, 1, 0, "math::radians_to_degrees expects 1 argument"};
             case math_fn::degrees_to_radians: return {1, 1, 0, "math::degrees_to_radians expects 1 argument"};
-            case math_fn::random_: case math_fn::random_range: return {0, 0, 2, "math::random expects 0 or 2 arguments (min, max)"};
+            case math_fn::random_: return {0, 0, 2, "math::random expects 0 or 2 arguments (min, max)"};
+            case math_fn::random_range: return {2, 2, 0, "math::random_range expects 2 arguments (min, max)"};
             case math_fn::random_seed: return {1, 1, 0, "math::random_seed expects 1 argument"};
             case math_fn::wrap_add_: return {2, 2, 0, "math::wrap_add expects 2 arguments"};
             case math_fn::wrap_sub_: return {2, 2, 0, "math::wrap_sub expects 2 arguments"};
@@ -1017,6 +1069,108 @@ namespace jai::detail {
         };
 
         switch (fn) {
+            case math_fn::trunc_: {
+                if (!math_arity_ok<math_fn::trunc_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::trunc expects a numeric argument"); }
+                return script_value(std::trunc(a.d()), eng);
+            }
+            case math_fn::cbrt_: {
+                if (!math_arity_ok<math_fn::cbrt_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::cbrt expects a numeric argument"); }
+                return script_value(std::cbrt(a.d()), eng);
+            }
+            case math_fn::exp_: {
+                if (!math_arity_ok<math_fn::exp_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::exp expects a numeric argument"); }
+                return script_value(std::exp(a.d()), eng);
+            }
+            case math_fn::exp2_: {
+                if (!math_arity_ok<math_fn::exp2_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::exp2 expects a numeric argument"); }
+                return script_value(std::exp2(a.d()), eng);
+            }
+            case math_fn::log_: {
+                if (!math_arity_ok<math_fn::log_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::log expects a numeric argument"); }
+                return script_value(std::log(a.d()), eng);
+            }
+            case math_fn::log2_: {
+                if (!math_arity_ok<math_fn::log2_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::log2 expects a numeric argument"); }
+                return script_value(std::log2(a.d()), eng);
+            }
+            case math_fn::log10_: {
+                if (!math_arity_ok<math_fn::log10_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::log10 expects a numeric argument"); }
+                return script_value(std::log10(a.d()), eng);
+            }
+            case math_fn::asin_: {
+                if (!math_arity_ok<math_fn::asin_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::asin expects a numeric argument"); }
+                return script_value(std::asin(a.d()), eng);
+            }
+            case math_fn::acos_public_: {
+                if (!math_arity_ok<math_fn::acos_public_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::acos expects a numeric argument"); }
+                return script_value(std::acos(a.d()), eng);
+            }
+            case math_fn::atan_: {
+                if (!math_arity_ok<math_fn::atan_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::atan expects a numeric argument"); }
+                return script_value(std::atan(a.d()), eng);
+            }
+            case math_fn::sinh_: {
+                if (!math_arity_ok<math_fn::sinh_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::sinh expects a numeric argument"); }
+                return script_value(std::sinh(a.d()), eng);
+            }
+            case math_fn::cosh_: {
+                if (!math_arity_ok<math_fn::cosh_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::cosh expects a numeric argument"); }
+                return script_value(std::cosh(a.d()), eng);
+            }
+            case math_fn::tanh_: {
+                if (!math_arity_ok<math_fn::tanh_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math::tanh expects a numeric argument"); }
+                return script_value(std::tanh(a.d()), eng);
+            }
+            case math_fn::sign_: case math_fn::is_nan_: case math_fn::is_inf_: case math_fn::saturate_: {
+                if (!math_arity_accepts(fn, argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]);
+                if (!a.ok) { return bad_type("math scalar helper expects a numeric argument"); }
+                const auto x = a.d();
+                if (fn == math_fn::sign_) { return script_value(script_int((x > 0.0) - (x < 0.0)), eng); }
+                if (fn == math_fn::is_nan_) { return script_value(std::isnan(x), eng); }
+                if (fn == math_fn::is_inf_) { return script_value(std::isinf(x), eng); }
+                return script_value(std::fmax(0.0, std::fmin(x, 1.0)), eng);
+            }
+            case math_fn::fmod_: case math_fn::hypot_: {
+                if (!math_arity_accepts(fn, argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]), b = read(*args[1]);
+                if (!a.ok || !b.ok) { return bad_type("math scalar helper expects numeric arguments"); }
+                return script_value(fn == math_fn::fmod_ ? std::fmod(a.d(), b.d()) : std::hypot(a.d(), b.d()), eng);
+            }
+            case math_fn::wrap_: {
+                if (!math_arity_ok<math_fn::wrap_>(argc)) { return bad_arity(math_arity_of(fn).text); }
+                const num a = read(*args[0]), b = read(*args[1]), v = read(*args[2]);
+                if (!a.ok || !b.ok || !v.ok) { return bad_type("math::wrap expects numeric arguments"); }
+                const auto lower = std::min(a.d(), b.d()), upper = std::max(a.d(), b.d());
+                const auto range = upper - lower, value = v.d() - lower;
+                return script_value(range == 0.0 ? upper : value - range * std::floor(value / range) + lower, eng);
+            }
             case math_fn::floor_: {
                 if (!math_arity_ok<math_fn::floor_>(argc)) return bad_arity(math_arity_of(math_fn::floor_).text);
                 const num a = read(*args[0]);
@@ -1146,15 +1300,17 @@ namespace jai::detail {
                 return checked_result<script_value>(script_value(a.d() * (3.14159265358979323846 / 180.0), eng));
             }
             case math_fn::random_:
-            case math_fn::random_range: {
-                if (argc == 0) {
+            case math_fn::random_range:
+            case math_fn::random_int_: {
+                if (fn == math_fn::random_ && argc == 0) {
                     // math::random(): uniform [0.0, 1.0] inclusive
                     return checked_result<script_value>(script_value(rng.next_unit_inclusive(), eng));
                 }
-                if (!math_arity_ok<math_fn::random_>(argc)) return bad_arity(math_arity_of(math_fn::random_).text);
+                if (!math_arity_accepts(fn, argc)) return bad_arity(math_arity_of(fn).text);
                 const num lo = read(*args[0]), hi = read(*args[1]);
                 if (!lo.ok || !hi.ok) return bad_type("math::random expects numeric arguments");
-                if (lo.is_int && hi.is_int) {
+                if (fn == math_fn::random_int_ && (!lo.is_int || !hi.is_int)) { return bad_type("math::random_int expects integer arguments"); }
+                if (fn != math_fn::random_range && lo.is_int && hi.is_int) {
                     // Inclusive int range; empty/inverted range errors cleanly
                     if (hi.i < lo.i) return bad_type("math::random range is inverted (max < min)");
                     const uint64_t span = static_cast<uint64_t>(hi.i) - static_cast<uint64_t>(lo.i) + 1ull;

@@ -342,8 +342,7 @@ whose type changed. The work is the accessor's single entry for every observer, 
   vector's storage index). They live on the byte buffer the one-byte kinds use: element i is its components' words
   (binary32, or int32 for ivec) at offset `i * stride * 4`. The declared element type picks the kind (`make_array`,
   `kind_for_element`), so the tag and the kind agree as for every typed array. `get` boxes an element, and `set`/`push`
-  take a value the element boundary already converted to the exact kind. Raw sort does not apply (vectors have no
-  ordering), and `==` compares elementwise through the element rows.
+  take a value the element boundary already converted to the exact kind. Raw sort does not apply (vectors currently use the generic lexicographic comparator), and `==` compares elementwise through the element rows.
 - **Element references.** `var& r = a[i]` is a typed element reference: a component store through it writes the
   reference's scratch and commits it back to the buffer, whether the store names the reference directly or the alias's
   variable (`r.x = 7`).
@@ -406,8 +405,7 @@ whose type changed. The work is the accessor's single entry for every observer, 
   uses a 1-ULP tolerance (`equals()`); approximate equality is not transitive and cannot be `==` while `==`, `<=>` and
   `map_key_hash` stay consistent (a CRITICAL rule in `Source/JaiScript/CLAUDE.md`). The tolerant compare is
   `a.approx_equal(b, ulps)`.
-- Script ordering (`<`, `<=`, `>`, `>=`) is not defined for math types. The checker reports it and the runtime raises
-  `math::vec3 has no ordering`. MV's `Point <` compares `x + y` sums, which nothing in script uses.
+- Script ordering (`<`, `<=`, `>`, `>=`, `<=>`) compares components lexicographically. Vectors compare across numeric vector families/dimensions; colors compare with colors. Float components use the public total `<=>` order (signed zeros equivalent, NaNs last). This is separate from private map-key ordering. MV's `Point <` compares `x + y` sums; script does not reproduce that rule.
 - The C++-level `<=>` is the lexicographic order of components with the float rules (`std::strong_order`), and
   `map_key_hash` hashes the component bits consistently. So `map<math::ivec2, Tile>` works as a grid map with hashed
   lookup and observed key order, per the map-order ruling.
@@ -898,7 +896,6 @@ instructions are an optional last step (section 12) held to the 1.5% bar.
   - `'magnitude' expects 0 arguments, got 1`;
   - `Cannot pass math::vec2 to parameter 'p' of 'f' (declared math::vec3)`;
   - `Cannot assign math::vec3 to 'c' (declared math::color)`;
-  - `math::vec3 has no ordering`;
   - `Cannot assign to a member of a temporary`;
   - the int32 overflow and float-to-int texts.
   - Strict mode reports these at load time. The runtime raises the same texts.
@@ -942,7 +939,7 @@ This text does not change; the values become native. It covers:
 
 Every use is `.x` / `.y` reads, pass-through, or a typed local, and each keeps its meaning. No script compares whole
 points with `==`, orders them, calls `normalized` / `magnitude` / `hsv` / `hex`, or builds a color. So the exact-`==`,
-no-ordering and color-constructor changes are unobservable in Bindstone today.
+lexicographic-ordering and color-constructor changes are unobservable in Bindstone today.
 
 ### 11.3 Assets
 

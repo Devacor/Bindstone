@@ -195,7 +195,7 @@ public:
             expect("to_string(math::vec2(3, 6) / 2) + to_string(6 / math::vec2(3, 6))", "(1.5, 3.0)(2.0, 1.0)", "division both ways");
             expect("to_string(math::vec2(1, 2) * math::vec2(3, 4))", "(3.0, 8.0)", "componentwise product");
             expect("to_string(-math::vec3(1, -2, 0))", "(-1.0, 2.0, -0.0)", "negation");
-            expect("to_string(math::ivec2(7, -7) / 2) + to_string(math::ivec2(7, -7) % 4)", "(3, -3)(3, -3)", "int division truncates, modulo keeps the sign");
+            expect("to_string(math::ivec2(7, -7) / 2) + to_string(math::ivec2(7, -7) % 4)", "(3, -3)(3, -3)", "int division truncates, modulo keeps the math::sign");
             expect("to_string(math::ivec3(1, 2, 3) * 2 + 1)", "(3, 5, 7)", "ivec arithmetic");
             expect("to_string(math::vec4(1, 2, 3, 4) * 2 - math::vec4(1, 1, 1, 1))", "(1.0, 3.0, 5.0, 7.0)", "vec4 arithmetic");
             expect("to_string(math::vec2(0.1, 0) + 0.2)", "(0.3, 0.2)", "binary32 arithmetic");
@@ -209,17 +209,17 @@ public:
             expect(raised("var q = math::vec2(1, 1) / 0;"), "Division by zero", "float division by zero");
             expect(raised("var q = math::ivec2(1, 1) / math::ivec2(1, 0);"), "Division by zero", "int division by zero");
             expect(raised("var q = math::ivec2(1, 1) % math::ivec2(1, 0);"), "Modulo by zero", "int modulo by zero");
-            expect(raised("var q = math::vec2(1, 1) < math::vec2(2, 2);"), "math::vec2 has no ordering", "no ordering");
-            expect(raised("var q = math::ivec3(1, 1, 1) <=> math::ivec3(1, 1, 1);"), "math::ivec3 has no ordering", "no spaceship");
+            expect("to_string(math::vec2(1, 1) < math::vec2(2, 2))", "true", "lexicographic ordering");
+            expect("to_string(math::ivec3(1, 1, 1) <=> math::ivec3(1, 1, 1))", "0", "spaceship equality");
         });
 
         test("component_wise_library", [expect, raised]() {
-            expect("to_string(math::mix(math::vec2(0, 10), math::vec2(10, 20), 0.5))", "(5.0, 15.0)", "mix, float t");
-            expect("to_string(math::lerp(math::vec3(0, 0, 0), math::vec3(10, 20, 40), math::vec3(0.5, 0.25, 1)))", "(5.0, 5.0, 40.0)", "lerp, per-component t");
+            expect("to_string(math::mix(math::vec2(0, 10), math::vec2(10, 20), 0.5))", "(5.0, 15.0)", "math::mix, float t");
+            expect("to_string(math::lerp(math::vec3(0, 0, 0), math::vec3(10, 20, 40), math::vec3(0.5, 0.25, 1)))", "(5.0, 5.0, 40.0)", "math::lerp, per-component t");
             expect("to_string(math::mix(math::vec4(0, 0, 0, 0), math::vec4(1, 2, 3, 4), 0.5))", "(0.5, 1.0, 1.5, 2.0)", "vec4");
             expect("var m = math::mix(math::ivec2(0, 0), math::ivec2(1, 3), 0.5); to_string(m) + type_of(m)", "(0.5, 1.5)math::vec2", "ivec inputs give a vec");
             expect("to_string(math::unmix(math::vec2(0, 10), math::vec2(10, 20), math::vec2(5, 20)))", "(0.5, 1.0)", "unmix");
-            expect("to_string(math::unmix(math::vec2(1, 1), math::vec2(1, 3), math::vec2(1, 2)))", "(0.0, 0.5)", "unmix over an empty range is 0");
+            expect("to_string(math::unmix(math::vec2(1, 1), math::vec2(1, 3), math::vec2(1, 2)))", "(0.0, 0.5)", "math::unmix over an empty range is 0");
             expect("to_string(math::mix_in(math::vec2(0, 0), math::vec2(8, 8), 0.5, 2.0)) + to_string(math::mix_out(math::vec2(0, 0), math::vec2(8, 8), 0.5, 2.0))",
                    "(2.0, 2.0)(6.0, 6.0)", "eased mixes");
             expect("to_string(math::mix_in_out(math::vec2(0, 0), math::vec2(8, 8), 0.25, 2.0)) + to_string(math::mix_out_in(math::vec2(0, 0), math::vec2(8, 8), 0.75, 2.0))",
@@ -229,19 +229,19 @@ public:
                    "0.50.35355339059327380.8535533905932737", "the float eased unmixes");
             expect("to_string(math::remap(5.0, 0.0, 10.0, 100.0, 200.0)) + to_string(math::remap(math::vec2(0, 10), 0.0, 10.0, math::vec2(0, 0), math::vec2(1, 2)))",
                    "150.0(0.0, 2.0)", "remap");
-            expect("to_string(math::remap(3.0, 1.0, 1.0, 7.0, 9.0))", "7.0", "remap over an empty range is the low end");
-            expect("to_string(math::round(2.5)) + to_string(math::round(-2.5)) + to_string(math::round(math::vec2(1.4, 1.6)))", "3.0-3.0(1.0, 2.0)", "round (half away from zero)");
-            expect("to_string(math::floor(math::vec3(1.5, -1.5, 2))) + to_string(math::ceil(math::vec2(1.2, -1.2)))", "(1.0, -2.0, 2.0)(2.0, -1.0)", "floor, ceil");
-            expect("var f = math::floor(math::ivec2(3, 4)); to_string(f) + type_of(f)", "(3.0, 4.0)math::vec2", "floor of an ivec gives a vec");
-            expect("to_string(math::abs(math::vec2(-1.5, 2))) + to_string(math::abs(math::ivec2(-3, 4)))", "(1.5, 2.0)(3, 4)", "abs keeps ivec exact");
-            expect("to_string(math::min(math::vec2(1, 5), math::vec2(3, 2))) + to_string(math::max(math::ivec2(1, 5), 3))", "(1.0, 2.0)(3, 5)", "min, max, scalar broadcast");
+            expect("to_string(math::remap(3.0, 1.0, 1.0, 7.0, 9.0))", "7.0", "math::remap over an empty range is the low end");
+            expect("to_string(math::round(2.5)) + to_string(math::round(-2.5)) + to_string(math::round(math::vec2(1.4, 1.6)))", "3.0-3.0(1.0, 2.0)", "math::round (half away from zero)");
+            expect("to_string(math::floor(math::vec3(1.5, -1.5, 2))) + to_string(math::ceil(math::vec2(1.2, -1.2)))", "(1.0, -2.0, 2.0)(2.0, -1.0)", "math::floor, math::ceil");
+            expect("var f = math::floor(math::ivec2(3, 4)); to_string(f) + type_of(f)", "(3.0, 4.0)math::vec2", "math::floor of an ivec gives a vec");
+            expect("to_string(math::abs(math::vec2(-1.5, 2))) + to_string(math::abs(math::ivec2(-3, 4)))", "(1.5, 2.0)(3, 4)", "math::abs keeps ivec exact");
+            expect("to_string(math::min(math::vec2(1, 5), math::vec2(3, 2))) + to_string(math::max(math::ivec2(1, 5), 3))", "(1.0, 2.0)(3, 5)", "math::min, math::max, scalar broadcast");
             expect("to_string(math::clamp(math::vec3(-1, 0.5, 2), 0.0, 1.0)) + to_string(math::clamp(math::ivec2(-5, 9), math::ivec2(0, 0), math::ivec2(4, 4)))",
                    "(0.0, 0.5, 1.0)(0, 4)", "clamp");
             expect("var c = math::clamp(math::ivec2(-5, 9), 0.0, 4.0); to_string(c) + type_of(c)", "(0.0, 4.0)math::vec2", "a float bound gives a vec");
             expect("to_string(math::mix(0.0, 10.0, math::vec2(0.1, 0.9)))", "(1.0, 9.0)", "scalar ends, vector t");
             expect(raised("var q = math::mix(math::vec2(0, 0), math::vec3(1, 1, 1), 0.5);"), "math::mix expects vectors of the same dimensions", "dimensions must agree");
-            expect(raised("var q = math::sqrt(math::vec2(4, 9));"), "math::sqrt expects a numeric argument", "sqrt stays scalar");
-            expect(raised("var q = math::abs(math::ivec2(-2147483647 - 1, 0));"), "Integer overflow: the value does not fit an int32 component", "abs of INT32_MIN");
+            expect(raised("var q = math::sqrt(math::vec2(4, 9));"), "math::sqrt expects a numeric argument", "math::sqrt stays scalar");
+            expect(raised("var q = math::abs(math::ivec2(-2147483647 - 1, 0));"), "Integer overflow: the value does not fit an int32 component", "math::abs of INT32_MIN");
             expect("function f(math::vec3 a, math::vec3 b) -> math::vec3 { math::vec3 m = math::mix(a, b, 0.5); return math::floor(m); } to_string(f(math::vec3(0, 1, 2), math::vec3(3, 4, 6)))",
                    "(1.0, 2.0, 4.0)", "typed slots take the library's vectors");
         });
@@ -268,18 +268,18 @@ public:
             expect("to_string(math::color() == math::color(1, 1, 1, 1)) + to_string(math::color() == math::vec4(1, 1, 1, 1))", "truefalse", "a color never equals a vec4");
             expect("var c = math::color(); string m = \"\"; try { math::vec4 v = c; } catch (e) { m = e; } to_string(m.contains(\"declared math::vec4\"))", "true", "a color does not convert to a vec4");
             expect("to_json(math::color(1, 0.5, 0, 1))", "{\"$type\":\"math::color\",\"$val\":{\"r\":1.0,\"g\":0.5,\"b\":0.0,\"a\":1.0}}", "JSON channels");
-            expect("var c = from_json(to_json(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c) + type_of(c)", "(0.1, 0.2, 0.3, 0.4)math::color", "JSON round trip");
-            expect("var c = from_base64(to_base64(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c)", "(0.1, 0.2, 0.3, 0.4)", "binary round trip");
+            expect("var c = from_json(to_json(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c) + type_of(c)", "(0.1, 0.2, 0.3, 0.4)math::color", "JSON math::round trip");
+            expect("var c = from_base64(to_base64(math::color(0.1, 0.2, 0.3, 0.4))); to_string(c)", "(0.1, 0.2, 0.3, 0.4)", "binary math::round trip");
             // OKLab (reference values from an independent implementation of Ottosson's transform)
             expect("var m = math::mix(math::color(1, 0, 0), math::color(0, 0, 1), 0.5); "
                    "to_string(math::abs(m.r - 0.55044109) < 1e-5 && math::abs(m.g - 0.32562068) < 1e-5 && math::abs(m.b - 0.63650066) < 1e-5 && m.a == 1.0)",
-                   "true", "mix(red, blue, 0.5) in OKLab");
+                   "true", "math::mix(red, blue, 0.5) in OKLab");
             expect("var m = math::mix(math::color(1, 1, 1), math::color(0, 0, 0), 0.5); "
                    "to_string(math::abs(m.r - 0.38857287) < 1e-5 && math::abs(m.g - m.r) < 1e-6 && math::abs(m.b - m.r) < 1e-6)",
-                   "true", "mix(white, black, 0.5) is the perceptual mid-gray");
+                   "true", "math::mix(white, black, 0.5) is the perceptual mid-gray");
             expect("function near(math::color a, math::color b) -> bool { return math::abs(a.r - b.r) < 1e-5 && math::abs(a.g - b.g) < 1e-5 && math::abs(a.b - b.b) < 1e-5; } "
                    "bool ok = true; for (auto c : [math::color(1, 0, 0), math::color(0, 1, 0), math::color(0, 0, 1), math::color(0.2, 0.4, 0.6)]) { ok = ok && near(math::mix(c, c, 0.3), c); } to_string(ok)",
-                   "true", "primaries round trip within 1e-5");
+                   "true", "primaries math::round trip within 1e-5");
             expect("var r = math::color(1, 0, 0); var b = math::color(0, 0, 1); to_string(math::mix_in(r, b, 0.5, 2.0) == math::mix(r, b, 0.25)) + to_string(math::lerp(r, b, 0.5) == math::mix(r, b, 0.5))",
                    "truetrue", "the eased mixes weight OKLab");
             expect("to_string(math::mix(math::color(0, 0, 0, 0), math::color(0, 0, 0, 1), 0.25).a)", "0.25", "alpha blends linearly");
@@ -290,7 +290,7 @@ public:
                    "true", "an achromatic endpoint takes the other's hue");
             expect("to_string(math::mix_hsv(math::color(1, 0, 0), math::color(0, 0, 1), 0.5))", "(1.0, 0.0, 1.0, 1.0)", "red to blue through magenta");
             expect(raised("var q = math::mix(math::color(), math::color(), math::vec4(0.5, 0.5, 0.5, 0.5));"), "math::mix on colors expects (math::color, math::color, float)", "t is a float for colors");
-            expect(raised("var q = math::mix(math::color(), math::vec4(), 0.5);"), "math::mix on colors expects (math::color, math::color, float)", "a color and a vector do not mix");
+            expect(raised("var q = math::mix(math::color(), math::vec4(), 0.5);"), "math::mix on colors expects (math::color, math::color, float)", "a color and a vector do not math::mix");
             expect(raised("var q = math::min(math::color(), math::vec4());"), "a math::color combines only with colors and scalars", "nor combine per channel");
             expect("var c = math::clamp(math::color(2, -1, 0.5, 1), 0.0, 1.0); to_string(c) + type_of(c)", "(1.0, 0.0, 0.5, 1.0)math::color", "per-channel rows keep the color");
         });
@@ -312,7 +312,7 @@ public:
             expect("var d = math::distance_squared(math::ivec3(1, 1, 1), math::ivec3(4, 5, 1)); to_string(d) + type_of(d) + to_string(math::distance(0, 0, 3, 4))", "25int5.0", "exact ivec distance_squared; the scalar form stays");
             expect("to_string(math::reflect(math::vec2(1, -1), math::vec2(0, 1)))", "(1.0, 1.0)", "reflect");
             expect("to_string(math::project(math::vec2(2, 3), math::vec2(4, 0))) + to_string(math::project(math::vec2(2, 3), math::vec2()))", "(2.0, 0.0)(0.0, 0.0)", "project, onto zero is zero");
-            expect("to_string(math::angle_between(math::vec2(1, 0), math::vec2(0, 1))) + to_string(math::angle_between(math::vec2(1, 0), math::vec2()))", "1.57079632679489660.0", "angle_between in radians; a zero vector gives 0");
+            expect("to_string(math::angle_between(math::vec2(1, 0), math::vec2(0, 1))) + to_string(math::angle_between(math::vec2(1, 0), math::vec2()))", "1.57079632679489660.0", "angle_between in math::radians; a zero vector gives 0");
             expect("to_string(math::angle_between(math::vec3(1, 1, 1), math::vec3(2, 2, 2)) < 1e-7) + to_string(math::abs(math::angle_between(math::vec2(1, 0), math::vec2(-1, 0)) - 3.141592653589793) < 1e-12)",
                    "truetrue", "the cosine is clamped");
             expect("var p = math::perpendicular(math::ivec2(1, 2)); to_string(math::perpendicular(math::vec2(1, 2))) + to_string(p) + type_of(p)", "(-2.0, 1.0)(-2, 1)math::ivec2", "perpendicular");
@@ -547,15 +547,15 @@ public:
             expect("array<var> d = [math::ivec2(1, 2), math::vec2(3.5, 4)]; array<math::vec2> e = d; e.join(\" \")", "(1.0, 2.0) (3.5, 4.0)", "a dynamic array into a vector buffer");
             expect("array<math::vec3> a = [math::vec3(1, 2, 3)]; array<math::vec3> b = [math::vec3(1, 2, 3)]; to_string(a == b) + to_string(a.contains(math::vec3(1, 2, 3))) + to_string(a.index_of(math::vec3(1, 2, 3)))",
                    "truetrue0", "equality and search");
-            expect("array<math::vec2> a = [math::vec2(1, 2)]; array<math::vec2> b = [math::vec2(3, 4)]; var c = concatenate(a, b); c[1].x = 7; c.join(\" \") + b.join(\" \")",
+            expect("array<math::vec2> a = [math::vec2(1, 2)]; array<math::vec2> b = [math::vec2(3, 4)]; var c = array::append(a, b); c[1].x = 7; c.join(\" \") + b.join(\" \")",
                    "(1.0, 2.0) (7.0, 4.0)(3.0, 4.0)", "concatenate");
-            expect("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4), math::vec2(5, 6)]; a.slice(1, 3).join(\" \")", "(3.0, 4.0) (5.0, 6.0)", "slice");
+            expect("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4), math::vec2(5, 6)]; array::slice(a, 1, 3).join(\" \")", "(3.0, 4.0) (5.0, 6.0)", "slice");
             expect("array<math::vec2> a = [math::vec2(0.1, 1e30)]; var j = from_json(to_json(a)); var b = from_base64(to_base64(a)); j.join(\" \") + b.join(\" \")",
                    "(0.1, 1e+30)(0.1, 1e+30)", "text and binary archives");
             expect(raised("array<math::vec3> a; a.push(math::vec2(1, 2));"), "Cannot push 'math::vec2' to array<math::vec3>", "another dimension rejects");
             expect(raised("array<math::vec3> a = [math::vec3()]; var five = 5; a[0] = five;"), "Cannot assign 'int' to element of type 'math::vec3'", "a scalar element store rejects");
             expect(raised("array<math::ivec2> a = [math::ivec2()]; a[0].x = 3000000000;"), "Integer overflow: the value does not fit an int32 component", "an int32 component store narrows");
-            expect(raised("array<math::vec2> a = [math::vec2(1, 2), math::vec2(3, 4)]; a.sort();"), "math::vec2 has no ordering", "no ordering");
+            expect("array<math::vec2> a = [math::vec2(3, 4), math::vec2(1, 2)]; a.sort(); to_string(a[0]);", "(1.0, 2.0)", "default vector sort");
             agree("function f() -> string { array<math::vec3> pts; for (int i = 0; i < 6; i++) { pts.push(math::vec3(i, i * 2, 1)); } float s = 0.0; "
                   "for (int i = 0; i < pts.size(); i++) { pts[i].x += 1; pts[i].z *= 0.5; math::vec3 p = pts[i]; s += p.x + p.y + p.z; } "
                   "for (auto& p : pts) { p.y = -p.y; } return pts.join(\" \") + to_string(s); } f()", "a typed loop over a vector buffer");
@@ -597,16 +597,16 @@ public:
 
         test("json", [expect]() {
             expect("to_json(math::vec3(1, 0.5, -2))", "{\"$type\":\"math::vec3\",\"$val\":{\"x\":1.0,\"y\":0.5,\"z\":-2.0}}", "to_json");
-            expect("to_string(from_json(to_json(math::ivec3(1, -2, 3))))", "(1, -2, 3)", "round trip ivec3");
-            expect("var v = from_json(to_json(math::vec2(0.1, 1e30))); to_string(v) + type_of(v)", "(0.1, 1e+30)math::vec2", "round trip binary32 exactly");
+            expect("to_string(from_json(to_json(math::ivec3(1, -2, 3))))", "(1, -2, 3)", "math::round trip ivec3");
+            expect("var v = from_json(to_json(math::vec2(0.1, 1e30))); to_string(v) + type_of(v)", "(0.1, 1e+30)math::vec2", "math::round trip binary32 exactly");
             expect("var a = from_json(to_json([math::ivec2(1, 2), 3])); to_string(a[0]) + to_string(a[1])", "(1, 2)3", "nested in an array");
-            expect("var v = from_json(to_json(math::vec4(1, -2.5, 0.1, 4))); to_string(v) + type_of(v)", "(1.0, -2.5, 0.1, 4.0)math::vec4", "round trip vec4");
+            expect("var v = from_json(to_json(math::vec4(1, -2.5, 0.1, 4))); to_string(v) + type_of(v)", "(1.0, -2.5, 0.1, 4.0)math::vec4", "math::round trip vec4");
         });
 
         test("binary_archive", [expect]() {
-            expect("var v = from_base64(to_base64(math::vec3(0.1, -2, 1e30))); to_string(v) + type_of(v)", "(0.1, -2.0, 1e+30)math::vec3", "binary32 bits round trip");
-            expect("var p = from_base64(to_base64(math::ivec2(-2147483647 - 1, 7))); to_string(p)", "(-2147483648, 7)", "int32 bits round trip");
-            expect("var q = from_base64(to_base64(math::vec4(0.1, 2, 3, -4))); to_string(q) + type_of(q)", "(0.1, 2.0, 3.0, -4.0)math::vec4", "vec4 round trip");
+            expect("var v = from_base64(to_base64(math::vec3(0.1, -2, 1e30))); to_string(v) + type_of(v)", "(0.1, -2.0, 1e+30)math::vec3", "binary32 bits math::round trip");
+            expect("var p = from_base64(to_base64(math::ivec2(-2147483647 - 1, 7))); to_string(p)", "(-2147483648, 7)", "int32 bits math::round trip");
+            expect("var q = from_base64(to_base64(math::vec4(0.1, 2, 3, -4))); to_string(q) + type_of(q)", "(0.1, 2.0, 3.0, -4.0)math::vec4", "vec4 math::round trip");
         });
 
         test("static_checker", [this]() {

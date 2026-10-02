@@ -374,3 +374,23 @@ as `auto` and types it again at load). The rules for an implementation:
   running unit or a compiled chunk.
 
 Suite `Spec Conformance` (`auto_static_type`) pins it, both backends, proofs on and off, every check mode.
+
+## 15. Collection transforms preserve observable copy behavior (2026-10-02)
+
+Dot array append/concat/filter/map/slice mutate; array:: forms copy. Dot map keeps
+input constraints; namespace map takes declared callback result constraints. Filters
+preserve array T or map K,V. Dynamic slots retain current typed container constraints
+through dynamic type twins while permitting the variable itself to be rebound.
+Selected outputs use clone_element: class values copy and explicit handles share.
+Never deep-copy read-only inputs or overwritten merge entries preemptively. In-place
+selection moves retained storage, so nocopy objects remain usable through references.
+Any snapshot held across a user callback is shallow and pins its backing node.
+
+Public ordering and private map-key ordering are distinct contracts. Public arrays
+and vectors order lexicographically; map entries compare keys by private map-key
+semantics and values by public ordering. Public numeric <=> groups NaNs last and
+signed zeros equivalent; ordinary numeric relational/equality operators stay IEEE.
+Private map-key comparison and hashing must remain consistent, including expired
+weak owners. Comparison errors and original script throws survive container ordering.
+Suite Spec Conformance's api_consistency groups pin these contracts on both backends
+with proofs on and off.

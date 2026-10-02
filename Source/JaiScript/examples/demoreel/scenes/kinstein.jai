@@ -169,7 +169,7 @@ class Kinstein : Scene {
 		for (int i = 0; i < nwp; ++i) {
 			float ddx = wpx[(i + 1) % nwp] - wpx[i];
 			float ddy = wpy[(i + 1) % nwp] - wpy[i];
-			seglen.push(sqrt(ddx * ddx + ddy * ddy));
+			seglen.push(math::sqrt(ddx * ddx + ddy * ddy));
 			path_len += seglen[i];
 		}
 		// garrison, posted along the route (a couple wait around corners)
@@ -248,7 +248,7 @@ class Kinstein : Scene {
 	}
 
 	var path_at(float s) {
-		s = s - floor(s / path_len) * path_len;
+		s = s - math::floor(s / path_len) * path_len;
 		for (int i = 0; i < nwp; ++i) {
 			float L = seglen[i];
 			if (s <= L) {
@@ -293,7 +293,7 @@ class Kinstein : Scene {
 		posy = p[1];
 		float dx = q[0] - posx;
 		float dy = q[1] - posy;
-		float dl = sqrt(dx * dx + dy * dy);
+		float dl = math::sqrt(dx * dx + dy * dy);
 		if (dl > 0.0001) { dirx = dx / dl; diry = dy / dl; }
 		planex = 0.0 - diry * 0.66;
 		planey = dirx * 0.66;
@@ -393,7 +393,7 @@ class Kinstein : Scene {
 		float hwm = (sh + (typ == 1 ? 6.0 : 2.0)) * 0.5;
 		int feet = h / 2 + itrunc(h * 0.5 / tyy);
 		int top = feet - sh;
-		float wob = sin(tt * 5.0 + i * 2.1) * 0.10;
+		float wob = math::sin(tt * 5.0 + i * 2.1) * 0.10;
 		bool flash = es[i] == 1;
 		int body = sprite_base + typ * 12;
 		float fogk = 1.1 - tyy * 0.06;
@@ -404,7 +404,7 @@ class Kinstein : Scene {
 			float v = (dy + 0.5) / sh * 2.0 - 1.0;
 			float vv = 1.0 - v * v;
 			if (vv <= 0.0) { continue; }
-			float hwf = sqrt(vv) * hwm;
+			float hwf = math::sqrt(vv) * hwm;
 			int hw = itrunc(hwf);
 			int cxr = scx + itrunc(wob * v * hwm);
 			int rowb = rr * w;
@@ -416,7 +416,7 @@ class Kinstein : Scene {
 				if (!flash) {
 					float nx = dx / (hwm + 0.5);
 					float q = 1.0 - nx * nx - v * v;
-					float nz = q > 0.0 ? sqrt(q) : 0.0;
+					float nz = q > 0.0 ? math::sqrt(q) : 0.0;
 					float li = -0.45 * nx - 0.55 * v + 0.70 * nz;
 					li = li < 0.0 ? 0.0 : li;
 					int lv = itrunc((0.12 + 0.88 * li) * fogk * 11.99);
@@ -477,7 +477,7 @@ class Kinstein : Scene {
 			pdist = pdist < 0.05 ? 0.05 : pdist;
 			zc[x] = pdist;
 			float wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
-			wallx = wallx - floor(wallx);
+			wallx = wallx - math::floor(wallx);
 			int tu = itrunc(wallx * 16.0) & 15;
 			float lineh = hh / pdist;
 			float topf = (hh - lineh) * 0.5;
@@ -553,8 +553,8 @@ class Kinstein : Scene {
 			int body = sprite_base + et[i3] * 12 + 8;
 			for (int k = 0; k < 18; ++k) {
 				float a = k * 0.349 + i3;
-				int gx = scx + itrunc(cos(a) * r * (1.0 + (k % 3) * 0.3));
-				int gy = scy + itrunc(sin(a) * r + prog * prog * 10.0);
+				int gx = scx + itrunc(math::cos(a) * r * (1.0 + (k % 3) * 0.3));
+				int gy = scy + itrunc(math::sin(a) * r + prog * prog * 10.0);
 				if (gx < 0 || gx >= w - 1 || gy < 1 || gy >= h - 1) { continue; }
 				if (tyy >= zcol[gx]) { continue; }
 				int gc = k % 4 == 0 ? sprite_base + 45 : body - (k % 3) * 2;
@@ -578,7 +578,7 @@ class Kinstein : Scene {
 			}
 		}
 		// the gun, drawn at 2x: bobs with the walk, kicks on the shot
-		int bob = itrunc(sin(tt * 7.0) * 2.5);
+		int bob = itrunc(math::sin(tt * 7.0) * 2.5);
 		int kick = muzzle_t > 0.0 ? 4 : 0;
 		int gw = 16;
 		int gh = gun.size();

@@ -148,9 +148,9 @@ class Gfx {
 	}
 
 	var rainbow_rgb(float phase) {
-		return [128.0 + 127.0 * sin(phase),
-			128.0 + 127.0 * sin(phase + 2.094),
-			128.0 + 127.0 * sin(phase + 4.188)];
+		return [128.0 + 127.0 * math::sin(phase),
+			128.0 + 127.0 * math::sin(phase + 2.094),
+			128.0 + 127.0 * math::sin(phase + 4.188)];
 	}
 
 	string fmt1(float v) {
@@ -240,7 +240,7 @@ class Gfx {
 			int cy = h / 2;
 			int rmax = cx * cx + cy * cy;
 			int r = itrunc(prog * prog * (rmax + 400.0));
-			int r2 = itrunc(sqrt(r * 1.0) + 2.0);
+			int r2 = itrunc(math::sqrt(r * 1.0) + 2.0);
 			r2 = r2 * r2;
 			for (int y = 0; y < h; ++y) {
 				int dy = y - cy;

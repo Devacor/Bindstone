@@ -50,7 +50,7 @@ void advance(array<Body>& bodies, int nbody) {
 			float dx = bix - bj.x;
 			float dy = biy - bj.y;
 			float dz = biz - bj.z;
-			float distance = sqrt(dx * dx + dy * dy + dz * dz);
+			float distance = math::sqrt(dx * dx + dy * dy + dz * dz);
 			float mag = 1.0 / (distance * distance * distance);
 			float bim = bimass * mag;
 			float bjm = bj.mass * mag;
@@ -87,7 +87,7 @@ float energy(array<Body>& bodies, int nbody) {
 			float dx = bi.x - bj.x;
 			float dy = bi.y - bj.y;
 			float dz = bi.z - bj.z;
-			float distance = sqrt(dx * dx + dy * dy + dz * dz);
+			float distance = math::sqrt(dx * dx + dy * dy + dz * dz);
 			e = e - ((bim * bj.mass) / distance);
 		}
 	}

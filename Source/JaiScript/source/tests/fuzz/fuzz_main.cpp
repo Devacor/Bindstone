@@ -121,7 +121,7 @@ namespace {
 			if (a == "--seed") { const char* v = next("--seed"); if (!v) return false; opt.seed = std::stoull(v); opt.seed_given = true; }
 			else if (a == "--seed-start") { const char* v = next("--seed-start"); if (!v) return false; opt.seed_start = std::stoull(v); }
 			else if (a == "--iterations") { const char* v = next("--iterations"); if (!v) return false; opt.iterations = std::stoull(v); }
-			else if (a == "--max-depth") { const char* v = next("--max-depth"); if (!v) return false; opt.max_depth = std::stoi(v); }
+			else if (a == "--math::max-depth") { const char* v = next("--math::max-depth"); if (!v) return false; opt.max_depth = std::stoi(v); }
 			else if (a == "--minimize") { opt.minimize_flag = true; }
 			else if (a == "--corpus") { const char* v = next("--corpus"); if (!v) return false; opt.corpus = v; }
 			else if (a == "--timeout-ms") { const char* v = next("--timeout-ms"); if (!v) return false; opt.timeout_ms = std::stod(v); }
@@ -178,7 +178,7 @@ namespace {
 			f << "# Divergence: fuzz seed " << original.seed << "\n\n";
 			if (!suppression_id.empty()) f << "Suppressed as known divergence: `" << suppression_id << "`\n\n";
 			f << "Command: `jaiscript_fuzz --seed " << original.seed
-			  << " --max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms << "`\n\n";
+			  << " --math::max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms << "`\n\n";
 			f << "## Diff\n\n```\n" << diff << "```\n\n";
 			const program& repro = minimized ? *minimized : original;
 			f << "## Minimized program\n\n```\n" << repro.joined() << "```\n\n";
@@ -378,7 +378,7 @@ namespace {
 		std::ifstream f(opt.run_file);
 		if (!f) { std::cerr << "cannot open " << opt.run_file << "\n"; return false; }
 		std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-		p.stdlib_math = opt.order;
+		p.host_math_aliases = opt.order;
 		const std::string marker = "// --- next execute() on same engine ---";
 		size_t pos = 0;
 		while (true) {
@@ -421,7 +421,7 @@ namespace {
 
 	int run_isolated(const options& opt, uint64_t seed) {
 		std::string cmd = "\"" + opt.exe_path + "\" --child --seed " + std::to_string(seed) +
-			" --max-depth " + std::to_string(opt.max_depth) +
+			" --math::max-depth " + std::to_string(opt.max_depth) +
 			" --timeout-ms " + std::to_string(opt.timeout_ms);
 		if (opt.minimize_flag) cmd += " --minimize";
 		if (!opt.corpus.empty()) cmd += " --corpus \"" + opt.corpus + "\"";
@@ -548,7 +548,7 @@ int main(int argc, char** argv) {
 			if (code != 0 && code != 24) {
 				std::cout << "[jaibite mutant " << seed << "] child exit " << code << "\n"
 				          << "reproduce: jaiscript_fuzz --jaibite-mutate --seed " << seed
-				          << " --max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms
+				          << " --math::max-depth " << opt.max_depth << " --timeout-ms " << opt.timeout_ms
 				          << (opt.proofs ? "" : " --no-proofs")
 				          << (opt.param_alias ? "" : " --no-param-alias") << (opt.passes ? "" : " --no-passes")
 				          << (opt.lowering == 1 ? " --no-lowering" : opt.lowering == 2 ? " --lowered-interp" : "") << "\n";
@@ -598,14 +598,14 @@ int main(int argc, char** argv) {
 					hang_seeds.push_back(seed);
 					std::cout << "\n=== HANG seed " << seed << " (child killed by its watchdog) ===\n";
 					std::cout << "reproduce: jaiscript_fuzz --child --seed " << seed
-					          << " --max-depth " << opt.max_depth << "\n";
+					          << " --math::max-depth " << opt.max_depth << "\n";
 					break;
 				default:
 					++crashes;
 					crash_seeds.push_back(seed);
 					std::cout << "\n=== CRASH seed " << seed << " (child exit code " << code << ") ===\n";
 					std::cout << "reproduce: jaiscript_fuzz --child --seed " << seed
-					          << " --max-depth " << opt.max_depth << "\n";
+					          << " --math::max-depth " << opt.max_depth << "\n";
 					break;
 			}
 		} else {

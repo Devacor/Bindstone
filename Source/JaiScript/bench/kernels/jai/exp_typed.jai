@@ -3,7 +3,7 @@ include "profile.jai";
 float exp_loop(int n) {
 	float sum = 0.0;
 	for (int i = 0; i <= n; ++i) {
-		sum += exp(1.0 / (1.0 + i));
+		sum += math::exp(1.0 / (1.0 + i));
 	}
 	return sum;
 }

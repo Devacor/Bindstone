@@ -71,7 +71,7 @@ function sponge_row(int py) -> array<float> {
 			float rdx = lfx * fl_ + lrx * u + lux * v;
 			float rdy = lfy * fl_ + luy * v;
 			float rdz = lfz * fl_ + lrz * u + luz * v;
-			float il = 1.0 / sqrt(rdx * rdx + rdy * rdy + rdz * rdz);
+			float il = 1.0 / math::sqrt(rdx * rdx + rdy * rdy + rdz * rdz);
 			rdx *= il;
 			rdy *= il;
 			rdz *= il;
@@ -318,20 +318,20 @@ class SpongeWorks : Scene {
 		tt = t;
 		// stately orbit, slow approach, then the dive toward the lattice
 		float ang = t * 0.26 + 0.7;
-		float el = 0.38 + 0.22 * sin(t * 0.19 + 1.2);
+		float el = 0.38 + 0.22 * math::sin(t * 0.19 + 1.2);
 		float rad = 3.9 - t * 0.05;
 		if (t > 11.0) { rad -= (t - 11.0) * 0.22; }
 		rad = rad < 1.7 ? 1.7 : rad;
-		rad += 0.06 * sin(t * 0.7);
-		float cel = cos(el);
-		ex = rad * cel * cos(ang);
-		ey = rad * sin(el);
-		ez = rad * cel * sin(ang);
+		rad += 0.06 * math::sin(t * 0.7);
+		float cel = math::cos(el);
+		ex = rad * cel * math::cos(ang);
+		ey = rad * math::sin(el);
+		ez = rad * cel * math::sin(ang);
 		float inr = 0.0 - 1.0 / rad;
 		fx = ex * inr;
 		fy = ey * inr;
 		fz = ez * inr;
-		float rl = sqrt(fx * fx + fz * fz);
+		float rl = math::sqrt(fx * fx + fz * fz);
 		rl = rl < 0.0001 ? 0.0001 : rl;
 		rgx = fz / rl;
 		rgz = 0.0 - fx / rl;

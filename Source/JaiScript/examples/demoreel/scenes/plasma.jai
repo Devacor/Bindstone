@@ -13,14 +13,14 @@ class Plasma : Scene {
 		name = "PLASMA";
 		handle = "warmup loop . by the symbolizer";
 		for (int i = 0; i < 1024; ++i) {
-			st.push(itrunc(sin(i * 0.00613592315) * 1024.0));
+			st.push(itrunc(math::sin(i * 0.00613592315) * 1024.0));
 		}
 		dw = w * 2;
 		for (int y = 0; y < h * 2; ++y) {
 			for (int x = 0; x < dw; ++x) {
 				float dx = x - w * 1.0;
 				float dy = y - h * 1.0;
-				dist.push(itrunc(sqrt(dx * dx + dy * dy) * 26.0) & 1023);
+				dist.push(itrunc(math::sqrt(dx * dx + dy * dy) * 26.0) & 1023);
 			}
 		}
 		pal.gradient(256, [[12.0, 6.0, 40.0], [68.0, 20.0, 150.0], [214.0, 40.0, 150.0], [255.0, 120.0, 60.0],
@@ -42,9 +42,9 @@ class Plasma : Scene {
 		int t3 = itrunc(tt * -210.0) + 4096;
 		int t4 = itrunc(tt * 61.0);
 		int phase = itrunc(tt * 38.0);
-		int ox = itrunc(w * 0.5 + w * 0.42 * sin(tt * 0.61));
-		int oy = itrunc(h * 0.5 + h * 0.40 * sin(tt * 0.83 + 1.3));
-		int zoom = 17 + itrunc(6.0 * sin(tt * 0.35));
+		int ox = itrunc(w * 0.5 + w * 0.42 * math::sin(tt * 0.61));
+		int oy = itrunc(h * 0.5 + h * 0.40 * math::sin(tt * 0.83 + 1.3));
+		int zoom = 17 + itrunc(6.0 * math::sin(tt * 0.35));
 		int idx = 0;
 		for (int y = 0; y < hh; ++y) {
 			int ys = s[(y * 21 + t2) & 1023];

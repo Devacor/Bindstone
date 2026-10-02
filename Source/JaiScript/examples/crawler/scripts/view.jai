@@ -285,7 +285,7 @@ function tex_rock(var& t, int seed) -> void {
 function tex_marble(var& t, int seed) -> void {
 	for (int v = 0; v < 32; ++v) {
 		for (int u = 0; u < 32; ++u) {
-			float s = sin(u * 0.28 + v * 0.15 + 2.0 * sin(v * 0.22 + u * 0.05));
+			float s = math::sin(u * 0.28 + v * 0.15 + 2.0 * math::sin(v * 0.22 + u * 0.05));
 			int code = 1;
 			if (s > 0.95) { code = 5; }
 			else if (s > 0.84) { code = 2; }
@@ -1213,7 +1213,7 @@ function render_pane(int p, float dirx, float diry) -> void {
 		zbuf[x] = pdist;
 
 		float wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
-		wallx = wallx - floor(wallx);
+		wallx = wallx - math::floor(wallx);
 		int u = wallx * 32.0;
 		if (u > 31) { u = 31; }
 		if ((side == 0 && rdx > 0.0) || (side == 1 && rdy < 0.0)) { u = 31 - u; }
@@ -1431,7 +1431,7 @@ function draw_sprites() -> void {
 		int wdt = hgt * ART_W[a] * SPRITE_ASPECT / ART_H[a];
 		if (wdt < 1) { wdt = 1; }
 		int bot = PH * 0.5 + WALL_KPX * (0.5 - SP_LIFT[i]) / depth;
-		int x0 = floor(SP_X[i] - wdt * 0.5);
+		int x0 = math::floor(SP_X[i] - wdt * 0.5);
 		int lvl = lightf(depth) * 15.0 + 0.5;
 		draw_art(a, SP_RGB[i], x0, bot - hgt, wdt, hgt, lvl, depth, SP_FLASH[i]);
 		if (SP_HP[i] >= 0) { draw_hp_bar(x0, bot - hgt - 2, wdt, SP_HP[i], depth); }

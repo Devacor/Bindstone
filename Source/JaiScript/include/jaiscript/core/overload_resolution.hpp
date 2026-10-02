@@ -7,9 +7,25 @@
 #include <jaiscript/detail/ast.hpp>
 #include <climits>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace jai {
+
+inline std::optional<bool> spaceship_rewritten(token_type op, const script_value& result) {
+    const script_value& r = result.deref();
+    double cmp = 0.0;
+    if (r.is_int()) { cmp = static_cast<double>(r.as_int()); }
+    else if (r.is_float()) { cmp = r.as_float(); }
+    else { return std::nullopt; }
+    switch (op) {
+        case token_type::less: return cmp < 0;
+        case token_type::less_equal: return cmp <= 0;
+        case token_type::greater: return cmp > 0;
+        case token_type::greater_equal: return cmp >= 0;
+        default: return std::nullopt;
+    }
+}
 
 // Trailing-default arity window (the parser enforces defaults are trailing): a callable
 // with N params of which K have defaults accepts N-K..N arguments. The binding layer on

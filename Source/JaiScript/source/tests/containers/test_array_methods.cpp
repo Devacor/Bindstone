@@ -58,7 +58,7 @@ public:
 
         test("slice_positive", [this]() {
             auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.slice(1, 3);");
+            auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; array::slice(arr, 1, 3);");
             const auto& arr = result.as_array();
             check_eq(arr.size(), 2);
             check_eq(arr[0].as<int>(), 2);
@@ -67,7 +67,7 @@ public:
 
         test("slice_negative", [this]() {
             auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.slice(-3, -1);");
+            auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; array::slice(arr, -3, -1);");
             const auto& arr = result.as_array();
             check_eq(arr.size(), 2);
             check_eq(arr[0].as<int>(), 3);
@@ -78,7 +78,7 @@ public:
             auto eng = make_engine();
             auto result = eng->execute(R"(
                 var arr = [1, 2, 3, 4, 5, 6];
-                arr.filter([](auto x) -> auto { return x % 2 == 0; });
+                array::filter(arr, [](auto x) -> auto { return x % 2 == 0; });
             )");
             const auto& arr = result.as_array();
             check_eq(arr.size(), 3);

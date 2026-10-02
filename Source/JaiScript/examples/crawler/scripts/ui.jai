@@ -135,8 +135,8 @@ function animate_turn(int old_facing, int rot) -> void {
 	var sweep = [0.5236, 1.0472];   // 30, 60 degrees; the loop draws the 90 frame
 	for (auto a : sweep) {
 		float ang = rot * a;
-		float ca = cos(ang);
-		float sa = sin(ang);
+		float ca = math::cos(ang);
+		float sa = math::sin(ang);
 		compose_frame(render_view(dx0 * ca - dy0 * sa, dx0 * sa + dy0 * ca));
 		time::sleep_ms(26);
 	}

@@ -811,6 +811,10 @@ namespace detail { struct argument_capture_storage; }
         }
 
         // Unchecked mutable array NODE handle - caller must verify is_array() first
+		inline const strong_ptr<script_array>& unchecked_get_array_storage() const noexcept {
+			return *storage_.get_if<TYPEID_ARRAY>();
+		}
+
         inline strong_ptr<script_array>& unchecked_get_array_storage() noexcept {
             return *storage_.get_if<TYPEID_ARRAY>();
         }
@@ -833,6 +837,10 @@ namespace detail { struct argument_capture_storage; }
         }
 
         // Unchecked mutable map storage accessor - caller must verify is_map() first
+		inline const strong_ptr<script_map>& unchecked_get_map_storage() const noexcept {
+			return *storage_.get_if<TYPEID_MAP>();
+		}
+
         inline strong_ptr<script_map>& unchecked_get_map_storage() noexcept {
             return *storage_.get_if<TYPEID_MAP>();
         }
@@ -2793,6 +2801,62 @@ namespace detail { struct argument_capture_storage; }
             default: values_.reserve(n); break;
         }
     }
+	inline bool script_array::append_same_kind(const script_array& a_source) {
+		if (kind_ != a_source.kind_ || kind_ == kind_t::hetero || kind_ == kind_t::obj) { return false; }
+		auto append = [](auto& a_target, const auto& a_input) {
+			const size_t count = a_input.size();
+			if (&a_target == &a_input) {
+				const size_t start = a_target.size();
+				a_target.resize(start + count);
+				std::copy_n(a_target.begin(), count, a_target.begin() + start);
+			} else { a_target.insert(a_target.end(), a_input.begin(), a_input.end()); }
+		};
+		switch (kind_) {
+			case kind_t::i64: append(ints_, a_source.ints_); break;
+			case kind_t::f64: append(floats_, a_source.floats_); break;
+			case kind_t::str: append(strs_, a_source.strs_); break;
+			default: append(bytes_, a_source.bytes_); break;
+		}
+		return true;
+	}
+
+	inline void script_array::retain_range(size_t a_start, size_t a_end) {
+		auto retain = [&](auto& a_buffer, size_t a_stride = 1) {
+			a_buffer.erase(a_buffer.begin() + a_end * a_stride, a_buffer.end());
+			a_buffer.erase(a_buffer.begin(), a_buffer.begin() + a_start * a_stride);
+		};
+		switch (kind_) {
+			case kind_t::i64: retain(ints_); break;
+			case kind_t::f64: retain(floats_); break;
+			case kind_t::str: retain(strs_); break;
+			case kind_t::obj: retain(objs_); break;
+			case kind_t::hetero: retain(values_); break;
+			default: retain(bytes_, is_vec_kind(kind_) ? vec_stride(kind_) * 4 : 1); break;
+		}
+	}
+	inline void script_array::retain_selected(const std::vector<uint8_t>& a_selected) {
+		auto retain = [&](auto& a_buffer, size_t a_stride = 1) {
+			size_t out = 0;
+			const size_t count = std::min(a_selected.size(), a_buffer.size() / a_stride);
+			for (size_t i = 0; i < count; ++i) {
+				if (!a_selected[i]) { continue; }
+				if (out != i) {
+					for (size_t lane = 0; lane < a_stride; ++lane) { a_buffer[out * a_stride + lane] = std::move(a_buffer[i * a_stride + lane]); }
+				}
+				++out;
+			}
+			a_buffer.erase(a_buffer.begin() + out * a_stride, a_buffer.end());
+		};
+		switch (kind_) {
+			case kind_t::i64: retain(ints_); break;
+			case kind_t::f64: retain(floats_); break;
+			case kind_t::str: retain(strs_); break;
+			case kind_t::obj: retain(objs_); break;
+			case kind_t::hetero: retain(values_); break;
+			default: retain(bytes_, is_vec_kind(kind_) ? vec_stride(kind_) * 4 : 1); break;
+		}
+	}
+
     inline void script_array::assign_buffer(const script_array& other) {
         switch (other.kind_) {
             case kind_t::i64: ints_ = other.ints_; break;

@@ -53,13 +53,13 @@ public:
         test("array_map_untyped_and_typed", [this]() {
             check_eq(std::string("[2,4,6] array\n[6,7]\ncaught: Cannot push 'string' to array<int>\n[2,3,\"s\"]\n"), run_output(R"JS(
                 var a = [1, 2, 3];
-                var d = a.map((x) => x * 2);
+                var d = array::map(a, (x) => x * 2);
                 print(to_json(d), " ", type_of(d));
                 array<int> b = [5, 6];
-                auto t = b.map([](int x) -> int { return x + 1; });
+                auto t = array::map(b, [](int x) -> int { return x + 1; });
                 print(to_json(t));
                 try { t.push("s"); } catch (e) { print("caught: ", e); }
-                var u = [1, 2].map(x => x + 1);
+                var u = array::map([1, 2], x => x + 1);
                 u.push("s");
                 print(to_json(u));
             )JS"));
@@ -68,9 +68,9 @@ public:
         test("array_map_index_and_reference", [this]() {
             check_eq(std::string("[\"0:a\",\"1:b\"]\n[10,20] [1,2]\n"), run_output(R"JS(
                 var names = ["a", "b"];
-                print(to_json(names.map((n, i) => `${i}:${n}`)));
+                print(to_json(array::map(names, (n, i) => `${i}:${n}`)));
                 array<int> v = [1, 2];
-                var tens = v.map([](int& x) -> int { x = x; return x * 10; });
+                var tens = array::map(v, [](int& x) -> int { x = x; return x * 10; });
                 print(to_json(tens), " ", to_json(v));
             )JS"));
         });
@@ -97,7 +97,7 @@ public:
                 array<Unit> units = [Unit(), Unit()];
                 units[1].hp = 20;
                 units.for_each([](Unit& u) { u.hp += 1; });
-                print(to_json(units.map(u => u.hp)));
+                print(to_json(array::map(units, u => u.hp)));
             )JS"));
         });
 
@@ -132,9 +132,9 @@ public:
             check_eq(std::string("[1,2,3,4] [1,2]\ncaught: Cannot push 'string' to array<int>\n[0,1,9,2,3]\n[\"a\",\"x\",\"b\"]\n"
                                  "caught: Cannot insert at index 9 of an array of size 5\ncaught: Cannot insert 'string' into array<int>\n"), run_output(R"JS(
                 array<int> a = [1, 2];
-                auto both = a.concat([3, 4]);
+                auto both = array::concat(a, [3, 4]);
                 print(to_json(both), " ", to_json(a));
-                try { a.concat(["s"]); } catch (e) { print("caught: ", e); }
+                try { array::concat(a, ["s"]); } catch (e) { print("caught: ", e); }
                 array<int> b = [1, 2, 3];
                 b.insert(0, 0);
                 b.insert(2, 9);
@@ -150,7 +150,7 @@ public:
         test("array_helper_callback_throw_propagates", [this]() {
             check_eq(std::string("caught: boom at 2\n[1,2,3]\n"), run_output(R"JS(
                 var a = [1, 2, 3];
-                try { a.map(x => { if (x == 2) { throw "boom at " + x; } return x; }); } catch (e) { print("caught: ", e); }
+                try { array::map(a, x => { if (x == 2) { throw "boom at " + x; } return x; }); } catch (e) { print("caught: ", e); }
                 print(to_json(a));
             )JS"));
         });
@@ -169,8 +169,8 @@ public:
             auto report = e->check("array<int> a = [1, 2]; a.mapp(x => x);");
             check_eq((size_t)1, report.error_count());
             check_true(!report.diagnostics.empty() && contains(report.diagnostics[0].message, "did you mean 'map'"));
-            check_eq((size_t)0, e->check("array<int> a = [1, 2]; bool b = a.some(x => x > 1); int i = a.find_index(x => x > 1); auto m = a.map(x => x); auto j = m.size();").error_count());
-            check_eq((size_t)1, e->check("array<int> a = [1, 2]; auto m = a.map(x => x); m.nosuch();").error_count());
+            check_eq((size_t)0, e->check("array<int> a = [1, 2]; bool b = a.some(x => x > 1); int i = a.find_index(x => x > 1); auto m = array::map(a, x => x); auto j = m.size();").error_count());
+            check_eq((size_t)1, e->check("array<int> a = [1, 2]; auto m = array::map(a, x => x); m.nosuch();").error_count());
         });
 
         // ------------------------------------------------------------------ arrow functions
@@ -208,8 +208,8 @@ public:
             check_eq(std::string("[11,12] [21,22]\n"), run_output(R"JS(
                 class Shift {
                     int by = 10;
-                    var arrow(var xs) { return xs.map(x => x + this.by); }
-                    var bare(var xs) { return xs.map((int x) => x + by + 10); }
+                    var arrow(var xs) { return array::map(xs, x => x + this.by); }
+                    var bare(var xs) { return array::map(xs, (int x) => x + by + 10); }
                 }
                 Shift s;
                 print(to_json(s.arrow([1, 2])), " ", to_json(s.bare([1, 2])));

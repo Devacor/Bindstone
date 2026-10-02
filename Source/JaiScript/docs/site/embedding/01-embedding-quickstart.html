@@ -138,7 +138,7 @@ script sees: 1</code></pre></div>
 <p>The write-through matrix holds on both backends (the interpreter and the VM, <a href="03-backends.html">chapter 3</a>); the test suite holds them to it:</p>
 <ul><li><strong>Name-level assignment and compound assignment write through</strong>: <code>hp = hp + 50;</code>, <code>hp += 7;</code>, <code>++hp</code>, <code>hp--</code> all mutate the C++ variable, at every width: int8 through uint64, float/double, and <code>std::string</code> <code>+=</code>.</li><li><strong>Reads are always live</strong>: change the C++ variable between executes and the script sees the new value.</li><li><strong>Mixed conversions keep the binding</strong>: <code>boundInt += 2.5</code> converts (truncates) and still writes through.</li><li>A bound <code>char</code> is a width-1 bound <strong>int</strong>. It reads as its code point.</li></ul>
 <h3 id="where-the-binding-deliberately-drops-detach-rules">Where the binding deliberately drops (detach rules)<a class="hlink" href="#where-the-binding-deliberately-drops-detach-rules" aria-label="link">&#8203;</a></h3>
-<ul><li><code>clone()</code> of a bound primitive <strong>detaches</strong>. It snapshots the value. A plain copy of the <code>script_value</code> stays bound.</li><li><strong>Every store detaches.</strong> Storing a bound value into an <strong>array element, map slot, or object member</strong>, whether by literal construction (<code>[hp]</code>, <code>{&quot;k&quot;: hp}</code>), assignment, <code>push</code>, or an implicit-this member store, snapshots the value at store time. Write-through belongs to the registered <em>name</em> (and references/captures/by-ref params bound to it), never to stored copies.</li><li>Plain <code>=</code> <strong>through a script reference</strong> (<code>auto&amp; r = hp; r = r + 4;</code>) stores a detached value and unbinds the name: from then on the script variable is its own copy, and later stores by name (<code>hp = 7;</code>) no longer reach C++. Compound assigns through refs (<code>r += 5</code>) DO write through.</li></ul>
+<ul><li><code>clone()</code> of a bound primitive <strong>detaches</strong>. It snapshots the value. A plain copy of the <code>script_value</code> stays bound.</li><li><strong>Every store detaches.</strong> Storing a bound value into an <strong>array element, map slot, or object member</strong>, whether by literal construction (<code>[hp]</code>, <code>{"k": hp}</code>), assignment, <code>push</code>, or an implicit-this member store, snapshots the value at store time. Write-through belongs to the registered <em>name</em> (and references/captures/by-ref params bound to it), never to stored copies.</li><li>Plain <code>=</code> <strong>through a script reference</strong> (<code>auto&amp; r = hp; r = r + 4;</code>) stores a detached value and unbinds the name: from then on the script variable is its own copy, and later stores by name (<code>hp = 7;</code>) no longer reach C++. Compound assigns through refs (<code>r += 5</code>) DO write through.</li></ul>
 <h2 id="the-exact-width-as-aliasing-rules">The exact-width <code>as&lt;T&amp;&gt;</code> aliasing rules<a class="hlink" href="#the-exact-width-as-aliasing-rules" aria-label="link">&#8203;</a></h2>
 <p>A non-const <code>as&lt;T&amp;&gt;</code> on a bound value gives you a <strong>live reference into the C++ variable</strong> (zero-copy, reads and writes are real), but only when the binding&#x27;s width and signedness exactly match the script-side type:</p>
 <div class="tablewrap"><table><thead><tr><th><code>as&lt;T&amp;&gt;</code> request</th><th>aliases live when the bound C++ type is</th></tr></thead><tbody><tr><td><code>as&lt;jai::script_int&amp;&gt;</code></td><td>exactly <code>int64_t</code> (or <code>script_int</code>)</td></tr><tr><td><code>as&lt;jai::script_float&amp;&gt;</code></td><td>exactly <code>double</code></td></tr><tr><td><code>as&lt;std::string&amp;&gt;</code></td><td><code>std::string</code></td></tr><tr><td><code>as&lt;jai::script_bool&amp;&gt;</code></td><td><code>bool</code></td></tr></tbody></table></div>
@@ -189,9 +189,9 @@ int64_t dmg = r.value().as_int();                                  // 12</code><
 <h2 id="reading-script-state-back">Reading script state back<a class="hlink" href="#reading-script-state-back" aria-label="link">&#8203;</a></h2>
 <p><code>get_variable(name)</code> reads a global; <code>as&lt;T&gt;()</code> converts it. How a container comes out follows its declared type: <code>array&lt;int&gt;</code>, <code>array&lt;string&gt;</code> and the other typed arrays are raw buffers that copy out as a <code>std::vector</code>, and only <code>array&lt;var&gt;</code> has a <code>script_value</code> vector to view:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 7;
-array&lt;string&gt; log = [&quot;spawned&quot;, &quot;hit&quot;];
-map&lt;string, int&gt; kills = {&quot;orc&quot;: 3, &quot;troll&quot;: 1};
-array&lt;var&gt; loot = [12, &quot;rope&quot;, 2.5];</code></pre></div>
+array&lt;string&gt; log = ["spawned", "hit"];
+map&lt;string, int&gt; kills = {"orc": 3, "troll": 1};
+array&lt;var&gt; loot = [12, "rope", 2.5];</code></pre></div>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// examples/embed_quickstart makes these calls
 int64_t score = eng-&gt;get_variable(&quot;score&quot;).as_int();
 auto log   = eng-&gt;get_variable(&quot;log&quot;).as&lt;std::vector&lt;std::string&gt;&gt;();              // a typed array copies out
@@ -220,7 +220,7 @@ eng-&gt;execute(&quot;undefined_thing + 1&quot;);   // throws jai::static_check_
 instead, catchable and raised only if control flow actually reaches the name:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;extern function spawn_wave; spawn_wave(3);&quot;);
 // throws jai::runtime_error: &quot;&#x27;spawn_wave&#x27; is declared extern but never defined&quot;</code></pre></div>
-<p>(<code>what()</code> appends the error&#x27;s category, <code>&lt;text&gt;: &lt;category&gt;</code>, when the text does not already begin with it: <code>Cannot apply &#x27;+=&#x27; to string and int: Type mismatch</code>. A script <code>catch</code> sees the text alone.)</p>
+<p>(<code>what()</code> appends the error&#x27;s category, <code>&lt;text&gt;: &lt;category&gt;</code>, when the text does not already begin with it: <code>Cannot apply '+=' to string and int: Type mismatch</code>. A script <code>catch</code> sees the text alone.)</p>
 <p>The other two surfaces are unchanged by checking, and the engine survives all of them:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;throw \&quot;from script\&quot;;&quot;); // uncaught script throw -&gt; jai::script_exception: &quot;from script&quot;
 eng-&gt;execute(&quot;var x = ;&quot;);              // throws jai::parse_error:
@@ -235,7 +235,7 @@ from it). <code>jai::parse_error</code> and <code>jai::runtime_error</code> shar
 derives from <code>std::runtime_error</code> directly. Its listing <em>is</em> the location. <code>eng-&gt;format_stack_trace()</code> /
 <code>eng-&gt;last_stack_trace()</code> give the script stack of the most recent failure. For a
 <code>throw</code> two calls deep:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function inner() { throw &quot;boom&quot;; }
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function inner() { throw "boom"; }
 function outer() { inner(); }
 outer();</code></pre></div>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">  at inner (&lt;script&gt;:1)

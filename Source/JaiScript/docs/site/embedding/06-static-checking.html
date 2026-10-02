@@ -256,7 +256,7 @@ for (float&amp; v : ids) { v = 0; }</code></pre></div>
     for (float&amp; v : ids) { v = 0; }
     ^</code></pre></div>
 <p>A store <em>through</em> a reference runs the referenced variable&#x27;s own table at run time (<code>int&amp; r =
-x; r = &quot;s&quot;</code> raises like <code>x = &quot;s&quot;</code>); the checker leaves those stores to the runtime.</p>
+x; r = "s"</code> raises like <code>x = "s"</code>); the checker leaves those stores to the runtime.</p>
 <h3 id="members">Members<a class="hlink" href="#members" aria-label="link">&#8203;</a></h3>
 <p>On a receiver whose class is fully known (an in-script hierarchy the checker can resolve, or an
 engine-registered class with its properties and statics), an unknown field or method is an error, on
@@ -333,7 +333,7 @@ cast itself is covered in the <a href="../guide/02-type-ladder.html#cast-the-exp
 <h3 id="namespaces-and-recovery">Namespaces, and recovery<a class="hlink" href="#namespaces-and-recovery" aria-label="link">&#8203;</a></h3>
 <p><code>math::&lt;fn&gt;(...)</code> is typed by its kernel's result (<code>int</code> for
 <code>itrunc</code>/<code>ifloor</code>/<code>wrap_*</code>, <code>float</code> for the transcendental and
-interpolation families, operand-typed for <code>abs</code>/<code>min</code>/<code>max</code>/<code>clamp</code>/<code>random</code>);
+interpolation families, operand-typed for <code>math::abs</code>/<code>math::min</code>/<code>math::max</code>/<code>math::clamp</code>/<code>math::random</code>);
 arity there is the kernel's run-time error. A user namespace path <code>a::b::c</code> is lenient at every
 depth.</p>
 <p>An erroring expression assumes its declared or expected type afterwards, so one bad line produces one

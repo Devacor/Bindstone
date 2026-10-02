@@ -32,7 +32,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li><a href="../guide/08-coroutines.html">Coroutines</a></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li><li class="current"><a href="../guide/15-math.html" aria-current="page">Math: Vectors &amp; Colors</a><ol class="page-toc" data-page-toc></ol></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1">
 <article class="chapter"><h1 id="math">Math: Vectors &amp; Colors<a class="hlink" href="#math" aria-label="link">&#8203;</a></h1>
-<p>The standard library has six math value types for positions, directions, grid cells and colors: <code>math::vec2</code>, <code>math::vec3</code>, <code>math::vec4</code>, <code>math::ivec2</code>, <code>math::ivec3</code> and <code>math::color</code>. They are values like <code>int</code> and <code>string</code>: a copy is a separate vector, every arithmetic operator works component by component, and the <code>math::</code> library has the interpolation and geometry functions a game needs. A host can make its own C++ vector types cross the boundary as these types (<a href="../embedding/15-math-adapters.html">Math Adapters</a>).</p>
+<p>The language has six built-in math value types for positions, directions, grid cells and colors: <code>math::vec2</code>, <code>math::vec3</code>, <code>math::vec4</code>, <code>math::ivec2</code>, <code>math::ivec3</code> and <code>math::color</code>. They are values like <code>int</code> and <code>string</code>: a copy is a separate vector, every arithmetic operator works component by component, and the <code>math::</code> library has the interpolation and geometry functions a game needs. A host can make its own C++ vector types cross the boundary as these types (<a href="../embedding/15-math-adapters.html">Math Adapters</a>).</p>
 <div class="tablewrap"><table><thead><tr><th>Type</th><th>Components</th><th>Also named</th><th>Default</th></tr></thead><tbody>
 <tr><td><code>math::vec2</code></td><td><code>x y</code> (32-bit float)</td><td><code>width height</code></td><td><code>(0.0, 0.0)</code></td></tr>
 <tr><td><code>math::vec3</code></td><td><code>x y z</code> (32-bit float)</td><td><code>width height depth</code></td><td><code>(0.0, 0.0, 0.0)</code></td></tr>
@@ -41,6 +41,9 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <tr><td><code>math::ivec3</code></td><td><code>x y z</code> (32-bit int)</td><td><code>width height depth</code></td><td><code>(0, 0, 0)</code></td></tr>
 <tr><td><code>math::color</code></td><td><code>r g b a</code> (32-bit float, straight alpha)</td><td></td><td><code>(1.0, 1.0, 1.0, 1.0)</code>, opaque white</td></tr>
 </tbody></table></div>
+<h2 id="scalar-math">Scalar math and random numbers</h2>
+<p>All standard math operations and constants live in <code>math::</code>, on every engine. Use <code>math::abs</code>, <code>math::min</code>, <code>math::max</code>, <code>math::clamp</code>, rounding, powers, roots, logarithms, trigonometry, interpolation, and random functions here; the <a href="../reference/api.html#group-math">full signatures</a> list every operation. <code>math::PI</code>, <code>math::E</code>, <code>math::TAU</code>, <code>math::INF</code> and <code>math::NAN_VALUE</code> are namespaced constants. Scalar helpers accept int/float numbers; bool and objects require an explicit numeric conversion.</p>
+<p>The namespace has one engine-owned deterministic random stream. <code>math::random_seed(seed)</code> resets it; <code>math::random()</code> returns a float from 0 to 1 inclusive, <code>math::random(lo, hi)</code> returns int for two int bounds and float otherwise, <code>math::random_int(lo, hi)</code> requires int bounds, and <code>math::random_range(lo, hi)</code> always returns float. Both bounds are inclusive, and an inverted range raises. Function values such as <code>auto root = math::sqrt;</code> call the same math kernel.</p>
 <h2 id="making-vectors">Making vectors<a class="hlink" href="#making-vectors" aria-label="link">&#8203;</a></h2>
 <p>Call the type with up to one argument per component; missing components are 0. A declaration without an initializer holds the default, and the C++ initializer spellings work: <code>T v(args)</code> and <code>T v{args}</code>. A narrower vector followed by scalars that complete the count builds a wider one, and a vector of the same dimensions converts between the float and int families (float to int truncates toward zero). A color takes <code>(r, g, b)</code> with alpha 1, <code>(r, g, b, a)</code>, nothing (opaque white) or another color.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2.5, 3);
@@ -48,13 +51,13 @@ math::vec3 b = math::vec3(1, 2);              // missing components are 0
 math::vec3 zero;                              // a declaration default-constructs
 math::ivec2 cell(3, 4);                       // direct initialization
 math::vec4 q{1, 2, 3, 4};                     // brace initialization
-print(a, &quot; &quot;, b, &quot; &quot;, zero, &quot; &quot;, cell, &quot; &quot;, q);
+print(a, " ", b, " ", zero, " ", cell, " ", q);
 
 math::vec3 lifted = math::vec3(math::vec2(1, 2), 3);   // a narrower vector, completed by scalars
 math::ivec3 snapped = math::ivec3(math::vec3(1.9, -1.9, 2));  // float to int truncates toward zero
-print(lifted, &quot; &quot;, snapped, &quot; &quot;, type_of(snapped));
+print(lifted, " ", snapped, " ", type_of(snapped));
 
-print(math::color(), &quot; &quot;, math::color(1, 0, 0), &quot; &quot;, math::color(0.2, 0.4, 0.6, 0.5));</code></pre></div>
+print(math::color(), " ", math::color(1, 0, 0), " ", math::color(0.2, 0.4, 0.6, 0.5));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(1.0, 2.5, 3.0) (1.0, 2.0, 0.0) (0.0, 0.0, 0.0) (3, 4) (1.0, 2.0, 3.0, 4.0)
 (1.0, 2.0, 3.0) (1, -1, 2) math::ivec3
 (1.0, 1.0, 1.0, 1.0) (1.0, 0.0, 0.0, 1.0) (0.2, 0.4, 0.6, 0.5)</code></pre></div>
@@ -64,7 +67,7 @@ print(math::color(), &quot; &quot;, math::color(1, 0, 0), &quot; &quot;, math::c
 
 vec3 up = vec3(0, 1, 0);
 ivec2 tile = ivec2(5, 9);
-print(up, &quot; &quot;, tile, &quot; &quot;, type_of(up));</code></pre></div>
+print(up, " ", tile, " ", type_of(up));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(0.0, 1.0, 0.0) (5, 9) math::vec3</code></pre></div>
 <h2 id="components">Components<a class="hlink" href="#components" aria-label="link">&#8203;</a></h2>
 <p>Components read and store by name, with compound assignment and <code>++</code>/<code>--</code>. A vector's components are <code>float</code> (an ivec's are <code>int</code>); <code>width</code>, <code>height</code> and <code>depth</code> are second names for <code>x</code>, <code>y</code> and <code>z</code>. A color's channels are <code>r g b a</code> only. The components are stored as 32-bit floats, so a component reads back the nearest 32-bit value, widened exactly:</p>
@@ -72,19 +75,19 @@ print(up, &quot; &quot;, tile, &quot; &quot;, type_of(up));</code></pre></div>
 v.x = 5;
 v.y += 2.5;
 v.z *= 2;
-print(v, &quot; &quot;, v.width, &quot; &quot;, v.height, &quot; &quot;, v.depth);
+print(v, " ", v.width, " ", v.height, " ", v.depth);
 
 math::ivec2 p;
 p.x++;
 ++p.y;
-print(p, &quot; &quot;, type_of(p.x), &quot; &quot;, type_of(v.x));
+print(p, " ", type_of(p.x), " ", type_of(v.x));
 
 math::color c = math::color(0.25, 0.5, 0.75);
 c.a = 0.5;
-print(c, &quot; &quot;, c.r + c.g + c.b);
+print(c, " ", c.r + c.g + c.b);
 
 math::vec2 tiny = math::vec2(0.1, 0);
-print(tiny.x, &quot; &quot;, tiny.x == 0.1);            // components are 32-bit floats</code></pre></div>
+print(tiny.x, " ", tiny.x == 0.1);            // components are 32-bit floats</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(5.0, 4.5, 6.0) 5.0 4.5 6.0
 (1, 1) int float
 (0.25, 0.5, 0.75, 0.5) 1.5
@@ -93,7 +96,7 @@ print(tiny.x, &quot; &quot;, tiny.x == 0.1);            // components are 32-bit
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::ivec2 p;
 try { p.x = 3000000000; } catch (e) { print(e); }
 try { var w = math::vec2(); w.z = 1; } catch (e) { print(e); }
-try { var v = math::vec3(); var s = &quot;a&quot;; v.x = s; } catch (e) { print(e); }
+try { var v = math::vec3(); var s = "a"; v.x = s; } catch (e) { print(e); }
 math::vec2 big;
 big.x = 1e300;
 print(big);</code></pre></div>
@@ -105,25 +108,25 @@ Cannot store a non-numeric value in a math::vec3 component
 <p><code>+ - * /</code> work component by component between two vectors of the same type, and between a vector and a scalar on either side; <code>*</code> of two vectors is the component-wise product (the dot product is <code>math::dot</code>). Unary <code>-</code> negates every component. An ivec divides like an int (truncating) and has <code>%</code>; float vectors have no <code>%</code>. Compound assignment works on any vector lvalue, and a vector concatenates into a string as its text.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2, 3);
 math::vec3 b = math::vec3(0.5, 0.5, 0.5);
-print(a + b, &quot; &quot;, a - b, &quot; &quot;, -a);
-print(a * 2, &quot; &quot;, 2 * a, &quot; &quot;, a / 2, &quot; &quot;, 6 / math::vec2(3, 6));
+print(a + b, " ", a - b, " ", -a);
+print(a * 2, " ", 2 * a, " ", a / 2, " ", 6 / math::vec2(3, 6));
 print(math::vec2(1, 2) * math::vec2(3, 4));   // component-wise product
-print(math::ivec2(7, -7) / 2, &quot; &quot;, math::ivec2(7, -7) % 4);
+print(math::ivec2(7, -7) / 2, " ", math::ivec2(7, -7) % 4);
 a += b;
 a *= 2;
 print(a);
-print(&quot;at &quot; + math::ivec2(1, 2));</code></pre></div>
+print("at " + math::ivec2(1, 2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(1.5, 2.5, 3.5) (0.5, 1.5, 2.5) (-1.0, -2.0, -3.0)
 (2.0, 4.0, 6.0) (2.0, 4.0, 6.0) (0.5, 1.0, 1.5) (2.0, 1.0)
 (3.0, 8.0)
 (3, -3) (3, -3)
 (3.0, 5.0, 7.0)
 at (1, 2)</code></pre></div>
-<p><code>==</code> and <code>!=</code> compare every component; a vec equals an ivec holding the same values, and vectors of different dimensions, or a color and a vec4, are never equal. A vector is true when any component is nonzero. Vectors have no ordering. Mixing kinds or dimensions in arithmetic, a float scalar with an ivec, and a zero divisor component raise the scalar operators' errors, and ivec arithmetic follows the integer overflow policy (<a href="04-operators.html">Operators</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(math::vec3(1, 2, 3) == math::vec3(1, 2, 3), &quot; &quot;, math::vec3(1, 2, 3) == math::ivec3(1, 2, 3), &quot; &quot;, math::vec2(1, 2) == math::vec3(1, 2, 0));
-print(math::color() == math::color(1, 1, 1, 1), &quot; &quot;, math::color() == math::vec4(1, 1, 1, 1));
-if (math::vec2(0, 0)) { print(&quot;zero is true&quot;); } else { print(&quot;zero is false&quot;); }
-if (math::ivec2(0, 1)) { print(&quot;any nonzero component is true&quot;); }
+<p><code>==</code> and <code>!=</code> compare every component; a vec equals an ivec holding the same values, and vectors of different dimensions, or a color and a vec4, are never equal. A vector is true when any component is nonzero. Vectors and colors compare lexicographically by component with &lt;=&gt; and relational operators; colors compare only with colors. Mixing kinds or dimensions in arithmetic, a float scalar with an ivec, and a zero divisor component raise the scalar operators' errors, and ivec arithmetic follows the integer overflow policy (<a href="04-operators.html">Operators</a>):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(math::vec3(1, 2, 3) == math::vec3(1, 2, 3), " ", math::vec3(1, 2, 3) == math::ivec3(1, 2, 3), " ", math::vec2(1, 2) == math::vec3(1, 2, 0));
+print(math::color() == math::color(1, 1, 1, 1), " ", math::color() == math::vec4(1, 1, 1, 1));
+if (math::vec2(0, 0)) { print("zero is true"); } else { print("zero is false"); }
+if (math::ivec2(0, 1)) { print("any nonzero component is true"); }
 
 try { var q = math::vec3(1, 2, 3) + math::ivec3(1, 2, 3); } catch (e) { print(e); }
 try { var q = math::vec2(1, 2) + math::vec3(1, 2, 3); } catch (e) { print(e); }
@@ -139,7 +142,6 @@ any nonzero component is true
 Invalid operands for + operator
 Invalid operands for + operator
 Invalid operands for * operator
-math::vec2 has no ordering
 Division by zero
 Modulo by zero
 Integer overflow in &#x27;+&#x27;</code></pre></div>
@@ -150,10 +152,10 @@ math::vec3 b = a;                      // a copy
 b.x = 9;
 array&lt;math::vec3&gt; pts = [a, a];
 pts[1].y = 7;
-print(a, &quot; &quot;, b, &quot; &quot;, pts[0], &quot; &quot;, pts[1]);
+print(a, " ", b, " ", pts[0], " ", pts[1]);
 
-void push_up(math::vec3 p) { p.y += 100; }        // by value: the caller&#x27;s vector is untouched
-void lift(math::vec3&amp; p) { p.y += 100; }          // by reference: it is the caller&#x27;s vector
+void push_up(math::vec3 p) { p.y += 100; }        // by value: the caller's vector is untouched
+void lift(math::vec3&amp; p) { p.y += 100; }          // by reference: it is the caller's vector
 push_up(a);
 print(a);
 lift(a);
@@ -201,7 +203,7 @@ print(tint);</code></pre></div>
 math::ivec2 p = math::vec2(1.5, -2.5);          // a vec into an ivec slot truncates
 string s = math::vec2(1, 2);                    // a string slot takes the text
 math::ivec2 snap(math::vec2 at) { return at; }  // returns convert too
-print(v, &quot; &quot;, p, &quot; &quot;, s, &quot; &quot;, snap(math::vec2(2.9, 1.1)));
+print(v, " ", p, " ", s, " ", snap(math::vec2(2.9, 1.1)));
 
 var w = math::vec2(1, 2);
 try { math::vec3 bad = w; } catch (e) { print(e); }
@@ -217,22 +219,22 @@ Cannot initialize &#x27;bad&#x27; (declared math::vec4) with math::color</code><
 <tr><td><code>math::unmix(a, b, v)</code></td><td>where <code>v</code> lies between <code>a</code> and <code>b</code> (0 over an empty range)</td></tr>
 <tr><td><code>math::remap(v, in_lo, in_hi, out_lo, out_hi)</code></td><td>maps <code>v</code> from one range onto another</td></tr>
 <tr><td><code>math::clamp(v, lo, hi)</code>, <code>math::min(a, b)</code>, <code>math::max(a, b)</code></td><td>per component</td></tr>
-<tr><td><code>math::abs</code>, <code>math::floor</code>, <code>math::ceil</code>, <code>math::round</code></td><td>per component; <code>round</code> rounds half away from zero</td></tr>
-<tr><td><code>math::mix_in</code>, <code>mix_out</code>, <code>mix_in_out</code>, <code>mix_out_in</code> <code>(a, b, t, strength)</code></td><td>eased mixes</td></tr>
-<tr><td><code>math::unmix_in</code>, <code>unmix_out</code>, <code>unmix_in_out</code>, <code>unmix_out_in</code> <code>(a, b, v, strength)</code></td><td>their inverses</td></tr>
+<tr><td><code>math::abs</code>, <code>math::floor</code>, <code>math::ceil</code>, <code>math::round</code></td><td>per component; <code>math::round</code> rounds half away from zero</td></tr>
+<tr><td><code>math::mix_in</code>, <code>math::mix_out</code>, <code>math::mix_in_out</code>, <code>math::mix_out_in</code> <code>(a, b, t, strength)</code></td><td>eased mixes</td></tr>
+<tr><td><code>math::unmix_in</code>, <code>math::unmix_out</code>, <code>math::unmix_in_out</code>, <code>math::unmix_out_in</code> <code>(a, b, v, strength)</code></td><td>their inverses</td></tr>
 </tbody></table></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec2 a = math::vec2(0, 10);
 math::vec2 b = math::vec2(10, 20);
-print(math::mix(a, b, 0.25), &quot; &quot;, math::lerp(a, b, math::vec2(0.5, 1)));   // a float or a per-component t
+print(math::mix(a, b, 0.25), " ", math::lerp(a, b, math::vec2(0.5, 1)));   // a float or a per-component t
 print(math::unmix(a, b, math::vec2(5, 20)));                              // where a value sits between a and b
 print(math::remap(math::vec2(5, 5), 0.0, 10.0, a, b));                    // value, in_lo, in_hi, out_lo, out_hi
-print(math::clamp(math::vec3(-1, 0.5, 2), 0.0, 1.0), &quot; &quot;, math::clamp(math::ivec2(-5, 9), math::ivec2(0, 0), math::ivec2(4, 4)));
-print(math::min(math::vec2(1, 5), math::vec2(3, 2)), &quot; &quot;, math::max(math::ivec2(1, 5), 3));
-print(math::abs(math::vec2(-1.5, 2)), &quot; &quot;, math::floor(math::vec2(1.5, -1.5)), &quot; &quot;, math::ceil(math::vec2(1.2, -1.2)), &quot; &quot;, math::round(math::vec2(1.5, -2.5)));
-print(math::mix_in(a, b, 0.5, 2.0), &quot; &quot;, math::mix_out(a, b, 0.5, 2.0), &quot; &quot;, math::mix_in_out(a, b, 0.25, 2.0));
+print(math::clamp(math::vec3(-1, 0.5, 2), 0.0, 1.0), " ", math::clamp(math::ivec2(-5, 9), math::ivec2(0, 0), math::ivec2(4, 4)));
+print(math::min(math::vec2(1, 5), math::vec2(3, 2)), " ", math::max(math::ivec2(1, 5), 3));
+print(math::abs(math::vec2(-1.5, 2)), " ", math::floor(math::vec2(1.5, -1.5)), " ", math::ceil(math::vec2(1.2, -1.2)), " ", math::round(math::vec2(1.5, -2.5)));
+print(math::mix_in(a, b, 0.5, 2.0), " ", math::mix_out(a, b, 0.5, 2.0), " ", math::mix_in_out(a, b, 0.25, 2.0));
 
 var m = math::mix(math::ivec2(0, 0), math::ivec2(1, 3), 0.5);
-print(m, &quot; &quot;, type_of(m), &quot; &quot;, type_of(math::abs(math::ivec2(-3, 4))));
+print(m, " ", type_of(m), " ", type_of(math::abs(math::ivec2(-3, 4))));
 try { var q = math::mix(math::vec2(0, 0), math::vec3(1, 1, 1), 0.5); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(2.5, 12.5) (5.0, 20.0)
 (0.5, 1.0)
@@ -243,7 +245,7 @@ try { var q = math::mix(math::vec2(0, 0), math::vec3(1, 1, 1), 0.5); } catch (e)
 (2.5, 12.5) (7.5, 17.5) (1.25, 11.25)
 (0.5, 1.5) math::vec2 math::ivec2
 math::mix expects vectors of the same dimensions</code></pre></div>
-<p>Results stay exact where they can: <code>abs</code>, <code>min</code>, <code>max</code> and <code>clamp</code> with int bounds keep an ivec an ivec, while the interpolations, <code>floor</code>/<code>ceil</code>/<code>round</code> and a float bound give a float vector. Functions with no component-wise meaning (<code>math::sqrt</code>, <code>math::sin</code>) stay scalar and reject a vector.</p>
+<p>Results stay exact where they can: <code>math::abs</code>, <code>math::min</code>, <code>math::max</code> and <code>math::clamp</code> with int bounds keep an ivec an ivec, while the interpolations, <code>math::floor</code>/<code>math::ceil</code>/<code>math::round</code> and a float bound give a float vector. Functions with no component-wise meaning (<code>math::sqrt</code>, <code>math::sin</code>) stay scalar and reject a vector.</p>
 <h2 id="geometry">Geometry<a class="hlink" href="#geometry" aria-label="link">&#8203;</a></h2>
 <div class="tablewrap"><table><thead><tr><th>Function</th><th>Method</th><th>Result</th></tr></thead><tbody>
 <tr><td><code>math::dot(a, b)</code></td><td><code>a.dot(b)</code></td><td>float (int for two ivecs)</td></tr>
@@ -260,15 +262,15 @@ math::mix expects vectors of the same dimensions</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(3, 4, 0);
 math::vec3 x = math::vec3(1, 0, 0);
 math::vec3 y = math::vec3(0, 1, 0);
-print(math::dot(v, x), &quot; &quot;, v.dot(y), &quot; &quot;, math::cross(x, y), &quot; &quot;, x.cross(y));
-print(v.length(), &quot; &quot;, math::length_squared(v), &quot; &quot;, v.normalized(), &quot; &quot;, math::normalize(math::vec3()));
-print(math::distance(math::vec2(0, 0), math::vec2(3, 4)), &quot; &quot;, math::vec2(1, 1).distance_to(math::vec2(4, 5)), &quot; &quot;, math::distance_squared(math::vec2(1, 1), math::vec2(4, 5)));
-print(math::reflect(math::vec2(1, -1), math::vec2(0, 1)), &quot; &quot;, math::project(math::vec2(2, 3), math::vec2(4, 0)));
-print(math::angle_between(math::vec2(1, 0), math::vec2(0, 1)), &quot; &quot;, math::perpendicular(math::vec2(1, 2)));
-print(math::round(math::rotate(math::vec2(2, 0), PI / 2)), &quot; &quot;, math::round(x.rotated(math::vec3(0, 0, 1), PI / 2)));
+print(math::dot(v, x), " ", v.dot(y), " ", math::cross(x, y), " ", x.cross(y));
+print(v.length(), " ", math::length_squared(v), " ", v.normalized(), " ", math::normalize(math::vec3()));
+print(math::distance(math::vec2(0, 0), math::vec2(3, 4)), " ", math::vec2(1, 1).distance_to(math::vec2(4, 5)), " ", math::distance_squared(math::vec2(1, 1), math::vec2(4, 5)));
+print(math::reflect(math::vec2(1, -1), math::vec2(0, 1)), " ", math::project(math::vec2(2, 3), math::vec2(4, 0)));
+print(math::angle_between(math::vec2(1, 0), math::vec2(0, 1)), " ", math::perpendicular(math::vec2(1, 2)));
+print(math::round(math::rotate(math::vec2(2, 0), math::PI / 2)), " ", math::round(x.rotated(math::vec3(0, 0, 1), math::PI / 2)));
 
 var d = math::dot(math::ivec2(2, 3), math::ivec2(4, 5));
-print(d, &quot; &quot;, type_of(d), &quot; &quot;, math::ivec2(3, 4).length_squared(), &quot; &quot;, math::ivec2(3, 4).length(), &quot; &quot;, math::cross(math::vec2(1, 2), math::vec2(3, 4)));
+print(d, " ", type_of(d), " ", math::ivec2(3, 4).length_squared(), " ", math::ivec2(3, 4).length(), " ", math::cross(math::vec2(1, 2), math::vec2(3, 4)));
 try { var q = math::cross(math::vec4(), math::vec4()); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3.0 4.0 (0.0, 0.0, 1.0) (0.0, 0.0, 1.0)
 5.0 25.0 (0.6, 0.8, 0.0) (0.0, 0.0, 0.0)
@@ -280,14 +282,14 @@ try { var q = math::cross(math::vec4(), math::vec4()); } catch (e) { print(e); }
 math::cross expects two vec2 or two vec3 vectors</code></pre></div>
 <p>The methods are the free functions with the receiver first; a color has none of them. Dimensions must agree, and the errors name the shape they expected (<code>math::dot expects two vectors of the same dimensions</code>, <code>math::rotate expects (vec2, angle) or (vec3, axis, angle)</code>).</p>
 <h2 id="colors">Colors<a class="hlink" href="#colors" aria-label="link">&#8203;</a></h2>
-<p>A color's channels are straight (not premultiplied) alpha. Arithmetic, <code>clamp</code>, <code>min</code>, <code>max</code> and the rounding functions work on all four channels; a color combines only with colors and scalars, never with a <code>vec4</code>. <code>math::mix</code> and <code>math::lerp</code> blend colors in the OKLab perceptual space, so a blend keeps its brightness instead of dipping through gray; <code>math::mix_rgb</code> blends each channel directly and <code>math::mix_hsv</code> travels the shorter way around the hue wheel. Alpha always blends linearly, and the eased mixes ease the same perceptual blend.</p>
+<p>A color's channels are straight (not premultiplied) alpha. Arithmetic, <code>math::clamp</code>, <code>math::min</code>, <code>math::max</code> and the rounding functions work on all four channels; a color combines only with colors and scalars, never with a <code>vec4</code>. <code>math::mix</code> and <code>math::lerp</code> blend colors in the OKLab perceptual space, so a blend keeps its brightness instead of dipping through gray; <code>math::mix_rgb</code> blends each channel directly and <code>math::mix_hsv</code> travels the shorter way around the hue wheel. Alpha always blends linearly, and the eased mixes ease the same perceptual blend.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::color red = math::color(1, 0, 0);
 math::color blue = math::color(0, 0, 1);
 print(math::mix(red, blue, 0.5));             // perceptual (OKLab)
 print(math::mix_rgb(red, blue, 0.5));         // per channel
 print(math::mix_hsv(red, blue, 0.5));         // around the hue wheel
 print(math::mix(math::color(0, 0, 0, 0), math::color(0, 0, 0, 1), 0.25).a);   // alpha blends linearly
-print(math::color(0.25, 0.5, 0.5, 1) * 2, &quot; &quot;, math::clamp(math::color(2, -1, 0.5), 0.0, 1.0));
+print(math::color(0.25, 0.5, 0.5, 1) * 2, " ", math::clamp(math::color(2, -1, 0.5), 0.0, 1.0));
 try { var q = math::color() + math::vec4(1, 1, 1, 1); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(0.5504411, 0.32562068, 0.63650066, 1.0)
 (0.5, 0.0, 0.5, 1.0)
@@ -301,13 +303,13 @@ Invalid operands for + operator</code></pre></div>
 pts.push(math::ivec3(7, 8, 9));                 // the element boundary converts
 pts[0].x += 10;
 for (auto&amp; p : pts) { p.z = 0; }
-print(pts.join(&quot; &quot;), &quot; &quot;, pts.size());
+print(pts.join(" "), " ", pts.size());
 
 array&lt;math::ivec3&gt; cells = pts;                 // converts by value, element by element
-print(cells.join(&quot; &quot;));
+print(cells.join(" "));
 
 map&lt;math::ivec2, string&gt; tiles;
-tiles[math::ivec2(1, 2)] = &quot;door&quot;;
+tiles[math::ivec2(1, 2)] = "door";
 print(tiles[math::ivec2(1, 2)]);
 
 try { pts.push(math::vec2(1, 2)); } catch (e) { print(e); }
@@ -315,19 +317,18 @@ try { pts.sort(); } catch (e) { print(e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(11.0, 2.0, 0.0) (4.0, 5.0, 0.0) (7.0, 8.0, 0.0) 3
 (11, 2, 0) (4, 5, 0) (7, 8, 0)
 door
-Cannot push &#x27;math::vec2&#x27; to array&lt;math::vec3&gt;
-math::vec3 has no ordering</code></pre></div>
+Cannot push &#x27;math::vec2&#x27; to array&lt;math::vec3&gt;</code></pre></div>
 <h2 id="text-and-json">Text and JSON<a class="hlink" href="#text-and-json" aria-label="link">&#8203;</a></h2>
 <p><code>to_string</code>, <code>print</code> and string concatenation write a vector as its components in parentheses, floats in the shortest text that reads back the same 32-bit value. (An array prints as <code>[array]</code>; use <code>join</code>.) <code>to_json</code> writes the type and the named components, and <code>from_json</code> rebuilds the same type; the binary archive (<code>to_base64</code> / <code>from_base64</code>) keeps the exact bits.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(1, 0.5, -2);
-print(to_string(v), &quot; &quot;, &quot;v = &quot; + v, &quot; &quot;, math::vec2(0.1, 1e30));
+print(to_string(v), " ", "v = " + v, " ", math::vec2(0.1, 1e30));
 string j = to_json(v);
 print(j);
 var back = from_json(j);
-print(back, &quot; &quot;, type_of(back));
+print(back, " ", type_of(back));
 print(to_json(math::color(1, 0.5, 0, 1)));
 var restored = from_base64(to_base64(math::ivec2(-7, 3)));
-print(restored, &quot; &quot;, type_of(restored));</code></pre></div>
+print(restored, " ", type_of(restored));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(1.0, 0.5, -2.0) v = (1.0, 0.5, -2.0) (0.1, 1e+30)
 {&quot;$type&quot;:&quot;math::vec3&quot;,&quot;$val&quot;:{&quot;x&quot;:1.0,&quot;y&quot;:0.5,&quot;z&quot;:-2.0}}
 (1.0, 0.5, -2.0) math::vec3

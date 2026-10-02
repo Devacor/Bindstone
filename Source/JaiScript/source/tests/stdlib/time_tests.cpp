@@ -278,7 +278,7 @@ public:
             expect(R"(time::utc_date(2026, 9, 27, 14, 3, 5, 7).format("${day:02}/${month:02}/${year} ${hours:02}:${minutes:02}:${seconds:02}.${milliseconds:03} ${am_pm}");)",
                    "27/09/2026 02:03:05.007 PM", "zero padding");
             expect(R"(time::utc_date(2026, 9, 27, 14, 3, 5, 7).format("[${month_name:>10}] [${month_short:*^7}] [${year:x}] [${milliseconds:+}] [${weekday_name:<8}]");)",
-                   "[ September] [**Sep**] [7ea] [+7] [Sunday  ]", "align, fill, hex, sign");
+                   "[ September] [**Sep**] [7ea] [+7] [Sunday  ]", "align, fill, hex, math::sign");
             expect(R"(var f = "${hours} ${am_pm}"; time::utc_date(2026, 1, 1).format(f) + ", " + time::utc_date(2026, 1, 1, 12).format(f) + ", " + time::utc_date(2026, 1, 1, 23).format(f) + ", " + time::utc_date(2026, 1, 1, 1).format(f);)",
                    "12 AM, 12 PM, 11 PM, 1 AM", "12-hour clock");
             expect(R"(time::utc_date(2026, 5, 3).format("cost $5 on ${month_short} ${day}, no braces {day}");)", "cost $5 on May 3, no braces {day}", "text outside placeholders");

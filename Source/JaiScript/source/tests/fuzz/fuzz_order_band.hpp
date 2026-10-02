@@ -238,7 +238,7 @@ namespace jai::fuzz::order {
 				return call_text(*e, a);
 			}
 			case ek::math: case ek::alias: {
-				std::string s = (e->kind == ek::math ? "math::" : "") + e->op + "(";
+				std::string s = (e->kind == ek::math ? "math::" : "host_") + e->op + "(";
 				for (size_t i = 0; i < e->args.size(); ++i) { if (i) { s += ", "; } s += expr_text(e->args[i]); }
 				return s + ")";
 			}
@@ -311,7 +311,7 @@ namespace jai::fuzz::order {
 				return t;
 			}
 			case ek::math: case ek::alias: {
-				std::string s = (e->kind == ek::math ? "math::" : "") + e->op + "(";
+				std::string s = (e->kind == ek::math ? "math::" : "host_") + e->op + "(";
 				for (size_t i = 0; i < e->args.size(); ++i) { if (i) { s += ", "; } s += hoist(e->args[i], depth, out); }
 				return s + ")";
 			}
@@ -818,10 +818,10 @@ namespace jai::fuzz::order {
 			emit_final_prints();
 			generated g;
 			g.original.seed = seed_;
-			g.original.stdlib_math = true;
+			g.original.host_math_aliases = true;
 			g.original.segments.push_back(renderer(p_, false).render());
 			g.variant.seed = seed_;
-			g.variant.stdlib_math = true;
+			g.variant.host_math_aliases = true;
 			g.variant.segments.push_back(renderer(p_, true).render());
 			try {
 				g.expected = model(p_).run();

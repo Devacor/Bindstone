@@ -248,13 +248,13 @@ static int run(int argc, char** argv) {
 	std::cout << json << "\n";
 	SaveGame fromJson = jai::from_json<SaveGame>(*eng, json);
 	auto jsonBoss = std::dynamic_pointer_cast<Monster>(fromJson.boss);
-	expect(fromJson.hero == "Alice" && fromJson.scores.size() == 3, "JSON round-trip of plain fields");
-	expect(jsonBoss && jsonBoss->hp == 25, "JSON round-trip rebuilt the Monster behind shared_ptr<Actor>");
+	expect(fromJson.hero == "Alice" && fromJson.scores.size() == 3, "JSON math::round-trip of plain fields");
+	expect(jsonBoss && jsonBoss->hp == 25, "JSON math::round-trip rebuilt the Monster behind shared_ptr<Actor>");
 
 	std::vector<uint8_t> bytes = jai::to_binary(*eng, save);
 	SaveGame fromBinary = jai::from_binary<SaveGame>(*eng, bytes);
 	auto binaryBoss = std::dynamic_pointer_cast<Monster>(fromBinary.boss);
-	expect(binaryBoss && binaryBoss->name == "Cave Troll", "binary round-trip (" + std::to_string(bytes.size()) + " bytes)");
+	expect(binaryBoss && binaryBoss->name == "Cave Troll", "binary math::round-trip (" + std::to_string(bytes.size()) + " bytes)");
 
 	eng->execute("frames_run = 0; journal = [];");
 	call(*eng, "restore", {eng->make_value(fromBinary.script_state)});

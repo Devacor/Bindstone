@@ -2,6 +2,9 @@
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/execution_backend.hpp>
+#include <jaiscript/core/script_namespace.hpp>
+#include <jaiscript/detail/container_enforce.hpp>
 
 namespace jai {
 namespace stdlib {
@@ -27,115 +30,39 @@ namespace stdlib {
     };
 
     // Merge two maps, with the second map's values overriding the first's on key collision
-    inline script_value map_merge(const script_value& map1, const script_value& map2) {
-        if (!map1.is_map() || !map2.is_map()) {
-            throw runtime_error("merge() requires two map arguments");
-        }
-
-        // Create a new map with all entries from map1
-        script_value result = map1.clone();
-        auto& resultMap = const_cast<script_map&>(result.as_map());
-        const auto& map2_data = map2.as_map();
-
-        // Merge map2 into the result, overriding values for duplicate keys
-        for (const auto& [key, value] : map2_data) {
-            resultMap[key.clone()] = value.clone();
-        }
-
-        return result;
-    }
-
-    // Concatenate multiple arrays or multiple strings
-    inline script_value concatenate_impl(const std::vector<script_value>& args) {
-        if (args.empty()) {
-            throw runtime_error("concatenate() requires at least one argument");
-        }
-
-        // Determine type from first argument
-        bool is_string_concat = args[0].is_text();
-        bool is_array_concat = args[0].is_array();
-
-        if (!is_string_concat && !is_array_concat) {
-            throw runtime_error("concatenate() requires arrays or strings");
-        }
-
-        // Verify all arguments are the same type
-        for (size_t i = 1; i < args.size(); ++i) {
-            if (is_string_concat && !args[i].is_text()) {
-                throw runtime_error("concatenate() requires all arguments to be strings");
-            }
-            if (is_array_concat && !args[i].is_array()) {
-                throw runtime_error("concatenate() requires all arguments to be arrays");
-            }
-        }
-
-        // Handle string concatenation
-        if (is_string_concat) {
-            std::string result;
-            bool utf8 = false;
-            for (const auto& arg : args) {
-                result += arg.deref().unchecked_text();
-                utf8 = utf8 || arg.is_utf8_string();
-            }
-            return utf8 ? script_value::make_utf8(std::move(result), args[0].get_engine()) : script_value(result, args[0].get_engine());
-        }
-
-        // Handle array concatenation
-        if (is_array_concat) {
-            engine* eng = args[0].get_engine();
-            size_t total_size = 0;
-            for (const auto& arg : args) { total_size += arg.unchecked_array_node()->size(); }
-            const script_array* first = args[0].unchecked_array_node();
-            if (first->is_typed()) {
-                // A typed first argument keeps its raw form when every appended element fits it (a number into a
-                // numeric buffer, the same vector kind into a vector buffer); anything else lands in a fresh dynamic
-                // array (no tag lie)
-                using kind_t = script_array::kind_t;
-                const kind_t fk = first->kind();
-                const bool numeric_first = fk == kind_t::i64 || fk == kind_t::f64;
-                auto element_fits = [&](size_t idx) {
-                    return numeric_first ? (idx == script_value::TYPEID_INT || idx == script_value::TYPEID_FLOAT)
-                                         : script_array::is_vec_kind(fk) && idx == script_array::vec_storage_index(fk);
-                };
-                bool stays_typed = true;
-                for (size_t i = 1; i < args.size() && stays_typed; ++i) {
-                    const script_array* node = args[i].unchecked_array_node();
-                    if (node->is_typed()) {
-                        stays_typed = node->kind() == fk || (numeric_first && (node->kind() == kind_t::i64 || node->kind() == kind_t::f64));
-                        continue;
-                    }
-                    for (const script_value& elem : node->values()) {
-                        if (!element_fits(elem.deref().raw_storage_index())) { stays_typed = false; break; }
-                    }
-                }
-                if (stays_typed) {
-                    script_value result = args[0].clone();
-                    script_array* out = const_cast<script_array*>(result.unchecked_array_node());
-                    out->reserve(total_size);
-                    for (size_t i = 1; i < args.size(); ++i) {
-                        args[i].unchecked_array_node()->for_each(eng, [&](const script_value& elem) { out->push(elem.deref()); });
-                    }
-                    return result;
-                }
-                script_value result = script_value::make_array(nullptr, eng);
-                auto& resultArray = const_cast<std::vector<script_value>&>(result.as_array());
-                resultArray.reserve(total_size);
-                for (const auto& arg : args) {
-                    arg.unchecked_array_node()->for_each(eng, [&](const script_value& elem) { resultArray.push_back(elem.clone()); });
-                }
-                return result;
-            }
-            script_value result = args[0].clone();
-            auto& resultArray = const_cast<std::vector<script_value>&>(result.as_array());
-            resultArray.reserve(total_size);
-            for (size_t i = 1; i < args.size(); ++i) {
-                args[i].unchecked_array_node()->for_each(eng, [&](const script_value& elem) { resultArray.push_back(elem.clone()); });
-            }
-            return result;
-        }
-
-        throw runtime_error("concatenate() requires arrays or strings");
-    }
+	inline checked_result<script_value> map_merge(const script_value& a_left, const script_value& a_right) {
+		if (!a_left.is_map() || !a_right.is_map()) {
+			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "merge() requires two map arguments");
+		}
+		auto* engine = a_left.get_engine();
+		const auto tag = a_left.get_type_info();
+		const auto keyType = tag ? tag->key_type() : nullptr, valueType = tag ? tag->value_type() : nullptr;
+		script_value result = script_value::make_map(keyType, valueType, engine);
+		using Entry = std::pair<script_value, script_value>;
+		std::vector<Entry> entries;
+		entries.reserve(a_left.unchecked_as_map().size() + a_right.unchecked_as_map().size());
+		// Decide the output before copying: an overwritten input value is only read.
+		for (const auto& [key,value] : a_left.unchecked_as_map()) {
+			if (a_right.unchecked_as_map().find(key) == a_right.unchecked_as_map().end()) { entries.emplace_back(key,value); }
+		}
+		for (const auto& [key,value] : a_right.unchecked_as_map()) { entries.emplace_back(key,value); }
+		for (const auto& [key,value] : entries) {
+			if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type && key.type() != keyType->base_type) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::map_key_type_mismatch), "Cannot use '{0}' as a key of type '{1}'", engine->symbolize(detail::container_value_type_name(key)), engine->symbolize(detail::type_info_display_name(keyType)));
+			}
+			script_value output = value.clone_element();
+			if (valueType && valueType->base_type != script_value_type::jai_any_type && valueType->base_type != script_value_type::jai_null_type) {
+				if (!detail::container_element_compatible(output, valueType, engine)) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::map_value_type_mismatch), "Cannot store '{0}' in map value of type '{1}'", engine->symbolize(detail::container_value_type_name(output)), engine->symbolize(detail::type_info_display_name(valueType)));
+				}
+				auto converted = detail::convert_container_element(engine, output, valueType);
+				if (!converted) { return converted.error_value(); }
+				output = std::move(converted.value());
+			}
+			(*result.unchecked_get_map_storage())[key.clone_element()] = std::move(output);
+		}
+		return result;
+	}
 
     inline void register_container_types(engine& eng) {
         // Register the pair type for map iteration
@@ -158,27 +85,7 @@ namespace stdlib {
             return map_merge(args[0], args[1]);
         });
 
-        eng.add_variadic_function("concatenate", [](const std::vector<script_value>& args) -> checked_result<script_value> {
-            if (args.size() < 1) {
-                return checked_result<script_value>(
-                    make_error_code(runtime_error_code::argument_count_mismatch),
-                    "concatenate() expects at least 1 argument, got {0}",
-                    static_cast<uint64_t>(args.size())
-                );
-            }
-            return concatenate_impl(args);
-        });
 
-        eng.add_variadic_function("append", [](const std::vector<script_value>& args) -> checked_result<script_value> {
-            if (args.size() < 1) {
-                return checked_result<script_value>(
-                    make_error_code(runtime_error_code::argument_count_mismatch),
-                    "append() expects at least 1 argument, got {0}",
-                    static_cast<uint64_t>(args.size())
-                );
-            }
-            return concatenate_impl(args);
-        });
     }
 
 } // namespace stdlib

@@ -3,7 +3,7 @@ include "profile.jai";
 function exp_loop(var n) {
 	var sum = 0.0;
 	for (var i = 0; i <= n; ++i) {
-		sum += exp(1.0 / (1.0 + i));
+		sum += math::exp(1.0 / (1.0 + i));
 	}
 	return sum;
 }

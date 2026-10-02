@@ -343,7 +343,7 @@ private:
 				function f(int x) -> float { var sqrt = [](float v) { return -v; }; return sqrt(x * 1.0) + sqrt(x); }
 				function g(var sqrt) -> string { try { return "" + sqrt(4.0); } catch (e) { return "E:" + e; } }
 				function h() -> float { var abs = [](float v) { return 100.0 + v; }; float s = 0.0; for (int i = 0; i < 3; i++) { s += abs(i * 1.0); } return s; }
-				"" + f(4) + "," + g(2.5) + "," + h() + "," + sqrt(16.0);
+				"" + f(4) + "," + g(2.5) + "," + h() + "," + math::sqrt(16.0);
 			)", "-8.0,E:Cannot call 'sqrt': it is a float, not a function,303.0,4.0");
 		});
 		test("a_class_reloaded_mid_loop_takes_effect_at_the_member_site", [this]() {

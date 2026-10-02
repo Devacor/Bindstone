@@ -94,9 +94,9 @@ namespace jai {
         // via engine::get_type_info_shared_ptr_dynamic. Excluded from equals().
         bool dynamic_pointee = false;
 
-        // A typed array held by a var slot (Dev ruling 2026-09-28): the array keeps its element type (every element
+        // A typed container held by a var slot (Dev ruling 2026-09-28): the container keeps its element/key/value types (every element
         // boundary reads it), the slot stays dynamic ('=' takes any value). Same name/id/element as the plain spelling;
-        // interned as a twin via engine::get_type_info_array_dynamic. Excluded from equals().
+        // interned as a twin via engine::get_type_info_array_dynamic/get_type_info_map_dynamic. Excluded from equals().
         bool dynamic_slot = false;
 
         // A reference whose DECLARED type is T (`int& r = v`, cast<int&>(v); Dev ruling 2026-09-30): the T& twin a store through

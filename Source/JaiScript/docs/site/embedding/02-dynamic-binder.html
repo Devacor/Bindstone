@@ -410,7 +410,7 @@ class-level values. The pointer form binds the live variable: <code>Class::name<
 lambda form reads through the getter and stores through the setter, which takes the one new value.</li>
 <li><code>.method(name, lambda)</code>: a lambda whose first parameter is <code>T&amp;</code> or
 <code>const T&amp;</code> receives the object; any other lambda is a method that ignores its receiver
-(<code>.method(&quot;twice&quot;, [](int64_t k) { return k * 2; })</code> answers <code>obj.twice(4)</code>).</li>
+(<code>.method("twice", [](int64_t k) { return k * 2; })</code> answers <code>obj.twice(4)</code>).</li>
 <li><code>.base_class&lt;Base&gt;()</code>: inheritance edge. Methods and properties of the base become
 callable on the derived, virtual dispatch preserved, and the polymorphic-load type check learns that a
 <code>Base</code> slot may hold this type. <code>static_assert</code>-guarded; diamond inheritance throws.</li>

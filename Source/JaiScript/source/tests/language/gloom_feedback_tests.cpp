@@ -310,7 +310,7 @@ public:
 					parts.push(s);                       // source string untouched
 					parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3] + " " + parts[4] + " " + parts[5];
 				)");
-				check_eq(std::string("char true string true 2 hello"), r.as<std::string>(), backend_tag(use_vm) + "string subscript reads chars");
+				check_eq(std::string("char true char true 2 hello"), r.as<std::string>(), backend_tag(use_vm) + "string subscript reads chars");
 			}
 		});
 

@@ -468,3 +468,13 @@ tr:last-child td { border-bottom: none; }
   a[href^="http"]::after { content: " (" attr(href) ")"; font-size: .85em; color: #555; }
   h2 { break-after: avoid; }
 }
+
+/* Full API reference: signatures wrap on narrow displays; filtering works offline. */
+.api-controls { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; }
+.api-controls label { display: flex; flex-direction: column; gap: .35rem; }
+.api-controls input { min-width: min(24rem, 75vw); }
+.api-controls input, .api-controls select { font: inherit; padding: .5rem; }
+.api-controls p { flex-basis: 100%; }
+.api-entry { border-top: 1px solid currentColor; padding-top: .5rem; margin-top: 1.2rem; }
+.api-entry h3 code { white-space: normal; overflow-wrap: anywhere; }
+.api-entry[hidden], .api-group[hidden] { display: none; }

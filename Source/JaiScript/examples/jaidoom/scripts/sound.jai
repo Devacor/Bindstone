@@ -101,8 +101,8 @@ function snd_play_at(string name, float x, float y) -> void {
 	float dx = x - P_X;
 	float dy = y - P_Y;
 	float rel = math::atan2(dy, dx) - P_ANG;
-	while (rel > PI) { rel = rel - TAU; }
-	while (rel < 0.0 - PI) { rel = rel + TAU; }
+	while (rel > math::PI) { rel = rel - math::TAU; }
+	while (rel < 0.0 - math::PI) { rel = rel + math::TAU; }
 	if (!snd_pos_pick(math::sqrt(dx * dx + dy * dy), rel)) { return; }
 	if (SPA_TIER == 0 && SPA_PAN == 0) { snd_play(name); return; }   // close and ahead: the plain lump
 	var key = `${name}_t${SPA_TIER}_p${SPA_PAN}`;

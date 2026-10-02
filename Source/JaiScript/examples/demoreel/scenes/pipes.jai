@@ -95,10 +95,10 @@ class Pipes : Scene {
 	void set_view(float ang, float tilt) {
 		gen_ang = ang;
 		gen_tilt = tilt;
-		f_ca = cos(ang);
-		f_sa = sin(ang);
-		f_ct = cos(tilt);
-		f_st = sin(tilt);
+		f_ca = math::cos(ang);
+		f_sa = math::sin(ang);
+		f_ct = math::cos(tilt);
+		f_st = math::sin(tilt);
 	}
 
 	int cell_idx(int x, int y, int z) {
@@ -252,7 +252,7 @@ class Pipes : Scene {
 				float dx = xx + 0.5 - sx;
 				float q = r2 - dx * dx - dy * dy;
 				if (q < 0.0) { continue; }
-				float nz = sqrt(q) * ir;
+				float nz = math::sqrt(q) * ir;
 				float depth = ooz + nz * dz_gain;
 				if (depth < zz[rowb + xx]) { continue; }
 				float nx = dx * ir;

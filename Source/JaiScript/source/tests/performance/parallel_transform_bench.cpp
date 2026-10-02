@@ -33,7 +33,7 @@ public:
 		test_engine->execute(R"(
 			var a_math = [];
 			for (var i = 0; i < 100000; i++) { a_math.push(0.5 + i * 0.173); }
-			float f_math(float x) { return sqrt(x) * 2.0 + sqrt(x + 1.0) - pow(x, 0.25); }
+			float f_math(float x) { return math::sqrt(x) * 2.0 + math::sqrt(x + 1.0) - math::pow(x, 0.25); }
 
 			var a_small = [];
 			for (var i = 0; i < 1000; i++) { a_small.push(0.5 + i * 0.173); }

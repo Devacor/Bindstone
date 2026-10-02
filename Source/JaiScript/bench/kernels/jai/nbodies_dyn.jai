@@ -50,7 +50,7 @@ function advance(var& bodies, var nbody) {
 			var dx = bix - bj.x;
 			var dy = biy - bj.y;
 			var dz = biz - bj.z;
-			var distance = sqrt(dx * dx + dy * dy + dz * dz);
+			var distance = math::sqrt(dx * dx + dy * dy + dz * dz);
 			var mag = 1.0 / (distance * distance * distance);
 			var bim = bimass * mag;
 			var bjm = bj.mass * mag;
@@ -87,7 +87,7 @@ function energy(var& bodies, var nbody) {
 			var dx = bi.x - bj.x;
 			var dy = bi.y - bj.y;
 			var dz = bi.z - bj.z;
-			var distance = sqrt(dx * dx + dy * dy + dz * dz);
+			var distance = math::sqrt(dx * dx + dy * dy + dz * dz);
 			e = e - ((bim * bj.mass) / distance);
 		}
 	}

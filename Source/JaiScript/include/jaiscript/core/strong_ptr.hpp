@@ -10,6 +10,7 @@
 #include <new>
 #include <type_traits>
 #include <utility>
+#include <functional>
 #ifdef JAISCRIPT_DIAG_ATOMIC_RC
 #include <atomic>
 #endif
@@ -404,6 +405,11 @@ public:
     [[nodiscard]] size_t use_count() const noexcept {
         return ptr_ ? cb()->get_strong_count() : 0;
     }
+
+	[[nodiscard]] const void* owner_identity() const noexcept { return ptr_; }
+	[[nodiscard]] bool owner_before(const weaker_ptr& a_other) const noexcept {
+		return std::less<const void*>{}(ptr_, a_other.ptr_);
+	}
 
     [[nodiscard]] bool expired() const noexcept {
         return use_count() == 0;

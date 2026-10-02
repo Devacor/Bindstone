@@ -83,17 +83,17 @@ jai::dynamic_binder&lt;Body&gt;(*eng, &quot;Body&quot;)
     .method(&quot;moved&quot;, &amp;Body::moved)
     .build();</code></pre></div>
 <div class="codeblock cb-jai" data-host="math adapter registration (vec_types.h, scale / nudge / neighbor / faded / make_path / path_length)"><span class="cb-label">jaiscript (with the host above)</span><pre><code class="lang-jai">var p = scale(math::vec3(1, 2, 3), 2);
-print(p, &quot; &quot;, type_of(p));
+print(p, " ", type_of(p));
 
 math::vec3 v = math::vec3(1, 2, 3);
 nudge(v);
 print(v);
 
-print(neighbor(math::ivec2(4, 7)), &quot; &quot;, neighbor(math::vec2(4.9, 7.2)));   // a vec2 converts like a typed slot
+print(neighbor(math::ivec2(4, 7)), " ", neighbor(math::vec2(4.9, 7.2)));   // a vec2 converts like a typed slot
 print(faded(math::color(1, 0, 0)));
 
 var path = make_path(3);
-print(path.join(&quot; &quot;), &quot; &quot;, type_of(path[0]));
+print(path.join(" "), " ", type_of(path[0]));
 array&lt;math::vec3&gt; pts = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)];
 print(path_length(pts));
 
@@ -124,7 +124,7 @@ No viable candidates for function call</code></pre></div>
 b.pos = math::vec3(1, 2, 3);
 b.pos.x += 4;                          // a component store reaches the C++ member
 b.tint.g = 0.5;
-print(b.pos, &quot; &quot;, type_of(b.pos), &quot; &quot;, b.tint);
+print(b.pos, " ", type_of(b.pos), " ", b.tint);
 print(b.moved(math::vec3(1, 1, 1)));
 
 math::vec3 copy = b.pos;               // a read is a copy
@@ -132,9 +132,9 @@ copy.x = 0;
 print(b.pos);
 
 void halve(float&amp; c) { c /= 2; }
-halve(b.pos.y);                        // a member&#x27;s component binds float&amp;
+halve(b.pos.y);                        // a member's component binds float&amp;
 b.path = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)];
-print(b.pos, &quot; &quot;, b.path.size());</code></pre></div>
+print(b.pos, " ", b.path.size());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(5.0, 2.0, 3.0) math::vec3 (1.0, 0.5, 1.0, 1.0)
 (6.0, 3.0, 4.0)
 (5.0, 2.0, 3.0)

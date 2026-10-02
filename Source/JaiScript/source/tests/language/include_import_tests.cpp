@@ -1433,7 +1433,7 @@ public:
                 text.clear();
                 try { fresh->execute("hot_reload_migrate({});"); } catch (const std::exception& e) { text = e.what(); }
                 check_false(text.empty(), "nor one from a jaibite");
-                check_eq(script_int(2), fresh->jaibite_load_bytes(bite.save_bytes()).execute().as_int(), "a saved bite round-trips with its hook kept off the program");
+                check_eq(script_int(2), fresh->jaibite_load_bytes(bite.save_bytes()).execute().as_int(), "a saved bite math::round-trips with its hook kept off the program");
             }
             const auto file = dir / "rh_file.jai";
             write("rh_file.jai", unit("f", 7));

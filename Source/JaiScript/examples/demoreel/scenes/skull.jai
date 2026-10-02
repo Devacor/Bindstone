@@ -87,22 +87,22 @@ array<int> SK_BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 // the landscape's level function: three surfaces blended under a flowing warp, twisted about the creature's axis
 function sk_field(float x, float y, float z) -> float {
 	float a = (z - SK_CZ) * SK_TW;
-	float ca = cos(a);
-	float sa = sin(a);
+	float ca = math::cos(a);
+	float sa = math::sin(a);
 	float px = x - SK_CX;
 	float py = y - SK_CY;
 	float qx = (px * ca - py * sa + SK_CX) * SK_S;
 	float qy = (px * sa + py * ca + SK_CY) * SK_S;
 	float qz = z * SK_S;
-	float swx = sin(qy * 1.3 + SK_T * 0.7);
-	float swy = sin(qz * 1.3 + SK_T * 0.6);
-	float swz = sin(qx * 1.3 + SK_T * 0.8);
+	float swx = math::sin(qy * 1.3 + SK_T * 0.7);
+	float swy = math::sin(qz * 1.3 + SK_T * 0.6);
+	float swz = math::sin(qx * 1.3 + SK_T * 0.8);
 	float wx = qx + SK_WA * swx;
 	float wy = qy + SK_WA * swy;
 	float wz = qz + SK_WA * swz;
-	float sx = sin(wx); float cx = cos(wx);
-	float sy = sin(wy); float cy = cos(wy);
-	float sz = sin(wz); float cz = cos(wz);
+	float sx = math::sin(wx); float cx = math::cos(wx);
+	float sy = math::sin(wy); float cy = math::cos(wy);
+	float sz = math::sin(wz); float cz = math::cos(wz);
 	float g = sx * cy + sy * cz + sz * cx;
 	float p = cx + cy + cz;
 	float d = sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz;
@@ -134,7 +134,7 @@ function sk_capsules(float x, float y, float z, int first, int last, float best)
 		float ex = pax - dx * hh;
 		float ey = pay - dy * hh;
 		float ez = paz - dz * hh;
-		float d = sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[i];
+		float d = math::sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[i];
 		best = d < best ? d : best;
 	}
 	return best;
@@ -146,7 +146,7 @@ function sk_glows(float x, float y, float z) -> float {
 		float dx = x - SK_GX[i];
 		float dy = y - SK_GY[i];
 		float dz = z - SK_GZ[i];
-		float d = sqrt(dx * dx + dy * dy + dz * dz) - SK_GR[i];
+		float d = math::sqrt(dx * dx + dy * dy + dz * dz) - SK_GR[i];
 		best = d < best ? d : best;
 	}
 	return best;
@@ -158,12 +158,12 @@ function sk_skull(float x, float y, float z, float best) -> float {
 	float hx = x - SK_HX;
 	float hy = y - SK_HY;
 	float hz = z - SK_HZ;
-	if (sqrt(hx * hx + hy * hy + hz * hz) * 0.959 - SK_SKB >= best) { return best; }
+	if (math::sqrt(hx * hx + hy * hy + hz * hz) * 0.959 - SK_SKB >= best) { return best; }
 	float cu = hx * SK_PUX + hy * SK_PUY + hz * SK_PUZ;
 	float cf = hx * SK_PFX + hy * SK_PFY + hz * SK_PFZ;
 	float cr = hx * SK_PRX + hy * SK_PRY + hz * SK_PRZ;
 	cu = cu * 1.18;
-	float d = sqrt(cu * cu + cf * cf * 0.92 + cr * cr) - SK_HR;
+	float d = math::sqrt(cu * cu + cf * cf * 0.92 + cr * cr) - SK_HR;
 	float jx = x - SK_JX;
 	float jy = y - SK_JY;
 	float jz = z - SK_JZ;
@@ -172,17 +172,17 @@ function sk_skull(float x, float y, float z, float best) -> float {
 	float qx = jx - SK_PRX * jr;
 	float qy = jy - SK_PRY * jr;
 	float qz = jz - SK_PRZ * jr;
-	float dj = sqrt(qx * qx + qy * qy + qz * qz) - 0.09;
+	float dj = math::sqrt(qx * qx + qy * qy + qz * qz) - 0.09;
 	d = d < dj ? d : dj;
 	for (int i = 0; i < SK_NSOCK; ++i) {
 		float sx = x - SK_GX[i];
 		float sy = y - SK_GY[i];
 		float sz = z - SK_GZ[i];
-		float c = SK_GR[i] * 2.5 - sqrt(sx * sx + sy * sy + sz * sz);
+		float c = SK_GR[i] * 2.5 - math::sqrt(sx * sx + sy * sy + sz * sz);
 		d = d > c ? d : c;
 	}
 	float nx = x - SK_NX; float ny = y - SK_NY; float nz = z - SK_NZ;
-	float cn = 0.042 - sqrt(nx * nx + ny * ny + nz * nz);
+	float cn = 0.042 - math::sqrt(nx * nx + ny * ny + nz * nz);
 	d = d > cn ? d : cn;
 	return d < best ? d : best;
 }
@@ -194,9 +194,9 @@ function sk_body(float x, float y, float z) -> float {
 	float ar = ax * SK_PRX + ay * SK_PRY + az * SK_PRZ;
 	af = af * 0.74;
 	au = au * 1.12;
-	float da = (sqrt(af * af + au * au + ar * ar) - SK_AR) * 0.74;
+	float da = (math::sqrt(af * af + au * au + ar * ar) - SK_AR) * 0.74;
 	float tx = x - SK_TX; float ty = y - SK_TY; float tz = z - SK_TZ;
-	float dt = sqrt(tx * tx + ty * ty + tz * tz) - SK_TR;
+	float dt = math::sqrt(tx * tx + ty * ty + tz * tz) - SK_TR;
 	float k = 0.09;
 	float hh = 0.5 + 0.5 * (dt - da) / k;
 	hh = hh < 0.0 ? 0.0 : (hh > 1.0 ? 1.0 : hh);
@@ -208,8 +208,8 @@ function sk_ring(float x, float y, float z) -> float {
 	float ox = x - SK_CRX; float oy = y - SK_CRY; float oz = z - SK_CRZ;
 	float cu = ox * SK_PUX + oy * SK_PUY + oz * SK_PUZ;
 	float px = ox - SK_PUX * cu; float py = oy - SK_PUY * cu; float pz = oz - SK_PUZ * cu;
-	float ring = sqrt(px * px + py * py + pz * pz) - 0.2;
-	return sqrt(ring * ring + cu * cu) - 0.028;
+	float ring = math::sqrt(px * px + py * py + pz * pz) - 0.2;
+	return math::sqrt(ring * ring + cu * cu) - 0.028;
 }
 
 function sk_gem(float x, float y, float z) -> float {
@@ -229,7 +229,7 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 		d = sk_skull(x, y, z, d);
 		// the crown's ring and flames lie within SK_CRB of its center
 		float ox = x - SK_CRX; float oy = y - SK_CRY; float oz = z - SK_CRZ;
-		if (sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < d) {
+		if (math::sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < d) {
 			float dr = sk_ring(x, y, z);
 			d = d < dr ? d : dr;
 			d = sk_capsules(x, y, z, SK_CROWN0, SK_NC, d);
@@ -244,7 +244,7 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 			float gx = x - SK_GX[g];
 			float gy = y - SK_GY[g];
 			float gz = z - SK_GZ[g];
-			float dg2 = sqrt(gx * gx + gy * gy + gz * gz) - SK_GR[g];
+			float dg2 = math::sqrt(gx * gx + gy * gy + gz * gz) - SK_GR[g];
 			d = d < dg2 ? d : dg2;
 		} else {
 			float mx = x - SK_CMX[c];
@@ -263,7 +263,7 @@ function sk_spider(float x, float y, float z, int groups, array<int>& cand, int 
 			float ex = pax - cdx * hh;
 			float ey = pay - cdy * hh;
 			float ez = paz - cdz * hh;
-			float dc = sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[c];
+			float dc = math::sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[c];
 			d = d < dc ? d : dc;
 		}
 	}
@@ -279,7 +279,7 @@ function sk_candidates(float x, float y, float z, array<int>& cand, int first, i
 			float gx = x - SK_GX[g];
 			float gy = y - SK_GY[g];
 			float gz = z - SK_GZ[g];
-			float dg2 = sqrt(gx * gx + gy * gy + gz * gz) - SK_GR[g];
+			float dg2 = math::sqrt(gx * gx + gy * gy + gz * gz) - SK_GR[g];
 			d = d < dg2 ? d : dg2;
 		} else {
 			float mx = x - SK_CMX[c];
@@ -298,7 +298,7 @@ function sk_candidates(float x, float y, float z, array<int>& cand, int first, i
 			float ex = pax - cdx * hh;
 			float ey = pay - cdy * hh;
 			float ez = paz - cdz * hh;
-			float dc = sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[c];
+			float dc = math::sqrt(ex * ex + ey * ey + ez * ez) - SK_CR[c];
 			d = d < dc ? d : dc;
 		}
 	}
@@ -333,7 +333,7 @@ function sk_material(float x, float y, float z, float dw, array<int>& cand, int 
 	float de = sk_glows(x, y, z);
 	de = de < best ? de : best;
 	float ox = x - SK_CRX; float oy = y - SK_CRY; float oz = z - SK_CRZ;
-	if (sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < de) {
+	if (math::sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < de) {
 		float dr = sk_ring(x, y, z);
 		de = de < dr ? de : dr;
 		de = sk_capsules(x, y, z, SK_CROWN0, SK_NC, de);
@@ -390,7 +390,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		float vz = SK_BCZ - oz;
 		float tc = vx * dx + vy * dy + vz * dz;
 		float perp = vx * vx + vy * vy + vz * vz - tc * tc;
-		glow = tc < 0.0 ? 9.0 : sqrt(perp < 0.0 ? 0.0 : perp) - 0.55;
+		glow = tc < 0.0 ? 9.0 : math::sqrt(perp < 0.0 ? 0.0 : perp) - 0.55;
 	}
 	bool hit = false;
 	bool inside = SK_EYE_INSIDE;
@@ -456,7 +456,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	float ly = SK_LY - y;
 	float lz = SK_LZ - z;
 	float ld2 = lx * lx + ly * ly + lz * lz;
-	float lil = 1.0 / sqrt(ld2 + 0.0001);
+	float lil = 1.0 / math::sqrt(ld2 + 0.0001);
 	lx *= lil; ly *= lil; lz *= lil;
 	if (m == 0) {
 		float hs = 0.004;
@@ -469,7 +469,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		float ny = -n0 - n1 + n2 + n3;
 		float nz = -n0 + n1 - n2 + n3;
 		float sg = g < 0.0 ? -1.0 : 1.0;
-		float nl = sg / sqrt(nx * nx + ny * ny + nz * nz + 0.0000001);
+		float nl = sg / math::sqrt(nx * nx + ny * ny + nz * nz + 0.0000001);
 		nx *= nl; ny *= nl; nz *= nl;
 		float head = -(nx * dx + ny * dy + nz * dz);
 		head = head < 0.0 ? 0.0 : head;
@@ -479,9 +479,9 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		float vx = x * s;
 		float vy = y * s;
 		float vz = z * s;
-		float vein = sin(vx) * cos(vy) + sin(vy) * cos(vz) + sin(vz) * cos(vx);
+		float vein = math::sin(vx) * math::cos(vy) + math::sin(vy) * math::cos(vz) + math::sin(vz) * math::cos(vx);
 		float va = vein < 0.0 ? -vein : vein;
-		float pulse = 0.5 + 0.5 * sin(vein * 5.0 - SK_T * 3.4 + vz * 0.25);
+		float pulse = 0.5 + 0.5 * math::sin(vein * 5.0 - SK_T * 3.4 + vz * 0.25);
 		float ao = 1.0 - i * 0.011;
 		ao = ao < 0.3 ? 0.3 : ao;
 		float lit = (0.06 + head * 0.7) * fog * ao;
@@ -495,7 +495,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 			return SK_EMBER + (e < 0 ? 0 : (e > 11 ? 11 : e)) + depth;
 		}
 		float hue = (vx * 0.11 + vy * 0.07 - vz * 0.05) * 0.3 + g * 0.35 + SK_T * 0.05 + t * 0.035 + (va < 0.3 ? 0.33 : 0.0);
-		hue = hue - floor(hue);
+		hue = hue - math::floor(hue);
 		int hq = itrunc(hue * 12.0);
 		hq = hq > 11 ? 11 : hq;
 		int l = itrunc(lit * 11.0 + dith + 0.5);
@@ -517,11 +517,11 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		float gnx = SK_GAX * sa + SK_PUX * sb * 0.62 + SK_GBX * sc;
 		float gny = SK_GAY * sa + SK_PUY * sb * 0.62 + SK_GBY * sc;
 		float gnz = SK_GAZ * sa + SK_PUZ * sb * 0.62 + SK_GBZ * sc;
-		float gl = 1.0 / sqrt(gnx * gnx + gny * gny + gnz * gnz);
+		float gl = 1.0 / math::sqrt(gnx * gnx + gny * gny + gnz * gnz);
 		float face = -(gnx * dx + gny * dy + gnz * dz) * gl;
 		face = face < 0.0 ? 0.0 : face;
 		int facet = (sa > 0.0 ? 1 : 0) + (sb > 0.0 ? 2 : 0) + (sc > 0.0 ? 4 : 0);
-		float twinkle = sin(SK_T * 9.0 + facet * 2.3);
+		float twinkle = math::sin(SK_T * 9.0 + facet * 2.3);
 		float lit = 0.25 + face * face * 0.6 + (twinkle > 0.85 ? 0.6 : 0.0);
 		int r = itrunc(lit * 7.0 + dith + 0.5);
 		return SK_GEM + (r < 0 ? 0 : (r > 7 ? 7 : r)) + depth;
@@ -534,7 +534,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 	float nx = n0 - n1 - n2 + n3;
 	float ny = -n0 - n1 + n2 + n3;
 	float nz = -n0 + n1 - n2 + n3;
-	float nl = 1.0 / sqrt(nx * nx + ny * ny + nz * nz + 0.0000001);
+	float nl = 1.0 / math::sqrt(nx * nx + ny * ny + nz * nz + 0.0000001);
 	nx *= nl; ny *= nl; nz *= nl;
 	float vd = -(nx * dx + ny * dy + nz * dz);
 	vd = vd < 0.0 ? 0.0 : vd;
@@ -549,7 +549,7 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		float so = 99.0;
 		for (int k = 0; k < SK_NSOCK; ++k) {
 			float ox2 = x - SK_GX[k]; float oy2 = y - SK_GY[k]; float oz2 = z - SK_GZ[k];
-			float q = sqrt(ox2 * ox2 + oy2 * oy2 + oz2 * oz2) - SK_GR[k] * 2.5;
+			float q = math::sqrt(ox2 * ox2 + oy2 * oy2 + oz2 * oz2) - SK_GR[k] * 2.5;
 			so = q < so ? q : so;
 		}
 		if (so < 0.012) { lit = lit * 0.15 + 0.07 * (1.0 + SK_FLICK); }
@@ -560,13 +560,13 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		float ju = jx * SK_PUX + jy * SK_PUY + jz * SK_PUZ;
 		if (jf > 0.045 && ju > -0.05 && ju < 0.042) {
 			float tr = (jx * SK_PRX + jy * SK_PRY + jz * SK_PRZ) * 44.0;
-			if (tr - floor(tr) < 0.24 || (ju > -0.008 && ju < 0.006)) { lit = lit * 0.22; }
+			if (tr - math::floor(tr) < 0.24 || (ju > -0.008 && ju < 0.006)) { lit = lit * 0.22; }
 		}
 		int b = itrunc(lit * fog * 11.0 + dith + 0.5);
 		return SK_BONE + (b < 0 ? 0 : (b > 11 ? 11 : b)) + depth;
 	}
 	if (m == 4) {
-		int k = itrunc((0.45 + vd * 0.45 + 0.3 * sin(SK_T * 4.0)) * 5.0 + dith + 0.5);
+		int k = itrunc((0.45 + vd * 0.45 + 0.3 * math::sin(SK_T * 4.0)) * 5.0 + dith + 0.5);
 		return SK_MARK + (k < 0 ? 0 : (k > 5 ? 5 : k)) + depth;
 	}
 	float lit = 0.03 + vd * 0.16 + rim * 0.62 + eyel * 0.9;
@@ -590,7 +590,7 @@ function sk_row(int y) -> array<int> {
 	float nx = SK_RY * az - SK_RZ * ay;
 	float ny = SK_RZ * ax - SK_RX * az;
 	float nz = SK_RX * ay - SK_RY * ax;
-	float nl = 1.0 / sqrt(nx * nx + ny * ny + nz * nz);
+	float nl = 1.0 / math::sqrt(nx * nx + ny * ny + nz * nz);
 	array<int> row = [];
 	for (int c = 0; c < SK_CROWN0; ++c) {
 		float off = ((SK_CMX[c] - SK_EX) * nx + (SK_CMY[c] - SK_EY) * ny + (SK_CMZ[c] - SK_EZ) * nz) * nl;
@@ -606,7 +606,7 @@ function sk_row(int y) -> array<int> {
 		float dx = SK_FX + SK_RX * u + SK_UX * v;
 		float dy = SK_FY + SK_RY * u + SK_UY * v;
 		float dz = SK_FZ + SK_RZ * u + SK_UZ * v;
-		float il = 1.0 / sqrt(dx * dx + dy * dy + dz * dz);
+		float il = 1.0 / math::sqrt(dx * dx + dy * dy + dz * dz);
 		int v = sk_trace(dx * il, dy * il, dz * il, x, y, cand, row, nrow);
 		out.push(v);
 	}
@@ -730,15 +730,15 @@ class Ossuary : Scene {
 
 	void set_world(float t) {
 		SK_T = t;
-		SK_S = 0.8 + 0.07 * sin(t * 0.37);
-		SK_K = 0.45 * sin(t * 0.21 + 0.6);
-		SK_TW = 0.11 * sin(t * 0.29 + 1.3);
-		SK_WA = 0.18 + 0.14 * sin(t * 0.33 + 2.0);
+		SK_S = 0.8 + 0.07 * math::sin(t * 0.37);
+		SK_K = 0.45 * math::sin(t * 0.21 + 0.6);
+		SK_TW = 0.11 * math::sin(t * 0.29 + 1.3);
+		SK_WA = 0.18 + 0.14 * math::sin(t * 0.33 + 2.0);
 		SK_SHELL = SK_S * (2.1 + SK_WA * 2.4);
 		float ph = t * 0.19;
-		float a = 0.5 + 0.5 * cos(ph);
-		float b = 0.5 + 0.5 * cos(ph - 2.0944);
-		float c = 0.5 + 0.5 * cos(ph + 2.0944);
+		float a = 0.5 + 0.5 * math::cos(ph);
+		float b = 0.5 + 0.5 * math::cos(ph - 2.0944);
+		float c = 0.5 + 0.5 * math::cos(ph + 2.0944);
 		a = a * a * a; b = b * b * b; c = c * c * c;
 		float sum = a + b + c;
 		SK_MG = a / sum;
@@ -752,16 +752,16 @@ class Ossuary : Scene {
 		float gx = sk_field(bx + e, by, bz) - sk_field(bx - e, by, bz);
 		float gy = sk_field(bx, by + e, bz) - sk_field(bx, by - e, bz);
 		float gz = sk_field(bx, by, bz + e) - sk_field(bx, by, bz - e);
-		float gl = 1.0 / sqrt(gx * gx + gy * gy + gz * gz + 0.0000001);
+		float gl = 1.0 / math::sqrt(gx * gx + gy * gy + gz * gz + 0.0000001);
 		ux = gx * gl; uy = gy * gl; uz = gz * gl;
 		float d = fx * ux + fy * uy + fz * uz;
 		fx -= ux * d; fy -= uy * d; fz -= uz * d;
-		float fl = sqrt(fx * fx + fy * fy + fz * fz);
+		float fl = math::sqrt(fx * fx + fy * fy + fz * fz);
 		if (fl < 0.001) {
 			fx = uy; fy = uz; fz = ux;
 			d = fx * ux + fy * uy + fz * uz;
 			fx -= ux * d; fy -= uy * d; fz -= uz * d;
-			fl = sqrt(fx * fx + fy * fy + fz * fz);
+			fl = math::sqrt(fx * fx + fy * fy + fz * fz);
 		}
 		fx /= fl; fy /= fl; fz /= fl;
 		rx = uy * fz - uz * fy;
@@ -801,8 +801,8 @@ class Ossuary : Scene {
 			int kind = rng.next(14);
 			if (kind >= 10) {
 				float ca2 = rng.next(628) * 0.01;
-				float cxr = cos(ca2) * 0.2;
-				float sxr = sin(ca2) * 0.2;
+				float cxr = math::cos(ca2) * 0.2;
+				float sxr = math::sin(ca2) * 0.2;
 				float crx = hx + fx * 0.34 + ux * 0.55;
 				float cry = hy + fy * 0.34 + uy * 0.55;
 				float crz = hz + fz * 0.34 + uz * 0.55;
@@ -817,8 +817,8 @@ class Ossuary : Scene {
 			} else {
 				float r = 0.6 + rng.next(140) * 0.01;
 				float a = rng.next(628) * 0.01;
-				float ca = cos(a) * r;
-				float sa = sin(a) * r;
+				float ca = math::cos(a) * r;
+				float sa = math::sin(a) * r;
 				spawn(hx + fx * ca + rx * sa - ux * 0.1, hy + fy * ca + ry * sa - uy * 0.1, hz + fz * ca + rz * sa - uz * 0.1, ux * 0.25, uy * 0.25, uz * 0.25, 2.0 + rng.next(100) * 0.01);
 			}
 		}
@@ -847,15 +847,15 @@ class Ossuary : Scene {
 			cxs = bx; cys = by; czs = bz;
 		}
 		set_world(t);
-		float turn = 0.75 * sin(t * 0.53 + wander) + 0.45 * sin(t * 1.37 + wander * 2.0) + 0.2 * sin(t * 2.9);
+		float turn = 0.75 * math::sin(t * 0.53 + wander) + 0.45 * math::sin(t * 1.37 + wander * 2.0) + 0.2 * math::sin(t * 2.9);
 		float ang = turn * dt * 1.6;
-		float c = cos(ang);
-		float s = sin(ang);
+		float c = math::cos(ang);
+		float s = math::sin(ang);
 		float nfx = fx * c + rx * s;
 		float nfy = fy * c + ry * s;
 		float nfz = fz * c + rz * s;
 		fx = nfx; fy = nfy; fz = nfz;
-		float speed = 0.55 + 0.2 * sin(t * 0.8);
+		float speed = 0.55 + 0.2 * math::sin(t * 0.8);
 		bx += fx * speed * dt;
 		by += fy * speed * dt;
 		bz += fz * speed * dt;
@@ -888,7 +888,7 @@ class Ossuary : Scene {
 					footx[i] = tox[i]; footy[i] = toy[i]; footz[i] = toz[i];
 				} else {
 					float e = stept[i];
-					float lift = sin(e * 3.14159265) * 0.22;
+					float lift = math::sin(e * 3.14159265) * 0.22;
 					footx[i] = fromx[i] + (tox[i] - fromx[i]) * e + ux * lift;
 					footy[i] = fromy[i] + (toy[i] - fromy[i]) * e + uy * lift;
 					footz[i] = fromz[i] + (toz[i] - fromz[i]) * e + uz * lift;
@@ -912,20 +912,20 @@ class Ossuary : Scene {
 			}
 		}
 		update_particles(dt);
-		float bob = 0.2 + 0.018 * sin(t * 11.0);
+		float bob = 0.2 + 0.018 * math::sin(t * 11.0);
 		float hx = bx + ux * bob;
 		float hy = by + uy * bob;
 		float hz = bz + uz * bob;
-		float orbit = 2.4 + t * 0.33 + 0.5 * sin(t * 0.17);
-		float oc = cos(orbit) * 2.1;
-		float os = sin(orbit) * 2.1;
+		float orbit = 2.4 + t * 0.33 + 0.5 * math::sin(t * 0.17);
+		float oc = math::cos(orbit) * 2.1;
+		float os = math::sin(orbit) * 2.1;
 		float dex = hx + fx * oc + rx * os + ux * 1.0;
 		float dey = hy + fy * oc + ry * os + uy * 1.0;
 		float dez = hz + fz * oc + rz * os + uz * 1.0;
 		float cdx = dex - hx;
 		float cdy = dey - hy;
 		float cdz = dez - hz;
-		float want = sqrt(cdx * cdx + cdy * cdy + cdz * cdz);
+		float want = math::sqrt(cdx * cdx + cdy * cdy + cdz * cdz);
 		cdx /= want; cdy /= want; cdz /= want;
 		float reach = 1.5;
 		while (reach < want) {
@@ -958,7 +958,7 @@ class Ossuary : Scene {
 		SK_CID[i] = 1.0 / (dx * dx + dy * dy + dz * dz + 0.000001);
 		SK_CR[i] = r;
 		SK_CMX[i] = ax + dx * 0.5; SK_CMY[i] = ay + dy * 0.5; SK_CMZ[i] = az + dz * 0.5;
-		SK_CB[i] = sqrt(dx * dx + dy * dy + dz * dz) * 0.5 + r;
+		SK_CB[i] = math::sqrt(dx * dx + dy * dy + dz * dz) * 0.5 + r;
 	}
 
 	void glow(int i, float x, float y, float z, float r) {
@@ -985,8 +985,8 @@ class Ossuary : Scene {
 		set_world(tt);
 		SK_W = w;
 		SK_H = h;
-		SK_FLICK = 0.7 * sin(tt * 17.0) * sin(tt * 5.3);
-		float bob = 0.2 + 0.018 * sin(tt * 11.0);
+		SK_FLICK = 0.7 * math::sin(tt * 17.0) * math::sin(tt * 5.3);
+		float bob = 0.2 + 0.018 * math::sin(tt * 11.0);
 		float cx = bx + ux * bob;
 		float cy = by + uy * bob;
 		float cz = bz + uz * bob;
@@ -995,10 +995,10 @@ class Ossuary : Scene {
 		SK_PRX = rx; SK_PRY = ry; SK_PRZ = rz;
 		SK_TX = cx; SK_TY = cy; SK_TZ = cz;
 		SK_AX = cx - fx * 0.4 + ux * 0.1; SK_AY = cy - fy * 0.4 + uy * 0.1; SK_AZ = cz - fz * 0.4 + uz * 0.1;
-		float nod = 0.03 * sin(tt * 2.1);
+		float nod = 0.03 * math::sin(tt * 2.1);
 		SK_HX = cx + fx * 0.34 + ux * (0.09 + nod); SK_HY = cy + fy * 0.34 + uy * (0.09 + nod); SK_HZ = cz + fz * 0.34 + uz * (0.09 + nod);
 		SK_NX = SK_HX + fx * 0.23 - ux * 0.06; SK_NY = SK_HY + fy * 0.23 - uy * 0.06; SK_NZ = SK_HZ + fz * 0.23 - uz * 0.06;
-		float jaw = 0.012 * sin(tt * 6.0);
+		float jaw = 0.012 * math::sin(tt * 6.0);
 		SK_JX = SK_HX + fx * 0.1 - ux * (0.14 + jaw); SK_JY = SK_HY + fy * 0.1 - uy * (0.14 + jaw); SK_JZ = SK_HZ + fz * 0.1 - uz * (0.14 + jaw);
 		SK_BCX = cx; SK_BCY = cy; SK_BCZ = cz;
 		SK_BR = 1.6;
@@ -1020,7 +1020,7 @@ class Ossuary : Scene {
 		SK_NBONE = 5;
 		glow(0, SK_HX + fx * 0.175 + ux * 0.03 + rx * 0.088, SK_HY + fy * 0.175 + uy * 0.03 + ry * 0.088, SK_HZ + fz * 0.175 + uz * 0.03 + rz * 0.088, 0.03);
 		glow(1, SK_HX + fx * 0.175 + ux * 0.03 - rx * 0.088, SK_HY + fy * 0.175 + uy * 0.03 - ry * 0.088, SK_HZ + fz * 0.175 + uz * 0.03 - rz * 0.088, 0.03);
-		float third = 0.024 + 0.006 * sin(tt * 3.0);
+		float third = 0.024 + 0.006 * math::sin(tt * 3.0);
 		glow(2, SK_HX + fx * 0.17 + ux * 0.15, SK_HY + fy * 0.17 + uy * 0.15, SK_HZ + fz * 0.17 + uz * 0.15, third);
 		SK_LX = SK_GX[2] * 0.4 + (SK_GX[0] + SK_GX[1]) * 0.3 + fx * 0.1;
 		SK_LY = SK_GY[2] * 0.4 + (SK_GY[0] + SK_GY[1]) * 0.3 + fy * 0.1;
@@ -1028,7 +1028,7 @@ class Ossuary : Scene {
 		capsule(0, SK_JX - rx * 0.08, SK_JY - ry * 0.08, SK_JZ - rz * 0.08, SK_JX + rx * 0.08, SK_JY + ry * 0.08, SK_JZ + rz * 0.08, 0.05);
 		int ci = horn(1, 1.0);
 		ci = horn(ci, -1.0);
-		float fang = 0.02 * sin(tt * 6.0 + 1.0);
+		float fang = 0.02 * math::sin(tt * 6.0 + 1.0);
 		for (int s = 0; s < 2; ++s) {
 			float side = s == 0 ? 1.0 : -1.0;
 			float ax = SK_JX + fx * 0.05 + rx * side * 0.035;
@@ -1047,7 +1047,7 @@ class Ossuary : Scene {
 			float dx = footx[i] - hx;
 			float dy = footy[i] - hy;
 			float dz = footz[i] - hz;
-			float d = sqrt(dx * dx + dy * dy + dz * dz);
+			float d = math::sqrt(dx * dx + dy * dy + dz * dz);
 			float dn = d < 0.0001 ? 0.0001 : d;
 			dx /= dn; dy /= dn; dz /= dn;
 			float dmax = (l1 + l2) * 0.995;
@@ -1055,13 +1055,13 @@ class Ossuary : Scene {
 			dc = dc < 0.08 ? 0.08 : dc;
 			float a = (l1 * l1 - l2 * l2 + dc * dc) / (2.0 * dc);
 			float hh = l1 * l1 - a * a;
-			hh = hh < 0.0 ? 0.0 : sqrt(hh);
+			hh = hh < 0.0 ? 0.0 : math::sqrt(hh);
 			float bux = ux + rx * side * 0.35;
 			float buy = uy + ry * side * 0.35;
 			float buz = uz + rz * side * 0.35;
 			float bd = bux * dx + buy * dy + buz * dz;
 			bux -= dx * bd; buy -= dy * bd; buz -= dz * bd;
-			float bl = 1.0 / sqrt(bux * bux + buy * buy + buz * buz + 0.0000001);
+			float bl = 1.0 / math::sqrt(bux * bux + buy * buy + buz * buz + 0.0000001);
 			bux *= bl; buy *= bl; buz *= bl;
 			float kx = hx + dx * a + bux * hh;
 			float ky = hy + dy * a + buy * hh;
@@ -1072,7 +1072,7 @@ class Ossuary : Scene {
 			capsule(ci, hx, hy, hz, kx, ky, kz, 0.034);
 			capsule(ci + 1, kx, ky, kz, tipx, tipy, tipz, 0.02);
 			ci = ci + 2;
-			glow(3 + i, kx, ky, kz, 0.036 + 0.008 * sin(tt * 7.0 + i));
+			glow(3 + i, kx, ky, kz, 0.036 + 0.008 * math::sin(tt * 7.0 + i));
 		}
 		for (int k = 0; k < 3; ++k) {
 			float side = k - 1.0;
@@ -1081,8 +1081,8 @@ class Ossuary : Scene {
 			float pz = SK_AZ - fz * 0.3 + rz * side * 0.07;
 			for (int seg = 0; seg < 4; ++seg) {
 				float ph = tt * 3.1 + seg * 0.9 + k * 2.1;
-				float sw = sin(ph) * (0.1 + seg * 0.05);
-				float lift = cos(ph * 0.7 + k) * 0.08 + 0.05;
+				float sw = math::sin(ph) * (0.1 + seg * 0.05);
+				float lift = math::cos(ph * 0.7 + k) * 0.08 + 0.05;
 				float len = 0.2 - seg * 0.025;
 				float qx = px - fx * len + rx * (sw + side * 0.05) + ux * lift;
 				float qy = py - fy * len + ry * (sw + side * 0.05) + uy * lift;
@@ -1092,15 +1092,15 @@ class Ossuary : Scene {
 				px = qx; py = qy; pz = qz;
 			}
 		}
-		float hover = 0.03 * sin(tt * 1.7);
+		float hover = 0.03 * math::sin(tt * 1.7);
 		SK_HGX = SK_HX + ux * 0.3; SK_HGY = SK_HY + uy * 0.3; SK_HGZ = SK_HZ + uz * 0.3;
 		SK_BGX = (SK_AX + SK_TX) * 0.5; SK_BGY = (SK_AY + SK_TY) * 0.5; SK_BGZ = (SK_AZ + SK_TZ) * 0.5;
 		SK_CRX = SK_HX + ux * (0.44 + hover); SK_CRY = SK_HY + uy * (0.44 + hover); SK_CRZ = SK_HZ + uz * (0.44 + hover);
 		for (int k = 0; k < 7; ++k) {
 			float a = k * 0.8976 + tt * 0.6;
-			float ca = cos(a) * 0.2;
-			float sa = sin(a) * 0.2;
-			float flame = 0.1 + 0.05 * sin(tt * 9.0 + k * 1.9) + 0.03 * sin(tt * 23.0 + k);
+			float ca = math::cos(a) * 0.2;
+			float sa = math::sin(a) * 0.2;
+			float flame = 0.1 + 0.05 * math::sin(tt * 9.0 + k * 1.9) + 0.03 * math::sin(tt * 23.0 + k);
 			float bxk = SK_CRX + fx * ca + rx * sa;
 			float byk = SK_CRY + fy * ca + ry * sa;
 			float bzk = SK_CRZ + fz * ca + rz * sa;
@@ -1108,33 +1108,33 @@ class Ossuary : Scene {
 		}
 		// the bounding radii the distance skips on: the skull's jaw about its center, the ring and flames about the crown's
 		float jhx = SK_JX - SK_HX; float jhy = SK_JY - SK_HY; float jhz = SK_JZ - SK_HZ;
-		float jaw_reach = sqrt(jhx * jhx + jhy * jhy + jhz * jhz) + 0.085 + 0.09;
+		float jaw_reach = math::sqrt(jhx * jhx + jhy * jhy + jhz * jhz) + 0.085 + 0.09;
 		SK_SKB = (jaw_reach > SK_HR ? jaw_reach : SK_HR) + 0.001;
 		float crown_reach = 0.2 + 0.028;
 		for (int k = SK_CROWN0; k < SK_NC; ++k) {
 			float mx = SK_CMX[k] - SK_CRX; float my = SK_CMY[k] - SK_CRY; float mz = SK_CMZ[k] - SK_CRZ;
-			float r = sqrt(mx * mx + my * my + mz * mz) + SK_CB[k];
+			float r = math::sqrt(mx * mx + my * my + mz * mz) + SK_CB[k];
 			crown_reach = r > crown_reach ? r : crown_reach;
 		}
 		SK_CRB = crown_reach + 0.001;
 		float spin = tt * 2.2;
-		float gl2 = 0.3 + 0.02 * sin(tt * 2.5);
+		float gl2 = 0.3 + 0.02 * math::sin(tt * 2.5);
 		SK_GMX = SK_CRX + ux * gl2; SK_GMY = SK_CRY + uy * gl2; SK_GMZ = SK_CRZ + uz * gl2;
-		SK_GAX = rx * cos(spin) + fx * sin(spin); SK_GAY = ry * cos(spin) + fy * sin(spin); SK_GAZ = rz * cos(spin) + fz * sin(spin);
-		SK_GBX = fx * cos(spin) - rx * sin(spin); SK_GBY = fy * cos(spin) - ry * sin(spin); SK_GBZ = fz * cos(spin) - rz * sin(spin);
+		SK_GAX = rx * math::cos(spin) + fx * math::sin(spin); SK_GAY = ry * math::cos(spin) + fy * math::sin(spin); SK_GAZ = rz * math::cos(spin) + fz * math::sin(spin);
+		SK_GBX = fx * math::cos(spin) - rx * math::sin(spin); SK_GBY = fy * math::cos(spin) - ry * math::sin(spin); SK_GBZ = fz * math::cos(spin) - rz * math::sin(spin);
 		SK_EX = ex; SK_EY = ey; SK_EZ = ez;
 		float ge = sk_field(ex, ey, ez);
 		SK_EYE_INSIDE = sk_shell(ge) < 0.0;
 		float lx = cx + fx * 0.3 + ux * 0.25 - ex;
 		float ly = cy + fy * 0.3 + uy * 0.25 - ey;
 		float lz = cz + fz * 0.3 + uz * 0.25 - ez;
-		float ll = 1.0 / sqrt(lx * lx + ly * ly + lz * lz);
+		float ll = 1.0 / math::sqrt(lx * lx + ly * ly + lz * lz);
 		lx *= ll; ly *= ll; lz *= ll;
 		float d = cux * lx + cuy * ly + cuz * lz;
 		float upx = cux - lx * d;
 		float upy = cuy - ly * d;
 		float upz = cuz - lz * d;
-		float ul = 1.0 / sqrt(upx * upx + upy * upy + upz * upz + 0.0000001);
+		float ul = 1.0 / math::sqrt(upx * upx + upy * upy + upz * upz + 0.0000001);
 		upx *= ul; upy *= ul; upz *= ul;
 		SK_FX = lx; SK_FY = ly; SK_FZ = lz;
 		SK_UX = upx; SK_UY = upy; SK_UZ = upz;
@@ -1182,8 +1182,8 @@ class Ossuary : Scene {
 		float scale = half_h / (0.6 * zc);
 		float sx = (ox * SK_RX + oy * SK_RY + oz * SK_RZ) * scale + w * 0.5;
 		float sy = half_h - (ox * SK_UX + oy * SK_UY + oz * SK_UZ) * scale;
-		int px = itrunc(floor(sx));
-		int py = itrunc(floor(sy));
+		int px = itrunc(math::floor(sx));
+		int py = itrunc(math::floor(sy));
 		int dq = itrunc(zc * 18.0);
 		plot(grid, px, py, dq, level);
 		if (size > 0) {
@@ -1212,21 +1212,21 @@ class Ossuary : Scene {
 		float hz = bz + uz * 0.25;
 		for (int g = 0; g < 7; ++g) {
 			float a = tt * (0.9 + g * 0.07) + g * 0.8976;
-			float r = 1.05 + 0.2 * sin(tt * 1.3 + g);
-			float ca = cos(a) * r;
-			float sa = sin(a) * r;
-			float lift = 0.35 + 0.25 * sin(tt * 2.0 + g * 1.7);
-			int pulse = itrunc(5.5 + 2.0 * sin(tt * 6.0 + g));
+			float r = 1.05 + 0.2 * math::sin(tt * 1.3 + g);
+			float ca = math::cos(a) * r;
+			float sa = math::sin(a) * r;
+			float lift = 0.35 + 0.25 * math::sin(tt * 2.0 + g * 1.7);
+			int pulse = itrunc(5.5 + 2.0 * math::sin(tt * 6.0 + g));
 			splat(grid, hx + fx * ca + rx * sa + ux * lift, hy + fy * ca + ry * sa + uy * lift, hz + fz * ca + rz * sa + uz * lift, pulse > 7 ? 7 : pulse, 2);
 		}
 		for (int s = 0; s < 6; ++s) {
 			float ph = tt * 4.0 + s * 1.047;
-			float tw = sin(tt * 11.0 + s * 2.7);
+			float tw = math::sin(tt * 11.0 + s * 2.7);
 			if (tw < 0.2) { continue; }
-			float rr = 0.1 + 0.05 * sin(tt * 3.0 + s);
-			float ca = cos(ph) * rr;
-			float sa = sin(ph) * rr;
-			float lift = 0.06 * sin(tt * 5.0 + s * 1.3);
+			float rr = 0.1 + 0.05 * math::sin(tt * 3.0 + s);
+			float ca = math::cos(ph) * rr;
+			float sa = math::sin(ph) * rr;
+			float lift = 0.06 * math::sin(tt * 5.0 + s * 1.3);
 			splat(grid, SK_GMX + SK_GAX * ca + SK_GBX * sa + ux * lift, SK_GMY + SK_GAY * ca + SK_GBY * sa + uy * lift, SK_GMZ + SK_GAZ * ca + SK_GBZ * sa + uz * lift, tw > 0.7 ? 7 : 5, 1);
 		}
 	}

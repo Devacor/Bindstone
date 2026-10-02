@@ -612,7 +612,7 @@ public:
             auto eng = make_engine();
             auto result = eng->execute(R"(
                 auto arr = [1, 2, 3, 4, 5, 6];
-                auto evens = arr.filter([](x) { return x % 2 == 0; });
+                auto evens = array::filter(arr, [](x) { return x % 2 == 0; });
                 evens.size()
             )");
             check_eq(result.as<int>(), 3);
@@ -1435,7 +1435,7 @@ public:
             check_both("int x = 10; x -= 2.5; to_string(x)", "7", "int -=");
             check_both("int x = 10; x *= 2.5; to_string(x)", "25", "int *=");
             check_both("int x = 10; x /= 4.0; to_string(x)", "2", "int /= truncates 2.5 -> 2");
-            check_both("int x = 10; x %= 4.5; to_string(x)", "1", "int %= fmod then truncate");
+            check_both("int x = 10; x %= 4.5; to_string(x)", "1", "int %= math::fmod then truncate");
         });
 
         test("compound_truncates_toward_zero", [this, check_both]() {
@@ -1645,7 +1645,7 @@ public:
                 auto c = C();
                 c.v %= 4.5;
                 to_string(c.v)
-            )", "1", "member %= fmod then truncate");
+            )", "1", "member %= math::fmod then truncate");
         });
 
         test("var_and_auto_fields", [this, check_both, both]() {
@@ -1899,9 +1899,9 @@ public:
             check_both("var i = 97; to_string(cast<char>(i)) + \":\" + type_of(cast<char>(i))", "a:char", "int -> char in range");
             check_both("to_string(cast<char>(0) == '\\x00') + \",\" + to_string(cast<char>(255) == '\\xFF')", "true,true", "int -> char range ends");
             check_both("var s = \"a\"; to_string(cast<char>(s)) + \":\" + type_of(cast<char>(s))", "a:char", "one-character string -> char");
-            check_both("to_string(cast<char>(cast<int>('z')) == 'z')", "true", "char -> int -> char round trip");
-            check_both("to_string(cast<char>(cast<string>('q')) == 'q')", "true", "char -> string -> char round trip");
-            check_both("to_string(cast<int>(cast<char>(200)))", "200", "int -> char -> int round trip");
+            check_both("to_string(cast<char>(cast<int>('z')) == 'z')", "true", "char -> int -> char math::round trip");
+            check_both("to_string(cast<char>(cast<string>('q')) == 'q')", "true", "char -> string -> char math::round trip");
+            check_both("to_string(cast<int>(cast<char>(200)))", "200", "int -> char -> int math::round trip");
             check_both("char c = cast<char>(65); to_string(c) + \":\" + type_of(c)", "A:char", "cast<char> is a parse-proven typed store");
             check_both("int code = cast<int>('a'); to_string(code)", "97", "cast<int> of a char into a typed local");
             check_both("var i = 256; var c = \"\"; try { var bad = cast<char>(i); } catch (e) { c = e; } c", "Cannot cast 'int' to 'char'", "int above 255 fails");
@@ -2156,7 +2156,7 @@ public:
                 var j = to_json(p);
                 var q = from_json(j);
                 type_of(q.hp) + ":" + to_string(q.hp) + "|" + type_of(q.speed) + ":" + to_string(q.speed) + "|" + q.name
-            )", "int:42|float:1.5|hero", "JSON round-trip preserves typed fields");
+            )", "int:42|float:1.5|hero", "JSON math::round-trip preserves typed fields");
             // A float JSON payload into an int field converts on the way in
             check_both(R"(
                 class P { int hp = 0; }
@@ -2304,7 +2304,7 @@ public:
             check_quad(q("array<K> a = [K(1)]; array<K> b = a; array<K> c = [K(2)]; to_string(a == b) + \",\" + to_string(a == c) + \",\" + to_string(same_object(a, b))").c_str(), "true,false,false", "equality is memberwise (a copy equals its source, identity via same_object)");
             check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; sp.a = 8; to_string(ks[0].a) + \"|\" + type_of(ks[0])").c_str(), "8|K", "a shared_ptr element shares its instance");
             check_quad(q("shared_ptr<K> sp = K(7); array<K> ks = [sp]; auto c = ks; c[0].a = 9; to_string(ks[0].a) + \",\" + to_string(sp.a)").c_str(), "9,9", "copying an array keeps a shared element shared (C++ copy semantics)");
-            check_quad(q("array<K> ks = [K(1), K(2), K(3)]; to_string(ks.filter([](K k) { return k.a > 1; }).size())").c_str(), "2", "filter");
+            check_quad(q("array<K> ks = [K(1), K(2), K(3)]; to_string(array::filter(ks, [](K k) { return k.a > 1; }).size())").c_str(), "2", "filter");
             check_quad(q("array<K> ks = [K(1)]; ks.clear(); ks.push(K(4)); to_string(ks.size()) + \":\" + to_string(ks[0].a)").c_str(), "1:4", "clear then push");
             check_quad(q("array<K> ks = [K(1)]; var v = ks; string r = \"\"; try { v.push(5); } catch (e) { r = e; } v.push(K(2)); v = 5; r + \"|\" + type_of(v)").c_str(), "Cannot push 'int' to array<K>|int", "a var copy keeps array<K>, the var stays a var");
             check_quad(q("var v = [K(1), K(2)]; array<K> ks = v; v[0].a = 50; to_string(ks[0].a) + \",\" + to_string(ks.size())").c_str(), "1,2", "array<K> from a dynamic array copies");
@@ -2357,7 +2357,7 @@ public:
             check_quad("map<string,int> m = {}; to_string(m.size()) + \",\" + to_string(m.empty())", "0,true", "empty");
             check_quad("function total(map<string,int> mm) -> int { int s = 0; for (auto kv : mm) { s += kv.second; } mm[\"z\"] = 100; return s; } map<string,int> m = {\"a\": 1, \"b\": 2}; to_string(total(m)) + \",\" + to_string(m.size())", "3,2", "by-value parameter");
             check_quad("function grow(map<string,int>& mm) { mm[\"z\"] = 100; } map<string,int> m = {\"a\": 1}; grow(m); to_string(m.size()) + \",\" + to_string(m[\"z\"])", "2,100", "by-reference parameter");
-            check_quad("map<string,int> m = {\"a\": 1}; var v = m; v[5] = 2; to_string(v.size()) + \",\" + type_of(v)", "2,map", "var laundering then anything goes");
+			check_quad("map<string,int> m = {\"a\": 1}; var v = m; bool rejected = false; try { v[5] = 2; } catch (e) { rejected = true; } string before = to_string(rejected) + \",\" + to_string(v.size()) + \",\" + type_of(v); v = 7; before + \"|\" + to_string(v)", "true,1,map|7", "var map keeps content constraints but permits rebinding");
             check_quad("var v = {\"a\": 1, \"b\": 2}; map<string,int> m = v; v[\"a\"] = 50; to_string(m[\"a\"]) + \",\" + to_string(m.size())", "1,2", "typed map from a dynamic map copies");
             check_quad("map<string,int> a = {\"x\": 1}; map<string,int> b = a; to_string(a == b) + \",\" + to_string(same_object(a, b))", "true,false", "equality is memberwise (a copy equals its source, identity via same_object)");
             check_quad("map<string,int> m = {\"px\": 3}; int acc = 0; for (int i = 0; i < 1000; i++) { acc += m[\"px\"]; } to_string(acc)", "3000", "constant-key reads");
@@ -2746,7 +2746,7 @@ public:
             check_quad("array<int> a = [10]; a[0] %= 4.5; to_string(a[0])", "1", "compound modulo");
             // byte kinds (bool/char buffers): reads, stores, push, sort, reverse, copies, json
             check_quad("array<bool> f = [true, false, true]; f[1] = true; to_string(f[0]) + to_string(f[1]) + to_string(f.size())", "truetrue3", "bool buffer store/read");
-            check_quad("array<bool> f = []; f.push(false); f.push(true); f.sort(); to_string(f[0]) + to_string(f[1])", "falsetrue", "bool buffer push/sort");
+            check_quad("array<bool> f = []; f.push(false); f.push(true); f.sort((a, b) => !a && b); to_string(f[0]) + to_string(f[1])", "falsetrue", "bool buffer push/sort");
             check_quad("array<char> c = ['q', 'a', 'z']; c.sort(); c.reverse(); to_string(c[0]) + to_string(c[2])", "za", "char buffer sort/reverse");
             check_quad("array<char> c = ['a', 'b']; array<char> d = c; d[0] = 'x'; to_string(c[0]) + to_string(d[0])", "ax", "char buffer copy is a copy");
             check_quad("array<bool> f = [true, false]; to_json(f)", "[true,false]", "bool buffer serializes");
@@ -2840,15 +2840,15 @@ public:
             // the builtins
             expect("array<int8> s = [5, -3, 0]; s.sort(); array<uint8> u = [200, 3, 100]; u.sort(); to_json(s) + to_json(u)", "[-3,0,5][3,100,200]", "sort by value");
             expect("array<uint8> u = [1, 2, 3]; u.reverse(); var p = u.pop(); u.push(9); to_json(u) + to_string(p) + to_string(u.index_of(9)) + to_string(u.contains(3))", "[3,2,9]12true", "reverse, pop, push, index_of, contains");
-            expect("array<uint8> u = [1, 2, 3, 4]; u.remove(0); to_json(u) + \" \" + to_json(u.slice(1, 3)) + \" \" + u.join(\"-\")", "[2,3,4] [3,4] 2-3-4", "remove, slice, join");
-            expect("array<uint8> u = [4, 5, 6]; u.remove_if([](int x) -> bool { return x == 5; }); to_json(u) + to_json(u.filter([](int x) -> bool { return x > 4; }))", "[4,6][6]", "remove_if, filter");
+            expect("array<uint8> u = [1, 2, 3, 4]; u.remove(0); to_json(u) + \" \" + to_json(array::slice(u, 1, 3)) + \" \" + u.join(\"-\")", "[2,3,4] [3,4] 2-3-4", "remove, slice, join");
+            expect("array<uint8> u = [4, 5, 6]; u.remove_if([](int x) -> bool { return x == 5; }); to_json(u) + to_json(array::filter(u, [](int x) -> bool { return x > 4; }))", "[4,6][6]", "remove_if, filter");
             expect("array<uint8> u = [3, 1]; u.sort([](int a, int b) -> bool { return a > b; }); to_json(u)", "[3,1]", "comparator sort");
             expect("array<uint8> a = [1, 2]; array<uint8> b = a; b[0] = 9; array<uint8> c = [1, 2]; array<int> d = [1, 2]; to_string(a[0]) + to_string(a == c) + to_string(a == b) + to_string(a == d)", "1truefalsetrue", "copies copy, == is memberwise");
             expect("array<array<uint8>> g = [[1, 2], [3]]; g[1].push(255); to_json(g)", "[[1,2],[3,255]]", "nested byte buffers");
             expect(caught("array<array<uint8>> g = [[1]]; int v = 256; g[0].push(v)"), "Cannot store 256 in array<uint8> (0..255)", "a nested byte buffer keeps its range");
             expect("class P { array<uint8> data; } P p; p.data.push(7); p.data.push(200); P q = from_json(to_json(p)); int v = 256; string r = \"none\"; try { q.data.push(v); } catch (e) { r = e; } to_json(q.data) + \" \" + r",
-                   "[7,200] Cannot store 256 in array<uint8> (0..255)", "json round trip keeps the declared kind");
-            expect("class P { array<int8> data; } P p; p.data.push(-5); P q = from_binary(to_binary(p)); to_json(q.data)", "[-5]", "binary archive round trip");
+                   "[7,200] Cannot store 256 in array<uint8> (0..255)", "json math::round trip keeps the declared kind");
+            expect("class P { array<int8> data; } P p; p.data.push(-5); P q = from_binary(to_binary(p)); to_json(q.data)", "[-5]", "binary archive math::round trip");
             expect("array<uint8> b = [1, 2, 3, 4]; parallel_for (auto& x : b) { x = x * 2; } to_json(b)", "[2,4,6,8]", "parallel_for writes a byte buffer in place");
             // a scalar byte is an int; the checker reads literals against the range
             check(run("uint8 x = 5; x", false, true).find("is an array element type only") != std::string::npos, "a scalar uint8 is a parse error");
@@ -2904,11 +2904,11 @@ public:
             check_quad("array<int> a = [1,2,3]; a.remove(1); to_string(a.size()) + to_string(a[1])", "23", "remove");
             check_quad("array<int> a = [1,2,3,4]; var n = a.remove_if([](auto x) -> auto { return x % 2 == 0; }); to_string(n) + \":\" + to_string(a.size()) + to_string(a[1])", "2:23", "remove_if");
             check_quad("array<int> a = [5,6,7]; to_string(a.index_of(6)) + to_string(a.has(7)) + to_string(a.has(9))", "1truefalse", "index_of/has");
-            check_quad("array<int> a = [1,2,3,4]; var s = a.slice(1,3); to_string(s.size()) + to_string(s[0])", "22", "slice");
+            check_quad("array<int> a = [1,2,3,4]; var s = array::slice(a, 1,3); to_string(s.size()) + to_string(s[0])", "22", "slice");
             check_quad("array<int> a = [1,2]; to_string(a.pop()) + \":\" + to_string(a.size())", "2:1", "pop");
             check_quad("array<int> a = [1,2,3]; a.join(\"-\")", "1-2-3", "join");
             check_quad("array<int> a = [9]; to_string(a.front()) + to_string(a.first()) + to_string(a.back()) + to_string(a.last())", "9999", "front/back");
-            check_quad("array<float> f = [1.5,2.5]; var t = 0.0; var r = f.filter([](auto x) -> auto { return x > 2.0; }); to_string(r.size()) + to_string(r[0])", "12.5", "filter");
+            check_quad("array<float> f = [1.5,2.5]; var t = 0.0; var r = array::filter(f, [](auto x) -> auto { return x > 2.0; }); to_string(r.size()) + to_string(r[0])", "12.5", "filter");
         });
 
         test("typed_storage_iteration_and_refs", [check_quad]() {

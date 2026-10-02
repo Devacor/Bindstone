@@ -942,7 +942,7 @@ public:
             std::string blob = to_binary_string(*eng, original);
             auto loaded = from_binary_string<std::shared_ptr<conv_poly_base>>(*eng, blob);
             auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
-            check(loadedDerived != nullptr, "binary convenience round-trip sliced the derived type (B6)");
+            check(loadedDerived != nullptr, "binary convenience math::round-trip sliced the derived type (B6)");
             check_eq(loadedDerived->derivedTag.get(), std::string("binary"), "derived field preserved (binary)");
             check_eq(loadedDerived->baseVal.get(), 11, "inherited field preserved (binary)");
         });
@@ -958,7 +958,7 @@ public:
             std::string encoded = to_base64(*eng, original);
             auto loaded = from_base64<std::shared_ptr<conv_poly_base>>(*eng, encoded);
             auto loadedDerived = std::dynamic_pointer_cast<conv_poly_derived>(loaded);
-            check(loadedDerived != nullptr, "base64 convenience round-trip sliced the derived type (B6)");
+            check(loadedDerived != nullptr, "base64 convenience math::round-trip sliced the derived type (B6)");
             check_eq(loadedDerived->derivedTag.get(), std::string("b64"), "derived field preserved (base64)");
             check_eq(loadedDerived->baseVal.get(), 13, "inherited field preserved (base64)");
         });
@@ -970,8 +970,8 @@ public:
 
             std::string json = to_json(*eng, ptr);
             auto loaded = from_json<std::shared_ptr<sp_simple_data>>(*eng, json);
-            check(loaded != nullptr, "non-polymorphic owning root round-trips");
-            check_eq(loaded->value, 321, "value preserved through convenience round-trip");
+            check(loaded != nullptr, "non-polymorphic owning root math::round-trips");
+            check_eq(loaded->value, 321, "value preserved through convenience math::round-trip");
         });
 
         test("dangling_shared_ptr_id_is_a_load_error_not_null", [this]() {
@@ -1071,7 +1071,7 @@ public:
             std::string original = "a\"b\\c\nd\te\xC3\xA9z";
             std::string json = to_json(*eng, original);
             std::string back = from_json<std::string>(*eng, json);
-            check_eq(back, original, "string with escapes + UTF-8 round-trips");
+            check_eq(back, original, "string with escapes + UTF-8 math::round-trips");
         });
 
         test("json_infinity_roundtrips", [this]() {
@@ -1080,7 +1080,7 @@ public:
             double inf = std::numeric_limits<double>::infinity();
             std::string json = to_json(*eng, inf);
             double back = from_json<double>(*eng, json);
-            check(std::isinf(back) && back > 0, "+infinity round-trips via 1e999 sentinel");
+            check(std::isinf(back) && back > 0, "+infinity math::round-trips via 1e999 sentinel");
         });
 
         // weak_ptr serialized before its shared_ptr owner must round-trip (forward ref).

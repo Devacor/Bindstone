@@ -134,7 +134,7 @@ class CanyonRun : Scene {
 		ph2 = rng.nextf() * 6.283185307;
 		var rivc = [];
 		for (int ry = 0; ry < msz; ++ry) {
-			rivc.push(itrunc(64.0 + 26.0 * sin(ry * 0.04908738521 + ph1) + 11.0 * sin(ry * 0.1472621556 + ph2)));
+			rivc.push(itrunc(64.0 + 26.0 * math::sin(ry * 0.04908738521 + ph1) + 11.0 * math::sin(ry * 0.1472621556 + ph2)));
 		}
 		var falltab = [];   // smoothstep carve profile in 1/256ths, by distance from the river axis
 		for (int fd = 0; fd < 16; ++fd) {
@@ -219,14 +219,14 @@ class CanyonRun : Scene {
 		float sp = 8.2;
 		float u = t * sp;
 		posy = u;
-		float wv = 13.0 * sin(t * 0.5 + 0.8);
-		posx = 64.0 + 26.0 * sin(u * 0.04908738521 + ph1) + 11.0 * sin(u * 0.1472621556 + ph2) + wv;
+		float wv = 13.0 * math::sin(t * 0.5 + 0.8);
+		posx = 64.0 + 26.0 * math::sin(u * 0.04908738521 + ph1) + 11.0 * math::sin(u * 0.1472621556 + ph2) + wv;
 		// heading from a look-ahead point on the same path: the turns steer themselves
 		float u2 = u + 7.5;
-		float wv2 = 13.0 * sin((t + 7.5 / sp) * 0.5 + 0.8);
-		float lx = 64.0 + 26.0 * sin(u2 * 0.04908738521 + ph1) + 11.0 * sin(u2 * 0.1472621556 + ph2) + wv2;
+		float wv2 = 13.0 * math::sin((t + 7.5 / sp) * 0.5 + 0.8);
+		float lx = 64.0 + 26.0 * math::sin(u2 * 0.04908738521 + ph1) + 11.0 * math::sin(u2 * 0.1472621556 + ph2) + wv2;
 		float ddx = lx - posx;
-		float dl = sqrt(ddx * ddx + 56.25);
+		float dl = math::sqrt(ddx * ddx + 56.25);
 		dirx = ddx / dl;
 		diry = 7.5 / dl;
 		planex = 0.0 - diry * 0.92;
@@ -249,7 +249,7 @@ class CanyonRun : Scene {
 		int g2 = hmap[((ifloor(posy + diry * 14.0) & mmask) * msz) + (ifloor(posx + dirx * 14.0) & mmask)];
 		int gm = g0 > g1 ? g0 : g1;
 		gm = g2 > gm ? g2 : gm;
-		float base = 118.0 + 74.0 * sin(t * 0.31 + 4.4);
+		float base = 118.0 + 74.0 * math::sin(t * 0.31 + 4.4);
 		float floorh = gm + 30.0;
 		float targ = floorh > base ? floorh : base;
 		if (dt > 0.0001) {
@@ -259,7 +259,7 @@ class CanyonRun : Scene {
 		}
 		camh = itrunc(camhf);
 		// pitch: nose down when high over the terrain ahead, plus a gentle bob
-		float pit = (camhf - (gm + 70.0)) * 0.0020 + 0.06 * sin(t * 0.23);
+		float pit = (camhf - (gm + 70.0)) * 0.0020 + 0.06 * math::sin(t * 0.23);
 		pit = pit > 0.20 ? 0.20 : pit;
 		pit = pit < -0.14 ? -0.14 : pit;
 		horizon = itrunc(h * (0.30 + pit));
@@ -337,7 +337,7 @@ class CanyonRun : Scene {
 			while (yy2 < yb2) { grid[gi2] = yy2; gi2 += ww; yy2 = yy2 + 1; }
 		}
 		// the sun sits at a fixed bearing: its screen column follows the heading
-		float rel = atan2(dx_, dy_) - 0.55;
+		float rel = math::atan2(dx_, dy_) - 0.55;
 		float sxf = ww * 0.5 - rel * ww * 0.55;
 		float syf = horiz - hh * 0.16;
 		float sr = hh * 0.07;
@@ -351,7 +351,7 @@ class CanyonRun : Scene {
 				if (sx < 0 || sx >= ww || sy >= yb[sx]) { continue; }
 				float ddx = sx + 0.5 - sxf;
 				float ddy = sy + 0.5 - syf;
-				float d = sqrt(ddx * ddx + ddy * ddy) / sr;
+				float d = math::sqrt(ddx * ddx + ddy * ddy) / sr;
 				if (d < 1.0) { grid[sy * ww + sx] = sunb + 5; }
 				else if (d < 2.2) {
 					int gl = itrunc((2.2 - d) * 4.2);

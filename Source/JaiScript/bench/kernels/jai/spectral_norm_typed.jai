@@ -48,7 +48,7 @@ float spectral_norm() {
 		vBv = vBv + ui * vi;
 		vv = vv + vi * vi;
 	}
-	return sqrt(vBv / vv);
+	return math::sqrt(vBv / vv);
 }
 
 float result = 0.0;

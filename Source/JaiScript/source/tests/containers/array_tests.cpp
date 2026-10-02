@@ -346,7 +346,7 @@ public:
 
         //     eng->execute(R"(
         //         auto arr = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-        //         auto slice = arr.slice(2, 5);
+        //         auto slice = array::slice(arr, 2, 5);
         //     )");
 
         //     auto result = eng->execute("slice");
@@ -364,7 +364,7 @@ public:
             eng->execute(R"(
                 auto arr1 = [1, 2, 3];
                 auto arr2 = [4, 5, 6];
-                auto result = concatenate(arr1, arr2);
+                auto result = array::append(arr1, arr2);
             )");
 
             auto result = eng->execute("result");
@@ -383,7 +383,7 @@ public:
             eng->execute(R"(
                 auto arr1 = ["a", "b"];
                 auto arr2 = ["c", "d", "e"];
-                auto result = append(arr1, arr2);
+                auto result = array::append(arr1, arr2);
             )");
 
             auto result = eng->execute("result");
@@ -403,7 +403,7 @@ public:
             eng->execute(R"(
                 auto str1 = "Hello ";
                 auto str2 = "World";
-                auto result = concatenate(str1, str2);
+                auto result = string::append(str1, str2);
             )");
 
             check_eq(eng->execute("result").as<std::string>(), "Hello World");
@@ -414,7 +414,7 @@ public:
             stdlib::register_all(eng);
 
             eng->execute(R"(
-                auto greeting = append("Good ", "morning");
+                auto greeting = string::append("Good ", "morning");
             )");
 
             check_eq(eng->execute("greeting").as<std::string>(), "Good morning");

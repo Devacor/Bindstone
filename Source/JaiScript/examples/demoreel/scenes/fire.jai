@@ -130,7 +130,7 @@ class Fire : Scene {
 				life = 0.8 + rng.next(100) * 0.012;
 			}
 			slife[s] = life;
-			svx[s] = svx[s] + sin(tt * 3.0 + s) * 6.0 * dt;
+			svx[s] = svx[s] + math::sin(tt * 3.0 + s) * 6.0 * dt;
 			spx[s] = spx[s] + svx[s] * dt;
 			spy[s] = spy[s] + svy[s] * dt;
 		}

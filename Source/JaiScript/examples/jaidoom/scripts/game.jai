@@ -174,7 +174,7 @@ function game_start_map(string name) -> bool {
 		if (TH_TYPE[t] == want_start) {
 			P_X = TH_X[t];
 			P_Y = TH_Y[t];
-			P_ANG = TH_ANG[t] * PI / 180.0;
+			P_ANG = TH_ANG[t] * math::PI / 180.0;
 			placed = true;
 			break;
 		}
@@ -184,7 +184,7 @@ function game_start_map(string name) -> bool {
 			if (TH_TYPE[t2] == 1) {
 				P_X = TH_X[t2] + 32.0;                   // no P2 start: offset off P1
 				P_Y = TH_Y[t2];
-				P_ANG = TH_ANG[t2] * PI / 180.0;
+				P_ANG = TH_ANG[t2] * math::PI / 180.0;
 				break;
 			}
 		}
@@ -214,8 +214,8 @@ function game_start_map(string name) -> bool {
 function player_damage_from(int dmg, float sx, float sy) -> void {
 	if (P_HP <= 0 || P_GOD) { return; }
 	float rel = math::atan2(sy - P_Y, sx - P_X) - P_ANG;
-	while (rel > PI) { rel = rel - TAU; }
-	while (rel < 0.0 - PI) { rel = rel + TAU; }
+	while (rel > math::PI) { rel = rel - math::TAU; }
+	while (rel < 0.0 - math::PI) { rel = rel + math::TAU; }
 	player_damage(dmg);
 	if (rel > 0.39) { FACE_SIDE = -1; }              // attacker to the left
 	else if (rel < -0.39) { FACE_SIDE = 1; }
@@ -752,8 +752,8 @@ function game_tic() -> void {
 	if (DEMO_REC) { demo_note(); }
 	GAME_TIC = GAME_TIC + 1;
 	P_ANG = P_ANG + CMD_TURN;
-	if (P_ANG > TAU) { P_ANG = P_ANG - TAU; }
-	if (P_ANG < 0.0) { P_ANG = P_ANG + TAU; }
+	if (P_ANG > math::TAU) { P_ANG = P_ANG - math::TAU; }
+	if (P_ANG < 0.0) { P_ANG = P_ANG + math::TAU; }
 
 	// P_Thrust: move * 2048/65536 per tic, then friction 0.90625 — ground
 	// only, doom gives no air control and no air friction

@@ -166,6 +166,12 @@ namespace jai {
     // The interpreter implements the visitor pattern to execute the AST
     class interpreter : public ast_visitor, public std::enable_shared_from_this<interpreter> {
     public:
+		checked_result<bool> language_less(const script_value& a_left, const script_value& a_right);
+		checked_result<script_value> array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args);
+		bool native_less_available() const {
+			return !operator_table_ || !operator_table_->entry(detail::op_slot::less);
+		}
+
         using class_lookup_callback = std::function<std::shared_ptr<class_definition>(const std::string&)>;
 
         // Method type for built-in type methods (shared registries, see detail/builtin_methods.hpp)

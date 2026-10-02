@@ -8709,7 +8709,7 @@ op_status vm_backend::exec_c_probe(frame& f, const vm_instruction& ins) {
 	const op_status st = exec_probe_callee(f, f.code->code[cc.probe_ip], &observed);
 	if (st == op_status::failed) [[unlikely]] { cells_flush(f, loop); f.ip = cc.probe_ip; return st; }
 	if (observed && loop.raw_sites) [[unlikely]] { raw_epoch_advance(); }   // a getter ran: no plan outlives it
-	if (observed && !cells_reland(f, loop, cc)) [[unlikely]] { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }   // the callee stays parked: the general form pushes the arguments, the getter never runs twice
+	if (observed && !cells_reland(f, loop, cc, false, false)) [[unlikely]] { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.probe_ip + 1, 4); return {}; }   // the callee stays parked: the general form pushes the arguments, the getter never runs twice
 	++f.ip;
 	return {};
 }
@@ -9020,7 +9020,7 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 // have reached is checked or re-read (a slot argument's kind, since a by-reference parameter boxes the caller's slot; the
 // environment values; the string cells' nodes; the container sites; the numeric-operator and debugger states); false is a
 // miss, and the caller decides where the general form resumes
-bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc, bool raw) {
+bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc, bool raw, bool args_flushed) {
 	cell_state& cs = *f.cells;
 	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return false;
 	if (!raw) for (const chunk::cell_loop::call_arg& a : cc.args) {
@@ -9029,6 +9029,12 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 		if (cl.temp || cl.env_operand != k_invalid_u32) continue;
 		const script_value* s = frame_slot(f, cl.slot);
 		if (!s || s->raw_storage_index() != cs.kind[a.v]) return false;   // the local escaped by reference: the slot is the value from here on
+		// the slot is the value after the call (C_ARGS flushed it): a host T& parameter writes its final value back into it
+		if (!args_flushed) continue;
+		const uint8_t k = cs.kind[a.v];
+		if (k == static_cast<uint8_t>(script_value::TYPEID_INT)) { cs.payload[a.v] = static_cast<int64_t>(s->unchecked_as_int()); }
+		else if (k == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { cs.payload[a.v] = cell_bits_of_float(s->unchecked_as_float()); }
+		else if (k == static_cast<uint8_t>(script_value::TYPEID_BOOL)) { cs.payload[a.v] = s->unchecked_as_bool() ? 1 : 0; }
 	}
 	return cells_reland_effects(f, loop);
 }

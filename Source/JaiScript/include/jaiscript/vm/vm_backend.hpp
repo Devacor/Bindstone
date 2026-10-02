@@ -1975,7 +1975,7 @@ namespace jai::vm {
         op_status cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc);
         // after an effect point inside the block: what user code could have reached is checked or re-read; false = a miss. raw: the call entered a
         // frame program raw (by-value scalar parameters bind nothing of the caller's, so the arguments' slots need no check)
-        bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc, bool raw = false);
+        bool cells_reland(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc, bool raw = false, bool args_flushed = true);   // args_flushed: after the call (C_ARGS wrote the argument slots), not at the probe
         // raw typed frames (docs/typed_regions_design.md "Raw typed frames"): the arguments instruction of a raw call site enters the parked callee's
         // frame program raw when it has one whose parameter kinds are the arguments' kinds (false: the general door runs); a frame program's return
         // lands raw in a raw caller's cell, else boxes through its return pad. Both switch the block loop's frame through raw_switch_

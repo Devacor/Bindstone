@@ -4977,7 +4977,7 @@ bool vm_compiler::fusable_index_expr(const expression* e) {
 			const int depth = index_chain_spine(rb, spine);
 			if (depth > 0 && binary_shape(spine[depth - 1]) != binary_shape_none) return true;
 			if (depth == 1 && quiet_partner(b->left.get()) && index_read_partner_shape(rb)) return true;
-			return quiet_partner(b->left.get()) && binary_lands_fused(rb);
+			return (quiet_partner(b->left.get()) || env_identifier(b->left.get())) && binary_lands_fused(rb);   // an environment container reads first, through the guard's always form
 		}
 	}
 	return false;
@@ -5950,10 +5950,10 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 				emit(opcode::op_index_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), flags);
 				return true;
 			}
-			if (!computed_mc && quiet_partner(expr->left.get()) && binary_lands_fused(rb)) {
+			if (!computed_mc && (quiet_partner(expr->left.get()) || env_identifier(expr->left.get())) && binary_lands_fused(rb)) {
 				// an arithmetic tree as the index: compile_binary emits one fused binary last, rewritten to land in a
-				// fresh temp, and the read is the ident-plus-temp shape (the T_LOAD row); a reference-slot container
-				// is dereferenced ahead of the index (the interpreter's container-before-index order)
+				// fresh temp, and the read is the ident-plus-temp shape (the T_LOAD row); a reference-slot or environment
+				// container's value is taken ahead of the index (the interpreter's container-before-index order)
 				const size_t temp_mark = temp_next_;
 				fused_operand container;
 				const bool snap_container = !private_local(expr->left.get());   // the tree holds a binary (a custom numeric operator is user code): the container's value precedes it

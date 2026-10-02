@@ -4496,6 +4496,51 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(rl.find("-- open loop") != std::string::npos && rl.find("translation at") != std::string::npos, "the refusal is a translation gap: " + rl);
 			check_true(rl.find("effect at") == std::string::npos, "no effect refusal: " + rl);
 		});
+		test("a_global_containers_computed_index_runs_in_the_block", [this]() {
+			// Gator Quest's cave_automaton (`TILES[base + ny * ww + nx]`) and tile_at inlined into bfs_path: an element read of a program-scope
+			// container whose index is an arithmetic tree takes the container guard's always form (the container read before the index, as the
+			// stack form reads it) and the read lands as a typed load, so both loops run as blocks
+			const std::string prelude =
+				"array<int> T = [1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1];\n"
+				"int cave(int b, int w) { int s = 0; for (int y = 0; y < 3; ++y) { for (int x = 0; x < 3; ++x) { if (x < 0 || T[b + y * w + x] == 1) { s = s + 1; } } } return s; }\n"
+				"array<int> OFF = [0, 8];\n"
+				"array<int> WW = [4, 4];\n"
+				"array<int> HH = [2, 2];\n"
+				"int tile_at(int w, int x, int y) { if (x < 0 || y < 0 || x >= WW[w] || y >= HH[w]) { return 9; } return T[OFF[w] + y * WW[w] + x]; }\n"
+				"int bfs() { int s = 0; for (int i = 0; i < 8; ++i) { s = s + tile_at(i % 2, i % 4, i % 3); } return s; }\n";
+			const std::string run = "to_string(cave(1, 4)) + \"|\" + to_string(bfs());";
+			both(prelude + run, "5|22", "a global container's computed index");
+			both(prelude + run, "5|22", "a global container's computed index, proofs off", false);
+			const std::string l = listing_run(prelude + "cave(1, 4); bfs();");
+			for (const char* fn : { "== cave ", "== bfs " }) {
+				const size_t at = l.find(fn);
+				const std::string fl = at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at);
+				check_true(fl.find("-- cell loop") != std::string::npos && fl.find("-- open loop") == std::string::npos, std::string(fn) + "runs its loops as blocks: " + fl);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("5|22"), got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("a_global_container_is_read_before_its_computed_index", [this]() {
+			// C++17 E1[E2]: the container is read before the index; an index that rebinds the global (a call, a user getter) leaves the read on
+			// the array the name held before it, on both backends, whatever the index's shape
+			const std::string prelude =
+				"array<int> T = [10, 11, 12, 13, 14, 15, 16, 17];\n"
+				"array<int> U = [90, 91, 92, 93, 94, 95, 96, 97];\n"
+				"int swaps = 0;\n"
+				"int swap_t() { swaps = swaps + 1; array<int> tmp = T; T = U; U = tmp; return 0; }\n"
+				"int order(int b, int w) { int s = 0; for (int y = 0; y < 3; ++y) { s = s + T[b + y * w + swap_t()]; } return s; }\n"
+				"class G { int n = 0; int _get_off() { n = n + 1; array<int> tmp = T; T = U; U = tmp; return 0; } }\n"
+				"G g;\n"
+				"int by_getter(int b, int w) { int s = 0; for (int y = 0; y < 3; ++y) { s = s + T[b + y * w + g.off]; } return s; }\n";
+			const std::string run = "to_string(order(1, 2)) + \"|\" + to_string(by_getter(1, 2)) + \"|\" + to_string(swaps) + \"|\" + to_string(g.n);";
+			both(prelude + run, "119|199|3|3", "the container before its index");
+			both(prelude + run, "119|199|3|3", "the container before its index, proofs off", false);
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

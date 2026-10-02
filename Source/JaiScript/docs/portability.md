@@ -36,7 +36,7 @@ path-separator assumptions, no Win32 calls, no MSVC pragmas).
   Unknown-compiler behavior: plain `inline`, and an empty type-name signature (degrades
   binder diagnostics, not correctness).
 
-Call-depth caps are engine-owned: interpreter 256 and VM 10000 by default.
+Call-depth caps are engine-owned: interpreter 256 and VM 200000 by default.
 `eng->max_call_depth(jai::backend_type::interpreter, depth)` and the equivalent VM
 setter accept `[1, INT_MAX]` between executions; the one-argument overload reads
 the configured cap. Setters reject an executing engine or active parallel region,

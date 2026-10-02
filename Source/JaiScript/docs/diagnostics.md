@@ -300,7 +300,7 @@ text comes well before the cap of 256; the VM's script calls are in-loop frames 
 on any stack (its native checks guard host reentry and constructor phases). This is a known
 divergence between the backends: deep-recursion tests above the interpreter's reach run on the VM.
 
-Default caps are 256 active calls for the interpreter and 10000 for the VM.
+Default caps are 256 active calls for the interpreter and 200000 for the VM.
 `engine::max_call_depth(backend_type, depth)` sets either cap between executions;
 `engine::max_call_depth(backend_type) const` reads it. Values must be in
 `[1, INT_MAX]`. Each engine owns its settings, and parallel workers snapshot them

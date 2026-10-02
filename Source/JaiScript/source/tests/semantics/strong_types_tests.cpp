@@ -2108,7 +2108,7 @@ public:
             check_both("class Enemy { int hp = 1; } var v = 5; var c = \"\"; try { Enemy& e = v; c = \"bound\"; } catch (x) { c = x; } c", "Cannot initialize 'e' (declared Enemy&) with int", "a class reference over a var holding an int");
             check_both("function f() -> string { var v = 1; var c = \"\"; try { float& r = v; c = \"bound\"; } catch (e) { c = e; } return c; } f()", "Cannot initialize 'r' (declared float&) with int", "a function's local");
             check_both("var a = [1, 2]; var c = \"\"; try { float& r = a[0]; c = \"bound\"; } catch (e) { c = e; } c", "Cannot initialize 'r' (declared float&) with int", "an untyped element");
-            check_both("function f(float& p) { p = 1; } var v = 1; var c = \"\"; try { f(v); c = \"bound\"; } catch (e) { c = e; } c", "Cannot pass int to parameter 'p' of 'f' (declared float)", "a parameter");
+            check_both("function f(float& p) { p = 1; } var v = 1; var c = \"\"; try { f(v); c = \"bound\"; } catch (e) { c = e; } c", "Cannot pass int to parameter 'p' of 'f' (declared float&)", "a parameter");
             check_both("var v = 1; var c = \"\"; try { cast<float&>(v) = 2; c = \"bound\"; } catch (e) { c = e; } c", "Cannot cast 'int' to 'float&'", "a reference cast");
             check_both("var v = 1; int& r = v; r = 2.5; type_of(v) + to_string(v)", "int2", "a matching binding stores by T");
             check_both("class A { int a = 1; } class B : A { int b = 2; } var v = B(); A& r = v; type_of(r)", "B", "a subclass binds a base reference");
@@ -2663,7 +2663,7 @@ public:
             // byte-identical across backends (the write raises a STRING, never a bool)
             const std::string P = "class C { static int s = 0; int q = 1; string viaThis() { string r = \"ok\"; try { this.s = 1; } catch (err) { r = type_of(err) + \":\" + to_string(err); } return r; } string readThis() { string r = \"ok\"; try { int t = this.s; } catch (err) { r = to_string(err); } return r; } } ";
             check_quad_error("class C { static int s = 0; } C.s", "dot read on a class name");
-            check_quad_off("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "string:Cannot assign to member of non-object type 0", "dot store on a class name");
+            check_quad_off("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "string:'C' is a class; use C::s 0", "dot store on a class name");
             check_quad_error("class C { static int s = 0; } C.s += 1", "dot compound on a class name");
             check_quad_error("class C { static int s = 0; } C.s++", "dot ++ on a class name");
             check_quad_off((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "string:Cannot assign to 's': C has no such member 0", "this.s store");

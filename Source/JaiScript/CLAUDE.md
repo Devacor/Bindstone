@@ -207,6 +207,9 @@ engine.execution_budget(1.0/60);   // wall-clock seconds per host entry (execute
                                    // catchable runtime error. 0 = unlimited. DEFAULT: 5.0 seconds.
                                    // Checked at loop back-edges + call entry (clock sampled every
                                    // 1024 ticks — no measurable hot-path cost).
+engine.execution_step_budget(32);  // clock-free twin for harnesses: at most 32 of those 1024-tick checks per host
+                                   // entry, then the same terminal error; 0 (default) = off. Gates that must not
+                                   // depend on load use it (counters, not clocks).
 ```
 Host call failure routes (Dev ruling 2026-10-01): a `checked_result` call (`fn.as_function()(args)`, the method/static dispatchers,
 `coroutine_handle::resume`) reports every failure in its result through `engine::checked_host_entry` (uncaught throw, failed

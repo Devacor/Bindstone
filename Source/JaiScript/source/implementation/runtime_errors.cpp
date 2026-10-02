@@ -15,7 +15,7 @@ std::string runtime_error_category_impl::message(int ev) const {
         case runtime_error_code::invalid_reference:
             return "Invalid reference";
         case runtime_error_code::max_recursion_depth:
-            return "Maximum environment recursion depth exceeded";
+            return "Maximum recursion depth exceeded";
         case runtime_error_code::execution_budget_exceeded:
             return "Script execution budget exceeded";
         case runtime_error_code::memory_cap_exceeded:

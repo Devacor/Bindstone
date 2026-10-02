@@ -991,7 +991,15 @@ bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<
 bool parser::reject_using_name(const token& t, const char* what) {
     if (t.type != token_type::identifier) return false;
     if (!t.using_name.empty()) {
-        report_error("'" + std::string(t.using_name) + "' names " + std::string(t.lexeme) + (t.lexeme.find("::") == std::string_view::npos ? "::..." : "") +
+        // the using name expanded to its qualified spelling's tokens in place: t is the first, the rest follow it
+        std::string qualified(t.lexeme);
+        if (&t == &peek()) {
+            for (size_t k = current_ + 1; k + 1 < stream_->size() && (*stream_)[k].type == token_type::colon_colon &&
+                                          (*stream_)[k + 1].type == token_type::identifier; k += 2) {
+                qualified += "::" + std::string((*stream_)[k + 1].lexeme);
+            }
+        }
+        report_error("'" + std::string(t.using_name) + "' names " + qualified +
                      " by a using declaration; a " + std::string(what) + " cannot be declared with that name", t);
         return true;
     }
@@ -4014,8 +4022,18 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     if (match(token_type::colon)) {
         do {
             JAISCRIPT_TRY_ASSIGN(token base_class_tok, consume(token_type::identifier, "Expected base class name"));
-            // Token lexeme already points to symbolizer storage (identifiers are interned during lexing)
-            base_classes.emplace_back(base_class_tok.lexeme);
+            if (!check(token_type::colon_colon)) {
+                // Token lexeme already points to symbolizer storage (identifiers are interned during lexing)
+                base_classes.emplace_back(base_class_tok.lexeme);
+                continue;
+            }
+            // a qualified base (ns::Base, binary::writer): the class registered under that spelling
+            std::string qualified(base_class_tok.lexeme);
+            while (check(token_type::colon_colon) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
+                advance();
+                qualified += "::" + std::string(advance().lexeme);
+            }
+            base_classes.emplace_back(symbolizer_->intern_with_view(qualified).second);
         } while (match(token_type::comma));
     }
 

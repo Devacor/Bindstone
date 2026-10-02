@@ -1239,7 +1239,7 @@ public:
                 if (parent) walk(*parent);
             }
             const uint8_t cpp_declared = cd.is_cpp_class() ? 1 : 0;
-            for (const auto& [id, value] : cd.field_defaults_) {
+            cd.for_each_own_field_id([&](uint64_t id) {
                 auto it = field_slots_.find(id);
                 if (it == field_slots_.end()) {
                     it = field_slots_.emplace(id, static_cast<uint32_t>(slot_to_field_.size())).first;
@@ -1249,7 +1249,7 @@ public:
                 // A binder .property() placeholder marks its slot; a script declaration
                 // anywhere in the chain (walked base-first) shadows it
                 cpp_property_slots_[it->second] = cpp_declared;
-            }
+            });
         };
         walk(*this);
         has_cpp_property_slots_ = std::find(cpp_property_slots_.begin(), cpp_property_slots_.end(), 1) != cpp_property_slots_.end();
@@ -1762,14 +1762,30 @@ public:
                 }
             }
 
-            for (const auto& [id, default_value] : field_defaults_) {
+            for_each_own_field_id([&](uint64_t id) {
                 std::string prop_name(eng->get_symbolizer()->get_string(id));
                 if (seen.insert(prop_name).second) {
                     properties.push_back(prop_name);
                 }
-            }
+            });
         }
         return properties;
+    }
+
+    // This class's own instance fields in declaration order (field_order_), then any field the order does not list (a
+    // binder .property()) in the table's order: symbol ids follow each engine's interning, so the table's own order differs
+    // between engines and backends
+    template <class F>
+    void for_each_own_field_id(F&& visit) const {
+        size_t listed = 0;
+        for (uint64_t id : field_order_) {
+            if (field_defaults_.count(id)) { visit(id); ++listed; }
+        }
+        if (listed == field_defaults_.size()) { return; }
+        for (const auto& [id, value] : field_defaults_) {
+            (void)value;
+            if (std::find(field_order_.begin(), field_order_.end(), id) == field_order_.end()) { visit(id); }
+        }
     }
 
     bool is_subtype_of(const std::string& base_class_name) const {
@@ -3093,7 +3109,7 @@ inline std::string callee_spelling(std::string_view callee) {
 }
 
 inline std::string slot_description(const slot_site& site, const type_info& target) {
-    const std::string declared = slot_type_spelling(target);
+    const std::string declared = slot_type_spelling(target) + (site.by_reference ? "&" : "");
     switch (site.kind) {
         case slot_kind::parameter: {
             std::string out = "parameter '" + std::string(site.name) + "'";

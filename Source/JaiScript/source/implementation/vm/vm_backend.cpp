@@ -10,6 +10,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #define JAI_COARSE(acc, cnt)
 #endif
 #include <jaiscript/detail/null_member_diagnostic.hpp>
+#include <jaiscript/detail/enum_value.hpp>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/class_definition.hpp>
@@ -540,6 +541,7 @@ bool vm_backend::execution_budget_exhausted() {
 	// be killed by the act of debugging); sync_debug_hook re-arms fresh on session end.
 	const auto now = std::chrono::steady_clock::now();
 	limits_->note_clock_sample(now);
+	if (limits_->step_budget_spent()) [[unlikely]] { limits_->terminal_error = true; return true; }   // the clock-free bound (interpreter twin)
 	if (!budget_active_ || debug_hook_) { return false; }
 	if (now < execution_deadline_) { return false; }
 	// Budget overruns are TERMINAL: no script catch may swallow a timeout
@@ -1084,7 +1086,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 				continue;
 			}
 			auto converted_result = try_convert_for_parameter(args[i], param.type,
-				detail::slot_site{detail::slot_kind::parameter, param.name, function->name});
+				detail::slot_site{detail::slot_kind::parameter, param.name, function->name, param.is_reference});
 			if (!converted_result) {
 				environment_ = prev_env;
 				active_coroutine_ = prev_active;
@@ -3810,7 +3812,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 					{
 						const uint8_t declared_kind = slot_declared_kind(f, ins.b);
 						VM_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_,
-							declared_kind ? f.code->slot_declared_refs[ins.b] : nullptr, declared_kind));
+							declared_kind ? f.code->slot_declared_refs[ins.b] : nullptr, declared_kind, symbolizer_->get_string(sym)));
 					}
 					stack_.push_back(std::move(value));
 					return {};
@@ -3987,7 +3989,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 #ifdef JAISCRIPT_VM_PROFILE
 				profile_store_last_path_ = 5;
 #endif
-				VM_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_));
+				VM_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_, nullptr, 0, symbolizer_->get_string(sym)));
 				stack_.push_back(std::move(value));
 				return {};
 			}
@@ -6639,6 +6641,9 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				if (!result) {
 					return raise_from(result);
 				}
+				if (string_target && !result.value().is_reference() && !is_unwinding_) {   // KEEP BYTE-PARALLEL with the interpreter
+					return raise_(make_error_code(runtime_error_code::invalid_assignment_target), detail::by_value_subscript_store_text);
+				}
 				stack_.push_back(std::move(result.value()));
 				return {};
 			}
@@ -6651,6 +6656,9 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				auto result = func(args);
 				if (!result) {
 					return raise_from(result);
+				}
+				if (string_target && !result.value().is_reference() && !is_unwinding_) {
+					return raise_(make_error_code(runtime_error_code::invalid_assignment_target), detail::by_value_subscript_store_text);
 				}
 				stack_.push_back(std::move(result.value()));
 				return {};
@@ -11552,7 +11560,8 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			value.set_type_info(decl->type);
 			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
 		}
-		return raise_(make_error_code(runtime_error_code::invalid_shared_ptr_conversion), "Cannot initialize shared_ptr with this type");
+		return raise_from(detail::typed_slot_rejection(value, *decl->type,   // KEEP BYTE-PARALLEL with the interpreter
+			detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_));
 	}
 
 	script_value value = make_null();
@@ -12351,6 +12360,10 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	if (!objectValue.is_object()) {
 		if (objectValue.is_null()) {
 			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(member->object.get(), true), member_id, null_member_receiver_symbol(member->object.get()));
+		}
+		if (const std::string_view cls = class_named_by_dot_receiver(member->object.get(), objectValue, engine_); !cls.empty()) {
+			const auto [text, symbol] = class_dot_member_error(*symbolizer_, parallel_worker_, cls, member->member);
+			return raise_(make_error_code(runtime_error_code::member_not_found), text, symbol);
 		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
 			scalar_member_message, base_type_ids_[objectValue.type()], member_id);
@@ -13959,6 +13972,10 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		if (objectValue.is_null()) {
 			return raise_(make_error_code(runtime_error_code::member_access_on_null), null_member_message(expr->object.get(), as_callee), expr->member_id, null_member_receiver_symbol(expr->object.get()));
 		}
+		if (const std::string_view cls = class_named_by_dot_receiver(expr->object.get(), objectValue, engine_); !cls.empty()) {
+			const auto [text, symbol] = class_dot_member_error(*symbolizer_, parallel_worker_, cls, expr->member);
+			return raise_(make_error_code(runtime_error_code::member_not_found), text, symbol);
+		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
 			scalar_member_message, base_type_ids_[objectValue.type()], expr->member_id);
 	}
@@ -14220,6 +14237,14 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 	if (!class_var_result) {
 		if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
 			return raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
+		}
+		if (ident_expr && engine_->is_enum_name(name_id)) {   // KEEP BYTE-PARALLEL with the interpreter
+			if (auto enum_var = environment_->get(name_id); enum_var && enum_var.value().deref().is_map()) {
+				auto value = detail::enum_scoped_value(enum_var.value().deref().as_map(), name_id, expr->member, expr->member_id, engine_);
+				if (!value) { return raise_from(value); }
+				out = std::move(value.value());
+				return {};
+			}
 		}
 		// no namespace and no class of that name: the class is what `C::m` names (docs/diagnostics.md, undefined names)
 		return raise_(make_error_code(runtime_error_code::class_not_found), "Class '{0}' not found", name_id);
@@ -14596,7 +14621,9 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 			if (want_result) { stack_.push_back(assignment_result_used(f) ? std::move(stored) : std::move(value)); }
 			return {};
 		}
-		raise_script_exception("Cannot assign to member of non-object type", member->location);
+		const std::string_view cls = class_named_by_dot_receiver(member->object.get(), dereferenced, engine_);
+		raise_script_exception(cls.empty() ? std::string("Cannot assign to member of non-object type") : class_dot_member_text(cls, member->member),
+		                       member->location);
 		if (want_result) { stack_.push_back(make_null()); }
 		return {};
 	}
@@ -16403,6 +16430,7 @@ op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 	}
 
 	environment_->define(decl->name_id, std::move(enum_map));
+	engine_->note_enum_name(decl->name_id);
 	return {};
 }
 
@@ -16505,6 +16533,8 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				} else {
 					return raise_(make_error_code(runtime_error_code::type_mismatch));
 				}
+			} else if (auto ns_class = detail::namespace_class(*engine_, base_name)) {   // KEEP BYTE-PARALLEL with the interpreter
+				base_class_def = std::move(ns_class);
 			} else {
 				if (class_lookup_) {
 					auto cpp_class_def = class_lookup_(std::string(base_name));
@@ -17281,15 +17311,8 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 					if (parent_script_class) {
 						// fewest defaults used wins
 						const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
-						std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the arity match
-						size_t parent_defaults = SIZE_MAX;
-						if (!parent_ctor) for (const auto& ctor_ast : parent_ctor_asts) {
-							if (arity_accepts(ctor_ast->parameters, init_args.size()) &&
-							    ctor_ast->parameters.size() - init_args.size() < parent_defaults) {
-								parent_ctor = ctor_ast;
-								parent_defaults = ctor_ast->parameters.size() - init_args.size();
-							}
-						}
+						std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the sole arity match
+						if (!parent_ctor) { parent_ctor = sole_arity_candidate(parent_ctor_asts, init_args.size()); }
 						if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
 							parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the interpreter
 						}
@@ -17338,15 +17361,8 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 											if (ancestor_script) {
 												// fewest defaults used wins
 												const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
-												std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the arity match
-												size_t ancestor_defaults = SIZE_MAX;
-												if (!ancestor_ctor) for (const auto& ac : ancestor_ctors) {
-													if (arity_accepts(ac->parameters, ancestor_args.size()) &&
-													    ac->parameters.size() - ancestor_args.size() < ancestor_defaults) {
-														ancestor_ctor = ac;
-														ancestor_defaults = ac->parameters.size() - ancestor_args.size();
-													}
-												}
+												std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the sole arity match
+												if (!ancestor_ctor) { ancestor_ctor = sole_arity_candidate(ancestor_ctors, ancestor_args.size()); }
 												if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
 													ancestor_ctor = ancestor_script->implicit_default_constructor();
 												}
@@ -17425,6 +17441,9 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 							handled_parent_init = true;
 						} else if (parent_ctor_asts.empty() && init_args.empty()) {
 							// Parent only has the default constructor - nothing to do
+						} else if (!parent_ctor_asts.empty()) {   // KEEP BYTE-PARALLEL with the interpreter
+							return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
+								parent_script_class->get_type_id(), init_args.data(), init_args.size(), engine_, true);
 						} else {
 							if (init_args.empty()) { return detail::no_default_constructor(parent_script_class->get_type_id()); }
 							return checked_result<script_value>(make_error_code(runtime_error_code::no_constructor_found),
@@ -17490,18 +17509,11 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 
 			// fewest defaults used wins
 			const auto& all_ctor_asts = class_def->get_constructor_asts();
-			// the delegation target through the one scorer (typed exact > conversion > var), else the arity match
+			// the delegation target through the one scorer (typed exact > conversion > var), else the sole arity match
 			std::vector<std::shared_ptr<function_decl>> other_ctors;
 			for (const auto& ctor_ast : all_ctor_asts) { if (ctor_ast != matching_ctor) { other_ctors.push_back(ctor_ast); } }
 			std::shared_ptr<function_decl> target_ctor = pick_best_overload(other_ctors, init_args);
-			size_t target_defaults = SIZE_MAX;
-			if (!target_ctor) for (const auto& ctor_ast : all_ctor_asts) {
-				if (ctor_ast != matching_ctor && arity_accepts(ctor_ast->parameters, init_args.size()) &&
-				    ctor_ast->parameters.size() - init_args.size() < target_defaults) {
-					target_ctor = ctor_ast;
-					target_defaults = ctor_ast->parameters.size() - init_args.size();
-				}
-			}
+			if (!target_ctor) { target_ctor = sole_arity_candidate(other_ctors, init_args.size()); }
 
 			if (!target_ctor) {
 				return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
@@ -17563,14 +17575,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 		if (arity_accepts(ctor_asts[0]->parameters, args.size())) { matching_ctor = ctor_asts[0]; }
 	} else {
 		matching_ctor = pick_best_overload(ctor_asts, args);
-		if (!matching_ctor) {   // no viable overload: the arity match (fewest defaults) raises its parameter's own text at the binding
-			size_t fewest_defaults = SIZE_MAX;
-			for (const auto& ctor_ast : ctor_asts) {
-				if (arity_accepts(ctor_ast->parameters, args.size()) && ctor_ast->parameters.size() - args.size() < fewest_defaults) {
-					matching_ctor = ctor_ast;
-					fewest_defaults = ctor_ast->parameters.size() - args.size();
-				}
-			}
+		if (!matching_ctor) {   // no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss
+			matching_ctor = sole_arity_candidate(ctor_asts, args.size());
 		}
 	}
 
@@ -18310,8 +18316,8 @@ op_status vm_backend::exec_include(frame& f, const vm_instruction& ins) {
 	std::string resolved_path = std::move(resolve_result.value());
 
 	std::string content;
-	if (!engine_->read_include_file(resolved_path, content)) {
-		return raise_(make_error_code(runtime_error_code::type_mismatch));
+	if (!engine_->read_include_file(resolved_path, content)) {   // KEEP BYTE-PARALLEL with the interpreter
+		return raise_(make_error_code(runtime_error_code::file_not_found), "Failed to open include file: {0}", symbolizer_->intern(resolved_path));
 	}
 
 	// Re-entrant into this backend's execute(); prepare_for_execution preserves any
@@ -22254,7 +22260,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					}
 				}
 				auto converted_result = try_convert_for_parameter(arg_shield, param.type,
-					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name});
+					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, param.is_reference});
 				if (!converted_result) {
 					return raise_from(converted_result);
 				}
@@ -22294,7 +22300,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		const script_value* bound = frame_slot(callee, param.slot_index);
 		if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
 			return raise_from(detail::typed_slot_rejection(bound->deref(), *param.type,
-				detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name}, engine_));
+				detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, param.is_reference}, engine_));
 		}
 		if ((param.ref_escaping || param.declared_ref_escapes) && bound) [[unlikely]] {   // its reference reaches a binding that cannot see the name
 			detail::ref_declare(*const_cast<script_value*>(bound), const_cast<type_info*>(detail::parameter_declared_ref(param)), engine_);

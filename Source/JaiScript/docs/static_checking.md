@@ -228,8 +228,12 @@ registry dispatches (`detail/builtin_methods.hpp`, the one list both backends us
 registry name when one is within two edits (`no member 'pusj' on 'array<int>' (did you mean
 'push'?)`); the runtime raises family B's `array has no member 'insert'`. A map whose values may be
 callable answers other names through its keys (`m.f(x)` calls the value at "f") and stays lenient,
-as do `var` receivers and element reads. The builtin methods' arguments and results, subscripts,
-enum values (existence IS checked: `Direction.zzz` errors), namespaces: lenient. The handle builtins every object answers
+as do `var` receivers and element reads. A builtin method of a declared array, map, string or
+utf8_string read without a call is the runtime's text (`var f = a.push;`: `'push' is a method of array;
+call it with a.push() or wrap the call in a lambda`; a builtin name wins over a map key at run time, so
+any declared map is certain). A dot on a class name is the runtime's text too: `C.s` is `'C' is a class;
+use C::s`. The builtin methods' arguments and results, subscripts,
+enum values (existence IS checked: `Direction.zzz` and `Direction::zzz` error), namespaces: lenient. The handle builtins every object answers
 (`use_count`/`cpp_ref_count` → int, `unique`/`same_as` → bool, `reset`) are lenient on any
 object receiver; a class method of the same name wins first.
 
@@ -289,7 +293,9 @@ that escapes whole into a container or a by-value parameter loses the marker.
 (`cannot assign 'string' to a cast<int&> target declared 'int'`); a call returning `T&`, a conditional of lvalues and an
 assignment in target position check against the referent's type (`... to the reference declared 'int'`). A target that
 names no storage is an error with the runtime's text, lowercased (`cannot assign to a literal`, `cannot assign to a call
-result: 'f' returns by value` for a call the checker resolves to by-value functions or a constructor). The operand
+result: 'f' returns by value` for a call the checker resolves to by-value functions or a constructor, `cannot assign to a call
+result: 'operator[]' returns by value` for a subscript store on a class whose `operator[]`, every override included, returns by
+value). The operand
 is the explicit typed boundary and is never checked against `T` — the verdict is the runtime's
 (`Cannot cast 'X' to 'T'`, catchable). A `T` that names no class is an error
 (`unknown type in cast`). A value-form class cast whose operand is statically a `shared_ptr<T>`

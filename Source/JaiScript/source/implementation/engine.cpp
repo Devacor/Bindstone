@@ -714,6 +714,7 @@ struct engine::implementation {
 
     // Script namespace registry (engine-owned so namespaces survive across backends)
     std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>> script_namespaces_;
+    std::unordered_set<uint64_t> enum_names_;
 
     // Include/Import support
     std::vector<std::string> include_paths;
@@ -3416,6 +3417,14 @@ std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::sc
     return impl->script_namespaces_;
 }
 
+void engine::note_enum_name(uint64_t name_id) {
+    impl->enum_names_.insert(name_id);
+}
+
+bool engine::is_enum_name(uint64_t name_id) const {
+    return impl->enum_names_.count(name_id) != 0;
+}
+
 void engine::setHasCustomNumericOps(bool value) {
     // Set the flag on the backend (which might be interpreter or VM)
     impl->custom_numeric_ops_flag_ = value;
@@ -3928,6 +3937,14 @@ void engine::execution_budget(double seconds) {
         impl->backend->set_execution_budget(budget);
     }
     // Not yet constructed: wire_backend applies the stored value at first use
+}
+
+void engine::execution_step_budget(uint64_t checks) {
+    execution_limits().step_budget = checks;
+}
+
+uint64_t engine::execution_step_budget() const {
+    return const_cast<engine*>(this)->execution_limits().step_budget;
 }
 
 double engine::execution_budget() const {
@@ -4840,7 +4857,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         } else {
             const std::string last = memo != I.resolution_memo_.end() ? memo->second.resolved : std::string();
             ++I.import_stats_;
-            auto resolved = resolve_include_path(path, this, from);
+            auto resolved = resolve_include_path(path, this, from, true);
             if (!resolved) {
                 m.resolved = lost_module(key, last);
                 if (m.resolved.empty()) { return resolved.error_value(); }
@@ -4858,7 +4875,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         if (m.stamped || !m.remembered) { return {}; }
         m.remembered = false;
         ++I.import_stats_;
-        auto resolved = resolve_include_path(*m.path, this, from);
+        auto resolved = resolve_include_path(*m.path, this, from, true);
         if (!resolved) { return resolved.error_value(); }
         m.resolved = std::move(resolved.value());
         m.stamped = implementation::stat_mtime_size(m.resolved, m.mtime, m.size);

@@ -186,7 +186,8 @@ declaration = classDeclaration
 // Class declarations
 classDeclaration = "class" IDENTIFIER (":" classBaseList)? "{" classMember* "}" ";"?
 
-classBaseList = IDENTIFIER ("," IDENTIFIER)*   // Multiple inheritance
+classBaseList = qualifiedName ("," qualifiedName)*   // Multiple inheritance; a base may be qualified (ns::Base, binary::writer)
+qualifiedName = IDENTIFIER ("::" IDENTIFIER)*
 
 classMember = accessLabel
             | constructorDeclaration

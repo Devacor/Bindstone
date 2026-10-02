@@ -19,6 +19,7 @@ namespace jai::detail {
         slot_kind kind = slot_kind::assignment;
         std::string_view name;    // parameter / variable / field; empty = unknown
         std::string_view owner;   // callee / class; empty = unknown
+        bool by_reference = false;   // a T& slot: the description spells the declared type T&
     };
 
 } // namespace jai::detail

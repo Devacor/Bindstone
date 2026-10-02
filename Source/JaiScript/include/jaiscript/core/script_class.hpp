@@ -142,13 +142,11 @@ public:
     // C++ implicit construction: a base chain that runs code (a declared constructor or a C++ class above) must be
     // constructed by a class that declares no constructor of its own
     bool base_needs_construction() const {
-        for (const auto& parent : get_parent_classes()) {
-            if (!parent) { continue; }
-            if (!parent->is_script_class()) { return true; }
-            const auto& script_parent = static_cast<const script_class_definition&>(*parent);
-            if (!script_parent.get_constructor_asts().empty() || script_parent.base_needs_construction()) { return true; }
-        }
-        return find_cpp_base_class() != nullptr;
+        auto parent = get_parent();   // the base super() reaches
+        if (!parent) { return false; }
+        if (!parent->is_script_class()) { return true; }
+        const auto& script_parent = static_cast<const script_class_definition&>(*parent);
+        return !script_parent.get_constructor_asts().empty() || script_parent.base_needs_construction();
     }
 
     // A constructor's initializer list as it runs: one naming none over a base that needs construction is `: super()`

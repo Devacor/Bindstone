@@ -2725,21 +2725,16 @@ private:
             }
             return c->decl->name;
         }
-        for (auto base : c->decl->base_classes) {
-            if (auto missing = base_without_default(base, depth + 1); !missing.empty()) { return missing; }
-        }
-        return {};
+        if (c->decl->base_classes.empty()) { return {}; }
+        return base_without_default(c->decl->base_classes.front(), depth + 1);   // the base super() reaches
     }
 
     // cls default-constructs its bases (an empty super(), or the implicit default constructor)
     void report_base_without_default(std::string_view cls, const source_location& loc) {
         const sclass* c = find_sclass(cls);
-        if (!c || !c->decl) { return; }
-        for (auto base : c->decl->base_classes) {
-            if (auto missing = base_without_default(base); !missing.empty()) {
-                diag(diag_level::error, loc, "Base '" + std::string(missing) + "' has no default constructor; call super(...)");
-                return;
-            }
+        if (!c || !c->decl || c->decl->base_classes.empty()) { return; }
+        if (auto missing = base_without_default(c->decl->base_classes.front()); !missing.empty()) {
+            diag(diag_level::error, loc, "Base '" + std::string(missing) + "' has no default constructor; call super(...)");
         }
     }
 

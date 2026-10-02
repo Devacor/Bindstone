@@ -13698,7 +13698,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                 // Ancestor is a C++ class - call its constructor NOW
                                                 auto cpp_name = ancestor->get_name();
                                                 auto cpp_ctor_result = environment_->get(cpp_name);
-                                                if ((!cpp_ctor_result || !cpp_ctor_result.value().is_function()) && ancestor_args.empty()) {
+                                                if (ancestor_args.empty() && (!cpp_ctor_result || !cpp_ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, std::string(cpp_name)))) {
                                                     return detail::no_default_constructor(ancestor->get_type_id());
                                                 }
                                                 if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
@@ -13791,7 +13791,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                             // Get the C++ class constructor function
                             auto parent_name = parent_class->get_name();
                             auto ctor_result = environment_->get(parent_name);
-                            if ((!ctor_result || !ctor_result.value().is_function()) && init_args.empty()) {
+                            if (init_args.empty() && (!ctor_result || !ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, std::string(parent_name)))) {
                                 return detail::no_default_constructor(parent_class->get_type_id());
                             }
                             if (ctor_result && ctor_result.value().is_function()) {

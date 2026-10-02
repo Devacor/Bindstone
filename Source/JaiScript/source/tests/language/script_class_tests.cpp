@@ -612,10 +612,7 @@ public:
 
                 class C : A, B {
                     int z = 0;
-                    C(int a, int b, int c) {
-                        // Note: In current implementation, parent constructors
-                        // are not automatically called. Fields get default values.
-                        this.x = a;
+                    C(int a, int b, int c) : super(a) {
                         this.y = b;
                         this.z = c;
                     }

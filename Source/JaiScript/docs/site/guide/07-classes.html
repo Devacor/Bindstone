@@ -153,6 +153,12 @@ class Tiger : Cat { auto speak() { return "ROAR"; } }   // no override
 Tiger().speak();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Method &#x27;speak&#x27; shadows base class method. Use &#x27;override&#x27; keyword if this is intentional</code></pre></div>
 <p>Assigning a derived instance to a base-typed variable is allowed; the reverse (parent to child), siblings, and structurally-identical unrelated classes are rejected.</p>
+<p><strong>The base is constructed first, as in C++.</strong> A constructor that names no <code>: super(...)</code>, and a class that declares no constructor at all, default-construct the base: its default constructor runs (a C++ base class is created) before the derived class&#x27;s field initializers and body, so they can read the base&#x27;s state. A base whose constructors all need arguments has no default constructor, and constructing the derived class raises <code>Base &#x27;Cat&#x27; has no default constructor; call super(...)</code> (the strict checker reports it at load when it sees both classes).</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Engine { int rpm = 0; Engine() { rpm = 800; } }
+class Car : Engine { int idle = this.rpm; }      // no constructor: Engine() still runs first
+class Truck : Engine { int load = 0; Truck() { load = rpm * 2; } }
+Car().idle + Truck().load;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 2400</code></pre></div>
 <h2 id="a-subtype-member-through-a-base-typed-receiver">A subtype member through a base-typed receiver<a class="hlink" href="#a-subtype-member-through-a-base-typed-receiver" aria-label="link">&#8203;</a></h2>
 <p>Once a variable is declared <code>Cat</code>, the checker holds you to <code>Cat</code>&#x27;s members, exactly like C++. The object inside may well be a <code>Tiger</code>, but reaching for a member only <code>Tiger</code> declares is a load error:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat { int a = 0; }

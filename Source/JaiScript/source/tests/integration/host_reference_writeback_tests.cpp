@@ -180,6 +180,7 @@ public:
 			expect("int g = 1; string seen = \"\"; function peek() { seen = to_string(g); } around(g, peek); seen + \"|\" + to_string(g)", "1|6", "a global a callback reads by name");
 			expect("class Box { int v = 1; } var b = Box(); string seen = \"\"; around(b.v, [&]() { seen = to_string(b.v); }); seen + \"|\" + to_string(b.v)", "1|6", "a field");
 			expect("function f() -> int { int v = 1; for (int i = 0; i < 3; i++) { add_i64(v, i); } return v; } to_string(f())", "4", "a loop local stays a plain slot");
+			expect("function f() -> int { int v = 1; for (int i = 0; i < 3; i++) { v = v + 1; add_i64(v, i); } return v; } to_string(f())", "7", "a loop local the block writes takes the host's value after the call");
 		});
 
 		test("builtin_callbacks_take_the_elements_as_lvalues", [expect]() {

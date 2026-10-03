@@ -391,17 +391,27 @@ namespace jai::fuzz {
 		return std::regex_replace(text, pattern, "$1");
 	}
 
+	// A longer name moves every column after it: a location keeps its line and drops its column
+	// (and a value's stream hash, taken over the names as the renamed program spelled them, string keys included)
+	inline std::string without_columns(const std::string& text) {
+		static const std::regex pattern(R"(:([0-9]+):([0-9]+))");
+		static const std::regex hash(R"( #[0-9a-f]{16})");
+		return std::regex_replace(std::regex_replace(text, pattern, ":$1:c"), hash, "");
+	}
+
 	// "" when the renamed run's outcome, names restored, is the original's
 	inline std::string rename_difference(const run_outcome& original, const run_outcome& renamed_run) {
 		std::string diff;
 		for (size_t i = 0; i < original.segment_results.size() && i < renamed_run.segment_results.size(); ++i) {
-			const std::string back = unrenamed(renamed_run.segment_results[i]);
-			if (original.segment_results[i] != back) {
-				diff += "  segment " + std::to_string(i) + " result:\n    original: " + original.segment_results[i] + "\n    renamed:  " + back + "\n";
+			const std::string back = without_columns(unrenamed(renamed_run.segment_results[i]));
+			const std::string mine = without_columns(original.segment_results[i]);
+			if (mine != back) {
+				diff += "  segment " + std::to_string(i) + " result:\n    original: " + mine + "\n    renamed:  " + back + "\n";
 			}
 		}
-		const std::string printed = unrenamed(renamed_run.printed);
-		if (original.printed != printed) { diff += "  printed output differs " + first_difference(original.printed, printed) + "\n"; }
+		const std::string printed = without_columns(unrenamed(renamed_run.printed));
+		const std::string mine_printed = without_columns(original.printed);
+		if (mine_printed != printed) { diff += "  printed output differs " + first_difference(mine_printed, printed) + "\n"; }
 		if (original.alive != renamed_run.alive) { diff += "  engine-alive-after differs\n"; }
 		return diff;
 	}

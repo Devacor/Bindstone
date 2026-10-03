@@ -117,6 +117,15 @@ measurably cheaper than spelling out the read-modify-write.</li>
 <li><strong>Define classes once.</strong> Executing a <code>class</code> declaration does
 redefinition/hot-reload bookkeeping; keep class definitions out of per-frame scripts and re-run
 only the code that ticks.</li>
+<li><strong>Choose the VM.</strong> An engine you make runs the tree-walking interpreter until you call
+<code>eng-&gt;set_backend(jai::backend_type::vm)</code>, before its first execute (<a href="03-backends.html">Backends</a>).
+The standalone runner uses the VM already. Measure Release builds: a Debug build of the engine is many times slower.</li>
+<li><strong>Walk containers by reference.</strong> <code>for (auto u : units)</code> copies each element, as in C++, and a
+write to <code>u</code> changes the copy; <code>for (auto&amp; u : units)</code> visits the elements themselves and copies nothing.</li>
+<li><strong>Copies are real, but read-only ones are free.</strong> <code>Unit u = units[i];</code> is a copy. When nothing after
+it writes <code>u</code>, uses it whole or can change <code>units[i]</code>, the engine binds the element itself instead, and a
+by-value parameter the callee only reads binds the same way. Nothing can observe the difference, so write the copy
+when you mean a copy and <code>auto&amp;</code> when you mean the element, and treat the saving as a bonus rather than a rule.</li>
 </ul>
 <h2 id="the-cost-model">The cost model<a class="hlink" href="#the-cost-model" aria-label="link">&#8203;</a></h2>
 <p>The intuition, cheapest to dearest (every rung quantified in the

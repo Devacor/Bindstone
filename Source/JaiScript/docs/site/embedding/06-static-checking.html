@@ -140,7 +140,7 @@ parameters, returns, instance and static field stores, and the container element
 <tr><td><code>bool</code></td><td>anything</td><td>truthy conversion</td></tr>
 <tr><td><code>string</code></td><td>anything</td><td><code>to_string</code> conversion; objects use their own <code>to_string()</code> when they define one</td></tr>
 <tr><td><code>char</code></td><td>char, an object with <code>to_char()</code></td><td><code>char c = 65</code> is an error at load and at run time; <code>cast&lt;char&gt;(65)</code> is the spelling</td></tr>
-<tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>element and key types are not checked statically; the runtime element boundary runs on every path (<code>Cannot store string in array&lt;int&gt;</code>)</td></tr>
+<tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>the checker rejects a literal element, a <code>push</code> or an element store it can see (<code>cannot push into 'array&lt;int&gt;': expected 'int', got 'string'</code>); map keys, <code>var</code>-sourced values and untyped containers meet the runtime element boundary, which runs on every path (<code>Cannot store string in array&lt;int&gt;</code>)</td></tr>
 <tr><td>object <code>C</code></td><td>null (a typed null); the same class; derived to base; a <code>shared_ptr&lt;C or derived&gt;</code> handle; a converting constructor <code>C(src)</code> through exactly one one-parameter constructor that takes <code>src</code> directly; on plain assignment, a user <code>operator=</code> of <code>C</code> (or an in-script base) that accepts <code>src</code></td><td>an unrelated class with no viable one-argument constructor or <code>operator=</code> = error; array/map/function into an object = error; a registered ancestor's <code>operator=</code> is lenient</td></tr>
 <tr><td><code>shared_ptr&lt;C&gt;</code> / <code>weak_ptr&lt;C&gt;</code></td><td>null, a handle or an instance of <code>C</code> or a subclass</td><td><code>null</code> stores a typed null on every path; an unrelated class or a primitive is an error</td></tr>
 <tr><td><code>function</code></td><td>a callable or null</td><td>a number, string or container is an error</td></tr>
@@ -263,8 +263,7 @@ x; r = "s"</code> raises like <code>x = "s"</code>); the checker leaves those st
 <h3 id="members">Members<a class="hlink" href="#members" aria-label="link">&#8203;</a></h3>
 <p>On a receiver whose class is fully known (an in-script hierarchy the checker can resolve, or an
 engine-registered class with its properties and statics), an unknown field or method is an error, on
-reads and on writes (the runtime tolerates dynamic field creation on a write; the declaration says what you
-meant). A member that only a <em>subtype</em> declares is an error on a receiver whose static class is certain,
+reads and on writes (the runtime raises the same mistake at the store, <code>Cannot assign to 'x': A has no such member</code>). A member that only a <em>subtype</em> declares is an error on a receiver whose static class is certain,
 exactly as in C++:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; subtype_member.jai</span><pre><code class="lang-jai">class Unit { int hp = 10; }
 class Archer : Unit { int arrows = 20; }
@@ -303,7 +302,7 @@ field's declared type.</li>
 <li><strong>Enum values</strong> are checked for existence: <code>Direction.zzz</code> is <code>no value 'zzz'
 in enum 'Direction'</code>.</li>
 <li><strong>Lenient by design:</strong> builtin container/string/map methods, subscripts, namespaces at every
-depth, and the handle builtins every object answers (<code>use_count</code>, <code>cpp_ref_count</code>,
+depth, and the handle builtins a <code>shared_ptr</code> answers (<code>use_count</code>, <code>cpp_ref_count</code>,
 <code>unique</code>, <code>same_as</code>, <code>reset</code>). A class method of the same name wins
 first. Any ancestor the checker cannot resolve opens the whole class: silence.</li>
 </ul>
@@ -485,7 +484,7 @@ mistake in any of these spots is a run-time error, never a load error:</p>
 <div class="tablewrap"><table><thead><tr><th>lenient by design</th><th>why</th></tr></thead><tbody>
 <tr><td><code>var</code> anywhere, and everything computed from it; <code>auto</code> without an initializer; a <code>null</code> initializer</td><td>no declared type to check against; <code>auto</code> locks at a store the checker cannot order</td></tr>
 <tr><td>stores <em>through</em> a reference (<code>T&amp;</code> declarations, <code>auto&amp;</code> loop variables, by-reference parameters)</td><td>the referenced variable&#x27;s table runs at run time; binding the reference and member lookup through it are still checked</td></tr>
-<tr><td>container elements: <code>array&lt;T&gt;</code>/<code>map&lt;K,V&gt;</code> element and key types, subscripts, builtin container/string methods</td><td>the runtime element boundary is the check</td></tr>
+<tr><td>container elements the checker cannot type: map keys, elements of untyped containers and <code>var</code> receivers, subscripts, builtin container/string method results (literal elements, pushes and element stores into a declared <code>array&lt;T&gt;</code> or <code>map&lt;K,V&gt;</code> are checked)</td><td>the runtime element boundary is the check</td></tr>
 <tr><td>engine globals (typed off the value tag; a later retag is invisible), host-object conversions, callables held in variables, host functions beyond arity and primitive certainties, binder (C++) methods reached through a script chain, binder properties</td><td>no static signature in view</td></tr>
 <tr><td>dynamic-path <code>import(expr)</code>/<code>include(expr)</code> units (undeclared identifiers drop to warnings), untyped <code>extern</code> names, a parent found nowhere, namespaces at every depth</td><td>such a unit or name can define anything</td></tr>
 <tr><td>accessor-bearing members whose declaration is ambiguous (two getter/setter overloads, <code>var</code>/<code>auto</code>/coroutine/parameterized getters, reference or untyped setter parameters, an accessor on a registered-only ancestor)</td><td>no single declaration to trust</td></tr>

@@ -71,6 +71,7 @@ add_executable(my_game main.cpp)
 target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
 set_property(TARGET my_game PROPERTY MSVC_RUNTIME_LIBRARY &quot;${JaiScript_MSVC_RUNTIME_LIBRARY}&quot;)</code></pre></div>
 <p>The last line matters on MSVC. A standalone JaiScript build uses the static runtime (<code>/MT</code>, <code>/MTd</code>) unless you pass <code>CMAKE_MSVC_RUNTIME_LIBRARY</code>, while a CMake project defaults to the DLL runtime; the package records the runtime its library was built with in <code>JaiScript_MSVC_RUNTIME_LIBRARY</code>, and without the line the link fails with <code>LNK2038: mismatch detected for 'RuntimeLibrary'</code>.</p>
+<p>Building without CMake, compile your files with the definitions the library was built with: its runtime (<code>/MT</code> for a standalone build), <code>NDEBUG</code> for a Release library, and <code>JAISCRIPT_ENABLE_DEBUGGER</code> unless it was configured off. The target passes them for you; a mismatch changes class layouts between your code and the library and fails at run time, typically as an assertion in <code>strong_ptr.hpp</code>.</p>
 <p><strong>The runner, for trying scripts.</strong> A standalone build of JaiScript builds the command-line runner as the target <code>jaiscript_runner</code>; its binary is <code>jaiscript</code>:</p>
 <div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cmake -S JaiScript -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target jaiscript_runner

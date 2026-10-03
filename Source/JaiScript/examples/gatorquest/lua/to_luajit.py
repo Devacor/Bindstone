@@ -49,8 +49,8 @@ def tokenize(src):
 	return toks
 
 class Parser:
-	def __init__(self, toks):
-		self.t, self.i, self.nodes = toks, 0, []
+	def __init__(self, toks, ops=REWRITE):
+		self.t, self.i, self.nodes, self.ops = toks, 0, [], ops
 
 	def peek(self, k=0): return self.t[self.i + k]
 	def is_(self, text): return self.t[self.i][1] == text and self.t[self.i][0] in ('op', 'kw')
@@ -167,7 +167,7 @@ class Parser:
 			self.take()
 			rstart = self.i
 			self.expr(BINARY[op][1])
-			if op in REWRITE:
+			if op in self.ops:
 				self.nodes.append((op, start, self.i, (start, lend), (rstart, self.i)))
 
 	def simpleexp(self):
@@ -221,9 +221,11 @@ class Parser:
 				self.take()
 		self.take('}')
 
-def translate(src):
+def translate(src, rewrite=REWRITE, bnot='jbnot'):
+	"""rewrite maps a binary operator to the function that replaces it ('//' -> 'jfloor' is a division);
+	an operator it leaves out stays as written"""
 	toks = tokenize(src)
-	p = Parser(toks)
+	p = Parser(toks, rewrite)
 	p.block()
 	if p.peek()[0] != 'eof':
 		raise SyntaxError('trailing tokens at %d' % p.i)
@@ -242,14 +244,14 @@ def translate(src):
 				lead = toks[k][2]
 				if best[0] == 'bnot':
 					inner = emit(best[3][0], best[3][1], True)
-					text = 'jbnot(%s)' % inner
+					text = '%s(%s)' % (bnot, inner)
 				else:
 					left = emit(best[3][0], best[3][1], True)
 					right = emit(best[4][0], best[4][1], True)
-					if best[0] == '//':
+					if rewrite[best[0]] == 'jfloor':
 						text = 'jfloor((%s) / (%s))' % (left, right)
 					else:
-						text = '%s(%s, %s)' % (REWRITE[best[0]], left, right)
+						text = '%s(%s, %s)' % (rewrite[best[0]], left, right)
 				out.append(('' if (drop_lead and k == i) else lead) + text)
 				k = best[2]
 			else:

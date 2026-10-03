@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Time the Gator Quest smoke simulation: JaiScript (VM, optionally the interpreter) against the Lua port
-(Lua 5.4 / 5.5 and LuaJIT JIT / interpreter), serial, one process per sample, pinned to one P core,
-interleaved rounds, every timed run hash-checked. The measured interval is each side's own tick loop
-("ran N ticks in X ms": after world generation, player creation included, until the last tick).
+(Lua 5.4 / 5.5, LuaJIT JIT / interpreter, Luau interpreter at -O1 and -O2 and native code at -O2), serial,
+one process per sample, pinned to one P core, interleaved rounds, every timed run hash-checked. Each sample
+records the in-script tick loop ("ran N ticks in X ms": after world generation, player creation included,
+until the last tick) and the process CPU time. --cpu-baseline adds a 0-tick run of every configuration and
+bot count to each round; the summary then also reports (CPU seconds - median 0-tick CPU seconds) / ticks,
+which removes startup, loading and world generation and holds up under load where wall time does not.
 
   python run_comparison.py --jai jaiscript.exe --lua54 lua54.exe --lua55 lua55.exe --luajit luajit.exe
-      --output DIR [--rounds 5] [--max-background-cores 1.5] [--desktop-load] [--interp]
+      --luau luau.exe --output DIR [--rounds 5] [--max-background-cores 1.5] [--desktop-load] [--interp]
+      [--cpu-baseline]
 
 Screening reuses the 09-29 runner's machine (examples/gloom/ports/run_comparison.py): wait for a window
 below the background ceiling with no competing build/test process, reject and rerun a sample whose
@@ -35,6 +39,8 @@ def main():
 	p.add_argument("--lua54")
 	p.add_argument("--lua55")
 	p.add_argument("--luajit")
+	p.add_argument("--luau", help="a luau CLI: runs luau/gatorquest.luau interpreted (-O1, -O2) and native (-O2 --codegen)")
+	p.add_argument("--cpu-baseline", action="store_true", help="also time 0-tick runs and report CPU ms/tick net of them")
 	p.add_argument("--interp", action="store_true", help="also time the JaiScript interpreter (reference only)")
 	p.add_argument("--interp-rounds", type=int, default=2)
 	p.add_argument("--output", required=True)
@@ -47,6 +53,8 @@ def main():
 	p.add_argument("--quiet-timeout", type=float, default=7200.0, help="seconds to wait for a quiet window before each sample")
 	a = p.parse_args()
 	workloads = [tuple(int(v) for v in w.split("x")) for w in a.workloads.split(",")]
+	if a.cpu_baseline:
+		workloads += [(0, b) for b in sorted({b for t, b in workloads if t > 0}) if (0, b) not in workloads]
 	out = pathlib.Path(a.output).resolve()
 	out.mkdir(parents=True, exist_ok=True)
 	if (out / "runs.json").exists():
@@ -61,10 +69,15 @@ def main():
 		j = str(pathlib.Path(a.luajit).resolve())
 		configs.append({"key": "luajit-jit", "runtime": "LuaJIT 2.1 JIT", "cmd": [j, str(HERE / "luajit" / "gatorquest.lua"), "smoke"], "extra": []})
 		configs.append({"key": "luajit-joff", "runtime": "LuaJIT 2.1 interpreter (-joff)", "cmd": [j, "-joff", str(HERE / "luajit" / "gatorquest.lua"), "smoke"], "extra": []})
+	if a.luau:
+		u, bundle = str(pathlib.Path(a.luau).resolve()), str(HERE / "luau" / "gatorquest.luau")
+		configs.append({"key": "luau-O1", "runtime": "Luau interpreter (-O1)", "cmd": [u, bundle, "-a", "smoke"], "extra": []})
+		configs.append({"key": "luau-O2", "runtime": "Luau interpreter (-O2)", "cmd": [u, "-O2", bundle, "-a", "smoke"], "extra": []})
+		configs.append({"key": "luau-codegen", "runtime": "Luau native (-O2 --codegen)", "cmd": [u, "-O2", "--codegen", bundle, "-a", "smoke"], "extra": []})
 	interp = {"key": "jai-interp", "runtime": "JaiScript interpreter (reference)", "cmd": [str(jai), "--no-debug", "--no-pause", "--backend=interp", "scripts/gatorquest.jai", "--", "smoke"], "extra": ["noroundtrip"]}
 	machine = COMMON.WindowsMachine()
 	binaries = {c["cmd"][0]: COMMON.file_hash(pathlib.Path(c["cmd"][0])) for c in configs}
-	inputs = {str(f): COMMON.file_hash(f) for f in list(GAME.glob("scripts/*.jai")) + list(HERE.glob("*.lua")) + list(HERE.glob("luajit/*.lua"))}
+	inputs = {str(f): COMMON.file_hash(f) for f in list(GAME.glob("scripts/*.jai")) + list(HERE.glob("*.lua")) + list(HERE.glob("luajit/*.lua")) + list(HERE.glob("luau/*.lua*"))}
 	meta = {"created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rounds": a.rounds, "seed": a.seed,
 		"workloads": workloads, "max_background_cores": a.max_background_cores, "desktop_load": a.desktop_load,
 		"performance_cpus": machine.performance_cpus, "configs": configs + ([interp] if a.interp else []),
@@ -158,24 +171,34 @@ def main():
 		if COMMON.file_hash(pathlib.Path(path)) != digest:
 			raise RuntimeError("Measured input changed: " + path)
 	summary = []
+	def accepted(key, ticks, bots):
+		return [x for x in records if x["configuration"] == key and x["ticks"] == ticks and x["bots"] == bots and x["accepted"]]
 	for config in configs + ([interp] if a.interp else []):
 		for ticks, bots in workloads:
-			rows = [x for x in records if x["configuration"] == config["key"] and x["ticks"] == ticks and x["bots"] == bots and x["accepted"]]
-			if not rows:
+			rows = accepted(config["key"], ticks, bots)
+			if not rows or ticks == 0:
 				continue
 			v = [x["ms_per_tick"] for x in rows]
 			bg = [x["background_core_equivalents"] for x in rows]
-			summary.append({"configuration": config["key"], "runtime": config["runtime"], "ticks": ticks, "bots": bots,
+			s = {"configuration": config["key"], "runtime": config["runtime"], "ticks": ticks, "bots": bots,
 				"samples": len(v), "median_ms_per_tick": statistics.median(v), "range_ms_per_tick": [min(v), max(v)],
 				"median_gen_ms": statistics.median([x["gen_ms"] for x in rows]),
 				"median_wall_s": statistics.median([x["wall_seconds"] for x in rows]),
-				"background_cores": [min(bg), statistics.median(bg), max(bg)]})
+				"background_cores": [min(bg), statistics.median(bg), max(bg)]}
+			base = accepted(config["key"], 0, bots)
+			if base:
+				b0 = statistics.median([x["cpu_seconds"] for x in base])
+				c = [(x["cpu_seconds"] - b0) * 1000 / ticks for x in rows]
+				s.update(baseline_cpu_s=b0, median_cpu_ms_per_tick=statistics.median(c), range_cpu_ms_per_tick=[min(c), max(c)])
+			summary.append(s)
 	meta.update(complete=True, accepted=sum(x["accepted"] for x in records), rejected=sum(not x["accepted"] for x in records))
 	COMMON.save(out / "metadata.json", meta)
 	COMMON.save(out / "summary.json", summary)
 	for s in summary:
+		cpu = (f" cpu {s['median_cpu_ms_per_tick']:.3f} [{s['range_cpu_ms_per_tick'][0]:.3f} - {s['range_cpu_ms_per_tick'][1]:.3f}]"
+			if "median_cpu_ms_per_tick" in s else "")
 		print(f"{s['runtime']:34s} t{s['ticks']} b{s['bots']}: {s['median_ms_per_tick']:.4f} ms/tick "
-			f"[{s['range_ms_per_tick'][0]:.4f} - {s['range_ms_per_tick'][1]:.4f}] n={s['samples']} gen {s['median_gen_ms']} ms "
+			f"[{s['range_ms_per_tick'][0]:.4f} - {s['range_ms_per_tick'][1]:.4f}]{cpu} n={s['samples']} gen {s['median_gen_ms']} ms "
 			f"bg {s['background_cores'][0]:.2f}/{s['background_cores'][1]:.2f}/{s['background_cores'][2]:.2f}")
 
 if __name__ == "__main__":

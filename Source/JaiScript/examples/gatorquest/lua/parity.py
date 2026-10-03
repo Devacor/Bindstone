@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Run the JaiScript smoke and the Lua port over a seed/ticks/bots matrix and compare their output.
 
-  python parity.py --jai PATH/jaiscript.exe --lua PATH/lua.exe [--lua PATH2 ...] [--luajit PATH/luajit.exe] [--ref DIR] [--ticks 500,2000] ...
+  python parity.py --jai PATH/jaiscript.exe --lua PATH/lua.exe [--lua PATH2 ...] [--luajit PATH/luajit.exe]
+      [--luau PATH/luau.exe] [--ref DIR] [--ticks 500,2000] ...
 
 Both sides run noroundtrip. Timing figures (gen ms, run ms, us/tick) are masked; every other line,
 STATE_HASH included, must match byte for byte. --ref reuses saved JaiScript outputs (t{T}_s{S}_b{B}.txt).
@@ -36,6 +37,7 @@ def main():
 	p.add_argument('--backend', default='vm')
 	p.add_argument('--lua', action='append', default=[])
 	p.add_argument('--luajit', help='a LuaJIT exe: runs luajit/gatorquest.lua with the JIT on and with -joff')
+	p.add_argument('--luau', help='a luau CLI: runs luau/gatorquest.luau interpreted (-O1, -O2) and native (-O2 --codegen)')
 	p.add_argument('--ref')
 	p.add_argument('--ticks', default='500,2000,6000')
 	p.add_argument('--seeds', default='1,7,42')
@@ -47,6 +49,11 @@ def main():
 		j = os.path.abspath(a.luajit)
 		runs.append(('luajit', [j, os.path.join(HERE, 'luajit', 'gatorquest.lua')]))
 		runs.append(('luajit-joff', [j, '-joff', os.path.join(HERE, 'luajit', 'gatorquest.lua')]))
+	if a.luau:
+		u, bundle = os.path.abspath(a.luau), os.path.join(HERE, 'luau', 'gatorquest.luau')
+		runs.append(('luau', [u, bundle, '-a']))
+		runs.append(('luau-O2', [u, '-O2', bundle, '-a']))
+		runs.append(('luau-codegen', [u, '-O2', '--codegen', bundle, '-a']))
 	if a.ref: a.ref = os.path.abspath(a.ref)
 	fails = 0
 	for t, s, b in itertools.product(*[[int(x) for x in v.split(',')] for v in (a.ticks, a.seeds, a.bots)]):

@@ -179,8 +179,8 @@ xs.append([3, 4]);        // changes xs and returns it
 print(to_json(xs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3,4]</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.back() -&gt; t observe empty array raises. every engine"><h3 id="api-bb691742ebe2"><code>array&lt;T&gt;.back() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>Empty array raises.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.back() -&gt; t observe empty array raises. an object, array or map element comes back as a reference to it, like a c++ reference return: binding the result to var, auto or t copies the element, while var&amp;, t&amp; and a member call on the result reach the stored element. every engine"><h3 id="api-bb691742ebe2"><code>array&lt;T&gt;.back() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Empty array raises. An object, array or map element comes back as a reference to it, like a C++ reference return: binding the result to var, auto or T copies the element, while var&amp;, T&amp; and a member call on the result reach the stored element.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [4, 5, 6];
 print(xs.front(), &quot; &quot;, xs.back());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">4 6</code></pre></div>
@@ -237,8 +237,8 @@ print(names.find(n =&gt; n.size() == 3), &quot; &quot;, names.find(n =&gt; n == 
 print(names.find_index(n =&gt; n == &quot;cy&quot;), &quot; &quot;, names.find_index(n =&gt; n == &quot;zed&quot;));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 -1</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.first() -&gt; t observe alias of front. every engine"><h3 id="api-2953197d4a27"><code>array&lt;T&gt;.first() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>Alias of front.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.first() -&gt; t observe alias of front. an object, array or map element comes back as a reference to it, like a c++ reference return: binding the result to var, auto or t copies the element, while var&amp;, t&amp; and a member call on the result reach the stored element. every engine"><h3 id="api-2953197d4a27"><code>array&lt;T&gt;.first() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Alias of front. An object, array or map element comes back as a reference to it, like a C++ reference return: binding the result to var, auto or T copies the element, while var&amp;, T&amp; and a member call on the result reach the stored element.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.for_each(callback: function(t[, int]) -&gt; var) -&gt; void callback t&amp; callback parameters bind live elements. every engine"><h3 id="api-ce67fb889c65"><code>array&lt;T&gt;.for_each(callback: function(T[, int]) -&gt; var) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; callback</p>
 <p>T&amp; callback parameters bind live elements.</p>
@@ -247,8 +247,8 @@ xs.for_each((s, i) =&gt; print(i, &quot;: &quot;, s));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">0: a
 1: b</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.front() -&gt; t observe empty array raises. every engine"><h3 id="api-cbf64e8aea39"><code>array&lt;T&gt;.front() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>Empty array raises.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.front() -&gt; t observe empty array raises. an object, array or map element comes back as a reference to it, like a c++ reference return: binding the result to var, auto or t copies the element, while var&amp;, t&amp; and a member call on the result reach the stored element. every engine"><h3 id="api-cbf64e8aea39"><code>array&lt;T&gt;.front() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Empty array raises. An object, array or map element comes back as a reference to it, like a C++ reference return: binding the result to var, auto or T copies the element, while var&amp;, T&amp; and a member call on the result reach the stored element.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.has(value: var) -&gt; bool observe language equality. every engine"><h3 id="api-84948bc3515f"><code>array&lt;T&gt;.has(value: var) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Language equality.</p>
@@ -272,8 +272,8 @@ print(to_json(xs));</code></pre></div>
 print(xs.join(&quot;, &quot;));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1, 2, 3</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.last() -&gt; t observe alias of back. every engine"><h3 id="api-b5444c61d056"><code>array&lt;T&gt;.last() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>Alias of back.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.last() -&gt; t observe alias of back. an object, array or map element comes back as a reference to it, like a c++ reference return: binding the result to var, auto or t copies the element, while var&amp;, t&amp; and a member call on the result reach the stored element. every engine"><h3 id="api-b5444c61d056"><code>array&lt;T&gt;.last() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Alias of back. An object, array or map element comes back as a reference to it, like a C++ reference return: binding the result to var, auto or T copies the element, while var&amp;, T&amp; and a member call on the result reach the stored element.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.length() -&gt; int observe alias of size. every engine"><h3 id="api-448127c1d705"><code>array&lt;T&gt;.length() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Alias of size.</p>
@@ -298,8 +298,8 @@ xs.push(3);
 print(to_json(xs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3]</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.reduce(callback: function(var, t[, int]) -&gt; r, initial: var = first_element) -&gt; r callback without initial, empty array raises; callback receives accumulator and element, optionally index. every engine"><h3 id="api-708a0df8d248"><code>array&lt;T&gt;.reduce(callback: function(var, T[, int]) -&gt; R, initial: var = first_element) -&gt; R</code></h3><p><strong>Every engine</strong> &middot; callback</p>
-<p>Without initial, empty array raises; callback receives accumulator and element, optionally index.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.reduce(callback: function(var, t[, int]) -&gt; r, initial: var = first_element) -&gt; r callback without initial, empty array raises; callback receives accumulator and element, optionally index. the accumulator starts as a copy of the initial value (or of the first element), as std::accumulate takes its init by value. every engine"><h3 id="api-708a0df8d248"><code>array&lt;T&gt;.reduce(callback: function(var, T[, int]) -&gt; R, initial: var = first_element) -&gt; R</code></h3><p><strong>Every engine</strong> &middot; callback</p>
+<p>Without initial, empty array raises; callback receives accumulator and element, optionally index. The accumulator starts as a copy of the initial value (or of the first element), as std::accumulate takes its init by value.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3, 4];
 print(xs.reduce((sum, x) =&gt; sum + x), &quot; &quot;, xs.reduce((sum, x) =&gt; sum + x, 100));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10 110</code></pre></div>
@@ -718,8 +718,8 @@ stock.filter((k, v) =&gt; v &gt; 0);                                 // in place
 print(to_json(big), &quot; &quot;, to_json(stock));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;cup&quot;:5} {&quot;axe&quot;:2,&quot;cup&quot;:5}</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.get(key: k, fallback: var = null) -&gt; v or var observe does not insert; returns the stored value or fallback; missing keys default to null. every engine"><h3 id="api-6c6197bc503b"><code>map&lt;K,V&gt;.get(key: K, fallback: var = null) -&gt; V or var</code></h3><p><strong>Every engine</strong> &middot; observe</p>
-<p>Does not insert; returns the stored value or fallback; missing keys default to null.</p>
+<div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.get(key: k, fallback: var = null) -&gt; v or var observe does not insert; returns the stored value or fallback; missing keys default to null. an object, array or map element comes back as a reference to it, like a c++ reference return: binding the result to var, auto or t copies the element, while var&amp;, t&amp; and a member call on the result reach the stored element. every engine"><h3 id="api-6c6197bc503b"><code>map&lt;K,V&gt;.get(key: K, fallback: var = null) -&gt; V or var</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>Does not insert; returns the stored value or fallback; missing keys default to null. An object, array or map element comes back as a reference to it, like a C++ reference return: binding the result to var, auto or T copies the element, while var&amp;, T&amp; and a member call on the result reach the stored element.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; stock = {&quot;axe&quot;: 2};
 print(stock.get(&quot;axe&quot;), &quot; &quot;, stock.get(&quot;bow&quot;), &quot; &quot;, stock.get(&quot;bow&quot;, 0), &quot; &quot;, stock.size());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 null 0 1</code></pre></div>

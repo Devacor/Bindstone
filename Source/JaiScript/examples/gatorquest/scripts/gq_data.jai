@@ -621,7 +621,7 @@ array<string> MON_SRC = [
 	// -- Gatorland overworld (tier 1)
 	"Mosquito Swarm|hp=6|dmg=1-2|spd=2|aspd=5|ai=pack|move=4|tier=1|fame=2|spr=mosquito|col=gray|snd=buzz|quip=BZZZZZ",
 	"Swamp Rat|hp=10|dmg=1-4|spd=3|aspd=7|ai=melee|tier=1|fame=3|gold=0-3|drop=Rat Tail:500|spr=rat|col=brown|snd=squeak",
-	"Raccoon Bandit|hp=14|dmg=1-3|spd=2|aspd=6|ai=thief|tier=1|fame=6|gold=2-10|spr=raccoon|col=gray|quip=Yoink!",
+	"Raccoon Bandit|hp=14|dmg=1-3|spd=3|aspd=6|ai=thief|tier=1|fame=6|gold=2-10|poisonous|spr=raccoon|col=gray|quip=Yoink!",
 	"Feral Hog|hp=22|dmg=3-6|spd=3|aspd=8|ai=melee|tier=1|fame=6|drop=Hide:700|spr=hog|col=brown|snd=oink",
 	"Timber Wolf|hp=20|dmg=3-7|spd=2|aspd=7|ai=pack|tier=1|fame=7|drop=Hide:600|spr=wolf|col=gray|snd=howl",
 	"Goblin Poacher|hp=24|dmg=3-8|spd=3|aspd=9|ai=ranged|rng=6|tier=1|fame=9|gold=4-15|drop=Arrow:700,Short Bow:60|spr=goblin|col=green|quip=Gator boots! Gator boots!",
@@ -850,7 +850,7 @@ array<RecipeDef> build_recipes() {
 array<RecipeDef> RECIPES = build_recipes();
 
 // ---------------------------------------------------------------- worlds ---
-// gen: 0 overworld, 1 bayou, 2 sunken city, 3 haunted, 4 ice caves, 5 volcano, 6 sky, 7 sewers
+// gen: 0 overworld, 1 bayou, 2 sunken city, 3 haunted, 4 ice caves, 5 volcano, 6 sky, 7 sewers, 8 warrens (a maze below the sewers)
 array<string> WORLD_SRC = [
 	"Gatorland|w=128|h=96|gen=0|tier=1|amb=0|mus=0|wx=ccccrrft|col=green|b=The green heart of the swamp. Home.",
 	"The Bayou|w=96|h=72|gen=1|tier=2|amb=0|mus=1|wx=crrftt|col=moss|boss=Big Mama Snapper|b=Cypress knees and bad intentions.",
@@ -859,7 +859,8 @@ array<string> WORLD_SRC = [
 	"Frostfang Caverns|w=88|h=64|gen=4|tier=4|amb=5|mus=4|wx=sscs|col=ice|boss=The Glacier Queen|b=Cold-blooded is not a compliment down here.",
 	"Mt. Scorchmaw|w=88|h=72|gen=5|tier=5|amb=9|mus=5|wx=aaca|col=lava|boss=Emberjaw the Wyrm|b=The mountain breathes. Try not to be what it exhales.",
 	"Cloudreach|w=100|h=72|gen=6|tier=5|amb=14|mus=6|wx=cctt|col=sky|boss=The Thunder Roc|b=Islands in the sky. Mind the gap.",
-	"Swampton Sewers|w=64|h=48|gen=7|tier=1|amb=3|mus=7|wx=c|col=slime|boss=The Rat King|b=It smells exactly how you think."
+	"Swampton Sewers|w=64|h=48|gen=7|tier=1|amb=3|mus=7|wx=c|col=slime|boss=The Rat King|b=It smells exactly how you think.",
+	"Raccoon Warrens|w=57|h=41|gen=8|tier=2|amb=2|mus=7|wx=c|col=brown|b=Somebody down here has your coin purse."
 ];
 
 array<WorldDef> build_worlds() {
@@ -888,6 +889,7 @@ array<WorldDef> WORLDS = build_worlds();
 int WORLD_COUNT = WORLDS.size();
 int W_GATORLAND = 0;
 int W_SEWERS = 7;
+int W_WARRENS = 8;
 
 // ------------------------------------------------------------- npc roles ---
 array<string> ROLE_SRC = [
@@ -957,7 +959,7 @@ array<array<int>> SHOPS = build_shops();
 // type: 0 kill kind, 1 bring item, 2 slay boss, 3 visit worlds, 4 craft, 5 catch fish
 array<string> QUEST_SRC = [
 	"Rats in the Cellar|giver=Mayor Beauregard|type=0|target=Sewer Rat|count=8|gold=60|reward=Leather Cap|o=The sewers under town are crawling. Squash 8 Sewer Rats for me, would you?|d=Splendid! The cellar smells almost tolerable now.",
-	"The Masked Menace|giver=Captain Fontenot|type=0|target=Raccoon Bandit|count=3|gold=80|reward=Lucky Frog Charm|o=Raccoon Bandits keep lifting purses outside town. Teach 3 of them some manners.|d=Ha! That will show the little burglars.",
+	"The Masked Menace|giver=Captain Fontenot|type=0|target=Raccoon Bandit|count=3|gold=80|reward=Lucky Frog Charm|o=Raccoon Bandits lift purses and scurry off to their warrens below the sewers. Teach 3 of them some manners; they drop what they stole.|d=Ha! That will show the little burglars.",
 	"Frog Legs Friday|giver=Boudreaux|type=1|target=Frog Legs|count=5|gold=50|reward=Fried Frog Legs|rq=3|o=Friday is frog leg night and I am plumb out. Bring me 5 Frog Legs?|d=Now THAT is a Friday. Here, have some on the house.",
 	"Gone Fishin'|giver=Thibodeaux|type=5|count=10|gold=100|reward=Fish Slapper|o=Catch 10 fish, any fish, and I will teach you the ancient art of the slap.|d=A natural! Take this. Treat it with respect.",
 	"Iron Will|giver=Gus|type=4|count=1|gold=40|reward=Iron Ingot|rq=10|o=Smelt some ore at the forge and make anything at the anvil. Show me what you have got.|d=Not bad for a gator with no thumbs.",

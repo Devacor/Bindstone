@@ -8,6 +8,7 @@
 //   jaiscript gatorquest.jai -- shot [ticks N] [every N] [screen 150x44] [out DIR] [keys "i down enter"]
 //                                                    headless frame captures (.ans + .txt sketch)
 //   jaiscript gatorquest.jai -- savetest             save robustness suite
+//   jaiscript gatorquest.jai -- thieftest            the Raccoon Bandits: warrens, pace, thefts, the purse, the quest
 //   powershell -File hotreload.ps1 [-Backend interp]  hot-reload test (it edits its scripts: runs a scratch copy)
 //   jaiscript gatorquest.jai -- dev                  play with live script reload
 //   jaiscript gatorquest.jai -- predtest | menutest | nettest | endgame | tour | serve | client   see README.md
@@ -262,6 +263,7 @@ int main() {
 	// "tag X" gives a test run its own folders, so runs in parallel never share files
 	string tests = data_root() + "/saves" + (arg_value("tag", "") == "" ? "" : "/" + arg_value("tag", ""));
 	if (arg_flag("savetest")) { return run_savetest(tests); }
+	if (arg_flag("thieftest")) { return run_thieftest(tests); }
 	if (arg_flag("hotreload")) { return run_hotreload(); }
 	if (arg_flag("nettest")) { return run_nettest(tests, arg_value("port", "28911").to_int(28911)); }
 	if (arg_flag("prepare")) { return run_prepare(); }

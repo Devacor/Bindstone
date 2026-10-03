@@ -196,7 +196,8 @@ local function ai_thief(m)
 	if (MOB_FLAGS[m] & MF_FLEEING) ~= 0 then
 		local p = nearest_player(MOB_WORLD[m], MOB_X[m], MOB_Y[m], 12)
 		if p < 0 or MOB_AUX[m] == 0 and rnd(20) == 0 then MOB_FLAGS[m] = MOB_FLAGS[m] & ~MF_FLEEING; think_later(m, 5); return end
-		if not mob_step_away(m, MOB_X[p], MOB_Y[p]) then think_later(m, 2) end
+		if mob_step_away(m, MOB_X[p], MOB_Y[p]) then MOB_NEXT[m] = MOB_NEXT[m] + 1
+		else think_later(m, 2) end
 		return
 	end
 	local t = engage(m, AGGRO)
@@ -204,9 +205,9 @@ local function ai_thief(m)
 	local d = cheb(MOB_X[m], MOB_Y[m], MOB_X[t], MOB_Y[t])
 	if d <= 1 and TICK >= MOB_ATK[m] then
 		local slot = MOB_PLAYER[t]
-		if slot >= 0 and CHARS[slot].gold > 0 and rnd(3) == 0 then
+		if slot >= 0 and CHARS[slot].gold > 0 and rnd(4) == 0 then
 			local c = CHARS[slot]
-			local grab = imin(c.gold, 5 + rnd(16))
+			local grab = imin(c.gold, 3 + rnd(8))
 			c.gold = c.gold - grab
 			c.version = c.version + 1
 			MOB_AUX[m] = MOB_AUX[m] + grab

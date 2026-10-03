@@ -5,7 +5,8 @@ You are a gator. Six tyrants rule the six realms beyond the Moongates, each hoar
 Big Mama Snapper (the Bayou), the Drowned King (the Sunken City of Sogg), Count Crocula (Gloomfen),
 the Glacier Queen (Frostfang Caverns), Emberjaw the Wyrm (Mt. Scorchmaw) and the Thunder Roc
 (Cloudreach). Bring all six scales to the Shrine of the Six, north-west of Swampton, and become the
-Gator Avatar. Fight, fish, mine, chop, smith, cook and brew along the way. Raccoons will steal your gold.
+Gator Avatar. Fight, fish, mine, chop, smith, cook and brew along the way. Raccoons will steal your gold;
+they hide in warrens below the sewers, and drop what they stole when they fall.
 
 START
   play.bat              the title screen: type a name, pick a color, then Single player, Host a game
@@ -50,7 +51,8 @@ TIPS
   Skills rise as you use them. Reagents grow wild: pick them up for your spells.
   Talk to the Mayor, the Captain, the shopkeepers and the Oracle for quests.
   Stand in tall grass or reeds and press X to hide from monsters.
-  Moongates around Swampton lead to the six realms; the grate in the plaza leads to the sewers.
+  Moongates around Swampton lead to the six realms; the grate in the plaza leads to the sewers, and stairs in
+  the sewers lead further down, to the Raccoon Warrens.
 
 SAVES
   The game saves every five minutes, from the menu, and when you leave to the title or quit. Files are plain text in the

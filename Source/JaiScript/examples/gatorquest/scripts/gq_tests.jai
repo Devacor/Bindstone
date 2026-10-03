@@ -120,6 +120,186 @@ int run_savetest(string base_dir) {
 	return TEST_FAILS;
 }
 
+// ------------------------------------------------------------ thieftest ---
+// the Raccoon Bandits: where they live, how fast they run, what they take and give back
+
+// land tiles reachable on foot from (x, y)
+array<int> land_reach(int w, int x, int y) {
+	int ww = W_W[w];
+	array<int> seen;
+	for (int i = 0; i < ww * W_H[w]; ++i) { seen.push(0); }
+	array<int> queue = [y * ww + x];
+	seen[y * ww + x] = 1;
+	for (int head = 0; head < queue.size(); ++head) {
+		int cx = queue[head] % ww;
+		int cy = queue[head] / ww;
+		for (int d = 0; d < 8; d += 2) {
+			int nx = cx + DX[d];
+			int ny = cy + DY[d];
+			if (in_world(w, nx, ny) && seen[ny * ww + nx] == 0 && is_land(w, nx, ny)) {
+				seen[ny * ww + nx] = 1;
+				queue.push(ny * ww + nx);
+			}
+		}
+	}
+	return seen;
+}
+
+// tick until slot loses gold to a thief (the victim kept alive); returns the gold taken
+int wait_for_theft(int slot, int ticks) {
+	int me = CHARS[slot].mob;
+	int before = CHARS[slot].gold;
+	for (int t = 0; t < ticks; ++t) {
+		MOB_HP[me] = MOB_HPMAX[me];
+		sim_tick();
+		if (CHARS[slot].gold < before) { return before - CHARS[slot].gold; }
+	}
+	return 0;
+}
+
+void thief_reset_beside(int r, int slot) {
+	int me = CHARS[slot].mob;
+	array<int> p = find_free_spot(MOB_WORLD[me], MOB_X[me] + 1, MOB_Y[me], 3, 2);
+	mob_place(r, MOB_WORLD[me], p[0], p[1]);
+	MOB_FLAGS[r] = MOB_FLAGS[r] & ~MF_FLEEING;
+	MOB_TARGET[r] = me;
+	MOB_NEXT[r] = TICK;
+	MOB_ATK[r] = TICK;
+}
+
+// gold on the ground within r tiles: the total, or with qty >= 0 the number of piles of exactly qty
+int ground_gold_near(int w, int x, int y, int r, int qty) {
+	int n = 0;
+	for (int i = 0; i < GI_ITEM.size(); ++i) {
+		if (GI_ITEM[i].base != I_GOLD || GI_W[i] != w || cheb(GI_X[i], GI_Y[i], x, y) > r) { continue; }
+		if (qty < 0) { n = n + GI_ITEM[i].qty; }
+		else if (GI_ITEM[i].qty == qty) { n = n + 1; }
+	}
+	return n;
+}
+
+int run_thieftest(string base_dir) {
+	print("thieves:");
+	sim_init(1);
+	BOTS = [];
+	int kind = mid("Raccoon Bandit");
+	int spawners = 0;
+	int deep = 0;
+	int den = -1;
+	for (int s = 0; s < SP_W.size(); ++s) {
+		if (SP_KIND[s] != kind) { continue; }
+		spawners = spawners + 1;
+		if (SP_W[s] == W_WARRENS) { deep = deep + 1; den = s; }
+	}
+	check(spawners >= 3 && deep == spawners, `raccoons spawn only in the Raccoon Warrens (${deep} of ${spawners} spawners)`);
+	int below = 0;
+	int elsewhere = 0;
+	for (int m = 0; m < MOB_KIND.size(); ++m) {
+		if (MOB_KIND[m] != kind || MOB_HP[m] <= 0) { continue; }
+		if (MOB_WORLD[m] == W_WARRENS) { below = below + 1; } else { elsewhere = elsewhere + 1; }
+	}
+	check(below >= 3 && elsewhere == 0, `the world starts with ${below} raccoons in the warrens and ${elsewhere} elsewhere`);
+	check(MON_SPEED[kind] > 2 && MONS[kind].poisonous, `a raccoon walks slower than a gator (${MON_SPEED[kind]} ticks a step against 2) and bites can poison`);
+	// the way down: Swampton's grate, the sewers' stairs, the warrens' stairs back up
+	int down = gate_in(W_SEWERS, W_WARRENS);
+	int up = gate_in(W_WARRENS, W_SEWERS);
+	check(down >= 0 && up >= 0, "the sewers have stairs down to the warrens, and the warrens stairs back up");
+	array<int> sewer = land_reach(W_SEWERS, W_ARRIVE_X[W_SEWERS], W_ARRIVE_Y[W_SEWERS]);
+	check(sewer[GATE_Y[down] * W_W[W_SEWERS] + GATE_X[down]] != 0, "the stairs down are a walk from the sewer entrance");
+	array<int> warren = land_reach(W_WARRENS, W_ARRIVE_X[W_WARRENS], W_ARRIVE_Y[W_WARRENS]);
+	int floor = 0;
+	int cut = 0;
+	for (int i = 0; i < warren.size(); ++i) {
+		if (TILES[W_OFF[W_WARRENS] + i] != T_DIRT) { continue; }
+		floor = floor + 1;
+		if (warren[i] == 0) { cut = cut + 1; }
+	}
+	check(floor > 500 && cut == 0, `every burrow is reachable from the stairs (${floor} tiles, ${cut} cut off)`);
+	player_create(0, "Tester", 2);
+	int me = CHARS[0].mob;
+	mob_place(me, W_SEWERS, GATE_X[down], GATE_Y[down]);
+	on_enter(me);
+	check(MOB_WORLD[me] == W_WARRENS && cheb(MOB_X[me], MOB_Y[me], GATE_X[up], GATE_Y[up]) <= 2, "the stairs down land beside the stairs up");
+	mob_place(me, W_WARRENS, GATE_X[up], GATE_Y[up]);
+	on_enter(me);
+	check(MOB_WORLD[me] == W_SEWERS && cheb(MOB_X[me], MOB_Y[me], GATE_X[down], GATE_Y[down]) <= 2, "the stairs up land beside the sewer stairs down");
+	// one raccoon in an emptied den
+	for (int m = 0; m < MOB_KIND.size(); ++m) {
+		if (MOB_KIND[m] >= 0 && MOB_PLAYER[m] < 0 && MOB_WORLD[m] == W_WARRENS) { mob_free(m); }
+	}
+	for (int s = 0; s < SP_W.size(); ++s) {
+		if (SP_W[s] == W_WARRENS) { SP_NEXT[s] = 1 << 40; }
+	}
+	array<int> p = find_free_spot(W_WARRENS, SP_X[den], SP_Y[den], 3, 2);
+	mob_place(me, W_WARRENS, p[0], p[1]);
+	CHARS[0].gold = 200;
+	int r = mob_spawn(kind, W_WARRENS, p[0], p[1]);
+	thief_reset_beside(r, 0);
+	int stolen = wait_for_theft(0, 800);
+	check(stolen >= 3 && stolen <= 10 && MOB_AUX[r] == stolen, `a theft takes 3 to 10 gold and the raccoon keeps it (${stolen}, carrying ${MOB_AUX[r]})`);
+	int steps = 0;
+	int last = MOB_MOVE_T[r];
+	for (int t = 0; t < 40; ++t) {
+		MOB_HP[me] = MOB_HPMAX[me];
+		sim_tick();
+		if (MOB_MOVE_T[r] != last) { steps = steps + 1; last = MOB_MOVE_T[r]; }
+	}
+	check((MOB_FLAGS[r] & MF_FLEEING) != 0 && steps >= 1 && steps <= 10, `a fleeing raccoon takes at most a step every 4 ticks (${steps} steps in 40 ticks; a gator walks 20)`);
+	CHARS[0].gold = 0;
+	mob_place(me, W_WARRENS, p[0], p[1]);
+	thief_reset_beside(r, 0);
+	bool poisoned = false;
+	for (int t = 0; t < 800 && !poisoned; ++t) {
+		MOB_HP[me] = MOB_HPMAX[me];
+		sim_tick();
+		poisoned = MOB_POISON[me] > 0;
+	}
+	check(poisoned, "a raccoon's bite poisons");
+	MOB_POISON[me] = 0;
+	// the purse survives a save and load, and holds every victim's gold
+	make_dirs(base_dir + "/thieftest/chars");
+	check(save_roundtrip(base_dir + "/thieftest") && MOB_KIND[r] == kind && MOB_AUX[r] == stolen, `the purse survives a save and load (${MOB_AUX[r]})`);
+	me = CHARS[0].mob;
+	player_create(1, "Second", 3);
+	int me2 = CHARS[1].mob;
+	mob_place(me, 0, W_ARRIVE_X[0], W_ARRIVE_Y[0]);
+	mob_place(me2, W_WARRENS, p[0], p[1]);
+	CHARS[1].gold = 100;
+	thief_reset_beside(r, 1);
+	int stolen2 = wait_for_theft(1, 800);
+	int purse = stolen + stolen2;
+	check(stolen2 > 0 && MOB_AUX[r] == purse, `a second victim's gold joins the purse (${stolen} + ${stolen2} = ${MOB_AUX[r]})`);
+	int w = MOB_WORLD[r];
+	int kx = MOB_X[r];
+	int ky = MOB_Y[r];
+	int gold_before = ground_gold_near(w, kx, ky, 3, -1);
+	kill(r, me2);
+	int dropped = ground_gold_near(w, kx, ky, 3, -1) - gold_before;
+	check(ground_gold_near(w, kx, ky, 3, purse) >= 1 && dropped >= purse + MONS[kind].gold_lo && dropped <= purse + MONS[kind].gold_hi, `killing it drops the ${purse} stolen gold as a pile of its own beside its loot (${dropped} gold on the ground)`);
+	mob_place(me2, w, kx, ky);
+	int had = CHARS[1].gold;
+	pick_up(1);
+	int got = CHARS[1].gold - had;
+	check(got >= purse && ground_gold_near(w, kx, ky, 3, -1) + got == dropped, `picking it up gives the gold back (+${got}), counted once`);
+	// The Masked Menace: the Captain sends you down
+	int q = -1;
+	for (int i = 0; i < QUESTS.size(); ++i) {
+		if (QUESTS[i].name == "The Masked Menace") { q = i; }
+	}
+	quest_talk(0, R_CAPTAIN);
+	check(q >= 0 && quest_active(0, q) && QUESTS[q].offer.contains("warrens below the sewers"), "the Captain's quest points to the warrens");
+	mob_place(me, W_WARRENS, p[0], p[1]);
+	for (int k = 0; k < QUESTS[q].count; ++k) {
+		array<int> at = find_free_spot(W_WARRENS, p[0], p[1] + 2, 4, 2);
+		kill(mob_spawn(kind, W_WARRENS, at[0], at[1]), me);
+	}
+	check(quest_ready(0, q), `three raccoons later the quest is ready (${quest_progress(0, q)}/${quest_goal(q)})`);
+	quest_talk(0, R_CAPTAIN);
+	check(CHARS[0].quest_stage[q] == 99, "and the Captain takes it");
+	print(`thieftest: ${TEST_PASSES} passed, ${TEST_FAILS} failed`);
+	return TEST_FAILS;
+}
+
 // ------------------------------------------------------------ netplay ---
 // the real host session and real client sessions over loopback sockets in one engine
 // (p9_netplay style); the clients share the host's terrain instead of regenerating it

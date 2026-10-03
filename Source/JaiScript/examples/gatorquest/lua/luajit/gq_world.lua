@@ -384,7 +384,7 @@ local function gen_overworld()
 			elseif t == T_SHALLOW or t == T_SAND then
 				kind = pick({ [0] = "Heron", "Cottonmouth", "Crawdad" })
 			elseif T_WALK[t] == 1 then
-				kind = pick({ [0] = "Swamp Rat", "Raccoon Bandit", "Marsh Rabbit", "Feral Hog", "Mosquito Swarm" })
+				kind = pick({ [0] = "Swamp Rat", "Marsh Rabbit", "Feral Hog", "Mosquito Swarm" })
 			end
 			if kind >= 0 then
 				local maxn = 2 + rnd(2)
@@ -392,10 +392,8 @@ local function gen_overworld()
 			end
 		end
 	end
-	-- raccoons and rats loiter just outside town
-	add_spawner(w, sx - 6, sy + 22, mid("Raccoon Bandit"), 2, 5, 400)
+	-- rats loiter just outside town
 	add_spawner(w, sx + 32, sy - 4, mid("Swamp Rat"), 3, 5, 300)
-	add_spawner(w, sx + 30, sy + 24, mid("Raccoon Bandit"), 2, 6, 450)
 end
 
 -- a world's way home: a moongate at its arrival point leading back to Gatorland
@@ -751,6 +749,8 @@ local function gen_sewers()
 		local y = rnd_range(2, hh - 3)
 		if tile_at(w, x, y) == T_SEWAGE then set_tile(w, x, y, T_BRIDGE) end
 	end
+	-- the stairs further down get a room of their own, west of where the side rooms put chests
+	fill_rect(w, 2, hh - 8, 7, hh - 3, T_SEWERFLOOR)
 	-- side rooms
 	for _ = 0, 6 do
 		local x = rnd_range(3, ww - 12)
@@ -772,6 +772,72 @@ local function gen_sewers()
 	add_chest(w, kx + 3, ky + 2, 2)
 	boss_lair(w, kx, ky)
 	spawners_by_pool(w, { [0] = "Sewer Rat", "Sewer Rat", "Green Slime", "Giant Cockroach" }, 16, 2, 3, 300)
+end
+
+-- the Raccoon Warrens below the sewers: a burrow maze with a few loops, and dens where the bandits stash their loot
+local function gen_warrens()
+	local w = W_WARRENS
+	local ww = W_W[w]
+	local hh = W_H[w]
+	fill_rect(w, 0, 0, ww - 1, hh - 1, T_CAVEWALL)
+	local cw = jfloor(((ww - 1)) / (2))
+	local ch = jfloor(((hh - 1)) / (2))
+	local seen = {}
+	for i = 0, cw * ch - 1 do seen[i] = 0 end
+	local stack, sn = { [0] = 0 }, 1
+	seen[0] = 1
+	set_tile(w, 1, 1, T_DIRT)
+	while sn > 0 do
+		local c = stack[sn - 1]
+		local cx = c % cw
+		local cy = jfloor((c) / (cw))
+		local start = rnd(4)
+		local nxt = -1
+		local k = 0
+		while k < 4 and nxt < 0 do
+			local d = (start + k) % 4 * 2
+			local nx = cx + DX[d]
+			local ny = cy + DY[d]
+			if nx >= 0 and ny >= 0 and nx < cw and ny < ch and seen[ny * cw + nx] == 0 then
+				nxt = ny * cw + nx
+				set_tile(w, 1 + cx * 2 + DX[d], 1 + cy * 2 + DY[d], T_DIRT)
+			end
+			k = k + 1
+		end
+		if nxt < 0 then
+			sn = sn - 1
+		else
+			seen[nxt] = 1
+			set_tile(w, 1 + (nxt % cw) * 2, 1 + (jfloor((nxt) / (cw))) * 2, T_DIRT)
+			stack[sn] = nxt
+			sn = sn + 1
+		end
+	end
+	for _ = 0, 39 do
+		local x = rnd_range(1, ww - 2)
+		local y = rnd_range(1, hh - 2)
+		if (x + y) % 2 == 1 then set_tile(w, x, y, T_DIRT) end
+	end
+	fill_rect(w, 1, 1, 5, 3, T_DIRT)
+	W_ARRIVE_X[w] = 3
+	W_ARRIVE_Y[w] = 3
+	-- dens first, then their chests: a later den never paves over an earlier chest
+	local den_x, den_y, dn = {}, {}, 0
+	for _ = 0, 5 do
+		local x = 1 + rnd(cw - 2) * 2
+		local y = 1 + rnd(ch - 1) * 2
+		if cheb(x + 2, y + 1, W_ARRIVE_X[w], W_ARRIVE_Y[w]) >= 10 then
+			fill_rect(w, x, y, x + 4, y + 2, T_DIRT)
+			den_x[dn] = x + 2
+			den_y[dn] = y + 1
+			dn = dn + 1
+		end
+	end
+	for k = 0, dn - 1 do
+		if rnd(2) == 0 and tile_at(w, den_x[k], den_y[k]) ~= T_CHEST then add_chest(w, den_x[k], den_y[k], 2) end
+		add_spawner(w, den_x[k], den_y[k], mid("Raccoon Bandit"), 2, 3, 400)
+	end
+	spawners_by_pool(w, { [0] = "Sewer Rat", "Giant Cockroach" }, 4, 2, 2, 400)
 end
 
 local STAIRS_X, STAIRS_Y = 0, 0
@@ -804,19 +870,26 @@ function world_generate(seed)
 	gen_scorchmaw()
 	gen_cloudreach()
 	gen_sewers()
+	gen_warrens()
 	-- the sewer grate in Swampton leads down; the stairs up lead back
 	add_gate(0, gate_x_of_stairs(), gate_y_of_stairs(), W_SEWERS)
 	set_tile(0, gate_x_of_stairs(), gate_y_of_stairs(), T_STAIRS_DN)
 	add_gate(W_SEWERS, 3, 3, 0)
 	set_tile(W_SEWERS, 3, 3, T_STAIRS_UP)
+	-- and further down, the Raccoon Warrens
+	add_gate(W_SEWERS, 3, W_H[W_SEWERS] - 5, W_WARRENS)
+	set_tile(W_SEWERS, 3, W_H[W_SEWERS] - 5, T_STAIRS_DN)
+	add_gate(W_WARRENS, 3, 1, W_SEWERS)
+	set_tile(W_WARRENS, 3, 1, T_STAIRS_UP)
 end
 
 -- where a traveller lands arriving in `dest` through a gate
 local function gate_arrival(from_w, dest)
-	if dest == 0 then
-		local g = gate_in(0, from_w)
-		if g >= 0 then return find_spot(0, GATE_X[g], GATE_Y[g] + 1, 4, LAND_MASK) end
-		return W_ARRIVE_X[0], W_ARRIVE_Y[0]
+	-- home, or between two dungeon levels: beside the gate leading back
+	if dest == 0 or from_w ~= 0 then
+		local g = gate_in(dest, from_w)
+		if g >= 0 then return find_spot(dest, GATE_X[g], GATE_Y[g] + 1, 4, LAND_MASK) end
+		if dest == 0 then return W_ARRIVE_X[0], W_ARRIVE_Y[0] end
 	end
 	return find_spot(dest, W_ARRIVE_X[dest], W_ARRIVE_Y[dest], 6, LAND_MASK)
 end

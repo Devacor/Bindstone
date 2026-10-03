@@ -22,7 +22,7 @@ COMMON = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COMMON)
 
 WORKLOADS = [(2000, 2), (2000, 4), (6000, 2), (6000, 4)]
-HASHES = {(2000, 2): "3237070200", (2000, 4): "1527532673", (6000, 2): "2499173128", (6000, 4): "2955240815"}
+HASHES = {(2000, 2): "3218840367", (2000, 4): "4257627332", (6000, 2): "2287915908", (6000, 4): "791100447"}
 RAN = re.compile(r"^ran (\d+) ticks in (\d+) ms \((\d+) us/tick\)", re.M)
 GEN = re.compile(r"\(gen (\d+) ms\)")
 HASH = re.compile(r"STATE_HASH: (\d+)")

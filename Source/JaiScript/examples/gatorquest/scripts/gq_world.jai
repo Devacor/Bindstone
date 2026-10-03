@@ -356,15 +356,13 @@ void gen_overworld() {
 			array<string> pool = ["Heron", "Cottonmouth", "Crawdad"];
 			kind = mid(pool[rnd(pool.size())]);
 		} else if (T_WALK[t] == 1) {
-			array<string> pool = ["Swamp Rat", "Raccoon Bandit", "Marsh Rabbit", "Feral Hog", "Mosquito Swarm"];
+			array<string> pool = ["Swamp Rat", "Marsh Rabbit", "Feral Hog", "Mosquito Swarm"];
 			kind = mid(pool[rnd(pool.size())]);
 		}
 		if (kind >= 0) { add_spawner(w, x, y, kind, 2 + rnd(2), 6, 300 + rnd(300)); }
 	}
-	// raccoons and rats loiter just outside town
-	add_spawner(w, sx - 6, sy + 22, mid("Raccoon Bandit"), 2, 5, 400);
+	// rats loiter just outside town
 	add_spawner(w, sx + 32, sy - 4, mid("Swamp Rat"), 3, 5, 300);
-	add_spawner(w, sx + 30, sy + 24, mid("Raccoon Bandit"), 2, 6, 450);
 }
 
 // a world's way home: a moongate at its arrival point leading back to Gatorland
@@ -705,6 +703,8 @@ void gen_sewers() {
 		int y = rnd_range(2, hh - 3);
 		if (tile_at(w, x, y) == T_SEWAGE) { set_tile(w, x, y, T_BRIDGE); }
 	}
+	// the stairs further down get a room of their own, west of where the side rooms put chests
+	fill_rect(w, 2, hh - 8, 7, hh - 3, T_SEWERFLOOR);
 	// side rooms
 	for (int k = 0; k < 7; ++k) {
 		int x = rnd_range(3, ww - 12);
@@ -726,6 +726,65 @@ void gen_sewers() {
 	add_chest(w, kx + 3, ky + 2, 2);
 	boss_lair(w, kx, ky);
 	spawners_by_pool(w, ["Sewer Rat", "Sewer Rat", "Green Slime", "Giant Cockroach"], 16, 2, 3, 300);
+}
+
+// the Raccoon Warrens below the sewers: a burrow maze with a few loops, and dens where the bandits stash their loot
+void gen_warrens() {
+	int w = W_WARRENS;
+	int ww = W_W[w];
+	int hh = W_H[w];
+	fill_rect(w, 0, 0, ww - 1, hh - 1, T_CAVEWALL);
+	int cw = (ww - 1) / 2;
+	int ch = (hh - 1) / 2;
+	array<int> seen;
+	for (int i = 0; i < cw * ch; ++i) { seen.push(0); }
+	array<int> stack = [0];
+	seen[0] = 1;
+	set_tile(w, 1, 1, T_DIRT);
+	while (stack.size() > 0) {
+		int c = stack[stack.size() - 1];
+		int cx = c % cw;
+		int cy = c / cw;
+		int start = rnd(4);
+		int next = -1;
+		for (int k = 0; k < 4 && next < 0; ++k) {
+			int d = (start + k) % 4 * 2;
+			int nx = cx + DX[d];
+			int ny = cy + DY[d];
+			if (nx >= 0 && ny >= 0 && nx < cw && ny < ch && seen[ny * cw + nx] == 0) {
+				next = ny * cw + nx;
+				set_tile(w, 1 + cx * 2 + DX[d], 1 + cy * 2 + DY[d], T_DIRT);
+			}
+		}
+		if (next < 0) { stack.pop(); continue; }
+		seen[next] = 1;
+		set_tile(w, 1 + (next % cw) * 2, 1 + (next / cw) * 2, T_DIRT);
+		stack.push(next);
+	}
+	for (int k = 0; k < 40; ++k) {
+		int x = rnd_range(1, ww - 2);
+		int y = rnd_range(1, hh - 2);
+		if ((x + y) % 2 == 1) { set_tile(w, x, y, T_DIRT); }
+	}
+	fill_rect(w, 1, 1, 5, 3, T_DIRT);
+	W_ARRIVE_X[w] = 3;
+	W_ARRIVE_Y[w] = 3;
+	// dens first, then their chests: a later den never paves over an earlier chest
+	array<int> den_x;
+	array<int> den_y;
+	for (int k = 0; k < 6; ++k) {
+		int x = 1 + rnd(cw - 2) * 2;
+		int y = 1 + rnd(ch - 1) * 2;
+		if (cheb(x + 2, y + 1, W_ARRIVE_X[w], W_ARRIVE_Y[w]) < 10) { continue; }
+		fill_rect(w, x, y, x + 4, y + 2, T_DIRT);
+		den_x.push(x + 2);
+		den_y.push(y + 1);
+	}
+	for (int k = 0; k < den_x.size(); ++k) {
+		if (rnd(2) == 0 && tile_at(w, den_x[k], den_y[k]) != T_CHEST) { add_chest(w, den_x[k], den_y[k], 2); }
+		add_spawner(w, den_x[k], den_y[k], mid("Raccoon Bandit"), 2, 3, 400);
+	}
+	spawners_by_pool(w, ["Sewer Rat", "Giant Cockroach"], 4, 2, 2, 400);
 }
 
 // every realm, then the flat mirrors the renderer and movement code read
@@ -775,11 +834,17 @@ void world_generate(int seed) {
 	gen_scorchmaw();
 	gen_cloudreach();
 	gen_sewers();
+	gen_warrens();
 	// the sewer grate in Swampton leads down; the stairs up lead back
 	add_gate(0, gate_x_of_stairs(), gate_y_of_stairs(), W_SEWERS);
 	set_tile(0, gate_x_of_stairs(), gate_y_of_stairs(), T_STAIRS_DN);
 	add_gate(W_SEWERS, 3, 3, 0);
 	set_tile(W_SEWERS, 3, 3, T_STAIRS_UP);
+	// and further down, the Raccoon Warrens
+	add_gate(W_SEWERS, 3, W_H[W_SEWERS] - 5, W_WARRENS);
+	set_tile(W_SEWERS, 3, W_H[W_SEWERS] - 5, T_STAIRS_DN);
+	add_gate(W_WARRENS, 3, 1, W_SEWERS);
+	set_tile(W_WARRENS, 3, 1, T_STAIRS_UP);
 }
 
 int STAIRS_X;
@@ -796,13 +861,14 @@ void find_stairs() {
 
 // where a traveller lands arriving in `dest` through a gate
 array<int> gate_arrival(int from_w, int dest) {
-	if (dest == 0) {
-		int g = gate_in(0, from_w);
+	// home, or between two dungeon levels: beside the gate leading back
+	if (dest == 0 || from_w != 0) {
+		int g = gate_in(dest, from_w);
 		if (g >= 0) {
-			array<int> p = find_spot(0, GATE_X[g], GATE_Y[g] + 1, 4, LAND_MASK);
+			array<int> p = find_spot(dest, GATE_X[g], GATE_Y[g] + 1, 4, LAND_MASK);
 			return p;
 		}
-		return [W_ARRIVE_X[0], W_ARRIVE_Y[0]];
+		if (dest == 0) { return [W_ARRIVE_X[0], W_ARRIVE_Y[0]]; }
 	}
 	return find_spot(dest, W_ARRIVE_X[dest], W_ARRIVE_Y[dest], 6, LAND_MASK);
 }

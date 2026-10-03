@@ -2323,7 +2323,22 @@ void engine::initialize_engine_reference() {
         if (args.size() != 2) {
             return checked_result<script_value>(make_error_code(runtime_error_code::extend_rejected), "extend expects (object, Class)");
         }
-        return engine_weak->extend_checked(args[0], args[1], std::string());
+        auto extended = engine_weak->extend_checked(args[0], args[1], std::string());
+        if (!extended) { return extended; }
+        // A pure script value is C++'s T& extend(T& object, Class): the result names the argument, so `var w = extend(v, B)`
+        // copies and `var& w = extend(v, B)` aliases v (Dev ruling 2026-10-03, the call-result rule)
+        const script_value& object = args[0].deref();
+        auto holder = object.raw_storage_index() == script_value::TYPEID_OBJECT && !object.is_shared_ptr_type() ? object.get_object_holder() : nullptr;
+        if (!holder || !holder->is_class_instance_wrapper || !holder->data ||
+            static_cast<class_instance*>(holder->data.get())->has_cpp_object()) {
+            return extended;
+        }
+        if (auto* backend = engine_weak->get_execution_backend()) {
+            host_slot slot;
+            auto named = backend->host_reference_argument(args, 0, 0, slot);
+            if (named && named.value().is_reference() && detail::same_object(named.value(), extended.value())) { return std::move(named.value()); }
+        }
+        return script_value::make_cell_reference(std::move(extended.value()), engine_weak);
     });
 
     // Parallel builtins (parallel_transform v0; docs/parallel_design.md). thread_count()

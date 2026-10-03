@@ -319,7 +319,7 @@ Counter::PI;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Counter::count = 3
 Counter::twice_count() = 6
 == result: 3.14159</code></pre></div>
-<p><code>Class::name</code> is the <em>only</em> spelling from outside. <code>Counter.count</code> is not a static access. It is a member lookup on the constructor value, and fails at run time. Static fields also enforce their declared type exactly like instance fields, through the same table: a literal mismatch is a load error, a <code>var</code>-sourced one raises where it lands, and the initializer converts on the way in:</p>
+<p><code>Class::name</code> is the <em>only</em> spelling from outside. <code>Counter.count</code> is an error naming the right spelling (<code>'Counter' is a class; use Counter::count</code>), reported at load by the checker and raised the same way when checking is off. Static fields also enforce their declared type exactly like instance fields, through the same table: a literal mismatch is a load error, a <code>var</code>-sourced one raises where it lands, and the initializer converts on the way in:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Registry {
     static int count = 0;
     static float ratio = 3;       // the initializer converts: holds 3.0
@@ -328,11 +328,9 @@ Counter::twice_count() = 6
 Registry::count = 2.9;            // the same table as an instance field: truncates
 print("count = {} ({}), ratio = {}, last_id = {}", Registry::count, type_of(Registry::count), Registry::ratio, Registry::last_id);
 var bad = "many";
-try { Registry::count = bad; } catch (e) { print("caught: {}", e); }
-try { Registry.count; } catch (e) { print("caught: {}", e); }</code></pre></div>
+try { Registry::count = bad; } catch (e) { print("caught: {}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 2 (int), ratio = 3.0, last_id = 0
-caught: Cannot assign string to static &#x27;count&#x27; of Registry (declared int)
-caught: function has no member &#x27;count&#x27;</code></pre></div>
+caught: Cannot assign string to static &#x27;count&#x27; of Registry (declared int)</code></pre></div>
 <p>(<code>Registry::count = "many";</code> written as a literal is the load error <code>cannot assign 'string' to field 'count' declared 'int'</code>.) Statics are inherited names, as in C++: a class&#x27;s code sees its own and its bases&#x27; statics bare, a base method running for a subclass instance reads its own class&#x27;s statics, and <code>Derived::count</code> names the base&#x27;s static unless <code>Derived</code> declares a member of that name:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { static int count = 0; static int bump() { count += 1; return count; } }
 class Derived : Base {

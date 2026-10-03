@@ -202,9 +202,9 @@ r = 7.9;                       // so the store converts as hp = 7.9 would
 print("hp = {}", hp);
 try { r = "full"; } catch (err) { print("caught: {}", err); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 5
-caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;bump&#x27; (declared int)
+caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;bump&#x27; (declared int&amp;)
 hp = 7
-caught: Cannot assign string to a variable declared int</code></pre></div>
+caught: Cannot assign string to &#x27;r&#x27; (declared int&amp;)</code></pre></div>
 <h2 id="escape-hatch-4-range-for-with-auto">Escape hatch 4: range-for with <code>auto&amp;</code><a class="hlink" href="#escape-hatch-4-range-for-with-auto" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
 for (auto x : nums) { x *= 2; }       // copies: original unchanged

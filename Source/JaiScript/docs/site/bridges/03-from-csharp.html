@@ -237,12 +237,14 @@ string upper = name.to_upper();       // changes name and returns it
 print(name, " ", copy, " ", upper, " ", string::to_lower(upper), " ", upper);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ADA ada ADA ada ADA</code></pre></div>
 <h3 id="statics">Statics use ::<a class="hlink" href="#statics" aria-label="link">&#8203;</a></h3>
-<p><code>Config::volume</code> reaches a static; <code>Config.volume</code> is a member lookup on the class itself and fails when it runs:</p>
+<p><code>Config::volume</code> reaches a static. <code>Config.volume</code> is an error that names the right spelling: the checker reports it at load, and with checking off it raises the same text when it runs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config { static int volume = 7; }
 print(Config::volume);
 print(Config.volume);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7
-== error: function has no member 'volume'</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+main.jai:3:14: error: 'Config' is a class; use Config::volume
+    print(Config.volume);
+                 ^</code></pre></div>
 <h3 id="integers">Integers are 64-bit and checked<a class="hlink" href="#integers" aria-label="link">&#8203;</a></h3>
 <p>There is no wrap at 2<sup>31</sup>, and overflow at 2<sup>63</sup> raises instead of wrapping, as if every block were <code>checked</code>. <code>math::wrap_add</code>, <code>wrap_sub</code> and <code>wrap_mul</code> are the unchecked arithmetic:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int big = 2147483647;

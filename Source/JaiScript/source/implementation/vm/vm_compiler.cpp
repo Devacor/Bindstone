@@ -3855,7 +3855,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = ir::arith; op.tok = static_cast<uint8_t>((st.c & incdec_flag_increment) ? token_type::plus : token_type::minus); op.a = e; op.b = e; op.c = k_typed_const_bit | int_one();
 			} else if ((st.op == opcode::op_load || st.op == opcode::op_const) && ip + 1 < back && (code[ip + 1].op == opcode::op_store || code[ip + 1].op == opcode::op_decl_var) &&
 			           (code[ip + 1].op == opcode::op_decl_var ? (code[ip + 1].b != 0 && (code[ip + 1].c == 0 || st.op == opcode::op_load) && code[ip + 1].a < c.nodes.size()) : ((code[ip + 1].b == k_invalid_u32 || code[ip + 1].b < k_typed_slot_mask) && !(code[ip + 1].c & (store_flag_ref_alias | store_flag_global_only)) && (code[ip + 1].c & store_flag_no_result))) &&
-			           (st.op == opcode::op_const ? (st.a < c.constants.size() && st.a < k_typed_slot_mask && (c.constants[st.a].raw_storage_index() == script_value::TYPEID_INT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_FLOAT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_BOOL)) : (st.a != k_invalid_u32 && st.a < k_typed_slot_mask && st.c == 0))) {
+			           (st.op == opcode::op_const ? (st.a < c.constants.size() && st.a < k_typed_slot_mask && (c.constants[st.a].raw_storage_index() == script_value::TYPEID_INT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_FLOAT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_BOOL)) : (st.c == 0 && (st.a != k_invalid_u32 ? st.a < k_typed_slot_mask : st.b < c.symbols.size())))) {
 				// a general move the typed rows left alone (`painted = true;`, `bool b = other;`, `g = x;` onto an environment value): the
 				// pair (a push, a store or a declaration) is one move by the declared-type rule
 				const vm_instruction& sn = code[ip + 1];
@@ -3870,6 +3870,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				} else if (sn.b == k_invalid_u32) { op.a = k_ir_env_bit | env_written(sn.a, k_typed_dst_store, ip + 1); }
 				else { use_slot(sn.b, 0, true, k_typed_dst_store, nullptr, ip + 1); op.a = sn.b; op.writes = sn.b; }
 				if (st.op == opcode::op_const) { op.b = k_typed_const_bit | st.a; }
+				else if (st.a == k_invalid_u32) {   // an environment name (a ternary arm's `t = h < 60 ? T_DEADTREE : T_SWAMP`): the cell its reads share
+					if (sn.op == opcode::op_decl_var && op.tok == 1) { refuse(chunk::cell_refusal_translation, ip); break; }
+					fused_operand o; o.symbol = st.b; o.ident_node = ip < c.ident_nodes.size() ? c.ident_nodes[ip] : k_invalid_u32;
+					op.b = k_ir_env_bit | env_cell(o, 0, static_cast<uint32_t>(ip * 3), ip);
+				}
 				else { use_slot(st.a, 0, false, 0, nullptr, ip); op.b = st.a; slot_read(op, st.a); }
 				op.kind = ir::mov;
 				ops.push_back(op);

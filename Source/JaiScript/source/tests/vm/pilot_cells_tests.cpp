@@ -4697,6 +4697,40 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_true(fl.find("-- cell loop") != std::string::npos && fl.find("C_BAIL") != std::string::npos && fl.find("bail dominates") == std::string::npos, std::string(fn) + "keeps the block: " + fl);
 			}
 		});
+		test("a_conditional_assignments_environment_arms_run_in_the_block", [this]() {
+			// Gator Quest's gen_bayou and gen_gloomfen: `t = h < 220 ? T_CYPRESS : (h < 340 ? T_REEDS : ...)` inside an if arm stores a
+			// program-scope name into a typed local in each arm; the move takes the name's environment cell, so the loop runs whole as a block
+			// (no bail, no boundary). A call door that rewrites a name an arm reads leaves the arm reading the new value
+			const std::string prelude =
+				"int TA = 1; int TB = 2; int TC = 3; int TD = 4; int TE = 5; int TF = 6; int TG = 7;\n"
+				"array<int> TILES = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];\n"
+				"int hashv(int x, int y) { return ((x * 73856093) ^ (y * 19349663)) & 1023; }\n"
+				"void gen(int ww, int hh) { for (int y = 0; y < hh; ++y) { for (int x = 0; x < ww; ++x) {\n"
+				"  int e = hashv(x + 1, y + 7); int h = hashv(x, y); int t = TA;\n"
+				"  if (e > 560) { t = h < 220 ? TB : (h < 340 ? TC : (h < 560 ? TD : (h < 640 ? TE : TF))); }\n"
+				"  else if (e > 500) { t = h < 300 ? TC : TD; }\n"
+				"  else { t = h < 70 ? TG : (h < 90 ? TB : TA); }\n"
+				"  TILES[y * ww + x] = t; } } }\n"
+				"array<int> LOG;\n"
+				"int bump_tb(int v) { TB = TB + 10; LOG.push(v); return v; }\n"
+				"int rewrite(int n) { int s = 0; for (int i = 0; i < n; ++i) { int e = bump_tb(i); int t = TA; if (e > 1) { t = e < 4 ? TB : TC; } s = s + t; } return s; }\n"
+				"string dump() { string s = \"\"; for (int i = 0; i < TILES.size(); ++i) { s = s + to_string(TILES[i]); } return s; }\n";
+			const std::string run = "gen(8, 4); dump() + \"|\" + to_string(rewrite(6)) + \"|\" + to_string(TB);";
+			const std::string want = run_on(false, prelude + run);
+			both(prelude + run, want, "environment arms");
+			both(prelude + run, want, "environment arms, proofs off", false);
+			const std::string l = listing_run(prelude + run);
+			auto section = [&](const char* fn) { const size_t at = l.find(fn); return at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at); };
+			const std::string gl = section("== gen ");
+			check_true(gl.find("-- cell loop") != std::string::npos && gl.find("-- open loop") == std::string::npos && gl.find("C_BAIL") == std::string::npos && gl.find("boundaries") == std::string::npos, "gen runs whole as blocks: " + gl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(want, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

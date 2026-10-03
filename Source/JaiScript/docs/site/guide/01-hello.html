@@ -118,7 +118,14 @@ print(to_json({"a": 1}));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[array]
 [1,2,3]
 {&quot;a&quot;:1}</code></pre></div>
-<p><code>type_of(x)</code> returns one of: <code>null bool int float char string array map function object reference weak_ptr</code>, except for a class instance, which answers its own class name.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/index.html"><span>&larr; guide</span>The Language Guide</a><a class="next" rel="next" href="../guide/02-type-ladder.html"><span>next &rarr;</span>The Type Ladder: typed, auto, var</a></nav></article>
+<p><code>type_of(x)</code> answers <code>null</code>, <code>bool</code>, <code>int</code>, <code>float</code>, <code>char</code>, <code>string</code>, <code>utf8_string</code>, <code>array</code>, <code>map</code>, <code>function</code> or <code>weak_ptr</code>. A class instance answers its class's name, and so does a <code>shared_ptr</code> handle to one (<code>Foo</code>, <code>math::vec2</code>, <code>time::stopwatch</code>); a reference answers the type of what it refers to; a coroutine handle answers <code>object</code>. A typed array is still <code>array</code>: its element type lives in its declaration.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Foo { }
+var handle = new Foo();
+int x = 1;
+auto&amp; r = x;
+array&lt;int&gt; xs = [1];
+print(type_of(Foo()), " ", type_of(handle), " ", type_of(r), " ", type_of(xs), " ", type_of(math::vec2(1, 2)));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Foo Foo int array math::vec2</code></pre></div><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/index.html"><span>&larr; guide</span>The Language Guide</a><a class="next" rel="next" href="../guide/02-type-ladder.html"><span>next &rarr;</span>The Type Ladder: typed, auto, var</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

@@ -152,7 +152,7 @@ stdlib cost hundreds of warm executes. Reuse engines; never build one per evalua
 the cost is per-call frame setup, not opcode count. Bare self tail calls are the exception: on the VM,
 <code>return f(args)</code> reuses the live frame (constant stack space, no depth limit, ~40 ns per
 call), so accumulator-style tail recursion runs at loop speed and any depth. The interpreter keeps its
-call-depth cap (256 active calls by default, <a href="05-safety-rails.html">Safety Rails</a>). The caveat applies to
+call-depth cap (256 active calls by default, about 150 to 200 on a 1 MB thread, <a href="05-safety-rails.html">Safety Rails</a>). The caveat applies to
 non-tail shapes like fib&#x27;s <code>f(n-1) + f(n-2)</code>: most game scripts are loop- and
 method-shaped, where the gap is small to none. Keep naive deep <em>non-tail</em> recursion out of
 per-frame hot paths, or express the algorithm iteratively.</li>

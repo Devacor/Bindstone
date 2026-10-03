@@ -111,7 +111,7 @@ local function run_smoke()
 end
 
 if arg_flag("smoke") then
-	os.exit(run_smoke())
+	os.exit(run_smoke(), true)   -- close the state: finalizers run (LuaJIT -jp reports at close)
 end
 print("usage: lua gatorquest.lua smoke [ticks N] [seed S] [bots K] [verbose]")
 os.exit(2)

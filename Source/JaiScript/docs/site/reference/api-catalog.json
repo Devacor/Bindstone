@@ -12,7 +12,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.size() -> int"
+      "display": "array<T>.size() -> int",
+      "example": {
+        "code": "array<int> xs = [4, 5, 6];\nprint(xs.size(), \" \", xs.empty());",
+        "output": "3 false"
+      }
     },
     {
       "owner": "array<T>",
@@ -48,7 +52,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.push(value: T) -> void"
+      "display": "array<T>.push(value: T) -> void",
+      "example": {
+        "code": "array<int> xs = [1, 2];\nxs.push(3);\nprint(to_json(xs));",
+        "output": "[1,2,3]"
+      }
     },
     {
       "owner": "array<T>",
@@ -60,7 +68,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.pop() -> T"
+      "display": "array<T>.pop() -> T",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nprint(xs.pop(), \" \", to_json(xs));",
+        "output": "3 [1,2]"
+      }
     },
     {
       "owner": "array<T>",
@@ -72,7 +84,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.clear() -> void"
+      "display": "array<T>.clear() -> void",
+      "example": {
+        "code": "array<int> xs = [4, 5, 6];\nxs.clear();\nprint(xs.size());",
+        "output": "0"
+      }
     },
     {
       "owner": "array<T>",
@@ -96,7 +112,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.back() -> T"
+      "display": "array<T>.back() -> T",
+      "example": {
+        "code": "array<int> xs = [4, 5, 6];\nprint(xs.front(), \" \", xs.back());",
+        "output": "4 6"
+      }
     },
     {
       "owner": "array<T>",
@@ -132,7 +152,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.index_of(value: var) -> int"
+      "display": "array<T>.index_of(value: var) -> int",
+      "example": {
+        "code": "array<string> xs = [\"a\", \"b\"];\nprint(xs.index_of(\"b\"), \" \", xs.index_of(\"z\"));",
+        "output": "1 -1"
+      }
     },
     {
       "owner": "array<T>",
@@ -156,7 +180,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.contains(value: var) -> bool"
+      "display": "array<T>.contains(value: var) -> bool",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nprint(xs.contains(2), \" \", xs.contains(9));",
+        "output": "true false"
+      }
     },
     {
       "owner": "array<T>",
@@ -168,7 +196,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.slice(start: int = 0, end: int = size()) -> array<T>"
+      "display": "array<T>.slice(start: int = 0, end: int = size()) -> array<T>",
+      "example": {
+        "code": "array<int> xs = [0, 1, 2, 3, 4];\narray<int> part = array::slice(xs, 1, 3);   // a copy\nxs.slice(3);                                 // xs itself becomes [3, 4]\nprint(to_json(part), \" \", to_json(xs));",
+        "output": "[1,2] [3,4]"
+      }
     },
     {
       "owner": "array<T>",
@@ -180,7 +212,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.filter(predicate: function(T[, int]) -> bool) -> array<T>"
+      "display": "array<T>.filter(predicate: function(T[, int]) -> bool) -> array<T>",
+      "example": {
+        "code": "array<int> hp = [5, 0, 12, 0];\narray<int> alive = array::filter(hp, h => h > 0);   // a copy\nhp.filter(h => h > 10);                            // in place\nprint(to_json(alive), \" \", to_json(hp));",
+        "output": "[5,12] [12]"
+      }
     },
     {
       "owner": "array<T>",
@@ -192,7 +228,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.sort(predicate: function(T, T) -> bool = omitted) -> void"
+      "display": "array<T>.sort(predicate: function(T, T) -> bool = omitted) -> void",
+      "example": {
+        "code": "array<int> xs = [3, 1, 2];\nxs.sort();\nprint(to_json(xs));\nxs.sort((a, b) => a > b);\nprint(to_json(xs));",
+        "output": "[1,2,3]\n[3,2,1]"
+      }
     },
     {
       "owner": "array<T>",
@@ -204,7 +244,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.reverse() -> void"
+      "display": "array<T>.reverse() -> void",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nxs.reverse();\nprint(to_json(xs), \" \", to_json(array::reverse(xs)));",
+        "output": "[3,2,1] [1,2,3]"
+      }
     },
     {
       "owner": "array<T>",
@@ -228,7 +272,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.remove_if(predicate: function(T) -> bool) -> int"
+      "display": "array<T>.remove_if(predicate: function(T) -> bool) -> int",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3, 4, 5];\nprint(xs.remove_if(x => x % 2 == 0), \" \", to_json(xs));",
+        "output": "2 [1,3,5]"
+      }
     },
     {
       "owner": "array<T>",
@@ -240,7 +288,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.join(separator: string = \"\") -> string"
+      "display": "array<T>.join(separator: string = \"\") -> string",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nprint(xs.join(\", \"));",
+        "output": "1, 2, 3"
+      }
     },
     {
       "owner": "array<T>",
@@ -252,7 +304,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.map(callback: function(T[, int]) -> var) -> array<T>"
+      "display": "array<T>.map(callback: function(T[, int]) -> var) -> array<T>",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nxs.map(x => x * 10);       // in place, keeps array<int>\nprint(to_json(xs));",
+        "output": "[10,20,30]"
+      }
     },
     {
       "owner": "array<T>",
@@ -264,7 +320,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.reduce(callback: function(var, T[, int]) -> R, initial: var = first_element) -> R"
+      "display": "array<T>.reduce(callback: function(var, T[, int]) -> R, initial: var = first_element) -> R",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3, 4];\nprint(xs.reduce((sum, x) => sum + x), \" \", xs.reduce((sum, x) => sum + x, 100));",
+        "output": "10 110"
+      }
     },
     {
       "owner": "array<T>",
@@ -276,7 +336,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.for_each(callback: function(T[, int]) -> var) -> void"
+      "display": "array<T>.for_each(callback: function(T[, int]) -> var) -> void",
+      "example": {
+        "code": "array<string> xs = [\"a\", \"b\"];\nxs.for_each((s, i) => print(i, \": \", s));",
+        "output": "0: a\n1: b"
+      }
     },
     {
       "owner": "array<T>",
@@ -288,7 +352,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.find(predicate: function(T[, int]) -> bool) -> T or null"
+      "display": "array<T>.find(predicate: function(T[, int]) -> bool) -> T or null",
+      "example": {
+        "code": "array<string> names = [\"ann\", \"bob\", \"cy\"];\nprint(names.find(n => n.size() == 3), \" \", names.find(n => n == \"zed\"));",
+        "output": "ann null"
+      }
     },
     {
       "owner": "array<T>",
@@ -300,7 +368,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.find_index(predicate: function(T[, int]) -> bool) -> int"
+      "display": "array<T>.find_index(predicate: function(T[, int]) -> bool) -> int",
+      "example": {
+        "code": "array<string> names = [\"ann\", \"bob\", \"cy\"];\nprint(names.find_index(n => n == \"cy\"), \" \", names.find_index(n => n == \"zed\"));",
+        "output": "2 -1"
+      }
     },
     {
       "owner": "array<T>",
@@ -312,7 +384,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.some(predicate: function(T[, int]) -> bool) -> bool"
+      "display": "array<T>.some(predicate: function(T[, int]) -> bool) -> bool",
+      "example": {
+        "code": "array<int> xs = [1, 3, 4];\nprint(xs.some(x => x % 2 == 0), \" \", xs.every(x => x > 0));",
+        "output": "true true"
+      }
     },
     {
       "owner": "array<T>",
@@ -324,7 +400,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.every(predicate: function(T[, int]) -> bool) -> bool"
+      "display": "array<T>.every(predicate: function(T[, int]) -> bool) -> bool",
+      "example": {
+        "code": "array<int> xs = [2, 4, 7];\nprint(xs.every(x => x % 2 == 0));",
+        "output": "false"
+      }
     },
     {
       "owner": "array<T>",
@@ -336,7 +416,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.concat(other: array<var> or array<T>) -> array<T>"
+      "display": "array<T>.concat(other: array<var> or array<T>) -> array<T>",
+      "example": {
+        "code": "array<int> a = [1];\nprint(to_json(array::concat(a, [2, 3])), \" \", to_json(a));",
+        "output": "[1,2,3] [1]"
+      }
     },
     {
       "owner": "array<T>",
@@ -348,7 +432,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.insert(index: int, value: T) -> void"
+      "display": "array<T>.insert(index: int, value: T) -> void",
+      "example": {
+        "code": "array<string> xs = [\"a\", \"c\"];\nxs.insert(1, \"b\");\nprint(to_json(xs));",
+        "output": "[\"a\",\"b\",\"c\"]"
+      }
     },
     {
       "owner": "map<K,V>",
@@ -408,7 +496,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "map<K,V>.contains(key: K) -> bool"
+      "display": "map<K,V>.contains(key: K) -> bool",
+      "example": {
+        "code": "map<string, int> stock = {\"axe\": 2};\nprint(stock.contains(\"axe\"), \" \", stock.contains(\"bow\"));",
+        "output": "true false"
+      }
     },
     {
       "owner": "map<K,V>",
@@ -432,7 +524,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "map<K,V>.erase(key: K) -> bool"
+      "display": "map<K,V>.erase(key: K) -> bool",
+      "example": {
+        "code": "map<string, int> stock = {\"axe\": 2, \"bow\": 1};\nprint(stock.erase(\"axe\"), \" \", stock.erase(\"axe\"), \" \", to_json(stock));",
+        "output": "true false {\"bow\":1}"
+      }
     },
     {
       "owner": "map<K,V>",
@@ -456,7 +552,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "map<K,V>.keys() -> array<var>"
+      "display": "map<K,V>.keys() -> array<var>",
+      "example": {
+        "code": "map<string, int> stock = {\"bow\": 1, \"axe\": 2};\nprint(to_json(stock.keys()), \" \", to_json(stock.values()));",
+        "output": "[\"axe\",\"bow\"] [2,1]"
+      }
     },
     {
       "owner": "map<K,V>",
@@ -480,7 +580,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "map<K,V>.get(key: K, fallback: var = null) -> V or var"
+      "display": "map<K,V>.get(key: K, fallback: var = null) -> V or var",
+      "example": {
+        "code": "map<string, int> stock = {\"axe\": 2};\nprint(stock.get(\"axe\"), \" \", stock.get(\"bow\"), \" \", stock.get(\"bow\", 0), \" \", stock.size());",
+        "output": "2 null 0 1"
+      }
     },
     {
       "owner": "map<K,V>",
@@ -492,7 +596,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "map<K,V>.to_array() -> array<array<var>>"
+      "display": "map<K,V>.to_array() -> array<array<var>>",
+      "example": {
+        "code": "map<string, int> stock = {\"axe\": 2};\nprint(to_json(stock.to_array()));",
+        "output": "[[\"axe\",2]]"
+      }
     },
     {
       "owner": "map<K,V>",
@@ -504,7 +612,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "map<K,V>.filter(predicate: function(K, V) -> bool) -> map<K,V>"
+      "display": "map<K,V>.filter(predicate: function(K, V) -> bool) -> map<K,V>",
+      "example": {
+        "code": "map<string, int> stock = {\"axe\": 2, \"bow\": 0};\nauto in_stock = stock.filter((k, v) => v > 0);   // a filtered copy\nprint(to_json(in_stock), \" \", to_json(stock));",
+        "output": "{\"axe\":2} {\"axe\":2,\"bow\":0}"
+      }
     },
     {
       "owner": "map<K,V>",
@@ -516,7 +628,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "map<K,V>.remove_if(predicate: function(K, V) -> bool) -> int"
+      "display": "map<K,V>.remove_if(predicate: function(K, V) -> bool) -> int",
+      "example": {
+        "code": "map<string, int> stock = {\"axe\": 2, \"bow\": 0, \"cap\": 0};\nprint(stock.remove_if((k, v) => v == 0), \" \", to_json(stock));",
+        "output": "2 {\"axe\":2}"
+      }
     },
     {
       "owner": "string",
@@ -564,7 +680,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.at(index: int) -> char"
+      "display": "string.at(index: int) -> char",
+      "example": {
+        "code": "string s = \"abc\";\nprint(s.at(1), \" \", s[2], \" \", type_of(s.at(0)));",
+        "output": "b c char"
+      }
     },
     {
       "owner": "string",
@@ -600,7 +720,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.substr(start: int, count: int = remaining) -> Self"
+      "display": "string.substr(start: int, count: int = remaining) -> Self",
+      "example": {
+        "code": "print(\"dungeon\".substr(3), \" \", \"dungeon\".substr(0, 3));",
+        "output": "geon dun"
+      }
     },
     {
       "owner": "string",
@@ -612,7 +736,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.find(needle: text, start: int = 0) -> int"
+      "display": "string.find(needle: text, start: int = 0) -> int",
+      "example": {
+        "code": "print(\"banana\".find(\"an\"), \" \", \"banana\".find(\"an\", 2), \" \", \"banana\".find(\"x\"));",
+        "output": "1 3 -1"
+      }
     },
     {
       "owner": "string",
@@ -684,7 +812,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.contains(needle: text) -> bool"
+      "display": "string.contains(needle: text) -> bool",
+      "example": {
+        "code": "print(\"hello\".contains(\"ell\"), \" \", \"hello\".count(\"l\"));",
+        "output": "true 2"
+      }
     },
     {
       "owner": "string",
@@ -696,7 +828,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.starts_with(prefix: text) -> bool"
+      "display": "string.starts_with(prefix: text) -> bool",
+      "example": {
+        "code": "print(\"player_1\".starts_with(\"player\"), \" \", \"a.jai\".ends_with(\".jai\"));",
+        "output": "true true"
+      }
     },
     {
       "owner": "string",
@@ -732,7 +868,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.to_int(fallback: var = null, base: int = 10) -> int or fallback"
+      "display": "string.to_int(fallback: var = null, base: int = 10) -> int or fallback",
+      "example": {
+        "code": "print(\"42\".to_int(), \" \", \"ff\".to_int(0, 16), \" \", \"x\".to_int(-1), \" \", \"2.5\".to_float());",
+        "output": "42 255 -1 2.5"
+      }
     },
     {
       "owner": "string",
@@ -768,7 +908,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.to_upper() -> Self"
+      "display": "string.to_upper() -> Self",
+      "example": {
+        "code": "string s = \"loud\";\nstring t = s.to_upper();     // changes s and returns it\nprint(s, \" \", t, \" \", string::to_lower(t));",
+        "output": "LOUD LOUD loud"
+      }
     },
     {
       "owner": "string",
@@ -780,7 +924,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.trim(characters: text = string::whitespace) -> Self"
+      "display": "string.trim(characters: text = string::whitespace) -> Self",
+      "example": {
+        "code": "string s = \"  hi  \";\ns.trim();                        // in place\nstring t = \"--x--\";\nt.trim(\"-\");                     // a chosen character set\nprint(\"[\", s, \"] [\", t, \"] [\", string::trim(\"  copy  \"), \"]\");",
+        "output": "[hi] [x] [copy]"
+      }
     },
     {
       "owner": "string",
@@ -816,7 +964,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.pad_left(width: int, fill: char or text = ' ') -> Self"
+      "display": "string.pad_left(width: int, fill: char or text = ' ') -> Self",
+      "example": {
+        "code": "print(\"[\", \"7\".pad_left(3, '0'), \"] [\", \"ab\".pad_right(4), \"]\");",
+        "output": "[007] [ab  ]"
+      }
     },
     {
       "owner": "string",
@@ -876,7 +1028,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.replace_all(from: text, to: text) -> Self"
+      "display": "string.replace_all(from: text, to: text) -> Self",
+      "example": {
+        "code": "string s = \"a-b-c\";\ns.replace_all(\"-\", \"+\");\nprint(s);",
+        "output": "a+b+c"
+      }
     },
     {
       "owner": "string",
@@ -948,7 +1104,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.repeat(count: int) -> Self"
+      "display": "string.repeat(count: int) -> Self",
+      "example": {
+        "code": "print(\"ab\".repeat(3));",
+        "output": "ababab"
+      }
     },
     {
       "owner": "string",
@@ -960,7 +1120,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.split(separator: text = whitespace, max_splits: int = -1) -> array<string>"
+      "display": "string.split(separator: text = whitespace, max_splits: int = -1) -> array<string>",
+      "example": {
+        "code": "print(to_json(\"a  b\\tc\".split()));\nprint(to_json(\"a,,b\".split(\",\")));\nprint(to_json(\"k=v=w\".split(\"=\", 1)));",
+        "output": "[\"a\",\"b\",\"c\"]\n[\"a\",\"\",\"b\"]\n[\"k\",\"v=w\"]"
+      }
     },
     {
       "owner": "string",
@@ -1032,7 +1196,11 @@
       "source": "include/jaiscript/detail/string_methods_more.hpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.lines() -> array<Self>"
+      "display": "string.lines() -> array<Self>",
+      "example": {
+        "code": "print(to_json(\"one\\ntwo\".lines()));",
+        "output": "[\"one\",\"two\"]"
+      }
     },
     {
       "owner": "string",
@@ -1044,7 +1212,11 @@
       "source": "include/jaiscript/detail/string_methods_more.hpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.partition(separator: text) -> array<Self>"
+      "display": "string.partition(separator: text) -> array<Self>",
+      "example": {
+        "code": "print(to_json(\"key=value=more\".partition(\"=\")));",
+        "output": "[\"key\",\"=\",\"value=more\"]"
+      }
     },
     {
       "owner": "string",
@@ -1164,7 +1336,11 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "string.to_bytes(offset: int = 0, count: int = remaining) -> array<uint8>"
+      "display": "string.to_bytes(offset: int = 0, count: int = remaining) -> array<uint8>",
+      "example": {
+        "code": "print(to_json(\"AB\".to_bytes()), \" \", string::from_bytes([72, 105]));",
+        "output": "[65,66] Hi"
+      }
     },
     {
       "owner": "string",
@@ -1892,7 +2068,7 @@
       "signature": "same_as(other: var) -> bool",
       "provider": "core",
       "effect": "observe",
-      "notes": "Identity; also available on other value kinds.",
+      "notes": "True when both handles share one object. same_object(x, y) asks the same question of any two values.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
@@ -1952,7 +2128,7 @@
       "signature": "resume() -> var",
       "provider": "core",
       "effect": "advance, callback",
-      "notes": "Next yielded value; completed handle returns its completion result.",
+      "notes": "Runs to the next yield and returns its value; the call that finishes the body returns the return value. Resuming a completed coroutine raises Cannot resume a completed coroutine. Takes no arguments.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
@@ -1969,18 +2145,6 @@
       "form": "method",
       "availability": "Every engine",
       "display": "coroutine.done() -> bool"
-    },
-    {
-      "owner": "value",
-      "name": "same_as",
-      "signature": "same_as(other: var) -> bool",
-      "provider": "core",
-      "effect": "observe",
-      "notes": "Universal identity helper.",
-      "source": "source/implementation/interpreter.cpp",
-      "form": "method",
-      "availability": "Every engine",
-      "display": "value.same_as(other: var) -> bool"
     },
     {
       "owner": "global",
@@ -2016,7 +2180,11 @@
       "source": "source/implementation/engine.cpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "same_object(left: var, right: var) -> bool"
+      "display": "same_object(left: var, right: var) -> bool",
+      "example": {
+        "code": "array<int> a = [1];\narray<int> b = a;\nauto& r = a;\nprint(same_object(a, b), \" \", same_object(a, r), \" \", a == b);",
+        "output": "false true true"
+      }
     },
     {
       "owner": "global",
@@ -2088,7 +2256,7 @@
       "source": "source/implementation/parser.cpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "language.cast<T>(value: var) -> T"
+      "display": "cast<T>(value: var) -> T"
     },
     {
       "owner": "language",
@@ -2100,7 +2268,7 @@
       "source": "source/implementation/parser.cpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "language.include(path: string) -> var"
+      "display": "include(path: string) -> var"
     },
     {
       "owner": "language",
@@ -2112,7 +2280,7 @@
       "source": "source/implementation/parser.cpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "language.import(paths: string or array<string>..., force: jai::force = omitted) -> bool"
+      "display": "import(paths: string or array<string>..., force: jai::force = omitted) -> bool"
     },
     {
       "owner": "global",
@@ -2232,7 +2400,11 @@
       "source": "source/implementation/engine.cpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "file_name(path: string) -> string"
+      "display": "file_name(path: string) -> string",
+      "example": {
+        "code": "print(file_name(\"assets/maps/e1m1.jai\"));",
+        "output": "e1m1.jai"
+      }
     },
     {
       "owner": "global",
@@ -2304,7 +2476,11 @@
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "format(template: string, values: var...) -> string"
+      "display": "format(template: string, values: var...) -> string",
+      "example": {
+        "code": "print(format(\"{} has {} hp\", \"orc\", 7));",
+        "output": "orc has 7 hp"
+      }
     },
     {
       "owner": "global",
@@ -2316,7 +2492,11 @@
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "to_string(value: var) -> string"
+      "display": "to_string(value: var) -> string",
+      "example": {
+        "code": "print(to_string(3) + \"!\", \" \", to_string(2.5), \" \", to_string([1, 2]));",
+        "output": "3! 2.5 [array]"
+      }
     },
     {
       "owner": "global",
@@ -2328,7 +2508,11 @@
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "type_of(value: var) -> string"
+      "display": "type_of(value: var) -> string",
+      "example": {
+        "code": "print(type_of(1), \" \", type_of(1.5), \" \", type_of(\"s\"), \" \", type_of([1]));",
+        "output": "int float string array"
+      }
     },
     {
       "owner": "global",
@@ -2352,7 +2536,11 @@
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "to_char(code: int) -> char"
+      "display": "to_char(code: int) -> char",
+      "example": {
+        "code": "print(to_char(65), \" \", type_of(to_char(65)));",
+        "output": "A char"
+      }
     },
     {
       "owner": "global",
@@ -2376,7 +2564,11 @@
       "source": "include/jaiscript/stdlib/json.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "to_json(value: var, indent: int = -1) -> string"
+      "display": "to_json(value: var, indent: int = -1) -> string",
+      "example": {
+        "code": "print(to_json({\"hp\": 3, \"tags\": [\"a\"]}));\nprint(to_json([1, 2], 2));",
+        "output": "{\"hp\":3,\"tags\":[\"a\"]}\n[\n  1,\n  2\n]"
+      }
     },
     {
       "owner": "global",
@@ -2388,7 +2580,11 @@
       "source": "include/jaiscript/stdlib/json.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "from_json(text: string) -> var"
+      "display": "from_json(text: string) -> var",
+      "example": {
+        "code": "var v = from_json(\"{\\\"hp\\\": 3, \\\"tags\\\": [\\\"a\\\"]}\");\nprint(v[\"hp\"], \" \", v[\"tags\"][0]);",
+        "output": "3 a"
+      }
     },
     {
       "owner": "global",
@@ -2472,7 +2668,11 @@
       "source": "include/jaiscript/stdlib/containers.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "merge(first: map<K,V>, second: map) -> map<K,V>"
+      "display": "merge(first: map<K,V>, second: map) -> map<K,V>",
+      "example": {
+        "code": "print(to_json(merge({\"a\": 1, \"b\": 2}, {\"b\": 3})));",
+        "output": "{\"a\":1,\"b\":3}"
+      }
     },
     {
       "owner": "string",
@@ -2484,7 +2684,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.to_lower(value: text) -> same_text_kind"
+      "display": "string::to_lower(value: text) -> same_text_kind"
     },
     {
       "owner": "string",
@@ -2496,7 +2696,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.to_upper(value: text) -> same_text_kind"
+      "display": "string::to_upper(value: text) -> same_text_kind"
     },
     {
       "owner": "string",
@@ -2508,7 +2708,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.from_code(codepoint: int) -> string"
+      "display": "string::from_code(codepoint: int) -> string"
     },
     {
       "owner": "string",
@@ -2520,7 +2720,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.is_valid_utf8(value: text) -> bool"
+      "display": "string::is_valid_utf8(value: text) -> bool"
     },
     {
       "owner": "string",
@@ -2532,19 +2732,23 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.join(values: array, separator: text = \"\") -> string"
+      "display": "string::join(values: array, separator: text = \"\") -> string",
+      "example": {
+        "code": "print(string::join([\"a\", \"b\", \"c\"], \"/\"));",
+        "output": "a/b/c"
+      }
     },
     {
       "owner": "string",
       "name": "trim",
-      "signature": "trim(characters: text = \" \\t\\r\\n\") -> Self",
+      "signature": "trim(value: text) -> same_text_kind",
       "provider": "stdlib",
       "effect": "copy",
-      "notes": "Returns receiver text for chaining; character set selects trimmed bytes.",
+      "notes": "Returns a copy without the whitespace class (space, tab, LF, VT, FF, CR) at both ends; a utf8_string argument returns a utf8_string. The method form takes a character set.",
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.trim(characters: text = \" \\t\\r\\n\") -> Self"
+      "display": "string::trim(value: text) -> same_text_kind"
     },
     {
       "owner": "string",
@@ -2556,7 +2760,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.replace_all(value: text, from: text, to: text) -> same_text_kind"
+      "display": "string::replace_all(value: text, from: text, to: text) -> same_text_kind"
     },
     {
       "owner": "string",
@@ -2568,7 +2772,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.repeat(value: text, count: int) -> same_text_kind"
+      "display": "string::repeat(value: text, count: int) -> same_text_kind"
     },
     {
       "owner": "string",
@@ -2580,7 +2784,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.pad_left(value: text, width: int, fill: char or text = ' ') -> same_text_kind"
+      "display": "string::pad_left(value: text, width: int, fill: char or text = ' ') -> same_text_kind"
     },
     {
       "owner": "string",
@@ -2592,7 +2796,7 @@
       "source": "include/jaiscript/stdlib/strings.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "string.pad_right(value: text, width: int, fill: char or text = ' ') -> same_text_kind"
+      "display": "string::pad_right(value: text, width: int, fill: char or text = ' ') -> same_text_kind"
     },
     {
       "owner": "global",
@@ -2904,7 +3108,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.floor(value: number or vector) -> float or vector"
+      "display": "math::floor(value: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -2916,7 +3120,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ceil(value: number or vector) -> float or vector"
+      "display": "math::ceil(value: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -2928,7 +3132,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.round(value: number or vector) -> float or vector"
+      "display": "math::round(value: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -2940,7 +3144,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.itrunc(value: number) -> int"
+      "display": "math::itrunc(value: number) -> int"
     },
     {
       "owner": "math",
@@ -2952,7 +3156,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ifloor(value: number) -> int"
+      "display": "math::ifloor(value: number) -> int"
     },
     {
       "owner": "math",
@@ -2964,7 +3168,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.sqrt(value: number or vector) -> float or vector"
+      "display": "math::sqrt(value: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -2976,7 +3180,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.pow(base: number or vector, exponent: number or vector) -> float or vector"
+      "display": "math::pow(base: number or vector, exponent: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -2988,7 +3192,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.abs(value: number or vector) -> number or vector"
+      "display": "math::abs(value: number or vector) -> number or vector"
     },
     {
       "owner": "math",
@@ -3000,7 +3204,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.min(left: number or vector, right: number or vector) -> number or vector"
+      "display": "math::min(left: number or vector, right: number or vector) -> number or vector"
     },
     {
       "owner": "math",
@@ -3012,7 +3216,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.max(left: number or vector, right: number or vector) -> number or vector"
+      "display": "math::max(left: number or vector, right: number or vector) -> number or vector"
     },
     {
       "owner": "math",
@@ -3024,7 +3228,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.clamp(value: number or vector, minimum: number or vector, maximum: number or vector) -> number or vector"
+      "display": "math::clamp(value: number or vector, minimum: number or vector, maximum: number or vector) -> number or vector"
     },
     {
       "owner": "math",
@@ -3036,7 +3240,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.sin(angle: number or vector) -> float or vector"
+      "display": "math::sin(angle: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -3048,7 +3252,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.cos(angle: number or vector) -> float or vector"
+      "display": "math::cos(angle: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -3060,7 +3264,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.tan(angle: number or vector) -> float or vector"
+      "display": "math::tan(angle: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -3072,7 +3276,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.atan2(y: number or vector, x: number or vector) -> float or vector"
+      "display": "math::atan2(y: number or vector, x: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -3084,7 +3288,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.radians_to_degrees(angle: number or vector) -> float or vector"
+      "display": "math::radians_to_degrees(angle: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -3096,7 +3300,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.degrees_to_radians(angle: number or vector) -> float or vector"
+      "display": "math::degrees_to_radians(angle: number or vector) -> float or vector"
     },
     {
       "owner": "math",
@@ -3108,7 +3312,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.random() -> float"
+      "display": "math::random() -> float"
     },
     {
       "owner": "math",
@@ -3120,7 +3324,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.random(minimum: number, maximum: number) -> number"
+      "display": "math::random(minimum: number, maximum: number) -> number"
     },
     {
       "owner": "math",
@@ -3132,7 +3336,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.random_seed(seed: int) -> void"
+      "display": "math::random_seed(seed: int) -> void"
     },
     {
       "owner": "math",
@@ -3144,7 +3348,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.lerp(start: number or vector or color, end: same_shape, percent: number) -> same_shape"
+      "display": "math::lerp(start: number or vector or color, end: same_shape, percent: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3156,7 +3360,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.mix(start: number or vector or color, end: same_shape, percent: number) -> same_shape"
+      "display": "math::mix(start: number or vector or color, end: same_shape, percent: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3168,7 +3372,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.unmix(start: number or vector, end: same_shape, value: same_shape) -> number or vector"
+      "display": "math::unmix(start: number or vector, end: same_shape, value: same_shape) -> number or vector"
     },
     {
       "owner": "math",
@@ -3180,7 +3384,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.wrap_add(left: int, right: int) -> int"
+      "display": "math::wrap_add(left: int, right: int) -> int"
     },
     {
       "owner": "math",
@@ -3192,7 +3396,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.wrap_sub(left: int, right: int) -> int"
+      "display": "math::wrap_sub(left: int, right: int) -> int"
     },
     {
       "owner": "math",
@@ -3204,7 +3408,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.wrap_mul(left: int, right: int) -> int"
+      "display": "math::wrap_mul(left: int, right: int) -> int"
     },
     {
       "owner": "math",
@@ -3216,7 +3420,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.length(vector: vector) -> float"
+      "display": "math::length(vector: vector) -> float"
     },
     {
       "owner": "math",
@@ -3228,7 +3432,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.length_squared(vector: vector) -> number"
+      "display": "math::length_squared(vector: vector) -> number"
     },
     {
       "owner": "math",
@@ -3240,7 +3444,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.normalize(vector: vector) -> floating_vector"
+      "display": "math::normalize(vector: vector) -> floating_vector"
     },
     {
       "owner": "math",
@@ -3252,7 +3456,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.dot(left: vector, right: matching_vector) -> number"
+      "display": "math::dot(left: vector, right: matching_vector) -> number"
     },
     {
       "owner": "math",
@@ -3264,7 +3468,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.cross(left: vector2 or vector3, right: matching_vector) -> number or vector3"
+      "display": "math::cross(left: vector2 or vector3, right: matching_vector) -> number or vector3"
     },
     {
       "owner": "math",
@@ -3276,7 +3480,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.distance(left: vector, right: matching_vector) -> float"
+      "display": "math::distance(left: vector, right: matching_vector) -> float"
     },
     {
       "owner": "math",
@@ -3288,7 +3492,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.distance_squared(left: vector, right: matching_vector) -> number"
+      "display": "math::distance_squared(left: vector, right: matching_vector) -> number"
     },
     {
       "owner": "math",
@@ -3300,7 +3504,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.reflect(vector: vector, normal: matching_vector) -> floating_vector"
+      "display": "math::reflect(vector: vector, normal: matching_vector) -> floating_vector"
     },
     {
       "owner": "math",
@@ -3312,7 +3516,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.project(vector: vector, onto: matching_vector) -> floating_vector"
+      "display": "math::project(vector: vector, onto: matching_vector) -> floating_vector"
     },
     {
       "owner": "math",
@@ -3324,7 +3528,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.angle_between(left: vector, right: matching_vector) -> float"
+      "display": "math::angle_between(left: vector, right: matching_vector) -> float"
     },
     {
       "owner": "math",
@@ -3336,7 +3540,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.perpendicular(vector: vector2) -> vector2"
+      "display": "math::perpendicular(vector: vector2) -> vector2"
     },
     {
       "owner": "math",
@@ -3348,7 +3552,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.rotate(vector: vector2, angle: number) -> vector2"
+      "display": "math::rotate(vector: vector2, angle: number) -> vector2"
     },
     {
       "owner": "math",
@@ -3360,7 +3564,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.rotate(vector: vector3, axis: vector3, angle: number) -> vector3"
+      "display": "math::rotate(vector: vector3, axis: vector3, angle: number) -> vector3"
     },
     {
       "owner": "math",
@@ -3372,7 +3576,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.mix_rgb(start: color, end: color, percent: number) -> color"
+      "display": "math::mix_rgb(start: color, end: color, percent: number) -> color"
     },
     {
       "owner": "math",
@@ -3384,7 +3588,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.mix_hsv(start: color, end: color, percent: number) -> color"
+      "display": "math::mix_hsv(start: color, end: color, percent: number) -> color"
     },
     {
       "owner": "math",
@@ -3396,7 +3600,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.remap(value: number or vector, in_start: same_shape, in_end: same_shape, out_start: same_shape, out_end: same_shape) -> number or vector"
+      "display": "math::remap(value: number or vector, in_start: same_shape, in_end: same_shape, out_start: same_shape, out_end: same_shape) -> number or vector"
     },
     {
       "owner": "math",
@@ -3408,7 +3612,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.mix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3420,7 +3624,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.mix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3432,7 +3636,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.mix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3444,7 +3648,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.mix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3456,7 +3660,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3468,7 +3672,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.unmix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3480,7 +3684,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.unmix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3492,7 +3696,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.unmix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
     },
     {
       "owner": "math",
@@ -3504,7 +3708,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec2() -> math::vec2"
+      "display": "math::vec2() -> math::vec2"
     },
     {
       "owner": "math",
@@ -3516,7 +3720,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec2(value: same_dimension_vector) -> math::vec2"
+      "display": "math::vec2(value: same_dimension_vector) -> math::vec2"
     },
     {
       "owner": "math",
@@ -3528,7 +3732,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec2(x: number, y: number) -> math::vec2"
+      "display": "math::vec2(x: number, y: number) -> math::vec2"
     },
     {
       "owner": "math::vec2",
@@ -3624,7 +3828,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec3() -> math::vec3"
+      "display": "math::vec3() -> math::vec3"
     },
     {
       "owner": "math",
@@ -3636,7 +3840,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec3(value: same_dimension_vector) -> math::vec3"
+      "display": "math::vec3(value: same_dimension_vector) -> math::vec3"
     },
     {
       "owner": "math",
@@ -3648,7 +3852,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec3(x: number, y: number, z: number = 0) -> math::vec3"
+      "display": "math::vec3(x: number, y: number, z: number = 0) -> math::vec3"
     },
     {
       "owner": "math::vec3",
@@ -3744,7 +3948,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec4() -> math::vec4"
+      "display": "math::vec4() -> math::vec4"
     },
     {
       "owner": "math",
@@ -3756,7 +3960,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec4(value: same_dimension_vector) -> math::vec4"
+      "display": "math::vec4(value: same_dimension_vector) -> math::vec4"
     },
     {
       "owner": "math",
@@ -3768,7 +3972,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec4(x: number, y: number, z: number = 0, w: number = 0) -> math::vec4"
+      "display": "math::vec4(x: number, y: number, z: number = 0, w: number = 0) -> math::vec4"
     },
     {
       "owner": "math::vec4",
@@ -3840,7 +4044,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ivec2() -> math::ivec2"
+      "display": "math::ivec2() -> math::ivec2"
     },
     {
       "owner": "math",
@@ -3852,7 +4056,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ivec2(value: same_dimension_vector) -> math::ivec2"
+      "display": "math::ivec2(value: same_dimension_vector) -> math::ivec2"
     },
     {
       "owner": "math",
@@ -3864,7 +4068,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ivec2(x: number, y: number) -> math::ivec2"
+      "display": "math::ivec2(x: number, y: number) -> math::ivec2"
     },
     {
       "owner": "math::ivec2",
@@ -3960,7 +4164,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ivec3() -> math::ivec3"
+      "display": "math::ivec3() -> math::ivec3"
     },
     {
       "owner": "math",
@@ -3972,7 +4176,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ivec3(value: same_dimension_vector) -> math::ivec3"
+      "display": "math::ivec3(value: same_dimension_vector) -> math::ivec3"
     },
     {
       "owner": "math",
@@ -3984,7 +4188,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ivec3(x: number, y: number, z: number = 0) -> math::ivec3"
+      "display": "math::ivec3(x: number, y: number, z: number = 0) -> math::ivec3"
     },
     {
       "owner": "math::ivec3",
@@ -4080,7 +4284,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.color() -> math::color"
+      "display": "math::color() -> math::color"
     },
     {
       "owner": "math",
@@ -4092,7 +4296,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.color(value: math::color) -> math::color"
+      "display": "math::color(value: math::color) -> math::color"
     },
     {
       "owner": "math",
@@ -4104,7 +4308,7 @@
       "source": "include/jaiscript/detail/math_values.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.color(red: number, green: number, blue: number, alpha: number = 1) -> math::color"
+      "display": "math::color(red: number, green: number, blue: number, alpha: number = 1) -> math::color"
     },
     {
       "owner": "time",
@@ -4116,7 +4320,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.now() -> float"
+      "display": "time::now() -> float"
     },
     {
       "owner": "time",
@@ -4128,7 +4332,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.engine_elapsed() -> float"
+      "display": "time::engine_elapsed() -> float"
     },
     {
       "owner": "time",
@@ -4140,7 +4344,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.execute_elapsed() -> float"
+      "display": "time::execute_elapsed() -> float"
     },
     {
       "owner": "time",
@@ -4152,7 +4356,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.unix_time() -> float"
+      "display": "time::unix_time() -> float"
     },
     {
       "owner": "time",
@@ -4164,7 +4368,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.unix_ms() -> int"
+      "display": "time::unix_ms() -> int"
     },
     {
       "owner": "time",
@@ -4176,7 +4380,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.date_now(template: string) -> string"
+      "display": "time::date_now(template: string) -> string"
     },
     {
       "owner": "time",
@@ -4188,7 +4392,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.local_now() -> time::date"
+      "display": "time::local_now() -> time::date"
     },
     {
       "owner": "time",
@@ -4200,7 +4404,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.utc_now() -> time::date"
+      "display": "time::utc_now() -> time::date"
     },
     {
       "owner": "time",
@@ -4212,7 +4416,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.date_from_unix(seconds: number, utc: bool = false) -> time::date"
+      "display": "time::date_from_unix(seconds: number, utc: bool = false) -> time::date"
     },
     {
       "owner": "time",
@@ -4224,7 +4428,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.sleep(seconds: number) -> void"
+      "display": "time::sleep(seconds: number) -> void"
     },
     {
       "owner": "time",
@@ -4236,7 +4440,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.sleep_ms(milliseconds: number) -> void"
+      "display": "time::sleep_ms(milliseconds: number) -> void"
     },
     {
       "owner": "time",
@@ -4248,7 +4452,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.stopwatch() -> time::stopwatch"
+      "display": "time::stopwatch() -> time::stopwatch"
     },
     {
       "owner": "time::stopwatch",
@@ -4512,7 +4716,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.type_name(value: var) -> string"
+      "display": "reflect::type_name(value: var) -> string"
     },
     {
       "owner": "reflect",
@@ -4524,7 +4728,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.is_cpp_bound(value: var) -> bool"
+      "display": "reflect::is_cpp_bound(value: var) -> bool"
     },
     {
       "owner": "reflect",
@@ -4536,7 +4740,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.has_field(object_or_class: var, name: string) -> bool"
+      "display": "reflect::has_field(object_or_class: var, name: string) -> bool"
     },
     {
       "owner": "reflect",
@@ -4548,7 +4752,11 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.has_method(object_or_class: var, name: string) -> bool"
+      "display": "reflect::has_method(object_or_class: var, name: string) -> bool",
+      "example": {
+        "code": "class Orc { int hp = 7; void hit() {} }\nprint(reflect::has_field(Orc(), \"hp\"), \" \", reflect::has_method(Orc(), \"hit\"), \" \", reflect::has_method(Orc(), \"fly\"));",
+        "output": "true true false"
+      }
     },
     {
       "owner": "reflect",
@@ -4560,7 +4768,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.classes() -> array<string>"
+      "display": "reflect::classes() -> array<string>"
     },
     {
       "owner": "reflect",
@@ -4572,7 +4780,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.bases(object_or_class: var) -> array<string>"
+      "display": "reflect::bases(object_or_class: var) -> array<string>"
     },
     {
       "owner": "reflect",
@@ -4584,7 +4792,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.generation(object_or_class: var) -> int"
+      "display": "reflect::generation(object_or_class: var) -> int"
     },
     {
       "owner": "reflect",
@@ -4596,7 +4804,11 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.fields(object_or_class: var) -> array<map<string,var>>"
+      "display": "reflect::fields(object_or_class: var) -> array<map<string,var>>",
+      "example": {
+        "code": "class Orc { int hp = 7; string name = \"grok\"; }\nfor (auto f : reflect::fields(Orc())) { print(f[\"name\"], \": \", f[\"type\"]); }",
+        "output": "hp: int\nname: string"
+      }
     },
     {
       "owner": "reflect",
@@ -4608,7 +4820,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.instances(class: class or string) -> array<var>"
+      "display": "reflect::instances(class: class or string) -> array<var>"
     },
     {
       "owner": "reflect",
@@ -4620,7 +4832,11 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.get(object: var, field: string) -> var"
+      "display": "reflect::get(object: var, field: string) -> var",
+      "example": {
+        "code": "class Orc { int hp = 7; }\nOrc o;\nreflect::set(o, \"hp\", 9);\nprint(reflect::get(o, \"hp\"));",
+        "output": "9"
+      }
     },
     {
       "owner": "reflect",
@@ -4632,7 +4848,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.set(object: var, field: string, value: var) -> void"
+      "display": "reflect::set(object: var, field: string, value: var) -> void"
     },
     {
       "owner": "reflect",
@@ -4644,7 +4860,11 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.invoke(object: var, method: string, args: var...) -> var"
+      "display": "reflect::invoke(object: var, method: string, args: var...) -> var",
+      "example": {
+        "code": "class Orc { int add(int a, int b) { return a + b; } }\nprint(reflect::invoke(Orc(), \"add\", 2, 3));",
+        "output": "5"
+      }
     },
     {
       "owner": "reflect",
@@ -4656,7 +4876,11 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.bind(object: var, method: string) -> function"
+      "display": "reflect::bind(object: var, method: string) -> function",
+      "example": {
+        "code": "class Orc { int hp = 7; void hit() { hp -= 1; } }\nauto o = new Orc();\nauto hit = reflect::bind(o, \"hit\");\nhit();\nhit();\nprint(o.hp);",
+        "output": "5"
+      }
     },
     {
       "owner": "reflect",
@@ -4668,7 +4892,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.call(name: string, args: var...) -> var"
+      "display": "reflect::call(name: string, args: var...) -> var"
     },
     {
       "owner": "reflect",
@@ -4680,7 +4904,11 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.construct(class_name: string, args: var...) -> var"
+      "display": "reflect::construct(class_name: string, args: var...) -> var",
+      "example": {
+        "code": "class Orc { int hp = 7; Orc(int h) { hp = h; } }\nvar o = reflect::construct(\"Orc\", 12);\nprint(o.hp);",
+        "output": "12"
+      }
     },
     {
       "owner": "reflect",
@@ -4692,7 +4920,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.construct_shared(class_name: string, args: var...) -> shared_ptr"
+      "display": "reflect::construct_shared(class_name: string, args: var...) -> shared_ptr"
     },
     {
       "owner": "reflect",
@@ -4704,7 +4932,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.methods(object_or_class: var) -> array<map<string,var>>"
+      "display": "reflect::methods(object_or_class: var) -> array<map<string,var>>"
     },
     {
       "owner": "reflect",
@@ -4716,7 +4944,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.method_arguments(object_or_class: var, name: string) -> array<array<map<string,var>>>"
+      "display": "reflect::method_arguments(object_or_class: var, name: string) -> array<array<map<string,var>>>"
     },
     {
       "owner": "reflect",
@@ -4728,7 +4956,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.functions() -> array<map<string,var>>"
+      "display": "reflect::functions() -> array<map<string,var>>"
     },
     {
       "owner": "reflect",
@@ -4740,7 +4968,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.globals() -> array<map<string,var>>"
+      "display": "reflect::globals() -> array<map<string,var>>"
     },
     {
       "owner": "reflect",
@@ -4752,7 +4980,7 @@
       "source": "include/jaiscript/stdlib/reflection.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "reflect.function_arguments(name: string) -> array<array<map<string,var>>>"
+      "display": "reflect::function_arguments(name: string) -> array<array<map<string,var>>>"
     },
     {
       "owner": "binary",
@@ -4764,7 +4992,7 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "binary.text(count: int) -> binary::width"
+      "display": "binary::text(count: int) -> binary::width"
     },
     {
       "owner": "binary",
@@ -4776,7 +5004,7 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "binary.bytes(count: int) -> binary::width"
+      "display": "binary::bytes(count: int) -> binary::width"
     },
     {
       "owner": "binary",
@@ -4788,7 +5016,7 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "binary.layout(field_and_width_pairs: string, binary::width, ...) -> binary::layout"
+      "display": "binary::layout(field_and_width_pairs: string, binary::width, ...) -> binary::layout"
     },
     {
       "owner": "binary",
@@ -4800,7 +5028,7 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "binary.reader(bytes: string) -> binary::reader"
+      "display": "binary::reader(bytes: string) -> binary::reader"
     },
     {
       "owner": "binary",
@@ -4812,7 +5040,7 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "binary.writer() -> binary::writer"
+      "display": "binary::writer() -> binary::writer"
     },
     {
       "owner": "binary::width",
@@ -4932,7 +5160,11 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "binary::reader.uint16() -> int"
+      "display": "binary::reader.uint16() -> int",
+      "example": {
+        "code": "binary::writer w;\nw.uint16(513).int32(-2);\nauto r = w.to_string().reader();\nprint(r.uint16(), \" \", r.int32(), \" \", r.at_end());",
+        "output": "513 -2 true"
+      }
     },
     {
       "owner": "binary::reader",
@@ -5088,7 +5320,11 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "binary::reader.unpack(layout: binary::layout) -> map<string,var>"
+      "display": "binary::reader.unpack(layout: binary::layout) -> map<string,var>",
+      "example": {
+        "code": "auto entry = binary::layout(\"id\", binary::uint16, \"hp\", binary::int32);\nbinary::writer w;\nw.pack(entry, {\"id\": 7, \"hp\": 120});\nauto row = w.to_string().reader().unpack(entry);\nprint(row[\"id\"], \" \", row[\"hp\"]);",
+        "output": "7 120"
+      }
     },
     {
       "owner": "binary::reader",
@@ -5220,7 +5456,11 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "binary::writer.text(value: string, count: int = encoded_length) -> binary::writer"
+      "display": "binary::writer.text(value: string, count: int = encoded_length) -> binary::writer",
+      "example": {
+        "code": "binary::writer w;\nw.text(\"ab\", 4).text(\"c\");\nprint(w.size(), \" \", to_json(w.to_string().to_bytes()));",
+        "output": "6 [97,98,0,0,99,0]"
+      }
     },
     {
       "owner": "binary::writer",
@@ -5328,7 +5568,7 @@
       "source": "include/jaiscript/detail/binary_data.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "string.from_bytes(bytes: array<uint8> or array<int8> or array<int> or array<char> or array<var>) -> string"
+      "display": "string::from_bytes(bytes: array<uint8> or array<int8> or array<int> or array<char> or array<var>) -> string"
     },
     {
       "owner": "global",
@@ -5964,7 +6204,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.local_date(year: int, month: int, day: int, hour: int = 0, minute: int = 0, second: int = 0, millisecond: int = 0) -> time::date"
+      "display": "time::local_date(year: int, month: int, day: int, hour: int = 0, minute: int = 0, second: int = 0, millisecond: int = 0) -> time::date"
     },
     {
       "owner": "time",
@@ -5976,7 +6216,7 @@
       "source": "include/jaiscript/stdlib/time.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
-      "display": "time.utc_date(year: int, month: int, day: int, hour: int = 0, minute: int = 0, second: int = 0, millisecond: int = 0) -> time::date"
+      "display": "time::utc_date(year: int, month: int, day: int, hour: int = 0, minute: int = 0, second: int = 0, millisecond: int = 0) -> time::date"
     },
     {
       "owner": "binary::reader",
@@ -6072,7 +6312,7 @@
       "notes": "At least one privilege; scripts query grants, hosts change them.",
       "form": "function",
       "availability": "Every engine",
-      "display": "reflect.is_enabled(privileges: int or string...) -> bool"
+      "display": "reflect::is_enabled(privileges: int or string...) -> bool"
     },
     {
       "owner": "global",
@@ -6096,7 +6336,7 @@
       "notes": "",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec3(xy: vector2, z: number) -> math::vec3"
+      "display": "math::vec3(xy: vector2, z: number) -> math::vec3"
     },
     {
       "owner": "math",
@@ -6108,7 +6348,7 @@
       "notes": "",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec4(xyz: vector3, w: number) -> math::vec4"
+      "display": "math::vec4(xyz: vector3, w: number) -> math::vec4"
     },
     {
       "owner": "math",
@@ -6120,7 +6360,7 @@
       "notes": "",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.vec4(xy: vector2, z: number, w: number) -> math::vec4"
+      "display": "math::vec4(xy: vector2, z: number, w: number) -> math::vec4"
     },
     {
       "owner": "math",
@@ -6132,7 +6372,7 @@
       "notes": "",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.ivec3(xy: vector2, z: number) -> math::ivec3"
+      "display": "math::ivec3(xy: vector2, z: number) -> math::ivec3"
     },
     {
       "owner": "array<T>",
@@ -6144,7 +6384,11 @@
       "notes": "Alias of remove(index); false without change when out of range.",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.erase(index: int) -> bool"
+      "display": "array<T>.erase(index: int) -> bool",
+      "example": {
+        "code": "array<int> xs = [10, 20, 30];\nprint(xs.erase(1), \" \", to_json(xs), \" \", xs.erase(9));",
+        "output": "true [10,30] false"
+      }
     },
     {
       "owner": "math",
@@ -6156,7 +6400,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.distance(x1: number, y1: number, x2: number, y2: number) -> float"
+      "display": "math::distance(x1: number, y1: number, x2: number, y2: number) -> float"
     },
     {
       "owner": "math",
@@ -6168,7 +6412,7 @@
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math.distance_squared(x1: number, y1: number, x2: number, y2: number) -> number"
+      "display": "math::distance_squared(x1: number, y1: number, x2: number, y2: number) -> number"
     },
     {
       "owner": "array<T>",
@@ -6180,7 +6424,11 @@
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
-      "display": "array<T>.append(other: array<var> or array<T>) -> array<T>"
+      "display": "array<T>.append(other: array<var> or array<T>) -> array<T>",
+      "example": {
+        "code": "array<int> xs = [1, 2];\nxs.append([3, 4]);        // changes xs and returns it\nprint(to_json(xs));",
+        "output": "[1,2,3,4]"
+      }
     },
     {
       "owner": "array",
@@ -6228,7 +6476,11 @@
       "source": "include/jaiscript/detail/array_namespace.hpp",
       "form": "namespace",
       "availability": "Every engine",
-      "display": "array::filter(values: array<T>, predicate: function(T[, int]) -> bool) -> array<T>"
+      "display": "array::filter(values: array<T>, predicate: function(T[, int]) -> bool) -> array<T>",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3, 4];\nprint(to_json(array::filter(xs, x => x > 2)), \" \", to_json(xs));",
+        "output": "[3,4] [1,2,3,4]"
+      }
     },
     {
       "owner": "array",
@@ -6240,7 +6492,11 @@
       "source": "include/jaiscript/detail/array_namespace.hpp",
       "form": "namespace",
       "availability": "Every engine",
-      "display": "array::map(values: array<T>, callback: function(T[, int]) -> R) -> array<R>"
+      "display": "array::map(values: array<T>, callback: function(T[, int]) -> R) -> array<R>",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nauto labels = array::map(xs, [](int x) -> string { return \"#\" + to_string(x); });\nprint(to_json(labels), \" \", to_json(xs));",
+        "output": "[\"#1\",\"#2\",\"#3\"] [1,2,3]"
+      }
     },
     {
       "owner": "array",
@@ -6252,7 +6508,11 @@
       "source": "include/jaiscript/detail/array_namespace.hpp",
       "form": "namespace",
       "availability": "Every engine",
-      "display": "array::sort(values: array<T>, predicate: function(T, T) -> bool = omitted) -> array<T>"
+      "display": "array::sort(values: array<T>, predicate: function(T, T) -> bool = omitted) -> array<T>",
+      "example": {
+        "code": "array<int> xs = [3, 1, 2];\nprint(to_json(array::sort(xs)), \" \", to_json(xs));",
+        "output": "[1,2,3] [3,1,2]"
+      }
     },
     {
       "owner": "array",

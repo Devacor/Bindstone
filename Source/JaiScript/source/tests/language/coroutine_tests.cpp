@@ -375,28 +375,40 @@ public:
             check_eq(eng->get_variable("r3").as<int64_t>(), int64_t(99));
         });
 
-        test("nested_coroutine_captures_enclosing_locals", [this]() {
-            // A coroutine declared inside a function snapshots the enclosing frame's
-            // slot locals at declaration (lambda-style capture); each factory call gets
-            // its own independent snapshot.
+        test("nested_coroutine_handles_are_independent", [this]() {
+            // A coroutine declared inside a function takes what it needs as parameters (a named function captures
+            // nothing); each factory call mints its own independent handle.
             auto eng = jai::foundry::make_engine();
             auto result = eng->execute(R"(
                 function make_counter(auto start) -> auto {
-                    coroutine int counter() {
-                        auto v = start;
-                        while (v < start + 3) {
+                    coroutine int counter(int first) {
+                        auto v = first;
+                        while (v < first + 3) {
                             yield v;
                             v = v + 1;
                         }
                         return 0 - 1;
                     }
-                    return counter();
+                    return counter(start);
                 }
                 auto c1 = make_counter(5);
                 auto c2 = make_counter(50);
                 c1.resume() + c2.resume() + c1.resume() + c2.resume();
             )");
             check_eq(int64_t(112), result.as<int64_t>());
+        });
+
+        // A named coroutine declared in a function body captures nothing, like a nested named function (Dev ruling
+        // 2026-10-03): an enclosing frame local is a parse error on both backends; a lambda or function(...) / => reads it
+        test("nested_coroutine_reading_an_enclosing_local_is_a_parse_error", [this]() {
+            for (const char* source : {
+                "int f(int base) { coroutine int gen() { yield base; return 0; } auto g = gen(); return g.resume(); } f(4);",
+                "int f() { int base = 4; coroutine int gen() { base = 5; yield 1; return 0; } auto g = gen(); return g.resume(); } f();"}) {
+                auto eng = jai::foundry::make_engine();
+                std::string message;
+                try { eng->execute(source); } catch (const std::exception& e) { message = e.what(); }
+                check_true(message.find("Nested function 'gen' cannot use enclosing local 'base'") != std::string::npos, message);
+            }
         });
 
         test("resume_inside_running_function_keeps_caller_frame", [this]() {
@@ -423,12 +435,12 @@ public:
             auto eng = jai::foundry::make_engine();
             auto result = eng->execute(R"(
                 function pair_sum(int base) -> int {
-                    coroutine int gen() {
-                        yield base * 10;
-                        yield base * 10 + 1;
+                    coroutine int gen(int b) {
+                        yield b * 10;
+                        yield b * 10 + 1;
                         return 0;
                     }
-                    auto g = gen();
+                    auto g = gen(base);
                     return g.resume() + g.resume();
                 }
                 pair_sum(1) + pair_sum(2);
@@ -523,16 +535,16 @@ public:
             check_eq(int64_t(430), result.as<int64_t>());
         });
 
-        test("nested_coroutine_snapshot_is_per_declaration", [this]() {
+        test("nested_coroutine_handles_keep_their_arguments", [this]() {
             auto eng = jai::foundry::make_engine();
             auto result = eng->execute(R"(
                 function make_gen(int base) -> auto {
-                    coroutine int gen() {
-                        yield base * 10;
-                        yield base * 10 + 1;
+                    coroutine int gen(int b) {
+                        yield b * 10;
+                        yield b * 10 + 1;
                         return 0;
                     }
-                    return gen();
+                    return gen(base);
                 }
                 auto g1 = make_gen(1);
                 auto g2 = make_gen(2);

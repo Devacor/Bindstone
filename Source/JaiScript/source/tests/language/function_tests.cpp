@@ -14,6 +14,25 @@ public:
     function_tests() : suite("Function Tests") {}
     
     void forge_tests() override {
+        // A named function declared in a function body captures nothing (Dev ruling 2026-10-02): an enclosing frame local is
+        // a parse error on both backends; globals stay visible, and function(...) / => keep their [&] lambda semantics
+        test("nested_named_function_captures_nothing", [this]() {
+            for (const char* source : {
+                "var y = 100; int g() { int y = 5; int helper(int x) { return x + y; } return helper(1); } g();",
+                "int g() { int y = 5; void helper() { y = 6; } helper(); return y; } g();",
+                "int g(int y) { int helper() { return [&]() { return y; }(); } return helper(); } g(5);"}) {
+                auto engine = make_engine();
+                std::string message;
+                try { engine->execute(source); } catch (const std::exception& e) { message = e.what(); }
+                check_true(message.find("Nested function 'helper' cannot use enclosing local 'y'") != std::string::npos, message);
+            }
+            auto engine = make_engine();
+            check_eq(script_int(101), engine->execute("var y = 100; int g() { int helper(int x) { return x + y; } return helper(1); } g();").as_int());
+            check_eq(script_int(10), engine->execute("int r(int n) { int rec(int k) { if (k == 0) { return 0; } return rec(k - 1) + 1; } return rec(n); } r(10);").as_int());
+            check_eq(script_int(6), engine->execute("int g() { int y = 5; var helper = function(int x) { return x + y; }; return helper(1); } g();").as_int());
+            check_eq(script_int(6), engine->execute("int g() { int y = 5; var helper = (int x) => x + y; return helper(1); } g();").as_int());
+        });
+
         test("simple_function_declaration_and_call", [this]() {
             auto engine = make_engine();
             

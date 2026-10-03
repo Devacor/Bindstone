@@ -2035,6 +2035,7 @@ namespace {
 		const auto& outer = eng.execution_limits();
 		slot.limits.interpreter_call_depth_limit = outer.interpreter_call_depth_limit;
 		slot.limits.vm_call_depth_limit = outer.vm_call_depth_limit;
+		slot.limits.vm_depth_gate = 0;
 		slot.limits.terminal_error = false;
 		slot.limits.memory_used = 0;
 		slot.limits.memory_raises = 0;

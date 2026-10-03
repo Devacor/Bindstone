@@ -767,6 +767,7 @@ struct engine::implementation {
         script_value value;
     };
     std::unordered_map<const void*, caught_error> caught_errors_;
+    size_t caught_errors_sweep_at_ = 32;   // twice the live count after a sweep: a catch per level of a deep recursion sweeps O(1) amortized
     struct resolution_entry {
         std::vector<std::string> misses;   // the earlier rungs' candidates, which held no file
         std::string candidate;             // the rung that answered
@@ -4172,6 +4173,7 @@ void engine::max_call_depth(backend_type type, size_t depth) {
     int& result = type == backend_type::vm
         ? impl->limits_.vm_call_depth_limit : impl->limits_.interpreter_call_depth_limit;
     result = static_cast<int>(depth);
+    impl->limits_.vm_depth_gate = 0;
 }
 
 size_t engine::max_call_depth(backend_type type) const {
@@ -4778,10 +4780,11 @@ script_value engine::make_caught_error(const script_value& thrown_in, bool by_th
     caught.set_type_info(type_info_ptr{get_type_info_any()});   // the catch variable stays a dynamic local
     if (parallel_region_active()) { return caught; }
     auto& table = impl->caught_errors_;
-    if (table.size() >= 32) {
+    if (table.size() >= impl->caught_errors_sweep_at_) {
         for (auto it = table.begin(); it != table.end();) {
             it = it->second.text.unchecked_string_handle().unique() ? table.erase(it) : std::next(it);
         }
+        impl->caught_errors_sweep_at_ = std::max<size_t>(32, table.size() * 2);
     }
     implementation::caught_error info{caught, {}, 0, 0, {}, script_value(std::monostate{}, this)};
     const auto spell = [](const std::string& file) { return file.empty() ? std::string("<script>") : file; };
@@ -4794,7 +4797,7 @@ script_value engine::make_caught_error(const script_value& thrown_in, bool by_th
         info.line = trace.front().line;
         info.column = trace.front().column;
     }
-    for (const auto& frame : trace) { info.stack.push_back(spell(frame.file) + ":" + std::to_string(frame.line)); }
+    for (const auto& frame : trace) { info.stack.push_back(frame.elided ? elided_frames_text(frame.elided) : spell(frame.file) + ":" + std::to_string(frame.line)); }
     if (by_throw) { info.value = thrown; }
     table.erase(&caught.unchecked_as_string());
     table.emplace(&caught.unchecked_as_string(), std::move(info));

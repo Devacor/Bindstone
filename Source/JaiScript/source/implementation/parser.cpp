@@ -5206,7 +5206,9 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     }
 
     // Enter function scope for slot-based local variable tracking
+    const bool nested_function = in_function_scope();
     enter_function_scope();
+    if (nested_function) { function_scope_stack_.back().nested_function = name_id; }
 
     // Assign slots to parameters (they get slots 0, 1, 2, ...)
     for (auto& param : func->parameters) {

@@ -275,7 +275,26 @@ namespace jai {
         std::string file;
         size_t line = 0;
         size_t column = 0;
+        size_t elided = 0;   // the final marker: this many outer frames are not listed
     };
+
+    // A trace lists the innermost frames and one final marker for the rest, so a catch deep in a recursion costs the same
+    // as a shallow one
+    inline constexpr size_t k_stack_trace_frames = 64;
+    inline std::string elided_frames_text(size_t count) { return "... " + std::to_string(count) + " more frames"; }
+    // uncounted: outer frames the capture did not walk
+    inline void cap_stack_trace(std::vector<stack_frame>& trace, size_t uncounted = 0) {
+        size_t total = uncounted, leading = 0;
+        bool listing = true;
+        for (const auto& f : trace) {
+            total += f.elided ? f.elided : 1;
+            if (f.elided) { listing = false; } else if (listing) { ++leading; }
+        }
+        const size_t kept = leading < k_stack_trace_frames ? leading : k_stack_trace_frames;
+        if (kept == total) { return; }
+        trace.resize(kept);
+        trace.push_back({ "...", std::string(), 0, 0, total - kept });
+    }
 
     // Base exception class with source location tracking
     // Uses std::string for nice formatted messages (cold path, user-facing)

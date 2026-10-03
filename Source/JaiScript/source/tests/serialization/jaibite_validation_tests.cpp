@@ -335,13 +335,13 @@ public:
             check_eq(script_int(4), loaded.execute().as_int());
         });
 
-        test("saved_coroutine_outer_plan_preserves_bytes", [this]() {
+        test("saved_nested_coroutine_preserves_bytes", [this]() {
             auto author = engine::make();
             auto bite = author->jaibite(R"(
                 int read() {
                     int a = 1; int b = 2; int c = 3; int value = 4;
-                    coroutine int result() { yield value; return 0; }
-                    auto handle = result();
+                    coroutine int result(int v) { yield v; return 0; }
+                    auto handle = result(value);
                     return handle.resume();
                 }
                 read();

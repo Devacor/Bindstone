@@ -418,8 +418,9 @@ engine stays usable", not by `check_throws`.
   Proof = the parallel admission walk in `proof_mode` (`prove_readonly_parameters`), cached per
   function against `engine::definition_epoch()`; kill switch `engine::parameter_alias(false)`,
   gates `parameter_alias_differential_gate` + `jaiscript_fuzz --no-param-alias`. A write through a
-  reference whose type can occur in the parameter's value tree escapes it, and a program with a script
-  destructor elides nothing. **Read-only by-value locals** (`T x = lvalue;` in a plain function) bind the
+  reference whose type can occur in the parameter's value tree escapes it; a type whose by-value tree can
+  hold a script-destructor class is never elided, and no such value may die in the proven range
+  (`class_definition::value_tree_runs_destructor`, per class per definition epoch). **Read-only by-value locals** (`T x = lvalue;` in a plain function) bind the
   source's object the same way when the statements after the declaration (and their callees) neither use x
   whole nor write the source (`prove_local_aliases`, `local_mode`: writes only into a local's own by-value
   tree, never through a reference or handle; verdicts on `variable_decl::alias_home` per definition

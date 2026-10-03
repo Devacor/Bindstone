@@ -654,8 +654,13 @@ definition and host registration):
 - program-scope member chains are read in place when every step is a declared field with no
   user accessor (`AFFIXES[i].code`); a mutating method on one, a writing reference argument
   rooted in program state and a by-reference loop over it refuse the proof;
-- no script class of the program declares a destructor: the elided copy's destructor would
-  never run, and an instance dying inside the call runs code the walk cannot see.
+- script destructors, per type (`class_definition::value_tree_runs_destructor`: the chain or a
+  subclass declares one, or a by-value field's type can hold such an instance; handles share
+  and never count; cached against the definition epoch): the parameter's type may not run one
+  (the elided copy's destructor would never run), and nowhere in the walk may a value whose type
+  can run one die (a by-value local or parameter, a replaced slot, a mutating builtin's
+  receiver, a by-value call result or cast, a thrown instance) - its destructor is code the walk
+  cannot see.
 
 A proven parameter binds the argument by handle (`script_value(derefed)` instead of
 `.clone()`) on both backends, in the exact-class fast branch and after the conversion
@@ -689,7 +694,8 @@ name, member or subscript chain) deep-copies its source; the copy goes when noth
   root) or replaces a local's slot; a write through a reference, a handle or a loop variable
   escapes, and a callee's reference parameter defers to its call sites, which judge the
   argument they pass;
-- no script class declares a destructor (as for parameters).
+- the destructor rule of the parameter proof, per type: T may not run a script destructor and
+  no value whose type can run one may die in the range.
 
 The mint stamps every candidate declaration of a plain function with its home (parameters,
 return type, body; `variable_decl::alias_home`); the declaration's first run in a definition

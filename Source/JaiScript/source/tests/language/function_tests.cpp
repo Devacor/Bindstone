@@ -735,6 +735,44 @@ public:
             check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds(), "no write-channel parameter is elided");
         });
 
+        // The destructor gate is per type: an elision is refused when the elided value's tree can hold an instance whose chain
+        // declares a script destructor, or when such an instance can die while the elided value lives
+        test("alias_destructor_gate_is_per_type", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                int DEAD = 0;
+                class Def { int atk = 3; Def() {} }
+                class Tracked { int v = 2; Tracked() {} ~Tracked() { DEAD = DEAD + 1; } }
+                class Holder { int n = 1; Tracked t = Tracked(); Holder() {} }
+                class Writer { int v = 0; Writer() {} ~Writer() { G.atk = G.atk + 100; } }
+                Def G = Def();
+                Holder HG = Holder();
+                Writer WG = Writer();
+                int local_unrelated() { Def d = G; return d.atk; }
+                int param_unrelated(Def p) { return p.atk; }
+                int holder_local() { Holder h = HG; return h.n; }
+                int take_writer(Writer w) { return w.v; }
+                int dies_in_range(Writer w) { Def d = G; int k = take_writer(w); int c = d.atk; return c + k; }
+                int r1 = local_unrelated();
+                int r2 = param_unrelated(G);
+                int d0 = DEAD;
+                int r3 = holder_local();
+                int d1 = DEAD;
+                int r4 = dies_in_range(WG);
+                G.atk = 3;
+                return [r1, r2, r3, d1 - d0, r4];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)3, v[0].as_int());
+            check_eq((int64_t)3, v[1].as_int());
+            check_eq((int64_t)1, v[2].as_int());
+            check_eq((int64_t)1, v[3].as_int(), "the copied Holder's Tracked field runs its destructor");
+            check_eq((int64_t)3, v[4].as_int(), "the copy keeps its value when a destructor in the range writes the source");
+            check_eq((int64_t)1, (int64_t)eng->local_alias_binds(), "an unrelated local still elides");
+            check_eq((int64_t)1, (int64_t)eng->parameter_alias_binds(), "an unrelated parameter still elides");
+        });
+
         test("destructuring_basic", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

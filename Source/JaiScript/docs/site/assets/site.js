@@ -200,11 +200,9 @@
     function widest(el) {
       var code = el.querySelector("pre > code");
       if (!code) return 0;
-      var lines = code.textContent.replace(/
-$/, "").split("
-"), w = 0;
+      var lines = code.textContent.replace(/\n$/, "").split("\n"), w = 0;
       for (var i = 0; i < lines.length; i++) {
-        var n = lines[i].replace(/	/g, "    ").length;
+        var n = lines[i].replace(/\t/g, "    ").length;
         if (n > w) w = n;
       }
       return w;

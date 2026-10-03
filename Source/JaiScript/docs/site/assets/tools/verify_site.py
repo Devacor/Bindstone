@@ -3,12 +3,13 @@
 
     python assets/tools/verify_site.py [--no-samples] [--runner PATH]
 
-Order: links and anchors, HTML structure, internal leakage and stale facts, retired error
+Order: script syntax (node --check), links and anchors, HTML structure, internal leakage and stale facts, retired error
 texts, search index freshness, chrome freshness, then (unless --no-samples) every jaiscript
 sample on both backends under strict, with its expected output. Exit code 1 if any check fails.
 """
 
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -31,6 +32,17 @@ def main():
     if "--runner" in sys.argv:
         runner = ["--runner", str(pathlib.Path(sys.argv[sys.argv.index("--runner") + 1]).resolve())]
     failed = []
+    print("=" * 72)
+    print("== scripts")
+    node = shutil.which("node")
+    if node:
+        bad = [js.name for js in sorted((HERE.parent).glob("*.js"))
+               if subprocess.call([node, "--check", str(js)]) != 0]
+        print("-- scripts: %s" % ("FAILED (%s)" % ", ".join(bad) if bad else "ok"))
+        if bad:
+            failed.append("scripts")
+    else:
+        print("-- scripts: skipped (node not on PATH)")
     for name, cmd in STEPS:
         if name == "samples" and skip_samples:
             continue

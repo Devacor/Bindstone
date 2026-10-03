@@ -4615,6 +4615,68 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string bl = at == std::string::npos ? il : il.substr(at, il.find("\n== ", at + 1) - at);
 			check_true(bl.find("CAPTURE_ARG") == std::string::npos, "no capture ahead of an imported enum value: " + bl);
 		});
+		test("a_global_containers_computed_index_store_runs_in_the_block", [this]() {
+			// Gator Quest's set_tile inlined into fill_rect (`TILES[W_OFF[w] + y * W_W[w] + x] = t`): a store into a program-scope container whose
+			// index is an arithmetic tree takes the value first, the container guard's always form, the index tree into a temp, and one fused store,
+			// so the loop runs as a block with no bail at the store
+			const std::string prelude =
+				"array<int> T = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];\n"
+				"array<int> OFF = [0, 8];\n"
+				"array<int> WW = [4, 4];\n"
+				"array<int> HH = [2, 2];\n"
+				"bool in_world(int w, int x, int y) { return x >= 0 && y >= 0 && x < WW[w] && y < HH[w]; }\n"
+				"void set_tile(int w, int x, int y, int t) { if (in_world(w, x, y)) { T[OFF[w] + y * WW[w] + x] = t; } }\n"
+				"void fill_rect(int w, int x0, int y0, int x1, int y1, int t) { for (int y = y0; y <= y1; ++y) { for (int x = x0; x <= x1; ++x) { set_tile(w, x, y, t); } } }\n"
+				"array<float> F = [0.0, 0.0, 0.0, 0.0];\n"
+				"void put_f(int b) { for (int i = 0; i < 4; ++i) { F[OFF[0] + (i % 2) * 2 + i / 2 + b] = i * 1.5; } }\n"
+				"string dump() { string s = \"\"; for (int i = 0; i < T.size(); ++i) { s = s + to_string(T[i]); } return s; }\n";
+			const std::string run = "fill_rect(0, 0, 0, 3, 1, 2); fill_rect(1, 1, 0, 2, 1, 5); fill_rect(1, 3, 1, 5, 3, 7); put_f(0); dump() + \"|\" + to_string(F[1] * 10.0 + F[2]);";
+			both(prelude + run, "2222222205500557|31.5", "a global container's computed-index store");
+			both(prelude + run, "2222222205500557|31.5", "a global container's computed-index store, proofs off", false);
+			const std::string l = listing_run(prelude + run);
+			for (const char* fn : { "== fill_rect ", "== put_f " }) {
+				const size_t at = l.find(fn);
+				const std::string fl = at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at);
+				check_true(fl.find("-- cell loop") != std::string::npos && fl.find("-- open loop") == std::string::npos, std::string(fn) + "runs its loops as blocks: " + fl);
+				check_true(fl.find("C_BAIL") == std::string::npos, std::string(fn) + "has no bail at the store: " + fl);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("2222222205500557|31.5"), got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("a_global_container_store_takes_its_value_before_the_container_and_the_index", [this]() {
+			// C++17 E1[E2] = E3: the value first, then the container, then the index. A value that rebinds the global stores into the array the
+			// name holds after it; a global value an index call rewrites stores what it held before the index ran; an index whose getter rebinds
+			// the global stores into the array the name held before the index (the getter copied a new one in, so the store is lost)
+			const std::string prelude =
+				"array<int> T = [1, 2, 3, 4];\n"
+				"array<int> U = [10, 20, 30, 40];\n"
+				"array<int> OFF = [0];\n"
+				"int swap_v(int v) { array<int> tmp = T; T = U; U = tmp; return v; }\n"
+				"int G = 5;\n"
+				"int bump() { G = G + 1; return 0; }\n"
+				"class H { int n = 0; int _get_off() { n = n + 1; array<int> tmp = T; T = U; U = tmp; return 0; } }\n"
+				"H h;\n"
+				"string show() { return to_string(T[0]) + \",\" + to_string(T[1]) + \",\" + to_string(T[2]) + \",\" + to_string(T[3]) + \"/\" + to_string(U[0]) + \",\" + to_string(U[1]) + \",\" + to_string(U[2]) + \",\" + to_string(U[3]); }\n"
+				"void by_value(int w) { for (int y = 0; y < 2; ++y) { T[OFF[0] + y * w] = swap_v(7 + y); } }\n"
+				"void by_global(int w) { for (int y = 0; y < 2; ++y) { T[OFF[0] + y * w + bump()] = G; } }\n"
+				"void by_getter(int w) { for (int y = 0; y < 2; ++y) { T[OFF[0] + y * w + h.off] = 50 + y; } }\n";
+			const std::string run = "by_value(1); string a = show(); by_global(1); string b = show(); by_getter(1); a + \"|\" + b + \"|\" + show() + \"|\" + to_string(G) + \"|\" + to_string(h.n);";
+			const std::string want = "1,8,3,4/7,20,30,40|5,6,3,4/7,20,30,40|5,6,3,4/7,20,30,40|7|2";
+			both(prelude + run, want, "the value, the container, the index");
+			both(prelude + run, want, "the value, the container, the index, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(want, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

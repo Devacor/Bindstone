@@ -17354,7 +17354,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 						// fewest defaults used wins
 						const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
 						std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the sole arity match
-						if (!parent_ctor) { parent_ctor = sole_arity_candidate(parent_ctor_asts, init_args.size()); }
+						if (!parent_ctor) { parent_ctor = sole_arity_candidate(parent_ctor_asts, init_args); }
 						if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
 							parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the interpreter
 						}
@@ -17404,7 +17404,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 												// fewest defaults used wins
 												const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
 												std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the sole arity match
-												if (!ancestor_ctor) { ancestor_ctor = sole_arity_candidate(ancestor_ctors, ancestor_args.size()); }
+												if (!ancestor_ctor) { ancestor_ctor = sole_arity_candidate(ancestor_ctors, ancestor_args); }
 												if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
 													ancestor_ctor = ancestor_script->implicit_default_constructor();
 												}
@@ -17555,7 +17555,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 			std::vector<std::shared_ptr<function_decl>> other_ctors;
 			for (const auto& ctor_ast : all_ctor_asts) { if (ctor_ast != matching_ctor) { other_ctors.push_back(ctor_ast); } }
 			std::shared_ptr<function_decl> target_ctor = pick_best_overload(other_ctors, init_args);
-			if (!target_ctor) { target_ctor = sole_arity_candidate(other_ctors, init_args.size()); }
+			if (!target_ctor) { target_ctor = sole_arity_candidate(other_ctors, init_args); }
 
 			if (!target_ctor) {
 				return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
@@ -17621,7 +17621,7 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
 	} else {
 		matching_ctor = pick_best_overload(ctor_asts, args);
 		if (!matching_ctor) {   // no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss
-			matching_ctor = sole_arity_candidate(ctor_asts, args.size());
+			matching_ctor = sole_arity_candidate(ctor_asts, args);
 		}
 	}
 

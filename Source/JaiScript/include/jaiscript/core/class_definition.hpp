@@ -925,6 +925,15 @@ public:
         return methods_.find(id) != methods_.end();
     }
 
+    // A class without its own destructor still runs its bases' (C++'s implicit destructor)
+    bool chain_declares_destructor(engine& eng) const {
+        if (has_method(eng.symbolize("~" + name_))) { return true; }
+        for (const auto& parent : parent_classes_) {
+            if (parent && parent->chain_declares_destructor(eng)) { return true; }
+        }
+        return false;
+    }
+
     // Chain-aware (this class + script parents + cpp base): does ANY resolvable user
     // method with this name exist? Used to let a user class method WIN over a same-named
     // builtin handle method (Dev ruling 2026-07). Cheap: no symbolizer / no throw.
@@ -1115,11 +1124,9 @@ public:
         // the construct_instance section profile). method_epoch_ already cascades to
         // derived classes on every method-set mutation, so it is the exact validity key.
         if (dtor_memo_epoch_ != method_epoch_) {
-            dtor_id_ = 0;
             has_script_dtor_ = false;
             if (auto eng = engine_) {
-                dtor_id_ = eng->symbolize("~" + name_);
-                has_script_dtor_ = is_script_class() && dtor_id_ != 0 && has_method(dtor_id_);
+                has_script_dtor_ = is_script_class() && chain_declares_destructor(*eng);
             }
             dtor_memo_epoch_ = method_epoch_;
         }
@@ -2352,7 +2359,6 @@ private:
     // Destructor probe memo (see create_instance): valid while dtor_memo_epoch_
     // matches method_epoch_. mutable: create_instance is the hot mint path.
     mutable uint64_t dtor_memo_epoch_ = 0;   // method_epoch_ starts at 1 => first mint fills
-    mutable uint64_t dtor_id_ = 0;
     mutable bool has_script_dtor_ = false;
 
     bool is_transparent_wrapper_ = false;

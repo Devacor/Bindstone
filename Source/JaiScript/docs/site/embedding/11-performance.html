@@ -122,7 +122,7 @@ only the code that ticks.</li>
 The standalone runner uses the VM already. Measure Release builds: a Debug build of the engine is many times slower.</li>
 <li><strong>Walk containers by reference.</strong> <code>for (auto u : units)</code> copies each element, as in C++, and a
 write to <code>u</code> changes the copy; <code>for (auto&amp; u : units)</code> visits the elements themselves and copies nothing.</li>
-<li><strong>Copies are real, but read-only ones are free.</strong> <code>Unit u = units[i];</code> is a copy. When nothing after
+<li><strong>Copies are real, but read-only ones are free.</strong> <code>Unit u = units[i];</code> is a copy. Inside a function, when nothing after
 it writes <code>u</code>, uses it whole or can change <code>units[i]</code>, the engine binds the element itself instead, and a
 by-value parameter the callee only reads binds the same way. Nothing can observe the difference, so write the copy
 when you mean a copy and <code>auto&amp;</code> when you mean the element, and treat the saving as a bonus rather than a rule.</li>

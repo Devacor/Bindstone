@@ -76,6 +76,27 @@ b.x + c.y;</code></pre></div>
 main ctor (3, 3)
 main ctor (1, 2)
 == result: 5</code></pre></div>
+<h3 id="choosing-an-overload">Choosing an overload<a class="hlink" href="#choosing-an-overload" aria-label="link">&#8203;</a></h3>
+<p>Constructors and methods overload by parameter count and parameter types. A call takes the overload whose parameters take its arguments best: an argument of the parameter's exact type beats one that needs a conversion, so <code>3</code> picks <code>add(int)</code> over <code>add(float)</code> and <code>2.5</code> picks <code>add(float)</code>. A string argument never selects a <code>bool</code> parameter. When nothing fits, the call raises <code>No overload of 'add' takes (char)</code>, naming the argument types; a literal the checker can see is a load error (<code>no overload of 'add' matches this call</code>). Top-level functions do not overload (see <a href="06-functions.html#redefinition-and-the-duplicate-warning">Functions</a>); namespace functions overload by arity.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Meter {
+    string last = "";
+    void add(int v) { last = "int"; }
+    void add(float v) { last = "float"; }
+    void add(string v) { last = "string"; }
+    void add(int a, int b) { last = "two ints"; }
+}
+Meter m;
+m.add(3); print(m.last);
+m.add(2.5); print(m.last);
+m.add("x"); print(m.last);
+m.add(1, 2); print(m.last);
+var c = 'c';
+try { m.add(c); } catch (e) { print("caught: ", e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int
+float
+string
+two ints
+caught: No overload of &#x27;add&#x27; takes (char)</code></pre></div>
 <p><strong>Converting constructors.</strong> A true one-parameter constructor makes the class a conversion target, and that conversion is one row of the one table. It runs for declarations, assignments, by-value parameters, returns and field stores alike:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Money {
     int dollars = 0;
@@ -132,6 +153,25 @@ lit lamp
 two handles
 out lamp
 dark is &#x27;&#x27;</code></pre></div>
+<p>Every instance runs its destructor once, copies included: <code>Token b = a;</code> makes a second object with its own destructor, and so does a container literal that names an existing instance (<code>[a]</code> holds a copy of <code>a</code>, as <code>std::vector{a}</code> does). A <code>shared_ptr</code> handle is the way to share one object, and it runs the destructor when the last handle drops:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Token {
+    string id;
+    Token(string s) { id = s; }
+    ~Token() { print("drop ", id); }
+}
+function scope() {
+    Token a = Token("a");
+    Token b = a;                 // a copy, with its own destructor
+    b.id = "b";
+    array&lt;Token&gt; list = [a];     // the literal copies a
+    list[0].id = "in list";
+    print("leaving");
+}
+scope();</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">leaving
+drop a
+drop b
+drop in list</code></pre></div>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;

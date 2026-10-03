@@ -5028,7 +5028,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function h(var v) -> string { try { float r = host_sin(v * 1) + 1.0; return to_string(r); } catch (e) { return \"E:\" + e; } }\n"
 				"g(true) + \"|\" + g(\"x\") + \"|\" + g(null) + \"|\" + g([1]) + \"|\" + g(F()) + \"|\" + h(\"s\") + \"|\" + h(false) + \"|\" + h(2);";
 			both(src, "", "non-numeric arguments");
-			check_true(run_on(true, src).rfind("E:script_value is not a float or integer. Actual type: 6|E:No viable candidates for function call|", 0) == 0, "the builtin's own texts: " + run_on(true, src));
+			check_true(run_on(true, src).rfind("E:script_value is not a float or integer. Actual type: 6|E:No overload of 'host_sqrt' takes (string)|", 0) == 0, "the builtin's own texts: " + run_on(true, src));
 		});
 		test("host_math_alias_follows_a_rebinding", [this]() {
 			// rebound between calls, from inside a loop, from inside its own argument (the callee resolved first), to a

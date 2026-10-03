@@ -2478,6 +2478,11 @@ checked_result<expression_ptr> parser::unary() {
         report_foreign(detail::foreign_word::address_of, peek());
         return make_error_code(parse_error_code::unexpected_token);
     }
+    if (check(token_type::dot) && current_ + 2 < stream_->size() && (*stream_)[current_ + 1].type == token_type::dot &&
+        (*stream_)[current_ + 2].type == token_type::dot) {
+        report_foreign(detail::foreign_word::spread, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     if (match({token_type::bang, token_type::minus, token_type::plus, token_type::plus_plus,
                token_type::minus_minus, token_type::tilde})) {
         token op = previous();
@@ -2850,6 +2855,11 @@ checked_result<declaration_ptr> parser::declaration_body() {
                 JAISCRIPT_TRY_ASSIGN(token val_tok, consume(token_type::identifier, "Expected enum value name"));
                 auto [val_id, val_view] = symbolizer_->intern_with_view(val_tok.lexeme);
                 decl->values.push_back({val_view, val_id});
+                if (check(token_type::equal)) {
+                    report_error("Enum values take no initializer: '" + std::string(val_tok.lexeme) + "' is " +
+                                 std::to_string(decl->values.size() - 1) + ", its position in the enum", peek());
+                    return make_error_code(parse_error_code::unexpected_token);
+                }
             } while (match(token_type::comma));
         }
 
@@ -4695,6 +4705,26 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 namespace_class_names_.insert(full_namespace_name + "::" + std::string(cls->name));
             }
             match(token_type::semicolon);  // Consume optional semicolon after class
+        } else if (!inline_member && match(token_type::coroutine_keyword)) {
+            // a coroutine member: the program-scope spellings (docs/grammar.md: a namespace body is declaration*)
+            const bool was_in_coroutine = in_coroutine_;
+            in_coroutine_ = true;
+            coroutine_body_pending_ = true;
+            auto parsed = bare_coroutine_head() ? bare_coroutine_declaration() : function_declaration();
+            in_coroutine_ = was_in_coroutine;
+            coroutine_body_pending_ = false;
+            if (!parsed) {
+                synchronize();
+                continue;
+            }
+            auto* func = static_cast<function_decl*>(parsed.value().get());
+            func->is_coroutine = true;
+            if (func->return_type && func->return_type->base_type == script_value_type::jai_reference_type) {
+                report_error("Coroutines cannot return references", previous());
+                continue;
+            }
+            member_decl = std::move(parsed.value());
+            match(token_type::semicolon);
         } else if (match(token_type::namespace_keyword)) {
             // Nested namespaces
             auto namespace_result = namespace_declaration();

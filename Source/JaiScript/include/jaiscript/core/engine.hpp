@@ -1269,8 +1269,9 @@ namespace jai {
         // reads it unchanged) that also answers e.message, e.file, e.line, e.column, e.stack (file:line per frame,
         // innermost first) and e.value (a throw's value; null for a run-time error). The place is the throw's, else the
         // innermost frame's statement.
+        // thrown_text: the throw's own message (a thrown object's to_string(), engine::text_of), spoken for a value that is no text
         script_value make_caught_error(const script_value& thrown, bool by_throw, const source_location* throw_site,
-                                       const std::vector<stack_frame>& trace);
+                                       const std::vector<stack_frame>& trace, const char* thrown_text = nullptr);
         // A member read on a string receiver that is a caught error (nullopt: not one, or not an error member; a thrown
         // object or map answers its own fields)
         std::optional<script_value> caught_error_member(const script_value& receiver, uint64_t member_id);

@@ -123,6 +123,9 @@ public:
 	virtual checked_result<script_value> array_transform(uint64_t, script_value&, const std::vector<script_value>&) {
 		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), "Array namespace transforms are unavailable on this backend");
 	}
+	virtual checked_result<script_value> map_transform(uint64_t, script_value&, const std::vector<script_value>&) {
+		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), "Map namespace transforms are unavailable on this backend");
+	}
 
     // Parallel workers: barrier-provisioned class-method pins for the active region
     // (null outside regions and on engine backends). A worker method wall consults it —

@@ -61,6 +61,7 @@ namespace jai::vm {
 		checked_result<bool> language_less(const script_value& a_left, const script_value& a_right) override;
 		bool native_less_available() const override;
 		checked_result<script_value> array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override;
+		checked_result<script_value> map_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override;
 
         vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env);
 #if defined(JAISCRIPT_VM_COARSE_PROFILE) && !defined(JAISCRIPT_VM_PROFILE)
@@ -627,8 +628,9 @@ namespace jai::vm {
             }
             void truncate(size_t new_size) noexcept {
                 assert(new_size <= count);
-                for (size_t i = new_size; i < count; ++i) {
-                    if (!dtor_elidable(slots[i])) { slots[i].~script_value(); }
+                // last slot first: a frame's locals die in reverse declaration order (C++)
+                for (size_t i = count; i > new_size; --i) {
+                    if (!dtor_elidable(slots[i - 1])) { slots[i - 1].~script_value(); }
                 }
                 count = new_size;
             }

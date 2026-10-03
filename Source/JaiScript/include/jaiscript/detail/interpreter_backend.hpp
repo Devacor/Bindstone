@@ -19,6 +19,9 @@ public:
 	checked_result<script_value> array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override {
 		return interpreter_->array_transform(a_member, a_self, a_args);
 	}
+	checked_result<script_value> map_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override {
+		return interpreter_->map_transform(a_member, a_self, a_args);
+	}
 
     interpreter_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env)
         : interpreter_(std::make_shared<interpreter>(symbolizer, global_env)) {}

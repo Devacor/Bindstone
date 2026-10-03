@@ -769,8 +769,8 @@ public:
             expect("var c = tint_of(math::color(0.5, 0.25, 1, 1)); to_string(c) + type_of(c) + to_string(default_tint())", "(0.25, 0.25, 1.0, 1.0)math::color(1.0, 1.0, 1.0, 1.0)", "a color host type");
             expect("var b = box(math::vec3(2, 3, 4)); to_string(b.width + b.height + b.depth)", "11.0", "the width/height/depth aliases read a host extent");
             expect("to_string(native3(math::vec3(1, 2, 3)))", "(3.0, 2.0, 1.0)", "jai::vec3 is its own adapter");
-            expect("string m = \"\"; try { scale3(5, 2); } catch (e) { m = e; } m", "No viable candidates for function call", "a scalar is not a vector");
-            expect("string m = \"\"; try { scale3(math::vec2(1, 2), 2); } catch (e) { m = e; } m", "No viable candidates for function call", "another dimension is not a vector of this kind");
+            expect("string m = \"\"; try { scale3(5, 2); } catch (e) { m = e; } m", "No overload of 'scale3' takes (int, int)", "a scalar is not a vector");
+            expect("string m = \"\"; try { scale3(math::vec2(1, 2), 2); } catch (e) { m = e; } m", "No overload of 'scale3' takes (math::vec2, int)", "another dimension is not a vector of this kind");
         });
 
         test("vectors_of_host_values", [expect, this]() {

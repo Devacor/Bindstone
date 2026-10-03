@@ -190,7 +190,7 @@ public:
 			expect("var cmpf = [](var& p, var& q) { p = 0; return false; }; var arr = [3, 1, 2]; arr.sort(cmpf); type_of(cmpf)", "function", "the comparator's writes never reach the variable passed to sort");
 			expect("var a = [1, 2, 3]; var r = array::filter(a, [](int& x) { x = x * 10; return x > 10; }); r.join(\",\") + \"|\" + a.join(\",\")", "20,30|10,20,30", "filter reference parameters target the live source");
 			expect("var a = [1, 2, 3, 4]; a.remove_if([](int& x) { x = x + 1; return x > 3; }); a.join(\",\")", "2,3", "remove_if keeps the written survivors");
-			expect("var m = {\"a\": 1, \"b\": 2}; var f = m.filter([](var& k, var& v) { v = v * 10; return v > 10; }); to_string(m[\"a\"]) + to_string(m[\"b\"]) + to_string(f.size())", "10201", "a map callback's value aliases the entry");
+			expect("var m = {\"a\": 1, \"b\": 2}; var f = map::filter(m, [](var& k, var& v) { v = v * 10; return v > 10; }); to_string(m[\"a\"]) + to_string(m[\"b\"]) + to_string(f.size())", "10201", "a map callback's value aliases the entry");
 			expect("var m = {\"a\": 1, \"b\": 2}; m.remove_if([](var& k, var& v) { k = \"z\"; v = v + 1; return v > 2; }); to_string(m[\"a\"]) + to_string(m.size())", "21", "a map key reaches the callback as a copy");
 		});
 

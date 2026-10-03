@@ -326,8 +326,7 @@ public:
             } catch (const std::exception& e) {
                 caught = true;
                 std::string msg = e.what();
-                check(msg.find("Cannot assign") != std::string::npos ||
-                      msg.find("Type mismatch") != std::string::npos);
+                check_true(msg.find("Cannot assign") != std::string::npos, msg);
             }
             check_eq(caught, true, "Should reject string assignment to int variable");
             // strict admits a var-sourced store; the runtime still rejects it
@@ -338,7 +337,7 @@ public:
             } catch (const static_check_error&) {
             } catch (const std::exception& e) {
                 caught = true;
-                check_true(std::string(e.what()).find("Type mismatch") != std::string::npos);
+                check_true(std::string(e.what()).find("Cannot assign string to 'x' (declared int)") != std::string::npos, e.what());
             }
             check_eq(caught, true, "var-sourced string into a locked int raises at runtime");
         });
@@ -1781,13 +1780,13 @@ public:
                 {"function takes(int x) -> int { return x; } takes([1, 2])",
                  "argument 1 of 'takes': cannot pass 'array' to 'x' declared 'int'", "Cannot pass array to parameter 'x' of 'takes' (declared int)"},
                 {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } f(B())",
-                 "argument 1 of 'f': cannot pass 'B' to 'v' declared 'A'", "Type mismatch"},
+                 "argument 1 of 'f': cannot pass 'B' to 'v' declared 'A'", "Cannot convert B to A"},
                 {"class C { int v = 0; } auto c = C(); c.v = \"nope\"; c.v",
                  "cannot assign 'string' to field 'v' declared 'int'", "Cannot assign string to field 'v' of C (declared int)"},
                 {"auto x = 5; x = \"hello\"; x",
                  "cannot assign 'string' to 'x' declared 'int'", "Cannot assign string to 'x' (declared int)"},
                 {"int x = 1; x += \"s\"; x",
-                 "cannot assign 'string' to 'x' declared 'int'", "Type mismatch"},
+                 "cannot assign 'string' to 'x' declared 'int'", "Cannot apply '+=' to int and string"},
             };
             for (const row& r : typed_mismatches) {
                 auto [si, sv] = both_in(check_mode::strict, r.src);
@@ -1805,7 +1804,7 @@ public:
                 {"var s = \"s\"; int x = s; x", "Cannot initialize 'x' (declared int) with string"},
                 {"var v = \"nope\"; function bad() -> int { return v; } bad()", "Cannot return string from 'bad' (declared -> int)"},
                 {"var arr = [1, 2]; function takes(int x) -> int { return x; } takes(arr)", "Cannot pass array to parameter 'x' of 'takes' (declared int)"},
-                {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } var b = B(); f(b)", "Type mismatch"},
+                {"class A { int a = 0; } class B { int b = 0; } function f(A v) -> int { return v.a; } var b = B(); f(b)", "Cannot convert B to A"},
                 {"class C { int v = 0; } auto c = C(); var s = \"nope\"; c.v = s; c.v", "Cannot assign string to field 'v' of C (declared int)"},
                 {"auto x = 5; var s = \"hello\"; x = s; x", "Cannot assign string to 'x' (declared int)"},
                 {"var caught = \"\"; var s = \"s\"; try { int x = s; } catch (e) { caught = e; } caught", "Cannot initialize 'x' (declared int) with string"},
@@ -2417,13 +2416,13 @@ public:
 
         test("method_ic_exact_type_memo_battery", [check_quad, check_quad_error]() {
             // A single-overload typed method armed in the call-site IC: exact-typed arguments take
-            // the memo (no resolver run), convertible ones re-resolve, rejected ones keep the
-            // overload-miss text, and a retyping reload invalidates the memo through the epoch.
+            // the memo (no resolver run), convertible ones re-resolve, rejected ones raise the
+            // parameter's text, and a retyping reload invalidates the memo through the epoch.
             const std::string M = "class M { int acc = 0; int add(int v) { acc += v; return acc; } float scale(float f, int k) { return f * k; } } M m = M(); ";
             auto q = [&](const char* tail) { return M + tail; };
             check_quad(q("int t = 0; for (int i = 0; i < 5; ++i) { t = m.add(i); } to_string(t)").c_str(), "10", "exact int args hit the memo across the loop");
             check_quad(q("m.add(1); m.add(2.9); to_string(m.acc)").c_str(), "3", "a float into int truncates on the resolver path after a memo hit (one table)");
-            check_quad(q("m.add(1); var x = \"x\"; var caught = \"\"; try { m.add(x); } catch (e) { caught = e; } caught").c_str(), "No overload of 'add' takes (string)", "a var-sourced rejected argument keeps the overload-miss text after memo hits");
+            check_quad(q("m.add(1); var x = \"x\"; var caught = \"\"; try { m.add(x); } catch (e) { caught = e; } caught").c_str(), "Cannot pass string to parameter 'v' of 'add' (declared int)", "a var-sourced rejected argument raises the parameter's text after memo hits");
             check_quad(q("to_string(m.scale(2.0, 3)) + \",\" + to_string(m.scale(2, 3))").c_str(), "6.0,6.0", "two-parameter memo: exact then int-to-float conversion");
             check_quad(q("m.add(1); m.add(2); class M { int acc = 0; int add(float v) { acc += cast<int>(v * 10.0); return acc; } } m.add(3); to_string(m.acc)").c_str(), "33", "a retyping reload invalidates the memo (the new overload runs)");
             check_quad(q("m.add(1); class M { int acc = 0; int add(int v) { acc += v; return acc; } int add(string s) { return -1; } } to_string(m.add(2)) + \",\" + to_string(m.add(\"s\"))").c_str(), "3,-1", "a reload adding an overload leaves the single-overload memo behind");
@@ -3535,7 +3534,7 @@ public:
                 "var m3 = \"\"; try { c.b = 1.5; m3 = \"stored\"; } catch (err3) { m3 = err3; }\n"
                 "m1 + \"|\" + m2 + \"|\" + m3 + \"|\" + to_string(c.raw()) + \"|\" + to_string(c.b)");
             check_eq(i_out, v_out, "setter error texts agree across backends");
-            check_eq(std::string("negative|No overload of '_set_b' takes (string)|stored|10|10"), i_out, "script throw, overload rejection, float->int conversion");
+            check_eq(std::string("negative|Cannot pass string to parameter 'v' of '_set_b' (declared int)|stored|10|10"), i_out, "script throw, parameter rejection, float->int conversion");
         });
 
         test("accessor_ref_binding_is_non_lvalue", [check_both]() {

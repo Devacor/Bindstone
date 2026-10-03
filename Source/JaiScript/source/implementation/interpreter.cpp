@@ -1075,17 +1075,23 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
         script_int removed_count = 0;
 
-        for (auto it = mapPtr->begin(); it != mapPtr->end(); ) {
-            auto call_result = lvalues ? call_map_entry(predicate, lvalues, self, it->first, ctx.get_engine()) : predicate({it->first, it->second});
+        // the predicate is script that may write this map: walk a snapshot of the keys, never a live iterator
+        const auto storage = mapPtr;
+        std::vector<script_value> keys;
+        keys.reserve(storage->size());
+        for (const auto& [key, value] : *storage) { keys.push_back(key); }
+        for (const auto& key : keys) {
+            auto found = storage->find(key);
+            if (found == storage->end()) { continue; }
+            auto call_result = lvalues ? call_map_entry(predicate, lvalues, self, key, ctx.get_engine()) : predicate({key, found->second});
             if (!call_result) {
                 return call_result.error_value();
             }
+            if (ctx.unwinding()) { return ctx.make_value(); }
             const auto& val = call_result.value();
             if (val.is_bool() && val.unchecked_as_bool()) {
-                it = mapPtr->erase(it);
-                ++removed_count;
-            } else {
-                ++it;
+                auto current = storage->find(key);
+                if (current != storage->end()) { storage->erase(current); ++removed_count; }
             }
         }
         return ctx.make_value(removed_count);
@@ -1099,18 +1105,21 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument");
         }
 
+        // the dot form keeps the entries the predicate accepts and returns the receiver; map::filter returns a copy
         script_value receiver = self;
         const auto source = receiver.unchecked_get_map_storage();
         const auto& map = *source;
         const auto& predicate = args[0].unchecked_as_function();
         const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
         auto tag = self.get_type_info();
-        script_value result = script_value::make_map(tag ? tag->key_type() : nullptr, tag ? tag->value_type() : nullptr, ctx.get_engine());
-        auto& resultPtr = result.unchecked_get_map_storage();
+        script_value result = ctx.copy_array_result
+            ? script_value::make_map(tag ? tag->key_type() : nullptr, tag ? tag->value_type() : nullptr, ctx.get_engine())
+            : ctx.make_value();
 
         std::vector<script_value> keys;
         keys.reserve(map.size());
         for (const auto& [key, value] : map) { keys.push_back(key); }
+        std::vector<script_value> rejected;
         for (const auto& key : keys) {
             auto found = map.find(key);
             if (found == map.end()) { continue; }
@@ -1120,12 +1129,20 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
             if (ctx.unwinding()) { return ctx.make_value(); }
             const auto& val = call_result.value();
-            if (val.is_bool() && val.unchecked_as_bool()) {
+            const bool keep = val.is_bool() && val.unchecked_as_bool();
+            if (!ctx.copy_array_result) {
+                if (!keep) { rejected.push_back(key); }
+            } else if (keep) {
                 auto current = map.find(key);
-                if (current != map.end()) { (*resultPtr)[key.clone_element()] = current->second.clone_element(); }
+                if (current != map.end()) { (*result.unchecked_get_map_storage())[key.clone_element()] = current->second.clone_element(); }
             }
         }
-        return result;
+        if (ctx.copy_array_result) { return result; }
+        for (const auto& key : rejected) {
+            auto it = source->find(key);
+            if (it != source->end()) { source->erase(it); }
+        }
+        return self;
     }},
 
         {symbolizer->intern("to_array"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -2565,6 +2582,14 @@ checked_result<script_value> interpreter::array_transform(uint64_t a_member, scr
 		if (!answer) { return answer.error_value(); }
 		return result;
 	}
+	return found->second(context, a_self, a_args);
+}
+
+checked_result<script_value> interpreter::map_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) {
+	auto context = builtin_ctx();
+	context.copy_array_result = true;
+	auto found = map_methods_.find(a_member);
+	if (found == map_methods_.end()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "Unknown map transform"); }
 	return found->second(context, a_self, a_args);
 }
 
@@ -8322,6 +8347,11 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                                 ns_env = std::move(host_layer);
                             }
 
+                            if (func_decl->is_coroutine) {   // a coroutine member mints a handle over the namespace's scope
+                                auto handle = std::make_shared<coroutine_handle>(eng);
+                                handle->set_function(func_decl, args, ns_env);
+                                return script_value::make_coroutine_handle(eng->symbolize("coroutine_handle"), std::static_pointer_cast<void>(handle), eng);
+                            }
                             // Found matching arity - create script_defined_function with namespace environment
                             script_callable payload;
                             payload.kind = script_callable::kind_type::function;
@@ -10275,9 +10305,17 @@ checked_result<void> interpreter::visit_throw_expr_t(throw_expr* expr, const rep
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_operand, 0, {});
         script_value val = pop_value();
 
-        // Store the exception value and convert to string for exception message
+        // the message is the value's text, a class's own to_string() for an instance (engine::text_of, print's rule)
+        std::string message;
+        if (val.deref().is_object()) {
+            auto text = engine_->text_of(val);
+            if (!text) { return text.error_value(); }
+            if (is_unwinding_) { push_value(make_value()); return {}; }   // to_string() threw: that throw propagates
+            message = std::move(text.value());
+        } else {
+            message = val.to_string();
+        }
         active_exception_value_ = val;
-        std::string message = val.to_string();
         current_exception_ = script_exception(message, expr->location);
         current_exception_->thrown = true;
     } else {
@@ -11913,7 +11951,8 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         if (stmt->catch_var_id != UINT64_MAX && !resuming_catch) {
             const bool by_throw = current_exception_ && current_exception_->thrown;
             script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_value(), by_throw,
-                                                             by_throw ? &current_exception_->location() : nullptr, captured_trace_);
+                                                             by_throw ? &current_exception_->location() : nullptr, captured_trace_,
+                                                             by_throw ? current_exception_->what() : nullptr);
             if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
                 call_stack_.back().set_local(stmt->catch_slot_index, std::move(caught));
             } else {

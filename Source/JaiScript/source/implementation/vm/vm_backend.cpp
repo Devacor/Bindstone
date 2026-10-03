@@ -2957,6 +2957,14 @@ checked_result<script_value> vm_backend::array_transform(uint64_t a_member, scri
 	return found->second(context, a_self, a_args);
 }
 
+checked_result<script_value> vm_backend::map_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) {
+	auto context = builtin_ctx();
+	context.copy_array_result = true;
+	auto found = builtins_.map_methods.find(a_member);
+	if (found == builtins_.map_methods.end()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "Unknown map transform"); }
+	return found->second(context, a_self, a_args);
+}
+
 checked_result<bool> vm_backend::language_less(const script_value& a_left, const script_value& a_right) {
 	auto result = binary_general(token_type::less, a_left.deref(), a_right.deref());
 	if (!result) { return result.error_value(); }
@@ -14217,6 +14225,11 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 							ns_env = std::move(host_layer);
 						}
 
+						if (func_decl->is_coroutine) {   // a coroutine member mints a handle over the namespace's scope (KEEP BYTE-PARALLEL with the interpreter)
+							auto handle = std::make_shared<coroutine_handle>(eng);
+							handle->set_function(func_decl, args, ns_env);
+							return script_value::make_coroutine_handle(eng->symbolize("coroutine_handle"), std::static_pointer_cast<void>(handle), eng);
+						}
 						script_callable payload;
 						payload.kind = script_callable::kind_type::function;
 						payload.fn = std::make_shared<script_defined_function>(
@@ -17863,8 +17876,17 @@ op_status vm_backend::exec_throw(frame& f, const vm_instruction& ins) {
 	if (ins.a) {
 		script_value val = std::move(stack_.back());
 		stack_.pop_back();
+		// the message is the value's text, a class's own to_string() for an instance (KEEP BYTE-PARALLEL with the interpreter)
+		std::string message;
+		if (val.deref().is_object()) {
+			auto text = engine_->text_of(val);
+			if (!text) { return raise_from(text); }
+			if (is_unwinding_) { return {}; }   // to_string() threw: that throw propagates
+			message = std::move(text.value());
+		} else {
+			message = val.to_string();
+		}
 		active_exception_value_ = val;
-		std::string message = val.to_string();
 		current_exception_ = script_exception(message, node ? node->location : source_location{});
 		current_exception_->thrown = true;
 	} else {
@@ -18021,7 +18043,8 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		if (handler.catch_var != 0 && !symbolizer_->get_string(handler.catch_var).empty()) {
 			const bool by_throw = current_exception_ && current_exception_->thrown;
 			script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_null(), by_throw,
-			                                                 by_throw ? &current_exception_->location() : nullptr, captured_trace_);
+			                                                 by_throw ? &current_exception_->location() : nullptr, captured_trace_,
+			                                                 by_throw ? current_exception_->what() : nullptr);
 			if (handler.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
 				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {

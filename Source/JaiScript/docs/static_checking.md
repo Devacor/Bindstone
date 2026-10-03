@@ -164,6 +164,10 @@ hides a name), `extern` declarations (Escape hatches below — a name defined ou
 program, typed or not), and the engine's full registration surface (globals, functions,
 classes, template types, namespaces — visible because checking happens at execute/jaibite
 time).
+Forward references work from a function body (it runs after the whole file has defined its functions), but top-level
+code runs in order: a top-level call to a function the same file declares only further down is an error,
+`'later' is called before its declaration (line N): top-level code runs in order, so declare it above the call or make
+the call after it` (an earlier unit's or the host's function of that name makes the call fine).
 `::name` reaches the program scope only (the unit's top level, then the program and the engine),
 never a local or a field of the same name, for reads and stores alike. A store to a
 program-scope name the unit does not declare checks against that name's declaration: the

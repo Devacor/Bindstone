@@ -43,7 +43,7 @@ public:
         test("one_overload_rejects_with_the_set_text", [this]() {
             auto eng = make_engine();
             eng->add_function("one", [](double a) -> double { return a; });
-            check_eq(std::string("No viable candidates for function call"),
+            check_eq(std::string("No overload of 'one' takes (string)"),
                      eng->execute("string m = \"\"; var s = \"x\"; try { one(s); } catch (e) { m = e; } m").as<std::string>());
             check_near(2.5, eng->execute("one(2.5)").as_float(), 1e-12);
         });

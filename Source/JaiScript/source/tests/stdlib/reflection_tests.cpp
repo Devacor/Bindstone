@@ -77,7 +77,7 @@ public:
                 for (const std::string name : {"reflect", "reflect::sub", "jai", "jai::sub"}) {
                     auto eng = engine::make();
                     eng->static_checking(mode);
-                    check_eq("Namespace '" + name + "' is reserved for the engine (C++-registered only): Type mismatch",
+                    check_eq("Namespace '" + name + "' is reserved for the engine (C++-registered only)",
                         declaration_error(*eng, "namespace " + name + " { var value = 1; }"));
                 }
             }
@@ -114,7 +114,7 @@ public:
                 } catch (const std::exception& caught) {
                     error = caught.what();
                 }
-                check_eq(std::string("Namespace 'jai::saved' is reserved for the engine (C++-registered only): Type mismatch"),
+                check_eq(std::string("Namespace 'jai::saved' is reserved for the engine (C++-registered only)"),
                     error);
                 check_eq(reader->execute("6 * 7").as_int(), script_int{42});
             }

@@ -1259,7 +1259,7 @@ public:
                 check_eq(expected, v_out, std::string("vm: ") + what);
             };
             auto mismatch = [](const char* who) {
-                return std::string("Cannot return string from ") + who + " (declared -> int): Type mismatch\n";
+                return std::string("Cannot return string from ") + who + " (declared -> int)\n";
             };
             expect_both("int f() {\n  var x = \"s\";\n  return x;\n}\nint g() { return 1; }\nint a = g();\nint b = f();\n",
                 mismatch("'f'") + "  at f (<script>:3)\n  at <script> (<script>:7)\n", "plain return");
@@ -1276,11 +1276,11 @@ public:
             expect_both("coroutine int co() {\n  var x = \"s\";\n  return x;\n}\nauto h = co();\nint g() {\n  return h.resume();\n}\nint b = g();\n",
                 mismatch("'co'") + "  at co (<script>:3)\n  at g (<script>:7)\n  at <script> (<script>:9)\n", "coroutine return, first resume");
             expect_both("coroutine int co() {\n  yield 1;\n  var a = [];\n  int y = a[0];\n  return y;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
-                "Array index 0 out of bounds for array of size 0: Array index out of bounds\n  at co (<script>:4)\n  at <script> (<script>:9)\n", "coroutine body error");
+                "Array index 0 out of bounds for array of size 0\n  at co (<script>:4)\n  at <script> (<script>:9)\n", "coroutine body error");
             expect_both("coroutine int co() {\n  yield 1;\n  throw \"x\";\n  return 1;\n}\nauto h = co();\nvar a = h.resume();\nvar b = h.resume();\n",
                 "x\n  at co (<script>:3)\n  at <script> (<script>:8)\n", "coroutine body throw");
             expect_both("int& f() {\n  return 5;\n}\nint b = f();\n",
-                "Function with reference return type must return an lvalue reference: Invalid reference\n  at f (<script>:2)\n  at <script> (<script>:4)\n", "ref return");
+                "Function with reference return type must return an lvalue reference\n  at f (<script>:2)\n  at <script> (<script>:4)\n", "ref return");
             // returncatch: a try around the failing return INSIDE the callee catches it; the
             // catch's own return converts in turn and a rethrow keeps the callee frame on top
             expect_both("int f() {\n  try { var x = \"s\"; return x; } catch (e) { return -1; }\n}\nthrow f() == -1 ? \"callee:-1\" : \"callee:other\";\n",
@@ -2025,7 +2025,7 @@ public:
                 check_eq(std::string("Cannot apply '++' to string"), caught("class D2 { string s = \"\"; void bump() { s++; } } D2 d = D2(); try { d.bump(); } catch (err) { m = err; }"));
                 std::string what;
                 try { e->execute("string u = \"x\"; u += 5;"); } catch (const std::exception& ex) { what = ex.what(); }
-                check_eq(std::string("Cannot apply '+=' to string and int: Type mismatch"), what);
+                check_eq(std::string("Cannot apply '+=' to string and int"), what);
             }
         });
 
@@ -2040,8 +2040,8 @@ public:
             auto e = make_engine();
             e->static_checking(check_mode::warn);
             check_eq(std::string("Undefined variable 'undefined_thing'"), what_of(e, "undefined_thing + 1;"));
-            check_eq(std::string("Cannot apply '+=' to string and int: Type mismatch"), what_of(e, "string u = \"x\"; u += 5;"),
-                "a category that adds information stays");
+            check_eq(std::string("Cannot apply '+=' to string and int"), what_of(e, "string u = \"x\"; u += 5;"),
+                "the text alone");
             e->static_checking(check_mode::strict);
             e->execution_budget(0.05);
             const std::string budget = what_of(e, "while (true) { }");
@@ -2333,7 +2333,7 @@ public:
                 std::string ro_bare, ro_this;
                 try { e->execute("w.ro_store();"); } catch (const std::exception& ex) { ro_bare = ex.what(); }
                 try { e->execute("w.ro_store_this();"); } catch (const std::exception& ex) { ro_this = ex.what(); }
-                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), ro_bare, "a bare store to a getter-only property raises");
+                check_eq(std::string("Cannot assign to 'ro': it is read-only"), ro_bare, "a bare store to a getter-only property raises");
                 check_eq(ro_bare, ro_this, "the this. spelling raises the same text");
                 check_eq((int64_t)105, e->execute("w.ro_read()").as_int(), "the getter still reads after the rejected stores");
                 check_eq((int64_t)5, e->execute("w.value").as_int());
@@ -2629,10 +2629,10 @@ public:
                 )");
                 std::string got;
                 try { e->execute("[[warn_mode]] w.ro = 5;"); } catch (const std::exception& ex) { got = ex.what(); }
-                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), got);
+                check_eq(std::string("Cannot assign to 'ro': it is read-only"), got);
                 got.clear();
                 try { e->execute("w.go();"); } catch (const std::exception& ex) { got = ex.what(); }
-                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), got);
+                check_eq(std::string("Cannot assign to 'ro': it is read-only"), got);
             }
         });
         test("script_field_shadows_property_for_refs", [this, propref_engine]() {

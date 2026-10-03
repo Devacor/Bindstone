@@ -363,7 +363,11 @@ engine stays usable", not by `check_throws`.
   typed return and field store all run the assignment table (`docs/static_checking.md` rule
   table) - `string` slots take anything, `bool` is truthiness, `int`/`float` take bool and
   `to_int()`/`to_float()` objects, a `function` slot takes a callable or null (a std::function's rule), exactly ONE converting ctor (no chaining), the array/map
-  element boundary on every path; each site owns its rejection text.
+  element boundary on every path; each site owns its rejection text. Methods too: a lone method (or constructor, or the one
+  overload an argument count admits) binds by arity and converts like a free function; among several the scorer
+  (`core/overload_resolution.hpp` `table_conversion_cost`) ranks exact, then int/float and bool-to-number conversions, then a
+  var parameter, then the loose rows (the string and bool rows, `to_X()`, a converting constructor); a string never makes a
+  bool parameter viable among overloads of one argument count, in the checker as at run time.
 - **`++`/`--` work on every lvalue** (elements, map entries, members, `this.x`, nested): a
   non-identifier target desugars at parse time to `+= 1` / `-= 1`; postfix yields the old value.
 - **An assignment expression's value is the destination's stored value** (Dev ruling 2026-09-08,
@@ -452,14 +456,14 @@ engine stays usable", not by `check_throws`.
   store's kernel. There is no second, narrower reference table.
 - **NaN** (2026-10-02, builtin-order consistency): `== != < <= > >=` follow IEEE on every lane (a NaN operand compares false, and unequal);
   `<=>` uses a total numeric order: signed zeros are equivalent and all NaNs form the final equivalent group. Default float sorting follows this order; ordinary relational operators retain IEEE behavior. Map keys keep their separate total strong order.
-- **Array helpers** (2026-10-02, registry `init_builtin_method_registries`): dot `append`/`concat`, `slice`, `filter`, and `map` mutate and return the receiver; `sort` and `reverse` mutate with void results. Core `array::` counterparts return value copies. Dot `map` retains input constraints; `array::map` uses the declared callback return type, or var. Filters retain input constraints, including typed maps. `reduce(f[, init])`, `for_each`, `find` (copy or null), `find_index` (-1), `some`, `every`, `insert(i, v)`; a callback gets (element) or (element, index), a `T&` element parameter is the live element (`make_element_reference`), a predicate counts only a bool true; `parallel_transform.cpp` `builtin_runs_script` lists the callback ones.
+- **Array helpers** (2026-10-02, registry `init_builtin_method_registries`): dot `append`/`concat`, `slice`, `filter`, and `map` mutate and return the receiver; `sort` and `reverse` mutate with void results. Core `array::` counterparts return value copies. Dot `map` retains input constraints; `array::map` uses the declared callback return type, or var. Filters retain input constraints, including typed maps. A map's dot `filter` keeps the accepted entries in the receiver and returns it; `map::filter(m, f)` returns a copy (Dev ruling 2026-10-03). `reduce(f[, init])`, `for_each`, `find` (copy or null), `find_index` (-1), `some`, `every`, `insert(i, v)`; a callback gets (element) or (element, index), a `T&` element parameter is the live element (`make_element_reference`), a predicate counts only a bool true; `parallel_transform.cpp` `builtin_runs_script` lists the callback ones.
 - **Arrow functions** `(params) => expr` / `(params) => { body }` / `x => expr`: a `[&]` lambda like `function(...)` (parser `arrow_function_ahead` scans to the matching `)` for `=>`); no declared return type.
 - **`??` / `??=` / optional chains**: `a ?? b` is a binary_expr (token `question_question`; interpreter short-circuit beside `&&`, vm `op_null_guard` + jump, a short-circuit op to the inliner and `return_conv`); `a ??= b` parses to `a ?? (a = b)` over a re-parsed side-effect-free target; `x?.a.b` skips the rest of its chain (parser `null_chain_rest`: `(null != x) ? x.a.b : null` for a side-effect-free base, `((p) => (null != p) ? p.a.b : null)(x)` otherwise).
 - **`print(obj)`** shows the class's `to_string()` (`engine::text_of`, both print implementations); such a text is never a format string.
 - **`do { } while (c);`** desugars to `for (bool do# = true; do# || c; do# = false)` (`continue` reaches the condition); `do` stays an identifier unless `{` follows.
 - **`let` is `var`** (Dev ruling 2026-10-01, a lexer keyword alias).
 - **Structured range-for bindings** `for (auto [k, v] : m)` / `auto&` / `var&` over maps: a hidden pair variable `entry#`, the key a copy, the value a reference to the pair's half (aliases the entry under `auto&`); the checker rejects a non-map container it can see.
-- **Foreign keywords** (`const`, `virtual`, `delete`, `new T[n]`, `goto`, `&x`, typed `catch`, `extends`, `===`, `!==`, `function*`) are parse errors naming the JaiScript spelling, recognized only where they would fail to parse (`detail/foreign_keyword.hpp`, docs/diagnostics.md). `.jaibite` version 35.
+- **Foreign keywords** (`const`, `virtual`, `delete`, `new T[n]`, `goto`, `&x`, typed `catch`, `extends`, `===`, `!==`, `function*`, spread `...`) are parse errors naming the JaiScript spelling, recognized only where they would fail to parse (`detail/foreign_keyword.hpp`, docs/diagnostics.md). `.jaibite` version 35.
 - **User accessors** `_get_x` / `_set_x`: member access `expr.x` (any receiver, `this.x`
   included) reads through the nearest USER `_get_x` in the class chain and stores through the
   nearest USER `_set_x` (compound assigns and `++`/`--` read then write through them); the
@@ -630,7 +634,7 @@ engine stays usable", not by `check_throws`.
   like any local, survives yields; the exception pair + in-catch marker are parked per
   coroutine. `.jaibite` version 12. The bound value is an ERROR VALUE (Dev ruling 2026-09-28, guide ch. 5): its message
   as a string (every string operation unchanged) that answers `e.message/file/line/column/stack/value` - a throw's value
-  with its type in `e.value` (`throw 42`: `e` reads "42"; a thrown object's/map's fields read through `e`), the place
+  with its type in `e.value` (`throw 42`: `e` reads "42"; a thrown instance reads as its class's `to_string()`, `engine::text_of`; a thrown object's/map's fields read through `e`), the place
   the throw's or the raising statement's, the stack `file:line` innermost first; `engine::make_caught_error` at both
   backends' catch, `engine::caught_error_member` before `string has no member`, `script_exception::thrown`.
 - **Files and locations** (guide ch. 10 "Where files are"): ONE resolution ladder for `import`, `include`,

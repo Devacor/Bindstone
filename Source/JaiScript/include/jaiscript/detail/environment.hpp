@@ -75,7 +75,9 @@ namespace jai {
             bump_env_epoch();
         }
 
-        ~environment() = default;
+        ~environment() {
+            while (!local_storage_.empty()) { local_storage_.pop_back(); }   // reverse declaration order (C++), as clear_values
+        }
 
         // Reference tracking for proper reference parameter support
         struct ref_info {
@@ -433,7 +435,18 @@ namespace jai {
     /// Stack-based call frame for fast function parameter access - avoids hash map
     /// overhead for the most frequently accessed variables.
     /// Defined at namespace scope so coroutine_handle can reference it without circular includes.
-    struct call_frame {
+    // A frame's slots die last slot first: locals in reverse declaration order (C++)
+struct reverse_destroyed_values : std::vector<script_value> {
+    using std::vector<script_value>::vector;
+    reverse_destroyed_values() = default;
+    reverse_destroyed_values(const reverse_destroyed_values&) = default;
+    reverse_destroyed_values(reverse_destroyed_values&&) noexcept = default;
+    reverse_destroyed_values& operator=(const reverse_destroyed_values&) = default;
+    reverse_destroyed_values& operator=(reverse_destroyed_values&&) noexcept = default;
+    ~reverse_destroyed_values() { while (!empty()) { pop_back(); } }
+};
+
+struct call_frame {
         std::shared_ptr<environment> closure_env;
 
         /// We store a pointer to avoid script_value default construction issues
@@ -473,7 +486,7 @@ namespace jai {
         const script_defined_function* function = nullptr;
 
         /// O(1) access by slot index - much faster than hash map or linear search
-        std::vector<script_value> locals;
+        reverse_destroyed_values locals;
 
         /// Invalid slot constant - SIZE_MAX naturally fails bounds check
         static constexpr size_t INVALID_SLOT = SIZE_MAX;

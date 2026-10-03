@@ -70,20 +70,18 @@ std::unique_ptr<execution_backend> create_vm_backend();
 
 namespace {
 
-// A checked error leaves a backend as "<text>: <category>" (std::system_error's what()). The host sees
-// the category only when it adds something: text that already begins with it drops the repeat.
-script_exception without_repeated_category(const script_exception& e) {
+// A checked error leaves a backend as "<text>: <category>" (std::system_error's what()). A text says everything the
+// category would: the host sees the text alone, and the category only for an error that carries no text.
+script_exception without_category_suffix(const script_exception& e) {
     if (e.thrown) { return e; }
     const std::string_view text = e.what();
     const size_t cut = text.rfind(": ");
-    if (cut == std::string_view::npos) { return e; }
+    if (cut == std::string_view::npos || cut == 0) { return e; }
     const std::string_view category = text.substr(cut + 2);
-    const std::string_view head = text.substr(0, cut);
-    if (category.empty() || head.substr(0, category.size()) != category) { return e; }
     const auto& errors = runtime_error_category();
     for (int ev = 1; ev <= static_cast<int>(runtime_error_code::coroutine_suspended); ++ev) {
         if (errors.message(ev) == category) {
-            return script_exception(std::string(head), e.location());
+            return script_exception(std::string(text.substr(0, cut)), e.location());
         }
     }
     return e;
@@ -145,7 +143,7 @@ checked_result<script_value> engine::checked_host_entry(host_entry_body run, voi
     try {
         auto result = run(*backend, context);
         if (result.has_value() && backend->is_unwinding()) [[unlikely]] {   // an uncaught script throw: its text, as execute() throws it
-            return failure(without_repeated_category(backend->get_current_exception()).what());
+            return failure(without_category_suffix(backend->get_current_exception()).what());
         }
         return result;
     } catch (const std::exception& e) {   // a nested run's failure (an import that is missing or fails its check) leaves as an exception
@@ -545,7 +543,7 @@ struct engine::implementation {
                 }
             }
             if (!best) {
-                throw runtime_error("No viable candidates for function call");
+                return script_value::make_null(static_cast<engine*>(nullptr));   // the dispatcher names the miss (detail::overload_miss)
             }
             if (shape) {
                 resolved_[1] = resolved_[0];
@@ -1318,7 +1316,7 @@ struct engine::implementation {
         auto result = script_callable_thunk{&self, std::move(payload)}({std::move(previous)});
         if (be->is_unwinding()) {
             if (be->is_executing()) { be->park_nested_failure(); }
-            throw without_repeated_category(be->get_current_exception());
+            throw without_category_suffix(be->get_current_exception());
         }
         if (!result) { throw runtime_error(self.format_error(result)); }
     }
@@ -2314,6 +2312,7 @@ void engine::initialize_engine_reference() {
     // the helpers above this constructor's TU position are visible: see location builtins below.
 	detail::register_math_namespace(*this);
 	detail::register_array_namespace(*this);
+	detail::register_map_namespace(*this);
     register_privilege_builtins();
     register_location_builtins();
 
@@ -2486,7 +2485,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
 
         if (be->is_unwinding()) {
             if (be->is_executing()) { be->park_nested_failure(); }
-            throw without_repeated_category(be->get_current_exception());
+            throw without_category_suffix(be->get_current_exception());
         }
 
         // No need to sync globals - they're already in the shared environment!
@@ -4773,10 +4772,10 @@ uint64_t engine::clock_sample_count() const noexcept {
 }
 
 script_value engine::make_caught_error(const script_value& thrown_in, bool by_throw, const source_location* throw_site,
-                                       const std::vector<stack_frame>& trace) {
+                                       const std::vector<stack_frame>& trace, const char* thrown_text) {
     const script_value& thrown = thrown_in.deref();
     const std::string* text = thrown.text_bytes();
-    script_value caught(text ? *text : thrown.to_string(), this);
+    script_value caught(text ? *text : thrown_text ? std::string(thrown_text) : thrown.to_string(), this);
     caught.set_type_info(type_info_ptr{get_type_info_any()});   // the catch variable stays a dynamic local
     if (parallel_region_active()) { return caught; }
     auto& table = impl->caught_errors_;

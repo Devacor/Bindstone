@@ -48,7 +48,7 @@ public:
 					} catch (const std::exception& error) {
 						outcome = error.what();
 					}
-					check_eq(std::string("Array index 2 out of bounds for array of size 2: Array index out of bounds"),
+					check_eq(std::string("Array index 2 out of bounds for array of size 2"),
 						outcome, script);
 					check_eq(script_int{1}, source.reads, "one getter evaluation inside the function");
 				}

@@ -761,6 +761,12 @@ public:
     // reference-free value-semantic subtree can still carry is a shared string buffer.
     const std::vector<uint32_t>& string_reachable_slots() const;
     bool type_can_hold_string(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
+    // A value of this class (or of a subclass held where this class is declared) can destroy an instance whose chain
+    // declares a script destructor: the chain or a subclass's declares one, or a by-value field's type can hold such an
+    // instance (handles share, never destroy a copy). Cached against engine::definition_epoch.
+    bool value_tree_runs_destructor() const;
+    // The same question for a declared type (null, var and unknown kinds can hold anything)
+    bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
     type_info_ptr get_field_declared_type(uint64_t id) const {
         auto it = field_declared_types_.find(id);
@@ -2404,6 +2410,10 @@ private:
     mutable uint64_t string_slots_epoch_ = 0;
     mutable uint64_t handle_slots_epoch_ = 0;
     bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
+    mutable bool destructor_tree_cached_ = false;
+    mutable uint64_t destructor_tree_epoch_ = UINT64_MAX;
+    bool chain_declares_destructor() const;
+    bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const;
 
     void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref) {
         has_property_getters_ = false;

@@ -71,6 +71,65 @@ bool class_definition::type_can_hold_string(const type_info_ptr& t, std::vector<
     }
 }
 
+bool class_definition::chain_declares_destructor() const {
+    if (engine_) {
+        const uint64_t id = engine_->symbolize("~" + name_);
+        if (id != 0 && methods_.find(id) != methods_.end()) { return true; }
+    }
+    for (const auto& parent : parent_classes_) {
+        if (parent && parent->chain_declares_destructor()) { return true; }
+    }
+    return false;
+}
+
+bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const {
+    if (!t) { return true; }
+    switch (t->base_type) {
+    case script_value_type::jai_null_type:
+    case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
+    case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+    case script_value_type::jai_shared_ptr_type: case script_value_type::jai_weak_ptr_type: case script_value_type::jai_function_type:
+    case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_ivec2_type:
+    case script_value_type::jai_ivec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
+        return false;
+    case script_value_type::jai_array_type: return type_tree_runs_destructor(t->element_type(), in_progress);
+    case script_value_type::jai_map_type: return type_tree_runs_destructor(t->key_type(), in_progress) || type_tree_runs_destructor(t->value_type(), in_progress);
+    case script_value_type::jai_object_type: {
+        if (!engine_ || t->type_name.empty()) { return true; }
+        auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
+        return nested && nested->value_tree_runs_destructor_impl(in_progress);   // a host class runs no script destructor
+    }
+    default: return true;
+    }
+}
+
+bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const {
+    for (const class_definition* visiting : in_progress) { if (visiting == this) { return false; } }
+    in_progress.push_back(this);
+    bool runs = chain_declares_destructor();
+    const uint32_t n = field_slot_count();
+    for (uint32_t slot = 0; slot < n && !runs; ++slot) {
+        runs = type_tree_runs_destructor(get_field_declared_type(slot_field(slot)), in_progress);
+    }
+    if (!runs && engine_) {
+        for (const auto& entry : engine_->get_class_registry().script_classes_) {
+            const class_definition* other = entry.second.get();
+            if (other && other != this && other->derives_from(this) && other->value_tree_runs_destructor_impl(in_progress)) { runs = true; break; }
+        }
+    }
+    in_progress.pop_back();
+    return runs;
+}
+
+bool class_definition::value_tree_runs_destructor() const {
+    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
+    if (destructor_tree_epoch_ == epoch && engine_) { return destructor_tree_cached_; }
+    std::vector<const class_definition*> in_progress;
+    destructor_tree_cached_ = value_tree_runs_destructor_impl(in_progress);
+    destructor_tree_epoch_ = epoch;
+    return destructor_tree_cached_;
+}
+
 const std::vector<uint32_t>& class_definition::string_reachable_slots() const {
     const uint64_t epoch = engine_ ? engine_->class_definition_epoch() : 0;
     if (string_slots_epoch_ == epoch && engine_) { return string_slots_cached_; }

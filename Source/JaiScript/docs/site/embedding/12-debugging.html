@@ -37,6 +37,32 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <article class="chapter"><h1 id="debugging">Debugging<a class="hlink" href="#debugging" aria-label="link">&#8203;</a></h1>
 <p>JaiScript ships a <strong>step-debugger core</strong> (set breakpoints, pause a running script, inspect and edit variables, step, and resume) plus a <strong>VS&nbsp;Code extension</strong> for syntax highlighting and DAP attach. This page shows each piece and how to drive it, from a one-line editor attach down to the raw C++ controller.</p>
 <div class="callout"><p><strong>Three pieces, three audiences.</strong> (1) Editor <strong>syntax highlighting</strong>: standalone, no engine build needed. (2) The <strong>debugger core</strong>, an engine-owned controller you can drive directly from C++: breakpoints, stepping, and live variable reads <em>and writes</em> on a parked script. (3) The <strong>DAP <code>debug_connector</code></strong>, a dependency-free TCP server that lets <strong>VS&nbsp;Code attach</strong>: click breakpoints in the gutter, stop, step (over/into/out), and read in-scope variables. Both backends carry the statement hook, and it costs nothing until a session attaches. The design and its cost model are in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/DEBUGGER_DESIGN.md"><code>docs/DEBUGGER_DESIGN.md</code></a>.</p></div>
+<h2 id="quick-path">Debug a script, step by step<a class="hlink" href="#quick-path" aria-label="link">&#8203;</a></h2>
+<ol><li>Load the extension from <code>tools/vscode-jaiscript</code> (<a href="#syntax-highlighting-vs-code">below</a>: F5 in that folder, or install the packaged <code>.vsix</code>).</li>
+<li>Run the script through a host that listens: the standalone runner does by default and logs <code>debugger: DAP listening on 127.0.0.1:52477</code> (a host of your own calls <code>jai::debug::listen(*eng)</code>, port 52472). The script must still be running when you attach, so this suits a game loop or anything that waits for input; a short script finishes before the editor connects.</li>
+<li>In VS&nbsp;Code add the <a href="#attach-from-vs-code">attach configuration</a> with that port and press F5.</li>
+<li>Click in the gutter of the <code>.jai</code> file. Run scripts through <code>execute_file</code> or <code>import</code> so their nodes carry the file's path; a breakpoint binds by path.</li>
+<li>When it stops: step over, into and out, continue, and read the locals in the Variables pane.</li></ol>
+<h3 id="without-a-debugger">Without a debugger<a class="hlink" href="#without-a-debugger" aria-label="link">&#8203;</a></h3>
+<p>Most mistakes never reach run time: the strict checker lists every typed mistake and undeclared name in a file before anything runs (<a href="06-static-checking.html">Static Checking</a>). For the rest, a caught error knows where it came from: <code>e.message</code>, <code>e.line</code>, <code>e.column</code> and <code>e.stack</code> (each frame <code>file:line</code>, innermost first, the innermost 64 kept):</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function load_level(int n) {
+    array&lt;int&gt; sizes = [8, 16];
+    return sizes[n];
+}
+function start() { return load_level(5); }
+try {
+    start();
+} catch (e) {
+    print("error: ", e.message);
+    print("where: line ", e.line, ", column ", e.column);
+    for (auto frame : e.stack) { print("  at ", file_name(frame)); }
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">error: Array index 5 out of bounds for array of size 2
+where: line 3, column 5
+  at main.jai:3
+  at main.jai:5
+  at main.jai:7</code></pre></div>
+<p>On the host side, a failed <code>checked_result</code> gives the same through <code>eng-&gt;format_error(r)</code> and <code>eng-&gt;format_stack_trace()</code>, and an error nothing catches prints its message and stack from the runner.</p>
 <h2 id="syntax-highlighting-vs-code">Syntax highlighting (VS&nbsp;Code)<a class="hlink" href="#syntax-highlighting-vs-code" aria-label="link">&#8203;</a></h2>
 <p>The extension lives in <code>tools/vscode-jaiscript/</code>. It highlights <code>.script</code>, <code>.jai</code>, and <code>.jaibite</code> files: the keywords, the <code>int</code>/<code>auto</code>/<code>var</code> type ladder, <code>function</code>/<code>class</code>/<code>coroutine</code>, backtick template strings with <code>${expr}</code> interpolation, all operators (including <code>&lt;=&gt;</code> and <code>?.</code>), numeric literals, and the stdlib builtins. The keywords follow the lexer&#x27;s keyword table (<code>int64</code>, for instance, is <em>not</em> a keyword and is not highlighted as one).</p>
 <p>Load it the quickest way: open the extension folder in VS&nbsp;Code and press <kbd>F5</kbd> to launch an Extension Development Host, then open any <code>.jai</code> file:</p>

@@ -37,7 +37,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <article class="chapter"><h1 id="enums-namespaces-destructuring-friends">Enums, Namespaces, Destructuring &amp; Friends<a class="hlink" href="#enums-namespaces-destructuring-friends" aria-label="link">&#8203;</a></h1>
 <p>The kitchen sink. This chapter collects the smaller conveniences, the things you reach for daily that don&#x27;t need a chapter of their own: enums, namespaces, destructuring, the ternary operator, and null-safe access. Each behaves the way a C++ developer would guess, with the differences called out.</p>
 <h2 id="enums">Enums<a class="hlink" href="#enums" aria-label="link">&#8203;</a></h2>
-<p><code>enum Name { a, b, c }</code> declares sequential integer constants (0-based), accessed with dot syntax. They compare naturally and work as <code>switch</code> cases:</p>
+<p><code>enum Name { a, b, c }</code> declares sequential integer constants (0-based). They compare naturally and work as <code>switch</code> cases:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 print("east = {}", Direction.east);
 auto d = Direction.south;
@@ -59,7 +59,7 @@ print("{}", Direction.zzz);</code></pre></div>
 &lt;script&gt;:2:23: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (declared at 1:6)
     print(&quot;{}&quot;, Direction.zzz);
                           ^</code></pre></div>
-<p>Members are reached with a dot (<code>Direction.east</code>); the <code>::</code> spelling is for namespaces and statics, and does not resolve an enum value.</p>
+<p>Members are reached with a dot (<code>Direction.east</code>) or, as in C++, with <code>::</code> (<code>Direction::east</code>); both name the same constant. Values are always sequential from 0: a C++-style explicit value (<code>enum Flag { a = 5 }</code>) is a parse error, so spell fixed numbers as constants in a namespace (<code>namespace Flag { int a = 5; }</code>) when they matter.</p>
 <p>An enum declared inside a function or a block is local to it, like a C++ local enum: its values resolve there and it vanishes with the scope. The same holds for an enum in a file that an <code>include</code> runs inside a function. An enum of the same name at program scope keeps its values, and the checker warns when a local declaration hides one (<code>enum 'Color' declared in function 'reload' is local to it: the program-scope 'Color' keeps its values</code>).</p>
 <h2 id="namespaces">Namespaces<a class="hlink" href="#namespaces" aria-label="link">&#8203;</a></h2>
 <p>Namespaces group functions, variables, and classes behind <code>::</code>. They are <strong>flat</strong>. <code>namespace my::nested::deep { }</code> is a single namespace whose name contains <code>::</code>, and &quot;nesting&quot; blocks composes the same way. Functions overload <strong>by arity</strong>; redefining an existing name+arity requires the <code>override</code> keyword (mirrors hot-reload discipline):</p>

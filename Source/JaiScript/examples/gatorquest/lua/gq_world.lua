@@ -1,0 +1,827 @@
+-- Gator Quest (Lua port) - terrain access and world generation, carved from the seed alone.
+-- Spots come back as two results (x, y) where the script returns a two-element array.
+
+local W_OFF, W_W, W_H, TILES, TVAR, REGROW, OCC = W_OFF, W_W, W_H, TILES, TVAR, REGROW, OCC
+local W_WEATHER, W_WEATHER_T, W_ARRIVE_X, W_ARRIVE_Y, W_BOSS_T = W_WEATHER, W_WEATHER_T, W_ARRIVE_X, W_ARRIVE_Y, W_BOSS_T
+local GATE_W, GATE_X, GATE_Y, GATE_DEST = GATE_W, GATE_X, GATE_Y, GATE_DEST
+local TOWN_W, TOWN_X0, TOWN_Y0, TOWN_X1, TOWN_Y1, TOWN_NAME = TOWN_W, TOWN_X0, TOWN_Y0, TOWN_X1, TOWN_Y1, TOWN_NAME
+local CHEST_W, CHEST_X, CHEST_Y, CHEST_TIER, CHEST_T = CHEST_W, CHEST_X, CHEST_Y, CHEST_TIER, CHEST_T
+local SP_W, SP_X, SP_Y, SP_KIND, SP_MAX, SP_RAD, SP_DELAY, SP_NEXT, SP_ALIVE = SP_W, SP_X, SP_Y, SP_KIND, SP_MAX, SP_RAD, SP_DELAY, SP_NEXT, SP_ALIVE
+local TILES_DEF, T_WALK, WORLDS = TILES_DEF, T_WALK, WORLDS
+local DX, DY = DX, DY
+local idiv, iabs, iclamp, isign, cheb, dist2 = idiv, iabs, iclamp, isign, cheb, dist2
+local rnd, rnd_range, hash3, vnoise, fractal = rnd, rnd_range, hash3, vnoise, fractal
+local T_DEEP, T_SKY, T_CAVEWALL = T_DEEP, T_SKY, T_CAVEWALL
+
+-- ---------------------------------------------------------------- access ---
+local function in_world(w, x, y) return x >= 0 and y >= 0 and x < W_W[w] and y < W_H[w] end
+
+local function tile_at(w, x, y)
+	local ww = W_W[w]
+	if x < 0 or y < 0 or x >= ww or y >= W_H[w] then
+		if w == 0 then return T_DEEP elseif w == 6 then return T_SKY end
+		return T_CAVEWALL
+	end
+	return TILES[W_OFF[w] + y * ww + x]
+end
+
+-- terrain as it stands now: a felled tree shows its stump until it regrows
+local function tile_now(w, x, y)
+	local ww = W_W[w]
+	if x < 0 or y < 0 or x >= ww or y >= W_H[w] then return tile_at(w, x, y) end
+	local i = W_OFF[w] + y * ww + x
+	local t = TILES[i]
+	if REGROW[i] > TICK then
+		local after = TILES_DEF[t].after
+		if after >= 0 then return after end
+	end
+	return t
+end
+
+local function set_tile(w, x, y, t)
+	if in_world(w, x, y) then TILES[W_OFF[w] + y * W_W[w] + x] = t end
+end
+
+local function walk_at(w, x, y) return T_WALK[tile_now(w, x, y)] end
+local function is_land(w, x, y) local k = walk_at(w, x, y); return k == 1 or k == 6 or k == 4 end
+local function is_water(w, x, y) return walk_at(w, x, y) == 2 end
+
+local function fill_rect(w, x0, y0, x1, y1, t)
+	for y = y0, y1 do
+		for x = x0, x1 do set_tile(w, x, y, t) end
+	end
+end
+
+local function fill_disc(w, cx, cy, r, t)
+	for y = cy - r, cy + r do
+		for x = cx - r, cx + r do
+			if dist2(x, y, cx, cy) <= r * r + r then set_tile(w, x, y, t) end
+		end
+	end
+end
+
+-- nearest tile (spiral out) that satisfies the walk classes in `mask` (bit per class)
+local function find_spot(w, x0, y0, maxr, mask)
+	for r = 0, maxr do
+		for dy = -r, r do
+			for dx = -r, r do
+				if iabs(dx) == r or iabs(dy) == r then
+					local x = x0 + dx
+					local y = y0 + dy
+					if in_world(w, x, y) and ((1 << walk_at(w, x, y)) & mask) ~= 0 then return x, y end
+				end
+			end
+		end
+	end
+	return x0, y0
+end
+
+LAND_MASK = 2 + 64 + 16   -- land, slow land, ice
+local LAND_MASK = LAND_MASK
+
+-- a road from a to b: greedy steps with a wobble; water becomes bridge, obstacles are cleared
+local function carve_road(w, ax, ay, bx, by, road)
+	local x = ax
+	local y = ay
+	local guard = 0
+	while (x ~= bx or y ~= by) and guard < 600 do
+		guard = guard + 1
+		local dx = isign(bx - x)
+		local dy = isign(by - y)
+		if dx ~= 0 and dy ~= 0 then
+			if rnd(2) == 0 then dx = 0 else dy = 0 end
+		end
+		x = x + dx
+		y = y + dy
+		local t = tile_at(w, x, y)
+		local k = T_WALK[t]
+		if t == T_GATE or t == T_STAIRS_DN or TILES_DEF[t].station ~= 0 or t == T_DOOR or t == T_WOODFLOOR or t == T_CARPET then
+		elseif t == T_BRICK or t == T_WOODWALL or t == T_COUNTER or t == T_FENCE then
+		elseif k == 2 or t == T_SHALLOW then set_tile(w, x, y, T_BRIDGE)
+		else set_tile(w, x, y, road) end
+	end
+end
+
+-- ------------------------------------------------------------- recording ---
+local function add_gate(w, x, y, dest)
+	set_tile(w, x, y, T_GATE)
+	local n = GATE_N
+	GATE_W[n] = w
+	GATE_X[n] = x
+	GATE_Y[n] = y
+	GATE_DEST[n] = dest
+	GATE_N = n + 1
+end
+
+local function gate_in(w, dest)
+	for i = 0, GATE_N - 1 do
+		if GATE_W[i] == w and GATE_DEST[i] == dest then return i end
+	end
+	return -1
+end
+
+local function add_town(w, x0, y0, x1, y1, name)
+	local n = TOWN_N
+	TOWN_W[n] = w
+	TOWN_X0[n] = x0
+	TOWN_Y0[n] = y0
+	TOWN_X1[n] = x1
+	TOWN_Y1[n] = y1
+	TOWN_NAME[n] = name
+	TOWN_N = n + 1
+end
+
+local function town_at(w, x, y)
+	for i = 0, TOWN_N - 1 do
+		if TOWN_W[i] == w and x >= TOWN_X0[i] and x <= TOWN_X1[i] and y >= TOWN_Y0[i] and y <= TOWN_Y1[i] then return i end
+	end
+	return -1
+end
+
+local function add_chest(w, x, y, tier)
+	set_tile(w, x, y, T_CHEST)
+	local n = CHEST_N
+	CHEST_W[n] = w
+	CHEST_X[n] = x
+	CHEST_Y[n] = y
+	CHEST_TIER[n] = tier
+	CHEST_T[n] = 0
+	CHEST_N = n + 1
+end
+
+local function add_spawner(w, x, y, kind, maxn, rad, delay)
+	local n = SP_N
+	SP_W[n] = w
+	SP_X[n] = x
+	SP_Y[n] = y
+	SP_KIND[n] = kind
+	SP_MAX[n] = maxn
+	SP_RAD[n] = rad
+	SP_DELAY[n] = delay
+	SP_NEXT[n] = 0
+	SP_ALIVE[n] = 0
+	SP_N = n + 1
+end
+
+-- NPC placements the populate pass turns into mobiles
+NPC_PLAN_W = {}
+NPC_PLAN_X = {}
+NPC_PLAN_Y = {}
+NPC_PLAN_KIND = {}
+NPC_PLAN_ROLE = {}
+NPC_PLAN_N = 0
+
+local function plan_npc(w, x, y, kind, role)
+	local n = NPC_PLAN_N
+	NPC_PLAN_W[n] = w
+	NPC_PLAN_X[n] = x
+	NPC_PLAN_Y[n] = y
+	NPC_PLAN_KIND[n] = kind
+	NPC_PLAN_ROLE[n] = role
+	NPC_PLAN_N = n + 1
+end
+
+-- a walled building with a door on the south wall; returns doorx, doory
+local function building(w, x0, y0, bw, bh, wall, floor)
+	fill_rect(w, x0, y0, x0 + bw - 1, y0 + bh - 1, wall)
+	fill_rect(w, x0 + 1, y0 + 1, x0 + bw - 2, y0 + bh - 2, floor)
+	local dx = x0 + bw // 2
+	local dy = y0 + bh - 1
+	set_tile(w, dx, dy, T_DOOR)
+	set_tile(w, dx, dy + 1, T_ROAD)
+	return dx, dy
+end
+
+-- a shop: building + counter + keeper behind it (+ an optional station)
+local function shop(w, x0, y0, role, kind, station)
+	building(w, x0, y0, 7, 5, T_WOODWALL, T_WOODFLOOR)
+	fill_rect(w, x0 + 1, y0 + 2, x0 + 5, y0 + 2, T_COUNTER)
+	set_tile(w, x0 + 3, y0 + 2, T_WOODFLOOR)
+	set_tile(w, x0 + 1, y0 + 1, T_CARPET)
+	if station >= 0 then set_tile(w, x0 + 5, y0 + 1, station) end
+	plan_npc(w, x0 + 3, y0 + 1, kind, role)
+end
+
+-- ------------------------------------------------------------ generation ---
+local function world_alloc()
+	aclear(W_OFF); aclear(W_W); aclear(W_H); aclear(TILES); aclear(TVAR); aclear(REGROW); aclear(OCC)
+	local n_tiles = 0
+	for w = 0, WORLD_COUNT - 1 do
+		W_OFF[w] = n_tiles
+		W_W[w] = WORLDS[w].w
+		W_H[w] = WORLDS[w].h
+		local n = WORLDS[w].w * WORLDS[w].h
+		for i = 0, n - 1 do
+			local k = n_tiles + i
+			TILES[k] = 0
+			TVAR[k] = hash3(i, w, SEED) & 255
+			REGROW[k] = 0
+			OCC[k] = 0
+		end
+		n_tiles = n_tiles + n
+		W_WEATHER[w] = 0
+		W_WEATHER_T[w] = 0
+		W_ARRIVE_X[w] = 1
+		W_ARRIVE_Y[w] = 1
+		W_BOSS_T[w] = 0
+	end
+	TILE_N = n_tiles
+end
+
+local function pick(pool) return mid(pool[rnd(alen(pool))]) end
+
+local function gen_overworld()
+	local w = 0
+	local ww = W_W[w]
+	local hh = W_H[w]
+	local salt = SEED * 7 + 11
+	local base = W_OFF[w]
+	for y = 0, hh - 1 do
+		for x = 0, ww - 1 do
+			local e = fractal(x, y, salt)
+			local m = fractal(x, y, salt + 1000)
+			local cx = idiv((x - ww // 2) * 1000, ww // 2)
+			local cy = idiv((y - hh // 2) * 1000, hh // 2)
+			local falloff = (cx * cx + cy * cy) // 2600
+			e = e + 180 - falloff
+			local h = hash3(x, y, salt + 5) & 1023
+			local t = T_GRASS
+			if e < 330 then t = T_DEEP
+			elseif e < 380 then t = T_SHALLOW
+			elseif e < 410 then t = T_SAND
+			elseif e > 830 then t = T_MOUNTAIN
+			elseif e > 760 then
+				t = h < 90 and T_BOULDER or (h < 120 and T_ORE or (h < 400 and T_DIRT or T_GRASS))
+			elseif m > 640 then
+				if h < 260 then t = T_SWAMP
+				elseif h < 380 then t = T_CYPRESS
+				elseif h < 470 then t = T_REEDS
+				elseif h < 560 then t = T_MUD
+				elseif h < 600 then t = T_LILY
+				else t = T_BOG end
+			elseif m > 540 then
+				t = h < 520 and T_OAK or (h < 600 and T_BUSH or (h < 640 and T_PINE or T_GRASS))
+			elseif m < 280 then
+				t = h < 300 and T_DIRT or (h < 500 and T_TALLGRASS or T_GRASS)
+			else
+				if h < 50 then t = T_OAK
+				elseif h < 90 then t = T_BUSH
+				elseif h < 170 then t = T_TALLGRASS
+				elseif h < 210 then t = T_FLOWERS
+				elseif h < 214 then t = T_BOULDER end
+			end
+			TILES[base + y * ww + x] = t
+		end
+	end
+	-- rivers: walk downhill from high ground to the sea
+	for _ = 0, 3 do
+		local x = rnd_range(20, ww - 20)
+		local y = rnd_range(15, hh - 15)
+		local dir = rnd(8)
+		for step = 0, 89 do
+			local t = tile_at(w, x, y)
+			if t == T_DEEP then break end
+			set_tile(w, x, y, step % 7 == 0 and T_DEEP or T_SHALLOW)
+			if rnd(3) == 0 then dir = (dir + rnd(3) + 7) % 8 end
+			x = iclamp(x + DX[dir], 1, ww - 2)
+			y = iclamp(y + DY[dir], 1, hh - 2)
+		end
+	end
+	-- Swampton, near the middle
+	local sx = ww // 2 - 13
+	local sy = hh // 2 - 9
+	fill_rect(w, sx - 2, sy - 2, sx + 27, sy + 20, T_GRASS)
+	fill_rect(w, sx, sy, sx + 25, sy + 18, T_ROAD)
+	for _ = 0, 59 do
+		local fx = sx + rnd(26)
+		local fy = sy + rnd(19)
+		set_tile(w, fx, fy, rnd(3) == 0 and T_FLOWERS or T_GRASS)
+	end
+	shop(w, sx + 1, sy + 1, R_WEAPONS, M_GATOR_NPC, T_ANVIL)
+	shop(w, sx + 9, sy + 1, R_ARMOR, M_TURTLE_NPC, -1)
+	shop(w, sx + 17, sy + 1, R_ALCHEMIST, M_FROGFOLK, T_ALCHEMY)
+	shop(w, sx + 1, sy + 12, R_PROVISIONER, M_GATOR_NPC, -1)
+	shop(w, sx + 9, sy + 12, R_BANKER, M_TURTLE_NPC, T_BANK)
+	shop(w, sx + 17, sy + 12, R_HEALER, M_FROGFOLK, -1)
+	-- plaza: well, fire pit, forge + anvil yard, the sewer grate, a sign
+	local px = sx + 12
+	local py = sy + 9
+	set_tile(w, px, py, T_WELL)
+	set_tile(w, px - 4, py, T_FIRE)
+	set_tile(w, px + 5, py - 1, T_FORGE)
+	set_tile(w, px + 6, py - 1, T_ANVIL)
+	set_tile(w, px + 3, py + 1, T_STAIRS_DN)
+	set_tile(w, px - 1, py - 2, T_SIGN)
+	plan_npc(w, px - 2, py + 1, M_GATOR_NPC, R_MAYOR)
+	plan_npc(w, px + 1, py - 2, M_GUARD, R_CAPTAIN)
+	plan_npc(w, sx + 25, sy + 8, M_FROGFOLK, R_FISHMONGER)
+	plan_npc(w, sx + 3, sy + 8, M_GATOR_NPC, -1)
+	plan_npc(w, sx + 20, sy + 10, M_FROGFOLK, -1)
+	plan_npc(w, sx + 14, sy + 16, M_TURTLE_NPC, -1)
+	plan_npc(w, sx - 1, sy + 9, M_GUARD, -1)
+	plan_npc(w, sx + 26, sy + 9, M_GUARD, -1)
+	plan_npc(w, sx + 12, sy - 1, M_GUARD, -1)
+	add_town(w, sx - 3, sy - 3, sx + 28, sy + 21, "Swampton")
+	W_ARRIVE_X[w] = px
+	W_ARRIVE_Y[w] = py + 2
+
+	-- the Shrine of the Six on a knoll north-west of town
+	local shx = sx - 10
+	local shy = sy - 8
+	fill_disc(w, shx, shy, 3, T_STONEFLOOR)
+	set_tile(w, shx, shy, T_SHRINE)
+	plan_npc(w, shx, shy + 2, M_TURTLE_NPC, R_ORACLE)
+	carve_road(w, shx, shy + 3, sx, sy + 9, T_DIRT)
+
+	-- Mudport on the east coast
+	local mx = ww - 22
+	local my = hh // 2 + 10
+	fill_rect(w, mx - 1, my - 1, mx + 14, my + 10, T_SAND)
+	fill_rect(w, mx, my, mx + 13, my + 9, T_ROAD)
+	fill_rect(w, mx + 14, my - 1, mx + 17, my + 10, T_SHALLOW)
+	fill_rect(w, mx + 14, my + 4, mx + 17, my + 5, T_BRIDGE)
+	shop(w, mx + 1, my + 1, R_FISHMONGER, M_FROGFOLK, -1)
+	shop(w, mx + 1, my + 5, R_PROVISIONER, M_GATOR_NPC, T_FORGE)
+	set_tile(w, mx + 10, my + 3, T_FIRE)
+	set_tile(w, mx + 11, my + 3, T_ANVIL)
+	plan_npc(w, mx + 10, my + 6, M_FROGFOLK, R_HEALER)
+	plan_npc(w, mx + 12, my + 8, M_GUARD, -1)
+	add_town(w, mx - 2, my - 2, mx + 15, my + 11, "Mudport")
+	carve_road(w, sx + 25, sy + 9, mx, my + 5, T_ROAD)
+
+	-- six moongates in a ring around Swampton
+	for g = 1, 6 do
+		local ang = (g - 1) * 60 + 30
+		local gx = px + itrunc(math.cos(ang * 0.0174533) * 26.0)
+		local gy = py + itrunc(math.sin(ang * 0.0174533) * 19.0)
+		gx = iclamp(gx, 4, ww - 5)
+		gy = iclamp(gy, 4, hh - 5)
+		fill_disc(w, gx, gy, 2, T_STONEFLOOR)
+		add_gate(w, gx, gy, g)
+		carve_road(w, px, py + 2, gx, gy + 3, T_DIRT)
+	end
+
+	-- wild chests and spawners
+	for _ = 0, 5 do
+		local qx, qy = find_spot(w, rnd_range(8, ww - 8), rnd_range(8, hh - 8), 12, LAND_MASK)
+		if town_at(w, qx, qy) < 0 then add_chest(w, qx, qy, 1 + rnd(2)) end
+	end
+	for _ = 0, 41 do
+		local x = rnd_range(4, ww - 5)
+		local y = rnd_range(4, hh - 5)
+		local t = tile_at(w, x, y)
+		if not (town_at(w, x, y) >= 0 or cheb(x, y, px, py) < 18) then
+			local kind = -1
+			if t == T_SWAMP or t == T_REEDS or t == T_BOG or t == T_MUD or t == T_LILY then
+				kind = pick({ [0] = "Frog", "Mosquito Swarm", "Cottonmouth", "Giant Frog", "Crawdad" })
+			elseif t == T_OAK or t == T_BUSH or t == T_PINE then
+				kind = pick({ [0] = "Timber Wolf", "Treant", "Feral Hog", "Marsh Rabbit" })
+			elseif t == T_DIRT or t == T_BOULDER or t == T_ORE then
+				kind = pick({ [0] = "Goblin Poacher", "Bandit", "Feral Hog" })
+			elseif t == T_SHALLOW or t == T_SAND then
+				kind = pick({ [0] = "Heron", "Cottonmouth", "Crawdad" })
+			elseif T_WALK[t] == 1 then
+				kind = pick({ [0] = "Swamp Rat", "Raccoon Bandit", "Marsh Rabbit", "Feral Hog", "Mosquito Swarm" })
+			end
+			if kind >= 0 then
+				local maxn = 2 + rnd(2)
+				add_spawner(w, x, y, kind, maxn, 6, 300 + rnd(300))
+			end
+		end
+	end
+	-- raccoons and rats loiter just outside town
+	add_spawner(w, sx - 6, sy + 22, mid("Raccoon Bandit"), 2, 5, 400)
+	add_spawner(w, sx + 32, sy - 4, mid("Swamp Rat"), 3, 5, 300)
+	add_spawner(w, sx + 30, sy + 24, mid("Raccoon Bandit"), 2, 6, 450)
+end
+
+-- a world's way home: a moongate at its arrival point leading back to Gatorland
+local function arrival_gate(w, x, y)
+	fill_disc(w, x, y, 2, w == 6 and T_CLOUD or (w == 2 and T_RUINFLOOR or (w == 4 and T_SNOW or (w == 5 and T_OBSIDIAN or T_MUD))))
+	add_gate(w, x, y, 0)
+	W_ARRIVE_X[w] = x
+	W_ARRIVE_Y[w] = y + 2
+end
+
+local function boss_lair(w, x, y)
+	local boss = WORLDS[w].boss
+	if boss >= 0 then add_spawner(w, x, y, boss, 1, 3, 3000) end
+end
+
+local function spawners_by_pool(w, pool, count, mask, maxn, delay)
+	local ww = W_W[w]
+	local hh = W_H[w]
+	for _ = 0, count - 1 do
+		local px, py = find_spot(w, rnd_range(3, ww - 4), rnd_range(3, hh - 4), 6, mask)
+		if cheb(px, py, W_ARRIVE_X[w], W_ARRIVE_Y[w]) >= 8 then
+			add_spawner(w, px, py, pick(pool), maxn, 6, delay)
+		end
+	end
+end
+
+local function gen_bayou()
+	local w = 1
+	local ww = W_W[w]
+	local hh = W_H[w]
+	local salt = SEED * 13 + 101
+	local base = W_OFF[w]
+	for y = 0, hh - 1 do
+		for x = 0, ww - 1 do
+			local e = fractal(x, y, salt)
+			local h = hash3(x, y, salt + 3) & 1023
+			local t = T_SWAMP
+			if e > 560 then
+				t = h < 220 and T_CYPRESS or (h < 340 and T_REEDS or (h < 560 and T_MUD or (h < 640 and T_BUSH or T_BOG)))
+			elseif e > 500 then
+				t = h < 300 and T_REEDS or T_MUD
+			else
+				t = h < 70 and T_LILY or (h < 90 and T_CYPRESS or T_SWAMP)
+			end
+			TILES[base + y * ww + x] = t
+		end
+	end
+	arrival_gate(w, 8, 8)
+	fill_disc(w, 8, 10, 4, T_MUD)
+	set_tile(w, 8, 8, T_GATE)
+	-- shacks on stilts
+	for _ = 0, 3 do
+		local x = rnd_range(20, ww - 20)
+		local y = rnd_range(12, hh - 12)
+		fill_rect(w, x - 1, y - 1, x + 5, y + 4, T_BRIDGE)
+		building(w, x, y, 5, 4, T_WOODWALL, T_WOODFLOOR)
+		add_chest(w, x + 2, y + 1, 2)
+	end
+	-- Big Mama's nest
+	local bx = ww - 14
+	local by = hh - 12
+	fill_disc(w, bx, by, 7, T_SWAMP)
+	fill_disc(w, bx, by, 5, T_MUD)
+	fill_disc(w, bx, by, 2, T_BOG)
+	set_tile(w, bx + 3, by - 3, T_GOLDPILE)
+	add_chest(w, bx - 3, by + 3, 3)
+	boss_lair(w, bx, by)
+	spawners_by_pool(w, { [0] = "Snapping Turtle", "Voodoo Toad", "Crawdad Knight", "Bog Zombie", "Mosquito Swarm", "Frog", "Cottonmouth" }, 26, LAND_MASK + 4, 3, 400)
+end
+
+local function gen_sunken()
+	local w = 2
+	local ww = W_W[w]
+	local hh = W_H[w]
+	fill_rect(w, 0, 0, ww - 1, hh - 1, T_DEEP)
+	-- city blocks on a grid of flooded streets
+	for by = 6, hh - 9, 11 do
+		for bx = 6, ww - 9, 12 do
+			fill_rect(w, bx - 2, by - 2, bx + 9, by + 8, T_SHALLOW)
+			local kind = hash3(bx, by, SEED) % 4
+			if kind == 0 then
+				building(w, bx, by, 8, 6, T_RUINWALL, T_RUINFLOOR)
+				add_chest(w, bx + 2, by + 2, 3)
+			elseif kind == 1 then
+				fill_rect(w, bx, by, bx + 7, by + 5, T_RUINFLOOR)
+				set_tile(w, bx + 1, by + 1, T_PILLAR)
+				set_tile(w, bx + 6, by + 1, T_PILLAR)
+				set_tile(w, bx + 1, by + 4, T_PILLAR)
+				set_tile(w, bx + 6, by + 4, T_PILLAR)
+			elseif kind == 2 then
+				fill_rect(w, bx, by, bx + 7, by + 5, T_KELP)
+				fill_disc(w, bx + 3, by + 3, 1, T_CORAL)
+			else
+				fill_rect(w, bx, by, bx + 7, by + 5, T_RUINFLOOR)
+				for _ = 0, 5 do
+					local cx = bx + rnd(8)
+					local cy = by + rnd(6)
+					set_tile(w, cx, cy, T_CORAL)
+				end
+			end
+		end
+	end
+	-- scatter ruin rubble and coral
+	for _ = 0, 139 do
+		local x = rnd(ww)
+		local y = rnd(hh)
+		if tile_at(w, x, y) == T_SHALLOW then set_tile(w, x, y, rnd(3) == 0 and T_CORAL or T_RUINFLOOR) end
+	end
+	arrival_gate(w, 3, hh - 5)
+	fill_rect(w, 1, hh - 8, 8, hh - 2, T_RUINFLOOR)
+	set_tile(w, 3, hh - 5, T_GATE)
+	-- the drowned palace up north
+	local pxl = ww // 2 - 8
+	fill_rect(w, pxl - 2, 0, pxl + 17, 9, T_SHALLOW)
+	building(w, pxl, 1, 16, 8, T_RUINWALL, T_RUINFLOOR)
+	set_tile(w, pxl + 8, 2, T_GOLDPILE)
+	set_tile(w, pxl + 2, 2, T_SCONCE)
+	set_tile(w, pxl + 13, 2, T_SCONCE)
+	add_chest(w, pxl + 3, 5, 4)
+	boss_lair(w, pxl + 8, 4)
+	spawners_by_pool(w, { [0] = "Drowned Sailor", "Electric Eel", "Merrow Spearman", "Sea Witch", "Angler Lurker" }, 26, LAND_MASK + 4, 3, 450)
+end
+
+local function gen_gloomfen()
+	local w = 3
+	local ww = W_W[w]
+	local hh = W_H[w]
+	local salt = SEED * 17 + 303
+	local base = W_OFF[w]
+	for y = 0, hh - 1 do
+		for x = 0, ww - 1 do
+			local e = fractal(x, y, salt)
+			local h = hash3(x, y, salt + 9) & 1023
+			local t = T_BOG
+			if e < 420 then t = h < 60 and T_DEADTREE or T_SWAMP
+			elseif e < 470 then t = T_MUD
+			else t = h < 140 and T_DEADTREE or (h < 190 and T_GRAVE or (h < 300 and T_TALLGRASS or (h < 330 and T_WEB or T_BOG))) end
+			TILES[base + y * ww + x] = t
+		end
+	end
+	arrival_gate(w, ww // 2, hh - 6)
+	-- graveyards with fences
+	for _ = 0, 3 do
+		local x = rnd_range(8, ww - 16)
+		local y = rnd_range(8, hh - 20)
+		fill_rect(w, x, y, x + 8, y + 6, T_FENCE)
+		fill_rect(w, x + 1, y + 1, x + 7, y + 5, T_BOG)
+		for _ = 0, 7 do
+			local gx = x + 1 + rnd(7)
+			local gy = y + 1 + rnd(5)
+			set_tile(w, gx, gy, T_GRAVE)
+		end
+		set_tile(w, x + 4, y + 6, T_DIRT)
+	end
+	-- Crocula's chapel
+	local cx = ww // 2 - 6
+	building(w, cx, 3, 13, 9, T_RUINWALL, T_STONEFLOOR)
+	fill_rect(w, cx + 2, 5, cx + 10, 5, T_CARPET)
+	set_tile(w, cx + 2, 4, T_SCONCE)
+	set_tile(w, cx + 10, 4, T_SCONCE)
+	add_chest(w, cx + 6, 4, 4)
+	boss_lair(w, cx + 6, 6)
+	spawners_by_pool(w, { [0] = "Will-o'-Wisp", "Swamp Zombie", "Banshee", "Ghoul Gator", "Bone Heron" }, 28, LAND_MASK + 4, 3, 450)
+end
+
+-- cellular-automaton caves (ice caverns, sewers)
+local function cave_automaton(w, wall, floor, fillpct, salt)
+	local ww = W_W[w]
+	local hh = W_H[w]
+	local base = W_OFF[w]
+	for y = 0, hh - 1 do
+		for x = 0, ww - 1 do
+			local edge = x == 0 or y == 0 or x == ww - 1 or y == hh - 1
+			TILES[base + y * ww + x] = (edge or (hash3(x, y, salt) % 100) < fillpct) and wall or floor
+		end
+	end
+	local nxt = {}
+	for i = 0, ww * hh - 1 do nxt[i] = 0 end
+	for _ = 0, 3 do
+		for y = 0, hh - 1 do
+			for x = 0, ww - 1 do
+				local walls = 0
+				for dy = -1, 1 do
+					for dx = -1, 1 do
+						local nx = x + dx
+						local ny = y + dy
+						if nx < 0 or ny < 0 or nx >= ww or ny >= hh or TILES[base + ny * ww + nx] == wall then walls = walls + 1 end
+					end
+				end
+				nxt[y * ww + x] = walls >= 5 and wall or floor
+			end
+		end
+		for i = 0, ww * hh - 1 do TILES[base + i] = nxt[i] end
+	end
+end
+
+-- guarantee connectivity with a winding corridor
+local function cave_corridor(w, ax, ay, bx, by, floor)
+	local x = ax
+	local y = ay
+	local guard = 0
+	while (x ~= bx or y ~= by) and guard < 800 do
+		guard = guard + 1
+		if rnd(3) == 0 then x = x + rnd_range(-1, 1)
+		elseif rnd(2) == 0 then x = x + isign(bx - x)
+		else y = y + isign(by - y) end
+		x = iclamp(x, 1, W_W[w] - 2)
+		y = iclamp(y, 1, W_H[w] - 2)
+		set_tile(w, x, y, floor)
+		set_tile(w, x + 1, y, floor)
+	end
+end
+
+local function gen_frostfang()
+	local w = 4
+	local ww = W_W[w]
+	local hh = W_H[w]
+	cave_automaton(w, T_ICEWALL, T_SNOW, 44, SEED * 19 + 404)
+	local salt = SEED * 23 + 17
+	for y = 1, hh - 2 do
+		for x = 1, ww - 2 do
+			local t = tile_at(w, x, y)
+			local h = hash3(x, y, salt) & 1023
+			if t == T_SNOW and vnoise(x, y, 9, salt) > 640 then set_tile(w, x, y, T_ICE)
+			elseif t == T_ICEWALL and h < 40 then set_tile(w, x, y, T_CRYSTAL)
+			elseif t == T_ICEWALL and h < 70 then set_tile(w, x, y, T_ORE) end
+		end
+	end
+	arrival_gate(w, 6, 6)
+	fill_disc(w, 6, 7, 3, T_SNOW)
+	set_tile(w, 6, 6, T_GATE)
+	local qx = ww - 12
+	local qy = hh - 10
+	fill_disc(w, qx, qy, 6, T_ICE)
+	fill_disc(w, qx, qy, 1, T_SNOW)
+	set_tile(w, qx - 4, qy - 4, T_CRYSTAL)
+	set_tile(w, qx + 4, qy - 4, T_CRYSTAL)
+	add_chest(w, qx + 2, qy + 4, 4)
+	cave_corridor(w, 6, 8, ww // 2, hh // 2, T_SNOW)
+	cave_corridor(w, ww // 2, hh // 2, qx, qy, T_SNOW)
+	cave_corridor(w, 6, 8, ww - 10, 8, T_SNOW)
+	cave_corridor(w, ww // 3, hh - 8, qx, qy, T_SNOW)
+	boss_lair(w, qx, qy)
+	spawners_by_pool(w, { [0] = "Ice Bat", "Yeti", "Frost Wisp", "Penguin Mercenary", "Snow Troll" }, 24, LAND_MASK, 3, 450)
+	for _ = 0, 2 do
+		local px, py = find_spot(w, rnd_range(10, ww - 10), rnd_range(10, hh - 10), 10, LAND_MASK)
+		add_chest(w, px, py, 3)
+	end
+end
+
+local function gen_scorchmaw()
+	local w = 5
+	local ww = W_W[w]
+	local hh = W_H[w]
+	local salt = SEED * 29 + 505
+	local cxm = ww // 2
+	local cym = hh // 2
+	local base = W_OFF[w]
+	for y = 0, hh - 1 do
+		for x = 0, ww - 1 do
+			local e = fractal(x, y, salt)
+			local h = hash3(x, y, salt + 1) & 1023
+			local band = vnoise(x, y, 13, salt + 7)
+			local t = T_ASH
+			local edge = x < 2 or y < 2 or x >= ww - 2 or y >= hh - 2
+			if edge or e > 780 then t = T_BASALT
+			elseif band > 470 and band < 520 then t = T_LAVA
+			elseif h < 30 then t = T_ORE
+			elseif h < 70 then t = T_BOULDER
+			elseif e < 360 then t = T_OBSIDIAN end
+			TILES[base + y * ww + x] = t
+		end
+	end
+	-- the crater: a lava ring around the wyrm's island, one obsidian causeway
+	fill_disc(w, cxm, cym, 10, T_LAVA)
+	fill_disc(w, cxm, cym, 6, T_OBSIDIAN)
+	fill_rect(w, cxm - 1, cym + 5, cxm, cym + 11, T_OBSIDIAN)
+	set_tile(w, cxm + 2, cym - 2, T_GOLDPILE)
+	add_chest(w, cxm - 3, cym - 2, 5)
+	boss_lair(w, cxm, cym)
+	arrival_gate(w, 6, hh - 7)
+	fill_disc(w, 6, hh - 6, 3, T_OBSIDIAN)
+	set_tile(w, 6, hh - 7, T_GATE)
+	carve_road(w, 6, hh - 5, cxm, cym + 12, T_OBSIDIAN)
+	spawners_by_pool(w, { [0] = "Fire Imp", "Salamander", "Magma Golem", "Ash Bat", "Cinder Cultist" }, 24, LAND_MASK, 3, 450)
+end
+
+local function gen_cloudreach()
+	local w = 6
+	local ww = W_W[w]
+	local hh = W_H[w]
+	fill_rect(w, 0, 0, ww - 1, hh - 1, T_SKY)
+	local ix = {}
+	local iy = {}
+	ix[0] = 8
+	iy[0] = hh - 9
+	local n = 1
+	for _ = 0, 10 do
+		ix[n] = rnd_range(12, ww - 12)
+		iy[n] = rnd_range(10, hh - 10)
+		n = n + 1
+	end
+	ix[n] = ww - 12
+	iy[n] = 9
+	n = n + 1
+	for k = 0, n - 1 do
+		local r = k == n - 1 and 7 or 3 + rnd(3)
+		fill_disc(w, ix[k], iy[k], r, T_CLOUD)
+		fill_disc(w, ix[k], iy[k], r - 2, rnd(2) == 0 and T_GRASS or T_FLOWERS)
+		if k > 0 then
+			-- rainbow bridge from the previous island
+			local x = ix[k - 1]
+			local y = iy[k - 1]
+			local guard = 0
+			while (x ~= ix[k] or y ~= iy[k]) and guard < 300 do
+				guard = guard + 1
+				if x ~= ix[k] and (y == iy[k] or rnd(2) == 0) then x = x + isign(ix[k] - x)
+				else y = y + isign(iy[k] - y) end
+				if tile_at(w, x, y) == T_SKY then set_tile(w, x, y, T_RAINBOW) end
+			end
+		end
+		if k > 0 and k < n - 1 and rnd(3) == 0 then add_chest(w, ix[k], iy[k], 4) end
+	end
+	arrival_gate(w, ix[0], iy[0])
+	local bx = ix[n - 1]
+	local by = iy[n - 1]
+	set_tile(w, bx + 3, by - 3, T_GOLDPILE)
+	add_chest(w, bx - 3, by + 2, 5)
+	boss_lair(w, bx, by)
+	for k = 1, n - 2 do
+		local kind = pick({ [0] = "Harpy", "Storm Elemental", "Cloud Sheep", "Griffon", "Sky Pirate" })
+		add_spawner(w, ix[k], iy[k], kind, 2 + rnd(2), 3, 450)
+	end
+end
+
+local function gen_sewers()
+	local w = 7
+	local ww = W_W[w]
+	local hh = W_H[w]
+	fill_rect(w, 0, 0, ww - 1, hh - 1, T_BRICK)
+	-- a grid of tunnels with a channel of sewage down the middle of each
+	for y = 4, hh - 4, 8 do
+		fill_rect(w, 2, y - 1, ww - 3, y + 1, T_SEWERFLOOR)
+		fill_rect(w, 2, y, ww - 3, y, T_SEWAGE)
+	end
+	for x = 5, ww - 4, 10 do
+		fill_rect(w, x - 1, 3, x + 1, hh - 4, T_SEWERFLOOR)
+		fill_rect(w, x, 3, x, hh - 4, T_SEWAGE)
+	end
+	-- grates to cross the sewage
+	for _ = 0, 39 do
+		local x = rnd_range(2, ww - 3)
+		local y = rnd_range(2, hh - 3)
+		if tile_at(w, x, y) == T_SEWAGE then set_tile(w, x, y, T_BRIDGE) end
+	end
+	-- side rooms
+	for _ = 0, 6 do
+		local x = rnd_range(3, ww - 12)
+		local y = rnd_range(3, hh - 10)
+		fill_rect(w, x, y, x + 6, y + 4, T_SEWERFLOOR)
+		if rnd(2) == 0 then add_chest(w, x + 3, y + 2, 1) end
+	end
+	-- the entrance and the Rat King's throne
+	fill_rect(w, 2, 2, 7, 7, T_SEWERFLOOR)
+	set_tile(w, 3, 3, T_STAIRS_UP)
+	W_ARRIVE_X[w] = 4
+	W_ARRIVE_Y[w] = 4
+	local kx = ww - 9
+	local ky = hh - 8
+	fill_rect(w, kx - 5, ky - 4, kx + 5, ky + 4, T_SEWERFLOOR)
+	set_tile(w, kx, ky - 3, T_GOLDPILE)
+	set_tile(w, kx - 4, ky - 3, T_SCONCE)
+	set_tile(w, kx + 4, ky - 3, T_SCONCE)
+	add_chest(w, kx + 3, ky + 2, 2)
+	boss_lair(w, kx, ky)
+	spawners_by_pool(w, { [0] = "Sewer Rat", "Sewer Rat", "Green Slime", "Giant Cockroach" }, 16, 2, 3, 300)
+end
+
+local STAIRS_X, STAIRS_Y = 0, 0
+local function find_stairs()
+	for y = 0, W_H[0] - 1 do
+		for x = 0, W_W[0] - 1 do
+			if tile_at(0, x, y) == T_STAIRS_DN then STAIRS_X = x; STAIRS_Y = y; return end
+		end
+	end
+end
+local function gate_x_of_stairs() find_stairs(); return STAIRS_X end
+local function gate_y_of_stairs() find_stairs(); return STAIRS_Y end
+
+-- every realm
+function world_generate(seed)
+	SEED = seed
+	rng_seed(seed)
+	aclear(GATE_W); aclear(GATE_X); aclear(GATE_Y); aclear(GATE_DEST); GATE_N = 0
+	aclear(TOWN_W); aclear(TOWN_X0); aclear(TOWN_Y0); aclear(TOWN_X1); aclear(TOWN_Y1); aclear(TOWN_NAME); TOWN_N = 0
+	aclear(CHEST_W); aclear(CHEST_X); aclear(CHEST_Y); aclear(CHEST_TIER); aclear(CHEST_T); CHEST_N = 0
+	aclear(SP_W); aclear(SP_X); aclear(SP_Y); aclear(SP_KIND); aclear(SP_MAX); aclear(SP_RAD); aclear(SP_DELAY); aclear(SP_NEXT); aclear(SP_ALIVE); SP_N = 0
+	aclear(NPC_PLAN_W); aclear(NPC_PLAN_X); aclear(NPC_PLAN_Y); aclear(NPC_PLAN_KIND); aclear(NPC_PLAN_ROLE); NPC_PLAN_N = 0
+	aclear(W_WEATHER); aclear(W_WEATHER_T); aclear(W_ARRIVE_X); aclear(W_ARRIVE_Y); aclear(W_BOSS_T)
+	world_alloc()
+	gen_overworld()
+	gen_bayou()
+	gen_sunken()
+	gen_gloomfen()
+	gen_frostfang()
+	gen_scorchmaw()
+	gen_cloudreach()
+	gen_sewers()
+	-- the sewer grate in Swampton leads down; the stairs up lead back
+	add_gate(0, gate_x_of_stairs(), gate_y_of_stairs(), W_SEWERS)
+	set_tile(0, gate_x_of_stairs(), gate_y_of_stairs(), T_STAIRS_DN)
+	add_gate(W_SEWERS, 3, 3, 0)
+	set_tile(W_SEWERS, 3, 3, T_STAIRS_UP)
+end
+
+-- where a traveller lands arriving in `dest` through a gate
+local function gate_arrival(from_w, dest)
+	if dest == 0 then
+		local g = gate_in(0, from_w)
+		if g >= 0 then return find_spot(0, GATE_X[g], GATE_Y[g] + 1, 4, LAND_MASK) end
+		return W_ARRIVE_X[0], W_ARRIVE_Y[0]
+	end
+	return find_spot(dest, W_ARRIVE_X[dest], W_ARRIVE_Y[dest], 6, LAND_MASK)
+end
+
+for name, fn in pairs({ in_world = in_world, tile_at = tile_at, tile_now = tile_now, set_tile = set_tile, walk_at = walk_at,
+	is_land = is_land, is_water = is_water, fill_rect = fill_rect, fill_disc = fill_disc, find_spot = find_spot,
+	carve_road = carve_road, add_gate = add_gate, gate_in = gate_in, add_town = add_town, town_at = town_at,
+	add_chest = add_chest, add_spawner = add_spawner, plan_npc = plan_npc, building = building, shop = shop,
+	gate_arrival = gate_arrival }) do
+	_G[name] = fn
+end

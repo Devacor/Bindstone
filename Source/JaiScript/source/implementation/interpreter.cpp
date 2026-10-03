@@ -13789,7 +13789,7 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                             // Parent has no explicit constructors (only default constructor)
                             // and super() called with no arguments - this is valid, nothing to do
                             // The parent fields will be initialized with their default values
-                        } else if (!parent_ctor_asts.empty()) {   // KEEP BYTE-PARALLEL with the vm
+                        } else if (!parent_ctor_asts.empty() && !init_args.empty()) {   // KEEP BYTE-PARALLEL with the vm
                             return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
                                 parent_script_class->get_type_id(), init_args.data(), init_args.size(), engine_, true);
                         } else {

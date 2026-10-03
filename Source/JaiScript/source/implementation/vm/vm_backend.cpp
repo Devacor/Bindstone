@@ -17447,7 +17447,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 							handled_parent_init = true;
 						} else if (parent_ctor_asts.empty() && init_args.empty()) {
 							// Parent only has the default constructor - nothing to do
-						} else if (!parent_ctor_asts.empty()) {   // KEEP BYTE-PARALLEL with the interpreter
+						} else if (!parent_ctor_asts.empty() && !init_args.empty()) {   // KEEP BYTE-PARALLEL with the interpreter
 							return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
 								parent_script_class->get_type_id(), init_args.data(), init_args.size(), engine_, true);
 						} else {

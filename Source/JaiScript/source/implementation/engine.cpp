@@ -1569,6 +1569,7 @@ struct engine::implementation {
     uint64_t parameter_alias_binds_ = 0;
     bool parameter_alias_ = true;
     uint64_t local_alias_binds_ = 0;
+    bool destructors_armed_ = false;
     bool local_alias_ = true;
 
     // Empty result = caching inactive for this source (a .jaibite loaded as source
@@ -1980,6 +1981,11 @@ engine::~engine() {
         if (impl->debug_transport_) {
             impl->debug_transport_->stop();
             impl->debug_transport_.reset();
+        }
+        // Program-scope variables die in reverse construction order while the engine still runs their destructors (Dev
+        // ruling 2026-10-03); a destructor's error is reported through the script error handler, never propagated
+        if (impl->backend && impl->destructors_armed_ && impl->global_environment_) {
+            try { impl->global_environment_->release_values_in_reverse(); } catch (...) {}
         }
         impl->tearing_down = true;
         impl->backend.reset();
@@ -3944,6 +3950,14 @@ void engine::parameter_alias(bool on) {
 
 bool engine::parameter_alias() const {
     return impl->parameter_alias_;
+}
+
+bool engine::destructors_armed() const {
+    return impl->destructors_armed_;
+}
+
+void engine::note_destructors_armed() {
+    impl->destructors_armed_ = true;
 }
 
 uint64_t engine::local_alias_binds() const {

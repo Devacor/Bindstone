@@ -177,7 +177,7 @@ scope();</code></pre></div>
 drop in list
 drop b
 drop a</code></pre></div>
-<p>Locals die in reverse declaration order when their function returns or a throw leaves it, as in C++; a dying container destroys its elements first to last, and an object's members die after its destructor body, last member first.</p>
+<p>Lifetimes are C++'s. A local dies at the end of the block that declares it, the last declared first; a loop body's locals die at the end of each iteration, and <code>break</code>, <code>continue</code>, <code>return</code> and a <code>throw</code> destroy every scope they leave, innermost first. Parameters die when the callee returns, after its locals. An argument written as a temporary (<code>visit(Torch("hall"))</code>) is the parameter itself, never a copy, as C++17 guarantees. A by-value range-for variable (<code>for (Token t : list)</code>) is a copy that lives one iteration. A dying object runs its class's destructor body, then its members die, the last declared first, then its base's destructor runs and the base's members die; a class that declares no destructor still runs its base's, and a dying container destroys its elements first to last. Program-scope variables die when the engine is destroyed, the last constructed first, and an error a destructor raises there goes to the engine's script error handler instead of propagating.</p>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;

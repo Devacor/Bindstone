@@ -63,6 +63,7 @@ namespace jai::vm {
             size_t continue_target = k_invalid_u32;   // known target (while/range-for); patches used otherwise
             bool continue_is_loop_back = false;       // while: continue re-checks budget via loop_back
             size_t scope_depth = 0;
+            size_t kill_depth = 0;                     // kill scopes open outside the region: a jump out of it destroys the ones above
             const ast_node* stmt = nullptr;            // a loop's statement: its block verdict decides how a graft inside it lands (open_loops_)
         };
 
@@ -90,6 +91,18 @@ namespace jai::vm {
         string_symbolizer* symbolizer_;
         const builtin_method_registries* builtins_ = nullptr;   // compile-time bi_* fill
         const engine* engine_ = nullptr;
+        // Scope exits destroy the frame-slot locals that may own a script destructor (C++ lifetimes): one scope per block,
+        // case body, for initializer and range-for iteration, its slots killed in reverse at its close and by the jumps that
+        // leave it; a catch entry kills what its try block declared
+        std::vector<std::vector<uint32_t>> kill_scopes_;
+        std::vector<std::vector<uint32_t>> try_kills_;
+        bool slot_kill_wanted(const type_info_ptr& t, size_t slot, uint64_t symbol) const;
+        void note_kill_slot(uint32_t slot);
+        void note_kill_decl(const statement* decl);
+        void close_kill_scope();
+        void emit_kills_to(size_t depth);
+        void push_region(region_kind kind);
+        bool graft_may_destroy(const function_decl* fn) const;
         bool typed_lowering_ = true;
         bool ir_listing_ = false;
         bool ir_passes_ = true;

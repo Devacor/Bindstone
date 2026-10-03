@@ -503,6 +503,16 @@ engine stays usable", not by `check_throws`.
   default-constructs, `int` 0, `float` 0.0, `bool` false, `string` "", containers empty; `var` stays null. `T x(args);`
   direct-initializes, `T x();` default-constructs, `int i{5};` / `int i{};` brace-initialize a primitive. The parser writes
   the initializer (`.jaibite` 21); a class holding itself by value without one is a parse error (`Node next = null;` is a link).
+- **Destructor timing = C++ lifetimes** (Dev request 2026-10-03; suite `Destructor Timing`): a block's locals die at its
+  closing brace, last declared first (break/continue/return/throw destroy the scopes they leave; a loop body's per
+  iteration; a by-value range-for variable per iteration; a for initializer after the loop); a frame's locals then its
+  parameters die at the callee's end (vm `value_stack::truncate` top down, interpreter `call_frame::locals`); a
+  uniquely held aggregate argument is the parameter itself (C++17 elision, `detail::uniquely_held`); a dying instance runs
+  each level's destructor body, then that level's own members in reverse, then its bases in reverse
+  (`class_definition::destroy_chain`, armed when any class in the chain declares `~`); program-scope variables die at
+  engine teardown in reverse construction order (Dev ruling), a destructor's error reported through the script error
+  handler. Scope exits kill only slots that may own a destructor (`slot_may_own_destructor`, decided when the vm compiles
+  the body: `op_kill_slot`; the interpreter gates on `engine::destructors_armed()`); grafts refuse such callees.
 - **Constructor exits** (Dev ruling 2026-09-26): a bare `return;` ends a constructor body early and the call
   yields the instance; `return expr;` in a constructor's own body is a parse error (a lambda or nested function
   inside it returns freely); a `throw` propagates, the assignment target keeps its value and the half-built

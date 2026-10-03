@@ -92,7 +92,7 @@ namespace {
 			return fam::move;
 		case opcode::op_loop_back: case opcode::op_cfor_prep: case opcode::op_cfor_back: case opcode::op_cfor_pop: case opcode::op_parallel_advance: return fam::loop;
 		case opcode::op_cells_back: case opcode::op_cells_enter: case opcode::op_cells_cfor_back: case opcode::op_cells_resume: return fam::block;
-		case opcode::op_scope_push: case opcode::op_scope_pop: case opcode::op_scope_pop_n: case opcode::op_try_push: case opcode::op_try_pop: case opcode::op_catch_end:
+		case opcode::op_scope_push: case opcode::op_scope_pop: case opcode::op_scope_pop_n: case opcode::op_kill_slot: case opcode::op_try_push: case opcode::op_try_pop: case opcode::op_catch_end:
 		case opcode::op_throw: case opcode::op_yield:
 			return fam::scope;
 		case opcode::op_func_decl: case opcode::op_class_decl: case opcode::op_namespace_decl: case opcode::op_enum_decl: case opcode::op_extern_decl:

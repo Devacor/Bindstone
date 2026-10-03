@@ -54,6 +54,7 @@ namespace jai::vm {
         op_scope_push,      // push a child environment
         op_scope_pop,       // pop one environment
         op_scope_pop_n,     // a=count
+        op_kill_slot,       // a=frame slot: its value dies here (a scope exit destroys a local that may own a script destructor)
 
         op_func_decl,       // a=function proto index; defines the thunk in the current env
         op_closure,         // a=closure proto index; pushes the closure function value
@@ -508,6 +509,7 @@ namespace jai::vm {
             case opcode::op_scope_push: return "SCOPE_PUSH";
             case opcode::op_scope_pop: return "SCOPE_POP";
             case opcode::op_scope_pop_n: return "SCOPE_POP_N";
+            case opcode::op_kill_slot: return "KILL_SLOT";
             case opcode::op_func_decl: return "FUNC_DECL";
             case opcode::op_closure: return "CLOSURE";
             case opcode::op_this: return "THIS";

@@ -19041,6 +19041,7 @@ namespace {
 			if (op >= opcode::op_t_jlt_ii && op <= opcode::op_t_jne_ff) { typed_slot(ins.a, ip); typed_slot(ins.b, ip); continue; }
 			switch (op) {
 			case opcode::op_t_decl_mov: mark(ins.a, census_use_typed, ip); typed_slot(ins.b, ip); decl_of(ins.c); break;
+			case opcode::op_kill_slot: mark(ins.a, census_use_write, ip); break;
 			case opcode::op_t_decl_const: mark(ins.a, census_use_typed, ip); decl_of(ins.c); break;
 			case opcode::op_t_store_mov:
 			case opcode::op_t_store_const: {
@@ -20361,6 +20362,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 
 			case opcode::op_scope_pop_n:
 				pop_scopes_pooled(ins.a);
+				break;
+
+			case opcode::op_kill_slot:
+				if (script_value* slot = frame_slot(f, ins.a)) { script_value dying = std::move(*slot); }   // the destructor may reenter: the slot is null first
 				break;
 
 			case opcode::op_error: {
@@ -22333,6 +22338,13 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					continue;
 				}
 			}
+			// A prvalue argument (the stack's only holder of its aggregate) is the parameter itself: C++17 guaranteed elision
+			const bool elide = args_are_stack(args) && !arg.is_reference() && detail::uniquely_held(arg);
+			auto bind_elided = [&]() {
+				if (in_place && param.slot_index == i && !param.ref_escaping) { return; }
+				script_value moved = std::move(stack_[args_base + i]);
+				frame_slot_set(callee, param.slot_index, boxed_param(std::move(moved)));
+			};
 			// Shallow copy shields the conversion: it can reenter script (conversion
 			// ctors / to_* methods) and reallocate stack_ under an on-stack arg
 			script_value arg_shield(arg);
@@ -22354,6 +22366,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						frame_slot_set(callee, param.slot_index, script_value(derefed));
 						continue;
 					}
+					if (elide) { bind_elided(); continue; }
 					frame_slot_set(callee, param.slot_index, boxed_param(derefed.clone()));
 					continue;
 				}
@@ -22420,6 +22433,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					frame_slot_set(callee, param.slot_index, script_value(shared_probe));
 					continue;
 				}
+				if (elide && detail::same_heavy_node(shared_probe, arg_shield)) { bind_elided(); continue; }
 				frame_slot_set(callee, param.slot_index, boxed_param(converted_arg.clone()));
 			}
 		}

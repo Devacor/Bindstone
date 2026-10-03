@@ -6706,6 +6706,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
             }
 
             if (!result) {
+                kill_scope_slots(stmt->declarations);
                 // Restore scope before returning
                 if (!resuming || i > start_index) {
                     release_environment(environment_);
@@ -6751,6 +6752,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     // This ensures any lingering object references on the stack are released
     // Block statements don't produce a value, so the stack should be cleared
     valueStack_.clear();
+    kill_scope_slots(stmt->declarations);
 
     // Restore the previous scope - only release if we created it
     if (!resuming) {
@@ -10552,7 +10554,30 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
     return {};
 }
 
+void interpreter::kill_scope_slot(const statement* decl) {
+    if (!decl || decl->get_type() != node_type::variable_decl) { return; }
+    const auto* v = static_cast<const variable_decl*>(decl);
+    if (v->slot_index == SIZE_MAX || v->is_static) { return; }
+    if (const type_info* t = v->type.get()) {
+        switch (t->base_type) {
+        case script_value_type::jai_object_type: case script_value_type::jai_array_type: case script_value_type::jai_map_type:
+        case script_value_type::jai_shared_ptr_type: case script_value_type::jai_any_type:
+            break;
+        default:
+            return;   // a primitive, a string, a weak_ptr or a reference owns no instance
+        }
+    }
+    if (script_value* slot = call_stack_.back().get_local(v->slot_index)) { script_value dying = std::move(*slot); }
+}
+
+// The initializer's variables die after the loop (KEEP BYTE-PARALLEL with vm_compiler::compile_for)
 checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
+    auto result = run_for_stmt(stmt);
+    if (!hasYieldRequest_ && stmt->initializer && !call_stack_.empty() && engine_->destructors_armed()) { kill_scope_slot(stmt->initializer.get()); }
+    return result;
+}
+
+checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     // FAST PATH: Detect and optimize integer counting loops
     // Pattern: for (int/auto/var i = START; i < END; ++i) { body }
     //
@@ -10824,6 +10849,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                             valueStack_.clear();
                                         }
                                         if (!result) {
+                                            kill_scope_slots(body_block->declarations);
                                             release_environment(body_env);
                                             release_environment(loop_env);
                                             environment_ = previous;
@@ -10834,6 +10860,7 @@ checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
                                         }
                                     }
                                     valueStack_.clear();
+                                    kill_scope_slots(body_block->declarations);   // the body block's locals die each iteration (visit_block_stmt parity)
                                     // Fresh body scope per iteration (vm/while parity: body shadow decls must
                                     // not persist); clear_values early-outs when the body defined nothing
                                     body_env->clear_values();
@@ -11220,7 +11247,23 @@ checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stm
     return detail::run_parallel_for(*engine_, stmt, containers, environment_, read_frame_slot);
 }
 
+// A by-value loop variable dies with its iteration: the next element's binding replaces it, the last one dies here (KEEP
+// BYTE-PARALLEL with vm_compiler::compile_range_for)
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
+    auto result = run_range_for_stmt(stmt);
+    if (!hasYieldRequest_ && !stmt->is_reference && stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty() && engine_->destructors_armed()) {
+        const type_info* t = stmt->element_type.get();
+        const bool owns = !t || t->base_type == script_value_type::jai_object_type || t->base_type == script_value_type::jai_array_type ||
+                          t->base_type == script_value_type::jai_map_type || t->base_type == script_value_type::jai_shared_ptr_type ||
+                          t->base_type == script_value_type::jai_any_type;
+        if (owns) {
+            if (script_value* slot = call_stack_.back().get_local(stmt->variable_slot_index)) { script_value dying = std::move(*slot); }
+        }
+    }
+    return result;
+}
+
+checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
     // Coroutine resume replay: continue the SUSPENDED iteration - restoring the
     // evaluated container and position - instead of re-evaluating the container
     // (which would re-mint an inner coroutine or restart the sequence).
@@ -12274,11 +12317,15 @@ checked_result<void> interpreter::run_case_body(ast_node* self, const std::vecto
 }
 
 checked_result<void> interpreter::visit_case_stmt(case_stmt* stmt) {
-    return run_case_body(stmt, stmt->body);
+    auto result = run_case_body(stmt, stmt->body);
+    if (!hasYieldRequest_) { kill_scope_slots(stmt->body); }   // a case body is a scope (KEEP BYTE-PARALLEL with vm_compiler::compile_switch)
+    return result;
 }
 
 checked_result<void> interpreter::visit_default_stmt(default_stmt* stmt) {
-    return run_case_body(stmt, stmt->body);
+    auto result = run_case_body(stmt, stmt->body);
+    if (!hasYieldRequest_) { kill_scope_slots(stmt->body); }
+    return result;
 }
 
 checked_result<void> interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt) {
@@ -13588,6 +13635,14 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
     };
     std::optional<unwind_park> park;
     if (is_unwinding_) [[unlikely]] { park.emplace(this); }
+    // A callable returns its result; what its statements leave on the value stack (an expression declaration's value, kept for
+    // a block's statement boundary) is gone when it returns, so a destructor running in the middle of an expression never hands
+    // the expression a value of its own
+    struct stack_trim {
+        interpreter* self;
+        size_t mark;
+        ~stack_trim() { while (self->valueStack_.size() > mark) { (void)self->valueStack_.pop(); } }
+    } trim{this, valueStack_.size()};
     switch (payload.kind) {
         case script_callable::kind_type::function:
             return call_function(*payload.fn, args);
@@ -14867,6 +14922,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 }
                 return std::move(v);
             };
+            // A prvalue argument (the call site's only holder of its aggregate) is the parameter itself: C++17 guaranteed
+            // elision (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
+            const bool elide = call_ctx && call_ctx->values == &args && argv == &args && &arg == &args[i] && !arg.is_reference() &&
+                               detail::uniquely_held(arg);
+            auto bind_elided = [&]() {
+                call_stack_[frame_index].set_local(param.slot_index, boxed_param(std::move(const_cast<script_value&>(arg))));
+            };
 
             // Exact-class match: a pointer-identical interned type_info (with the
             // non-empty name the identity branch requires) replicates try_convert's
@@ -14885,6 +14947,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                         call_stack_[frame_index].set_local(param.slot_index, script_value(derefed));
                         continue;
                     }
+                    if (elide) { bind_elided(); continue; }
                     call_stack_[frame_index].set_local(param.slot_index, boxed_param(derefed.clone()));
                     continue;
                 }
@@ -14954,6 +15017,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     call_stack_[frame_index].set_local(param.slot_index, script_value(shared_probe));
                     continue;
                 }
+                if (elide && detail::same_heavy_node(shared_probe, arg)) { bind_elided(); continue; }
                 call_stack_[frame_index].set_local(param.slot_index, boxed_param(converted_arg.clone()));
             }
         }

@@ -7,6 +7,8 @@
 // replaced by their temps. The caller's AST is never changed: the interpreter walks it, and the fallback compiles it.
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/core/class_registry.hpp>
+#include <functional>
 #include <jaiscript/detail/return_flow.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
@@ -912,6 +914,41 @@ script_value_type spill_kind(const expression* e) {
 // clone takes, every by-value parameter a scalar the checker proved or a `var` taking a literal or a value of a scalar kind, every
 // reference parameter a `var&` bound to a plain identifier or an element lvalue, an untyped result one scalar kind at the site. frame:
 // the declared types of the slots the arguments are read from, when the call is a body's (null: the caller's frame)
+bool vm_compiler::graft_may_destroy(const function_decl* fn) const {
+	if (!engine_) { return false; }
+	engine& eng = *const_cast<engine*>(engine_);
+	for (const parameter& p : fn->parameters) {
+		if (!p.is_reference && slot_may_own_destructor(eng, p.type)) { return true; }
+	}
+	std::function<bool(const statement*)> walk = [&](const statement* st) -> bool {
+		if (!st) { return false; }
+		switch (st->get_type()) {
+		case node_type::block_stmt: for (const auto& d : static_cast<const block_stmt*>(st)->declarations) { if (walk(d.get())) { return true; } } return false;
+		case node_type::statement_decl: return walk(static_cast<const statement_decl*>(st)->statement.get());
+		case node_type::if_stmt: return walk(static_cast<const if_stmt*>(st)->then_statement.get()) || walk(static_cast<const if_stmt*>(st)->else_statement.get());
+		case node_type::while_stmt: return walk(static_cast<const while_stmt*>(st)->body.get());
+		case node_type::for_stmt: return walk(static_cast<const for_stmt*>(st)->initializer.get()) || walk(static_cast<const for_stmt*>(st)->body.get());
+		case node_type::range_for_stmt: {
+			const auto* rf = static_cast<const range_for_stmt*>(st);
+			return (!rf->is_reference && slot_may_own_destructor(eng, rf->element_type)) || walk(rf->body.get());
+		}
+		case node_type::try_stmt: return walk(static_cast<const try_stmt*>(st)->try_block.get()) || walk(static_cast<const try_stmt*>(st)->catch_block.get());
+		case node_type::switch_stmt: {
+			const auto* sw = static_cast<const switch_stmt*>(st);
+			for (const auto& c : sw->cases) { for (const auto& b : c->body) { if (walk(b.get())) { return true; } } }
+			if (sw->default_case) { for (const auto& b : sw->default_case->body) { if (walk(b.get())) { return true; } } }
+			return false;
+		}
+		case node_type::variable_decl: {
+			const auto* v = static_cast<const variable_decl*>(st);
+			return !(v->type && v->type->is_reference()) && slot_may_own_destructor(eng, v->type);
+		}
+		default: return false;
+		}
+	};
+	return walk(fn->body.get());
+}
+
 const char* vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame) const {
 	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
 	if (!fn || !fn->body) return "a callee without a body";
@@ -919,6 +956,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (callable_.coroutine_body && body_has_loop(fn->body.get())) return "a loop the coroutine's frame would run without its block";
 	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
+	if (graft_may_destroy(fn)) return "a callee whose parameters or locals may own a script destructor";
 	const type_info* rt = fn->return_type.get();
 	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0) || (any_type(rt) && untyped_result_kind(call, fn, frame) != script_value_type::jai_null_type))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
@@ -1608,7 +1646,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	auto declare = [&](uint64_t id) { if (id != UINT64_MAX && callable_.declared.insert(id).second) { added.push_back(id); } };
 	for (const parameter& p : fn->parameters) { declare(p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name)); }
 	for (const uint64_t id : ctx.declared_names) { declare(id); }
-	loops_.push_back({});
+	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::graft;
 	loops_.back().scope_depth = scope_depth_;
 	inlining_off_ = was_off;   // a leaf in an argument grafts inside its parameter's declaration, after this guard (the callee before the arguments)

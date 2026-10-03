@@ -286,6 +286,17 @@ namespace jai {
             }
         }
 
+        // Engine teardown: every variable that may own an instance (an object, an array, a map) dies, the last defined first
+        // (C++ statics at exit); functions stay callable for the destructors that run
+        void release_values_in_reverse() {
+            for (auto cell = local_storage_.rbegin(); cell != local_storage_.rend(); ++cell) {
+                const size_t kind = cell->deref().raw_storage_index();
+                if (kind == script_value::TYPEID_OBJECT || kind == script_value::TYPEID_ARRAY || kind == script_value::TYPEID_MAP) {
+                    script_value dying = std::move(*cell);
+                }
+            }
+        }
+
         // Get parent environment (needed for method_environment handling)
         std::shared_ptr<environment> get_parent() const { return parent_; }
 

@@ -4885,7 +4885,7 @@ public:
                 CopyProbe id(CopyProbe p) { return p; }
                 var q = id(CopyProbe());
                 to_string(src.size()) + "/" + to_string(rp.size()) + "/" + to_string(q.copies())
-            )", "1/2/1", "a by-value parameter binds as one copy and returns by move", true);
+            )", "1/2/0", "a prvalue argument is the parameter itself (C++17) and a parameter returns by move", true);
         });
         test("return_local_is_nrvo", [expect]() {
             expect(R"(

@@ -658,8 +658,8 @@ public:
 
             auto result = js_engine->execute(script);
             check(result.is_string());
-            // Destructors should be called: C, then A, then B (derived first, then parents left-to-right)
-            check_eq(result.as_string(), "CAB");
+            // C++: the derived destructor, then the bases in reverse declaration order
+            check_eq(std::string("CBA"), result.as_string());
         });
 
         test("multiple_inheritance_three_levels", [this]() {

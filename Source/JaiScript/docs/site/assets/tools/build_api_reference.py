@@ -126,7 +126,8 @@ def main():
 			# Chrome may have been normalized; only generated main content is compared.
 			current_main=re.search(r'<main\b[^>]*>([\s\S]*?)</main>',current)
 			wanted_main=re.search(r'<main\b[^>]*>([\s\S]*?)</main>',content)
-			same=current_main and current_main[1]==wanted_main[1]
+			crumbs=lambda body: re.sub(r'^\s*<nav class="crumbs"[\s\S]*?</nav>\s*','',body)
+			same=current_main and crumbs(current_main[1]).strip()==wanted_main[1].strip()
 		else: same=current==content
 		if not same:
 			stale.append(target.relative_to(PROJECT).as_posix())

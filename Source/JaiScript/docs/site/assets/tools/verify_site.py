@@ -22,6 +22,7 @@ STEPS = [
     ("retired error texts", ["check_old_texts.py"]),
     ("search index", ["build_search_index.py", "--check"]),
     ("chrome", ["apply_chrome.py", "--check"]),
+    ("api catalog", ["check_api_catalog.py"]),
     ("samples", ["run_samples.py"]),
 ]
 

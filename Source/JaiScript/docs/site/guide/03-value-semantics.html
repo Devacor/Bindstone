@@ -37,6 +37,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <article class="chapter"><h1 id="value-semantics-references">Value Semantics &amp; References<a class="hlink" href="#value-semantics-references" aria-label="link">&#8203;</a></h1>
 <p><strong>If you read only one chapter of this guide, read this one.</strong> The single most common ambush for a newcomer lives here: <em>JaiScript copies by default, everywhere.</em> Assignment copies. Function arguments copy. Even <strong>class instances copy</strong>. If you mutate a copy, the original never hears about it, and nothing warns you.</p>
 <h2 id="the-ambush-mutations-on-copies-vanish-silently">The ambush: mutations on copies vanish silently<a class="hlink" href="#the-ambush-mutations-on-copies-vanish-silently" aria-label="link">&#8203;</a></h2>
+<div class="callout cpp"><p>Classes, arrays and maps are values, as a C++ struct or <code>std::vector</code> is: <code>b = a</code> copies, a by-value parameter receives a copy, and a change to the copy never reaches the original. <code>&amp;</code> parameters, <code>auto&amp;</code> and <code>shared_ptr&lt;T&gt;</code> are how two names share one object, with their C++ meanings.</p></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto a = [1, 2, 3];
 auto b = a;          // assignment COPIES the array
 b[0] = 99;

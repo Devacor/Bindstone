@@ -823,6 +823,18 @@ namespace jai {
         declaration(const source_location& loc, node_type t) : statement(loc, t) {}
     };
     
+    // The function a read-only by-value local declaration belongs to, as the local-copy proof needs it
+    // (detail::prove_local_aliases): stamped on every candidate declaration of a plain function's body when the function
+    // is minted; the proof re-runs when engine::definition_epoch() moved
+    class block_stmt;
+    struct local_alias_home {
+        std::shared_ptr<const std::vector<parameter>> params;
+        type_info_ptr return_type;
+        std::weak_ptr<block_stmt> body;
+        mutable uint64_t epoch = 0;
+        mutable std::vector<uint8_t> verdicts;   // by variable_decl::alias_index; a graft's copy of a declaration reads its original's
+    };
+
     // Variable declaration
     class variable_decl : public declaration {
     public:
@@ -857,6 +869,10 @@ namespace jai {
         // so the binding skips the run-time admission
         mutable bool reference_admission_proven = false;
         size_t slot_index = SIZE_MAX; // Slot index for fast local access (SIZE_MAX = global/class member)
+        // Read-only by-value local elision (runtime caches, never serialized): the declaration's function and its slot in
+        // the home's verdicts (true = the declaration may bind the source's object instead of a clone)
+        mutable std::shared_ptr<const local_alias_home> alias_home;
+        mutable uint32_t alias_index = 0;
 
         // Construction-time classification for both backends' decl fast path
         // (exec_decl_var / visit_variable_decl): a decl carrying BOTH bits stores a

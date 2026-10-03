@@ -797,6 +797,8 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 			n->slot_index = v->slot_index + c.slot_offset;
 			n->static_init_proof = v->static_init_proof;
 			n->decl_fast_flags = v->decl_fast_flags;
+			n->alias_home = v->alias_home;
+			n->alias_index = v->alias_index;
 			c.declared_names.push_back(v->name_id);
 			out.push_back(n);
 			break;
@@ -1733,6 +1735,7 @@ bool vm_compiler::try_inline_variable_decl(const std::shared_ptr<variable_decl>&
 	auto nd = std::make_shared<variable_decl>(decl->location, decl->type, decl->name, decl->name_id, h);
 	nd->slot_index = decl->slot_index; nd->is_static = decl->is_static; nd->function_spelling = decl->function_spelling; nd->ref_escaping = decl->ref_escaping;
 	nd->static_init_proof = decl->static_init_proof; nd->decl_fast_flags = decl->decl_fast_flags; nd->site_kind = decl->site_kind; nd->site_owner = decl->site_owner;
+	nd->alias_home = decl->alias_home; nd->alias_index = decl->alias_index;
 	chunk_->nodes.push_back(nd);
 	compile_variable_decl(nd);
 	temp_next_ = mark;

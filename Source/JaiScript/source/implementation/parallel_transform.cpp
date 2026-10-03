@@ -45,6 +45,7 @@
 #include <jaiscript/vm/vm_backend.hpp>
 
 #include <algorithm>
+#include <functional>
 #include <cmath>
 #include <cstring>
 #include <optional>
@@ -488,7 +489,7 @@ namespace {
 		std::unordered_map<uint64_t, size_t> capture_index;   // name id -> adm.captures slot
 		// A local's declared type; primitive: it can never hold a class instance (a primitive or string type, or an auto
 		// slot the runtime locks to a primitive initializer), so dispatching on it runs no user code
-		struct local_info { type_info_ptr type; bool primitive = false; };
+		struct local_info { type_info_ptr type; bool primitive = false; bool reference = false; bool param = false; };
 		std::vector<std::unordered_map<uint64_t, local_info>> scopes;   // current function's scopes
 		bool failed = false;
 		// parallel_for bodies (in-place root mode): the element may bind by reference and
@@ -502,6 +503,7 @@ namespace {
 		uint64_t element_symbol = UINT64_MAX;   // the body's first element parameter / loop variable
 		std::vector<uint64_t> element_symbols;   // every element root: the zip's further loop variables too
 		bool is_element_symbol(uint64_t id) const {
+			if (local_mode && fn_depth != 0) { return false; }   // a callee's same-named local is its own
 			if (id == element_symbol) { return true; }
 			for (uint64_t e : element_symbols) { if (e == id) { return true; } }
 			return false;
@@ -518,6 +520,16 @@ namespace {
 		bool proof_mode = false;
 		bool root_escaped = false;
 		type_info_ptr root_type;
+
+		// Read-only local proof (prove_local_aliases): the root is a by-value local declaration `T x = lvalue;` and the walk
+		// covers the statements after it in its block (depth 0, the function's locals visible there pre-declared) and every
+		// function they call (depth > 0). On top of the parameter rules, nothing in that range may write the source's object:
+		// a write rooted at a local lands only in that local's own value tree (a by-value chain from a by-value local other
+		// than the source's root) or replaces a local's slot; a write through a reference or a handle may reach the source
+		// and escapes (a callee's reference parameter defers to its call sites, which judge the argument they pass)
+		bool local_mode = false;
+		int fn_depth = 0;
+		uint64_t source_root = UINT64_MAX;   // the initializer's root local (UINT64_MAX: a global)
 
 		admission_builder(engine& e) : eng(e), sym(*e.get_symbolizer()) { adm.admitted = false; }
 
@@ -765,6 +777,138 @@ namespace {
 			default:
 				return true;
 			}
+		}
+
+		// The identifier a member/subscript chain roots at (null: a call result, this, a literal)
+		static identifier_expr* chain_root_identifier(const expression* e) {
+			while (e) {
+				if (e->get_type() == node_type::member_expr) {
+					auto* m = static_cast<const member_expr*>(e);
+					if (m->is_static) { return nullptr; }
+					e = m->object.get();
+					continue;
+				}
+				if (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket) {
+					e = static_cast<const binary_expr*>(e)->left.get();
+					continue;
+				}
+				break;
+			}
+			return e && e->get_type() == node_type::identifier_expr ? static_cast<identifier_expr*>(const_cast<expression*>(e)) : nullptr;
+		}
+		// A member/subscript chain rooted at program state (a name neither a local nor the walked method's field)
+		bool global_rooted(const expression* e) const {
+			const identifier_expr* root = chain_root_identifier(e);
+			return root && (root->global_qualified || (!is_local(root->symbol_id) && !self_field(root->symbol_id)));
+		}
+		// A storage kind whose value is its own (no handle): a store into it lands in the holder's value tree
+		static bool by_value_kind(const type_info_ptr& t) {
+			if (!t) { return false; }
+			switch (t->base_type) {
+			case script_value_type::jai_int_type: case script_value_type::jai_float_type:
+			case script_value_type::jai_bool_type: case script_value_type::jai_char_type:
+			case script_value_type::jai_string_type:
+			case script_value_type::jai_array_type: case script_value_type::jai_map_type:
+				return true;
+			case script_value_type::jai_object_type:
+				return !t->type_name.empty();
+			default:
+				return false;
+			}
+		}
+		// Every step of a member/subscript chain from its root down to e (e itself when self) is statically by value: a write
+		// there lands in the root's own value tree, never behind a handle
+		bool chain_by_value(const expression* e, bool self) {
+			if (self && !by_value_kind(proof_chain_type(e))) { return false; }
+			while (e && e->get_type() != node_type::identifier_expr) {
+				const expression* base = nullptr;
+				if (e->get_type() == node_type::member_expr && !static_cast<const member_expr*>(e)->is_static) { base = static_cast<const member_expr*>(e)->object.get(); }
+				else if (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket) { base = static_cast<const binary_expr*>(e)->left.get(); }
+				else { return false; }
+				if (!by_value_kind(proof_chain_type(base))) { return false; }
+				e = base;
+			}
+			return e != nullptr;
+		}
+		// Local proof: a write at `target` (replace: a store that replaces a bare local's slot; otherwise the write lands in
+		// the target's value tree - a member/subscript store, a mutating builtin's receiver, a writing reference argument)
+		// Parameter proof: a reference of the walked function may name a part of the caller's argument (f(a, a.hp)), so a
+		// write through one escapes the parameter whenever the reference's type can occur in the parameter's value tree
+		bool param_ref_aliases = false;
+		bool types_meet(const type_info_ptr& a, const type_info_ptr& b) {
+			if (a.get() == b.get()) { return true; }
+			if (class_type(a) && class_type(b)) {
+				if (a->type_name == b->type_name) { return true; }
+				auto ca = eng.get_class_registry().find_script_class(std::string(a->type_name));
+				auto cb = eng.get_class_registry().find_script_class(std::string(b->type_name));
+				return !ca || !cb || ca->derives_from(cb.get()) || cb->derives_from(ca.get());
+			}
+			return a->canonical_name() == b->canonical_name();
+		}
+		bool type_may_hold(const type_info_ptr& tree, const type_info_ptr& t, std::vector<const class_definition*>& seen) {
+			if (!t || !tree || t->base_type == script_value_type::jai_any_type) { return true; }
+			if (types_meet(tree, t)) { return true; }
+			switch (tree->base_type) {
+			case script_value_type::jai_array_type: return type_may_hold(tree->element_type(), t, seen);
+			case script_value_type::jai_map_type: return type_may_hold(tree->key_type(), t, seen) || type_may_hold(tree->value_type(), t, seen);
+			case script_value_type::jai_object_type: {
+				if (tree->type_name.empty()) { return true; }
+				auto cls = eng.get_class_registry().find_script_class(std::string(tree->type_name));
+				if (!cls) { return true; }
+				auto fields_hold = [&](const class_definition* c) {
+					if (std::find(seen.begin(), seen.end(), c) != seen.end()) { return false; }
+					seen.push_back(c);
+					const uint32_t n = c->field_slot_count();
+					for (uint32_t slot = 0; slot < n; ++slot) {
+						if (type_may_hold(c->get_field_declared_type(c->slot_field(slot)), t, seen)) { return true; }
+					}
+					return false;
+				};
+				if (fields_hold(cls.get())) { return true; }
+				for (const auto& entry : eng.get_class_registry().script_classes_) {   // a by-value slot may hold a subclass
+					const class_definition* other = entry.second.get();
+					if (other && other != cls.get() && other->derives_from(cls.get()) && fields_hold(other)) { return true; }
+				}
+				return false;
+			}
+			case script_value_type::jai_any_type:
+				return true;
+			default:
+				return false;   // a primitive meets only itself; a handle's pointee is shared by the copy too
+			}
+		}
+		void check_param_write(const expression* target) {
+			if (fn_depth != 1 || !param_ref_aliases) { return; }   // a callee's reference parameter defers to its call sites
+			identifier_expr* root = chain_root_identifier(target);
+			if (!root || is_element_symbol(root->symbol_id)) { return; }
+			const local_info* l = root->global_qualified ? nullptr : local(root->symbol_id);
+			if (!l || !l->reference) { return; }
+			type_info_ptr referent = l->type;
+			if (referent && referent->is_reference()) { referent = referent->element_type(); }
+			std::vector<const class_definition*> seen;
+			if (type_may_hold(root_type, referent, seen)) { root_escaped = true; }
+		}
+		void check_local_write(const expression* target, bool replace) {
+			if (!proof_mode) { return; }
+			if (!local_mode) { check_param_write(target); return; }
+			identifier_expr* root = chain_root_identifier(target);
+			if (!root) { root_escaped = true; return; }
+			const bool bare = target == root;
+			if (is_element_symbol(root->symbol_id)) {
+				if (bare) { root_escaped = true; }   // the declaration's own slot: a store may assign into the referent
+				return;   // through it: the root rules (element_mutated, escapes)
+			}
+			const local_info* l = root->global_qualified ? nullptr : local(root->symbol_id);
+			if (!l) { return; }   // enclosing state: the walk rejects the write itself
+			if (l->reference) {
+				if (fn_depth > 0 && l->param) { return; }   // a callee's reference parameter: its call sites judge what they pass
+				root_escaped = true;
+				return;
+			}
+			if (l->primitive) { return; }   // a primitive or string slot holds no shared tree
+			if (fn_depth == 0 && root->symbol_id == source_root) { root_escaped = true; return; }
+			if (bare && replace) { return; }
+			if (!chain_by_value(target, !replace)) { root_escaped = true; }   // a replaced place may hold a handle, an in-place one may not
 		}
 
 		// Captured-read touch collection (the CHEAP half of the two-layer design: the
@@ -1051,10 +1195,14 @@ namespace {
 			scopes.emplace_back();
 			const type_info_ptr saved_return = return_type;
 			return_type = fn->return_type;
+			++fn_depth;
 			bool ok = true;
 			for (const auto& p : fn->parameters()) {
 				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }   // warm (idempotent lazy fill)
-				declare(p.symbol_id, typed_local(p.type));
+				local_info info = typed_local(p.type);
+				info.reference = p.is_reference;
+				info.param = true;
+				declare(p.symbol_id, info);
 				if (param_mode != root_param::none) {
 					if (element_symbol == UINT64_MAX) { element_symbol = p.symbol_id; } else { element_symbols.push_back(p.symbol_id); }
 				}
@@ -1068,6 +1216,7 @@ namespace {
 					if (!walk_stmt(d)) { ok = false; break; }
 				}
 			}
+			--fn_depth;
 			return_type = saved_return;
 			scopes.swap(saved);
 			if (lenient) { warm_stmt(fn->body); }
@@ -1215,6 +1364,9 @@ namespace {
 						return fail(n, "cannot iterate captured state '" + std::string(root->name) +
 						               "' by reference in a parallel body (captured reads are read-only)");
 					}
+					if (proof_mode && (global_rooted(n->container.get()) || !chain_root_identifier(n->container.get()))) {
+						return fail(n, "iterating by reference reaches state the proof does not own");
+					}
 				}
 				if (!walk_expr(n->container)) { return false; }
 				if (n->variable_name_id == UINT64_MAX) { n->variable_name_id = sym.intern(n->variable_name); }
@@ -1229,6 +1381,7 @@ namespace {
 					                 : ct->base_type == script_value_type::jai_string_type ? ct : nullptr;
 					loop_var = { n->element_type ? n->element_type : et, !n->is_reference && primitive_or_string(et) &&
 					             (!n->element_type || primitive_or_string(n->element_type)) };
+					loop_var.reference = true;   // the local proof never trusts a loop variable's storage to be its own
 				}
 				scopes.emplace_back();
 				declare(n->variable_name_id, loop_var);
@@ -1291,7 +1444,7 @@ namespace {
 				if (proof_mode) {
 					const bool reference = n->type.get() && n->type->is_reference();
 					if (!reference && conversion_may_run_code(n->type, n->initializer)) { root_escaped = true; }
-					if (reference) { info = {}; }
+					if (reference) { info = {}; info.reference = true; }
 					else if (!n->type && n->initializer && !maybe_object(n->initializer)) { info.primitive = true; }   // auto locks to its primitive initializer
 				}
 				declare(n->name_id, info);
@@ -1300,7 +1453,9 @@ namespace {
 			case node_type::destructuring_decl: {
 				auto* n = static_cast<destructuring_decl*>(s.get());
 				if (!walk_expr(n->initializer)) { return false; }
-				for (const auto& [name, id] : n->names) { declare(id); }
+				local_info binding;
+				binding.reference = true;   // a structured binding may name a part of its source
+				for (const auto& [name, id] : n->names) { declare(id, binding); }
 				return true;
 			}
 			case node_type::function_decl:
@@ -1365,6 +1520,7 @@ namespace {
 				if (n->op.type == token_type::plus_plus || n->op.type == token_type::minus_minus) {
 					if (proof_mode && chain_root_is_element(n->operand)) { root_escaped = true; }   // a user operator could run on the referent
 					if (proof_mode && store_may_run_code(n->operand, nullptr, true)) { root_escaped = true; }
+					check_local_write(n->operand.get(), true);
 					return walk_target(n->operand, "increment/decrement");
 				}
 				if (proof_mode && maybe_object(n->operand)) { root_escaped = true; }
@@ -1374,12 +1530,14 @@ namespace {
 				auto* n = static_cast<assignment_expr*>(e.get());
 				if (proof_mode && n->op.type != token_type::equal && chain_root_is_element(n->target)) { root_escaped = true; }
 				if (proof_mode && store_may_run_code(n->target, n->value, n->op.type != token_type::equal)) { root_escaped = true; }
+				check_local_write(n->target.get(), true);
 				return walk_target(n->target, "assignment") && walk_expr(n->value);
 			}
 			case node_type::call_expr:
 				return walk_call(static_cast<call_expr*>(e.get()));
 			case node_type::member_expr:
 				if (proof_mode && chain_root_is_element(e)) { return proof_chain_value(e); }
+				if (proof_mode && global_rooted(e.get()) && proof_chain_type(e.get())) { return walk_chain_indexes(e.get()); }   // a serial proof reads program state in place: no accessor, no write
 				return walk_local_member_chain(static_cast<member_expr*>(e.get()), "member access");
 			case node_type::lambda_expr:
 				return fail(e.get(), "lambdas are not allowed in a parallel body (v0)");
@@ -1527,6 +1685,10 @@ namespace {
 					// no element class defines are builtins and simply never match)
 					collect_element_method(m);
 					if (chain_root_is_element(m->object) && !parallel_readonly_method(m->member)) { adm.element_mutated = true; }
+					if (proof_mode && !chain_root_is_element(m->object) && (!parallel_readonly_method(m->member) || builtin_runs_script(m->member, proof_chain_type(m->object.get())))) {
+						if (global_rooted(m->object.get())) { return fail(m, "method '" + std::string(m->member) + "' may mutate program state"); }
+						check_local_write(m->object.get(), false);
+					}
 					if (proof_mode && chain_root_is_element(m->object)) {
 						// A read-only builtin on a receiver that is statically a container or string is a
 						// read; a receiver of unknown or class type could run a user method on the referent
@@ -1595,6 +1757,13 @@ namespace {
 							return fail(root, "argument passes enclosing state '" + std::string(root->name) +
 							                  "' by reference (captured reads are read-only)");
 						}
+						// A callee that writes through the parameter writes the argument's place
+						if (proof_mode && !ref_parameter_takes_temporary(eng, params, payload->fn->body.get(), i, true)) {
+							const expression* arg = call->arguments[i].get();
+							if (!chain_root_identifier(arg) || global_rooted(arg)) { return fail(arg, "argument passes state the proof does not own to a writing reference parameter"); }
+							if (chain_root_is_element(call->arguments[i])) { adm.element_mutated = true; }
+							else { check_local_write(arg, false); }
+						}
 					}
 					callee_ok = true;
 				} else if (parallel_host_whitelisted(callee->name)) {
@@ -1625,8 +1794,192 @@ namespace {
 		if (p.symbol_id == UINT64_MAX) { p.symbol_id = builder.sym.intern(p.name); }
 		builder.element_symbol = p.symbol_id;
 		builder.root_type = p.type;
+		builder.param_ref_aliases = fn->has_reference_parameters;
 		const bool walked = builder.admit_function(fn, UINT64_MAX, admission_builder::root_param::none, nullptr);
 		return walked && !builder.failed && !builder.adm.element_mutated && !builder.root_escaped;
+	}
+
+	// A program whose classes declare a script destructor: a copy runs it, and an instance dying anywhere in a live
+	// range runs user code the walk cannot see
+	bool any_script_destructor(engine& eng) {
+		for (const auto& entry : eng.get_class_registry().script_classes_) {
+			const class_definition* cls = entry.second.get();
+			if (!cls) { continue; }
+			const uint64_t id = eng.symbolize("~" + cls->get_name());
+			if (id != 0 && cls->has_method(id)) { return true; }
+		}
+		return false;
+	}
+
+	bool local_alias_candidate(const variable_decl& d) {
+		if (d.is_static || d.is_inline || d.default_initialized || !d.initializer || d.slot_index == SIZE_MAX || d.ref_escaping || !d.type) { return false; }
+		switch (d.type->base_type) {
+		case script_value_type::jai_object_type: if (d.type->type_name.empty()) { return false; } break;
+		case script_value_type::jai_array_type: case script_value_type::jai_map_type: break;
+		default: return false;
+		}
+		return admission_builder::chain_root_identifier(d.initializer.get()) != nullptr;
+	}
+
+	// The function body's statements in order, its locals in scope: each declaration stamped with this home is proven
+	// against the statements after it in its block
+	struct local_alias_prover {
+		engine& eng;
+		const local_alias_home& home;
+		string_symbolizer& sym;
+		using local_info = admission_builder::local_info;
+		std::vector<std::unordered_map<uint64_t, local_info>> scopes;
+
+		local_alias_prover(engine& e, const local_alias_home& h) : eng(e), home(h), sym(*e.get_symbolizer()) {}
+
+		void declare(uint64_t id, local_info info) { scopes.back()[id] = std::move(info); }
+		void declare_decl(variable_decl& d) {
+			if (d.name_id == UINT64_MAX) { d.name_id = sym.intern(d.name); }
+			local_info info = admission_builder::typed_local(d.type);
+			if (d.type && d.type->is_reference()) { info = {}; info.reference = true; }
+			else if (!d.type && d.initializer && d.initializer->get_type() == node_type::literal_expr &&
+			         !static_cast<const literal_expr*>(d.initializer.get())->value.is_null()) { info.primitive = true; }
+			declare(d.name_id, info);
+		}
+		void walk_list(const std::vector<declaration_ptr>& list) {
+			scopes.emplace_back();
+			for (size_t j = 0; j < list.size(); ++j) {
+				statement* st = list[j].get();
+				if (st && st->get_type() == node_type::variable_decl) {
+					auto* d = static_cast<variable_decl*>(st);
+					if (d->alias_home.get() == &home && d->alias_index < home.verdicts.size()) { home.verdicts[d->alias_index] = prove(*d, list, j) ? 1 : 0; }
+					declare_decl(*d);
+				} else {
+					walk(list[j]);
+				}
+			}
+			scopes.pop_back();
+		}
+		void walk(const statement_ptr& s) {
+			if (!s) { return; }
+			switch (s->get_type()) {
+			case node_type::block_stmt: walk_list(static_cast<block_stmt*>(s.get())->declarations); return;
+			case node_type::statement_decl: walk(static_cast<statement_decl*>(s.get())->statement); return;
+			case node_type::if_stmt: { auto* n = static_cast<if_stmt*>(s.get()); walk(n->then_statement); walk(n->else_statement); return; }
+			case node_type::while_stmt: walk(static_cast<while_stmt*>(s.get())->body); return;
+			case node_type::for_stmt: {
+				auto* n = static_cast<for_stmt*>(s.get());
+				scopes.emplace_back();
+				if (n->initializer && n->initializer->get_type() == node_type::variable_decl) { declare_decl(*static_cast<variable_decl*>(n->initializer.get())); }
+				walk(n->body);
+				scopes.pop_back();
+				return;
+			}
+			case node_type::range_for_stmt: {
+				auto* n = static_cast<range_for_stmt*>(s.get());
+				if (n->variable_name_id == UINT64_MAX) { n->variable_name_id = sym.intern(n->variable_name); }
+				scopes.emplace_back();
+				local_info loop_var;
+				loop_var.reference = true;
+				declare(n->variable_name_id, loop_var);
+				walk(n->body);
+				scopes.pop_back();
+				return;
+			}
+			case node_type::try_stmt: {
+				auto* n = static_cast<try_stmt*>(s.get());
+				walk(n->try_block);
+				scopes.emplace_back();
+				if (!n->catch_var.empty()) { declare(sym.intern(n->catch_var), local_info{}); }
+				walk(n->catch_block);
+				scopes.pop_back();
+				return;
+			}
+			default:
+				return;   // a switch's cases share a scope the walk does not model: their declarations keep the copy
+			}
+		}
+		bool prove(variable_decl& d, const std::vector<declaration_ptr>& list, size_t at) {
+			if (d.name_id == UINT64_MAX) { d.name_id = sym.intern(d.name); }
+			admission_builder b(eng);
+			b.proof_mode = true;
+			b.local_mode = true;
+			b.prefix = "local proof";
+			b.element_symbol = d.name_id;
+			b.root_type = d.type;
+			b.return_type = home.return_type;
+			b.scopes = scopes;
+			const expression* init = d.initializer.get();
+			const identifier_expr* root = admission_builder::chain_root_identifier(init);
+			if (!root || root->symbol_id == UINT64_MAX || root->symbol_id == d.name_id) { return false; }
+			// the source sits in a by-value tree: a by-value global or local, reached through by-value steps only
+			if (!b.global_rooted(init)) {
+				const local_info* l = b.local(root->symbol_id);
+				if (!l || l->reference) { return false; }
+				b.source_root = root->symbol_id;
+			}
+			if (!b.chain_by_value(init, true)) { return false; }
+			const type_info_ptr source_type = b.proof_chain_type(init);
+			const bool same_type = source_type.get() == d.type.get() ||
+			                       (admission_builder::class_type(source_type) && admission_builder::class_type(d.type) && source_type->type_name == d.type->type_name);
+			if (!same_type) { return false; }
+			b.scopes.emplace_back();
+			b.declare(d.name_id, admission_builder::typed_local(d.type));
+			for (size_t k = at + 1; k < list.size(); ++k) {
+				if (!b.walk_stmt(list[k]) || b.failed || b.root_escaped || b.adm.element_mutated) { return false; }
+			}
+			return !b.failed && !b.root_escaped && !b.adm.element_mutated;
+		}
+		void run() {
+			auto body = home.body.lock();
+			if (!body || !home.params) { return; }
+			scopes.emplace_back();
+			for (const auto& p : *home.params) {
+				if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym.intern(p.name); }
+				local_info info = admission_builder::typed_local(p.type);
+				info.reference = p.is_reference;
+				info.param = true;
+				declare(p.symbol_id, info);
+			}
+			walk_list(body->declarations);
+		}
+	};
+
+	void stamp_local_aliases(const std::shared_ptr<local_alias_home>& home, const statement_ptr& s) {
+		if (!s) { return; }
+		auto stamp = [&](const statement_ptr& st) { stamp_local_aliases(home, st); };
+		switch (s->get_type()) {
+		case node_type::block_stmt: for (const auto& d : static_cast<block_stmt*>(s.get())->declarations) { stamp(d); } return;
+		case node_type::statement_decl: stamp(static_cast<statement_decl*>(s.get())->statement); return;
+		case node_type::if_stmt: { auto* n = static_cast<if_stmt*>(s.get()); stamp(n->then_statement); stamp(n->else_statement); return; }
+		case node_type::while_stmt: stamp(static_cast<while_stmt*>(s.get())->body); return;
+		case node_type::for_stmt: stamp(static_cast<for_stmt*>(s.get())->body); return;
+		case node_type::range_for_stmt: stamp(static_cast<range_for_stmt*>(s.get())->body); return;
+		case node_type::try_stmt: { auto* n = static_cast<try_stmt*>(s.get()); stamp(n->try_block); stamp(n->catch_block); return; }
+		case node_type::variable_decl: {
+			auto* d = static_cast<variable_decl*>(s.get());
+			if (local_alias_candidate(*d)) {
+				d->alias_home = home;
+				d->alias_index = static_cast<uint32_t>(home->verdicts.size());
+				home->verdicts.push_back(0);
+			}
+			return;
+		}
+		default:
+			return;
+		}
+	}
+
+	bool body_has_local_alias_candidate(const statement_ptr& s) {
+		if (!s) { return false; }
+		switch (s->get_type()) {
+		case node_type::block_stmt:
+			for (const auto& d : static_cast<block_stmt*>(s.get())->declarations) { if (body_has_local_alias_candidate(d)) { return true; } }
+			return false;
+		case node_type::statement_decl: return body_has_local_alias_candidate(static_cast<statement_decl*>(s.get())->statement);
+		case node_type::if_stmt: { auto* n = static_cast<if_stmt*>(s.get()); return body_has_local_alias_candidate(n->then_statement) || body_has_local_alias_candidate(n->else_statement); }
+		case node_type::while_stmt: return body_has_local_alias_candidate(static_cast<while_stmt*>(s.get())->body);
+		case node_type::for_stmt: return body_has_local_alias_candidate(static_cast<for_stmt*>(s.get())->body);
+		case node_type::range_for_stmt: return body_has_local_alias_candidate(static_cast<range_for_stmt*>(s.get())->body);
+		case node_type::try_stmt: { auto* n = static_cast<try_stmt*>(s.get()); return body_has_local_alias_candidate(n->try_block) || body_has_local_alias_candidate(n->catch_block); }
+		case node_type::variable_decl: return local_alias_candidate(*static_cast<variable_decl*>(s.get()));
+		default: return false;
+		}
 	}
 
 	parallel_admission build_admission(engine& eng, const std::shared_ptr<script_defined_function>& fn,
@@ -3951,7 +4304,7 @@ bool parameter_alias_allows(const script_value& derefed) {
 }
 
 uint32_t prove_readonly_parameters(engine& eng, const script_defined_function& fn) {
-	if (!fn.body) { return 0; }
+	if (!fn.body || any_script_destructor(eng)) { return 0; }   // the elided copy's destructor would never run
 	// Non-owning view: the builder pins call targets for its own lifetime only
 	std::shared_ptr<script_defined_function> view(std::shared_ptr<void>{}, const_cast<script_defined_function*>(&fn));
 	uint32_t mask = 0;
@@ -3964,6 +4317,28 @@ uint32_t prove_readonly_parameters(engine& eng, const script_defined_function& f
 		}
 	}
 	return mask;
+}
+
+void prove_local_aliases(engine& eng, const local_alias_home& home) {
+	std::fill(home.verdicts.begin(), home.verdicts.end(), uint8_t{0});   // a verdict a raising walk never reaches keeps the copy
+	if (any_script_destructor(eng)) { return; }
+	local_alias_prover prover(eng, home);
+	try {
+		prover.run();
+	} catch (...) {
+		// an unresolvable callee or a frozen symbolizer means no proof, never an error (a verdict not reached stays false)
+	}
+}
+
+void stamp_local_alias_homes(const script_defined_function& fn) {
+	if (!fn.body || !fn.shared_parameters) { return; }
+	const statement_ptr body = fn.body;
+	if (!body_has_local_alias_candidate(body)) { return; }
+	auto home = std::make_shared<local_alias_home>();
+	home->params = fn.shared_parameters;
+	home->return_type = fn.return_type;
+	home->body = fn.body;
+	stamp_local_aliases(home, body);
 }
 
 bool resolve_global_ref_write_callee(engine& eng, const identifier_expr& id, std::vector<ref_write_callee>& out) {

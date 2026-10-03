@@ -10,6 +10,7 @@
 #include <jaiscript/detail/cast_kernel.hpp>
 #include <jaiscript/detail/transient_read.hpp>
 #include <jaiscript/detail/return_conv.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -7488,6 +7489,7 @@ void vm_compiler::compile_function_decl(const std::shared_ptr<function_decl>& de
 			decl->name, decl->parameters, decl->return_type, decl->body, nullptr, decl->local_count);
 		proto.fn->alias_candidate = true;
 		proto.fn->decl = decl;
+		detail::stamp_local_alias_homes(*proto.fn);
 	} else if (decl->outer_slot_plan_built) {
 		// Saved interpreter state has already replaced these identifiers' slots.
 		proto.outer_slot_plan = decl->outer_slot_plan;

@@ -186,6 +186,7 @@ namespace jai::fuzz {
 		bool alive = false;                       // trivial follow-up execute succeeded
 		bool budget_hit = false;                  // any segment raised a budget error
 		uint64_t alias_binds = 0;                 // engine::parameter_alias_binds() after the run (gate coverage)
+		uint64_t local_alias_binds = 0;           // engine::local_alias_binds() after the run (gate coverage)
 		uint64_t lowered_locals = 0;              // engine::aggregate_lowered_locals() after the run (gate coverage)
 	};
 
@@ -199,7 +200,7 @@ namespace jai::fuzz {
 		size_t memory_cap_bytes = 64 * 1024 * 1024;
 		uint64_t step_budget = 0;                 // engine::execution_step_budget: a clock-free bound (gates that must not depend on load)
 		bool proofs = true;                       // engine::type_proofs (the proof differential gate flips it)
-		bool param_alias = true;                  // engine::parameter_alias (the elision differential gate flips it)
+		bool param_alias = true;                  // engine::parameter_alias and engine::local_alias (the elision differential gate flips them)
 		bool passes = true;                       // engine::ir_passes (the middle end's differential gate flips it)
 		int lowering = -1;                        // engine::aggregate_lowering: -1 the backend's default (interpreter boxed, vm lowered), else forced
 		uint32_t miss_every = 0;                  // engine::cells_miss_every (the miss injection gate; a build with the lever)
@@ -221,6 +222,7 @@ namespace jai::fuzz {
 		eng->max_call_depth(jai::backend_type::vm, eng->max_call_depth(jai::backend_type::interpreter));
 		eng->type_proofs(cfg.proofs);
 		eng->parameter_alias(cfg.param_alias);
+		eng->local_alias(cfg.param_alias);
 		eng->ir_passes(cfg.passes);
 		if (cfg.lowering >= 0) eng->aggregate_lowering(cfg.lowering != 0);
 		if (cfg.miss_every) eng->cells_miss_every(cfg.miss_every);
@@ -285,6 +287,7 @@ namespace jai::fuzz {
 		try {
 			out.alive = (eng->execute("1 + 1").as_int() == 2);
 			out.alias_binds = eng->parameter_alias_binds();
+			out.local_alias_binds = eng->local_alias_binds();
 			out.lowered_locals = eng->aggregate_lowered_locals();
 		} catch (...) {
 			out.alive = false;

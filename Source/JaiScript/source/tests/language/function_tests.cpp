@@ -535,6 +535,187 @@ public:
             check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds());
         });
 
+        // Read-only by-value local elision: `T x = lvalue;` binds the source's object when nothing in x's block after it can
+        // mutate, alias or compare x or write the source. engine::local_alias_binds() counts the binds; the results are the
+        // copy's either way (every row runs on both backends).
+        test("readonly_local_alias_proven_shapes", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class Def { string name = "d"; int atk = 3; array<int> codes = [1, 2, 3]; array<int> vals = [10, 20, 30]; Def() {} Def(int a) { atk = a; } }
+                array<Def> DEFS = [Def(1), Def(2), Def(3)];
+                Def G = Def(7);
+                map<string, int> M = {"a": 1};
+                int stat(int i, int code) {
+                    int v = 0;
+                    Def d = DEFS[i];
+                    for (int k = 0; k < d.codes.size(); ++k) { if (d.codes[k] == code) { v = v + d.vals[k]; } }
+                    return v + d.atk;
+                }
+                int from_global() { Def d = G; return d.atk + d.name.size(); }
+                int pushes_other(int n) { array<int> out; for (int i = 0; i < 3; i++) { Def d = DEFS[i]; if (d.atk > n) { continue; } out.push(d.atk); } return out.size(); }
+                int pure_helper(int a) { return a * 2; }
+                int calls_pure(int i) { Def d = DEFS[i]; int h = pure_helper(d.atk); return h + d.vals[0]; }
+                int container_local() { array<int> xs = G.codes; int s = 0; for (int i = 0; i < xs.size(); i++) { s += xs[i]; } return s; }
+                int map_local() { map<string, int> m = M; return m.has("a") ? m["a"] : 0; }
+                int from_local_source() { Def a = Def(5); Def b = a; return b.atk; }
+                int reads_other_global() { Def d = DEFS[0]; return d.atk + DEFS[1].atk + G.atk; }
+                int stat_loop() { int s = 0; for (int j = 0; j < 4; j++) { s += stat(j % 3, 2); } return s; }   // a callee the vm may graft
+                int acc = 0;
+                for (int it = 0; it < 10; it++) {
+                    acc += stat(1, 2) + from_global() + pushes_other(2) + calls_pure(2) + container_local() + map_local() + from_local_source() + reads_other_global() + stat_loop();
+                }
+                return [acc, DEFS[1].atk, G.atk, G.codes.size(), DEFS.size()];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)10 * (22 + 8 + 2 + 16 + 6 + 1 + 5 + 10 + 87), v[0].as_int());
+            check_eq((int64_t)2, v[1].as_int());
+            check_eq((int64_t)7, v[2].as_int());
+            check_eq((int64_t)3, v[3].as_int());
+            check_eq((int64_t)140, (int64_t)eng->local_alias_binds());   // fourteen proven declarations per iteration
+        });
+
+        test("readonly_local_alias_refused_shapes_keep_the_copy", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class Def { int atk = 3; array<int> vals = [1]; Def() {} }
+                class Acc { int _hp = 1; int _get_hp() { G.atk = G.atk + 100; return _hp; } }
+                Def G = Def();
+                int take(Def x) { x.atk = 1; return x.atk; }
+                void bump() { G.atk = G.atk + 1; }
+                void write_ref(int& x) { x = 66; }
+                int mutates() { Def d = G; d.atk = 9; return d.atk * 10 + G.atk; }
+                int pushes() { Def d = G; d.vals.push(2); return d.vals.size() * 10 + G.vals.size(); }
+                int rebinds() { Def d = G; d = Def(); d.atk = 4; return G.atk; }
+                int aliases() { Def d = G; var& a = d; a.atk = 55; return G.atk; }
+                int captures() { Def d = G; auto f = [d]() { return d.atk; }; G.atk = 4; int c = f(); G.atk = 3; return c; }
+                Def returns() { Def d = G; return d; }
+                int passes() { Def d = G; return take(d) * 10 + G.atk; }
+                int compares() { Def d = G; return d == G ? 1 : 0; }
+                int identity() { Def d = G; return same_object(d, G) ? 1 : 0; }
+                int callee_writes() { Def d = G; bump(); int c = d.atk; G.atk = 3; return c; }
+                int local_source_written() { Def a = Def(); Def b = a; a.atk = 8; return b.atk; }
+                int handle_alias() { shared_ptr<Def> hp = G; Def d = G; hp.atk = 77; int c = d.atk; G.atk = 3; return c; }
+                int ref_arg_write() { Def d = G; write_ref(G.atk); int c = d.atk; G.atk = 3; return c; }
+                int ref_param_write(Def& q) { Def d = G; q.atk = 44; int c = d.atk; return c; }
+                int getter() { Acc a = Acc(); Def d = G; int h = a.hp; int c = d.atk; G.atk = 3; return c + h; }
+                int host_call() { Def d = G; to_json(d); return d.atk; }
+                int global_write() { Def d = G; G = Def(); G.atk = 5; int c = d.atk; G.atk = 3; return c; }
+                int r1 = mutates(); int r2 = pushes(); int r3 = rebinds(); int r4 = aliases(); int r5 = captures();
+                Def y = returns(); y.atk = 1234;
+                int r6 = passes(); int r7 = compares(); int r8 = identity(); int r9 = callee_writes(); int r10 = local_source_written();
+                int r11 = handle_alias(); int r12 = ref_arg_write(); int r13 = ref_param_write(G); G.atk = 3; int r14 = getter(); int r15 = host_call();
+                int r16 = global_write();
+                return [r1, r2, r3, r4, r5, G.atk, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, G.vals.size()];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)93, v[0].as_int());
+            check_eq((int64_t)21, v[1].as_int());
+            check_eq((int64_t)3, v[2].as_int());
+            check_eq((int64_t)3, v[3].as_int());
+            check_eq((int64_t)3, v[4].as_int());
+            check_eq((int64_t)3, v[5].as_int());
+            check_eq((int64_t)13, v[6].as_int());
+            check_eq((int64_t)1, v[7].as_int());     // memberwise ==: the copy equals its source
+            check_eq((int64_t)0, v[8].as_int());     // a copy is never the same object
+            check_eq((int64_t)3, v[9].as_int());
+            check_eq((int64_t)3, v[10].as_int());
+            check_eq((int64_t)3, v[11].as_int());
+            check_eq((int64_t)3, v[12].as_int());
+            check_eq((int64_t)3, v[13].as_int());
+            check_eq((int64_t)4, v[14].as_int());
+            check_eq((int64_t)3, v[15].as_int());
+            check_eq((int64_t)3, v[16].as_int());
+            check_eq((int64_t)1, v[17].as_int());
+            check_eq((int64_t)0, (int64_t)eng->local_alias_binds());
+        });
+
+        test("readonly_local_alias_revoked_by_redefinition_and_switch", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                class P { int a = 1; P() {} }
+                P g = P();
+                int helper() { return 1; }
+                int reads() { P p = g; int h = helper(); return p.a + h; }
+            )");
+            check_eq((int64_t)2, eng->execute("reads();").as_int());
+            check_eq((int64_t)1, (int64_t)eng->local_alias_binds());
+            eng->execute("int helper() { g.a = 50; return 1; }");
+            check_eq((int64_t)2, eng->execute("g.a = 1; reads();").as_int());   // the copy keeps the pre-call value
+            check_eq((int64_t)50, eng->execute("g.a;").as_int());
+            check_eq((int64_t)1, (int64_t)eng->local_alias_binds());
+            eng->local_alias(false);
+            eng->execute("int helper() { return 1; }");
+            check_eq((int64_t)2, eng->execute("g.a = 1; reads();").as_int());
+            check_eq((int64_t)1, (int64_t)eng->local_alias_binds());   // the kill switch keeps every copy
+        });
+
+        test("readonly_local_alias_skips_nocopy_and_destructors", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->execute(R"(
+                nocopy class Ledger { int total = 1; }
+                auto ledger = Ledger();
+                int peek() { Ledger l = ledger; return l.total; }
+            )");
+            std::string message;
+            try { eng->execute("peek();"); } catch (const std::exception& e) { message = e.what(); }
+            check(message.find("nocopy class 'Ledger'") != std::string::npos, "a nocopy local copy still raises: " + message);
+            auto d = make_engine();
+            jai::stdlib::register_all(d);
+            auto r = d->execute(R"(
+                int DEAD = 0;
+                class Tracked { int v = 2; ~Tracked() { DEAD = DEAD + 1; } }
+                Tracked T = Tracked();
+                int read_tracked() { Tracked t = T; return t.v; }
+                int s = 0;
+                for (int i = 0; i < 3; i++) { s += read_tracked(); }
+                return [s, DEAD];
+            )");
+            check_eq((int64_t)6, r.as_array()[0].as_int());
+            check_eq((int64_t)3, r.as_array()[1].as_int());   // every copy's destructor runs
+            check_eq((int64_t)0, (int64_t)d->local_alias_binds());
+            check_eq((int64_t)0, (int64_t)eng->local_alias_binds());
+        });
+
+        // The parameter proof's write channels: a callee's other reference parameter, a writing reference argument rooted at
+        // the parameter, a handle copied from program state, and the copy's own destructor
+        test("readonly_parameter_alias_write_channels_keep_the_copy", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                int DEAD = 0;
+                class Foo { int x = 1; Foo() {} }
+                class Holder { Foo foo = Foo(); Holder() {} }
+                class Tracked { int v = 2; ~Tracked() { DEAD = DEAD + 1; } }
+                shared_ptr<Holder> H = Holder();
+                Foo G = Foo();
+                Tracked T = Tracked();
+                int other_ref(Foo p, Foo& q) { q.x = 5; return p.x; }
+                void w(int& h) { h = 6; }
+                int ref_arg(Foo p) { w(p.x); return p.x; }
+                void poke() { shared_ptr<Holder> h = H; h.foo.x = 7; }
+                int through_handle(Foo p) { poke(); return p.x; }
+                int read_tracked(Tracked t) { return t.v; }
+                int r1 = other_ref(G, G); int g1 = G.x; G.x = 1;
+                int r2 = ref_arg(G); int g2 = G.x; G.x = 1;
+                int r3 = through_handle(H.foo);
+                int r4 = read_tracked(T);
+                return [r1, g1, r2, g2, r3, r4, DEAD];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)1, v[0].as_int(), "other_ref: the parameter is a copy");
+            check_eq((int64_t)5, v[1].as_int());
+            check_eq((int64_t)6, v[2].as_int(), "ref_arg: the callee writes the copy");
+            check_eq((int64_t)1, v[3].as_int(), "ref_arg: the caller's object is untouched");
+            check_eq((int64_t)1, v[4].as_int(), "through_handle: the parameter is a copy");
+            check_eq((int64_t)2, v[5].as_int());
+            check_eq((int64_t)1, v[6].as_int(), "the copy's destructor runs");
+            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds(), "no write-channel parameter is elided");
+        });
+
         test("destructuring_basic", [this]() {
             auto eng = make_engine();
             jai::stdlib::register_all(eng);

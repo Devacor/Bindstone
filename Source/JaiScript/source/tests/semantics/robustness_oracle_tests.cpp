@@ -5,6 +5,9 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
+#include <filesystem>
+#include <fstream>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -87,6 +90,7 @@ public:
 		second_audit();
 		spaceship_rewriting();
 		local_alias_soundness();
+		import_trees();
 	}
 
 private:
@@ -480,6 +484,59 @@ private:
 				const std::string src = prelude + "string f() {\n" + r.setup + "\nT x = " + r.src + ";\n" + r.attack +
 					"\nreturn \"\" + x.v + x.a.size();\n}\nf();";
 				expect(std::string("alias ") + r.name, src, "11", check_mode::warn);
+			}
+		});
+	}
+
+	// CLAUDE.md "Program-scope redeclarations shadow by unit": an import re-runs only the module whose closure changed (its
+	// importer does not), a vanished module raises once and then waits, a returning one re-runs, a group applies all or
+	// nothing, and a unit's reload hook sees its variables as they were
+	void import_trees() {
+		test("import_trees_rerun_only_what_changed_and_groups_apply_all_or_nothing", [this]() {
+			int run = 0;
+			for (const auto& c : robustness::configs()) {
+				const std::string label = std::string(" [") + c.label + "]";
+				const std::filesystem::path dir = test_temp_directory() / ("robustness_imports_" + std::to_string(run++));
+				std::filesystem::create_directories(dir);
+				auto write = [&](const char* name, const std::string& text) { std::ofstream(dir / name, std::ios::binary) << text; };
+				auto path = [&](const char* name) { return (dir / name).generic_string(); };
+				auto e = robustness::make(c, check_mode::strict);
+				e->import_recheck_interval(0);
+				std::string log;
+				e->add_function("note", [&log](std::string t) { log += t; });
+				write("A.jai", "note(\"A\");\nimport \"B.jai\";\n");
+				write("B.jai", "note(\"B\");\n");
+				const std::string importA = "import \"" + path("A.jai") + "\";";
+				auto step = [&](const std::string& src) {
+					log.clear();
+					try { e->execute(src); } catch (const std::exception& ex) { log += std::string("!") + (std::string(ex.what()).find("Failed to open import file") != std::string::npos ? "missing" : ex.what()); }
+					return log;
+				};
+				check_eq(std::string("AB"), step(importA), "first load" + label);
+				check_eq(std::string(""), step(importA), "nothing changed" + label);
+				write("B.jai", "note(\"B2\");\n");
+				check_eq(std::string("B2"), step(importA), "a changed child re-runs alone" + label);
+				std::filesystem::remove(dir / "B.jai");
+				check_eq(std::string("!missing"), step(importA), "a vanished child raises" + label);
+				check_eq(std::string(""), step(importA), "then waits quietly" + label);
+				write("B.jai", "note(\"B33\");\n");
+				check_eq(std::string("B33"), step(importA), "a returning child re-runs" + label);
+				write("X.jai", "note(\"X1\");\n");
+				write("Y.jai", "note(\"Y1\");\n");
+				const std::string group = "import([\"" + path("X.jai") + "\", \"" + path("Y.jai") + "\"]);";
+				check_eq(std::string("X1Y1"), step(group), "a group loads" + label);
+				write("X.jai", "note(\"X22\");\n");
+				write("Y.jai", "int y = \"s\";\nnote(\"Y2\");\n");
+				const std::string failed = step(group);
+				check_true(failed.size() > 1 && failed[0] == '!' && failed.find("X22") == std::string::npos, "a failing group applies nothing: " + failed + label);
+				write("Y.jai", "note(\"Y22\");\n");
+				check_eq(std::string("X22Y22"), step(group), "the fixed group applies every change" + label);
+				write("M.jai", "int count = 1;\nvoid hot_reload_migrate(map<string, var> previous) { count = previous[\"count\"] + 10; }\n");
+				const std::string importM = "import \"" + path("M.jai") + "\";";
+				step(importM);
+				write("M.jai", "int count = 2;\nvoid hot_reload_migrate(map<string, var> previous) { count = previous[\"count\"] + 100; }\n");
+				step(importM);
+				check_eq((int64_t)101, e->execute("count").as_int(), "the reload hook sees the previous value" + label);
 			}
 		});
 	}

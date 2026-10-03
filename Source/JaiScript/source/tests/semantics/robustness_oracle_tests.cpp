@@ -4,6 +4,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <filesystem>
@@ -17,6 +18,8 @@ using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+struct robustness_probe_host { int x = 0; int get() const { return x; } };
 
 namespace robustness {
 
@@ -92,6 +95,7 @@ public:
 		local_alias_soundness();
 		import_trees();
 		stored_element_results();
+		engine_teardown();
 	}
 
 private:
@@ -592,6 +596,37 @@ private:
 				}
 				run();
 			)", "1,3,2,2,3|1,6,7,1|3,5,1,6|1,2,5", check_mode::warn);
+		});
+	}
+
+	// An engine frees what it made: the conversion registry's standard converters reached it through a captured shared_ptr
+	// (every engine's registry and the host classes its converters name lived forever), and a script class's methods and a
+	// closure held the program environment that held them
+	void engine_teardown() {
+		test("an_engine_frees_its_classes_and_registry_when_it_dies", [this]() {
+			for (const auto& c : robustness::configs()) {
+				std::weak_ptr<class_definition> host, binary, script;
+				std::weak_ptr<conversions::conversion_registry> registry;
+				{
+					auto e = robustness::make(c, check_mode::strict);
+					dynamic_binder<robustness_probe_host>(*e, "RobustnessProbeHost").method("get", &robustness_probe_host::get).build();
+					e->execute(R"(
+						class Q { int v = 1; Q() {} int twice() { return v * 2; } static int s = 3; }
+						Q keep = Q();
+						auto fn = [&]() { return keep.twice(); };
+						int r = fn();
+					)");
+					host = e->get_class_definition("RobustnessProbeHost");
+					binary = e->get_class_definition("binary::reader");
+					script = e->get_class_definition("Q");
+					registry = e->get_conversion_registry();
+				}
+				const std::string label = std::string(" [") + c.label + "]";
+				check_true(host.expired(), "host class freed" + label);
+				check_true(binary.expired(), "engine-core host class freed" + label);
+				check_true(script.expired(), "script class freed" + label);
+				check_true(registry.expired(), "conversion registry freed" + label);
+			}
 		});
 	}
 

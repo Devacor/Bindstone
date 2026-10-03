@@ -1989,6 +1989,11 @@ engine::~engine() {
         for (auto& [id, def] : impl->classesByTypeId) { if (def) { def->detach_for_teardown(); } }
         for (auto& [type, def] : impl->classesByType) { if (def) { def->detach_for_teardown(); } }
         for (auto& [name, def] : impl->class_registry_.script_classes_) { if (def) { def->detach_for_teardown(); } }
+        // Program-scope values close cycles through the environment (a class's methods and a closure reach it as their
+        // definition scope while it holds them): emptying it lets every one of them die with the engine
+        if (impl->global_environment_) { impl->global_environment_->clear_values(); }
+        for (auto& [name, def] : impl->class_registry_.script_classes_) { if (def) { def->release_values_for_teardown(); } }
+        for (auto& [name, def] : impl->classes) { if (def && def->is_script_class()) { def->release_values_for_teardown(); } }
     }
 }
 

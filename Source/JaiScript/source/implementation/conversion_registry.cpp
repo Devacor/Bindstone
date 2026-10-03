@@ -186,6 +186,8 @@ void conversion_manager::add_builtin_conversion(script_value_type from, script_v
     }
 }
 
+// The registry owns these converters, so they reach it through a raw pointer: a captured shared_ptr kept every engine's
+// registry (and the host classes its converters name) alive forever
 void register_standard_vector_conversions(std::shared_ptr<conversion_registry> registry) {
     if (!registry) return;
     
@@ -211,7 +213,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             
             return result;
         },
-        [registry](const std::vector<int>& vec) -> script_value {
+        [registry = registry.get()](const std::vector<int>& vec) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for vector conversion");
@@ -222,12 +224,12 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
     
     // Vector<int64_t> - direct mapping to script_int
     registry->register_conversion<std::vector<int64_t>>(
-        [registry](const script_value& v) -> std::vector<int64_t> {
+        [registry = registry.get()](const script_value& v) -> std::vector<int64_t> {
             // Direct kernel: as<std::vector<T>>() consults this registry first, so routing
             // back through it recursed without bound (typed i64 buffers copy straight over)
             return conversions::convert_script_array_to_vector<int64_t>(v, registry->get_engine());
         },
-        [registry](const std::vector<int64_t>& vec) -> script_value {
+        [registry = registry.get()](const std::vector<int64_t>& vec) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for vector conversion");
@@ -255,7 +257,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             
             return result;
         },
-        [registry](const std::vector<float>& vec) -> script_value {
+        [registry = registry.get()](const std::vector<float>& vec) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for vector conversion");
@@ -283,7 +285,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             
             return result;
         },
-        [registry](const std::vector<double>& vec) -> script_value {
+        [registry = registry.get()](const std::vector<double>& vec) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for vector conversion");
@@ -294,10 +296,10 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
     
     // Vector<std::string>
     registry->register_conversion<std::vector<std::string>>(
-        [registry](const script_value& v) -> std::vector<std::string> {
+        [registry = registry.get()](const script_value& v) -> std::vector<std::string> {
             return conversions::convert_script_array_to_vector<std::string>(v, registry->get_engine());
         },
-        [registry](const std::vector<std::string>& vec) -> script_value {
+        [registry = registry.get()](const std::vector<std::string>& vec) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for vector conversion");
@@ -325,7 +327,7 @@ void register_standard_vector_conversions(std::shared_ptr<conversion_registry> r
             
             return result;
         },
-        [registry](const std::vector<bool>& vec) -> script_value {
+        [registry = registry.get()](const std::vector<bool>& vec) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for vector conversion");
@@ -364,7 +366,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             
             return result;
         },
-        [registry](const std::map<std::string, int>& map) -> script_value {
+        [registry = registry.get()](const std::map<std::string, int>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
@@ -383,11 +385,11 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     
     // Map<string, int64_t> - direct mapping
     registry->register_conversion<std::map<std::string, int64_t>>(
-        [registry](const script_value& v) -> std::map<std::string, int64_t> {
+        [registry = registry.get()](const script_value& v) -> std::map<std::string, int64_t> {
             // Direct kernel, as for vector<int64_t>: as<std::map<...>>() consults this registry first
             return conversions::convert_script_map_to_stdmap<std::string, int64_t>(v, registry->get_engine());
         },
-        [registry](const std::map<std::string, int64_t>& map) -> script_value {
+        [registry = registry.get()](const std::map<std::string, int64_t>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
@@ -427,7 +429,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             
             return result;
         },
-        [registry](const std::map<std::string, double>& map) -> script_value {
+        [registry = registry.get()](const std::map<std::string, double>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
@@ -467,7 +469,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             
             return result;
         },
-        [registry](const std::map<std::string, float>& map) -> script_value {
+        [registry = registry.get()](const std::map<std::string, float>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
@@ -484,10 +486,10 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     
     // Map<string, string>
     registry->register_conversion<std::map<std::string, std::string>>(
-        [registry](const script_value& v) -> std::map<std::string, std::string> {
+        [registry = registry.get()](const script_value& v) -> std::map<std::string, std::string> {
             return conversions::convert_script_map_to_stdmap<std::string, std::string>(v, registry->get_engine());
         },
-        [registry](const std::map<std::string, std::string>& map) -> script_value {
+        [registry = registry.get()](const std::map<std::string, std::string>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
@@ -527,7 +529,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             
             return result;
         },
-        [registry](const std::map<std::string, bool>& map) -> script_value {
+        [registry = registry.get()](const std::map<std::string, bool>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
@@ -568,7 +570,7 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
             
             return result;
         },
-        [registry](const std::map<int, std::string>& map) -> script_value {
+        [registry = registry.get()](const std::map<int, std::string>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");
@@ -587,10 +589,10 @@ void register_standard_map_conversions(std::shared_ptr<conversion_registry> regi
     
     // Map<int64_t, string> - direct mapping
     registry->register_conversion<std::map<int64_t, std::string>>(
-        [registry](const script_value& v) -> std::map<int64_t, std::string> {
+        [registry = registry.get()](const script_value& v) -> std::map<int64_t, std::string> {
             return conversions::convert_script_map_to_stdmap<int64_t, std::string>(v, registry->get_engine());
         },
-        [registry](const std::map<int64_t, std::string>& map) -> script_value {
+        [registry = registry.get()](const std::map<int64_t, std::string>& map) -> script_value {
             auto eng = registry->get_engine();
             if (!eng) {
                 throw std::runtime_error("Engine reference required for map conversion");

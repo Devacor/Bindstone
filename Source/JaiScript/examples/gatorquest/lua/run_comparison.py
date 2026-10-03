@@ -129,7 +129,7 @@ def main():
 			"run_ms": int(ran.group(2)) if ran else None, "gen_ms": int(gen.group(1)) if gen else None,
 			"hash": h.group(1) if h else None}
 		row["hash_match"] = row["hash"] == HASHES.get((ticks, bots)) if (ticks, bots) in HASHES else row["hash"] is not None
-		row["ms_per_tick"] = row["run_ms"] / ticks if row["run_ms"] is not None else None
+		row["ms_per_tick"] = row["run_ms"] / max(1, ticks) if row["run_ms"] is not None else None
 		row["accepted"] = proc.returncode == 0 and row["hash_match"] and row["run_ms"] is not None and (
 			a.desktop_load or (background <= a.max_background_cores and not competitors))
 		records.append(row)

@@ -5,14 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stability — JaiScript docs</title>
 <meta name="description" content="What is settled in the language and the embedding API, and what a 0.x release may still change before 1.0.">
-<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
 <meta property="og:title" content="Stability — JaiScript docs">
 <meta property="og:description" content="What is settled in the language and the embedding API, and what a 0.x release may still change before 1.0.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&amp;family=Chakra+Petch:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
 <link rel="stylesheet" href="assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
@@ -21,16 +24,16 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
-<a class="brand" href="index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">{*}</span>JaiScript<span class="brand-sub">docs</span></a>
 <nav class="site-nav" aria-label="Sections"><a href="tour/index.html">Tour</a><a href="bridges/index.html">Bridges</a><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
 <button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
 <aside class="sidebar" aria-label="On this page"><details class="sidebar-box" open><summary class="sidebar-title">On this page</summary><ol class="page-toc" data-page-toc data-toc-h3></ol></details></aside>
-<main class="content" id="main" tabindex="-1">
+<main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="index.html">Docs</a><span class="sep" aria-hidden="true">/</span>Stability</nav>
 <article class="chapter"><h1 id="stability">Stability<a class="hlink" href="#stability" aria-label="link">&#8203;</a></h1>
 <p>JaiScript is versioned 0.x until 1.0. This page sorts the language and the embedding API into what is settled and what a 0.x release may still change.</p>
 <p>A settled rule is the contract. Where the implementation departs from one, the implementation is the bug and changes to match; the rule stays. Everything under <a href="#may-change">May change</a> can move in any 0.x release, and anything this page does not mention counts as may change.</p>

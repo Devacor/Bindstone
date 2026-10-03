@@ -73,9 +73,9 @@
         push("tk-com", src.slice(i, j2)); i = j2; continue;
       }
       // string
-      if (c === '"') {
+      if (c === '"' || (c === "`" && kw === JAI_KW)) {
         var k = i + 1;
-        while (k < n && src[k] !== '"') { if (src[k] === "\\") k++; k++; }
+        while (k < n && src[k] !== c) { if (src[k] === "\\") k++; k++; }
         k = Math.min(k + 1, n);
         push("tk-str", src.slice(i, k)); i = k; continue;
       }

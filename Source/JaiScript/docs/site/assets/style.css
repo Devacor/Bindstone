@@ -254,10 +254,7 @@ code {
   font-family: var(--mono); font-size: .86em;
   background: var(--panel2); border: 1px solid var(--border);
   border-radius: 4px; padding: .05em .32em;
-}
-/* JetBrains Mono ligatures would draw <=> as one arrow glyph; a language reference shows the characters typed */
-code, pre, kbd, samp, .cb-gutter, #search-box, .api-controls input {
-  font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
 }
 kbd {
   font: .82em var(--mono); color: var(--head);
@@ -548,6 +545,12 @@ tr:last-child td { border-bottom: none; }
 .api-entry p { margin: .3rem 0; font-size: .94rem; }
 .api-entry[hidden], .api-group[hidden] { display: none; }
 
+/* JetBrains Mono ligatures would draw <=> as one arrow glyph; a language reference shows the characters typed.
+   Last, so no font shorthand in a component rule resets it. */
+code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
+  font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
+}
+
 /* ---------- narrow widths ---------- */
 @media (max-width: 960px) {
   .hero { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
@@ -588,7 +591,7 @@ tr:last-child td { border-bottom: none; }
   .callout::before { position: static; display: inline-block; margin-bottom: .45rem; }
   .demo-bar .dot { display: none; }
   .demo-bar .file { margin-left: 0; }
-  .scene-label { font-size: .66rem; }
+  .scene-label { position: static; display: block; padding: .2rem .8rem .35rem; font-size: .66rem; }
 }
 
 /* ---------- motion ---------- */

@@ -2215,6 +2215,7 @@ namespace jai::vm {
         op_status exec_index_compound(frame& f, const vm_instruction& ins);
         op_status exec_index_store(frame& f, const vm_instruction& ins);
         op_status exec_index_compound_fused(frame& f, const vm_instruction& ins);
+        op_status exec_index_compound_operand(frame& f, const vm_instruction& ins);
         op_status exec_math(frame& f, const vm_instruction& ins);
         op_status exec_parallel_for(frame& f, const vm_instruction& ins);
         const script_value* fused_subscript_value(frame& f, const fused_operand& operand,

@@ -76,7 +76,7 @@ namespace {
 		case opcode::op_from_this: case opcode::op_null_guard: case opcode::op_velem_load: case opcode::op_velem_store:
 			return fam::member;
 		case opcode::op_index: case opcode::op_index_assign: case opcode::op_index_compound: case opcode::op_index_store: case opcode::op_index_compound_fused:
-		case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_fused_decl: case opcode::op_iter_init: case opcode::op_iter_next:
+		case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_compound_operand: case opcode::op_index_fused_decl: case opcode::op_iter_init: case opcode::op_iter_next:
 		case opcode::op_iter_pop: case opcode::op_destructure: case opcode::op_parallel_element: case opcode::op_deref_top:
 			return fam::element;
 		case opcode::op_concat_append: return fam::string;
@@ -184,7 +184,7 @@ namespace {
 			case opcode::op_set_member_value: if (ins.a < c.member_store_protos.size()) { name = node_name(c, c.member_store_protos[ins.a].node); } break;
 			case opcode::op_load: name = sym_name(c, sym, ins.b); break;
 			case opcode::op_store: case opcode::op_compound_store: case opcode::op_incdec: name = sym_name(c, sym, ins.a); break;
-			case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_fused_decl:
+			case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_compound_operand: case opcode::op_index_fused_decl:
 				if (ins.a < c.fused_index_protos.size()) {
 					const fused_index_proto& fp = c.fused_index_protos[ins.a];
 					name = sym_name(c, sym, fp.container.symbol);
@@ -224,7 +224,7 @@ namespace {
 		case fam::element: case fam::typed_elem: {
 			if (cls == chunk::cell_refusal_effect) return "effect (call-argument order, an edge out, a global-only name)";
 			uint32_t proto = k_invalid_u32;
-			if (ins.op == opcode::op_index_fused || ins.op == opcode::op_index_store_fused || ins.op == opcode::op_index_fused_decl) proto = ins.a;
+			if (ins.op == opcode::op_index_fused || ins.op == opcode::op_index_store_fused || ins.op == opcode::op_index_compound_operand || ins.op == opcode::op_index_fused_decl) proto = ins.a;
 			if (proto < c.fused_index_protos.size()) {
 				if (c.fused_index_protos[proto].receiver == 1) return "string operation";
 				if (c.fused_index_protos[proto].receiver == 3) return "map operation";

@@ -300,7 +300,7 @@ text comes well before the cap of 256; the VM's script calls are in-loop frames 
 on any stack (its native checks guard host reentry and constructor phases). This is a known
 divergence between the backends: deep-recursion tests above the interpreter's reach run on the VM.
 
-Default caps are 256 active calls for the interpreter and 200000 for the VM.
+Default caps are 256 active calls for the interpreter and 250000 for the VM. The VM's cap is a backstop: every 10000 levels of depth it charges its frames' storage to `engine::memory_cap` (over the cap, the memory text) and every call entry samples the execution budget, so a runaway recursion stops at the memory or time limit first.
 `engine::max_call_depth(backend_type, depth)` sets either cap between executions;
 `engine::max_call_depth(backend_type) const` reads it. Values must be in
 `[1, INT_MAX]`. Each engine owns its settings, and parallel workers snapshot them
@@ -446,6 +446,15 @@ type and the included text is the function's own); import 'k.jai' instead` (the 
 class in the included file); a function it declares is a nested function, and when the program scope names it too the strict
 checker warns at warning severity, at the enclosing body: `inc.jai:1:10: function 'helper' from the include in function 'reload' is local to it and hides the
 program-scope 'helper' there without replacing it; import the file to replace program-scope functions` (`in a lambda`).
+
+A named function declared inside a function body captures nothing (Dev ruling 2026-10-02): a read or store of an enclosing
+frame local inside it is the parse error `Nested function 'helper' cannot use enclosing local 'y': a named function captures
+nothing; use a lambda with a capture ([&], [=] or [y]) or function(...) / =>` on both backends (the parser's capture walk,
+`parser::resolve_outer_use`); globals stay visible, `function(...)` / `=>` keep their `[&]` lambda semantics, and a nested named coroutine follows the
+same rule.
+
+A caught error's `e.stack` and a host's `format_stack_trace()` list the innermost 64 frames; a deeper stack ends with one
+line `... N more frames` (`stack_frame::elided`, `cap_stack_trace` in `core/types.hpp`, both backends).
 
 ## Untouched families (one-line recommendation each)
 

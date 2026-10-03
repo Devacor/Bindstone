@@ -219,10 +219,10 @@ public:
 
         test("reflection_query_validates_arguments", [this]() {
             auto eng = make_engine();
-            check_eq(std::string("reflect::is_enabled expects at least 1 argument: Function argument count mismatch"),
+            check_eq(std::string("reflect::is_enabled expects at least 1 argument"),
                 failure([&]() { eng->execute("reflect::is_enabled()"); }));
             for (const char* args : {"true", "-1", "2", "jai::filesystem, 2"}) {
-                check_eq(std::string("reflect::is_enabled expects valid privilege flags: Type mismatch"),
+                check_eq(std::string("reflect::is_enabled expects valid privilege flags"),
                     failure([&]() { eng->execute(std::string("reflect::is_enabled(") + args + ")"); }));
             }
         });

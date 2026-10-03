@@ -144,6 +144,15 @@ namespace jai::detail {
     // functions are the same object when they are one allocation. Primitives and strings
     // carry no identity in the language (strings share buffers copy-on-write), so two of
     // them are "the same" when they are equal values. A typed null is the same as null.
+    // The object a value names: holders are boxes, and several (a handle, an extend result, a re-boxed slot) can hold one object
+    inline const void* object_identity(const script_value& v) {
+        const auto holder = v.get_object_holder();
+        if (!holder) { return nullptr; }
+        if (holder->data) { return holder->data.get(); }
+        if (holder->bound_ptr) { return holder->bound_ptr; }
+        return holder.get();
+    }
+
     inline bool same_object(const script_value& lv, const script_value& rv) {
         const script_value l = lv.deref().try_unwrap_transparent_wrapper();
         const script_value r = rv.deref().try_unwrap_transparent_wrapper();
@@ -156,7 +165,7 @@ namespace jai::detail {
         case script_value::TYPEID_MAP:
             return ri == script_value::TYPEID_MAP && &l.unchecked_as_map() == &r.unchecked_as_map();
         case script_value::TYPEID_OBJECT:
-            return ri == script_value::TYPEID_OBJECT && l.unchecked_object_handle().get() == r.unchecked_object_handle().get();
+            return ri == script_value::TYPEID_OBJECT && object_identity(l) == object_identity(r);
         case script_value::TYPEID_STRING:
             return ri == script_value::TYPEID_STRING && l.unchecked_as_string() == r.unchecked_as_string();
         case script_value::TYPEID_INT:
@@ -165,7 +174,7 @@ namespace jai::detail {
         case script_value::TYPEID_CHAR:
             return l == r;
         default:
-            return li == ri && l.get_object_holder().get() == r.get_object_holder().get() && l.get_object_holder() != nullptr;
+            return li == ri && l.get_object_holder() != nullptr && object_identity(l) == object_identity(r);
         }
     }
 

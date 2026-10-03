@@ -120,7 +120,7 @@ public:
             check_eq(DWORD(WAIT_OBJECT_0), wait);
             check_eq(std::string(), state.failure);
             const std::string native = "Native stack exhausted before the call-depth cap: the host thread's stack bounds this recursion";
-            check_eq("ERROR: " + native + ": Maximum recursion depth exceeded|" + native + "|42", state.results[0], "interpreter");
+            check_eq("ERROR: " + native + "|" + native + "|42", state.results[0], "interpreter");
             check_eq(std::string("200|255|200|220|100|42"), state.results[1], "vm");
         });
 #endif

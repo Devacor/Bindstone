@@ -3836,6 +3836,7 @@ inline class_instance::~class_instance() {
     if (class_def_) {
         class_def_->unregister_instance(this);
     }
+    while (!flat_fields_.empty()) { flat_fields_.pop_back(); }   // members die in reverse declaration order (C++)
 }
 
 } // namespace jai

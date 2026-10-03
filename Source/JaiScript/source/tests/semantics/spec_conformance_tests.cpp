@@ -365,9 +365,10 @@ public:
 				string a = "a"; string b = string::append(a,"b"); a.append("c"); a + "|" + b;
 			)", "ac|ab");
 			expect("typed map filter", R"(
-				map<string,int> m = {"a":1,"b":2}; map<string,int> f = m.filter([](string k,int& v) -> bool { v += 1.5; return v > 2; });
-				to_json(m) + "|" + to_json(f);
-			)", "{\"a\":2,\"b\":3}|{\"b\":3}");
+				map<string,int> m = {"a":1,"b":2}; map<string,int> f = map::filter(m, [](string k,int& v) -> bool { v += 1.5; return v > 2; });
+				map<string,int> g = {"a":1,"b":2}; g.filter([](string k,int& v) -> bool { v += 1.5; return v > 2; });
+				to_json(m) + "|" + to_json(f) + "|" + to_json(g);
+			)", "{\"a\":2,\"b\":3}|{\"b\":3}|{\"b\":3}");
 		});
 		test("api_consistency_read_only_inputs_are_not_preemptively_cloned", [this]() {
 			expect("nocopy selection", R"(
@@ -1561,7 +1562,7 @@ private:
 			});
 		});
 		test("host_configuration_and_uncaught_suffix_texts", [this]() {
-			every_config("host texts", "max_call_depth must be between 1 and INT_MAX|Maximum recursion depth exceeded - possible infinite recursion|Cannot access 'x' on null ('v8' is null): Member access on null value", [](engine& e) {
+			every_config("host texts", "max_call_depth must be between 1 and INT_MAX|Maximum recursion depth exceeded - possible infinite recursion|Cannot access 'x' on null ('v8' is null)", [](engine& e) {
 				std::string out;
 				try { e.max_call_depth(backend_type::interpreter, 0); out += "accepted"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";

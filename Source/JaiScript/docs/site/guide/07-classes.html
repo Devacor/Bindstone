@@ -77,13 +77,14 @@ main ctor (3, 3)
 main ctor (1, 2)
 == result: 5</code></pre></div>
 <h3 id="choosing-an-overload">Choosing an overload<a class="hlink" href="#choosing-an-overload" aria-label="link">&#8203;</a></h3>
-<p>Constructors and methods overload by parameter count and parameter types. A call takes the overload whose parameters take its arguments best: an argument of the parameter's exact type beats one that needs a conversion, so <code>3</code> picks <code>add(int)</code> over <code>add(float)</code> and <code>2.5</code> picks <code>add(float)</code>. A string argument never selects a <code>bool</code> parameter. When nothing fits, the call raises <code>No overload of 'add' takes (char)</code>, naming the argument types; a literal the checker can see is a load error (<code>no overload of 'add' matches this call</code>). Top-level functions do not overload (see <a href="06-functions.html#redefinition-and-the-duplicate-warning">Functions</a>); namespace functions overload by arity.</p>
+<p>Constructors and methods overload by parameter count and parameter types, and their parameters convert by the one table a free function's do. A call takes the overload whose parameters take its arguments best: an exact type first, then the int/float and bool-to-number conversions (<code>3</code> picks <code>add(int)</code> over <code>add(float)</code>, <code>2.5</code> picks <code>add(float)</code>, <code>true</code> picks <code>add(int)</code>), then a <code>var</code> parameter, then the rows that take anything (a <code>string</code> parameter&#x27;s, a <code>bool</code> parameter&#x27;s, a <code>to_int()</code>-style method, a converting constructor), so a char reaches <code>add(string)</code> here. A string argument never selects a <code>bool</code> parameter among overloads of one argument count. The one overload an argument count admits binds and converts like a lone function (its parameter raises its own text when it cannot). When several fit the count and none takes the arguments, the call raises <code>No overload of 'add' takes (array, int)</code>, naming the argument types; a literal the checker can see is a load error (<code>no overload of 'add' matches this call</code>). Top-level functions do not overload (see <a href="06-functions.html#redefinition-and-the-duplicate-warning">Functions</a>); namespace functions overload by arity.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Meter {
     string last = "";
     void add(int v) { last = "int"; }
     void add(float v) { last = "float"; }
     void add(string v) { last = "string"; }
     void add(int a, int b) { last = "two ints"; }
+    void add(float a, float b) { last = "two floats"; }
 }
 Meter m;
 m.add(3); print(m.last);
@@ -91,12 +92,15 @@ m.add(2.5); print(m.last);
 m.add("x"); print(m.last);
 m.add(1, 2); print(m.last);
 var c = 'c';
-try { m.add(c); } catch (e) { print("caught: ", e); }</code></pre></div>
+m.add(c); print(m.last);
+var list = [1];
+try { m.add(list, 2); } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int
 float
 string
 two ints
-caught: No overload of &#x27;add&#x27; takes (char)</code></pre></div>
+string
+caught: No overload of &#x27;add&#x27; takes (array, int)</code></pre></div>
 <p><strong>Converting constructors.</strong> A true one-parameter constructor makes the class a conversion target, and that conversion is one row of the one table. It runs for declarations, assignments, by-value parameters, returns and field stores alike:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Money {
     int dollars = 0;
@@ -170,9 +174,10 @@ function scope() {
 }
 scope();</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">leaving
-drop a
+drop in list
 drop b
-drop in list</code></pre></div>
+drop a</code></pre></div>
+<p>Locals die in reverse declaration order when their function returns or a throw leaves it, as in C++; a dying container destroys its elements first to last, and an object's members die after its destructor body, last member first.</p>
 <h2 id="inheritance-super-super-explicit-override">Inheritance: <code>super(...)</code>, <code>super::</code>, explicit <code>override</code><a class="hlink" href="#inheritance-super-super-explicit-override" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Cat {
     int a = 0;

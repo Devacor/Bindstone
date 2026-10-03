@@ -492,7 +492,7 @@ public:
                 check_true(has_diag(r, dlevel::warning, text));
                 std::string got;
                 try { w->execute("[[warn_mode]]\n" + mk + "h.ro = 5;"); } catch (const std::exception& ex) { got = ex.what(); }
-                check_eq(std::string("Cannot assign to 'ro': it is read-only: Invalid assignment target"), got);
+                check_eq(std::string("Cannot assign to 'ro': it is read-only"), got);
                 check_eq((int64_t)100, w->execute("h.ro").as_int(), "the getter still reads");
             }
         });
@@ -1220,7 +1220,7 @@ public:
             try { e->execute("C c2 = C(); int n = c2.b; n"); text = "ran"; }
             catch (const static_check_error&) { text = "static"; }
             catch (const std::exception& ex) { text = ex.what(); }
-            check_true(text.find("Type mismatch") != std::string::npos, "registered-only class: the getter's declaration is out of view, a run-time mismatch: " + text);
+            check_true(text.find("Cannot initialize 'n' (declared int) with string") != std::string::npos, "registered-only class: the getter's declaration is out of view, a run-time mismatch: " + text);
             std::string same_unit;
             try { e->execute("class P2 { int b = 1; } class C2 : P2 { override string _get_b() { return \"s\"; } }\nC2 c3 = C2(); int n = c3.b; n"); same_unit = "ran"; }
             catch (const static_check_error& err) { same_unit = err.what(); }
@@ -2682,7 +2682,7 @@ public:
             check_eq((size_t)0, error_count(e->check(setter_only + "t.hp += \"s\";")), "setter-only compound store: no getter type, lenient");
             e->static_checking(check_mode::warn);
             std::string what = outcome(*e, cls + "s.hp = \"s\"; s.hp");
-            check_true(what.find("ERROR No overload of '_set_hp'") == 0, "the runtime keeps its rejection (got: " + what + ")");
+            check_true(what.find("ERROR Cannot pass string to parameter 'v' of '_set_hp' (declared int)") == 0, "the runtime keeps its rejection (got: " + what + ")");
             e->static_checking(check_mode::strict);
             // never a proof source: the member stays off the field lanes after registration too
             const std::string prog = cls + "s.hp = 4; int x = s.hp; x";

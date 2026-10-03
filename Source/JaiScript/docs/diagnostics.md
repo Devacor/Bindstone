@@ -2,8 +2,8 @@
 
 Every runtime error text is byte-identical on both backends (the interpreter and the vm raise
 through the same kernels or through byte-parallel twins). This catalog lists the texts a script
-can observe (`catch (e)` sees the text alone; an uncaught error's `what()` appends the error
-code's category message, `<text>: <category>`, unless the text already begins with it), grouped by family. Four families were redesigned
+can observe, and an uncaught error's `what()` is the same text (the error code's category message stands in only
+for an error that carries no text), grouped by family. Four families were redesigned
 in one pass (null receiver, "no member", arity/overloads, typed boundary); the rest are listed
 with a one-line recommendation each and are otherwise untouched.
 
@@ -57,8 +57,7 @@ raise the refusal above. Host-supplied source and bytecode bytes remain usable.
 
 Call vs access: the interpreter's generic call path marks the callee lookup
 (`member_callee_lookup_`, consumed at `visit_member_expr` entry); the vm's `op_probe_member`
-and `exec_call_method` pass `as_callee` to `member_access_value`. Uncaught: the category suffix
-stays (`...: Member access on null value`); the message no longer restates "member".
+and `exec_call_method` pass `as_callee` to `member_access_value`. The message no longer restates "member".
 
 Sites: `interpreter.cpp` visit_member_expr; `vm_backend.cpp` exec_probe_member,
 member_access_value.
@@ -79,15 +78,14 @@ member_access_value.
 | `C.s`, `C.f()`, `C.s = v` on a class name (a dot reaches an instance's members) | `function has no member 's'` (a store: `Cannot assign to member of non-object type`) | `'C' is a class; use C::s` (a read or call: code `member_not_found`; a store raises the text alone); a parallel worker reads `A class's members are reached with '::'`; the strict checker reports the same text at load (`detail/null_member_diagnostic.hpp` `class_dot_member_text`) |
 | `E::v` on an enum (C++ scoped access; `E.v` reads the same value) | `Class 'E' not found` | the value; a name the enum does not declare raises `No value 'v' in enum 'E'` (the checker: `no value 'v' in enum 'E'`; `detail/enum_value.hpp`) |
 | store to a missing member | `Cannot assign to non-existent member 'x'` | `Cannot assign to 'x': Vec2 has no such member` |
-| store to a read-only C++ property (binder `.property()` with a getter only / a `nullptr` setter / a member pointer whose type is not copy-assignable, e.g. a signal), or to a host-registered namespace entry (`string::to_lower = v`; `docs/namespaces.md`) | (silent no-op; `Class 'string' not found` for the namespace entry) | `Cannot assign to 'value': it is read-only` - every spelling: `obj.value = v`, `this.value = v`, a bare `value = v` in a hybrid method, compound and `++`/`--` (the getter and the arithmetic run first), stores through a PROPERTY reference (`auto& r = value; r = v`, `f(value)` into a `T&` parameter), `reflect::set`; a script `_set_value` override or a same-named script field in the chain takes the store instead; serialization loads (`from_json`, the binary archive) keep discarding the setter's result and skip silently. Uncaught, `what()` appends `: Invalid assignment target` except on the reference-store path, which throws the text alone like its family's `Reference to a removed field`. The static checker reports the same mistake at load on a closed class (`cannot assign to read-only property 'value'`, `docs/static_checking.md` Members) |
+| store to a read-only C++ property (binder `.property()` with a getter only / a `nullptr` setter / a member pointer whose type is not copy-assignable, e.g. a signal), or to a host-registered namespace entry (`string::to_lower = v`; `docs/namespaces.md`) | (silent no-op; `Class 'string' not found` for the namespace entry) | `Cannot assign to 'value': it is read-only` - every spelling: `obj.value = v`, `this.value = v`, a bare `value = v` in a hybrid method, compound and `++`/`--` (the getter and the arithmetic run first), stores through a PROPERTY reference (`auto& r = value; r = v`, `f(value)` into a `T&` parameter), `reflect::set`; a script `_set_value` override or a same-named script field in the chain takes the store instead; serialization loads (`from_json`, the binary archive) keep discarding the setter's result and skip silently. The static checker reports the same mistake at load on a closed class (`cannot assign to read-only property 'value'`, `docs/static_checking.md` Members) |
 | mutating or aliasing a map KEY through a range-for pair (`for (auto kv : m)` / `for (auto& kv : m)` over a statically known map, C++ `pair<const K, V>`: a string mutator on `kv.first` - `kv.first.to_upper()`, `insert`, `erase`, ... (`k_string_mutator_method_names`) - a store `kv.first = v`, compound `kv.first += "hey"`, `++`/`--`; or a mutable alias: `var& cheeky = kv.first` / `auto&` / `T&`, `shared_ptr<var> cheeky = kv.first` / `shared_ptr<auto>` / a store into a shared_ptr-declared variable, `cast<T&>` / `cast<shared_ptr<T>>` of the key, `kv.first` passed where every viable same-script overload takes `T&` or `shared_ptr<T>`, `return kv.first` from a `-> T&` / `-> shared_ptr<T>` function; the marker follows the pair through `var p = kv` / `auto& p = kv` and a ternary over keys) | (the key node was rewritten in place: `{"A":1}`, lookups and the ordering invariant broken) | STATIC ONLY: the checker rejects the load under strict (warn mode prints it) with `cannot mutate 'kv.first': map keys are read-only` for the mutation spellings and `cannot alias 'kv.first': map keys are read-only (copy it instead: var k = kv.first)` for the alias spellings (`a map key` replaces the spelling when the operand is a ternary; `docs/static_checking.md`). The runtime raises nothing: strings are copy-on-write at the in-place write gate (`docs/invariants.md` 11), so the copy (`var okay = kv.first`) and the paths the checker cannot see (`var m`, `m.keys()[0].to_upper()`) mutate the copy alone and the map stays intact - `first` is a shared handle in both bindings, no per-iteration copy |
 | calling a plain value (`obj.x(...)`, `f(...)` with `f = 5`) | caught: `` (empty); uncaught: `Cannot call non-function value` | `Cannot call 'x': it is an int, not a function` (member or identifier callee); `Cannot call a value of type int: it is not a function` (computed callee: `fs[0](x)`, `pick()(x)`) |
 
 The callee's type spells the class name for class instances (`it is a Vec2`), the base type
 otherwise; the article follows the spelling (`an int`, `a string`); a null callee reads
 `Cannot call 'f': it is null, not a function` / `Cannot call null: it is not a function`.
-Uncaught, the not-a-function code keeps its category suffix (`...: Cannot call non-function
-value`). `reflect::` keeps its own host-API texts (`Class 'C' has no method 'm'` in
+`reflect::` keeps its own host-API texts (`Class 'C' has no method 'm'` in
 `stdlib/reflection.hpp`), outside this pass.
 
 Sites: `interpreter.cpp` visit_call_expr (method fast path + generic callable check),
@@ -185,7 +183,7 @@ field through a receiver (`c.s += 5`) or bare in a method, a static (`C::i += "x
 variable, an element (`a[0] -= "s"`) and a map entry (`m["k"] /= "s"`). `string s; s += 5` is `Cannot apply '+=' to string and int` (a string target appends
 text only - a string, a char, a utf8_string; `string += int` raises by design, unlike binary
 `+`), `float f; f += "x"` is `Cannot apply '+=' to float and string`. Catchable, identical on
-both backends; uncaught, `what()` appends `: Type mismatch`. `++`/`--` on a target that is not a
+both backends. `++`/`--` on a target that is not a
 number (any spelling: a variable, a member, an element, a bare field) is `Cannot apply '++' to
 string` / `Cannot apply '--' to bool` (`invalid_numeric_operand`, `detail::incdec_mismatch`),
 which a `catch` used to see as an empty string. An element or map entry target
@@ -223,9 +221,7 @@ existing saturating policy (NaN to zero).
 `jai`, or their root-qualified subnames (`reflect::sub`, `jai::sub::deep`). The
 shared `core/script_namespace.hpp` predicate and checked error kernel are used by
 both backends, including execution of saved programs and with static checking off.
-Rejection happens before namespace members or their initializers run. Ordinary
-uncaught `what()` appends `: Type mismatch`. This replaces the old parenthetical
-`(reflect:: is C++-registered only)` with wording valid for both reserved roots.
+Rejection happens before namespace members or their initializers run.
 
 The host may register values/functions in these namespaces. Names that merely
 start with the same letters (`jailed`, `reflector`) and unrelated qualified names
@@ -289,10 +285,8 @@ the kernel does not spell reads `...`.
 native-stack headroom check)
 
 The shared `detail/execution_limits.hpp` kernel supplies both number-free texts for both
-backends (`raise_call_depth`, `raise_native_stack`). Recursion errors are catchable. The code's
-category message is `Maximum recursion depth exceeded`: the cap's text already begins with it, so
-its uncaught `what()` is the text alone, and the stack's reads `...: Maximum recursion depth
-exceeded`; a native callback boundary that wraps a C++ exception may append `: C++ exception`.
+backends (`raise_call_depth`, `raise_native_stack`). Recursion errors are catchable. Uncaught, `what()` is
+the text alone for both.
 
 The interpreter recurses natively per script call (about 7.5 KB of host stack per level in
 Release, several times that in Debug), so on a small host thread (a 1 MB main thread) the stack's
@@ -378,7 +372,7 @@ argument(s), got 1`, `no overload of 'binary::reader.seek' accepts these argumen
 | `Failed to open include file: helpers.jai` | an `include` whose path no rung of the resolution ladder finds (the path as written), or a found file that cannot be read (its resolved path) |
 | `Failed to open import file: creature.jai` | an `import` whose path no rung finds (the path as written), or a loaded module whose file disappeared (its resolved path; raised once, then the module waits for the file) |
 
-Both are catchable; uncaught, `what()` appends `: File not found`. The shared resolver is
+Both are catchable. The shared resolver is
 `resolve_include_path` (`interpreter.cpp`), whose `for_import` flag picks the form.
 
 ## Host file reads
@@ -409,6 +403,7 @@ Each is recognized only in that position, so a script using one of these words a
 | `a === b` | after `==` | `JaiScript has no '===': == never converts between types, so a == b already compares without coercion` |
 | `a !== b` | after `!=` | `JaiScript has no '!==': != never converts between types, so a != b already compares without coercion` |
 | `function* g()`, `function*()` | declaration or expression | `JaiScript has no 'function*': a generator is a coroutine, coroutine name(...) { yield v; }` |
+| `[...a, 3]`, `f(...args)` | an expression | `JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one` |
 
 `let` is not on the list: it is a synonym of `var` (Dev ruling 2026-10-01).
 
@@ -474,6 +469,7 @@ line `... N more frames` (`stack_frame::elided`, `cap_stack_trace` in `core/type
 | time and dates | `time::now expects no arguments`, `time::sleep expects a number of seconds`, `time::date_from_unix: the instant is outside the supported range (years 1 to 9999)`, `time::date: month must be 1 to 12, got 13`, `time::date: day 31 does not exist in 2024-04` (a refused field store leaves the date unchanged), `time::date: hour takes an int, got float`, `time::date::add_days expects a whole number`, `time::date::format: unknown placeholder '${bogus}'` (`time::date_now:` for the namespace call), `time::date::format: format spec ':05' does not apply to string value`; the parallel wall `time:: calls are not allowed in a parallel body (engine-owned clock)` | keep; every text spells the qualified name |
 | method / class plumbing | `Method called without 'this' object`, `Property getter requires 'this' object`, `'this' can only be used inside methods`, `'super' can only be used inside methods`, `Cannot call super() - class has no base class`, `No matching parent constructor found for super()` (a parent declaring no constructor called with arguments; a parent with constructors raises family C's `No constructor of 'Base' takes (...)`), `Constructor found for 'C' but no class definition available`, `Class definition no longer exists` | keep |
 | captures | `Cannot capture undefined variable 'x'`, `Cannot capture variable 'x' by reference` | keep |
+| enum values (parse) | `Enum values take no initializer: 'a' is 0, its position in the enum` (an `= value` after an enum value; values are their positions, 0 first) | keep |
 | using declarations (parse) | `'a' names g::a by a using declaration; a variable cannot be declared with that name` (the qualified name in full, `g::h::b` for a nested one; `class`, `enum`, `function`, `member` for the other declarations), `'a' is already named by a using declaration`, `'g::a' is a qualified name; a variable cannot be declared with it` | keep |
 | exceptions | `Bare throw with no active exception thrown.` (`invalid_operation`: a bare `throw;` outside every handler, a fresh coroutine's included; catchable where it stands, like any runtime error) | keep (Dev's wording, byte-exact) |
 | limits | `Maximum recursion depth exceeded - possible infinite recursion`, `Script execution budget exceeded - raise engine::execution_budget or break up the work`, memory cap | keep; recursion is catchable (see above), execution budget exhaustion is terminal |

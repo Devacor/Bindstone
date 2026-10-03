@@ -2528,7 +2528,7 @@ private:
         const function_decl* only_viable = nullptr;
         int viable_count = 0;
         for (const auto* fn : overloads) {
-            if (script_fn_viable(fn, args, scored && overloads.size() > 1)) {
+            if (script_fn_viable(fn, args, scored && arity_rivals(overloads, args.size()))) {
                 ++viable_count;
                 only_viable = fn;
             }
@@ -2566,6 +2566,17 @@ private:
             default:
                 return true;
         }
+    }
+
+    // Several overloads admit this argument count: the runtime scores them, else the one the arity admits binds and converts
+    template <typename Overloads>
+    static bool arity_rivals(const Overloads& overloads, size_t argc) {
+        size_t admitted = 0;
+        for (const auto& fn : overloads) {
+            auto [min_a, max_a] = arity_range(&*fn);
+            if (argc >= min_a && argc <= max_a && ++admitted > 1) { return true; }
+        }
+        return false;
     }
 
     // in_set: fn is one of several overloads, where a string's truthiness never makes a bool parameter viable (Dev ruling
@@ -2802,7 +2813,7 @@ private:
             return;
         }
         for (const auto* ctor : c.ctors) {
-            if (script_fn_viable(ctor, args, c.ctors.size() > 1)) { return; }
+            if (script_fn_viable(ctor, args, arity_rivals(c.ctors, args.size()))) { return; }
         }
         report_no_overload(cls_name, c.ctors, args, loc, c.foreign);
     }
@@ -3273,7 +3284,7 @@ private:
                 if (!args[i].const_key) { continue; }
                 bool aliasing = false, viable = false;
                 for (const auto* fn : *ov) {
-                    if (!script_fn_viable(fn, args, !free_callee && ov->size() > 1)) { continue; }
+                    if (!script_fn_viable(fn, args, !free_callee && arity_rivals(*ov, args.size()))) { continue; }
                     viable = true;
                     aliasing = i < fn->parameters.size() &&
                                (fn->parameters[i].is_reference || handle_type(fn->parameters[i].type.get()));
@@ -3290,7 +3301,7 @@ private:
                 std::vector<const function_decl*> by_ref;
                 bool all_ref = false;
                 for (const auto* fn : *ov) {
-                    if (!script_fn_viable(fn, args, !free_callee && ov->size() > 1)) { continue; }
+                    if (!script_fn_viable(fn, args, !free_callee && arity_rivals(*ov, args.size()))) { continue; }
                     all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference;   // a coroutine binds a copy
                     if (!all_ref) { break; }
                     by_ref.push_back(fn);
@@ -3317,6 +3328,19 @@ private:
         }
         return t;
     }
+
+	// Top-level code runs in order: a call there to a function this file declares only further down finds nothing yet
+	void report_call_before_declaration(std::string_view name, const std::vector<const function_decl*>& decls, const source_location& at) {
+		const function_decl* first = nullptr;
+		for (const auto* fn : decls) {
+			if (fn->location.filename != at.filename) { return; }
+			if (fn->location.line < at.line || (fn->location.line == at.line && fn->location.column < at.column)) { return; }
+			if (!first || fn->location.line < first->location.line) { first = fn; }
+		}
+		if (!first || eng_.has_function(std::string(name))) { return; }
+		diag(diag_level::error, at, "'" + std::string(name) + "' is called before its declaration (line " + std::to_string(first->location.line) +
+		                            "): top-level code runs in order, so declare it above the call or make the call after it");
+	}
 
 	ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov) {
 		expression* callee = c->callee.get();
@@ -3347,6 +3371,7 @@ private:
 			}
 			if (auto it = functions_.find(id->name); it != functions_.end()) {
 				note_global_use(id->name);
+				if (fn_stack_.empty() && !class_ctx_) { report_call_before_declaration(id->name, it->second, c->location); }
 				ov = &it->second;
 				return check_script_overloads(id->name, it->second, args, c->location, false, false).result;
 			}

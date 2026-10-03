@@ -79,8 +79,12 @@ public:
 
 	void forge_tests() override {
 		destructors();
+		destruction_order();
 		sorting();
 		method_conversions();
+		uncaught_texts();
+		map_transforms();
+		second_audit();
 	}
 
 private:
@@ -127,9 +131,9 @@ private:
 			)", "int,int,string,float,float,P5,bool");
 		});
 		test("a_string_never_makes_a_bool_parameter_viable_among_overloads", [this]() {
-			const std::string src = R"(
-				class D { string m(bool b) { return "bool"; } string m(int a, int b2) { return "pair"; } }
-				class E { E(bool b) { } E(int a, int b) { } }
+			const std::string rivals = R"(
+				class D { string m(bool b) { return "bool"; } string m(int a) { return "int"; } }
+				class E { E(bool b) { } E(int a) { } }
 				class F { int f(int v) { return v; } }
 				string run() {
 					string out = "";
@@ -143,25 +147,44 @@ private:
 				}
 				run();
 			)";
-			expect("string to bool in a set", src,
+			expect("string to bool among rivals", rivals,
 			       "No overload of 'm' takes (string)|No constructor of 'E' takes (string)|Cannot pass string to parameter 'v' of 'f' (declared int)",
 			       check_mode::off);
-			const std::string verdict = strict_load_error(src);
+			const std::string verdict = strict_load_error(rivals);
 			check_true(verdict.find("no overload of 'm' matches this call") != std::string::npos, "strict rejects m(string): " + verdict);
 			check_true(verdict.find("no overload of 'E' matches this call") != std::string::npos, "strict rejects E(string): " + verdict);
 			check_true(verdict.find("cannot pass 'string' to 'v' declared 'int'") != std::string::npos, "strict rejects f(string): " + verdict);
+			// the one overload the argument count admits binds and converts, at load as at run time
+			expect("the arity's one overload converts", R"(
+				class D { string m(bool b) { return "bool:" + b; } string m(int a, int b2) { return "pair"; } }
+				class E { bool v = false; E(bool b) { v = b; } E(int a, int b) { } }
+				D d; E x = E("s");
+				d.m("s") + "," + x.v;
+			)", "bool:true,true");
 		});
 		test("a_cached_arity_answer_never_lets_a_string_reach_a_bool_overload", [this]() {
 			expect("arity cache", R"(
-				class D { string m(bool b) { return "bool"; } string m(int a, int b2) { return "pair"; } }
+				class D { string m(bool b) { return "bool"; } string m(int a) { return "int"; } string m(int a, int b) { return "pair"; } }
 				string run() {
-					D d; string out = d.m(true) + d.m(false);
+					D d; string out = d.m(true) + d.m(false) + d.m(1, 2) + d.m(1, 2);
 					var s = "s";
 					try { out += d.m(s); } catch (e) { out += "|" + e; }
 					return out;
 				}
 				run();
-			)", "boolbool|No overload of 'm' takes (string)", check_mode::off);
+			)", "boolboolpairpair|No overload of 'm' takes (string)", check_mode::off);
+		});
+		test("a_var_parameter_takes_what_only_a_loose_row_would_convert", [this]() {
+			expect("var ahead of loose rows", R"(
+				class W { int k = 0; }
+				class C {
+					string p(int x) { return "int"; }
+					string p(string s) { return "string"; }
+					string p(var v) { return "var"; }
+				}
+				C c;
+				c.p(5) + "," + c.p("a") + "," + c.p(2.5) + "," + c.p(true) + "," + c.p(W()) + "," + c.p([1]);
+			)", "int,string,int,int,var,var");
 		});
 	}
 
@@ -185,6 +208,182 @@ private:
 				function scoped() { B b; B copy = b; } scoped(); log += "|";
 				log;
 			)", "~A|~A|~A|~C~A|~A|~A|~A|~A~A|");
+		});
+	}
+
+	// C++ [stmt.dcl], [class.dtor]: locals die in reverse declaration order when their frame ends (a return, a throw), a
+	// vector's elements first to last when it dies, an object's members after its destructor body in reverse order
+	void destruction_order() {
+		test("every_copy_runs_its_destructor_once_whatever_the_elisions", [this]() {
+			expect("copy destructor counts", R"(
+				int gone = 0;
+				class T { int v; T(int a) { v = a; } ~T() { gone++; } }
+				T id(T t) { return t; }
+				void take(T t) { }
+				int read(T t) { return t.v; }
+				function run() {
+					T a = T(1);
+					T b = a;
+					take(a);
+					T c = id(a);
+					array<T> arr = [a, b];
+					arr.push(c);
+					T d = arr[0];
+					T e = d;
+					int r = read(e) + read(arr[1]);
+				}
+				run();
+				"" + gone;
+			)", "11");
+		});
+		test("frame_locals_die_in_reverse_declaration_order", [this]() {
+			expect("frame order", R"(
+				string log = "";
+				class Token { string n; Token(string s) { n = s; } ~Token() { log += n; } }
+				function f() { Token a = Token("a"); Token b = Token("b"); array<Token> l = [Token("x"), Token("y")]; Token c = Token("c"); }
+				function g() { Token a = Token("a"); Token b = Token("b"); throw "boom"; }
+				function h(int k) -> int { Token a = Token("a"); if (k > 0) { Token b = Token("b"); return k; } Token c = Token("c"); return 0; }
+				class M { void run() { Token a = Token("a"); Token b = Token("b"); } }
+				class Holder { Token first = Token("1"); Token second = Token("2"); ~Holder() { log += "H"; } }
+				f(); log += "|";
+				try { g(); } catch (e) { log += "!"; } log += "|";
+				h(1); log += ","; h(0); log += "|";
+				M m; m.run(); log += "|";
+				auto lam = () => { Token a = Token("a"); Token b = Token("b"); };
+				lam(); log += "|";
+				{ Holder hh; } log += "|";
+				{ Token a = Token("a"); Token b = Token("b"); { Token i = Token("i"); Token j = Token("j"); } log += "."; }
+				log;
+			)", "cxyba|ba!|ba,ca|ba|ba|H21|ji.ba");
+		});
+	}
+
+	// docs/diagnostics.md: an uncaught error's what() is its text alone; the category message stands in only for an error
+	// that carries no text
+	void uncaught_texts() {
+		test("an_uncaught_error_reads_its_text_without_a_category_suffix", [this]() {
+			for (const auto& c : robustness::configs()) {
+				auto uncaught = [&](const std::string& src) {
+					auto e = robustness::make(c, check_mode::off);
+					try { e->execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
+					return std::string("no error");
+				};
+				const std::string label = std::string(" [") + c.label + "]";
+				check_eq(std::string("No overload of 'add' takes (bool)"),
+				         uncaught("class C { int add(int a, int b) { return a + b; } int add(string a, string b, string c) { return 0; } } C k; k.add(true);"),
+				         "overload miss" + label);
+				check_eq(std::string("Cannot resume a completed coroutine"),
+				         uncaught("coroutine int g() { yield 1; } auto h = g(); h.resume(); h.resume(); h.resume();"), "resume" + label);
+				check_eq(std::string("Division by zero"), uncaught("int z = 0; int q = 5 / z;"), "division" + label);
+				check_eq(std::string("boom: Type mismatch"), uncaught("throw \"boom: Type mismatch\";"), "a thrown text stays whole" + label);
+			}
+		});
+	}
+
+	// Dev ruling 2026-10-03: map.filter(pred) keeps the accepted entries in the receiver and returns it, map::filter(m, pred)
+	// returns them as a new map and leaves m alone (the array dot / namespace pairs)
+	void map_transforms() {
+		test("map_dot_filter_mutates_and_map_namespace_filter_copies", [this]() {
+			expect("map filter", R"(
+				string run() {
+					map<string, int> m = {"a": 1, "b": 2, "c": 3, "d": 4};
+					m.filter((k, v) => v != 2).filter((k, v) => v != 4);
+					string out = "" + m.size() + "," + m.contains("b") + "," + m.contains("d") + ",";
+					map<string, int> m2 = {"a": 1, "b": 2};
+					map<string, int> c = map::filter(m2, (k, v) => v == 1);
+					out += "" + m2.size() + "," + c.size() + "," + c.contains("a") + ",";
+					map<string, int> m3 = {"x": 1, "y": 2, "z": 3};
+					m3.filter((k, v) => { if (k == "x") { m3.remove("z"); } return v != 2; });
+					out += "" + m3.size() + "," + m3.contains("x");
+					return out;
+				}
+				run();
+			)", "2,false,false,2,1,true,1,true");
+		});
+		test("map_remove_if_whose_predicate_writes_the_map_visits_a_snapshot", [this]() {
+			expect("map remove_if writes", R"(
+				string run() {
+					map<int, int> m = {};
+					for (int i = 0; i < 64; i++) { m[i] = i; }
+					int removed = m.remove_if((k, v) => { if (k % 8 == 0) { m.remove(k + 1); m[1000 + k] = k; } return k % 2 == 0; });
+					return "" + removed + "," + m.size();
+				}
+				run();
+			)", "32,32");
+		});
+	}
+
+	// Second docs audit (2026-10-03): extend identity, thrown objects' text, parse texts that name the fix, top-level call
+	// order under strict, host overload misses
+	void second_audit() {
+		test("extend_reclasses_in_place_so_its_result_is_the_same_object", [this]() {
+			expect("extend identity", R"(
+				class A { int x = 1; } class B : A { int d = 0; }
+				var v = A(); var w = extend(v, B); w.d = 3;
+				var p = new A(); var q = extend(p, B); q.d = 4;
+				"" + same_object(v, w) + "," + v.d + "," + reflect::type_name(v) + "," + same_object(p, q) + "," + p.d;
+			)", "true,3,B,true,4");
+		});
+		test("a_thrown_object_reads_as_its_to_string", [this]() {
+			expect("thrown object text", R"(
+				class Oops { int code = 7; string to_string() { return "oops " + code; } }
+				class Bad { string to_string() { throw "inner"; } }
+				string out = "";
+				try { throw Oops(); } catch (e) { out += e + "|" + e.message + "|" + e.code; }
+				try { throw Bad(); } catch (e) { out += "|" + e; }
+				out;
+			)", "oops 7|oops 7|7|inner");
+			for (const auto& c : robustness::configs()) {
+				auto e = robustness::make(c, check_mode::strict);
+				std::string what;
+				try { e->execute("class Oops { string to_string() { return \"oops\"; } } throw Oops();"); } catch (const std::exception& ex) { what = ex.what(); }
+				check_eq(std::string("oops"), what, std::string("uncaught [") + c.label + "]");
+			}
+		});
+		test("parse_errors_name_the_fix", [this]() {
+			auto parse_text = [](const std::string& src) {
+				auto e = engine::make();
+				try { e->execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
+				return std::string("no error");
+			};
+			const std::string en = parse_text("enum F { a, b = 5 }");
+			check_true(en.find("Enum values take no initializer: 'b' is 1, its position in the enum") != std::string::npos, en);
+			const std::string sp = parse_text("array<int> a = [1, 2]; auto b = [...a, 3];");
+			check_true(sp.find("JaiScript has no spread '...': join arrays with array::concat(a, b)") != std::string::npos, sp);
+			const std::string sc = parse_text("int f(int x, int y) { return x + y; } array<int> a = [1, 2]; f(...a);");
+			check_true(sc.find("JaiScript has no spread '...'") != std::string::npos, sc);
+		});
+		test("a_namespace_declares_coroutines", [this]() {
+			expect("namespace coroutine", R"(
+				namespace ns {
+					coroutine int co(int n) { for (int i = 0; i < n; i++) { yield i; } }
+					coroutine function names() { yield "a"; yield "b"; }
+					int plain() { return 1; }
+				}
+				string s = "";
+				for (auto v : ns::co(3)) { s += "" + v; }
+				auto h = ns::names(); s += h.resume(); s += h.resume();
+				s + ns::plain();
+			)", "012ab1");
+		});
+		test("a_top_level_call_before_the_declaration_is_a_strict_load_error", [this]() {
+			const std::string verdict = strict_load_error("print(later(2));\nint later(int x) { return x; }\n");
+			check_true(verdict.find("'later' is called before its declaration (line 2): top-level code runs in order") != std::string::npos, verdict);
+			check_eq(std::string(""), strict_load_error("int f() { return later(1); }\nint later(int x) { return x; }\nf();\n"), "a body may call further down");
+			check_eq(std::string(""), strict_load_error("int later(int x) { return x; }\nlater(2);\n"), "declared first");
+			expect("warn keeps the run-time text", "string out = \"\"; try { later(2); } catch (e) { out = e; } int later(int x) { return x; } out;",
+			       "Undefined variable 'later'", check_mode::warn);
+		});
+		test("a_host_overload_miss_names_the_function_and_the_arguments", [this]() {
+			for (const auto& c : robustness::configs()) {
+				auto e = robustness::make(c, check_mode::off);
+				e->add_function("h", [](double a) -> double { return a; });
+				e->add_function("h", [](double a, double b) -> double { return a + b; });
+				std::string got;
+				try { got = robustness::render(e->execute("string m = \"\"; var s = \"x\"; try { h(s); } catch (err) { m = err; } m")); }
+				catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("No overload of 'h' takes (string)"), got, std::string("host miss [") + c.label + "]");
+			}
 		});
 	}
 

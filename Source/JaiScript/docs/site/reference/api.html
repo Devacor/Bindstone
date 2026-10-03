@@ -48,7 +48,7 @@ values.sort((a, b) =&gt; a &gt; b);
 print(to_json(values));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3]
 [3,2,1]</code></pre></div>
-<p>Typed integer, floating, boolean, byte, char, and string buffers use native sorting without per-element boxing or script comparisons when ordinary built-in ordering applies. Generic values and user comparisons use a temporary snapshot, committing the ordering after comparisons succeed. Comparison errors propagate; callback side effects are not rolled back. The predicate and element order must be a strict weak ordering and must not mutate the compared values or ordering rule. This is a C++-style boolean comparator, rather than JavaScript/C#&#x27;s signed comparison result.</p>
+<p>Typed integer, floating, boolean, byte, char, and string buffers use native sorting without per-element boxing or script comparisons when ordinary built-in ordering applies. Generic values and user comparisons use a temporary snapshot, committing the ordering after comparisons succeed. Comparison errors propagate; callback side effects are not rolled back. The predicate and element order should be a strict weak ordering that does not mutate the compared values or ordering rule; a predicate that breaks this still leaves a permutation of the elements, in an unspecified order. This is a C++-style boolean comparator, rather than JavaScript/C#&#x27;s signed comparison result.</p>
 <p>Builtin booleans, vectors, arrays and maps have an order. Records use their explicit &lt; or &lt;=&gt; operator; otherwise choose a predicate. For example, <code>flags.sort((a, b) =&gt; !a &amp;&amp; b)</code> orders false before true; <code>points.sort((a, b) =&gt; a.x &lt; b.x)</code> orders by x. Sorting is O(n log n); user callback cost is additional, and callback paths use O(n) temporary storage.</p>
 <h2 id="api-browser">Browse callable signatures</h2>
 <div class="api-controls"><label>Find an API <input id="api-query" type="search" placeholder="slice, sort, read_key, time, mutate..." autocomplete="off"></label><label>Provider <select id="api-provider"><option value="">All providers</option><option value="core">Core</option><option value="stdlib">Standard library</option><option value="runner">Standalone runner</option><option value="host-bound">Host-bound signals</option></select></label><p id="api-count" role="status" aria-live="polite"></p></div>
@@ -688,6 +688,11 @@ print(to_json([1, 2], 2));</code></pre></div>
 <p>Executes included source every reach; literal function-body include is textual.</p>
 </div>
 </section>
+<section class="api-group"><h2 id="group-map">map</h2>
+<div class="api-entry" data-provider="core" data-search="map::filter(values: map&lt;k,v&gt;, predicate: function(k, v) -&gt; bool) -&gt; map&lt;k,v&gt; copy, callback returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. only selected value elements copy; explicit handles retain identity. every engine"><h3 id="api-b8f32f5469d5"><code>map::filter(values: map&lt;K,V&gt;, predicate: function(K, V) -&gt; bool) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; copy, callback</p>
+<p>Returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. Only selected value elements copy; explicit handles retain identity.</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-map-k-v">map&lt;K,V&gt;</h2>
 <div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.clear() -&gt; void mutate  every engine"><h3 id="api-0119c6fa6e22"><code>map&lt;K,V&gt;.clear() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 </div>
@@ -705,12 +710,13 @@ print(stock.contains(&quot;axe&quot;), &quot; &quot;, stock.contains(&quot;bow&q
 print(stock.erase(&quot;axe&quot;), &quot; &quot;, stock.erase(&quot;axe&quot;), &quot; &quot;, to_json(stock));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">true false {&quot;bow&quot;:1}</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.filter(predicate: function(k, v) -&gt; bool) -&gt; map&lt;k,v&gt; copy, callback preserves input key/value constraints. only selected value elements copy; explicit handles retain identity. callback value references target live entries. every engine"><h3 id="api-b6747dd224f6"><code>map&lt;K,V&gt;.filter(predicate: function(K, V) -&gt; bool) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; copy, callback</p>
-<p>Preserves input key/value constraints. Only selected value elements copy; explicit handles retain identity. Callback value references target live entries.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; stock = {&quot;axe&quot;: 2, &quot;bow&quot;: 0};
-auto in_stock = stock.filter((k, v) =&gt; v &gt; 0);   // a filtered copy
-print(to_json(in_stock), &quot; &quot;, to_json(stock));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;axe&quot;:2} {&quot;axe&quot;:2,&quot;bow&quot;:0}</code></pre></div>
+<div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.filter(predicate: function(k, v) -&gt; bool) -&gt; map&lt;k,v&gt; mutate; callback keeps the entries the predicate accepts in place, retaining key/value constraints, and returns the receiver; map::filter returns a copy. callback value references target live entries. every engine"><h3 id="api-b6747dd224f6"><code>map&lt;K,V&gt;.filter(predicate: function(K, V) -&gt; bool) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
+<p>Keeps the entries the predicate accepts in place, retaining key/value constraints, and returns the receiver; map::filter returns a copy. Callback value references target live entries.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; stock = {&quot;axe&quot;: 2, &quot;bow&quot;: 0, &quot;cup&quot;: 5};
+map&lt;string, int&gt; big = map::filter(stock, (k, v) =&gt; v &gt; 2);   // a copy
+stock.filter((k, v) =&gt; v &gt; 0);                                 // in place
+print(to_json(big), &quot; &quot;, to_json(stock));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;cup&quot;:5} {&quot;axe&quot;:2,&quot;cup&quot;:5}</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.get(key: k, fallback: var = null) -&gt; v or var observe does not insert; returns the stored value or fallback; missing keys default to null. every engine"><h3 id="api-6c6197bc503b"><code>map&lt;K,V&gt;.get(key: K, fallback: var = null) -&gt; V or var</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Does not insert; returns the stored value or fallback; missing keys default to null.</p>

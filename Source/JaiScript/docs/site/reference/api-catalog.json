@@ -607,16 +607,28 @@
       "name": "filter",
       "signature": "filter(predicate: function(K, V) -> bool) -> map<K,V>",
       "provider": "core",
-      "effect": "copy, callback",
-      "notes": "Preserves input key/value constraints. Only selected value elements copy; explicit handles retain identity. Callback value references target live entries.",
+      "effect": "mutate; callback",
+      "notes": "Keeps the entries the predicate accepts in place, retaining key/value constraints, and returns the receiver; map::filter returns a copy. Callback value references target live entries.",
       "source": "source/implementation/interpreter.cpp",
       "form": "method",
       "availability": "Every engine",
       "display": "map<K,V>.filter(predicate: function(K, V) -> bool) -> map<K,V>",
       "example": {
-        "code": "map<string, int> stock = {\"axe\": 2, \"bow\": 0};\nauto in_stock = stock.filter((k, v) => v > 0);   // a filtered copy\nprint(to_json(in_stock), \" \", to_json(stock));",
-        "output": "{\"axe\":2} {\"axe\":2,\"bow\":0}"
+        "code": "map<string, int> stock = {\"axe\": 2, \"bow\": 0, \"cup\": 5};\nmap<string, int> big = map::filter(stock, (k, v) => v > 2);   // a copy\nstock.filter((k, v) => v > 0);                                 // in place\nprint(to_json(big), \" \", to_json(stock));",
+        "output": "{\"cup\":5} {\"axe\":2,\"cup\":5}"
       }
+    },
+    {
+      "owner": "map",
+      "name": "filter",
+      "signature": "filter(values: map<K,V>, predicate: function(K, V) -> bool) -> map<K,V>",
+      "provider": "core",
+      "effect": "copy, callback",
+      "notes": "Returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. Only selected value elements copy; explicit handles retain identity.",
+      "source": "include/jaiscript/detail/array_namespace.hpp",
+      "form": "namespace",
+      "availability": "Every engine",
+      "display": "map::filter(values: map<K,V>, predicate: function(K, V) -> bool) -> map<K,V>"
     },
     {
       "owner": "map<K,V>",

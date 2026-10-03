@@ -2033,7 +2033,7 @@ public:
             eng->add_include_path(jai::foundry::test_temp_directory().string());
             std::string what;
             try { eng->execute("var before = 1;\nimport \"imp_err_d.jai\";\n"); } catch (const std::exception& ex) { what = ex.what(); }
-            check_eq(std::string("Array index 5 out of bounds for array of size 1: Array index out of bounds"), what);
+            check_eq(std::string("Array index 5 out of bounds for array of size 1"), what);
             check_eq(std::string("  at boom (imp_err_c.jai:1)\n  at <script> (imp_err_c.jai:2)\n  at <script> (imp_err_d.jai:1)\n  at <script> (<script>:2)\n"),
                      trace_files(eng->format_stack_trace()));
             what.clear();

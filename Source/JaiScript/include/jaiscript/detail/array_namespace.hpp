@@ -25,4 +25,21 @@ namespace jai::detail {
 			}, &a_engine);
 		}
 	}
+
+	// map::filter(m, predicate) returns the kept entries as a new map; m.filter(predicate) keeps them in m
+	inline void register_map_namespace(engine& a_engine) {
+		auto& ns = a_engine.script_namespaces()[a_engine.symbolize("map")];
+		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
+		const uint64_t member = a_engine.symbolize("filter");
+		ns->signatures[member] = {2, 2, {script_value_type::jai_map_type}, script_value_type::jai_map_type, true};
+		ns->variables[member] = script_value::make_function([engine = &a_engine, member](const std::vector<script_value>& a_args) -> checked_result<script_value> {
+			if (a_args.size() != 2) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "Incorrect argument count for map namespace transform");
+			}
+			if (!a_args[0].is_map()) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "map namespace transforms require a map"); }
+			script_value input = a_args[0].deref();
+			std::vector<script_value> arguments{a_args[1].deref()};
+			return engine->get_execution_backend()->map_transform(member, input, arguments);
+		}, &a_engine);
+	}
 }

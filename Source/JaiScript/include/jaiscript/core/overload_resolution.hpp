@@ -5,7 +5,6 @@
 
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/detail/ast.hpp>
-#include <algorithm>
 #include <climits>
 #include <memory>
 #include <optional>
@@ -124,8 +123,10 @@ inline bool object_declares_method(const script_value& arg, std::string_view nam
 inline bool converting_constructor_takes(const script_value& arg, const type_info& target);
 
 // The assignment table's rows past the exact type that a by-value parameter takes (docs/static_checking.md), as overload costs:
-// int<->float and bool to a number 1, a to_int/to_float/to_char method and the string and bool rows 2, a converting constructor
-// 3; 0 = not viable. Among several overloads a string never makes a bool parameter viable (Dev ruling 2026-10-02).
+// int<->float and bool to a number 1 (a conversion, ahead of a var parameter); a to_int/to_float/to_char method and the string
+// and bool rows 2 and a converting constructor 3 (k_loose_conversion and up: after a var parameter, which takes the value as it
+// is); 0 = not viable. Among several overloads a string never makes a bool parameter viable (Dev ruling 2026-10-02).
+inline constexpr size_t k_loose_conversion = 2;
 inline size_t table_conversion_cost(const script_value& arg, const parameter& param, bool in_set) {
     using t = script_value_type;
     const t to = param.type->base_type;
@@ -185,6 +186,7 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
         bool has_var = false;        // Has any var/any parameters
         size_t var_count = 0;        // var/any parameters
         size_t mismatches = 0;       // typed parameters the argument matches neither exactly nor by conversion
+        bool loose = false;          // a conversion that ranks after a var parameter
 
         for (size_t i = 0; i < argc; ++i) {
             const auto& param = overload_ast->parameters[i];
@@ -201,6 +203,7 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
                     all_exact = false;
                     if (const size_t cost = table_conversion_cost(arg, param, overloads.size() > 1)) {
                         conversion_count += cost;
+                        loose = loose || cost >= k_loose_conversion;
                     } else {
                         all_convertible = false;
                         ++mismatches;
@@ -253,6 +256,8 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
             continue;
         } else if (all_typed && all_exact) {
             score = 0;
+        } else if (loose) {
+            score = static_cast<int>(2000 + conversion_count);
         } else if (all_typed && all_convertible) {
             score = static_cast<int>(1 + conversion_count);
         } else if (has_var) {
@@ -300,8 +305,7 @@ inline std::shared_ptr<function_decl> pick_best_overload(
 }
 
 // Constructor and method selection when the scorer finds no viable overload: the one overload the arity admits binds (its parameter
-// converts the argument its slot's way or raises its own text); with several, none does and the caller raises the overload miss.
-// A string never makes a bool parameter viable among overloads (Dev ruling 2026-10-02), here as in the scorer.
+// converts the argument its slot's way or raises its own text); with several, none does and the caller raises the overload miss
 inline const std::shared_ptr<function_decl>* sole_arity_candidate(const std::vector<std::shared_ptr<function_decl>>& overloads,
                                                                   const script_value* args, size_t argc) {
     const std::shared_ptr<function_decl>* sole = nullptr;
@@ -309,15 +313,6 @@ inline const std::shared_ptr<function_decl>* sole_arity_candidate(const std::vec
         if (!arity_accepts(o->parameters, argc)) { continue; }
         if (sole) { return nullptr; }
         sole = &o;
-    }
-    if (!sole || overloads.size() < 2) { return sole; }
-    for (size_t i = 0; i < argc; ++i) {
-        const parameter& p = (*sole)->parameters[i];
-        const auto from = args[i].deref().type();
-        if (p.type && !p.is_reference && p.type->base_type == script_value_type::jai_bool_type &&
-            (from == script_value_type::jai_string_type || from == script_value_type::jai_utf8_string_type)) {
-            return nullptr;
-        }
     }
     return sole;
 }
@@ -372,11 +367,7 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
                 ++arity_match_count;
             }
         }
-        // a bool parameter's viability depends on the argument (a string never makes it viable), so its answer is not the arity's
-        const bool takes_bool = std::any_of((*best_ast)->parameters.begin(), (*best_ast)->parameters.end(), [](const parameter& p) {
-            return p.type && !p.is_reference && p.type->base_type == script_value_type::jai_bool_type;
-        });
-        if (arity_match_count == 1 && !takes_bool) {
+        if (arity_match_count == 1) {
             overload_cache_key cache_key{name_id, argc};
             return &overload_resolution_cache_.insert_or_assign(cache_key, *best_ast).first->second;
         }

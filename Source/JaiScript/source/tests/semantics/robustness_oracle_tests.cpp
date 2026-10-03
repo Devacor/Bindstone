@@ -322,13 +322,25 @@ private:
 	// Second docs audit (2026-10-03): extend identity, thrown objects' text, parse texts that name the fix, top-level call
 	// order under strict, host overload misses
 	void second_audit() {
-		test("extend_reclasses_in_place_so_its_result_is_the_same_object", [this]() {
-			expect("extend identity", R"(
-				class A { int x = 1; } class B : A { int d = 0; }
-				var v = A(); var w = extend(v, B); w.d = 3;
-				var p = new A(); var q = extend(p, B); q.d = 4;
-				"" + same_object(v, w) + "," + v.d + "," + reflect::type_name(v) + "," + same_object(p, q) + "," + p.d;
-			)", "true,3,B,true,4");
+		// extend re-classes in place and its result names the argument (C++'s T& extend(T&, Class), Dev ruling 2026-10-03):
+		// `var w = extend(v, B)` copies, `var& w = extend(v, B)` aliases, a chained call reaches v, a handle's copy shares
+		test("extend_reclasses_in_place_and_its_result_follows_the_call_result_rule", [this]() {
+			expect("extend result binding", R"(
+				class A { int x = 1; int bump() { x++; return x; } } class B : A { int d = 0; }
+				string run() {
+					var v = A(); var w = extend(v, B); w.d = 3;
+					string out = "" + same_object(v, w) + "," + v.d + "," + reflect::type_name(v) + reflect::type_name(w);
+					var v1 = A(); var& w1 = extend(v1, B); w1.d = 4;
+					out += "|" + same_object(v1, w1) + "," + v1.d;
+					var v2 = A(); extend(v2, B).bump(); out += "|" + v2.x;
+					A loc = A(); var c = extend(loc, B); c.d = 5; var& r = extend(loc, B); r.d = 6;
+					out += "|" + loc.d + "," + c.d;
+					var p = new A(); var q = extend(p, B); q.d = 7;
+					out += "|" + same_object(p, q) + "," + p.d;
+					return out;
+				}
+				run();
+			)", "false,0,BB|true,4|2|6,5|true,7", check_mode::warn);
 		});
 		test("a_thrown_object_reads_as_its_to_string", [this]() {
 			expect("thrown object text", R"(
@@ -356,6 +368,12 @@ private:
 			check_true(en.find("Enum values take no initializer: 'b' is 1, its position in the enum") != std::string::npos, en);
 			const std::string sp = parse_text("array<int> a = [1, 2]; auto b = [...a, 3];");
 			check_true(sp.find("JaiScript has no spread '...': join arrays with array::concat(a, b)") != std::string::npos, sp);
+			// a lambda body that fails to parse leaves no scope behind: the enclosing function's own local reads as its own
+			// (ASAN: the stale scope pointed at the freed lambda, a heap use after free in resolve_outer_use)
+			const std::string lam = parse_text("function f() {\n\tint a = 1;\n\tauto l = []() { int b = ; };\n\treturn a;\n}\n");
+			check_true(lam.find("Expected expression") != std::string::npos && lam.find("does not capture enclosing local 'a'") == std::string::npos, lam);
+			const std::string fn = parse_text("function g() {\n\tint a = 1;\n\tfunction h() { int b = ; }\n\treturn a;\n}\n");
+			check_true(fn.find("Expected expression") != std::string::npos && fn.find("cannot use enclosing local 'a'") == std::string::npos, fn);
 			const std::string sc = parse_text("int f(int x, int y) { return x + y; } array<int> a = [1, 2]; f(...a);");
 			check_true(sc.find("JaiScript has no spread '...'") != std::string::npos, sc);
 		});

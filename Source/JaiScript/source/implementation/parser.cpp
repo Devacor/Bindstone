@@ -3369,8 +3369,12 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
         report_error("Expected '{' for lambda body", peek());
         return make_error_code(parse_error_code::unexpected_token);
     }
-    JAISCRIPT_TRY_ASSIGN(auto body_stmt, block_statement());
-    lambda->body = std::dynamic_pointer_cast<block_stmt>(body_stmt);
+    auto body_stmt = block_statement();
+    if (!body_stmt) {
+        exit_function_scope();   // a failed body leaves no scope naming the lambda that dies with this return
+        return body_stmt.error_value();
+    }
+    lambda->body = std::dynamic_pointer_cast<block_stmt>(body_stmt.value());
 
     // Exit function scope and record total slot count
     lambda->local_count = exit_function_scope();
@@ -5252,8 +5256,12 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
         report_error("Expected '{' before function body", peek());
     return make_error_code(parse_error_code::unexpected_token);
     }
-    JAISCRIPT_TRY_ASSIGN(auto body, block_statement());
-    func->body = std::dynamic_pointer_cast<block_stmt>(body);
+    auto body = block_statement();
+    if (!body) {
+        exit_function_scope();
+        return body.error_value();
+    }
+    func->body = std::dynamic_pointer_cast<block_stmt>(body.value());
 
     // Exit function scope and record total slot count
     func->local_count = exit_function_scope();

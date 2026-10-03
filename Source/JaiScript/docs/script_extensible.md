@@ -60,6 +60,8 @@ carried across the boundary.
   classes declare keeps its value, `C`'s own fields take their initializers, and ids only the
   old class declared stay reachable in overflow. So every handle already pointing at the
   object follows — `extend(kin, Voidling); kin.chompCount = 1;` is the idiom, no rebinding.
+  The result names the argument (C++'s `T& extend(T&, Class)`, Dev ruling 2026-10-03): a chained call reaches the
+  object, `var& w = extend(v, C)` aliases it and `var w = extend(v, C)` copies it, the call-result rule of every function.
   `x` a C++ wrapper or a layer: `C` must derive `x`'s C++ base; the current layer's class is
   a no-op. `x` a pure script instance: `C` must derive `x`'s class. Only a layer owned by
   *another* engine is rebuilt (symbols are engine-local) and the old one retired (S6).
@@ -132,7 +134,7 @@ Script:
 class Voidling : ServerCreature { int chompCount = 0; ... }
 var v = extend(creature, Voidling);      // the layer; creature's next crossing hands it back too
 v = extend(v, Voidspawn);                // re-derive (fields both classes declare carry over)
-var q = extend(p, Pt3);                  // a pure script value re-derived by value
+var q = extend(p, Pt3);                  // a pure script value re-derived in place; q copies it (var& q aliases)
 ```
 
 C++:

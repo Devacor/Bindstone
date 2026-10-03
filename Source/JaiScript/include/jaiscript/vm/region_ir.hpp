@@ -80,6 +80,20 @@ namespace jai::vm {
 	// the listing tool's text: index:kind, ->target, w slot, r slots, one operation per ';'
 	std::string listing(const region_ir& r);
 
+	// an operation that does work of its own (what a park and a resume, or a block entry and a flush, are weighed against)
+	inline bool ir_work(const ir_op& o) {
+		switch (o.kind) {
+		case ir::arith: case ir::load: case ir::store: case ir::math: case ir::neg: case ir::bnot: case ir::lnot: case ir::cmpval: case ir::append: case ir::push: case ir::size: case ir::call:
+			return true;
+		case ir::cmp: return !o.head;
+		default: return false;
+		}
+	}
+
+	// a loop whose every path from the head to the back edge passes a bail, with less work ahead of the bails than a park and a
+	// resume (two operations): each iteration would pay the entry and the flush and run on the general form; at = the first bail's ip
+	bool bail_dominates_back_edge(const region_ir& r, uint32_t& at);
+
 	// liveness of compiler values per copy instruction: a definition is live from the instruction after it through
 	// its last read, and through an inner loop's back edge when it is live where that loop's body begins (a miss there
 	// re-runs the read on the general form, which needs the slot to hold this value); a

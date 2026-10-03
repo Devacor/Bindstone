@@ -16,6 +16,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/vm/disassembler.hpp>
 #include <jaiscript/vm/chunk_manifest.hpp>
+#include <jaiscript/vm/region_ir.hpp>
 #include <cstring>
 #include <cmath>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -4678,26 +4679,29 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		test("a_loop_whose_every_path_bails_stays_general", [this]() {
-			// a block whose every path to the back edge passes a bail, with less work ahead of it than a park and a resume, pays the entry and
-			// the flush for nothing: the translation refuses it ("bail dominates the back edge"; the heavy else arm keeps both arms bails rather
-			// than a boundary). A bail one arm takes, or bails behind real work (Gator Quest's gen_bayou: fractal and hash3 ahead), keep the block
-			const std::string prelude =
-				"array<int> A = [0, 0, 0, 0, 0, 0, 0, 0];\n"
-				"int both_arms() { for (int i = 0; i < 8; ++i) { if (i < 4) { A[i] += 2; } else { A[i] += 1; A[i] += 1; A[i] += 1; A[i] += 1; } } return 0; }\n"
-				"int one_arm() { int s = 0; for (int i = 0; i < 8; ++i) { s = s + i; if (i % 2 == 0) { A[i] += 4; } else { s = s + 1; } } return s; }\n"
-				"int work_ahead() { int s = 0; for (int i = 0; i < 8; ++i) { s = s + i * 3; int h = s % 7; if (h < 4) { A[i] += 2; } else { A[i] += 1; A[i] += 1; A[i] += 1; A[i] += 1; } } return s; }\n";
-			const std::string run = "to_string(both_arms() + one_arm() + work_ahead()) + \"|\" + to_string(A[0]) + to_string(A[1]) + to_string(A[6]) + to_string(A[7]);";
-			both(prelude + run, "116|84106", "every path bails, one arm bails, bails behind work");
-			const std::string l = listing_run(prelude + run);
-			auto section = [&](const char* fn) { const size_t at = l.find(fn); return at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at); };
-			const std::string bl = section("== both_arms ");
-			check_true(bl.find("-- open loop") != std::string::npos && bl.find("bail dominates the back edge") != std::string::npos, "both arms bail with nothing ahead: the loop stays general: " + bl);
-			for (const char* fn : { "== one_arm ", "== work_ahead " }) {
-				const std::string fl = section(fn);
-				check_true(fl.find("-- cell loop") != std::string::npos && fl.find("C_BAIL") != std::string::npos && fl.find("bail dominates") == std::string::npos, std::string(fn) + "keeps the block: " + fl);
-			}
-		});
-		test("a_conditional_assignments_environment_arms_run_in_the_block", [this]() {
+			// the rule over the region itself (vm/region_ir.hpp bail_dominates_back_edge), so no translation gap is pinned: a loop whose
+			// every path from the head to the back edge passes a bail, with less work ahead of it than a park and a resume, refuses at its
+			// first bail; a path that avoids the bails, real work ahead of them, or a straight-line region keeps the block
+			using vir = jai::vm::ir; using vop = jai::vm::ir_op; using vregion = jai::vm::region_ir;
+			auto op_of = [](vir kind, uint32_t target = 0) { vop o; o.kind = kind; o.target = target; return o; };
+			auto region = [](std::vector<vop> ops) { vregion r; r.first = 10; r.head = 10; r.back = 10 + static_cast<uint32_t>(ops.size()); r.ops = std::move(ops); return r; };
+			uint32_t at = 0;
+			const vregion both_arms = region({ op_of(vir::cmp, 13), op_of(vir::bail), op_of(vir::skip), op_of(vir::bail), op_of(vir::skip), op_of(vir::skip) });
+			check_true(jai::vm::bail_dominates_back_edge(both_arms, at), "both arms bail with one compare ahead: refused");
+			check_eq(static_cast<uint32_t>(11), at, "at the first bail");
+			const vregion one_arm = region({ op_of(vir::cmp, 13), op_of(vir::bail), op_of(vir::skip), op_of(vir::arith), op_of(vir::skip), op_of(vir::skip) });
+			check_false(jai::vm::bail_dominates_back_edge(one_arm, at), "an arm that reaches the back edge keeps the block");
+			const vregion behind_work = region({ op_of(vir::arith), op_of(vir::arith), op_of(vir::cmp, 15), op_of(vir::bail), op_of(vir::skip), op_of(vir::bail) });
+			check_false(jai::vm::bail_dominates_back_edge(behind_work, at), "bails behind real work keep the block");
+			const vregion one_op_ahead = region({ op_of(vir::arith), op_of(vir::bail), op_of(vir::skip) });
+			check_true(jai::vm::bail_dominates_back_edge(one_op_ahead, at), "a bail on the main path behind one operation: refused");
+			const vregion head_only = region({ [] { vop o; o.kind = vir::cmp; o.head = true; o.target = 99; return o; }(), op_of(vir::arith), op_of(vir::bail) });
+			check_true(jai::vm::bail_dominates_back_edge(head_only, at), "the head compare and one operation ahead: refused (the head is the loop's own)");
+			vregion straight = both_arms; straight.straight = true;
+			check_false(jai::vm::bail_dominates_back_edge(straight, at), "a straight-line region is not a loop");
+			const vregion no_bail = region({ op_of(vir::cmp, 12), op_of(vir::arith), op_of(vir::arith) });
+			check_false(jai::vm::bail_dominates_back_edge(no_bail, at), "no bail");
+		});		test("a_conditional_assignments_environment_arms_run_in_the_block", [this]() {
 			// Gator Quest's gen_bayou and gen_gloomfen: `t = h < 220 ? T_CYPRESS : (h < 340 ? T_REEDS : ...)` inside an if arm stores a
 			// program-scope name into a typed local in each arm; the move takes the name's environment cell, so the loop runs whole as a block
 			// (no bail, no boundary). A call door that rewrites a name an arm reads leaves the arm reading the new value

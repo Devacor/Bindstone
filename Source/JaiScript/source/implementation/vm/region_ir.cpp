@@ -77,6 +77,26 @@ region_verdict verify(const region_ir& r, const std::vector<chunk::cell_loop::ce
 	return region_verdict{};
 }
 
+bool bail_dominates_back_edge(const region_ir& r, uint32_t& at) {
+	if (r.straight) return false;
+	const region_cfg g = control_flow(r);
+	std::vector<bool> reached(g.succ.size(), false);
+	std::vector<size_t> pending{ 0 };
+	reached[0] = true;
+	size_t ahead = 0;
+	while (!pending.empty()) {
+		const size_t k = pending.back(); pending.pop_back();
+		if (k == g.back_node) continue;
+		if (k < r.ops.size() && ir_work(r.ops[k])) { ++ahead; }
+		for (const size_t s : g.succ[k]) { if (s < reached.size() && !reached[s]) { reached[s] = true; pending.push_back(s); } }
+	}
+	if (reached[g.back_node] || ahead >= 2) return false;
+	for (size_t k = 0; k < r.ops.size(); ++k) {
+		if (reached[k] && r.ops[k].kind == ir::bail) { at = r.first + static_cast<uint32_t>(k); return true; }
+	}
+	return false;
+}
+
 std::string listing(const region_ir& r) {
 	std::string text;
 	for (size_t k = 0; k < r.ops.size(); ++k) {

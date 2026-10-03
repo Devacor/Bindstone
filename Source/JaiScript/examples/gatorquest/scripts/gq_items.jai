@@ -344,6 +344,11 @@ void loot_drop(int m, int killer_slot) {
 	if (elite) { gold = gold * 2 + 5; }
 	gold = gold * (100 + goldfind) / 100;
 	if (gold > 0) { drop_near(make_item(I_GOLD, gold), w, x, y, -1, 3000); }
+	if (MON_AI[kind] == Ai.thief && MOB_AUX[m] > 0) {
+		drop_near(make_item(I_GOLD, MOB_AUX[m]), w, x, y, -1, 3000);
+		say_near(w, x, y, `${cap_first(mob_the(m))} drops the ${MOB_AUX[m]} gold it stole!`, C_YELLOW);
+		MOB_AUX[m] = 0;
+	}
 	for (int k = 0; k < d.drop_item.size(); ++k) {
 		if (d.boss || rnd(1000) < d.drop_chance[k] + luck) {
 			int qty = item_stacks(d.drop_item[k]) ? 1 + rnd(2) : 1;

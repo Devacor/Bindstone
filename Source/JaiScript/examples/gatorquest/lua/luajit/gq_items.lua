@@ -379,6 +379,11 @@ local function loot_drop(m, killer_slot)
 	if elite then gold = gold * 2 + 5 end
 	gold = idiv(gold * (100 + goldfind), 100)
 	if gold > 0 then drop_near(make_item(I_GOLD, gold), w, x, y, -1, 3000) end
+	if MON_AI[kind] == Ai.thief and MOB_AUX[m] > 0 then
+		drop_near(make_item(I_GOLD, MOB_AUX[m]), w, x, y, -1, 3000)
+		say_near(w, x, y, cap_first(mob_the(m)) .. " drops the " .. MOB_AUX[m] .. " gold it stole!", C_YELLOW)
+		MOB_AUX[m] = 0
+	end
 	for k = 0, d.drop_n - 1 do
 		if d.boss or rnd(1000) < d.drop_chance[k] + luck then
 			local qty = item_stacks(d.drop_item[k]) and 1 + rnd(2) or 1

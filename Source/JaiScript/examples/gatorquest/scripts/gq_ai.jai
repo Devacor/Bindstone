@@ -168,12 +168,13 @@ void ai_caster(int m, bool coward) {
 	think_later(m, 3);
 }
 
-// raccoons: grab gold, run off laughing
+// raccoons: grab gold (MOB_AUX keeps the purse), run off laughing, slowed by the loot
 void ai_thief(int m) {
 	if ((MOB_FLAGS[m] & MF_FLEEING) != 0) {
 		int p = nearest_player(MOB_WORLD[m], MOB_X[m], MOB_Y[m], 12);
 		if (p < 0 || MOB_AUX[m] == 0 && rnd(20) == 0) { MOB_FLAGS[m] = MOB_FLAGS[m] & ~MF_FLEEING; think_later(m, 5); return; }
-		if (!mob_step_away(m, MOB_X[p], MOB_Y[p])) { think_later(m, 2); }
+		if (mob_step_away(m, MOB_X[p], MOB_Y[p])) { MOB_NEXT[m] = MOB_NEXT[m] + 1; }
+		else { think_later(m, 2); }
 		return;
 	}
 	int t = engage(m, AGGRO);
@@ -181,8 +182,8 @@ void ai_thief(int m) {
 	int d = cheb(MOB_X[m], MOB_Y[m], MOB_X[t], MOB_Y[t]);
 	if (d <= 1 && TICK >= MOB_ATK[m]) {
 		int slot = MOB_PLAYER[t];
-		if (slot >= 0 && CHARS[slot].gold > 0 && rnd(3) == 0) {
-			int grab = imin(CHARS[slot].gold, 5 + rnd(16));
+		if (slot >= 0 && CHARS[slot].gold > 0 && rnd(4) == 0) {
+			int grab = imin(CHARS[slot].gold, 3 + rnd(8));
 			CHARS[slot].gold = CHARS[slot].gold - grab;
 			CHARS[slot].version = CHARS[slot].version + 1;
 			MOB_AUX[m] = MOB_AUX[m] + grab;

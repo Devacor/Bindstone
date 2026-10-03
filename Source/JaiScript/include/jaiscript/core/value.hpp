@@ -716,7 +716,7 @@ namespace detail { struct argument_capture_storage; }
             return *storage_.get_if<TYPEID_INT>();
         }
 
-        inline script_float unchecked_as_float() const noexcept {
+        JAI_FORCEINLINE script_float unchecked_as_float() const noexcept {
             if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] {
                 if (((*b)->size_and_sign & 0x7F) == sizeof(script_float))
                     return *static_cast<const script_float*>((*b)->ptr);

@@ -504,9 +504,19 @@ namespace jai::vm {
             size_t debug_stmt_ip = 0;
             struct cell_state* cells = nullptr;        // the record's raw area (null: a frame that never runs cells)
         };
+        // a byte per cell: a cell store marks its cell with one byte write, so consecutive stores carry no read-modify-write chain
+        struct cell_dirty {
+            uint8_t b[chunk::k_cell_limit] = {};
+            void set(uint32_t k) noexcept { b[k] = 1; }
+            void clear(uint32_t k) noexcept { b[k] = 0; }
+            bool test(uint32_t k) const noexcept { return b[k] != 0; }
+            void reset() noexcept { std::memset(b, 0, sizeof(b)); }
+            chunk::cell_mask mask(size_t n) const noexcept { chunk::cell_mask m; for (uint32_t k = 0; k < n; ++k) { if (b[k]) m.set(k); } return m; }
+            bool any_of(const std::vector<uint32_t>& cells) const noexcept { for (const uint32_t k : cells) { if (b[k]) return true; } return false; }
+        };
         // Cell loops: a call record's raw area. Payload bits (floats bit-preserved), a kind byte per
-        // cell (0 empty, else the script_value storage index), the active loop, and dirty bits over the
-        // loop's cells. Cleared at record push and on every exit, miss and raise.
+        // cell (0 empty, else the script_value storage index), the active loop, and a dirty byte per
+        // cell. Cleared at record push and on every exit, miss and raise.
         struct cell_state {
             std::vector<int64_t> payload;
             std::vector<uint8_t> kind;
@@ -517,7 +527,7 @@ namespace jai::vm {
             // instruction enters it). A block's calls number below 65535 (the translation marks no raw site past that)
             uint16_t raw_landing = 0;
             uint16_t raw_call = 0;
-            chunk::cell_mask dirty;
+            cell_dirty dirty;
             std::vector<const script_array*> site_node;  // per copy instruction: the load/store site's container node, resolved at entry
             std::vector<const script_array*> site_node2;  // per copy instruction: a push site's source container (an element push), resolved at entry
             std::vector<const script_value*> site_member;   // per copy instruction: a member read site's field value, resolved at entry (the instance's plain field)
@@ -1947,7 +1957,7 @@ namespace jai::vm {
         op_status exec_c_arith_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         op_status exec_c_load_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         op_status exec_c_arith_jump(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
-        bool cells_second_half_injected(frame& f, size_t& ip);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
+        JAI_FORCEINLINE bool cells_second_half_injected(frame& f, size_t& ip);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
         script_array* velem_site(frame& f, const velem_proto& p, size_t& at, int& comp);   // a vector buffer's element and component for a velem site, else null
         op_status exec_velem_load(frame& f, const vm_instruction& ins);
         op_status exec_velem_store(frame& f, const vm_instruction& ins);
@@ -1957,20 +1967,35 @@ namespace jai::vm {
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
-        // the block loop's registers (row 155.3): the cells' payloads and kinds, the dirty mask, the chunk's constants, the copy's code and
+        // the block loop's registers (row 155.3): the cells' payloads, kinds and dirty bytes, the chunk's constants, the copy's code and
         // the loop, read once per run; every executor on the hot switch reads through them instead of re-deriving frame -> cells -> vectors
-        struct cell_regs { int64_t* payload; uint8_t* kinds; chunk::cell_mask* dirty; const script_value* consts; const vm_instruction* code; const chunk::cell_loop* loop; };
+        struct cell_regs { int64_t* payload; uint8_t* kinds; cell_dirty* dirty; const script_value* consts; const vm_instruction* code; const chunk::cell_loop* loop; };
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
         op_status cells_run_cold(frame& f, const chunk::cell_loop& loop, const vm_instruction& ci);   // the call door's instructions, off the block loop's hot switch
         op_status cfor_advance(counted_for_state& st, bool& again);             // the counted back edge's step and compare on the general slot
         JAI_FORCEINLINE op_status exec_c_cfor_back(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
-        JAI_FORCEINLINE op_status exec_c_cmp_any(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool head);
-        JAI_FORCEINLINE op_status exec_c_neg(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
-        JAI_FORCEINLINE op_status exec_c_bnot(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
-        JAI_FORCEINLINE op_status exec_c_lnot(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);     // the truthiness inverted, a bool
-        JAI_FORCEINLINE op_status exec_c_cmpval(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // a comparison as a value, a bool
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_cmp_any(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool head);
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_neg(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_bnot(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_lnot(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);     // the truthiness inverted, a bool
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_cmpval(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // a comparison as a value, a bool
         bool cell_truthy(frame& f, uint32_t operand, bool& truthy);                    // the language's truthiness of an int, a float or a bool cell or constant
         // a call inside the block: the probe, the pushes and the call run the general executors verbatim; the landing after the
         // return re-reads what the callee could have touched and lands the result by the declared-type rule
@@ -2030,7 +2055,7 @@ namespace jai::vm {
         bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index, bool reprobe);   // the alias's sites take the table's element at index, a plain array node, else false
         op_status exec_c_rebind(frame& f, const vm_instruction& ins);
         op_status exec_c_range(frame& f, const vm_instruction& ins);
-        op_status exec_c_back_step(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // after a call: every site's container is the node resolved at entry, reached the same way
+        JAI_FORCEINLINE op_status exec_c_back_step(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // after a call: every site's container is the node resolved at entry, reached the same way
         JAI_FORCEINLINE void cell_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);   // one cell's payload back to its slot
         JAI_FORCEINLINE void env_flush_one(frame& f, const chunk::cell_loop& loop, uint32_t k);    // an environment cell's payload back to the value its name resolves to
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
@@ -2038,11 +2063,23 @@ namespace jai::vm {
         JAI_FORCEINLINE op_status exec_c_arith(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked);
         JAI_FORCEINLINE op_status exec_c_cmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked);
         JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked);
-        JAI_FORCEINLINE op_status exec_c_arith_any(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_arith_any(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         JAI_FORCEINLINE op_status exec_c_mov(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
-        JAI_FORCEINLINE op_status exec_c_append(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // the compound plus with run-time kinds: strings in place
-        JAI_FORCEINLINE op_status exec_c_math(frame& f, const vm_instruction& ins, const cell_regs& cr);
-        JAI_FORCEINLINE op_status exec_c_guard(frame& f, const vm_instruction& ins, const cell_regs& cr);
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_append(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // the compound plus with run-time kinds: strings in place
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_math(frame& f, const vm_instruction& ins, const cell_regs& cr);
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
+        op_status exec_c_guard(frame& f, const vm_instruction& ins, const cell_regs& cr);
         bool cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, uint8_t kind, int64_t bits);
         bool cell_takes_string(const frame& f, const chunk::cell_loop& loop, uint32_t dk) const noexcept;
         void cell_land_string(frame& f, const chunk::cell_loop& loop, uint32_t dk, script_value&& v);

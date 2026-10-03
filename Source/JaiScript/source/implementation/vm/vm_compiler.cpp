@@ -4219,25 +4219,44 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (!held) { refuse(chunk::cell_refusal_translation, s.guard_ip); }
 		}
 		if (refusal == chunk::cell_refusal_none && cells.size() > chunk::k_cell_limit) { refuse(chunk::cell_refusal_too_many_cells, back); }
+		auto work_op = [](const ir_op& o) {
+			switch (o.kind) {
+			case ir::arith: case ir::load: case ir::store: case ir::math: case ir::neg: case ir::bnot: case ir::lnot: case ir::cmpval: case ir::append: case ir::push: case ir::size: case ir::call:
+				return true;
+			case ir::cmp: return !o.head;
+			default: return false;
+			}
+		};
 		if (refusal == chunk::cell_refusal_none && !boundary_ops.empty()) {
 			// a block pays a park and a resume per boundary each iteration: it stays a block only with work of its own beside them, and
 			// only while the general form's share of the body (the boundaries' instructions) stays small beside that work
 			size_t work = 0, covered = 0;
 			for (const size_t b : boundary_ops) { covered += ops[b].target - ops[b].a; }
-			for (const ir_op& o : ops) {
-				switch (o.kind) {
-				case ir::arith: case ir::load: case ir::store: case ir::math: case ir::neg: case ir::bnot: case ir::lnot: case ir::cmpval: case ir::append: case ir::push: case ir::size: case ir::call:
-					++work; break;
-				case ir::cmp: if (!o.head) { ++work; } break;
-				default: break;
-				}
-			}
+			for (const ir_op& o : ops) { if (work_op(o)) { ++work; } }
 			if (work < 2 * boundary_ops.size() || covered > 4 * work) { no_boundary_cand = cand; --cand; continue; }   // the loop as it was without them: its bails, or its refusal
 		}
 		// legality and lifetimes (region_ir.hpp verify): a container binding's slot is never written; a slot the block enters with
 		// undefined is defined on every path to each of its reads; a snapshot's slot is written only by its own guard between the
 		// guard and its read. The must-define dataflow over the region's control flow graph is the rule every pass must keep
 		if (refusal == chunk::cell_refusal_none) { const region_verdict v = verify(region, cells); if (v.refusal != chunk::cell_refusal_none) { refuse(v.refusal, v.at); } }
+		if (refusal == chunk::cell_refusal_none && !line) {
+			// every path from the head to the back edge passes a bail, and less work than a park and a resume runs ahead of it: each
+			// iteration would pay the entry and the flush for nothing; a bail some path avoids, or one after real work, keeps the block
+			const region_cfg g = control_flow(region);
+			std::vector<bool> reached(g.succ.size(), false);
+			std::vector<size_t> pending{ 0 };
+			reached[0] = true;
+			size_t ahead = 0;
+			while (!pending.empty()) {
+				const size_t k = pending.back(); pending.pop_back();
+				if (k == g.back_node) continue;
+				if (k < ops.size() && work_op(ops[k])) { ++ahead; }
+				for (const size_t s : g.succ[k]) { if (s < reached.size() && !reached[s]) { reached[s] = true; pending.push_back(s); } }
+			}
+			if (!reached[g.back_node] && ahead < 2) {
+				for (size_t k = 0; k < ops.size(); ++k) { if (reached[k] && ops[k].kind == ir::bail) { refuse(chunk::cell_refusal_bail_dominates, first + k); break; } }
+			}
+		}
 		if (fn_mode) {
 			// a frame program pays its entry only for its raw calls: without one (or refused) the body keeps its ordinary spans
 			bool any_raw = false;

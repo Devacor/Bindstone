@@ -522,7 +522,8 @@ namespace jai::vm {
         // translation does not normalize yet, a coverage gap rather than a limit of the model
         struct cell_refusal { uint32_t head, back, ip; uint8_t reason; uint8_t op; };
         static constexpr uint8_t cell_refusal_none = 0, cell_refusal_head = 1, cell_refusal_representation = 2, cell_refusal_effect = 3,
-                                 cell_refusal_translation = 4, cell_refusal_malformed = 5, cell_refusal_no_cells = 6, cell_refusal_too_many_cells = 7;
+                                 cell_refusal_translation = 4, cell_refusal_malformed = 5, cell_refusal_no_cells = 6, cell_refusal_too_many_cells = 7,
+                                 cell_refusal_bail_dominates = 8;
         static const char* cell_refusal_name(uint8_t r) {
             switch (r) {
             case cell_refusal_head: return "head";
@@ -532,6 +533,7 @@ namespace jai::vm {
             case cell_refusal_malformed: return "malformed";
             case cell_refusal_no_cells: return "no cells";
             case cell_refusal_too_many_cells: return "too many cells";
+            case cell_refusal_bail_dominates: return "bail dominates the back edge";
             default: return "none";
             }
         }

@@ -4677,6 +4677,26 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(want, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("a_loop_whose_every_path_bails_stays_general", [this]() {
+			// a block whose every path to the back edge passes a bail, with less work ahead of it than a park and a resume, pays the entry and
+			// the flush for nothing: the translation refuses it ("bail dominates the back edge"; the heavy else arm keeps both arms bails rather
+			// than a boundary). A bail one arm takes, or bails behind real work (Gator Quest's gen_bayou: fractal and hash3 ahead), keep the block
+			const std::string prelude =
+				"array<int> A = [0, 0, 0, 0, 0, 0, 0, 0];\n"
+				"int both_arms() { for (int i = 0; i < 8; ++i) { if (i < 4) { A[i] += 2; } else { A[i] += 1; A[i] += 1; A[i] += 1; A[i] += 1; } } return 0; }\n"
+				"int one_arm() { int s = 0; for (int i = 0; i < 8; ++i) { s = s + i; if (i % 2 == 0) { A[i] += 4; } else { s = s + 1; } } return s; }\n"
+				"int work_ahead() { int s = 0; for (int i = 0; i < 8; ++i) { s = s + i * 3; int h = s % 7; if (h < 4) { A[i] += 2; } else { A[i] += 1; A[i] += 1; A[i] += 1; A[i] += 1; } } return s; }\n";
+			const std::string run = "to_string(both_arms() + one_arm() + work_ahead()) + \"|\" + to_string(A[0]) + to_string(A[1]) + to_string(A[6]) + to_string(A[7]);";
+			both(prelude + run, "116|84106", "every path bails, one arm bails, bails behind work");
+			const std::string l = listing_run(prelude + run);
+			auto section = [&](const char* fn) { const size_t at = l.find(fn); return at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at); };
+			const std::string bl = section("== both_arms ");
+			check_true(bl.find("-- open loop") != std::string::npos && bl.find("bail dominates the back edge") != std::string::npos, "both arms bail with nothing ahead: the loop stays general: " + bl);
+			for (const char* fn : { "== one_arm ", "== work_ahead " }) {
+				const std::string fl = section(fn);
+				check_true(fl.find("-- cell loop") != std::string::npos && fl.find("C_BAIL") != std::string::npos && fl.find("bail dominates") == std::string::npos, std::string(fn) + "keeps the block: " + fl);
+			}
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

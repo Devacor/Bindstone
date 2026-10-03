@@ -204,6 +204,7 @@ namespace {
 		case chunk::cell_refusal_head: return "loop head form";
 		case chunk::cell_refusal_no_cells: return "no scalar work (no cells)";
 		case chunk::cell_refusal_too_many_cells: return "too many cells";
+		case chunk::cell_refusal_bail_dominates: return "bail dominates the back edge";
 		case chunk::cell_refusal_malformed: return "malformed region (lifetime rule)";
 		default: break;
 		}

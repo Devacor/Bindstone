@@ -19720,10 +19720,10 @@ void vm_backend::dump_opcode_profile() const {
 		}
 		{
 			// the translation's verdict per loop: closed loops and the refused ones with their class and first offending instruction
-			size_t closed = 0, by_class[8] = {};
-			for (const auto& [code, st] : profile_chunks_) { closed += st.closed_loops; for (const auto& r : st.refusals) { ++by_class[r.reason < 8 ? r.reason : 0]; } }
-			fprintf(stderr, "[vm-profile] cell translation: loops closed %llu | refused: head %llu, representation %llu, effect %llu, translation %llu, malformed %llu, no cells %llu, too many cells %llu\n",
-				(unsigned long long)closed, (unsigned long long)by_class[1], (unsigned long long)by_class[2], (unsigned long long)by_class[3], (unsigned long long)by_class[4], (unsigned long long)by_class[5], (unsigned long long)by_class[6], (unsigned long long)by_class[7]);
+			size_t closed = 0, by_class[9] = {};
+			for (const auto& [code, st] : profile_chunks_) { closed += st.closed_loops; for (const auto& r : st.refusals) { ++by_class[r.reason < 9 ? r.reason : 0]; } }
+			fprintf(stderr, "[vm-profile] cell translation: loops closed %llu | refused: head %llu, representation %llu, effect %llu, translation %llu, malformed %llu, no cells %llu, too many cells %llu, bail dominates the back edge %llu\n",
+				(unsigned long long)closed, (unsigned long long)by_class[1], (unsigned long long)by_class[2], (unsigned long long)by_class[3], (unsigned long long)by_class[4], (unsigned long long)by_class[5], (unsigned long long)by_class[6], (unsigned long long)by_class[7], (unsigned long long)by_class[8]);
 			for (const auto& [code, st] : profile_chunks_) {
 				for (const auto& r : st.refusals) {
 					fprintf(stderr, "[vm-profile]   open loop: %s line %u (ips %u..%u): %s at ip %u (%s)\n", st.name.empty() ? "<top level>" : st.name.c_str(),

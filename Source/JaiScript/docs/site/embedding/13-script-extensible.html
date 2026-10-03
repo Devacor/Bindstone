@@ -44,6 +44,7 @@ taken from <code>source/tests/serialization/polymorphic_serialization_tests.cpp<
 <strong>both backends</strong>; the mechanism is specified in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/script_extensible.md"><code>docs/script_extensible.md</code></a>.</p>
 
 <h2 id="one-object-one-identity">One object, one identity<a class="hlink" href="#one-object-one-identity" aria-label="link">&#8203;</a></h2>
+<div class="callout cpp"><p>A base pointer to a derived object is the derived object, as in C++: once extended, the object reaches script as its script class through every <code>shared_ptr&lt;Base&gt;</code>, never as a sliced base.</p></div>
 <p>The shape this exists for is a game whose C++ spawns creatures and whose scripts define what each kind of
 creature does. C++ never names a script class; it hands the creature over and the script extends it:</p>
 <div class="codeblock cb-jai" data-host="Creature registration + self"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern self;                       // the host binds `self` (its callback slots) after load
@@ -110,10 +111,8 @@ re-classes it in place under the same rule (<code>Pt3</code> must derive <code>p
 <li><strong>Refusals are catchable</strong> in script (<code>try { extend(x, Wrong); } catch (e) { ... }</code>)
 and thrown from the C++ entry point.</li>
 </ul>
-<p>Write it as a statement (<code>extend(kin, Voidling); kin.chompCount = 1;</code>) or chain it. A
-<code>var q = extend(p, C)</code> binding follows the language&#x27;s
-<a href="../guide/03-value-semantics.html">value-semantics</a> rules for call results; the object
-<code>p</code> holds is already the re-classed one either way.</p>
+<p>Write it as a statement (<code>extend(kin, Voidling); kin.chompCount = 1;</code>) or chain it (<code>extend(kin, Voidling).spawn();</code>). The object <code>kin</code> holds is the
+re-classed one afterwards, so keep using <code>kin</code> rather than binding the result to a second name.</p>
 
 <h3 id="try-it-without-a-host">Try it without a host<a class="hlink" href="#try-it-without-a-host" aria-label="link">&#8203;</a></h3>
 <p>Nothing above needs C++. Script classes re-derive under the same rule, so you can watch
@@ -184,7 +183,7 @@ the object alive) until <code>script_layer_detach</code>.</li>
 <p>Copies follow the C++ base. Assignment of a hybrid (<code>var b = a;</code>) deep-copies (a copyable base
 copies its C++ object too, giving two identities), while a hybrid over a base without a copy function is
 <code>nocopy</code> automatically, exactly as a derived class of a <code>nocopy</code> script class is.
-By-value capture (<code>[=]</code>) shares a hybrid, like any engine object.</p>
+By-value capture (<code>[=]</code>, <code>[this]</code>) shares a hybrid: the lambda pins that exact object, where a plain script value is copied into the lambda.</p>
 
 <h2 id="serialization">Serialization<a class="hlink" href="#serialization" aria-label="link">&#8203;</a></h2>
 <p>A hybrid serializes as <em>itself</em>. Through any C++ archive path (a <code>shared_ptr&lt;Base&gt;</code>

@@ -85,6 +85,8 @@ public:
 		uncaught_texts();
 		map_transforms();
 		second_audit();
+		spaceship_rewriting();
+		local_alias_soundness();
 	}
 
 private:
@@ -383,6 +385,101 @@ private:
 				try { got = robustness::render(e->execute("string m = \"\"; var s = \"x\"; try { h(s); } catch (err) { m = err; } m")); }
 				catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("No overload of 'h' takes (string)"), got, std::string("host miss [") + c.label + "]");
+			}
+		});
+	}
+
+	// C++20 [over.match.oper]: with no operator< in the chain a < b is (a <=> b) < 0, reversed 5 < v is 0 < (v <=> 5), == and !=
+	// come from (a <=> b) == 0 when no operator== is declared; each comparison calls <=> once, operands evaluated once, left first;
+	// sort, contains and index_of use the same operators (metamorphic: sorted order agrees with pairwise <)
+	void spaceship_rewriting() {
+		test("spaceship_drives_every_comparison_once_per_use", [this]() {
+			expect("spaceship rewriting", R"(
+				int calls = 0;
+				string order = "";
+				class V {
+					int x;
+					V(int a) { x = a; }
+					int operator<=>(V o) { calls++; return x - o.x; }
+					int operator<=>(int o) { calls++; return x - o; }
+				}
+				V mk(string tag, int v) { order += tag; return V(v); }
+				string run() {
+					V a = V(1); V b = V(2); V c = V(2);
+					string out = "" + (a < b) + (b <= c) + (b > a) + (c >= b) + (a > b) + (b < c) + calls + ",";
+					calls = 0;
+					out += "" + (b == c) + (a == b) + (b != c) + (a != b) + calls + ",";
+					calls = 0;
+					out += "" + (5 < a) + (0 < a) + (1 <= a) + (2 > a) + calls + ",";
+					calls = 0;
+					out += "" + (5 <=> a) + (a <=> 5) + (1 <=> a) + (a == 1) + (1 == a) + (a != 1) + (2 != a) + calls + ",";
+					calls = 0;
+					bool lt = mk("L", 1) < mk("R", 2);
+					out += "" + lt + order + calls + ",";
+					array<V> arr = [V(3), V(1), V(2), V(1), V(5), V(0)];
+					arr.sort();
+					bool sorted = true;
+					for (int i = 1; i < arr.size(); i++) { if (arr[i] < arr[i - 1]) { sorted = false; } }
+					string xs = ""; for (auto& v : arr) { xs += "" + v.x; }
+					out += xs + sorted + arr.contains(V(2)) + arr.contains(V(9)) + arr.index_of(V(2));
+					return out;
+				}
+				run();
+			)", "truetruetruetruefalsefalse6,truefalsefalsetrue4,falsetruetruetrue4,1-40truetruefalsetrue7,trueLR1,011235truetruefalse3");
+		});
+	}
+
+	// docs/parallel_design.md section 15: a read-only by-value local binds its source only when nothing after it can tell; every
+	// route that writes the source after the copy (operators, conversions, accessors, callbacks, coroutines, reflection,
+	// references) leaves the copy unchanged, elisions on or off (C++: T x = lvalue copies)
+	void local_alias_soundness() {
+		test("a_by_value_local_never_sees_a_later_write_of_its_source", [this]() {
+			const std::string prelude = R"(
+				class T { int v = 1; array<int> a = [1]; T() {} T(int k) { v = k; } }
+				T G;
+				array<T> GA = [T(1)];
+				class Evil {
+					int k = 0;
+					string to_string() { G.v = 7; return "evil"; }
+					int to_int() { G.v = 7; return 3; }
+					bool operator==(Evil o) { G.v = 7; return true; }
+					int operator<=>(Evil o) { G.v = 7; return 0; }
+					Evil operator+(Evil o) { G.v = 7; return o; }
+					int _get_q() { G.v = 7; return 1; }
+				}
+				class Conv { int z = 0; Conv(int i) { G.v = 7; z = i; } }
+				int takeconv(Conv c) { return c.z; }
+				void wr(T& t) { t.v = 7; }
+				void wri(int& i) { i = 7; }
+				coroutine int co() { G.v = 7; yield 1; }
+			)";
+			struct row { const char* name; const char* setup; const char* src; const char* attack; };
+			const row rows[] = {
+				{"to_string", "", "G", "Evil e; string s = to_string(e);"},
+				{"print", "", "G", "Evil e; string s = \"\" + e;"},
+				{"to_int", "", "G", "Evil e; int i = e;"},
+				{"operator==", "", "G", "Evil e; Evil e2; bool b = e == e2;"},
+				{"spaceship", "", "G", "Evil e; Evil e2; bool b = e < e2;"},
+				{"operator+", "", "G", "Evil e; Evil e2; Evil e3 = e + e2;"},
+				{"accessor", "", "G", "Evil e; int q = e.q;"},
+				{"sort", "", "G", "array<Evil> es = [Evil(), Evil()]; es.sort();"},
+				{"converting ctor", "", "G", "int r = takeconv(5);"},
+				{"reference parameter", "", "G", "wr(G);"},
+				{"field reference", "", "G", "wri(G.v);"},
+				{"reference before", "auto& r = G;", "G", "r.v = 7;"},
+				{"lambda", "auto fn = [&]() { G.v = 7; };", "G", "fn();"},
+				{"callback", "", "G", "array<int> xs = [1]; xs.for_each((k) => { G.v = 7; });"},
+				{"coroutine", "", "G", "auto c = co(); c.resume();"},
+				{"reflect", "", "G", "reflect::set(G, \"v\", 7);"},
+				{"element", "", "GA[0]", "for (auto& t : GA) { t.v = 7; }"},
+				{"local swap", "T s = T(1); T t2 = T(7);", "s", "T tmp = s; s = t2; t2 = tmp;"},
+				{"local lambda", "T s = T(1); auto fn = () => { s.v = 7; };", "s", "fn();"},
+				{"local element", "array<T> la = [T(1)];", "la[0]", "la[0].a.push(5); la[0].v = la[0].a.size() + 5;"},
+			};
+			for (const auto& r : rows) {
+				const std::string src = prelude + "string f() {\n" + r.setup + "\nT x = " + r.src + ";\n" + r.attack +
+					"\nreturn \"\" + x.v + x.a.size();\n}\nf();";
+				expect(std::string("alias ") + r.name, src, "11", check_mode::warn);
 			}
 		});
 	}

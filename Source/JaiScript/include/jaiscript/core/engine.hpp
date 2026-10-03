@@ -417,7 +417,7 @@ namespace jai {
         uint64_t execution_step_budget() const;
 
         // Maximum active call depth for each built-in backend: interpreter 256,
-        // VM 10000 by default. Configure between executions; depth must be in
+        // VM 250000 by default. Configure between executions; depth must be in
         // [1, INT_MAX]. Each engine owns its settings, copied to parallel workers
         // at region entry. Native-stack protection remains active independently;
         // increasing this cap cannot make native recursion safe on a small stack.

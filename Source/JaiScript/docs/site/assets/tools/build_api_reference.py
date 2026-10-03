@@ -99,6 +99,9 @@ def page(data):
 			search=' '.join([e['display'],e['effect'],e['notes'],e['availability']]).lower()
 			parts.append(f'<div class="api-entry" data-provider="{escape(provider)}" data-search="{escape(search)}"><h3 id="{anchor}"><code>{escape(e["display"])}</code></h3><p><strong>{escape(e["availability"])}</strong> &middot; {escape(e["effect"])}</p>')
 			if e['notes']: parts.append('<p>'+escape(e['notes'])+'</p>')
+			if e.get('example'):
+				parts.append('<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">'+escape(e['example']['code'])+'</code></pre></div>')
+				parts.append('<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">'+escape(e['example']['output'])+'</code></pre></div>')
 			parts.append('</div>')
 		parts.append('</section>')
 	parts += ['</div>', '<h2 id="fields-constants">Fields, constants, and tokens</h2>', '<div class="tablewrap"><table><thead><tr><th>Name</th><th>Type</th><th>Access / provider</th><th>Contract</th></tr></thead><tbody>']

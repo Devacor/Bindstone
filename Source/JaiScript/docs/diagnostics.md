@@ -431,7 +431,7 @@ Each is recognized only in that position, so a script using one of these words a
 A `checked_result` host call (`fn.as_function()(args)`, a method or static method value, `coroutine_handle::resume`) carries
 every failure in its result (Dev ruling 2026-10-01): a run-time error keeps its own code and text; an uncaught script throw, a
 missing module or a failed reload comes back as `evaluation_failed` with the text `execute()` would throw (the thrown text,
-`Could not find include/import file`, the check listing). `convert_script_function` refuses a value that is neither a function
+`Failed to open import file: <path>`, the check listing). `convert_script_function` refuses a value that is neither a function
 nor null: `Cannot convert a value that is not a function to a std::function callback`.
 
 ## Classes and includes inside a function body

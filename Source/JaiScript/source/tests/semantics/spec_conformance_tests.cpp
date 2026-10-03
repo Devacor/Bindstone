@@ -2971,10 +2971,10 @@ private:
 			C c; var bm = reflect::bind(c, "m"); var sm = C::s; var h = co();
 		)";
 		const std::vector<std::pair<std::string, std::string>> calls = {
-			{"runtime_fail", "out of bounds"}, {"throws_value", "boom"}, {"missing_module", "Could not find include/import file"},
+			{"runtime_fail", "out of bounds"}, {"throws_value", "boom"}, {"missing_module", "Failed to open import file: no_such_module_for_host_routes.jai"},
 			{"reload_module", "reloaded"}, {"bm", "method boom"}, {"sm", "static boom"}};
 		test("a_checked_host_call_reports_every_failure_in_its_result", [=, this]() {
-			every_config("checked routes", "err:out of bounds|err:boom|err:Could not find include/import file|ok:<1>|err:reloaded|"
+			every_config("checked routes", "err:out of bounds|err:boom|err:Failed to open import file: no_such_module_for_host_routes.jai|ok:<1>|err:reloaded|"
 			             "err:method boom|err:static boom|ok:<1>|err:co boom|<42>", [&](engine& e) {
 				e.import_recheck_interval(0);
 				std::ofstream(mod) << "function reloaded_value() -> int { return 1; }\n";
@@ -3005,8 +3005,8 @@ private:
 			}, check_mode::warn);
 		});
 		test("a_throwing_host_call_throws_for_every_failure", [=, this]() {
-			every_config("throwing routes", "throw:out of bounds|throw:boom|throw:Could not find include/import file|ok|throw:reloaded|"
-			             "throw:method boom|throw:static boom|exec throw:boom|exec throw:Could not find include/import file|null:empty|<42>", [&](engine& e) {
+			every_config("throwing routes", "throw:out of bounds|throw:boom|throw:Failed to open import file: no_such_module_for_host_routes.jai|ok|throw:reloaded|"
+			             "throw:method boom|throw:static boom|exec throw:boom|exec throw:Failed to open import file: no_such_module_for_host_routes.jai|null:empty|<42>", [&](engine& e) {
 				e.import_recheck_interval(0);
 				std::ofstream(mod) << "function reloaded_value() -> int { return 1; }\n";
 				e.execute(prog);
@@ -3019,7 +3019,7 @@ private:
 					}
 					try { fn(); out += "ok|"; } catch (const std::exception& ex) { out += route("throw", ex.what(), key) + "|"; }
 				}
-				for (const auto& [src, key] : std::vector<std::pair<std::string, std::string>>{{"throws_value();", "boom"}, {"missing_module();", "Could not find include/import file"}}) {
+				for (const auto& [src, key] : std::vector<std::pair<std::string, std::string>>{{"throws_value();", "boom"}, {"missing_module();", "Failed to open import file: no_such_module_for_host_routes.jai"}}) {
 					try { e.execute(src); out += "exec ok|"; } catch (const std::exception& ex) { out += route("exec throw", ex.what(), key) + "|"; }
 				}
 				auto none = convert_script_function<void()>(script_value(std::monostate{}, &e));

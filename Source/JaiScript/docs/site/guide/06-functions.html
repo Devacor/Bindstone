@@ -243,6 +243,7 @@ print(b.on_click());</code></pre></div>
 50
 clicked!</code></pre></div>
 <h2 id="lambdas-and-captures">Lambdas and captures<a class="hlink" href="#lambdas-and-captures" aria-label="link">&#8203;</a></h2>
+<div class="callout cpp"><p>Capture lists mean what they mean in C++: <code>[]</code> captures nothing, <code>[x]</code> copies, <code>[&amp;x]</code> shares, and naming a local the list does not admit is an error. One difference: a program-scope variable is never captured; the lambda reads it when it runs, unless the list copies it (<code>[g]</code>).</p></div>
 <p>C++11-style lambdas with explicit captures: <code>[x]</code> copies, <code>[&amp;x]</code> references, <code>[=]</code> copies everything used, <code>[&amp;]</code> references everything used:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto add = [](int a, int b) -&gt; int { return a + b; };
 print("add(5, 3) = {}", add(5, 3));

@@ -5,14 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JaiScript — an embedded scripting language for C++ engines</title>
 <meta name="description" content="An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.">
-<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="JaiScript docs">
 <meta property="og:title" content="JaiScript — an embedded scripting language for C++ engines">
 <meta property="og:description" content="An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&amp;family=Chakra+Petch:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
 <link rel="stylesheet" href="assets/style.css">
 <script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
 if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
@@ -21,30 +24,47 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
-<a class="brand" href="index.html"><span class="rainbow">JaiScript</span><span class="brand-sub">docs</span></a>
+<a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">{*}</span>JaiScript<span class="brand-sub">docs</span></a>
 <nav class="site-nav" aria-label="Sections"><a href="tour/index.html">Tour</a><a href="bridges/index.html">Bridges</a><a href="guide/index.html">Guide</a><a href="embedding/index.html">Embedding</a><a href="examples/index.html">Examples</a><a href="reference/index.html">Reference</a></nav>
 <div class="header-tools">
-<div class="search" role="search"><input id="search-box" type="search" placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<div class="search" role="search"><input id="search-box" type="search" placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
 <button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
 </div>
 </header>
 <div class="layout">
 
 <main class="content" id="main" tabindex="-1">
-<div class="hero">
-  <h1 class="rainbow">JaiScript</h1>
-  <p class="tagline">An embedded scripting language for C++ engines. It reads like the C++ you already write,
-  copies the way C++ copies, stops typed mistakes before the program runs, reloads classes without losing the
-  world, and spreads a loop across every core. Underneath, <strong>two independent backends</strong> (a
-  tree-walking interpreter and a bytecode VM) must agree on every result, byte for byte.</p>
-  <p class="sub">every example on this site was executed on both backends before it was written down</p>
-  <div class="hero-ctas">
-    <a class="btn btn-primary" href="tour/index.html">Take the ten-minute tour</a>
-    <a class="btn" href="guide/01-hello.html">Read the guide</a>
-    <a class="btn" href="embedding/01-embedding-quickstart.html">Embed it</a>
-    <a class="btn" href="examples/index.html">Play the examples</a>
+<section class="hero" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <p class="eyebrow">JaiScript &middot; scripting for C++ engines</p>
+    <h1 id="hero-title">Edit. Save.<br><span class="grad">It&#x27;s already running.</span></h1>
+    <p class="tagline">An embedded scripting language for C++ engines. It reads like the C++ you already write,
+    copies the way C++ copies, stops typed mistakes before the program runs, reloads classes without losing the
+    world, and spreads a loop across every core. Underneath, <strong>two independent backends</strong> (a
+    tree-walking interpreter and a bytecode VM) must agree on every result, byte for byte.</p>
+    <p class="sub">every example on this site was executed on both backends before it was written down</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="tour/index.html">Take the ten-minute tour</a>
+      <a class="btn" href="guide/01-hello.html">Read the guide</a>
+      <a class="btn" href="embedding/01-embedding-quickstart.html">Embed it</a>
+      <a class="btn" href="examples/index.html">Play the examples</a>
+    </div>
+    <ul class="chips" aria-label="Highlights"><li>C++ value semantics</li><li>hot reload keeps state</li><li>strict checker at load</li><li>coroutines</li><li>parallel_for</li><li>JS / C++ / C# bridges</li></ul>
   </div>
-</div>
+  <div class="demo" id="hero-demo" role="group" aria-label="Hot reload demo: a script class edited while it runs">
+    <div class="demo-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="file">gator.jai</span><span class="demo-status idle" id="demo-status">running</span><button class="demo-save" id="demo-save" type="button">Save</button></div>
+<pre><span class="tk-com">// lower spd: a faster gator</span>
+<span class="tk-kw">class</span> Gator : Mob {
+    <span class="tk-ty">int</span> spd = <span class="tk-num edit" id="demo-spd">4</span>;
+    <span class="tk-ty">int</span> slices = <span class="tk-num">0</span>;
+    <span class="tk-ty">void</span> <span class="tk-fn">tick</span>() {
+        <span class="tk-kw">if</span> (frame % spd == <span class="tk-num">0</span>) { <span class="tk-fn">step_toward</span>(cake); }
+        <span class="tk-kw">if</span> (<span class="tk-fn">beside</span>(cake)) { slices++; <span class="tk-fn">say</span>(<span class="tk-str">"Nom."</span>); }
+    }
+}</pre>
+    <div class="scene"><canvas id="demo-scene" width="640" height="150" role="img" aria-label="A pixel gator walks toward a cake and eats a slice"></canvas><span class="scene-label" id="demo-label">gator at spd 4 &middot; slices 0</span></div>
+  </div>
+</section>
 
 <div class="home-section">
 <h2 id="two-lines-to-hello">Two lines to hello</h2>
@@ -187,5 +207,6 @@ is MIT-licensed, and <a href="stability.html">Stability</a> lists what is settle
 </footer>
 <script src="assets/search-index.js"></script>
 <script src="assets/site.js"></script>
+<script src="assets/hero.js"></script>
 </body>
 </html>

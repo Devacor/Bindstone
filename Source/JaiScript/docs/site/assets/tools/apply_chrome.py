@@ -21,6 +21,13 @@ VERSION = "0.1.0"
 REPO = "https://github.com/Devacor/JaiScript"
 BUILD_DATE = "2026-10-01"
 
+FONTS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400'
+    '&amp;family=Chakra+Petch:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">'
+)
+
 THEME_BOOTSTRAP = (
     '<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}\n'
     'if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";\n'
@@ -141,14 +148,15 @@ def head(title, desc, root):
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
         "<title>%s</title>" % title,
         '<meta name="description" content="%s">' % attr(desc),
-        '<meta name="theme-color" content="#0c0f14" media="(prefers-color-scheme: dark)">',
-        '<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">',
+        '<meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">',
+        '<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">',
         '<meta property="og:type" content="website">',
         '<meta property="og:site_name" content="JaiScript docs">',
         '<meta property="og:title" content="%s">' % attr(title),
         '<meta property="og:description" content="%s">' % attr(desc),
         '<meta name="twitter:card" content="summary">',
         '<link rel="icon" href="%sassets/favicon.svg" type="image/svg+xml">' % root,
+        FONTS,
         '<link rel="stylesheet" href="%sassets/style.css">' % root,
         THEME_BOOTSTRAP,
         "</head>",
@@ -163,14 +171,14 @@ def header(section, root):
     return "\n".join([
         '<a class="skip" href="#main">Skip to content</a>',
         '<header class="site-header">',
-        '<a class="brand" href="%sindex.html"><span class="rainbow">JaiScript</span>'
+        '<a class="brand" href="%sindex.html"><span class="brand-mark" aria-hidden="true">{*}</span>JaiScript'
         '<span class="brand-sub">docs</span></a>' % root,
         '<nav class="site-nav" aria-label="Sections">'
         + nav("tour", "Tour") + nav("bridges", "Bridges") + nav("guide", "Guide") + nav("embedding", "Embedding")
         + nav("examples", "Examples") + nav("reference", "Reference") + "</nav>",
         '<div class="header-tools">',
         '<div class="search" role="search"><input id="search-box" type="search" '
-        'placeholder="search titles&hellip;  /" autocomplete="off" aria-label="Search docs" '
+        'placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" '
         'aria-controls="search-results" aria-expanded="false" aria-autocomplete="list">'
         '<div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>',
         '<button id="theme-toggle" type="button" aria-label="Switch to light theme" '
@@ -216,6 +224,28 @@ def footer(root):
         "</body>",
         "</html>",
     ])
+
+
+SECTION_CRUMB = {"tour": "Tour", "bridges": "Bridges", "guide": "Guide", "embedding": "Embedding",
+                 "examples": "Examples", "reference": "Reference"}
+
+
+def crumbs(rel, section, root):
+    """Docs / Section / NN, stamped right after <main> on every page but the landing page."""
+    if rel == "index.html":
+        return ""
+    parts = ['<a href="%sindex.html">Docs</a>' % root]
+    name = rel.split("/")[-1]
+    if not section:
+        parts.append(name[:-len(".html")].capitalize())
+    elif name == "index.html":
+        parts.append(SECTION_CRUMB[section])
+    else:
+        parts.append('<a href="index.html">%s</a>' % SECTION_CRUMB[section])
+        number = re.match(r"(\d+)-", name)
+        parts.append(number.group(1) if number else "API" if name == "api.html" else name)
+    return ('<nav class="crumbs" aria-label="Breadcrumb">%s</nav>'
+            % '<span class="sep" aria-hidden="true">/</span>'.join(parts))
 
 
 def prevnext(prev, nxt):
@@ -300,6 +330,7 @@ def build_pages():
 TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S)
 MAIN_OPEN_RE = re.compile(r"<main class=\"content\"[^>]*>")
 PREVNEXT_RE = re.compile(r'<nav class="prevnext".*?</nav>', re.S)
+CRUMBS_RE = re.compile(r'^<nav class="crumbs"[^>]*>.*?</nav>', re.S)
 
 
 def read_raw(path):
@@ -308,12 +339,12 @@ def read_raw(path):
         return handle.read()
 
 
-def rewrite(src, section, root, desc, sidebar, nav):
+def rewrite(src, rel, section, root, desc, sidebar, nav):
     title = TITLE_RE.search(src).group(1)
     prologue = src[:src.index("<head>")]
 
     open_tag = MAIN_OPEN_RE.search(src)
-    body = src[open_tag.end():src.index("</main>")]
+    body = CRUMBS_RE.sub("", src[open_tag.end():src.index("</main>")], count=1)
 
     if nav:
         if PREVNEXT_RE.search(body):
@@ -326,7 +357,8 @@ def rewrite(src, section, root, desc, sidebar, nav):
 
     out = (prologue + head(title, desc, root) + "\n<body>\n" + header(section, root)
            + '\n<div class="layout">\n' + sidebar
-           + '\n<main class="content" id="main" tabindex="-1">' + body + "</main>\n</div>\n"
+           + '\n<main class="content" id="main" tabindex="-1">' + crumbs(rel, section, root) + body
+           + "</main>\n</div>\n"
            + footer(root) + "\n")
     newline = "\r\n" if "\r\n" in src else "\n"
     return out.replace("\r\n", "\n").replace("\n", newline)
@@ -345,7 +377,10 @@ def main():
             drifted.append(rel)
             continue
         src = read_raw(path)
-        out = rewrite(src, section, root, desc, sidebar, nav)
+        out = rewrite(src, rel, section, root, desc, sidebar, nav)
+        if rel == "index.html":
+            out = out.replace('<script src="assets/site.js"></script>',
+                              '<script src="assets/site.js"></script>\n<script src="assets/hero.js"></script>')
         if rel == "reference/api.html":
             out = out.replace("</body>", '<script src="../assets/api-reference.js"></script>\n</body>')
             out = re.sub(r'<p class="foot-note">.*?</p>', '<p class="foot-note">Source-audited API reference &middot; built 2026-10-01</p>', out)

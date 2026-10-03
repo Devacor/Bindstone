@@ -1,4 +1,4 @@
-/* JaiScript docs: theme toggle, hand-rolled highlighter, client-side search. No dependencies. */
+/* JaiScript docs: theme toggle, hand-rolled highlighter, code/output pairs, client-side search. No dependencies. */
 (function () {
   "use strict";
 
@@ -173,8 +173,8 @@
         btn.addEventListener("click", function () {
           var body = code.textContent.replace(/\n$/, "");
           var done = function () {
-            btn.textContent = "copied"; btn.classList.add("done");
-            setTimeout(function () { btn.textContent = "copy"; btn.classList.remove("done"); }, 1500);
+            btn.textContent = "Copied"; btn.classList.add("done");
+            setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1500);
           };
           var fallback = function () {
             var range = document.createRange();
@@ -182,7 +182,7 @@
             var selection = window.getSelection();
             selection.removeAllRanges();
             selection.addRange(range);
-            btn.textContent = "ctrl+c";
+            btn.textContent = "Ctrl+C";
           };
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(body).then(done, fallback);
@@ -190,6 +190,37 @@
         });
         block.appendChild(btn);
       }(cbs[i]));
+    }
+  }());
+
+  /* ---------------- code + output pairs ---------------- */
+  // A sample and the output verified under it become one .pair; the stylesheet puts them
+  // side by side when both longest lines fit the column and stacks them otherwise.
+  (function () {
+    function widest(el) {
+      var code = el.querySelector("pre > code");
+      if (!code) return 0;
+      var lines = code.textContent.replace(/
+$/, "").split("
+"), w = 0;
+      for (var i = 0; i < lines.length; i++) {
+        var n = lines[i].replace(/	/g, "    ").length;
+        if (n > w) w = n;
+      }
+      return w;
+    }
+    var outs = document.querySelectorAll(".codeblock.cb-output");
+    for (var i = 0; i < outs.length; i++) {
+      var out = outs[i], code = out.previousElementSibling;
+      if (!code || !code.classList.contains("codeblock") ||
+          !(code.classList.contains("cb-jai") || code.classList.contains("cb-cpp"))) continue;
+      var pairEl = document.createElement("div");
+      pairEl.className = "pair";
+      pairEl.style.setProperty("--code-ch", Math.max(widest(code), 20));
+      pairEl.style.setProperty("--out-ch", Math.max(widest(out), 12));
+      code.parentNode.insertBefore(pairEl, code);
+      pairEl.appendChild(code);
+      pairEl.appendChild(out);
     }
   }());
 

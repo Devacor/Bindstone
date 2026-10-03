@@ -65,6 +65,12 @@ public:
     );
 };
 
+// A slot declared `t` can own an instance whose destruction runs a script destructor: a by-value class, array or map whose
+// value tree can hold one, a shared_ptr whose pointee's can (it may hold the last handle), a var or auto slot while any
+// script class declares a destructor; never a primitive, a string, a weak_ptr or a reference. Decides which locals a scope
+// exit destroys (both backends).
+bool slot_may_own_destructor(engine& eng, const type_info_ptr& t);
+
 // Factory functions for creating script class instances
 template<typename... Args>
 std::shared_ptr<script_class_instance> make_shared_script_class(

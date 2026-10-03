@@ -62,6 +62,12 @@ buffer. The rules that keep this sound:
   through a local, so a value whose release re-enters is never touched again by its own destructor.
 - `value_stack::pop_back` / `truncate` destroy a slot in place while `count` still covers it (a
   re-entry pushes above it, never over it) and re-read the buffer by index after every release.
+  `truncate` destroys top down, so a popped frame's locals die last declared first and its parameters
+  last (C++ order; the interpreter's `call_frame::locals` destroys the same way); a scope exit's `op_kill_slot` and
+  the interpreter's `kill_scope_slot` move the value out of its slot before it dies, so a destructor that re-enters
+  finds the slot already null. Which slots a scope exit kills is decided when the vm compiles the body
+  (`slot_may_own_destructor`): a destructor a hot reload adds to a class reaches the block exits of functions compiled
+  after it, and frame teardown destroys the rest at the function's end.
 - `storage` assignment puts the new payload in place first and releases the old one last, so a
   destructor that stores to the slot being assigned keeps its store (C++ `shared_ptr` order) and one
   that moves the buffer finds the slot already written.

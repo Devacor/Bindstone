@@ -1069,6 +1069,10 @@ namespace jai {
         bool parameter_alias() const;
         // Read-only by-value local declarations (`T x = lvalue;`) that bound the source's object instead of cloning it
         // (main thread; the local elision's test observable) and that elision's kill switch (default on)
+        // Set when the first instance armed with a script destructor is minted: until then no destructor can run, so
+        // destruction-order work (a frame's reverse release) costs nothing in programs without one
+        bool destructors_armed() const;
+        void note_destructors_armed();
         uint64_t local_alias_binds() const;
         void note_local_alias_bind();
         void local_alias(bool on);

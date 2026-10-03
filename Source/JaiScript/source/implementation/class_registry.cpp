@@ -71,17 +71,6 @@ bool class_definition::type_can_hold_string(const type_info_ptr& t, std::vector<
     }
 }
 
-bool class_definition::chain_declares_destructor() const {
-    if (engine_) {
-        const uint64_t id = engine_->symbolize("~" + name_);
-        if (id != 0 && methods_.find(id) != methods_.end()) { return true; }
-    }
-    for (const auto& parent : parent_classes_) {
-        if (parent && parent->chain_declares_destructor()) { return true; }
-    }
-    return false;
-}
-
 bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const {
     if (!t) { return true; }
     switch (t->base_type) {
@@ -106,7 +95,7 @@ bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::ve
 bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const {
     for (const class_definition* visiting : in_progress) { if (visiting == this) { return false; } }
     in_progress.push_back(this);
-    bool runs = chain_declares_destructor();
+    bool runs = engine_ && chain_declares_destructor(*engine_);
     const uint32_t n = field_slot_count();
     for (uint32_t slot = 0; slot < n && !runs; ++slot) {
         runs = type_tree_runs_destructor(get_field_declared_type(slot_field(slot)), in_progress);
@@ -119,6 +108,63 @@ bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_d
     }
     in_progress.pop_back();
     return runs;
+}
+
+void class_definition::destroy_chain(class_instance* instance, const class_definition* level) const {
+    if (!level) { return; }
+    if (engine_) {
+        const uint64_t id = engine_->symbolize("~" + level->name_);
+        auto it = id != 0 ? level->methods_.find(id) : level->methods_.end();
+        if (it != level->methods_.end()) {
+            try {
+                std::shared_ptr<class_instance> self(instance, [](class_instance*) {});
+                const script_function& body = it->second.as_function();
+                auto ran = body({script_value::make_object(level->name_, self, engine_)});
+                if (!ran) { engine_->report_script_error(format_error(ran, *engine_->get_symbolizer()), ran.error()); }   // reported, never propagated
+            } catch (...) {
+            }
+        }
+    }
+    const class_definition* layout = instance->get_class_definition() ? instance->get_class_definition() : this;
+    std::vector<uint64_t> own;
+    level->for_each_own_field_id([&](uint64_t field) { own.push_back(field); });
+    for (auto field = own.rbegin(); field != own.rend(); ++field) {
+        const uint32_t slot = layout->field_slot(*field);
+        if (slot != k_no_field_slot) { instance->release_field_slot(slot); }
+    }
+    for (auto parent = level->parent_classes_.rbegin(); parent != level->parent_classes_.rend(); ++parent) {
+        destroy_chain(instance, parent->get());
+    }
+}
+
+bool slot_may_own_destructor(engine& eng, const type_info_ptr& t) {
+    bool any = false;
+    for (const auto& entry : eng.get_class_registry().script_classes_) {
+        if (entry.second && entry.second->value_tree_runs_destructor()) { any = true; break; }
+    }
+    if (!any) { return false; }
+    if (!t) { return true; }
+    switch (t->base_type) {
+    case script_value_type::jai_any_type: return true;
+    case script_value_type::jai_reference_type: case script_value_type::jai_weak_ptr_type: return false;
+    case script_value_type::jai_shared_ptr_type: {
+        const type_info_ptr pointee = t->element_type();
+        if (!pointee) { return true; }
+        if (pointee->base_type != script_value_type::jai_object_type || pointee->type_name.empty()) { return true; }
+        auto cls = eng.get_class_registry().find_script_class(std::string(pointee->type_name));
+        return cls && cls->value_tree_runs_destructor();
+    }
+    case script_value_type::jai_object_type: case script_value_type::jai_array_type: case script_value_type::jai_map_type: {
+        for (const auto& entry : eng.get_class_registry().script_classes_) {
+            if (entry.second) {
+                std::vector<const class_definition*> in_progress;
+                return entry.second->type_tree_runs_destructor(t, in_progress);
+            }
+        }
+        return false;
+    }
+    default: return false;
+    }
 }
 
 bool class_definition::value_tree_runs_destructor() const {

@@ -10,6 +10,7 @@
 #include <jaiscript/detail/cast_kernel.hpp>
 #include <jaiscript/detail/transient_read.hpp>
 #include <jaiscript/detail/return_conv.hpp>
+#include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <algorithm>
 #include <array>
@@ -153,6 +154,7 @@ namespace {
 			case opcode::op_fused_cmp_jump:
 			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
+			case opcode::op_kill_slot:
 			case opcode::op_cells_back:
 			case opcode::op_cells_enter:
 			case opcode::op_c_arith:
@@ -351,6 +353,7 @@ namespace {
 			case opcode::op_fused_cmp_jump:
 			case opcode::op_compound_fused:
 			case opcode::op_loop_back:
+			case opcode::op_kill_slot:
 			case opcode::op_cells_back:
 			case opcode::op_cells_enter:
 			case opcode::op_c_arith:
@@ -973,6 +976,10 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 	auto saved_callable = std::move(callable_);
 	auto saved_loops = std::move(loops_);
 	auto saved_depth = scope_depth_;
+	auto saved_kills = std::move(kill_scopes_);
+	auto saved_try_kills = std::move(try_kills_);
+	kill_scopes_.clear();
+	try_kills_.clear();
 
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
@@ -989,6 +996,8 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 	callable_ = std::move(saved_callable);
 	loops_ = std::move(saved_loops);
 	scope_depth_ = saved_depth;
+	kill_scopes_ = std::move(saved_kills);
+	try_kills_ = std::move(saved_try_kills);
 	return result;
 }
 
@@ -998,6 +1007,10 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declara
 	auto saved_callable = std::move(callable_);
 	auto saved_loops = std::move(loops_);
 	auto saved_depth = scope_depth_;
+	auto saved_kills = std::move(kill_scopes_);
+	auto saved_try_kills = std::move(try_kills_);
+	kill_scopes_.clear();
+	try_kills_.clear();
 
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
@@ -1014,6 +1027,8 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declara
 	callable_ = std::move(saved_callable);
 	loops_ = std::move(saved_loops);
 	scope_depth_ = saved_depth;
+	kill_scopes_ = std::move(saved_kills);
+	try_kills_ = std::move(saved_try_kills);
 	return result;
 }
 
@@ -1270,19 +1285,60 @@ void vm_compiler::compile_block(block_stmt* block) {
 			break;
 		}
 	}
+	kill_scopes_.emplace_back();
 	if (!needs_scope) {
 		for (const auto& decl : block->declarations) {
 			compile_declaration(decl, false);
+			note_kill_decl(decl.get());
 		}
+		close_kill_scope();
 		return;
 	}
 	emit(opcode::op_scope_push);
 	++scope_depth_;
 	for (const auto& decl : block->declarations) {
 		compile_declaration(decl, false);
+		note_kill_decl(decl.get());
 	}
+	close_kill_scope();
 	--scope_depth_;
 	emit(opcode::op_scope_pop);
+}
+
+void vm_compiler::push_region(region_kind kind) {
+	loops_.push_back({});
+	loops_.back().kind = kind;
+	loops_.back().kill_depth = kill_scopes_.size();
+}
+
+bool vm_compiler::slot_kill_wanted(const type_info_ptr& t, size_t slot, uint64_t symbol) const {
+	if (slot == SIZE_MAX || !callable_.active || !engine_ || callable_.declared.find(symbol) == callable_.declared.end()) { return false; }
+	if (t && t->is_reference()) { return false; }
+	return slot_may_own_destructor(*const_cast<engine*>(engine_), t);
+}
+
+void vm_compiler::note_kill_slot(uint32_t slot) {
+	if (kill_scopes_.empty()) { return; }
+	kill_scopes_.back().push_back(slot);
+	for (auto& collect : try_kills_) { collect.push_back(slot); }
+}
+
+void vm_compiler::note_kill_decl(const statement* decl) {
+	if (!decl || decl->get_type() != node_type::variable_decl) { return; }
+	const auto* v = static_cast<const variable_decl*>(decl);
+	if (v->is_static || v->name_id == UINT64_MAX || !slot_kill_wanted(v->type, v->slot_index, v->name_id)) { return; }
+	note_kill_slot(static_cast<uint32_t>(v->slot_index));
+}
+
+void vm_compiler::close_kill_scope() {
+	for (auto slot = kill_scopes_.back().rbegin(); slot != kill_scopes_.back().rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
+	kill_scopes_.pop_back();
+}
+
+void vm_compiler::emit_kills_to(size_t depth) {
+	for (size_t scope = kill_scopes_.size(); scope-- > depth;) {
+		for (auto slot = kill_scopes_[scope].rbegin(); slot != kill_scopes_[scope].rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
+	}
 }
 
 // A condition in branch position is jumping code all the way down: `&&`, `||` and `!` nest as jumps, no bool is
@@ -1380,7 +1436,7 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 	compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps);
 	temp_next_ = cond_mark;
 
-	loops_.push_back({});
+	push_region(region_kind::loop);
 	mark_loop(stmt);
 	loops_.back().continue_target = top;
 	loops_.back().continue_is_loop_back = true;
@@ -1410,8 +1466,10 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 		++scope_depth_;
 	}
 
+	kill_scopes_.emplace_back();
 	if (stmt->initializer) {
 		compile_declaration(stmt->initializer, false);
+		note_kill_decl(stmt->initializer.get());
 	}
 
 	const size_t top = chunk_->code.size();
@@ -1422,7 +1480,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 		temp_next_ = cond_mark;
 	}
 
-	loops_.push_back({});
+	push_region(region_kind::loop);
 	mark_loop(stmt);
 	loops_.back().scope_depth = scope_depth_;
 
@@ -1443,6 +1501,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 		patch_jump(at, end);
 	}
 	loops_.pop_back();
+	close_kill_scope();
 
 	if (loop_scope) {
 		--scope_depth_;
@@ -1547,7 +1606,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 
 	const size_t body_start = chunk_->code.size();
 
-	loops_.push_back({});
+	push_region(region_kind::loop);
 	mark_loop(stmt);
 	loops_.back().scope_depth = scope_depth_;
 
@@ -1628,6 +1687,7 @@ void vm_compiler::compile_break() {
 	}
 	emit_region_exits(target);
 	auto& region = loops_[target];
+	emit_kills_to(region.kill_depth);
 	if (scope_depth_ > region.scope_depth) {
 		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth));
 	}
@@ -1653,6 +1713,7 @@ void vm_compiler::compile_continue() {
 	}
 	emit_region_exits(target);
 	auto& region = loops_[target];
+	emit_kills_to(region.kill_depth);
 	if (scope_depth_ > region.scope_depth) {
 		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth));
 	}
@@ -1692,13 +1753,18 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	emit(opcode::op_iter_next, proto_idx);        // budget check lives here (one per iteration)
 	size_t exit_jump = emit(opcode::op_jump_if_false, k_invalid_u32, 1);
 
-	loops_.push_back({});
+	push_region(region_kind::loop);
 	mark_loop(stmt);
 	loops_.back().kind = region_kind::range_for;
 	loops_.back().continue_target = loop_top;
 	loops_.back().scope_depth = scope_depth_;
 
+	kill_scopes_.emplace_back();
+	if (!stmt->is_reference && proto.slot != SIZE_MAX && slot_kill_wanted(stmt->element_type, proto.slot, proto.var_symbol)) {
+		note_kill_slot(static_cast<uint32_t>(proto.slot));
+	}
 	compile_statement(stmt->body);
+	close_kill_scope();
 	emit(opcode::op_jump, static_cast<uint32_t>(loop_top));
 
 	const size_t exit_ip = chunk_->code.size();
@@ -1723,17 +1789,21 @@ void vm_compiler::compile_try(try_stmt* stmt) {
 	}
 	size_t try_push = emit(opcode::op_try_push, k_invalid_u32, catch_sym, catch_slot);
 
-	loops_.push_back({});
+	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::try_block;
 	loops_.back().scope_depth = scope_depth_;
+	try_kills_.emplace_back();
 	compile_statement(stmt->try_block);
+	std::vector<uint32_t> try_declared = std::move(try_kills_.back());
+	try_kills_.pop_back();
 	loops_.pop_back();
 
 	emit(opcode::op_try_pop);
 	size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
 
 	patch_jump(try_push, chunk_->code.size());
-	loops_.push_back({});
+	for (auto slot = try_declared.rbegin(); slot != try_declared.rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
+	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::catch_block;
 	loops_.back().scope_depth = scope_depth_;
 	compile_statement(stmt->catch_block);
@@ -1746,7 +1816,7 @@ void vm_compiler::compile_try(try_stmt* stmt) {
 void vm_compiler::compile_switch(switch_stmt* stmt) {
 	compile_expression(stmt->condition);
 
-	loops_.push_back({});
+	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::switch_ctx;
 	loops_.back().scope_depth = scope_depth_;
 	const size_t region_index = loops_.size() - 1;
@@ -1792,9 +1862,12 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 			emit(opcode::op_scope_push);
 			++scope_depth_;
 		}
+		kill_scopes_.emplace_back();
 		for (const auto& body_stmt : case_node->body) {
 			compile_statement(body_stmt);
+			note_kill_decl(body_stmt.get());
 		}
+		close_kill_scope();
 		if (case_scope) {
 			--scope_depth_;
 			emit(opcode::op_scope_pop);
@@ -1820,9 +1893,12 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 			emit(opcode::op_scope_push);
 			++scope_depth_;
 		}
+		kill_scopes_.emplace_back();
 		for (const auto& body_stmt : stmt->default_case->body) {
 			compile_statement(body_stmt);
+			note_kill_decl(body_stmt.get());
 		}
+		close_kill_scope();
 		if (default_scope) {
 			--scope_depth_;
 			emit(opcode::op_scope_pop);

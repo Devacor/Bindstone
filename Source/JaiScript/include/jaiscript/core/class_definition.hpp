@@ -131,6 +131,13 @@ public:
     // Slot fast path (vm site ICs, tier-1 stage B): present-cell lookup by a
     // pre-resolved slot — no hash; absent (null cell / raw-invalid) returns null so
     // the caller falls back to the resolve ladder (chain defaults, errors).
+    // Destroy one field's value in place (a dying instance's member destruction); the cell stays, holding null
+    void release_field_slot(uint32_t slot) {
+        if (slot < flat_fields_.size() && flat_fields_[slot]) {
+            script_value dying = std::move(*flat_fields_[slot]);
+        }
+    }
+
     script_value* field_slot_value(uint32_t slot) {
         if (slot >= flat_fields_.size()) {
             return nullptr;
@@ -765,6 +772,9 @@ public:
     // declares a script destructor: the chain or a subclass's declares one, or a by-value field's type can hold such an
     // instance (handles share, never destroy a copy). Cached against engine::definition_epoch.
     bool value_tree_runs_destructor() const;
+    // C++ destruction of a dying instance from `level` down: the level's destructor body, its own fields in reverse
+    // declaration order, then its bases in reverse order
+    void destroy_chain(class_instance* instance, const class_definition* level) const;
     // The same question for a declared type (null, var and unknown kinds can hold anything)
     bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
@@ -1150,46 +1160,13 @@ public:
         if (has_script_dtor_) {
             auto* raw_instance = new class_instance(class_instance::interned_name_t{}, interned_name(), engine_);
             auto class_def = shared_from_this();
+            if (engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
 
-            instance = std::shared_ptr<class_instance>(raw_instance,
-                [class_def](class_instance* ptr) {
-                    if (ptr) {
-                        std::function<void(std::shared_ptr<class_definition>)> call_destructors;
-                        call_destructors = [&](std::shared_ptr<class_definition> current_class) {
-                            if (!current_class) return;
-
-                            auto current_destructor_name = "~" + current_class->name_;
-                            uint64_t destructor_id = 0;
-                            if (auto eng = current_class->get_engine()) {
-                                destructor_id = eng->symbolize(current_destructor_name);
-                            }
-                            if (destructor_id == 0) return;
-
-                            auto method_it = current_class->methods_.find(destructor_id);
-
-                            if (method_it != current_class->methods_.end()) {
-                                try {
-                                    std::shared_ptr<class_instance> temp_this(ptr, [](class_instance*){});
-
-                                    const script_function& destructor_func = method_it->second.as_function();
-                                    auto result = destructor_func({script_value::make_object(current_class->name_, temp_this, current_class->get_engine())});
-                                    (void)result;
-                                } catch (...) {
-                                }
-                            }
-
-                            for (const auto& parent : current_class->parent_classes_) {
-                                call_destructors(parent);
-                            }
-                        };
-
-                        if (!ptr->construction_pending()) {
-                            call_destructors(class_def);
-                        }
-
-                        delete ptr;
-                    }
-                });
+            instance = std::shared_ptr<class_instance>(raw_instance, [class_def](class_instance* ptr) {
+                if (!ptr) { return; }
+                if (!ptr->construction_pending()) { class_def->destroy_chain(ptr, class_def.get()); }
+                delete ptr;
+            });
         } else {
             instance = std::make_shared<class_instance>(class_instance::interned_name_t{}, interned_name(), engine_);   // instance + control block, one allocation
         }
@@ -2412,7 +2389,6 @@ private:
     bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
     mutable bool destructor_tree_cached_ = false;
     mutable uint64_t destructor_tree_epoch_ = UINT64_MAX;
-    bool chain_declares_destructor() const;
     bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const;
 
     void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref) {

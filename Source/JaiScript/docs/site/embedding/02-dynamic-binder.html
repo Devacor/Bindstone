@@ -43,6 +43,65 @@ then documents the fluent binder chain that makes it go. Every C++ signature bel
 <code>include/jaiscript/core/dynamic_binder.hpp</code> and friends; every snippet was compiled against the real
 library and run on <strong>both backends</strong>, with byte-identical output.</p>
 
+<h2 id="step-by-step">Step by step: bind a plain C++ class<a class="hlink" href="#step-by-step" aria-label="link">&#8203;</a></h2>
+<p>A class you already have needs no macros. Name the constructors, members and methods scripts may use, then use the type from either side:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;
+#include &lt;jaiscript/core/dynamic_binder.hpp&gt;
+#include &lt;jaiscript/stdlib/stdlib.hpp&gt;
+#include &lt;iostream&gt;
+
+struct Turret {                                   // 1. an ordinary class
+    std::string name = &quot;turret&quot;;
+    int64_t ammo = 10;
+    Turret() = default;
+    Turret(std::string a_name, int64_t a_ammo) : name(std::move(a_name)), ammo(a_ammo) {}
+    bool fire() { if (ammo == 0) { return false; } --ammo; return true; }
+    double range() const { return 12.5; }
+};
+
+int64_t total_ammo(const Turret&amp; a, const Turret&amp; b) { return a.ammo + b.ammo; }
+
+int main() {
+    auto eng = jai::engine::make();
+    jai::stdlib::register_all(*eng);
+
+    jai::dynamic_binder&lt;Turret&gt;(*eng, &quot;Turret&quot;)   // 2. bind it under a script name
+        .constructor&lt;&gt;()
+        .constructor&lt;std::string, int64_t&gt;()
+        .property(&quot;name&quot;, &amp;Turret::name)
+        .property(&quot;ammo&quot;, &amp;Turret::ammo)
+        .method(&quot;fire&quot;, &amp;Turret::fire)
+        .method(&quot;range&quot;, &amp;Turret::range)
+        .build();
+    eng-&gt;add_function(&quot;total_ammo&quot;, &amp;total_ammo);  // 3. functions that take it
+
+    eng-&gt;execute(R&quot;(                                // 4. scripts construct and call it
+        Turret t = Turret(&quot;north&quot;, 2);
+        t.fire();
+        t.fire();
+        print(t.name, &quot; ammo=&quot;, t.ammo, &quot; fired=&quot;, t.fire(), &quot; range=&quot;, t.range());
+    )&quot;);
+
+    auto east = std::make_shared&lt;Turret&gt;(&quot;east&quot;, 5);  // 5. hand a live C++ object to script
+    eng-&gt;add_global(&quot;east&quot;, eng-&gt;make_object(east));
+    eng-&gt;execute(&quot;east.fire(); east.ammo += 10;&quot;);
+    std::cout &lt;&lt; &quot;C++ sees east.ammo = &quot; &lt;&lt; east-&gt;ammo &lt;&lt; &quot;\n&quot;;
+
+    eng-&gt;execute(R&quot;(var west = new Turret(&quot;west&quot;, 3); print(total_ammo(east, west));)&quot;);
+    auto west = eng-&gt;get_variable(&quot;west&quot;).as&lt;std::shared_ptr&lt;Turret&gt;&gt;();   // 6. and take one back
+    west-&gt;ammo = 99;
+    eng-&gt;execute(&quot;print(west.ammo);&quot;);
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">north ammo=0 fired=false range=12.5
+C++ sees east.ammo = 14
+17
+99</code></pre></div>
+<ul><li><strong>Constructors</strong> are listed by parameter types; scripts pick one by argument count and types. <code>Turret(...)</code> in script makes a value, <code>new Turret(...)</code> a <code>shared_ptr</code> handle.</li>
+<li><strong>Properties</strong> read and write the C++ member directly; a getter-only property (<code>nullptr</code> setter) rejects stores with <code>Cannot assign to 'x': it is read-only</code>.</li>
+<li><strong>Objects cross by identity.</strong> <code>make_object(shared_ptr)</code> wraps the pointer without a copy, so script writes land in C++ (<code>east.ammo</code> is 14) and <code>as&lt;std::shared_ptr&lt;T&gt;&gt;()</code> returns the script's object to C++ shared, not copied.</li>
+<li><strong>Lifetime</strong> follows the <code>shared_ptr</code>: the object lives while either side holds it. <code>add_global_ref</code> instead binds a C++ object or variable you keep alive yourself.</li>
+<li><strong>Errors.</strong> A C++ exception thrown by a bound method reaches the script as a catchable error carrying its <code>what()</code> text (<code>throw std::runtime_error("jammed")</code> is caught as <code>jammed</code>); <a href="01-embedding-quickstart.html#error-surfaces">Error surfaces</a> lists how each call reports failures.</li></ul>
+<p>The rest of this chapter covers what a plain binding leaves out: reflection, save files, signals and inheritance from one declaration (<code>JAI_PROPERTY</code>), and every verb of <a href="#the-fluent-chain-verb-by-verb">the fluent chain</a>.</p>
 <h2 id="three-systems-that-drift">Three systems that drift<a class="hlink" href="#three-systems-that-drift" aria-label="link">&#8203;</a></h2>
 <p>Every engine eventually grows the same three subsystems, usually years apart, usually by different people:</p>
 <ul>

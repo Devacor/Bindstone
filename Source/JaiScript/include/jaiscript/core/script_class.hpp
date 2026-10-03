@@ -450,4 +450,14 @@ inline void apply_member_access_labels(class_definition& def, const class_decl& 
     def.set_nonpublic_members(std::move(nonpublic));
 }
 
+inline bool converting_constructor_takes(const script_value& arg, const type_info& target) {
+    engine* eng = arg.get_engine();
+    auto cls = eng ? eng->get_class_definition(target.type_name) : nullptr;
+    if (!cls || !cls->is_script_class()) { return false; }
+    for (const auto& ctor : static_cast<const script_class_definition&>(*cls).get_constructor_asts()) {
+        if (ctor->parameters.size() == 1 && parameter_admits(ctor->parameters[0], arg)) { return true; }
+    }
+    return false;
+}
+
 } // namespace jai

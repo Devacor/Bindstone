@@ -5,6 +5,7 @@
 
 #include <jaiscript/core/class_definition.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <algorithm>
 #include <climits>
 #include <memory>
 #include <optional>
@@ -109,6 +110,48 @@ inline std::optional<bool> spaceship_rewritten(token_type op, const script_value
     }
 }
 
+inline bool object_declares_method(const script_value& arg, std::string_view name) {
+    auto instance = const_cast<script_value&>(arg).get_class_instance();
+    auto def = instance ? instance->get_class_definition() : nullptr;
+    engine* eng = def ? def->get_engine() : nullptr;
+    if (!eng) { return false; }
+    const auto id = eng->get_symbolizer()->find(name);
+    return id && def->defines_method(*id);
+}
+
+// A one-parameter script constructor of the parameter's class takes the argument (the table's converting row, no chaining;
+// defined beside script_class_definition)
+inline bool converting_constructor_takes(const script_value& arg, const type_info& target);
+
+// The assignment table's rows past the exact type that a by-value parameter takes (docs/static_checking.md), as overload costs:
+// int<->float and bool to a number 1, a to_int/to_float/to_char method and the string and bool rows 2, a converting constructor
+// 3; 0 = not viable. Among several overloads a string never makes a bool parameter viable (Dev ruling 2026-10-02).
+inline size_t table_conversion_cost(const script_value& arg, const parameter& param, bool in_set) {
+    using t = script_value_type;
+    const t to = param.type->base_type;
+    const t from = arg.type();
+    const bool number_to = to == t::jai_int_type || to == t::jai_float_type;
+    if (number_to && (from == t::jai_int_type || from == t::jai_float_type)) { return 1; }
+    if (param.is_reference) { return 0; }
+    switch (to) {
+        case t::jai_int_type:
+        case t::jai_float_type:
+            if (from == t::jai_bool_type) { return 1; }
+            return from == t::jai_object_type && object_declares_method(arg, to == t::jai_int_type ? "to_int" : "to_float") ? 2 : 0;
+        case t::jai_char_type:
+            return from == t::jai_object_type && object_declares_method(arg, "to_char") ? 2 : 0;
+        case t::jai_bool_type:
+            return in_set && (from == t::jai_string_type || from == t::jai_utf8_string_type) ? 0 : 2;
+        case t::jai_string_type:
+        case t::jai_utf8_string_type:
+            return 2;
+        case t::jai_object_type:
+            return converting_constructor_takes(arg, *param.type) ? 3 : 0;
+        default:
+            return 0;
+    }
+}
+
 // Shared script-overload scorer used by method, static-method and constructor dispatch.
 // Priority: 1) all typed + exact match, 2) all typed + conversions (fewest first)
 //           3) var/any parameters (fallback; a typed parameter the argument does not
@@ -154,6 +197,15 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
                                     param.type->base_type != script_value_type::jai_any_type;
             if (has_explicit_type) {
                 auto arg_type = arg.type();
+                auto convert_or_mismatch = [&]() {
+                    all_exact = false;
+                    if (const size_t cost = table_conversion_cost(arg, param, overloads.size() > 1)) {
+                        conversion_count += cost;
+                    } else {
+                        all_convertible = false;
+                        ++mismatches;
+                    }
+                };
 
                 if (arg_type == script_value_type::jai_object_type ||
                     arg_type == script_value_type::jai_shared_ptr_type) {
@@ -174,39 +226,19 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
                                 all_exact = false;
                                 conversion_count++;
                             } else {
-                                all_exact = false;
-                                all_convertible = false;
-                                ++mismatches;
+                                convert_or_mismatch();
                             }
                         } else {
                             // Can't get class def, fall back to name comparison
                             if (instance->get_class_name() != param.type->type_name) {
-                                all_exact = false;
-                                all_convertible = false;
-                                ++mismatches;
+                                convert_or_mismatch();
                             }
                         }
                     } else {
-                        all_exact = false;
-                        all_convertible = false;
-                        ++mismatches;
+                        convert_or_mismatch();
                     }
-                } else {
-                    // For primitives, check base type
-                    if (arg_type != param.type->base_type) {
-                        all_exact = false;
-                        bool is_numeric_conversion =
-                            (arg_type == script_value_type::jai_int_type &&
-                             param.type->base_type == script_value_type::jai_float_type) ||
-                            (arg_type == script_value_type::jai_float_type &&
-                             param.type->base_type == script_value_type::jai_int_type);
-                        if (is_numeric_conversion) {
-                            conversion_count++;
-                        } else {
-                            all_convertible = false;
-                            ++mismatches;
-                        }
-                    }
+                } else if (arg_type != param.type->base_type) {
+                    convert_or_mismatch();
                 }
             } else {
                 // Parameter has no type (var/auto) - accepts anything
@@ -267,16 +299,33 @@ inline std::shared_ptr<function_decl> pick_best_overload(
     return pick_best_overload(overloads, args.data(), args.size());
 }
 
-// Constructor selection when the scorer finds no viable overload: the one constructor the arity admits binds (its parameter
-// converts the argument its slot's way or raises its own text); with several, none does and the caller raises the overload miss
-inline std::shared_ptr<function_decl> sole_arity_candidate(const std::vector<std::shared_ptr<function_decl>>& overloads, size_t argc) {
-    std::shared_ptr<function_decl> sole;
+// Constructor and method selection when the scorer finds no viable overload: the one overload the arity admits binds (its parameter
+// converts the argument its slot's way or raises its own text); with several, none does and the caller raises the overload miss.
+// A string never makes a bool parameter viable among overloads (Dev ruling 2026-10-02), here as in the scorer.
+inline const std::shared_ptr<function_decl>* sole_arity_candidate(const std::vector<std::shared_ptr<function_decl>>& overloads,
+                                                                  const script_value* args, size_t argc) {
+    const std::shared_ptr<function_decl>* sole = nullptr;
     for (const auto& o : overloads) {
         if (!arity_accepts(o->parameters, argc)) { continue; }
         if (sole) { return nullptr; }
-        sole = o;
+        sole = &o;
+    }
+    if (!sole || overloads.size() < 2) { return sole; }
+    for (size_t i = 0; i < argc; ++i) {
+        const parameter& p = (*sole)->parameters[i];
+        const auto from = args[i].deref().type();
+        if (p.type && !p.is_reference && p.type->base_type == script_value_type::jai_bool_type &&
+            (from == script_value_type::jai_string_type || from == script_value_type::jai_utf8_string_type)) {
+            return nullptr;
+        }
     }
     return sole;
+}
+
+inline std::shared_ptr<function_decl> sole_arity_candidate(const std::vector<std::shared_ptr<function_decl>>& overloads,
+                                                           const std::vector<script_value>& args) {
+    const auto* sole = sole_arity_candidate(overloads, args.data(), args.size());
+    return sole ? *sole : nullptr;
 }
 
 // Cache-aware instance-method overload resolution over method_overloads_.
@@ -294,7 +343,14 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
 
     const auto& overloads = it->second;
 
-    if (overloads.size() > 1) {
+    // one declaration binds by arity and converts like a free function's parameters (the one table)
+    if (overloads.size() == 1) {
+        if (arity_accepts(overloads[0]->parameters, argc)) { return &overloads[0]; }
+        ec = make_error_code(runtime_error_code::argument_count_mismatch);
+        return nullptr;
+    }
+
+    {
         overload_cache_key cache_key{name_id, argc};
         auto cache_it = overload_resolution_cache_.find(cache_key);
         if (cache_it != overload_resolution_cache_.end()) {
@@ -303,19 +359,24 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
     }
 
     const auto* best_ast = pick_best_overload_ref(overloads, args, argc);
+    if (!best_ast) { best_ast = sole_arity_candidate(overloads, args, argc); }
     if (!best_ast) {
         ec = make_error_code(runtime_error_code::argument_count_mismatch);
         return nullptr;
     }
 
-    if (overloads.size() > 1) {
+    {
         size_t arity_match_count = 0;
         for (const auto& o : overloads) {
             if (arity_accepts(o->parameters, argc)) {
                 ++arity_match_count;
             }
         }
-        if (arity_match_count == 1) {
+        // a bool parameter's viability depends on the argument (a string never makes it viable), so its answer is not the arity's
+        const bool takes_bool = std::any_of((*best_ast)->parameters.begin(), (*best_ast)->parameters.end(), [](const parameter& p) {
+            return p.type && !p.is_reference && p.type->base_type == script_value_type::jai_bool_type;
+        });
+        if (arity_match_count == 1 && !takes_bool) {
             overload_cache_key cache_key{name_id, argc};
             return &overload_resolution_cache_.insert_or_assign(cache_key, *best_ast).first->second;
         }

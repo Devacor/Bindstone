@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <cstdio>
@@ -364,6 +365,42 @@ namespace jai::fuzz {
 			cr.diff = diff;
 		}
 		return cr;
+	}
+
+	// ------------------------------------------------------------------
+	// Metamorphic renaming: every generated name (a letter or two after an optional band prefix, then digits) gains a
+	// suffix. Nothing the language defines may depend on a name's spelling, so the renamed program's outcome, with the
+	// suffix taken back out, is the original's on the same backend.
+	// ------------------------------------------------------------------
+	inline const std::regex& generated_name_pattern() {
+		static const std::regex pattern(R"(\b(u?[A-Za-z]{1,2}[0-9]+)\b)");
+		return pattern;
+	}
+
+	inline program renamed(const program& p) {
+		program out = p;
+		for (auto& seg : out.segments) { seg = std::regex_replace(seg, generated_name_pattern(), "$1_r"); }
+		return out;
+	}
+
+	inline std::string unrenamed(const std::string& text) {
+		static const std::regex pattern(R"(\b(u?[A-Za-z]{1,2}[0-9]+)_r\b)");
+		return std::regex_replace(text, pattern, "$1");
+	}
+
+	// "" when the renamed run's outcome, names restored, is the original's
+	inline std::string rename_difference(const run_outcome& original, const run_outcome& renamed_run) {
+		std::string diff;
+		for (size_t i = 0; i < original.segment_results.size() && i < renamed_run.segment_results.size(); ++i) {
+			const std::string back = unrenamed(renamed_run.segment_results[i]);
+			if (original.segment_results[i] != back) {
+				diff += "  segment " + std::to_string(i) + " result:\n    original: " + original.segment_results[i] + "\n    renamed:  " + back + "\n";
+			}
+		}
+		const std::string printed = unrenamed(renamed_run.printed);
+		if (original.printed != printed) { diff += "  printed output differs " + first_difference(original.printed, printed) + "\n"; }
+		if (original.alive != renamed_run.alive) { diff += "  engine-alive-after differs\n"; }
+		return diff;
 	}
 
 	// ------------------------------------------------------------------

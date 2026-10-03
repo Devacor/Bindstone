@@ -46,6 +46,8 @@
 //                                           model captures each by-value argument where it is evaluated)
 //   jaiscript_fuzz --miss-every N           the vm side misses at every Nth plain cell instruction (a build with
 //                                           JAISCRIPT_MISS_INJECTION defined: the flush and the continuation contract at every position)
+//   jaiscript_fuzz --rename                 the metamorphic renaming oracle too: every generated name gains a suffix, and each
+//                                           backend's outcome (names restored) must equal its run of the original
 //   jaiscript_fuzz --census                the block census instead of the differential: per segment label (each band, the main
 //                                           program, the reload; --order-band / --order-args for the ordering programs) the share of
 //                                           programs that compiled a closed loop, entered a block and entered a closed block, the refused
@@ -109,6 +111,7 @@ namespace {
 		bool order_args = false;
 		bool jaibite_mutate = false;
 		bool census = false;
+		bool rename = false;   // the metamorphic renaming oracle on top of the differential
 		std::string run_file; // triage: compare an on-disk program instead of a generated one
 		std::string exe_path;
 	};
@@ -126,6 +129,7 @@ namespace {
 			else if (a == "--iterations") { const char* v = next("--iterations"); if (!v) return false; opt.iterations = std::stoull(v); }
 			else if (a == "--max-depth") { const char* v = next("--max-depth"); if (!v) return false; opt.max_depth = std::stoi(v); }
 			else if (a == "--minimize") { opt.minimize_flag = true; }
+			else if (a == "--rename") { opt.rename = true; }
 			else if (a == "--corpus") { const char* v = next("--corpus"); if (!v) return false; opt.corpus = v; }
 			else if (a == "--timeout-ms") { const char* v = next("--timeout-ms"); if (!v) return false; opt.timeout_ms = std::stod(v); }
 			else if (a == "--child") { opt.child = true; }
@@ -208,6 +212,30 @@ namespace {
 				          << "\n";
 			}
 			return verdict::budget_skip;
+		}
+		if (cr.kind == compare_result::agree && opt.rename) {
+			// a renamed program must answer as the original did, on each backend (names carry no meaning)
+			const program q = renamed(p);
+			run_config rc;
+			rc.budget_seconds = budget_seconds;
+			rc.proofs = opt.proofs;
+			rc.param_alias = opt.param_alias;
+			rc.passes = opt.passes;
+			rc.miss_every = opt.miss_every;
+			rc.lowering = opt.lowering == 0 ? -1 : opt.lowering == 2 ? 1 : 0;
+			std::string diff;
+			for (int side = 0; side < 2; ++side) {
+				rc.use_vm = side == 1;
+				const run_outcome r = run_program(q, rc);
+				if (r.budget_hit) { return verdict::budget_skip; }
+				const std::string d = rename_difference(side ? cr.vm : cr.interp, r);
+				if (!d.empty()) { diff += std::string(side ? "  [vm]\n" : "  [interp]\n") + d; }
+			}
+			if (!diff.empty()) {
+				std::cout << "\n=== RENAME DIVERGENCE seed " << seed << " ===\n" << diff;
+				write_corpus_entry(opt, p, &q, diff, std::string());
+				return verdict::diverge_new;
+			}
 		}
 		if (cr.kind == compare_result::agree) {
 			if (verbose) {
@@ -446,6 +474,7 @@ namespace {
 		if (opt.blocks == band_mode::never) cmd += " --no-block-shapes";
 		if (opt.local_alias_band == band_mode::always) cmd += " --local-alias-band";
 		if (opt.local_alias_band == band_mode::never) cmd += " --no-local-alias-band";
+		if (opt.rename) cmd += " --rename";
 		if (opt.order) cmd += opt.order_args ? " --order-args" : " --order-band";
 		if (opt.miss_every) cmd += " --miss-every " + std::to_string(opt.miss_every);
 		if (opt.jaibite_mutate) cmd += " --jaibite-mutate";

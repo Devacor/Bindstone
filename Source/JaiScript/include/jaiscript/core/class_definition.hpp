@@ -348,6 +348,16 @@ public:
         engine_ = nullptr;
     }
     virtual ~class_definition() { detach_for_teardown(); }
+    // Engine teardown: the values a definition holds can reach it back (a method's dispatch names its class, an instance's
+    // deleter holds its definition, a method's scope holds the program environment): dropping them lets it die
+    void release_values_for_teardown() noexcept {
+        methods_.clear();
+        static_methods_.clear();
+        field_defaults_.clear();
+        static_field_values_.clear();
+        all_field_defaults_cache_.clear();
+        instance_plan_.clear();
+    }
 
     class_definition(std::string_view name, uint64_t type_id, engine* eng)
         : name_(name), type_id_(type_id), type_info_(nullptr), engine_(eng),

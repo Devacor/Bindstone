@@ -129,6 +129,7 @@ struct options {
 	bool debug = true;                     // DAP listener on by default (localhost, free until attach)
 	bool unsafe_parallel = false;
 	bool param_alias = true;               // engine::parameter_alias (--no-param-alias: every by-value parameter clones)
+	bool local_alias = true;               // engine::local_alias (--no-local-alias: every by-value local declaration clones)
 	int debug_port = 0;                    // 0 = default base (see attach_debugger)
 	int pause_mode = -1;                   // -1 auto (solo console), 0 never, 1 always
 	bool selftest = false;
@@ -213,6 +214,7 @@ void print_usage() {
 		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
 		"  --no-debug            do not stand up the DAP debug listener\n"
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
+		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
 		"  --debug-port=N        first port the DAP listener tries (default 52477, probing +10)\n"
 		"  --pause / --no-pause  force / suppress the \"press Enter to close\" hold after a file\n"
 		"                        run (auto: pauses only when the console window is exclusively\n"
@@ -270,6 +272,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--no-debug") { opt.debug = false; }
 		else if (a == "--unsafe-parallel") { opt.unsafe_parallel = true; }
 		else if (a == "--no-param-alias") { opt.param_alias = false; }
+		else if (a == "--no-local-alias") { opt.local_alias = false; }
 		else if (a == "--pause") { opt.pause_mode = 1; }
 		else if (a == "--no-pause") { opt.pause_mode = 0; }
 		else if (a == "--selftest") { opt.selftest = true; }
@@ -1138,6 +1141,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);
 	eng->parameter_alias(opt.param_alias);
+	eng->local_alias(opt.local_alias);
 	if (!opt.disasm.empty() || !opt.manifest.empty()) {
 		auto listing = opt.disasm.empty() ? nullptr : std::make_shared<std::ofstream>(opt.disasm, std::ios::binary | std::ios::trunc);
 		auto manifest = opt.manifest.empty() ? nullptr : std::make_shared<std::ofstream>(opt.manifest, std::ios::binary | std::ios::trunc);

@@ -26,6 +26,7 @@ struct host_options {
 	uint32_t miss_every = 0;         // jai: engine::cells_miss_every (--miss-every N; a build with JAISCRIPT_MISS_INJECTION)
 	std::string coverage;            // jai: the vm's execution-coverage census written here at exit (--coverage FILE; a build with JAISCRIPT_VM_COVERAGE)
 	bool param_alias = true;         // jai: engine::parameter_alias (--no-param-alias for an A/B on one binary)
+	bool local_alias = true;         // jai: engine::local_alias (--no-local-alias for an A/B on one binary)
 	int64_t width = 0;               // 0 = autodetect
 	int64_t height = 0;
 	double target_fps = 30.0;

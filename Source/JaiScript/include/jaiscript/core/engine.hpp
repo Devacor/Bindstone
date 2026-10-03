@@ -1067,6 +1067,12 @@ namespace jai {
         // clone, observationally identical - the differential gates flip it
         void parameter_alias(bool on);
         bool parameter_alias() const;
+        // Read-only by-value local declarations (`T x = lvalue;`) that bound the source's object instead of cloning it
+        // (main thread; the local elision's test observable) and that elision's kill switch (default on)
+        uint64_t local_alias_binds() const;
+        void note_local_alias_bind();
+        void local_alias(bool on);
+        bool local_alias() const;
 
         // Script-class SHAPE change (first definition, non-identical redefinition): the static
         // checker's surface moved, cached entries re-check (and re-stamp proofs) at their next

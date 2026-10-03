@@ -645,7 +645,17 @@ definition and host registration):
   string - objects and arrays compare by identity, so `p.child == g.child` would tell an
   alias from a copy. Read-only builtins on a receiver that is statically a container or
   string (`p.ids.size()`) are reads; rebinding the parameter itself (`p = x`) is not an
-  escape (it replaces the slot, never the referent).
+  escape (it replaces the slot, never the referent);
+- a reference of the callee may name a part of the caller's argument (`f(a, a.hp)`), so a write
+  through one (another reference parameter, a reference local, a by-reference loop variable)
+  escapes the parameter whenever the reference's type can occur in the parameter's value tree
+  (`type_may_hold`: fields, elements, subclasses' fields); a reference argument rooted at the
+  parameter that the callee writes (`w(p.x)`, `detail/ref_param_writes.hpp`) mutates it;
+- program-scope member chains are read in place when every step is a declared field with no
+  user accessor (`AFFIXES[i].code`); a mutating method on one, a writing reference argument
+  rooted in program state and a by-reference loop over it refuse the proof;
+- no script class of the program declares a destructor: the elided copy's destructor would
+  never run, and an instance dying inside the call runs code the walk cannot see.
 
 A proven parameter binds the argument by handle (`script_value(derefed)` instead of
 `.clone()`) on both backends, in the exact-class fast branch and after the conversion
@@ -660,6 +670,39 @@ programs with by-value class parameters, on vs off, both backends) and
 `jaiscript_fuzz --no-param-alias`. Measured (vm): a serial `xy(Vec3)` call 430 -> 113 ns,
 a struct with an array field 830 -> 476, the zip by-value helper 7.1 -> 2.5 ms per 40k
 (level with by-reference); GLOOM neutral (its helpers already take `var&`).
+
+### Read-only by-value locals
+
+`T x = lvalue;` in a plain function (T a script class, an array or a map; the initializer a
+name, member or subscript chain) deep-copies its source; the copy goes when nothing can tell
+(`prove_local_aliases`, the same walk in `proof_mode` with a `local_mode` on top):
+
+- the source sits in a by-value tree: its chain roots at a by-value local, parameter or
+  program-scope variable and every step is statically a field, element or value held by
+  value (never a handle, `var` or reference), and its static type is exactly T;
+- the statements after the declaration in its block are walked at depth 0 with the
+  function's locals visible there, x as the root (the parameter rules: reads through
+  primitive/string terminals and read-only builtins only), and every function they call is
+  walked as the parameter proof walks its callees; a store into x itself also escapes it;
+- nothing in that range may write the source: a write rooted at a local lands only in that
+  local's own value tree (a by-value chain from a by-value local other than the source's
+  root) or replaces a local's slot; a write through a reference, a handle or a loop variable
+  escapes, and a callee's reference parameter defers to its call sites, which judge the
+  argument they pass;
+- no script class declares a destructor (as for parameters).
+
+The mint stamps every candidate declaration of a plain function with its home (parameters,
+return type, body; `variable_decl::alias_home`); the declaration's first run in a definition
+epoch proves every candidate of its home and stamps the home's verdicts (a graft's copy of
+the declaration reads its original's verdict). At run time a proven
+declaration whose value's type is exactly T and passes the argument-side gate
+(`parameter_alias_allows`: not nocopy, not a host object) binds the source's object instead of
+the clone, on both backends at the one clone site of the declaration. Declarations in a
+switch's cases, in methods, lambdas and coroutines keep the copy. Kill switch
+`engine::local_alias(false)` (runner `--no-local-alias`); counter `engine::local_alias_binds()`;
+gates `parameter_alias_differential_gate` (the read-only local band always on, both switches
+flipped) and `jaiscript_fuzz --no-param-alias` (both switches; `--local-alias-band` forces the
+band).
 
 ## Appendix: possible future — background jobs on separate engines
 

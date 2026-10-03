@@ -7071,9 +7071,14 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             }
 
             // Only copy if initializing from an lvalue (existing object); temporaries
-            // move. The kernel deep-copies values and shares shared_ptr handles.
+            // move. The kernel deep-copies values and shares shared_ptr handles; a proven
+            // read-only local binds the object itself (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
             if (reference_init || is_lvalue_expression(decl->initializer.get())) {
-                value = clone_for_assignment(value);
+                if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !parallel_worker_ && !engine_->parallel_region_active())) {
+                    if (!parallel_worker_) { engine_->note_local_alias_bind(); }
+                } else {
+                    value = clone_for_assignment(value);
+                }
             }
             // else: Initializing from a temporary - use move semantics (no copy)
 
@@ -12309,6 +12314,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
             nullptr,  // No closure needed - environment stack handles everything
             decl->local_count  // Slot count for stack allocation
         );
+        detail::stamp_local_alias_homes(*scriptFunc);
     }
     scriptFunc->unit = decl_unit;
     scriptFunc->block_defined = environment_->block_scope();

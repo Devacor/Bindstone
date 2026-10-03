@@ -412,7 +412,14 @@ engine stays usable", not by `check_throws`.
   unobservable by construction, `nocopy` still raises, methods/coroutines excluded in v1.
   Proof = the parallel admission walk in `proof_mode` (`prove_readonly_parameters`), cached per
   function against `engine::definition_epoch()`; kill switch `engine::parameter_alias(false)`,
-  gates `parameter_alias_differential_gate` + `jaiscript_fuzz --no-param-alias`.
+  gates `parameter_alias_differential_gate` + `jaiscript_fuzz --no-param-alias`. A write through a
+  reference whose type can occur in the parameter's value tree escapes it, and a program with a script
+  destructor elides nothing. **Read-only by-value locals** (`T x = lvalue;` in a plain function) bind the
+  source's object the same way when the statements after the declaration (and their callees) neither use x
+  whole nor write the source (`prove_local_aliases`, `local_mode`: writes only into a local's own by-value
+  tree, never through a reference or handle; verdicts on `variable_decl::alias_home` per definition
+  epoch, graft copies included); kill switch `engine::local_alias(false)` / runner `--no-local-alias`, counter
+  `engine::local_alias_binds()`, same gates (the read-only local band). `docs/parallel_design.md` §15.
 - **Operator overloading** (Dev ruling 2026-09-30): a script class declares C++'s overloadable set less `&& || , ->
   new delete` - binary `+ - * / % & | ^ << >> < > <= >= == != <=>`, unary `- + ~` (told apart by the parameter count),
   `=`, `[]`, `()`. An operator runs only when the (left) operand is a class instance whose chain declares it (unary:

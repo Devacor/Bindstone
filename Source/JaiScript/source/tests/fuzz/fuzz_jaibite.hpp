@@ -29,6 +29,7 @@ namespace jai::fuzz {
 		result->static_checking(check_mode::off);
 		result->type_proofs(proofs);
 		result->parameter_alias(param_alias);
+		result->local_alias(param_alias);
 		result->execution_budget(0.25);
 		result->memory_cap(64 * 1024 * 1024);
 		return result;

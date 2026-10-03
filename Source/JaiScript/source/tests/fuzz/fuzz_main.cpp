@@ -21,7 +21,9 @@
 //                                           a VM crash doesn't kill the campaign)
 //   jaiscript_fuzz --no-suppressions        report known (suppressed) divergences too
 //   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
-//   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false)
+//   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false) and engine::local_alias(false)
+//   jaiscript_fuzz --local-alias-band       append the read-only local band (by-value locals beside writes of their sources) to
+//                                           every program (default: its own roll, ~35%); --no-local-alias-band never appends it
 //   jaiscript_fuzz --no-passes              run both backends with engine::ir_passes(false)
 //   jaiscript_fuzz --no-lowering            run both backends with engine::aggregate_lowering(false) (by default the interpreter
 //                                           runs boxed and the vm lowered, so every run is the lowering's differential)
@@ -102,6 +104,7 @@ namespace {
 		band_mode math_band = band_mode::sometimes;
 		band_mode call_args_band = band_mode::sometimes;
 		band_mode blocks = band_mode::sometimes;
+		band_mode local_alias_band = band_mode::sometimes;
 		bool order = false;
 		bool order_args = false;
 		bool jaibite_mutate = false;
@@ -144,6 +147,8 @@ namespace {
 			else if (a == "--census") { opt.census = true; }
 			else if (a == "--block-shapes") { opt.blocks = band_mode::always; }
 			else if (a == "--no-block-shapes") { opt.blocks = band_mode::never; }
+			else if (a == "--local-alias-band") { opt.local_alias_band = band_mode::always; }
+			else if (a == "--no-local-alias-band") { opt.local_alias_band = band_mode::never; }
 			else if (a == "--order-band") { opt.order = true; }
 			else if (a == "--order-args") { opt.order = true; opt.order_args = true; }
 			else if (a == "--miss-every") { const char* v = next("--miss-every"); if (!v) return false; opt.miss_every = static_cast<uint32_t>(std::stoul(v)); }
@@ -190,7 +195,7 @@ namespace {
 	enum class verdict { agree, diverge_new, diverge_suppressed, budget_skip };
 
 	verdict run_seed(const options& opt, uint64_t seed, bool verbose) {
-		program p = generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
+		program p = generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks, opt.local_alias_band);
 		double budget_seconds = opt.timeout_ms / 1000.0;
 		compare_result cr = compare_program(p, budget_seconds, opt.proofs, opt.param_alias, opt.passes, opt.miss_every, opt.lowering);
 		opt.lowered_locals += cr.vm.lowered_locals;
@@ -399,7 +404,7 @@ namespace {
 		}
 		for (uint64_t seed = begin; seed < end; ++seed) {
 			if ((seed - begin) % 500 == 0 && seed != begin) { std::cout << "[census] seed " << seed << "\n"; std::cout.flush(); }
-			program p = !opt.run_file.empty() ? from_file : opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
+			program p = !opt.run_file.empty() ? from_file : opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks, opt.local_alias_band);
 			if (opt.order && opt.run_file.empty()) p.labels = { opt.order_args ? "order-args" : "order" };
 			bool budget_hit = false;
 			for (const auto& f : census::measure(p, opt.timeout_ms / 1000.0, opt.proofs, opt.miss_every, &budget_hit)) {
@@ -439,6 +444,8 @@ namespace {
 		if (opt.call_args_band == band_mode::never) cmd += " --no-call-args-band";
 		if (opt.blocks == band_mode::always) cmd += " --block-shapes";
 		if (opt.blocks == band_mode::never) cmd += " --no-block-shapes";
+		if (opt.local_alias_band == band_mode::always) cmd += " --local-alias-band";
+		if (opt.local_alias_band == band_mode::never) cmd += " --no-local-alias-band";
 		if (opt.order) cmd += opt.order_args ? " --order-args" : " --order-band";
 		if (opt.miss_every) cmd += " --miss-every " + std::to_string(opt.miss_every);
 		if (opt.jaibite_mutate) cmd += " --jaibite-mutate";
@@ -477,7 +484,7 @@ int main(int argc, char** argv) {
 	}
 
 	if (opt.dump) {
-		program p = generate_program(opt.seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
+		program p = generate_program(opt.seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks, opt.local_alias_band);
 		std::cout << p.joined();
 		return 0;
 	}
@@ -571,7 +578,7 @@ int main(int argc, char** argv) {
 		{
 			// Parse-validity metric (jaibite throws on hard parse errors; recoverable
 			// ones synchronize silently, so this is a lower bound on brokenness only).
-			program p = opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks);
+			program p = opt.order ? order::generate(seed, opt.order_args).original : generate_program(seed, opt.max_depth, opt.band, opt.math_band, opt.call_args_band, opt.blocks, opt.local_alias_band);
 			bool ok = true;
 			try {
 				auto probe = jai::engine::make();

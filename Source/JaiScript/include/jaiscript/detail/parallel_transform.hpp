@@ -38,6 +38,8 @@ namespace jai {
     class parallel_for_stmt;
     class type_info;
     struct script_defined_function;
+    class variable_decl;
+    struct local_alias_home;
 }
 
 namespace jai::detail {
@@ -332,6 +334,27 @@ namespace jai::detail {
     // by-value pass must keep raising whatever the callee does), an array or a map. Host
     // objects keep the clone.
     bool parameter_alias_allows(const script_value& derefed);
+
+    // Read-only by-value local elision: a function's `T x = lvalue;` declarations whose proof (the parameter proof's walk
+    // over the statements after the declaration, plus: no write in that range may reach the source's object) holds bind
+    // the source's object instead of a clone. stamp_local_alias_homes marks a plain function's candidate declarations
+    // when it is minted; prove_local_aliases stamps every verdict of one home (main thread, no parallel region).
+    void stamp_local_alias_homes(const script_defined_function& fn);
+    void prove_local_aliases(engine& eng, const local_alias_home& home);
+    // The declaration may bind `value` (its initializer's derefed value) without the clone: proven for the current
+    // definition epoch, the value's type is exactly the declared one, and the argument-side gate admits it
+    inline bool local_alias_binds(engine& eng, const variable_decl& d, const script_value& value, bool may_prove) {
+        const local_alias_home* home = d.alias_home.get();
+        if (!home || !eng.local_alias()) { return false; }
+        const uint64_t epoch = eng.definition_epoch();
+        if (home->epoch != epoch) {
+            if (!may_prove) { return false; }
+            prove_local_aliases(eng, *home);
+            home->epoch = epoch;
+        }
+        return d.alias_index < home->verdicts.size() && home->verdicts[d.alias_index] && value.get_type_info().get() == d.type.get() &&
+               parameter_alias_allows(value);
+    }
 
     // Inferred-const reference parameters (detail/ref_param_writes.hpp): the body never
     // writes through reference parameter i, callees resolved through the global

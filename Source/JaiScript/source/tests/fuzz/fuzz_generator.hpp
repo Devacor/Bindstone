@@ -16,6 +16,7 @@
 #include "fuzz_math_band.hpp"
 #include "fuzz_callargs_band.hpp"
 #include "fuzz_block_band.hpp"
+#include "fuzz_local_alias_band.hpp"
 
 #include <string>
 #include <vector>
@@ -376,9 +377,9 @@ namespace jai::fuzz {
 	class generator {
 	public:
 		generator(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never, band_mode math_mode = band_mode::never,
-		          band_mode call_args_mode = band_mode::never, band_mode blocks_mode = band_mode::never)
+		          band_mode call_args_mode = band_mode::never, band_mode blocks_mode = band_mode::never, band_mode local_alias_mode = band_mode::never)
 			: rng_(mix64(seed + 0xD1B54A32D192ED03ULL)), max_depth_(max_expr_depth), seed_(seed), band_(band), math_(math_mode), call_args_(call_args_mode),
-			  blocks_(blocks_mode), block_(seed) {}
+			  blocks_(blocks_mode), local_alias_(local_alias_mode), block_(seed) {}
 
 		program generate() {
 			program p;
@@ -420,6 +421,9 @@ namespace jai::fuzz {
 			call_args_band cband(seed_);
 			const bool call_args_roll = cband.roll();
 			if (call_args_ == band_mode::always || (call_args_ == band_mode::sometimes && call_args_roll)) { p.segments.push_back(cband.emit()); p.labels.push_back("call-args"); }
+			local_alias_band lband(seed_);
+			const bool local_alias_roll = lband.roll();
+			if (local_alias_ == band_mode::always || (local_alias_ == band_mode::sometimes && local_alias_roll)) { p.segments.push_back(lband.emit()); p.labels.push_back("local-alias"); }
 			p.segments.push_back(join());
 			p.labels.push_back("main");
 
@@ -448,6 +452,7 @@ namespace jai::fuzz {
 		band_mode math_;
 		band_mode call_args_;
 		band_mode blocks_;
+		band_mode local_alias_;
 		block_band block_;
 		bool blocks_on_ = false;
 		bool wrapped_ = false;
@@ -1903,8 +1908,9 @@ namespace jai::fuzz {
 	};
 
 	inline program generate_program(uint64_t seed, int max_expr_depth = 4, band_mode band = band_mode::never, band_mode math_mode = band_mode::never,
-	                                band_mode call_args_mode = band_mode::never, band_mode blocks_mode = band_mode::never) {
-		return generator(seed, max_expr_depth, band, math_mode, call_args_mode, blocks_mode).generate();
+	                                band_mode call_args_mode = band_mode::never, band_mode blocks_mode = band_mode::never,
+	                                band_mode local_alias_mode = band_mode::never) {
+		return generator(seed, max_expr_depth, band, math_mode, call_args_mode, blocks_mode, local_alias_mode).generate();
 	}
 
 } // namespace jai::fuzz

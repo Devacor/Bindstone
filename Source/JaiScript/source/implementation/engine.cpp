@@ -1569,6 +1569,8 @@ struct engine::implementation {
     }
     uint64_t parameter_alias_binds_ = 0;
     bool parameter_alias_ = true;
+    uint64_t local_alias_binds_ = 0;
+    bool local_alias_ = true;
 
     // Empty result = caching inactive for this source (a .jaibite loaded as source
     // must never overwrite itself).
@@ -3922,6 +3924,22 @@ void engine::parameter_alias(bool on) {
 
 bool engine::parameter_alias() const {
     return impl->parameter_alias_;
+}
+
+uint64_t engine::local_alias_binds() const {
+    return impl->local_alias_binds_;
+}
+
+void engine::note_local_alias_bind() {
+    ++impl->local_alias_binds_;
+}
+
+void engine::local_alias(bool on) {
+    impl->local_alias_ = on;
+}
+
+bool engine::local_alias() const {
+    return impl->local_alias_;
 }
 
 void engine::note_class_shape_change() {

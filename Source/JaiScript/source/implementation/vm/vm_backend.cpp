@@ -11586,9 +11586,14 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 		}
 
 		// Lvalue-read initializers copy through the kernel (values deep-copy,
-		// shared_ptr handles share); temporaries move
+		// shared_ptr handles share); temporaries move; a proven read-only local binds the
+		// object itself (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
 		if (lvalue_init || reference_init) {
-			value = clone_for_assignment(value);
+			if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !parallel_worker_ && !engine_->parallel_region_active())) {
+				if (!parallel_worker_) { engine_->note_local_alias_bind(); }
+			} else {
+				value = clone_for_assignment(value);
+			}
 		}
 
 		if (value.is_array() || value.is_map()) {

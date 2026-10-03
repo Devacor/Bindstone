@@ -254,11 +254,11 @@ namespace jai::vm {
         bool compile_no_result_expression(const expression_ptr& expr);
         // Fused subscript store shared by the expression and statement (no_result) forms;
         // false = the shape doesn't fuse and the caller compiles the unfused sequence
-        bool try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site);
+        bool try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound = k_invalid_u32);
         // The chunk::string_target_sites entry of a subscript store target (k_invalid_u32 when
         // its base can only be a temporary or arrives as its own reference)
         uint32_t string_target_site_for(const expression_ptr& target);
-        bool try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site);
+        bool try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound = k_invalid_u32);
         bool try_emit_fused_push(const std::shared_ptr<call_expr>& call);
         // Branch-position condition: &&/|| thread straight to conditional jumps (no bool
         // materialization; each comparison pairs into fused_cmp_jump). Falsy control lands

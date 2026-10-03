@@ -299,6 +299,7 @@ namespace jai::vm {
         op_c_load_f,        // a = dst cell, b = the pinned int index cell, c = the original ip: C_LOAD of a float element into a float cell (a float buffer read in place; anything else runs C_LOAD)
         // pinned compare-jumps by kind: a = left cell, b = right cell (the k forms: a constant index), c = the copy ip taken when false | 0x80000000 (jump when true)
         op_c_jlt_ff, op_c_jle_ff, op_c_jgt_ff, op_c_jge_ff, op_c_jlt_ffk, op_c_jle_ffk, op_c_jgt_ffk, op_c_jge_ffk, op_c_jlt_ii, op_c_jle_ii, op_c_jgt_ii, op_c_jge_ii, op_c_jlt_iik, op_c_jle_iik, op_c_jgt_iik, op_c_jge_iik,
+        op_index_compound_operand, // a = fused_index_protos index (compound_kind set), b = index_flag_lvalue_shape?: `a[i] op= v;` in statement position, the value, container and index as operands; the read-modify-write is op_index_compound_fused's
         op_halt,
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
@@ -650,6 +651,7 @@ namespace jai::vm {
             case opcode::op_c_jge_iik: return "C_JGE_IIK";
             case opcode::op_cells_resume: return "CELLS_RESUME";
             case opcode::op_ref_target_store: return "REF_TARGET_STORE";
+            case opcode::op_index_compound_operand: return "INDEX_COMPOUND_OPERAND";
             case opcode::op_halt: return "HALT";
         }
         return "UNKNOWN";

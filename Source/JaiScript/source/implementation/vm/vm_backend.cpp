@@ -10254,6 +10254,52 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	script_array* node = const_cast<script_array*>(cs.site_node[f.ip - loop.copy_head]);   // resolved at entry
 	if (!node || index < 0 || static_cast<size_t>(index) >= node->size()) return miss();
 	const size_t at = static_cast<size_t>(index);
+	if (p.compound) {
+		// `a[i] op= v`: the element read in place, the operation by the kinds (an int pair exact, a float on either side a float), and the
+		// result stored by the store's rows below; an overflow, a zero divisor or another buffer kind is the general compound's
+		if (has_custom_numeric_ops_ || (operator_table_ && operator_table_->any())) return miss();
+		const uint8_t ki = static_cast<uint8_t>(script_value::TYPEID_INT), kf = static_cast<uint8_t>(script_value::TYPEID_FLOAT);
+		uint8_t ek; int64_t eb;
+		if (node->kind() == script_array::kind_t::i64) { ek = ki; eb = static_cast<int64_t>(node->ints()[at]); }
+		else if (node->kind() == script_array::kind_t::f64) { ek = kf; eb = cell_bits_of_float(node->floats()[at]); }
+		else if (node->kind() == script_array::kind_t::hetero) {   // an untyped element (a typed var array was refused at entry): its own int or float
+			const script_value& el = node->values()[at];
+			if (el.raw_storage_index() == script_value::TYPEID_INT) { ek = ki; eb = static_cast<int64_t>(el.unchecked_as_int()); }
+			else if (el.raw_storage_index() == script_value::TYPEID_FLOAT) { ek = kf; eb = cell_bits_of_float(el.unchecked_as_float()); }
+			else return miss();
+		}
+		else return miss();
+		const token_type op = compound_kind_token(p.compound_kind);
+		if (ek == ki && vkind == ki) {
+			const script_int a = static_cast<script_int>(eb), b = static_cast<script_int>(vbits);
+			script_int r; bool ok = true;
+			switch (op) {
+			case token_type::plus: ok = ints::try_add(a, b, r); break;
+			case token_type::minus: ok = ints::try_sub(a, b, r); break;
+			case token_type::star: ok = ints::try_mul(a, b, r); break;
+			case token_type::slash: ok = b != 0 && ints::try_div(a, b, r); break;
+			case token_type::percent: ok = b != 0; if (ok) { r = ints::mod(a, b); } break;
+			default: ok = false; break;
+			}
+			if (!ok) return miss();
+			vbits = static_cast<int64_t>(r);
+		} else {
+			const script_float a = ek == ki ? static_cast<script_float>(static_cast<script_int>(eb)) : cell_float_of_bits(eb);
+			const script_float b = vkind == ki ? static_cast<script_float>(static_cast<script_int>(vbits)) : cell_float_of_bits(vbits);
+			script_float r; bool ok = true;
+			switch (op) {
+			case token_type::plus: r = a + b; break;
+			case token_type::minus: r = a - b; break;
+			case token_type::star: r = a * b; break;
+			case token_type::slash: ok = b != 0.0; if (ok) { r = a / b; } break;
+			case token_type::percent: ok = b != 0.0; if (ok) { r = std::fmod(a, b); } break;
+			default: ok = false; break;
+			}
+			if (!ok) return miss();
+			vkind = kf; vbits = cell_bits_of_float(r);
+		}
+		vstamp = type_info_ptr{vkind == ki ? ti_int_ : ti_float_};   // the kernel's result carries the canonical stamp; an untyped element takes it
+	}
 	switch (node->kind()) {
 	case script_array::kind_t::i64:
 		if (vkind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { const script_float d = cell_float_of_bits(vbits); if (!detail::float_fits_script_int(d)) return miss(); node->ints()[at] = static_cast<script_int>(d); }
@@ -11329,6 +11375,40 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 	stack_.push_back(std::move(rhs));
 	vm_instruction compound_ins{opcode::op_index_compound, ins.a, 0, 0};
 	return exec_index_compound(f, compound_ins);
+}
+
+// `a[i] op= v;` with its operands in the proto: the value first (an operand, or the stack's top), then the container (the guard's temp
+// when the guard took it ahead of the index), then the index, pushed as the stack form leaves them; the compound itself is the stack form's
+op_status vm_backend::exec_index_compound_operand(frame& f, const vm_instruction& ins) {
+	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
+	std::optional<script_value> vscratch, cscratch, iscratch;
+	script_value value(std::monostate{}, engine_);
+	if (p.store_value.const_index != k_invalid_u32) { value = materialize_constant(*f.code, p.store_value.const_index); }
+	else if (p.store_value.symbol != k_invalid_u32) {
+		const script_value* v = fused_ident_value(f, p.store_value, vscratch, f.ip * 3 + 2);
+		if (!v) return op_status::failed;
+		value = *v;
+	} else {
+		value = std::move(stack_.back());
+		stack_.pop_back();
+	}
+	const script_value* cp = p.guard_always ? frame_slot(f, p.container_guard) : fused_ident_value(f, p.container, cscratch, f.ip * 3);
+	if (!cp) return op_status::failed;
+	script_value container(*cp);
+	script_value index(std::monostate{}, engine_);
+	if (p.index.const_index != k_invalid_u32) { index = materialize_constant(*f.code, p.index.const_index); }
+	else {
+		const script_value* xp = fused_ident_value(f, p.index, iscratch, f.ip * 3 + 1);
+		if (!xp) return op_status::failed;
+		index = *xp;
+	}
+	stack_.push_back(std::move(container));
+	stack_.push_back(std::move(index));
+	stack_.push_back(std::move(value));
+	const op_status st = exec_index_compound_fused(f, vm_instruction{opcode::op_index_compound_fused, p.compound_kind, ins.b, p.string_target});
+	if (st == op_status::failed) return st;
+	if (!is_unwinding_) { stack_.pop_back(); }
+	return st;
 }
 
 // math:: language intrinsic: pops argc args, evaluates through the shared kernel
@@ -18723,6 +18803,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_binary_fused_store: return exec_binary_fused_store(f, ins);
 		case opcode::op_index_fused: return exec_index_fused(f, ins);
 		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
+		case opcode::op_index_compound_operand: return exec_index_compound_operand(f, ins);
 		case opcode::op_index_fused_decl: return exec_index_fused_decl(f, ins);
 		case opcode::op_cast: return exec_cast(f, ins);
 		case opcode::op_take_temp: {
@@ -18968,6 +19049,7 @@ namespace {
 			case opcode::op_index_fused_decl: if (ins.c != k_invalid_u32) { mark(decl_of(ins.c), census_use_write, ip); } index_proto(ins.a, ip, false); break;
 			case opcode::op_index_fused: index_proto(ins.a, ip, false); break;
 			case opcode::op_index_store_fused: index_proto(ins.a, ip, ins.a < c.fused_index_protos.size() && c.fused_index_protos[ins.a].typed_lane); break;
+			case opcode::op_index_compound_operand: index_proto(ins.a, ip, false); break;
 			case opcode::op_binary_fused: binary_proto(ins.a, ip); break;
 			case opcode::op_binary_fused_temp: {
 				binary_proto(ins.a, ip);
@@ -19985,6 +20067,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_index_store_fused:
 				VM_TRY_OP_SHARED(exec_index_store_fused(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				break;
+			case opcode::op_index_compound_operand:
+				VM_TRY_OP_SHARED(exec_index_compound_operand(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 			case opcode::op_index_fused_decl:

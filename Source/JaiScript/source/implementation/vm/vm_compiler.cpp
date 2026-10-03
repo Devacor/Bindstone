@@ -272,6 +272,7 @@ namespace {
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
 			case opcode::op_index_store_fused:
+			case opcode::op_index_compound_operand:
 				break;
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:
@@ -460,6 +461,7 @@ namespace {
 			case opcode::op_binary_fused_store:
 			case opcode::op_index_fused:
 			case opcode::op_index_store_fused:
+			case opcode::op_index_compound_operand:
 				break;
 			case opcode::op_iter_init:
 			case opcode::op_iter_next:
@@ -2108,6 +2110,17 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 				return true;
 			}
 		}
+		// Statement-position element compound (`a[i] op= v;`): the value, the container and the index as operands, in C++17 order
+		if (assign->op.type != token_type::equal && assign->target->get_type() == node_type::binary_expr && typed_lowering_ && temps_active_ && chunk_->is_function_body) {
+			auto* sub = static_cast<binary_expr*>(assign->target.get());
+			uint32_t kind = compound_kind_for_token(assign->op.type);
+			if (assign->postfix_old_result) kind |= compound_flag_old_result;
+			if (assign->incdec_desugar) kind |= compound_flag_incdec;
+			if (sub->op.type == token_type::left_bracket && sub->left->get_type() == node_type::identifier_expr &&
+			    try_emit_fused_index_store(sub, assign->value, true, string_target_site_for(assign->target), kind)) {
+				return true;
+			}
+		}
 		return false;
 	}
 	if (expr->get_type() == node_type::unary_expr) {
@@ -3661,6 +3674,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!index_values(op, fp, ip) || (fp.store_value.const_index == k_invalid_u32 && !value(op, fp.store_value, 0, static_cast<uint32_t>(ip * 3 + 2), ip, sink))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.proto = st.a;
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
+			} else if (st.op == opcode::op_index_compound_operand && st.a < c.fused_index_protos.size()) {
+				// `a[i] op= v;`: the store's site with the read-modify-write of the element (int and float buffers in place; any other kind,
+				// an overflow or a zero divisor misses onto the general compound)
+				const fused_index_proto& fp = c.fused_index_protos[st.a];
+				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (!fp.compound || compound_kind_bitwise(fp.compound_kind) || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
+				uint32_t sink;
+				if (!index_values(op, fp, ip) || !value(op, fp.store_value, 0, static_cast<uint32_t>(ip * 3 + 2), ip, sink)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				op.kind = ir::store; op.proto = st.a;
+				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_unary_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask) {
 				// neg, bnot and not on a value into a compiler value, kinds at run time (`!` is the truthiness inverted, a bool)
 				const token_type tk = static_cast<token_type>(st.c);
@@ -3815,7 +3838,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				for (size_t ip2 = ip + 1; ip2 < back; ++ip2) {
 					const vm_instruction& n = code[ip2];
 					const uint32_t g = n.op == opcode::op_t_load && ip2 < c.typed_sites.size() ? c.typed_sites[ip2].guard_temp
-					                 : (n.op == opcode::op_index_fused_decl || n.op == opcode::op_index_store_fused) && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
+					                 : (n.op == opcode::op_index_fused_decl || n.op == opcode::op_index_store_fused || n.op == opcode::op_index_compound_operand) && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
 					if (g == st.b) { op.guarded = static_cast<uint32_t>(ip2 - head); break; }
 				}
 			} else if (st.op == opcode::op_operand_temp && st.c == 0 && st.a < c.fused_binary_protos.size()) {
@@ -4101,7 +4124,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			auto carried = [](opcode o) {
 				return (o >= opcode::op_t_add_ii && o <= opcode::op_t_mod_ff) || o == opcode::op_t_decl_mov || o == opcode::op_t_decl_const || o == opcode::op_t_store_mov || o == opcode::op_t_store_const ||
 				       o == opcode::op_t_load || o == opcode::op_t_push || o == opcode::op_load || o == opcode::op_const ||
-				       o == opcode::op_binary_fused_decl || o == opcode::op_binary_fused_store || o == opcode::op_binary_fused_temp || o == opcode::op_index_store_fused || o == opcode::op_set_member_value;
+				       o == opcode::op_binary_fused_decl || o == opcode::op_binary_fused_store || o == opcode::op_binary_fused_temp || o == opcode::op_index_store_fused || o == opcode::op_index_compound_operand || o == opcode::op_set_member_value;
 			};
 			size_t end = snap_ip;
 			bool ok = true;
@@ -6468,13 +6491,14 @@ uint32_t vm_compiler::string_target_site_for(const expression_ptr& target) {
 	return static_cast<uint32_t>(chunk_->string_target_sites.size() - 1);
 }
 
-bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site) {
+bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound) {
 	const size_t protos = chunk_->fused_index_protos.size();
-	const bool emitted = try_emit_fused_index_store_shape(sub, value, no_result, string_site);
+	const bool emitted = try_emit_fused_index_store_shape(sub, value, no_result, string_site, compound);
 	if (emitted && chunk_->fused_index_protos.size() > protos) { chunk_->fused_index_protos.back().receiver = sub->subscript_receiver; }
 	return emitted;
 }
-bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site) {
+bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound_kind) {
+	const bool compound = compound_kind != k_invalid_u32;
 	const uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
 	const bool operand_index = sub->right->get_type() == node_type::identifier_expr ||
 	                           sub->right->get_type() == node_type::literal_expr;
@@ -6487,13 +6511,13 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 		p.container = make_fused_operand(sub->left);
 		p.index = make_fused_operand(sub->right);
 		fused = true;
-	} else if (mc && operand_index) {
+	} else if (!compound && mc && operand_index) {
 		// Member-base container `base.member[i] = v` (see the read-site twin)
 		p.container = make_fused_operand(mc->object);
 		p.container.member_node = add_node(sub->left);
 		p.index = make_fused_operand(sub->right);
 		fused = true;
-	} else if (binary_expr* rb = ident_container ? index_binary_candidate(sub->right.get()) : nullptr) {
+	} else if (binary_expr* rb = ident_container && !compound ? index_binary_candidate(sub->right.get()) : nullptr) {
 		// Computed-index chain on an ident container (see the read-site twin)
 		binary_expr* spine[8];
 		const int depth = index_chain_spine(rb, spine);
@@ -6591,11 +6615,13 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 	}
 	// the typed store lane's shape proof (typed_index_store): the value rides the stack or
 	// resolves as an operand; container and index as the read lane requires
-	p.typed_lane = index_proto_typed_lane_shape(*chunk_, p);
+	p.typed_lane = !compound && index_proto_typed_lane_shape(*chunk_, p);
 	p.string_target = string_site;
+	p.compound = compound;
+	p.compound_kind = compound ? compound_kind : 0;
 	chunk_->fused_index_protos.push_back(p);
-	emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape,
-	     no_result ? 1u : 0u);
+	if (compound) { emit(opcode::op_index_compound_operand, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape, 0); }
+	else { emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape, no_result ? 1u : 0u); }
 	if (tree) { temp_next_ = temp_mark; }   // the value, the snapshot and the index temp die into the store
 	return true;
 }

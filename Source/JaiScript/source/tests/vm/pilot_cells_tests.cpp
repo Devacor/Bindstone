@@ -4731,6 +4731,67 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(want, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("an_element_compound_runs_in_the_block", [this]() {
+			// demoreel's cloth relaxation (`px[a] -= ddx * k; px[a + cww + 1] += ddx * k;` over `var& px = pxs`): an element compound in
+			// statement position takes its value, container and index as operands and the block reads, computes and writes the element in place
+			const std::string prelude =
+				"class Cloth { array<float> pxs = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]; array<int> cnt = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];\n"
+				"  void relax(int w) { var& px = pxs; var& cn = cnt; for (int a = 0; a < 7; ++a) { float d = px[a + 1] - px[a]; float k = 0.25 / (d * d + 1.0);\n"
+				"    px[a] -= d * k; px[a + 1] += d * k; px[a + w + 1] *= 0.5 + k; cn[a] += 3; cn[a + 1] -= 1; cn[a + 2] *= 2; } }\n"
+				"  void divs() { var& cn = cnt; for (int a = 0; a < 9; ++a) { cn[a] /= 2; cn[a] %= 7; pxs[a] /= 2.0; pxs[a] += cn[a]; cn[a]++; } } }\n"
+				"string dump(Cloth c) { string s = \"\"; for (int i = 0; i < 10; ++i) { s = s + to_string(c.cnt[i]) + \":\" + to_string(math::itrunc(c.pxs[i] * 1000.0)) + \" \"; } return s; }\n"
+				"int local_sum(int n) { array<int> v = [1, 2, 3, 4, 5, 6, 7, 8]; for (int i = 0; i < n; ++i) { v[i % 8] += i; v[(i + 3) % 8] -= 1; } int s = 0; for (int i = 0; i < 8; ++i) { s = s * 7 + v[i]; } return s; }\n"
+				"string untyped(int n) { var h = [1.5, 2.5, 3.5, 4.5, 5, 6]; for (int i = 0; i < n; ++i) { h[i % 4] += 0.25; h[4 + i % 2] += 1; h[4] *= 1; if (i == 3) { h[5] += 0.5; } } return to_string(h[0] + h[1] + h[2] + h[3]) + \",\" + to_string(h[4]) + \",\" + to_string(h[5]) + \",\" + type_of(h[4]) + \",\" + type_of(h[5]); }\n";
+			const std::string run = "Cloth c; c.relax(2); c.relax(1); c.divs(); dump(c) + \"|\" + to_string(local_sum(40)) + \"|\" + untyped(12);";
+			const std::string want = run_on(false, prelude + run);
+			both(prelude + run, want, "element compounds");
+			both(prelude + run, want, "element compounds, proofs off", false);
+			const std::string l = listing_run(prelude + run);
+			auto section = [&](const char* fn) { const size_t at = l.find(fn); return at == std::string::npos ? std::string() : l.substr(at, l.find("\n== ", at + 1) - at); };
+			for (const char* fn : { "== relax ", "== divs ", "== local_sum ", "== untyped " }) {
+				const std::string fl = section(fn);
+				check_true(fl.find("INDEX_COMPOUND_OPERAND") != std::string::npos && fl.find("INDEX_COMPOUND_FUSED") == std::string::npos, std::string(fn) + "takes the operand form: " + fl);
+				check_true(fl.find("-- cell loop") != std::string::npos && fl.find("-- open loop") == std::string::npos && fl.find("C_BAIL") == std::string::npos, std::string(fn) + "runs its loops as blocks: " + fl);
+			}
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(want, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("an_element_compound_takes_its_value_before_the_container_and_the_index", [this]() {
+			// C++17 E1[E2] op= E3: the value, then the container, then the index, then the read-modify-write; the interpreter is the oracle for a
+			// value that rebinds the container, an index call that rewrites the value's global, a getter in the index; errors keep their texts
+			const std::string prelude =
+				"array<int> T = [1, 2, 3, 4];\n"
+				"array<int> U = [10, 20, 30, 40];\n"
+				"array<int> OFF = [0];\n"
+				"int swap_v(int v) { array<int> tmp = T; T = U; U = tmp; return v; }\n"
+				"int G = 5;\n"
+				"int bump() { G = G + 1; return 0; }\n"
+				"class H { int n = 0; int _get_off() { n = n + 1; array<int> tmp = T; T = U; U = tmp; return 0; } }\n"
+				"H h;\n"
+				"string show() { return to_string(T[0]) + \",\" + to_string(T[1]) + \",\" + to_string(T[2]) + \",\" + to_string(T[3]) + \"/\" + to_string(U[0]) + \",\" + to_string(U[1]) + \",\" + to_string(U[2]) + \",\" + to_string(U[3]); }\n"
+				"void by_value(int w) { for (int y = 0; y < 2; ++y) { T[OFF[0] + y * w] += swap_v(7 + y); } }\n"
+				"void by_global(int w) { for (int y = 0; y < 2; ++y) { T[OFF[0] + y * w + bump()] -= G; } }\n"
+				"void by_getter(int w) { for (int y = 0; y < 2; ++y) { T[OFF[0] + y * w + h.off] *= 3; } }\n"
+				"string zero() { array<int> z = [4, 5]; try { for (int i = 0; i < 2; ++i) { z[i] /= i - 1 + 1; } } catch (e) { return \"E:\" + e; } return \"none\"; }\n"
+				"string ovf() { array<int> z = [4611686018427387904, 5]; try { for (int i = 0; i < 2; ++i) { z[i] *= 4; } } catch (e) { return \"E:\" + e; } return \"none\"; }\n";
+			const std::string run = "by_value(1); string a = show(); by_global(1); string b = show(); by_getter(1); a + \"|\" + b + \"|\" + show() + \"|\" + to_string(G) + \"|\" + to_string(h.n) + \"|\" + zero() + \"|\" + ovf();";
+			const std::string want = run_on(false, prelude + run);
+			both(prelude + run, want, "the value, the container, the index");
+			both(prelude + run, want, "the value, the container, the index, proofs off", false);
+			check_true(want.find("E:Division by zero") != std::string::npos && want.find("overflow") != std::string::npos, "the errors keep their texts: " + want);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				std::string got;
+				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(want, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_leaf_in_a_loop_left_open_grafts_by_the_rules_outside_a_loop", [this]() {
 			// Gator Quest's walk_at -> tile_now inside a loop the region compiler refuses: a loop the first compile refused holds no
 			// block to keep, so a leaf whose body the block could not land (a declaration from an element's field) grafts there in the second

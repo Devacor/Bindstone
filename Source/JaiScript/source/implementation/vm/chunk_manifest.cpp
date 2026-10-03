@@ -157,7 +157,9 @@ namespace {
 				out << pre << " " << i << " container=" << operand(ch, p.container) << " index=" << operand(ch, p.index) << " index_binary=" << u(p.index_binary) << " chain=[";
 				for (uint32_t s : p.index_chain_ext) { out << s << " "; }
 				out << "] value=" << operand(ch, p.store_value) << " decl_slot=" << u(p.decl_slot) << " expect=" << static_cast<int>(p.decl_expect) << " type=" << tn(p.decl_type)
-				    << " temp=" << b(p.decl_temp) << " lane=" << b(p.typed_lane) << " spec=" << b(p.speculative) << " guard=" << u(p.container_guard) << " always=" << b(p.guard_always) << "\n";
+				    << " temp=" << b(p.decl_temp) << " lane=" << b(p.typed_lane) << " spec=" << b(p.speculative) << " guard=" << u(p.container_guard) << " always=" << b(p.guard_always);
+				if (p.compound) { out << " compound=" << p.compound_kind; }
+				out << "\n";
 			}
 			out << pre << "push_protos " << ch.push_protos.size() << "\n";
 			for (size_t i = 0; i < ch.push_protos.size(); ++i) {

@@ -97,7 +97,7 @@ another engine or process never reads part of one.</li><li><strong>Write failure
 cache is an optimization, never an error. <code>eng-&gt;jaibite_cache_write_failures()</code> counts them
 for diagnostics.</li><li><strong>String executes never touch disk</strong>; hosts that read files through their own VFS can
 route through <code>eng-&gt;execute_file_source(resolvedPath, content)</code> to keep the cache. Opt out
-per engine with <code>eng-&gt;jaibite_cache(false)</code>.</li></ul>
+per engine with <code>eng-&gt;jaibite_cache(false)</code>. An engine whose filesystem privilege is disabled (<code>eng-&gt;disable(jai::filesystem)</code>, <a href="05-safety-rails.html">Safety Rails</a>) skips the cache entirely, and an explicit <code>jaibite_load(path)</code> or <code>bite.save(path)</code> throws a <code>jai::runtime_error</code> reading <code>Insufficient privilege: filesystem.</code>; the byte forms (<code>save_bytes</code>, <code>jaibite_load_bytes</code>) still work.</li></ul>
 <p>The cache stores the parsed AST, so it is backend-agnostic: both backends skip the parse, and the VM
 reuses its lazily compiled chunk in-memory as always. The whole matrix (a matching sibling loading
 while the source is unparseable, older-mtime and same-mtime replacements, corrupt and truncated
@@ -127,7 +127,7 @@ mismatch, or corrupt data (<code>jaibite: failed to open file: level.jaibite</co
 <code>jaibite: truncated header</code>, ...).</p>
 <p>The format is <strong>versioned</strong>, and the number moves whenever the
 parser gains a node, so a bite is readable only by builds that share its format version. An explicit
-<code>jaibite_load*</code> of a file from another version throws (<code>jaibite: unsupported format version 9 (expected 34)</code>);
+<code>jaibite_load*</code> of a file from another version throws (<code>jaibite: unsupported format version 9 (expected 40)</code> from a build whose version is 40; the build's number is <code>jai::detail::k_jaibite_version</code>);
 a stale <em>sibling</em> in the automatic disk cache is simply reparsed and rewritten, silently. Practical
 rule: ship bites from the same build you ship the engine from, and never hand-carry a
 <code>.jaibite</code> across versions.</p>

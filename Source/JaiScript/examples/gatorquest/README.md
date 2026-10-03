@@ -191,3 +191,23 @@ jaiscript scripts/gatorquest.jai -- sheet                        # every sprite 
 The STATE_HASH is identical on `--backend=vm` and `--backend=interp` for the same seed and tick count, and the same
 with or without the mid-session round trip (`noroundtrip`): saving and loading is invisible to the simulation.
 Test modes exit with the number of failures.
+
+## The Lua port (benchmark twin)
+
+`lua/` is a port of what the smoke session runs (world generation, the content tables, mobiles, spawners,
+combat, items, quests, actions, bots, the tick and the state hash) to Lua 5.4+, one module per `.jai` file. It
+prints the same output as the JaiScript smoke run with `noroundtrip`, STATE_HASH included (`python lua/parity.py`
+checks a seed/ticks/bots matrix line for line). Rendering, audio, netplay and save/load are not ported.
+
+```
+lua lua/gatorquest.lua smoke ticks 2000 seed 1 bots 2 [verbose]           # Lua 5.4 / 5.5
+luajit lua/luajit/gatorquest.lua smoke ticks 2000 seed 1 bots 2            # LuaJIT (add -joff for its interpreter)
+python lua/parity.py --jai PATH/jaiscript.exe --lua PATH/lua.exe --luajit PATH/luajit.exe
+python lua/to_luajit.py                                                    # regenerate lua/luajit/ after editing lua/
+```
+
+Arrays stay 0-based, so every id, index and hashed value is the script's. Integer division and remainder
+that can see a negative operand go through `idiv`/`imod` (C truncation); the script's
+value-class copies are explicit (`copy_item`) wherever the copy is stored or mutated. `lua/luajit/` is generated
+from `lua/` by `to_luajit.py` (operators to `bit` calls and `math.floor`); its `gq_util.lua` is hand-written,
+because the 32-bit hash and RNG need exact 32-bit multiplies on doubles.

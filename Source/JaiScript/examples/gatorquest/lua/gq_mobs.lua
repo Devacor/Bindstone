@@ -1,0 +1,463 @@
+-- Gator Quest (Lua port) - mobiles: the flat pool, the occupancy grid, movement and passability,
+-- line of sight, spawners, and the event queue (kept as reusable arrays with a count, EV_N).
+
+local W_OFF, W_W, W_H, OCC = W_OFF, W_W, W_H, OCC
+local MOB_KIND, MOB_SER, MOB_WORLD, MOB_X, MOB_Y, MOB_PX, MOB_PY = MOB_KIND, MOB_SER, MOB_WORLD, MOB_X, MOB_Y, MOB_PX, MOB_PY
+local MOB_MOVE_T, MOB_MOVE_D, MOB_DIR, MOB_HP, MOB_HPMAX, MOB_MP, MOB_MPMAX = MOB_MOVE_T, MOB_MOVE_D, MOB_DIR, MOB_HP, MOB_HPMAX, MOB_MP, MOB_MPMAX
+local MOB_TARGET, MOB_AI, MOB_NEXT, MOB_ATK, MOB_CAST, MOB_FLAGS, MOB_PLAYER = MOB_TARGET, MOB_AI, MOB_NEXT, MOB_ATK, MOB_CAST, MOB_FLAGS, MOB_PLAYER
+local MOB_SPAWNER, MOB_HOMEX, MOB_HOMEY, MOB_POISON, MOB_BURN, MOB_SLOW, MOB_BUFF = MOB_SPAWNER, MOB_HOMEX, MOB_HOMEY, MOB_POISON, MOB_BURN, MOB_SLOW, MOB_BUFF
+local MOB_HIT_T, MOB_OWNER, MOB_AUX, MOB_ROLE, MOB_LEVEL = MOB_HIT_T, MOB_OWNER, MOB_AUX, MOB_ROLE, MOB_LEVEL
+local SP_W, SP_X, SP_Y, SP_KIND, SP_MAX, SP_RAD, SP_DELAY, SP_NEXT, SP_ALIVE = SP_W, SP_X, SP_Y, SP_KIND, SP_MAX, SP_RAD, SP_DELAY, SP_NEXT, SP_ALIVE
+local W_BOSS_T = W_BOSS_T
+local EV_KIND, EV_W, EV_X, EV_Y, EV_A, EV_B, EV_C, EV_TO, EV_TEXT = EV_KIND, EV_W, EV_X, EV_Y, EV_A, EV_B, EV_C, EV_TO, EV_TEXT
+local CHARS = CHARS
+local MONS, ROLES, MON_FAC, MON_MOVE, MON_SPEED = MONS, ROLES, MON_FAC, MON_MOVE, MON_SPEED
+local T_WALK, T_OPAQUE = T_WALK, T_OPAQUE
+local DX, DY = DX, DY
+local iabs, cheb, dir_of, rnd, rnd_range = iabs, cheb, dir_of, rnd, rnd_range
+local in_world, tile_now, walk_at, find_spot = in_world, tile_now, walk_at, find_spot
+local MF_GHOST, MF_BOSS, MF_INVULN, MF_SWIM, MF_ELITE = MF_GHOST, MF_BOSS, MF_INVULN, MF_SWIM, MF_ELITE
+local FAC_PLAYER, FAC_NPC, FAC_GUARD, FAC_MONSTER = Fac.player, Fac.npc, Fac.guard, Fac.monster
+local SK_SWIMMING = Sk.swimming
+local EV_LOG, EV_FX, EV_SOUND, EV_SHAKE, EV_BANNER = Ev.log, Ev.fx, Ev.sound, Ev.shake, Ev.banner
+
+C_WHITE = 0
+C_GRAY = 1
+C_RED = 2
+C_GREEN = 3
+C_YELLOW = 4
+C_CYAN = 5
+C_PURPLE = 6
+C_ORANGE = 7
+C_BLUE = 8
+
+-- ---------------------------------------------------------------- events ---
+local function ev(kind, w, x, y, a, b, c, to, text)
+	local n = EV_N
+	EV_KIND[n] = kind
+	EV_W[n] = w
+	EV_X[n] = x
+	EV_Y[n] = y
+	EV_A[n] = a
+	EV_B[n] = b
+	EV_C[n] = c
+	EV_TO[n] = to
+	EV_TEXT[n] = text
+	EV_N = n + 1
+end
+
+function events_clear() EV_N = 0 end
+
+local function say_to(slot, text, color)
+	if slot < 0 then return end
+	ev(EV_LOG, -1, 0, 0, color, 0, 0, slot, text)
+end
+
+local function say_near(w, x, y, text, color)
+	ev(EV_LOG, w, x, y, color, 0, 0, -1, text)
+end
+
+local function say_mob(m, text, color)
+	local slot = MOB_PLAYER[m]
+	if slot >= 0 then say_to(slot, text, color) end
+end
+
+local function fx_at(w, x, y, fx, count) ev(EV_FX, w, x, y, fx, count, 0, -1, "") end
+local function sound_at(w, x, y, name) ev(EV_SOUND, w, x, y, 0, 0, 0, -1, name) end
+local function shake(slot, power) if slot >= 0 then ev(EV_SHAKE, -1, 0, 0, power, 0, 0, slot, "") end end
+
+-- ------------------------------------------------------------------ pool ---
+-- a new free slot at the end of the pool
+local function mob_push()
+	local i = MOB_N
+	MOB_KIND[i] = -1
+	MOB_SER[i] = 0
+	MOB_WORLD[i] = 0
+	MOB_X[i] = 0
+	MOB_Y[i] = 0
+	MOB_PX[i] = 0
+	MOB_PY[i] = 0
+	MOB_MOVE_T[i] = 0
+	MOB_MOVE_D[i] = 1
+	MOB_DIR[i] = 4
+	MOB_HP[i] = 0
+	MOB_HPMAX[i] = 1
+	MOB_MP[i] = 0
+	MOB_MPMAX[i] = 0
+	MOB_TARGET[i] = -1
+	MOB_AI[i] = 0
+	MOB_NEXT[i] = 0
+	MOB_ATK[i] = 0
+	MOB_CAST[i] = 0
+	MOB_FLAGS[i] = 0
+	MOB_PLAYER[i] = -1
+	MOB_SPAWNER[i] = -1
+	MOB_HOMEX[i] = 0
+	MOB_HOMEY[i] = 0
+	MOB_POISON[i] = 0
+	MOB_BURN[i] = 0
+	MOB_SLOW[i] = 0
+	MOB_BUFF[i] = 0
+	MOB_HIT_T[i] = -100
+	MOB_OWNER[i] = -1
+	MOB_AUX[i] = 0
+	MOB_ROLE[i] = -1
+	MOB_LEVEL[i] = 0
+	MOB_N = i + 1
+	return i
+end
+
+local function mob_alloc()
+	for i = 0, MOB_N - 1 do
+		if MOB_KIND[i] < 0 then return i end
+	end
+	return mob_push()
+end
+
+local function occ_index(w, x, y) return W_OFF[w] + y * W_W[w] + x end
+
+local function mob_at(w, x, y)
+	local ww = W_W[w]
+	if x < 0 or y < 0 or x >= ww or y >= W_H[w] then return -1 end
+	return OCC[W_OFF[w] + y * ww + x] - 1
+end
+
+local function occ_set(m)
+	local w = MOB_WORLD[m]
+	local x, y = MOB_X[m], MOB_Y[m]
+	if in_world(w, x, y) then OCC[W_OFF[w] + y * W_W[w] + x] = m + 1 end
+end
+
+local function occ_clear(m)
+	local w = MOB_WORLD[m]
+	local x, y = MOB_X[m], MOB_Y[m]
+	if in_world(w, x, y) then
+		local i = W_OFF[w] + y * W_W[w] + x
+		if OCC[i] == m + 1 then OCC[i] = 0 end
+	end
+end
+
+local function mob_live(m) return m >= 0 and m < MOB_N and MOB_KIND[m] >= 0 end
+local function mob_ghost(m) return (MOB_FLAGS[m] & MF_GHOST) ~= 0 end
+local function mob_alive(m) return m >= 0 and m < MOB_N and MOB_KIND[m] >= 0 and MOB_HP[m] > 0 and (MOB_FLAGS[m] & MF_GHOST) == 0 end
+local function mob_is_player(m) return MOB_PLAYER[m] >= 0 end
+local function mob_fac(m)
+	if MOB_PLAYER[m] >= 0 then return FAC_PLAYER end
+	return MON_FAC[MOB_KIND[m]]
+end
+
+local function mob_name(m)
+	if not mob_live(m) then return "something" end
+	local slot = MOB_PLAYER[m]
+	if slot >= 0 then return CHARS[slot].name end
+	local role = MOB_ROLE[m]
+	if role >= 0 then return ROLES[role].name end
+	local n = MONS[MOB_KIND[m]].name
+	if (MOB_FLAGS[m] & MF_ELITE) ~= 0 then n = "Elite " .. n end
+	return n
+end
+
+-- "the Swamp Rat" / "Gus" / "Chomps"
+local function mob_the(m)
+	if not mob_live(m) then return "something" end
+	if MOB_PLAYER[m] >= 0 or MOB_ROLE[m] >= 0 or MONS[MOB_KIND[m]].boss then return mob_name(m) end
+	return "the " .. mob_name(m)
+end
+
+local function mob_spawn(kind, w, x, y)
+	local m = mob_alloc()
+	local d = MONS[kind]
+	MOB_KIND[m] = kind
+	MOB_SER[m] = NEXT_SER
+	NEXT_SER = NEXT_SER + 1
+	MOB_WORLD[m] = w
+	MOB_X[m] = x
+	MOB_Y[m] = y
+	MOB_PX[m] = x
+	MOB_PY[m] = y
+	MOB_MOVE_T[m] = TICK
+	MOB_MOVE_D[m] = 1
+	MOB_DIR[m] = rnd(8)
+	MOB_HP[m] = d.hp
+	MOB_HPMAX[m] = d.hp
+	MOB_MP[m] = 100
+	MOB_MPMAX[m] = 100
+	MOB_TARGET[m] = -1
+	MOB_AI[m] = 0
+	MOB_NEXT[m] = TICK + 1 + rnd(4)
+	MOB_ATK[m] = TICK
+	MOB_CAST[m] = TICK + 20 + rnd(20)
+	MOB_FLAGS[m] = d.boss and MF_BOSS or 0
+	if d.fac == FAC_NPC or d.fac == FAC_GUARD then MOB_FLAGS[m] = MOB_FLAGS[m] | MF_INVULN end
+	MOB_PLAYER[m] = -1
+	MOB_SPAWNER[m] = -1
+	MOB_HOMEX[m] = x
+	MOB_HOMEY[m] = y
+	MOB_POISON[m] = 0
+	MOB_BURN[m] = 0
+	MOB_SLOW[m] = 0
+	MOB_BUFF[m] = 0
+	MOB_HIT_T[m] = -100
+	MOB_OWNER[m] = -1
+	MOB_AUX[m] = 0
+	MOB_ROLE[m] = -1
+	MOB_LEVEL[m] = d.tier
+	occ_set(m)
+	MOB_LIVE = MOB_LIVE + 1
+	STAT_SPAWNS = STAT_SPAWNS + 1
+	return m
+end
+
+local function mob_free(m)
+	if not mob_live(m) then return end
+	occ_clear(m)
+	local sp = MOB_SPAWNER[m]
+	if sp >= 0 and sp < SP_N and SP_ALIVE[sp] > 0 then SP_ALIVE[sp] = SP_ALIVE[sp] - 1 end
+	MOB_KIND[m] = -1
+	MOB_PLAYER[m] = -1
+	MOB_TARGET[m] = -1
+	MOB_LIVE = MOB_LIVE - 1
+	-- forget anyone targeting the freed slot
+	for i = 0, MOB_N - 1 do
+		if MOB_TARGET[i] == m then MOB_TARGET[i] = -1 end
+		if MOB_OWNER[i] == m then MOB_OWNER[i] = -1 end
+	end
+end
+
+-- ------------------------------------------------------------- movement ---
+local function mob_move_class(m)
+	if MOB_PLAYER[m] >= 0 then return 3 end
+	return MON_MOVE[MOB_KIND[m]]
+end
+
+-- can this mobile stand on (x, y)? players may step into a sky gap (and fall)
+local function mob_can_enter(m, x, y)
+	local w = MOB_WORLD[m]
+	if not in_world(w, x, y) then return false end
+	local k = walk_at(w, x, y)
+	local mv = mob_move_class(m)
+	if k == 0 then return false end
+	if mv == 0 then return false end
+	if k == 2 then
+		if mv == 1 then return false end
+	elseif k == 3 then
+		-- only flyers cross open sky, and a boss never leaves solid ground
+		if MOB_PLAYER[m] < 0 and (mv ~= 4 or (MOB_FLAGS[m] & MF_BOSS) ~= 0) then return false end
+	else
+		if mv == 2 then return false end
+		if k == 5 and MOB_PLAYER[m] < 0 and not MONS[MOB_KIND[m]].fireproof then return false end
+	end
+	local o = OCC[W_OFF[w] + y * W_W[w] + x] - 1
+	if o >= 0 and o ~= m and not mob_ghost(o) and not mob_ghost(m) then return false end
+	return true
+end
+
+-- ticks one step takes for this mobile onto (x, y)
+local function step_ticks(m, x, y)
+	local w = MOB_WORLD[m]
+	local k = walk_at(w, x, y)
+	local base = 2
+	if MOB_PLAYER[m] < 0 then base = MON_SPEED[MOB_KIND[m]] end
+	if MOB_PLAYER[m] >= 0 then
+		local c = CHARS[MOB_PLAYER[m]]
+		if k == 2 then
+			local swim = c.skill[SK_SWIMMING] + player_bonus(MOB_PLAYER[m], 16) * 10
+			base = swim >= 400 and 1 or 2
+		elseif k == 6 then base = 3 end
+		if mob_ghost(m) then base = 2 end
+	elseif k == 6 and MON_MOVE[MOB_KIND[m]] ~= 4 then base = base + 1 end
+	if MOB_SLOW[m] > 0 then base = base * 2 end
+	return base
+end
+
+local function mob_place(m, w, x, y)
+	occ_clear(m)
+	MOB_WORLD[m] = w
+	MOB_X[m] = x
+	MOB_Y[m] = y
+	MOB_PX[m] = x
+	MOB_PY[m] = y
+	MOB_MOVE_T[m] = TICK
+	MOB_MOVE_D[m] = 1
+	occ_set(m)
+end
+
+local function mob_step(m, dir)
+	local nx = MOB_X[m] + DX[dir]
+	local ny = MOB_Y[m] + DY[dir]
+	MOB_DIR[m] = dir
+	if not mob_can_enter(m, nx, ny) then return false end
+	-- no corner cutting through walls on diagonals
+	if DX[dir] ~= 0 and DY[dir] ~= 0 then
+		local w = MOB_WORLD[m]
+		if walk_at(w, MOB_X[m] + DX[dir], MOB_Y[m]) == 0 and walk_at(w, MOB_X[m], MOB_Y[m] + DY[dir]) == 0 then return false end
+	end
+	local d = step_ticks(m, nx, ny)
+	occ_clear(m)
+	MOB_PX[m] = MOB_X[m]
+	MOB_PY[m] = MOB_Y[m]
+	MOB_X[m] = nx
+	MOB_Y[m] = ny
+	MOB_MOVE_T[m] = TICK
+	MOB_MOVE_D[m] = d
+	MOB_NEXT[m] = TICK + d
+	occ_set(m)
+	local w = MOB_WORLD[m]
+	if walk_at(w, nx, ny) == 2 then MOB_FLAGS[m] = MOB_FLAGS[m] | MF_SWIM
+	else MOB_FLAGS[m] = MOB_FLAGS[m] & ~MF_SWIM end
+	return true
+end
+
+-- greedy step toward (tx, ty), trying the two neighbouring directions when blocked
+local function mob_step_toward(m, tx, ty)
+	local dx = tx - MOB_X[m]
+	local dy = ty - MOB_Y[m]
+	if dx == 0 and dy == 0 then return false end
+	local d = dir_of(dx, dy)
+	if mob_step(m, d) then return true end
+	local alt = (TICK + m) % 2 == 0 and 1 or 7
+	if mob_step(m, (d + alt) % 8) then return true end
+	if mob_step(m, (d + 8 - alt) % 8) then return true end
+	if mob_step(m, (d + 2) % 8) then return true end
+	return mob_step(m, (d + 6) % 8)
+end
+
+local function mob_step_away(m, tx, ty)
+	local dx = MOB_X[m] - tx
+	local dy = MOB_Y[m] - ty
+	if dx == 0 and dy == 0 then dx = 1 end
+	local d = dir_of(dx, dy)
+	if mob_step(m, d) then return true end
+	if mob_step(m, (d + 1) % 8) then return true end
+	if mob_step(m, (d + 7) % 8) then return true end
+	if mob_step(m, (d + 2) % 8) then return true end
+	return mob_step(m, (d + 6) % 8)
+end
+
+-- Bresenham sight line; the end tiles do not block
+local function los(w, x0, y0, x1, y1)
+	local dx = iabs(x1 - x0)
+	local dy = iabs(y1 - y0)
+	local sx = x0 < x1 and 1 or -1
+	local sy = y0 < y1 and 1 or -1
+	local err = dx - dy
+	local x = x0
+	local y = y0
+	local guard = 0
+	while (x ~= x1 or y ~= y1) and guard < 64 do
+		guard = guard + 1
+		local e2 = err * 2
+		if e2 > -dy then err = err - dy; x = x + sx end
+		if e2 < dx then err = err + dx; y = y + sy end
+		if (x ~= x1 or y ~= y1) and T_OPAQUE[tile_now(w, x, y)] ~= 0 then return false end
+	end
+	return true
+end
+
+-- the nearest live player within `r` tiles of (w, x, y), else -1
+local function nearest_player(w, x, y, r)
+	local best = -1
+	local bestd = r + 1
+	for s = 0, CHAR_N - 1 do
+		local c = CHARS[s]
+		if c.active then
+			local m = c.mob
+			if mob_live(m) and MOB_WORLD[m] == w then
+				local d = cheb(x, y, MOB_X[m], MOB_Y[m])
+				if d < bestd then bestd = d; best = m end
+			end
+		end
+	end
+	return best
+end
+
+-- nearest tile of the walk classes in `mask` that nobody stands on
+local function find_free_spot(w, x0, y0, maxr, mask)
+	for r = 0, maxr do
+		for dy = -r, r do
+			for dx = -r, r do
+				if iabs(dx) == r or iabs(dy) == r then
+					local x = x0 + dx
+					local y = y0 + dy
+					if in_world(w, x, y) and OCC[W_OFF[w] + y * W_W[w] + x] == 0 and ((1 << walk_at(w, x, y)) & mask) ~= 0 then return x, y end
+				end
+			end
+		end
+	end
+	return find_spot(w, x0, y0, maxr, mask)
+end
+
+local function player_near(w, x, y, r)
+	if CAMERA_W == w and cheb(x, y, CAMERA_X, CAMERA_Y) <= r then return true end
+	return nearest_player(w, x, y, r) >= 0
+end
+
+-- ------------------------------------------------------------- spawners ---
+function spawners_tick()
+	if TICK % 10 ~= 0 then return end
+	local tick = TICK
+	for s = 0, SP_N - 1 do
+		if SP_ALIVE[s] < SP_MAX[s] and tick >= SP_NEXT[s] then
+			local w = SP_W[s]
+			local kind = SP_KIND[s]
+			local md = MONS[kind]
+			local boss = md.boss
+			if not (boss and tick < W_BOSS_T[w]) then
+				local x = SP_X[s] + rnd_range(-SP_RAD[s], SP_RAD[s])
+				local y = SP_Y[s] + rnd_range(-SP_RAD[s], SP_RAD[s])
+				if boss then x = SP_X[s]; y = SP_Y[s] end
+				if in_world(w, x, y) then
+					local k = walk_at(w, x, y)
+					local mv = MON_MOVE[kind]
+					local ok
+					if mv == 4 then ok = k ~= 0
+					elseif mv == 2 then ok = k == 2
+					else ok = k == 1 or k == 6 or k == 4 or (k == 2 and mv == 3) end
+					if not ok or mob_at(w, x, y) >= 0 then
+						SP_NEXT[s] = tick + 20
+					elseif not boss and player_near(w, x, y, 5) then
+						-- never pop out of thin air right next to a player (bosses excepted)
+						SP_NEXT[s] = tick + 30
+					else
+						local m = mob_spawn(kind, w, x, y)
+						MOB_SPAWNER[m] = s
+						MOB_HOMEX[m] = SP_X[s]
+						MOB_HOMEY[m] = SP_Y[s]
+						-- one in fifteen tier-2+ spawns is an elite
+						if not boss and md.tier >= 2 and md.fac == FAC_MONSTER and rnd(15) == 0 then
+							MOB_FLAGS[m] = MOB_FLAGS[m] | MF_ELITE
+							MOB_HPMAX[m] = MOB_HPMAX[m] * 2
+							MOB_HP[m] = MOB_HPMAX[m]
+						end
+						SP_ALIVE[s] = SP_ALIVE[s] + 1
+						SP_NEXT[s] = tick + SP_DELAY[s]
+						if boss then
+							ev(EV_BANNER, w, x, y, kind, 0, 0, -1, md.name)
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+-- npcs from the worldgen plan, one-time
+function populate_npcs()
+	for i = 0, NPC_PLAN_N - 1 do
+		local w = NPC_PLAN_W[i]
+		local px, py = find_spot(w, NPC_PLAN_X[i], NPC_PLAN_Y[i], 3, LAND_MASK)
+		local m = mob_spawn(NPC_PLAN_KIND[i], w, px, py)
+		MOB_ROLE[m] = NPC_PLAN_ROLE[i]
+		if NPC_PLAN_ROLE[i] >= 0 then MOB_AI[m] = 1 end   -- shopkeepers stay behind the counter
+	end
+end
+
+for name, fn in pairs({ ev = ev, say_to = say_to, say_near = say_near, say_mob = say_mob, fx_at = fx_at, sound_at = sound_at,
+	shake = shake, mob_alloc = mob_alloc, mob_push = mob_push, occ_index = occ_index, mob_at = mob_at, occ_set = occ_set,
+	occ_clear = occ_clear, mob_live = mob_live, mob_ghost = mob_ghost, mob_alive = mob_alive, mob_is_player = mob_is_player,
+	mob_fac = mob_fac, mob_name = mob_name, mob_the = mob_the, mob_spawn = mob_spawn, mob_free = mob_free,
+	mob_move_class = mob_move_class, mob_can_enter = mob_can_enter, step_ticks = step_ticks, mob_place = mob_place,
+	mob_step = mob_step, mob_step_toward = mob_step_toward, mob_step_away = mob_step_away, los = los,
+	nearest_player = nearest_player, find_free_spot = find_free_spot, player_near = player_near }) do
+	_G[name] = fn
+end

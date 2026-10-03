@@ -10,6 +10,7 @@
 #include <cmath>
 
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <regex>
@@ -264,7 +265,9 @@ namespace jai::fuzz {
 			return script_value(std::monostate{}, raw);
 		});
 
+		const bool trace = std::getenv("JAI_FUZZ_TRACE") != nullptr;   // triage: name each segment before it runs (a hang's location)
 		for (const auto& seg : p.segments) {
+			if (trace) { std::fprintf(stderr, "[trace] %s segment %zu\n", cfg.use_vm ? "vm" : "interp", out.segment_results.size()); std::fflush(stderr); }
 			std::string r;
 			auto seg_start = std::chrono::steady_clock::now();
 			try {

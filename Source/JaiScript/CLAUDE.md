@@ -164,9 +164,10 @@ Measured on Bindstone (x64, `/MP`, 24 cores):
   `JAISCRIPT_SOURCES`, the unity's includes and the files on disk disagree.
 
 Header-hygiene rules that DO matter (keep them this way):
-- **`signals/signal.hpp` does NOT include `signal_impl.hpp`** (which pulls the whole
-  engine+value system). Consumers that fire *script* receivers must include `signal_impl.hpp`
-  explicitly (`dynamic_binder.hpp` and `signal_serialization.hpp` already do). This cut signal
+- **`signals/signal_decl.hpp` does NOT include `signal_impl.hpp`** (which pulls the whole
+  engine+value system). Headers on hot compile paths include `signal_decl.hpp`; `signal.hpp` is the
+  umbrella (decl + impl) for .cpp files, and consumers that fire *script* receivers include it or
+  `signal_impl.hpp` (`dynamic_binder.hpp` and `signal_serialization.hpp` already do). This cut signal
   consumers from 186→127 includes.
 - **`checked_result.hpp` does NOT include `<format>`** (it's on the universal `value.hpp` path).
   Error messages use plain `{0}`/`{1}` substitution.

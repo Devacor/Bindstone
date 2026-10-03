@@ -10641,7 +10641,8 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 	const script_value& v = vp->deref();
 	const size_t vi = v.raw_storage_index();
 	if (vi != script_value::TYPEID_INT && vi != script_value::TYPEID_FLOAT) return false;
-	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
+	const script_value* cp = p.guard_always ? frame_slot(f, p.container_guard)   // the guard took the container's value ahead of the index
+	                                        : fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
 	if (!cp) return false;
 	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
 		if (!lane_deref_silent(*cp)) return false;
@@ -10925,7 +10926,8 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	if (p.container.const_index != k_invalid_u32) {
 		container_ptr = &f.code->constants[p.container.const_index];
 	} else {
-		auto resolved = fused_ident_value(f, p.container, cscratch,
+		const script_value* guarded = p.guard_always ? frame_slot(f, p.container_guard) : nullptr;   // the guard took the container's value ahead of the index
+		auto resolved = guarded ? guarded : fused_ident_value(f, p.container, cscratch,
 		                                  p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
 		if (!resolved) return op_status::failed;
 		container_ptr = resolved;

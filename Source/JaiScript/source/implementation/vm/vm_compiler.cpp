@@ -3814,7 +3814,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				for (size_t ip2 = ip + 1; ip2 < back; ++ip2) {
 					const vm_instruction& n = code[ip2];
 					const uint32_t g = n.op == opcode::op_t_load && ip2 < c.typed_sites.size() ? c.typed_sites[ip2].guard_temp
-					                 : n.op == opcode::op_index_fused_decl && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
+					                 : (n.op == opcode::op_index_fused_decl || n.op == opcode::op_index_store_fused) && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
 					if (g == st.b) { op.guarded = static_cast<uint32_t>(ip2 - head); break; }
 				}
 			} else if (st.op == opcode::op_operand_temp && st.c == 0 && st.a < c.fused_binary_protos.size()) {
@@ -6493,12 +6493,22 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 			fused = true;
 		}
 	}
-	if (!fused) return false;
+	// an arithmetic tree as the index (the read site's twin): the value first, then the container (the guard's always form unless no user
+	// code can rebind it), then the tree into a temp, then the store over the guard's temp, the order the stack form evaluates
+	binary_expr* tree = nullptr;
+	if (!fused) {
+		tree = ident_container && sub->subscript_receiver != 1 && temps_active_ && chunk_->is_function_body ? index_binary_candidate(sub->right.get()) : nullptr;
+		if (!tree || !(quiet_partner(sub->left.get()) || env_identifier(sub->left.get())) || !binary_lands_fused(tree)) return false;
+	}
+	const size_t temp_mark = temp_next_;
 
 	// Statement position rides an ident/literal RHS as an operand (no LOAD dispatch,
 	// no pushes); every other shape keeps the value on the stack
 	bool value_operand = false;
-	if (no_result && (value->get_type() == node_type::identifier_expr ||
+	if (no_result && tree && value->get_type() == node_type::identifier_expr && !(private_local(value.get()) && !read_ahead_of(value.get(), sub->right.get()))) {
+		materialize_operand_temp(value, p.store_value);   // its value precedes the container and the tree, which may run user code
+		value_operand = true;
+	} else if (no_result && (value->get_type() == node_type::identifier_expr ||
 	                  value->get_type() == node_type::literal_expr)) {
 		p.store_value = make_fused_operand(value);
 		value_operand = true;
@@ -6529,6 +6539,31 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 	if (!value_operand) {
 		compile_expression(value);
 	}
+	if (tree) {
+		const bool snap_container = !private_local(sub->left.get());
+		fused_operand container;
+		uint32_t guard = k_invalid_u32;
+		if (snap_container) { guard_container_temp(sub->left, container, guard, true); }
+		compile_expression(sub->right);
+		vm_instruction& last = chunk_->code.back();
+		if (last.op != opcode::op_binary_fused) {
+			emit_unsupported("an index tree that did not land fused", "row 110");   // unreachable by construction, as at the read site
+			temp_next_ = temp_mark;
+			return true;
+		}
+		const uint32_t t = static_cast<uint32_t>(temp_next_);
+		++temp_next_;
+		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+		last.op = opcode::op_binary_fused_temp;
+		last.b = t;
+		p.container = snap_container ? container : make_fused_operand(sub->left);
+		p.container_guard = guard;
+		p.guard_always = snap_container;
+		p.index = fused_operand{};
+		p.index.slot = t;
+		p.index.symbol = temp_symbol_index();
+		p.index.direct = true;
+	}
 	// the typed store lane's shape proof (typed_index_store): the value rides the stack or
 	// resolves as an operand; container and index as the read lane requires
 	p.typed_lane = index_proto_typed_lane_shape(*chunk_, p);
@@ -6536,6 +6571,7 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 	chunk_->fused_index_protos.push_back(p);
 	emit(opcode::op_index_store_fused, static_cast<uint32_t>(chunk_->fused_index_protos.size() - 1), shape,
 	     no_result ? 1u : 0u);
+	if (tree) { temp_next_ = temp_mark; }   // the value, the snapshot and the index temp die into the store
 	return true;
 }
 

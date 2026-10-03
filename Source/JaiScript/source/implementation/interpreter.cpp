@@ -66,6 +66,28 @@ namespace {
         return positions;
     }
 
+    // A script comparison may answer inconsistently (a predicate with state, one writing the elements it compares):
+    // std::sort's unguarded loops then run past the range, while a merge never leaves its runs
+    template <typename Less>
+    void merge_sort_any_order(std::vector<script_value>& values, Less&& less) {
+        const size_t count = values.size();
+        if (count < 2) { return; }
+        std::vector<script_value> other(values);
+        std::vector<script_value>* from = &values;
+        std::vector<script_value>* to = &other;
+        for (size_t width = 1; width < count; width *= 2) {
+            for (size_t low = 0; low < count; low += 2 * width) {
+                const size_t mid = std::min(low + width, count), high = std::min(low + 2 * width, count);
+                size_t i = low, j = mid, k = low;
+                while (i < mid && j < high) { (*to)[k++] = less((*from)[j], (*from)[i]) ? std::move((*from)[j++]) : std::move((*from)[i++]); }
+                while (i < mid) { (*to)[k++] = std::move((*from)[i++]); }
+                while (j < high) { (*to)[k++] = std::move((*from)[j++]); }
+            }
+            std::swap(from, to);
+        }
+        if (from != &values) { values = std::move(*from); }
+    }
+
     // A callback call whose lvalue positions get a cell holding the element; the element takes the cell's value back
     // after the call (the builtin works on its own copies of the container's elements)
     checked_result<script_value> call_with_lvalues(const script_function& callback, uint32_t positions,
@@ -511,7 +533,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			std::optional<error_propagator> error;
 			struct SortAborted {};
 			try {
-				std::sort(values.begin(), values.end(), [&](const script_value& a_left, const script_value& a_right) {
+				merge_sort_any_order(values, [&](const script_value& a_left, const script_value& a_right) {
 					if (!predicate) {
 						if (!backend) {
 							error = error_propagator{make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator"};

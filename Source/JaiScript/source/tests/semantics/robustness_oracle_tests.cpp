@@ -91,6 +91,7 @@ public:
 		spaceship_rewriting();
 		local_alias_soundness();
 		import_trees();
+		stored_element_results();
 	}
 
 private:
@@ -556,6 +557,41 @@ private:
 				step(importM);
 				check_eq((int64_t)101, e->execute("count").as_int(), "the reload hook sees the previous value" + label);
 			}
+		});
+	}
+
+	// The call-result rule for builtins that hand back a stored element (Dev ruling 2026-10-03, C++'s reference returns):
+	// binding the result to var/auto/T copies, var&/T& and a member call reach the element; reduce's accumulator is a copy
+	void stored_element_results() {
+		test("stored_element_results_copy_by_value_and_alias_by_reference", [this]() {
+			expect("stored element results", R"(
+				class T { int v = 1; void bump() { v++; } }
+				string run() {
+					array<T> arr = [T(), T()];
+					map<string, T> m = {"k": T()};
+					var a = arr.front(); a.v = 2;
+					string out = "" + arr[0].v;
+					var& b = arr.front(); b.v = 3; out += "," + arr[0].v;
+					arr.back().bump(); out += "," + arr[1].v;
+					auto c = arr.last(); c.v = 9; out += "," + arr[1].v;
+					T d = arr.first(); d.v = 9; out += "," + arr[0].v;
+					var e = m.get("k"); e.v = 5; out += "|" + m["k"].v;
+					var& f = m.get("k"); f.v = 6; out += "," + m["k"].v;
+					m.get("k").bump(); out += "," + m["k"].v;
+					T def = T(); var g = m.get("none", def); g.v = 8; out += "," + def.v;
+					var acc = arr.reduce((var& x, var y) => { x.v += y.v; return x; });
+					out += "|" + arr[0].v + "," + acc.v;
+					T init = T();
+					var acc2 = arr.reduce((var& x, var y) => { x.v += y.v; return x; }, init);
+					out += "," + init.v + "," + acc2.v;
+					array<array<int>> nested = [[1], [2]];
+					var n = nested.front(); n.push(5); out += "|" + nested[0].size();
+					var& n2 = nested.front(); n2.push(5); out += "," + nested[0].size();
+					array<int> ints = [4, 5]; var i = ints.back(); i = 9; out += "," + ints[1];
+					return out;
+				}
+				run();
+			)", "1,3,2,2,3|1,6,7,1|3,5,1,6|1,2,5", check_mode::warn);
 		});
 	}
 

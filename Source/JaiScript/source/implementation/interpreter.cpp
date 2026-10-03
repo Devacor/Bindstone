@@ -88,6 +88,22 @@ namespace {
         if (from != &values) { values = std::move(*from); }
     }
 
+    // C++'s reference return for a builtin that hands back a stored element (front, back, first, last, map get): an
+    // object, array or map comes back as a reference to its slot, so binding it to var/auto/T copies, var&/T& and a
+    // member call reach the stored value; scalars and strings are copies already
+    bool stored_result_is_heavy(const script_value& v) {
+        const size_t k = v.deref().raw_storage_index();
+        return k == script_value::TYPEID_OBJECT || k == script_value::TYPEID_ARRAY || k == script_value::TYPEID_MAP;
+    }
+
+    script_value stored_element_result(const builtin_method_context& ctx, script_value& self, size_t index) {
+        const script_array* node = self.unchecked_array_node();
+        script_value element = node->get(index, ctx.get_engine());
+        if (!stored_result_is_heavy(element)) { return element; }
+        const auto tag = self.get_type_info();
+        return script_value::make_element_reference(self.unchecked_get_array_storage(), index, ctx.get_engine(), tag ? tag->element_type() : nullptr);
+    }
+
     // A callback call whose lvalue positions get a cell holding the element; the element takes the cell's value back
     // after the call (the builtin works on its own copies of the container's elements)
     checked_result<script_value> call_with_lvalues(const script_function& callback, uint32_t positions,
@@ -347,7 +363,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get front of empty array");
         }
-        return node->get(0, ctx.get_engine());
+        return stored_element_result(ctx, self, 0);
     }},
 
         {symbolizer->intern("back"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -358,7 +374,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get back of empty array");
         }
-        return node->get(node->size() - 1, ctx.get_engine());
+        return stored_element_result(ctx, self, node->size() - 1);
     }},
 
         {symbolizer->intern("index_of"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -399,7 +415,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get first of empty array");
         }
-        return node->get(0, ctx.get_engine());
+        return stored_element_result(ctx, self, 0);
     }},
 
         {symbolizer->intern("last"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -410,7 +426,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (node->empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot get last of empty array");
         }
-        return node->get(node->size() - 1, ctx.get_engine());
+        return stored_element_result(ctx, self, node->size() - 1);
     }},
 
         {symbolizer->intern("length"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -757,13 +773,15 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         const strong_ptr<script_array> array = self.unchecked_get_array_storage();
         size_t start = 0;
         script_value accumulator = ctx.make_value();
+        // the accumulator is a copy (std::accumulate takes its initial value by value): the callback never writes the
+        // initial argument or the first element through it
         if (args.size() == 2) {
-            accumulator = args[1];
+            accumulator = args[1].deref().clone_element();
         } else {
             if (array->empty()) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::array_empty), "Cannot reduce an empty array without an initial value");
             }
-            accumulator = array->get(0, eng);
+            accumulator = array->get(0, eng).clone_element();
             start = 1;
         }
         const element_callback callback(args[0], 1, self);
@@ -1037,9 +1055,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         const auto& map = self.unchecked_as_map();
         auto it = map.find(args[0]);
         if (it != map.end()) {
-            return it->second;
+            if (!stored_result_is_heavy(it->second)) { return it->second; }
+            const auto tag = self.get_type_info();
+            return script_value::make_map_entry_reference(self.unchecked_get_map_storage(), it->first, ctx.get_engine(), tag ? tag->value_type() : nullptr);
         }
-        return args.size() == 2 ? args[1] : ctx.make_value();  // Missing keys never insert
+        if (args.size() < 2) { return ctx.make_value(); }  // Missing keys never insert
+        if (!stored_result_is_heavy(args[1])) { return args[1]; }
+        return script_value::make_cell_reference(script_value(args[1].deref()), ctx.get_engine());   // the default argument, named
     }},
 
         {symbolizer->intern("length"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {

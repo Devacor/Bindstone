@@ -15592,7 +15592,12 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 			const script_map& map = recv.unchecked_as_map();
 			auto it = map.find(stack_[base].deref());
 			if (inline_op == 9) { result.emplace(it != map.end(), engine_); }
-			else { result.emplace(it != map.end() ? it->second : stack_[base + 1].deref()); }
+			else {
+				const script_value& got = it != map.end() ? it->second : stack_[base + 1].deref();
+				const size_t k = got.raw_storage_index();
+				// an object, array or map comes back named (the registry's get): the inline lane takes the scalars
+				if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_ARRAY && k != script_value::TYPEID_MAP) { result.emplace(got); }
+			}
 		}
 		if (result) {
 			stack_.truncate(base - 1);

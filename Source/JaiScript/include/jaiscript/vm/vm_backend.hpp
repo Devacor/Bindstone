@@ -372,6 +372,7 @@ namespace jai::vm {
             // piece of residual execution state from a prior region's chunk.
             stack_.clear();
             frames_.clear();
+            top_frame_mark_ = SIZE_MAX;
             call_records_top_ = 0;
             try_records_.clear();
             iter_states_.clear();
@@ -891,6 +892,7 @@ namespace jai::vm {
 
         value_stack stack_;
         std::vector<frame*> frames_;
+        size_t top_frame_mark_ = SIZE_MAX;   // frames_ index of the innermost top-level frame (a trace counts the frames above it)
 
         // Pending-callee register stack (callee-first ruling, 2026-07-08): identifier
         // callees resolve at the pre-args observation point WITHOUT materializing on
@@ -1189,6 +1191,9 @@ namespace jai::vm {
         // A deep recursion leaves the record pool, the value stack and the frame list at their high-water size; the end of a
         // top-level run gives back what a shallow program never needs
         void release_deep_call_storage();
+        // The call path's one compare is against the depth gate: past it the cap raises, or the frames' storage is charged to
+        // the memory allowance (its text when over) and the gate moves k_frame_charge_levels deeper
+        std::optional<error_propagator> pass_depth_gate();
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args,
                                                           const call_site* site = nullptr,

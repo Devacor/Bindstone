@@ -43,6 +43,45 @@ public:
     exception_handling_tests() : suite("Exception Handling") {}
     
     void forge_tests() override {
+        // A trace lists the innermost 64 frames and a final marker for the rest, on both backends
+        test("stack_trace_keeps_innermost_64_frames", [this]() {
+            auto engine = make_engine();
+            engine->execution_budget(0);
+            auto lines = engine->execute(R"(
+                var st = [];
+                int d(int n) { if (n == 0) { try { throw "x"; } catch (e) { st = e.stack; } return 0; } return d(n - 1) + 1; }
+                d(100);
+                st;
+            )");
+            check_eq(size_t(65), lines.as<std::vector<std::string>>().size());
+            check_eq(std::string("... 38 more frames"), lines.as<std::vector<std::string>>()[64]);
+            check_eq(script_int(64), engine->execute("var short_st = []; int s(int n) { if (n == 0) { try { throw \"x\"; } catch (e) { short_st = e.stack; } return 0; } return s(n - 1) + 1; } s(62); short_st.size();").as_int());
+            std::string trace;
+            try { engine->execute("int u(int n) { if (n == 0) { throw \"bottom\"; } return u(n - 1) + 1; } u(100);"); }
+            catch (const std::exception&) { trace = engine->format_stack_trace(); }
+            check_true(trace.find("  ... 38 more frames") != std::string::npos, trace);
+        });
+
+        test("vm_deep_catch_and_rethrow_is_linear", [this]() {
+            auto engine = engine::make();
+            engine->set_backend(backend_type::vm);
+            engine->execution_budget(0);
+            check_eq(script_int(20000), engine->execute(R"(
+                int hops = 0;
+                int rethrow(int n) { if (n == 0) { throw "deep"; } try { return rethrow(n - 1); } catch (e) { hops += 1; throw e; } }
+                try { rethrow(20000); } catch (e) { }
+                hops;
+            )").as_int());
+            auto lines = engine->execute(R"(
+                var st = [];
+                int d(int n) { if (n == 0) { try { throw "x"; } catch (e) { st = e.stack; } return 0; } return d(n - 1) + 1; }
+                d(50000);
+                st;
+            )");
+            check_eq(size_t(65), lines.as<std::vector<std::string>>().size());
+            check_eq(std::string("... 49938 more frames"), lines.as<std::vector<std::string>>()[64]);
+        });
+
         test("throw_unwinding_out_of_condition_positions", [this]() {
             // Fuzz seed 285 (pre-existing both backends at 7/13): a throw unwinding out
             // of a COMPARISON condition left a null placeholder that the

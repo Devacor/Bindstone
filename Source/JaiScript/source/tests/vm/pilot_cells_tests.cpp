@@ -87,7 +87,7 @@ public:
 
 	std::string run_on(bool vm, const std::string& script, bool proofs = true) {
 		auto e = engine::make();
-		if (vm) { e->set_backend(backend_type::vm); }
+		if (vm) { e->set_backend(backend_type::vm); e->max_call_depth(backend_type::vm, 10000); }   // a runaway recursion raises the cap text, as the interpreter does, inside the budget
 		stdlib::register_all(*e); register_host_math_fixture(*e);
 		if (!proofs) { e->type_proofs(false); }
 		try { return e->execute(script).as_string(); }
@@ -5997,7 +5997,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->max_call_depth(backend_type::vm, 10000); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));

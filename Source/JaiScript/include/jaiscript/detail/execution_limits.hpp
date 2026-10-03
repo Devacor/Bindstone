@@ -23,8 +23,11 @@ namespace jai::detail {
 		int vm_call_depth_limit = JAI_MAX_CALL_DEPTH;
 #else
 		int interpreter_call_depth_limit = 256;
-		int vm_call_depth_limit = 200000;   // in-loop frames: heap records of 1-3 KB a level in Release
+		int vm_call_depth_limit = 250000;   // a backstop: the memory cap and the execution budget bound a recursion first
 #endif
+		// The vm's call path compares the depth against this gate: the cap, or the next frame-storage charge below it
+		int vm_depth_gate = 0;
+		size_t vm_frame_bytes = 0;   // frame storage charged to memory_used this execute
 
 		// Terminal-error latch: while set, EVERY script catch handler is skipped -
 		// try/catch, catch-all, nested, catches inside coroutines/lambdas, and catches
@@ -83,6 +86,8 @@ namespace jai::detail {
 		void reset_for_execute() noexcept {
 			terminal_error = false;
 			steps_taken = 0;
+			vm_depth_gate = 0;
+			vm_frame_bytes = 0;
 			memory_used = 0;
 			memory_raises = 0;
 			import_pass_open = false;
@@ -102,6 +107,9 @@ namespace jai::detail {
 		return error_propagator{ make_error_code(runtime_error_code::max_recursion_depth),
 			"Native stack exhausted before the call-depth cap: the host thread's stack bounds this recursion" };
 	}
+
+	// The vm charges its frames' storage to the memory allowance once per this many levels of depth
+	inline constexpr int k_frame_charge_levels = 10000;
 
 	// A `: this(...)` chain deeper than this is a delegation cycle (ill-formed in C++): both backends raise the recursion text
 	inline constexpr size_t k_max_constructor_delegation_depth = 256;

@@ -251,6 +251,7 @@ namespace jai {
             std::vector<std::pair<uint64_t, size_t>> shadow_undo;
             std::vector<size_t> block_marks;
             lambda_expr* owner = nullptr;  // the lambda this scope belongs to (chain-capture target)
+            uint64_t nested_function = 0;  // a named function declared inside another function's body: it captures nothing
         };
         std::vector<function_scope> function_scope_stack_;  // Stack for nested functions/lambdas
         int nesting_depth_ = 0;   // function bodies, blocks, class and namespace bodies: an import is a top-level declaration only
@@ -355,6 +356,12 @@ namespace jai {
                 auto found = function_scope_stack_[i].symbol_to_slot.find(symbol_id);
                 if (found == function_scope_stack_[i].symbol_to_slot.end()) continue;
                 for (size_t j = i + 1; j < function_scope_stack_.size() && j < use_scope_count; ++j) {
+                    if (const uint64_t nested = function_scope_stack_[j].nested_function) {
+                        report_error("Nested function '" + std::string(symbolizer_->get_string(nested)) + "' cannot use enclosing local '" +
+                                     std::string(symbolizer_->get_string(symbol_id)) + "': a named function captures nothing; use a lambda with a capture ([&], [=] or [" +
+                                     std::string(symbolizer_->get_string(symbol_id)) + "]) or function(...) / =>", previous());
+                        return SIZE_MAX;
+                    }
                     auto* owner = function_scope_stack_[j].owner;
                     if (!owner || owner->default_capture != lambda_expr::capture_default::none) { continue; }
                     if (std::none_of(owner->captures.begin(), owner->captures.end(), [symbol_id](const auto& c) { return c.symbol_id == symbol_id; })) {

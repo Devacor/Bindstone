@@ -15794,6 +15794,11 @@ checked_result<void> interpreter::dispatch_expr(expression* expr) {
 void interpreter::capture_stack_trace() {
     captured_trace_.clear();
     for (auto it = call_stack_.rbegin(); it != call_stack_.rend(); ++it) {
+        if (captured_trace_.size() >= k_stack_trace_frames) {
+            cap_stack_trace(captured_trace_, static_cast<size_t>(call_stack_.rend() - it) + 1);
+            trace_captured_ = true;
+            return;
+        }
         const ast_node* node = it->current_node;
         captured_trace_.push_back({
             it->function_name.empty() ? std::string("<anonymous>") : std::string(it->function_name),
@@ -15808,6 +15813,7 @@ void interpreter::capture_stack_trace() {
         top_level_node_ ? top_level_node_->location.line : 0,
         top_level_node_ ? top_level_node_->location.column : 0
     });
+    cap_stack_trace(captured_trace_);
     trace_captured_ = true;
 }
 
@@ -15830,6 +15836,7 @@ void interpreter::absorb_nested_trace() {
     nested_failure_.trace.clear();
     capture_stack_trace();
     captured_trace_.insert(captured_trace_.begin(), inner.begin(), inner.end());
+    cap_stack_trace(captured_trace_);
 }
 
 std::string interpreter::current_source_file() const {
@@ -15842,6 +15849,7 @@ std::string interpreter::current_source_file() const {
 std::string interpreter::format_stack_trace() const {
     std::string out;
     for (const auto& e : captured_trace_) {
+        if (e.elided) { out += "  " + elided_frames_text(e.elided) + '\n'; continue; }
         out += "  at " + e.function + " (" +
             (e.file.empty() ? std::string("<script>") : e.file) + ":" + std::to_string(e.line) + ")\n";
     }

@@ -43,7 +43,7 @@ public:
 		test("defaults_are_backend_specific", [this]() {
 			auto eng = make_engine();
 			check_eq(size_t(256), configured(*eng, backend_type::interpreter));
-			check_eq(size_t(200000), configured(*eng, backend_type::vm));
+			check_eq(size_t(250000), configured(*eng, backend_type::vm));
 		});
 
 		test("interpreter_default_bounds_non_tail_recursion", [this]() {
@@ -91,6 +91,33 @@ public:
 				check_eq(std::string("50000"), outcome, shape);
 				check_eq(script_int(42), eng->execute("40 + 2;").as_int());
 			}
+		});
+
+		// The cap is a backstop: memory and time bound a runaway recursion first (frames are charged every 10000 levels)
+		test("vm_runaway_recursion_trips_the_memory_cap", [this]() {
+			auto eng = engine::make();
+			eng->set_backend(backend_type::vm);
+			eng->execution_budget(0);
+			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
+			eng->memory_cap(64u << 20);
+			std::string message;
+			try { eng->execute("int forever(int n) { return forever(n + 1) + 1; } forever(0);"); }
+			catch (const std::exception& error) { message = error.what(); }
+			check_true(message.find("Script memory cap exceeded") != std::string::npos, "got: " + message);
+			check_eq(script_int(42), eng->execute("int r = 0; try { forever(0); } catch (e) { r = 42; } r;").as_int());
+			check_eq(script_int(1000), eng->execute("int d(int n) { if (n == 0) { return 0; } return d(n - 1) + 1; } d(1000);").as_int());
+		});
+
+		test("vm_runaway_recursion_trips_the_budget", [this]() {
+			auto eng = engine::make();
+			eng->set_backend(backend_type::vm);
+			eng->execution_budget(0.25);
+			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
+			std::string message;
+			try { eng->execute("int forever(int n) { return forever(n + 1) + 1; } forever(0);"); }
+			catch (const std::exception& error) { message = error.what(); }
+			check_true(message.find("Script execution budget exceeded") != std::string::npos, "got: " + message);
+			check_eq(script_int(42), eng->execute("40 + 2;").as_int());
 		});
 
 		test("vm_cap_bounds_deep_recursion_and_unwinds", [this]() {
@@ -181,7 +208,7 @@ public:
 			check_eq(size_t(12), configured(*first, backend_type::interpreter));
 			check_eq(size_t(48), configured(*first, backend_type::vm));
 			check_eq(size_t(256), configured(*second, backend_type::interpreter));
-			check_eq(size_t(200000), configured(*second, backend_type::vm));
+			check_eq(size_t(250000), configured(*second, backend_type::vm));
 		});
 
 		test("invalid_caps_leave_configuration_unchanged", [this]() {

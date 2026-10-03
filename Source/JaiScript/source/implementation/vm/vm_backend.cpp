@@ -370,13 +370,16 @@ struct vm_backend::frame_guard {
 	size_t try_base;
 	size_t iter_base;
 	size_t cfor_base;
+	size_t top_mark;
 	frame_guard(vm_backend* backend, frame* f)
 		: vm(backend), try_base(backend->try_records_.size()), iter_base(backend->iter_states_.size()),
-		  cfor_base(backend->cfor_states_.size()) {
+		  cfor_base(backend->cfor_states_.size()), top_mark(backend->top_frame_mark_) {
 		vm->frames_.push_back(f);
+		if (f->top_level) { vm->top_frame_mark_ = vm->frames_.size() - 1; }
 	}
 	~frame_guard() {
 		vm->frames_.pop_back();
+		vm->top_frame_mark_ = top_mark;
 		truncate_detached(vm->try_records_, try_base);
 		truncate_detached(vm->iter_states_, iter_base);
 		if (vm->cfor_states_.size() > cfor_base) {
@@ -911,8 +914,8 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 	}
 	// Fiber bodies recurse natively through resume, unlike ordinary in-loop calls.
 	// Count setup/default conversions too, and release the count on every exit.
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return detail::raise_call_depth();
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return *blocked; }
 	}
 	if (detail::native_stack_low()) {
 		return detail::raise_native_stack();
@@ -1243,12 +1246,19 @@ std::shared_ptr<chunk> vm_backend::compile_only(const std::vector<declaration_pt
 void vm_backend::capture_stack_trace() {
 	captured_trace_.clear();
 	const ast_node* top_node = nullptr;
-	for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+	size_t walked = 0;
+	for (auto it = frames_.rbegin(); it != frames_.rend(); ++it, ++walked) {
 		frame* fr = *it;
 		const ast_node* node = fr->ip < fr->code->stmt_nodes.size() ? fr->code->stmt_nodes[fr->ip] : nullptr;
 		if (fr->top_level) {
 			top_node = node;
 			break;
+		}
+		if (captured_trace_.size() >= k_stack_trace_frames) {   // the frames above the innermost top-level one, counted, not walked
+			const size_t first = top_frame_mark_ == SIZE_MAX ? 0 : top_frame_mark_ + 1;
+			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1);
+			trace_captured_ = true;
+			return;
 		}
 		for (const chunk::inline_site& s : fr->code->inline_sites) {   // an inlined leaf: the callee's frame as the interpreter has it, the caller's line the call's
 			if (fr->ip >= s.begin_ip && fr->ip < s.fallback_ip && s.decl) {
@@ -1270,6 +1280,7 @@ void vm_backend::capture_stack_trace() {
 		top_node ? top_node->location.line : 0,
 		top_node ? top_node->location.column : 0
 	});
+	cap_stack_trace(captured_trace_);
 	trace_captured_ = true;
 }
 
@@ -1288,6 +1299,7 @@ void vm_backend::absorb_nested_trace() {
 	nested_failure_.trace.clear();
 	capture_stack_trace();
 	captured_trace_.insert(captured_trace_.begin(), inner.begin(), inner.end());
+	cap_stack_trace(captured_trace_);
 }
 
 std::string vm_backend::current_source_file() const {
@@ -1302,6 +1314,7 @@ std::string vm_backend::current_source_file() const {
 std::string vm_backend::format_stack_trace() const {
 	std::string out;
 	for (const auto& e : captured_trace_) {
+		if (e.elided) { out += "  " + elided_frames_text(e.elided) + '\n'; continue; }
 		out += "  at " + e.function + " (" +
 			(e.file.empty() ? std::string("<script>") : e.file) + ":" + std::to_string(e.line) + ")\n";
 	}
@@ -8937,11 +8950,13 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 		if (!cc.raw_proven && kind != ((callee_loop.param_kinds >> (4 * i)) & 0xFu)) { park_raw_callee(f, loop); return false; }
 	}
 	cs.raw_call = 0;
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) [[unlikely]] {
-		cells_flush(f, loop);
-		f.ip = cc.call_ip;
-		st = raise_from(detail::raise_call_depth());
-		return true;
+	if (current_call_depth_ >= limits_->vm_depth_gate) [[unlikely]] {
+		if (auto blocked = pass_depth_gate()) {
+			cells_flush(f, loop);
+			f.ip = cc.call_ip;
+			st = raise_from(*blocked);
+			return true;
+		}
 	}
 	if (++budget_tick_ >= 1024 || limits_->memory_tripped()) [[unlikely]] {
 		--budget_tick_;   // the general check ticks it
@@ -11948,7 +11963,7 @@ bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
 
 bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (debug_hook_ || (site.plain_numeric && has_custom_numeric_ops_)) return false;
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) [[unlikely]] return false;   // at the depth cap the call raises: the fallback makes it
+	if (current_call_depth_ >= limits_->vm_depth_gate) [[unlikely]] return false;   // the fallback call passes the gate (the cap raises there, a frame-storage charge runs)
 	if (!site.proof_globals.empty() && !inline_globals_hold(site)) return false;
 	if (site.method) return inline_method_holds(f, site);
 	if (site.env_reads && f.locals && !f.top_level) {
@@ -12605,8 +12620,8 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 #else
 #define JAI_CALL_PUSH_SECTION(idx)
 #endif
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return raise_from(detail::raise_call_depth());
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -17505,8 +17520,8 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared
                                                             std::shared_ptr<function_decl>& matching_ctor_out,
                                                             std::vector<script_value>& captured_out) {
 	// This native phase owns the constructor depth only until a body takes over.
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return detail::raise_call_depth();
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return *blocked; }
 	}
 	if (detail::native_stack_low()) {
 		return detail::raise_native_stack();
@@ -17713,8 +17728,8 @@ checked_result<script_value> vm_backend::construct_default_instance(std::shared_
 		if (!aggregate.fills()) { return detail::aggregate_answer(aggregate, *class_def, args, engine_); }
 	}
 
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return detail::raise_call_depth();
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return *blocked; }
 	}
 	if (detail::native_stack_low()) {
 		return detail::raise_native_stack();
@@ -20303,8 +20318,9 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	std::optional<detail::call_depth_guard> reentry_depth;
 	checked_result<void> entry_result;
 	if (is_executing()) {
-		if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-			entry_result = detail::raise_call_depth();
+		std::optional<error_propagator> blocked;
+		if (current_call_depth_ >= limits_->vm_depth_gate && (blocked = pass_depth_gate())) {
+			entry_result = *blocked;
 		} else if (detail::native_stack_low()) {
 			entry_result = detail::raise_native_stack();
 		} else {
@@ -20425,6 +20441,19 @@ script_value vm_backend::run_program(std::shared_ptr<chunk> program, bool textua
 	return make_null();
 }
 
+std::optional<error_propagator> vm_backend::pass_depth_gate() {
+	detail::execution_limits& limits = *limits_;
+	if (current_call_depth_ >= limits.vm_call_depth_limit) { return detail::raise_call_depth(); }
+	const size_t bytes = static_cast<size_t>(current_call_depth_) * (sizeof(call_record) + sizeof(frame*)) + stack_.size() * sizeof(script_value);
+	if (bytes > limits.vm_frame_bytes) {
+		limits.memory_charge_deferred(bytes - limits.vm_frame_bytes);
+		limits.vm_frame_bytes = bytes;
+	}
+	if (limits.memory_tripped()) { return detail::raise_memory_cap(limits); }
+	limits.vm_depth_gate = current_call_depth_ + std::min(limits.vm_call_depth_limit - current_call_depth_, detail::k_frame_charge_levels);
+	return std::nullopt;
+}
+
 void vm_backend::release_deep_call_storage() {
 	constexpr size_t k_retained_records = 1024, k_retained_slots = size_t(1) << 16;
 	if (call_records_.size() > k_retained_records && call_records_top_ <= k_retained_records) {
@@ -20538,8 +20567,8 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
                                                    const ArgsT& args,
                                                    size_t args_base, size_t argc,
                                                    const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return raise_from(detail::raise_call_depth());
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -20750,8 +20779,8 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 #define JAI_MPUSH_SECTION(idx)
 #define JAI_MPUSH_SUB(idx)
 #endif
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return raise_from(detail::raise_call_depth());
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -20917,8 +20946,8 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
                                                    script_value&& receiver,
                                                    const std::vector<script_value>& arguments,
                                                    const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return raise_from(detail::raise_call_depth());
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -21104,8 +21133,8 @@ bool vm_backend::enter_static_method(frame& caller, script_value& callee, const 
 // (parented on the definition env, the class for bare statics and access), parameters in the window
 op_status vm_backend::push_static_method_frame(frame& caller, script_value&& method_val, const script_static_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast, const std::vector<script_value>& arguments, const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return raise_from(detail::raise_call_depth());
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
 	if (execution_limit_exhausted()) [[unlikely]] {
 		return raise_from(execution_limit_failure());
@@ -22290,8 +22319,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		caller_code = pending_site_ctx_.caller_code;
 	}
 	pending_site_ctx_ = {};
-	if (current_call_depth_ >= limits_->vm_call_depth_limit) {
-		return detail::raise_call_depth();
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return *blocked; }
 	}
 	// The native entry path (constructor chains especially) stacks wide frames per
 	// level and can exhaust the native stack long before the depth cap - fail

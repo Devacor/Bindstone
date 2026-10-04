@@ -4103,7 +4103,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				for (size_t ip2 = ip + 1; ip2 < back; ++ip2) {
 					const vm_instruction& n = code[ip2];
 					const uint32_t g = n.op == opcode::op_t_load && ip2 < c.typed_sites.size() ? c.typed_sites[ip2].guard_temp
-					                 : (n.op == opcode::op_index_fused_decl || n.op == opcode::op_index_store_fused || n.op == opcode::op_index_compound_operand) && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
+					                 : (n.op == opcode::op_index_fused_decl || n.op == opcode::op_index_store_fused || n.op == opcode::op_index_compound_operand || n.op == opcode::op_index_fused) && n.a < c.fused_index_protos.size() ? c.fused_index_protos[n.a].container_guard : k_invalid_u32;
 					if (g == st.b) { op.guarded = static_cast<uint32_t>(ip2 - head); break; }
 				}
 			} else if (st.op == opcode::op_operand_temp && st.c == 0 && st.a < c.fused_binary_protos.size()) {
@@ -4279,6 +4279,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						if (std::find(c.reference_slots.begin(), c.reference_slots.end(), ai.a) != c.reference_slots.end()) { effect_seen = true; }   // a reference slot never holds a cell: its load runs at C_ARGS and may run a getter
 						cc.args.push_back(chunk::cell_loop::call_arg{ 0, ai.a, static_cast<uint32_t>(a) });
 						seq.push_back(ao);
+					} else if (ai.op == opcode::op_load && ai.a == k_invalid_u32 && ai.c == 0 && ai.b < c.symbols.size() && next && next->op == opcode::op_get_member &&
+					           next->a < c.nodes.size() && c.nodes[next->a]->get_type() == node_type::member_expr && static_cast<const member_expr*>(c.nodes[next->a].get())->enum_constant) {
+						// an enum's value by name as an argument (`Fx.fire`): the member's environment cell, read at entry and after every call, into an
+						// argument value
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }
+						fused_operand o; o.symbol = ai.b; o.ident_node = a < c.ident_nodes.size() ? c.ident_nodes[a] : k_invalid_u32;
+						const uint32_t e = env_cell(o, kint, static_cast<uint32_t>(a * 3), a, next->a);
+						const uint32_t t = arg_temp_next++;
+						use_slot(t, kint, true, k_typed_dst_temp, nullptr, a);
+						ao.kind = ir::mov; ao.a = t; ao.writes = t; ao.b = k_ir_env_bit | e;
+						seq.push_back(ao);
+						ir_op sk; sk.kind = ir::skip; seq.push_back(sk); ++a;
+						cc.args.push_back(chunk::cell_loop::call_arg{ 0, t, static_cast<uint32_t>(a) });
 					} else if (ai.op == opcode::op_const || (ai.op == opcode::op_load && ai.a == k_invalid_u32 && ai.c == 0)) {
 						if (ai.op == opcode::op_load) { effect_seen = true; }   // the load runs at C_ARGS: nothing computed may follow it
 						cc.args.push_back(chunk::cell_loop::call_arg{ 2, static_cast<uint32_t>(a), static_cast<uint32_t>(a) });   // a constant or an environment name: the general push

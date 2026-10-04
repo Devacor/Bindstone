@@ -522,7 +522,15 @@ flush, the liveness of temps and aliases, an inner counted loop's state and the 
 exercised at every such position against the interpreter (`jaiscript_fuzz --miss-every n`, the runner's
 `--miss-every=<n>` and GLOOM's `--miss-every N` under the hash tripwires, suite `Cell Loops`). A build without the
 define never reads the knob and throws on a nonzero setting, so a gate cannot run without the misses it asked for;
-`engine::miss_injection_available()` says which build this is.
+`engine::miss_injection_available()` says which build this is. The CMake option `JAISCRIPT_MISS_INJECTION` defines it for
+every target of the build:
+
+```
+cmake -S . -B "out/build/x64-Release MISS" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DJAISCRIPT_MISS_INJECTION=ON
+```
+
+`jaiscript --miss-every=1` on any script tells the builds apart: a build without the lever exits with code 2 and names
+the option instead of running the script.
 
 Element reads inside expressions take the same row: a subscript expression the fused index op can read
 (an identifier container with an identifier or literal index, a member-base container, or a computed index

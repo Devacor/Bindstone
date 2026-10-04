@@ -6430,7 +6430,7 @@ op_status vm_backend::exec_compound_fused(frame& f, const vm_instruction& ins) {
 }
 
 namespace {
-	inline bool cfor_compare(uint8_t cmp, script_int a, script_int b) {
+	JAI_FORCEINLINE bool cfor_compare(uint8_t cmp, script_int a, script_int b) {
 		switch (static_cast<token_type>(cmp)) {
 			case token_type::less: return a < b;
 			case token_type::less_equal: return a <= b;
@@ -6520,9 +6520,16 @@ op_status vm_backend::exec_cfor_back(frame& f, const vm_instruction& ins) {
 		f.ip = p.generic_update_ip;
 		return {};
 	}
-	bool again;
-	VM_TRY(cfor_advance(st, again));
-	if (again) {
+	// cfor_advance's step and compare in place; an overflow takes it for its text
+	const script_int i = st.var->unchecked_as_int();
+	const script_int step = st.step_ptr ? *st.step_ptr : st.step_val;
+	script_int next;
+	if (!(st.subtract ? ints::try_sub(i, step, next) : ints::try_add(i, step, next))) [[unlikely]] {
+		bool again;
+		return cfor_advance(st, again);
+	}
+	st.var->unchecked_as_int_ref() = next;
+	if (cfor_compare(st.cmp, next, st.end_ptr ? *st.end_ptr : st.end_val)) {
 		f.ip = p.body_ip;
 	} else {
 		cfor_states_.pop_back();

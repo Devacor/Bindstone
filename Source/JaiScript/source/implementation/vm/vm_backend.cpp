@@ -11511,6 +11511,28 @@ op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 	for (size_t i = 0; i < argc; ++i) {
 		argp[i] = &stack_[base + i].deref();
 	}
+	// the scalar rows exec_math_temp runs off the kernel: numbers in, the kernel's own unary or pair rule, a number out
+	const auto fn = static_cast<detail::math_fn>(ins.a);
+	auto number = [](const script_value& v, detail::scalar_num& n) {
+		const size_t raw = v.raw_storage_index();
+		if (raw == script_value::TYPEID_INT) { n.is_int = true; n.i = v.unchecked_as_int(); return true; }
+		if (raw == script_value::TYPEID_FLOAT) { n.is_int = false; n.f = v.unchecked_as_float(); return true; }
+		return false;
+	};
+	detail::scalar_num a, b, r;
+	bool lane = false;
+	if (argc == 1 && detail::math_scalar_unary(fn) && number(*argp[0], a)) {
+		r = detail::eval_scalar_unary(fn, a.is_int ? static_cast<script_float>(a.i) : a.f);
+		lane = true;
+	} else if (argc == 2 && detail::math_scalar_pair(fn) && number(*argp[0], a) && number(*argp[1], b)) {
+		lane = detail::eval_scalar_pair(fn, a, b, r);
+	}
+	if (lane) {
+		script_value out = r.is_int ? script_value(r.i, engine_) : script_value(r.f, engine_);
+		stack_.truncate(base);
+		stack_.push_back(std::move(out));
+		return {};
+	}
 	auto result = detail::eval_math_intrinsic(static_cast<detail::math_fn>(ins.a), argp, argc,
 	                                          engine_, engine_->math_rng());
 	if (!result) {
@@ -20038,7 +20060,7 @@ void vm_backend::dump_opcode_profile() const {
 // branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
 // unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
 #if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
-#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
+#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
 #define JAI_DISPATCH_HERE() { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + f.ip; switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
@@ -20229,6 +20251,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }   // a stdlib alias's real call entered a script frame
 				JAI_NEXT_OP();
 			case opcode::op_math_guard: VM_TRY_OP_SHARED(exec_math_guard(f, ins)); break;
+			case opcode::op_math: JAI_OP_LABEL(op_math) VM_TRY_OP_SHARED(exec_math(f, ins)); JAI_NEXT_OP();
 			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
 
 			// Both always retarget f.ip
@@ -20411,7 +20434,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_ref_target_store:
 			case opcode::op_index_store:
 			case opcode::op_index_compound_fused:
-			case opcode::op_math:
 			case opcode::op_parallel_for:
 			case opcode::op_cast:
 			case opcode::op_return_convert:

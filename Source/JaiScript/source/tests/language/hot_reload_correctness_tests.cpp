@@ -744,6 +744,46 @@ public:
             run("class R { static float g = 3; }");
             check_true(run("R::s").find("ERROR") == 0, "a dropped static is gone");
         });
+
+        // A by-reference argument site remembers that its member is a plain script field of the receiver's class; a reload that
+        // gives the field an accessor or another declared type, and a receiver of another class, take the full ladder again
+        test("reference_argument_site_follows_reload_and_receiver_class", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto run = [&](const char* src) -> std::string {
+                try { return eng->execute(src).to_string(); }
+                catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+            };
+            run(R"(
+                class P { int x = 1; }
+                class Q { float x = 0.5; int pad = 0; }
+                void bump(var& r) { r = r + 1.75; }
+                function go(var& o) -> string { for (int i = 0; i < 3; i++) { bump(o.x); } return to_string(o.x); }
+                P p = P(); Q q = Q();
+            )");
+            check_eq(std::string("4"), run("go(p)"), "int field: each store converts to int");
+            check_eq(std::string("5.75"), run("go(q)"), "another class at the same site: its float field");
+            check_eq(std::string("7"), run("go(p)"), "back to the first class");
+            run("class P { float x = 1; }");
+            check_eq(std::string("12.25"), run("go(p)"), "a reload that declares the field float governs the next binds");
+            run("class P { float x = 1; float _get_x() { return x; } }");
+            const std::string err = run("go(p)");
+            check_true(err.find("Cannot pass non-lvalue to reference parameter") != std::string::npos, "a user accessor makes the member a non-lvalue (got: " + err + ")");
+            run("class P { float x = 1; }");
+            check_eq(std::string("17.5"), run("go(p)"), "dropping the accessor binds the field again");
+            run(R"(
+                class Base { int a = 0; }
+                class D1 : Base { int d1 = 1; }
+                void poke(int& r, Base& x) { x = Base(); r = 5; }
+                function f() -> string {
+                    Base x = D1(); string out = "";
+                    for (int i = 0; i < 3; i++) { x = D1(); D1& dx = cast<D1&>(x); try { poke(dx.d1, x); out = out + "no"; } catch (e) { out = out + e + "/"; } }
+                    return out;
+                }
+            )");
+            check_eq(std::string("Reference to a removed field/Reference to a removed field/Reference to a removed field/"), run("f()"),
+                "a bound member the callee's re-class drops raises at every bind");
+        });
     }
 };
 

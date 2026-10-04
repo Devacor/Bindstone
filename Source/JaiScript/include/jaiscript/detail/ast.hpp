@@ -421,6 +421,13 @@ namespace jai {
         // the checker proved an enum's value read by name (the name holds a map<string,int>, whose member read runs no user code): a
         // capture ahead of it is never needed (transient_read_marker::callout_free)
         mutable bool enum_constant = false;
+        mutable uint64_t setter_id = UINT64_MAX;  // "_set_" + member, cached like getter_id
+        // a reference bind's verdict for one script class (detail::ref_plain_script_field): the member is a plain script field of it
+        // (no C++ property, no user accessor, public chain) while both epochs hold; ref_field_declared is its declared type
+        mutable const class_definition* ref_field_class = nullptr;
+        mutable uint64_t ref_field_shape = 0;
+        mutable uint64_t ref_field_methods = 0;
+        mutable type_info* ref_field_declared = nullptr;
 
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}

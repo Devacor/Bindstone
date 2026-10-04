@@ -14,6 +14,13 @@
 #else
 #define JAI_FORCEINLINE inline
 #endif
+#if defined(_MSC_VER)
+#define JAI_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define JAI_NOINLINE __attribute__((noinline))
+#else
+#define JAI_NOINLINE
+#endif
 
 // Inline header code holds locks and guards across throws; without unwinding their destructors never run
 #if defined(_MSC_VER) && !defined(_CPPUNWIND)

@@ -520,6 +520,7 @@ namespace jai::vm {
             mutable std::vector<call_plan> plans;
         };
         std::vector<cell_loop> cell_loops;
+        uint32_t max_cells = 0;   // the most cells any loop of this chunk holds: a frame's dirty bytes past it are never read
         // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's
         // open-loop table and the disassembly); a `translation` refusal is a supported core operation in an encoding the
         // translation does not normalize yet, a coverage gap rather than a limit of the model

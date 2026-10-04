@@ -515,7 +515,10 @@ namespace jai::vm {
             void set(uint32_t k) noexcept { b[k] = 1; }
             void clear(uint32_t k) noexcept { b[k] = 0; }
             bool test(uint32_t k) const noexcept { return b[k] != 0; }
-            void reset() noexcept { std::memset(b, 0, sizeof(b)); }
+            // the first n bytes, in fixed widths the compiler stores inline (a byte past n is never set by the loop that owns n)
+            void reset(size_t n) noexcept {
+                if (n <= 16) { std::memset(b, 0, 16); } else if (n <= 64) { std::memset(b, 0, 64); } else { std::memset(b, 0, sizeof(b)); }
+            }
             chunk::cell_mask mask(size_t n) const noexcept { chunk::cell_mask m; for (uint32_t k = 0; k < n; ++k) { if (b[k]) m.set(k); } return m; }
             bool any_of(const std::vector<uint32_t>& cells) const noexcept { for (const uint32_t k : cells) { if (b[k]) return true; } return false; }
         };
@@ -562,8 +565,9 @@ namespace jai::vm {
             uint32_t park_boundary = 0;
             uint32_t park_serial = 0;
             uint32_t entry_serial = 0;
-            void reset() { loop = k_invalid_u32; dirty.reset(); }
-            void reset_call() { reset(); refused_loops = 0; park_at = k_invalid_u32; env_loop = nullptr; }
+            void reset(size_t cells) { loop = k_invalid_u32; dirty.reset(cells); }
+            // a call's entry: cells = the body's largest loop (chunk::max_cells), past which this frame never reads a dirty byte
+            void reset_call(size_t cells) { reset(cells); refused_loops = 0; park_at = k_invalid_u32; env_loop = nullptr; }
         };
 
         struct frame_guard;
@@ -691,10 +695,15 @@ namespace jai::vm {
             const opcode next = code[f.ip + 1].op;
             return next != opcode::op_pop && next != opcode::op_implicit_return;
         }
-        void land_call_result(frame& caller, script_value&& v) {
-            if (caller.code->code[caller.ip].op == opcode::op_call_typed && call_typed_land(caller, v)) { caller.ip += 2; return; }
-            if (next_op_discards_result(caller)) { caller.ip += 2; return; }
-            if (block_landing_discards_result(caller)) { ++caller.ip; return; }   // a statement call inside a block: the landing has nothing to consume
+        // every chunk ends in op_halt, so a call's next instruction exists
+        JAI_FORCEINLINE void land_call_result(frame& caller, script_value&& v) {
+            const vm_instruction* code = caller.code->code.data();
+            const size_t ip = caller.ip;
+            assert(ip + 1 < caller.code->code.size());
+            if (code[ip].op == opcode::op_call_typed && call_typed_land(caller, v)) { caller.ip += 2; return; }
+            const opcode next = code[ip + 1].op;
+            if (next == opcode::op_pop) { caller.ip += 2; return; }
+            if (next == opcode::op_c_land && caller.code->cell_loops[code[ip + 1].b].calls[code[ip + 1].a].consumer == 0) { ++caller.ip; return; }   // a statement call inside a block: the landing has nothing to consume
             stack_.push_back(std::move(v));
             ++caller.ip;
         }
@@ -896,7 +905,25 @@ namespace jai::vm {
         std::unordered_map<node_unit_key, chunk_cache_entry, node_unit_hash> chunk_cache_;
 
         value_stack stack_;
-        std::vector<frame*> frames_;
+        // the active frames, innermost last: slots.size() is the capacity, so a push is a compare and a store
+        struct frame_stack {
+            std::vector<frame*> slots;
+            size_t top = 0;
+            void push_back(frame* f) { if (top == slots.size()) [[unlikely]] { grow(); } slots[top++] = f; }
+            void pop_back() noexcept { assert(top); --top; }
+            frame* back() const noexcept { assert(top); return slots[top - 1]; }
+            frame* operator[](size_t i) const noexcept { assert(i < top); return slots[i]; }
+            size_t size() const noexcept { return top; }
+            bool empty() const noexcept { return top == 0; }
+            size_t capacity() const noexcept { return slots.size(); }
+            void clear() noexcept { top = 0; }
+            void reserve(size_t n) { if (slots.size() < n) { slots.resize(n); } }
+            void shrink_to_fit() { slots.resize(top); slots.shrink_to_fit(); }
+            auto rbegin() const noexcept { return std::make_reverse_iterator(slots.begin() + static_cast<std::ptrdiff_t>(top)); }
+            auto rend() const noexcept { return slots.rend(); }
+            JAI_NOINLINE void grow() { slots.resize(slots.empty() ? 64 : slots.size() * 2); }
+        };
+        frame_stack frames_;
         size_t top_frame_mark_ = SIZE_MAX;   // frames_ index of the innermost top-level frame (a trace counts the frames above it)
 
         // Pending-callee register stack (callee-first ruling, 2026-07-08): identifier
@@ -1167,6 +1194,7 @@ namespace jai::vm {
         // conversion is the identity); return_mode_converted = already converted at an
         // in-region return site (op_return_convert), landed as is
         op_status return_with_result(frame*& fp, script_value result, uint32_t mode = 0);
+        op_status return_with_conversion(frame*& fp, script_value result, uint32_t mode);
         // Fused `return <ident>;` / `return <a op b>;` (stage 6): record-frame and
         // native-entry variants (the entry twins set return_value_ like op_return's
         // entry branch)
@@ -2207,6 +2235,7 @@ namespace jai::vm {
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
         op_status exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
         const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);
+        const script_value* fused_cmp_operand_env(frame& f, const fused_operand& operand, size_t cache_slot);
         // Superinstruction: fused binary RHS + identifier compound store
         op_status exec_compound_fused(frame& f, const vm_instruction& ins);
         // Counted-for ops: both always retarget f.ip (run() must `continue` after them)
@@ -2242,6 +2271,9 @@ namespace jai::vm {
 #endif
         void capture_arg(frame& f, const vm_instruction& ins);   // cold: the value may still share storage (op_capture_arg)
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
+        op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
+        op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);
+        op_status parked_call_threw(size_t args_base);
         // Callee-first probe for member / computed callees (op_probe_member)
         op_status exec_probe_member(frame& f, const vm_instruction& ins);
         op_status push_script_frame_pinned(frame& caller,

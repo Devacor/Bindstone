@@ -1278,6 +1278,13 @@ public:
     }
     uint32_t field_slot(uint64_t id) const {
         ensure_field_slots();
+        const size_t n = slot_to_field_.size();
+        if (n <= 16) {   // a scan of a small class's slots beats hashing the id (slot_to_field_ is the map's inverse)
+            for (size_t i = 0; i < n; ++i) {
+                if (slot_to_field_[i] == id) return static_cast<uint32_t>(i);
+            }
+            return k_no_field_slot;
+        }
         auto it = field_slots_.find(id);
         return it != field_slots_.end() ? it->second : k_no_field_slot;
     }

@@ -302,6 +302,15 @@ namespace jai::vm {
         op_c_jlt_ff, op_c_jle_ff, op_c_jgt_ff, op_c_jge_ff, op_c_jlt_ffk, op_c_jle_ffk, op_c_jgt_ffk, op_c_jge_ffk, op_c_jlt_ii, op_c_jle_ii, op_c_jgt_ii, op_c_jge_ii, op_c_jlt_iik, op_c_jle_iik, op_c_jgt_iik, op_c_jge_iik,
         op_index_compound_operand, // a = fused_index_protos index (compound_kind set), b = index_flag_lvalue_shape?: `a[i] op= v;` in statement position, the value, container and index as operands; the read-modify-write is op_index_compound_fused's
         op_halt,
+        // Dynamic slot-operand set: a fused binary or compare-jump still general after the typed lowering and the cell translation,
+        // both operands frame slots or literals (k_typed_const_bit | constant index). Each execution reads both tags and runs the
+        // general kernel's numeric rows in place; any other kind, a property reference, an overflow, a zero divisor or a shift
+        // out of range runs the original instruction from chunk::typed_sites (vm_compiler::lower_dynamic_ops)
+        // arithmetic: a = dst slot | dst kind << k_typed_dst_shift (temp, decl or store), b = left, c = right
+        op_d_add, op_d_sub, op_d_mul, op_d_div, op_d_mod,
+        op_d_and, op_d_or, op_d_xor, op_d_shl, op_d_shr,
+        // compare and jump-if-false: a = left, b = right, c = target
+        op_d_jlt, op_d_jle, op_d_jgt, op_d_jge, op_d_jeq, op_d_jne,
     };
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -656,6 +665,22 @@ namespace jai::vm {
             case opcode::op_ref_target_store: return "REF_TARGET_STORE";
             case opcode::op_index_compound_operand: return "INDEX_COMPOUND_OPERAND";
             case opcode::op_halt: return "HALT";
+            case opcode::op_d_add: return "D_ADD";
+            case opcode::op_d_sub: return "D_SUB";
+            case opcode::op_d_mul: return "D_MUL";
+            case opcode::op_d_div: return "D_DIV";
+            case opcode::op_d_mod: return "D_MOD";
+            case opcode::op_d_and: return "D_AND";
+            case opcode::op_d_or: return "D_OR";
+            case opcode::op_d_xor: return "D_XOR";
+            case opcode::op_d_shl: return "D_SHL";
+            case opcode::op_d_shr: return "D_SHR";
+            case opcode::op_d_jlt: return "D_JLT";
+            case opcode::op_d_jle: return "D_JLE";
+            case opcode::op_d_jgt: return "D_JGT";
+            case opcode::op_d_jge: return "D_JGE";
+            case opcode::op_d_jeq: return "D_JEQ";
+            case opcode::op_d_jne: return "D_JNE";
         }
         return "UNKNOWN";
     }

@@ -126,6 +126,22 @@ namespace {
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
 			case opcode::op_binary_fused_temp:
+			case opcode::op_d_add:
+			case opcode::op_d_sub:
+			case opcode::op_d_mul:
+			case opcode::op_d_div:
+			case opcode::op_d_mod:
+			case opcode::op_d_and:
+			case opcode::op_d_or:
+			case opcode::op_d_xor:
+			case opcode::op_d_shl:
+			case opcode::op_d_shr:
+			case opcode::op_d_jlt:
+			case opcode::op_d_jle:
+			case opcode::op_d_jgt:
+			case opcode::op_d_jge:
+			case opcode::op_d_jeq:
+			case opcode::op_d_jne:
 			case opcode::op_t_decl_mov:
 			case opcode::op_t_decl_const:
 			case opcode::op_t_store_mov:
@@ -325,6 +341,22 @@ namespace {
 			case opcode::op_binary:
 			case opcode::op_binary_fused:
 			case opcode::op_binary_fused_temp:
+			case opcode::op_d_add:
+			case opcode::op_d_sub:
+			case opcode::op_d_mul:
+			case opcode::op_d_div:
+			case opcode::op_d_mod:
+			case opcode::op_d_and:
+			case opcode::op_d_or:
+			case opcode::op_d_xor:
+			case opcode::op_d_shl:
+			case opcode::op_d_shr:
+			case opcode::op_d_jlt:
+			case opcode::op_d_jle:
+			case opcode::op_d_jgt:
+			case opcode::op_d_jge:
+			case opcode::op_d_jeq:
+			case opcode::op_d_jne:
 			case opcode::op_t_decl_mov:
 			case opcode::op_t_decl_const:
 			case opcode::op_t_store_mov:
@@ -880,6 +912,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 		result->local_count = temp_high_;
 	}
 	lower_typed_ops(*result);
+	lower_dynamic_ops(*result);
 	frame_param_kinds_.clear();
 	frame_eligible_ = false;
 	temps_active_ = false;
@@ -2591,6 +2624,114 @@ bool vm_compiler::try_lower_store_move(identifier_expr* ident, const expression_
 // In place, after every jump target is final, so nothing shifts.
 static bool index_proto_typed_lane_shape(const chunk& code, const fused_index_proto& p);   // defined with the index lanes below
 static bool index_proto_speculative_shape(const chunk& code, const fused_index_proto& p);
+
+// The dynamic slot-operand set (opcode.hpp op_d_*): after the typed lowering and the cell translation, a fused binary or
+// compare-jump still general whose operands are frame slots or literals carries them in the instruction word; the original
+// waits in typed_sites. Proofs or none alike; a block's general range keeps its originals (its misses re-run them there).
+void vm_compiler::lower_dynamic_ops(chunk& c) {
+	if (!c.is_function_body) return;
+	auto& code = c.code;
+	std::vector<uint8_t> held(code.size(), 0);
+	auto hold = [&](uint32_t from, uint32_t to) { for (uint32_t i = from; i <= to && i < held.size(); ++i) held[i] = 1; };
+	for (const auto& loop : c.cell_loops) {
+		hold(loop.head, loop.back);
+		hold(loop.copy_head, loop.copy_back);
+		if (loop.trampoline != k_invalid_u32) hold(loop.trampoline, loop.trampoline + 1);
+	}
+	auto operand = [&](const fused_operand& o, uint32_t& out) {
+		if (o.is_subscript() || o.member_node != k_invalid_u32) return false;
+		if (o.const_index != k_invalid_u32) {
+			if (o.const_index >= k_typed_env_bit) return false;
+			out = k_typed_const_bit | o.const_index;
+			return true;
+		}
+		if (o.slot == k_invalid_u32 || o.slot >= k_typed_env_bit || (o.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
+		out = o.slot;
+		return true;
+	};
+	auto arith_op = [](token_type t, opcode& out) {
+		switch (t) {
+		case token_type::plus: out = opcode::op_d_add; return true;
+		case token_type::minus: out = opcode::op_d_sub; return true;
+		case token_type::star: out = opcode::op_d_mul; return true;
+		case token_type::slash: out = opcode::op_d_div; return true;
+		case token_type::percent: out = opcode::op_d_mod; return true;
+		case token_type::ampersand: out = opcode::op_d_and; return true;
+		case token_type::pipe: out = opcode::op_d_or; return true;
+		case token_type::caret: out = opcode::op_d_xor; return true;
+		case token_type::left_shift: out = opcode::op_d_shl; return true;
+		case token_type::right_shift: out = opcode::op_d_shr; return true;
+		default: return false;
+		}
+	};
+	auto jump_op = [](token_type t, opcode& out) {
+		switch (t) {
+		case token_type::less: out = opcode::op_d_jlt; return true;
+		case token_type::less_equal: out = opcode::op_d_jle; return true;
+		case token_type::greater: out = opcode::op_d_jgt; return true;
+		case token_type::greater_equal: out = opcode::op_d_jge; return true;
+		case token_type::equal_equal: out = opcode::op_d_jeq; return true;
+		case token_type::bang_equal: out = opcode::op_d_jne; return true;
+		default: return false;
+		}
+	};
+	chunk* saved = chunk_;
+	chunk_ = &c;
+	for (uint32_t ip = 0; ip < code.size(); ++ip) {
+		if (held[ip]) continue;
+		const vm_instruction ins = code[ip];
+		uint32_t proto = k_invalid_u32, dst = 0;
+		type_info* stamp = nullptr;
+		vm_instruction store{opcode::op_halt, 0, 0, 0};
+		switch (ins.op) {
+		case opcode::op_binary_fused_temp:
+			if (ins.b >= k_typed_slot_mask) continue;
+			proto = ins.a;
+			dst = ins.b | (k_typed_dst_temp << k_typed_dst_shift);
+			break;
+		case opcode::op_binary_fused_decl: {
+			const fused_binary_dst_proto& dp = c.fused_binary_dst_protos[ins.a];
+			const auto* decl = static_cast<const variable_decl*>(c.nodes[dp.node_index].get());
+			if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
+			    decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) continue;
+			proto = dp.binary_proto;
+			dst = static_cast<uint32_t>(decl->slot_index) | (k_typed_dst_decl << k_typed_dst_shift);
+			stamp = decl->type.get();
+			break;
+		}
+		case opcode::op_binary_fused_store: {
+			const fused_binary_dst_proto& dp = c.fused_binary_dst_protos[ins.a];
+			if (dp.slot == k_invalid_u32 || dp.slot >= k_typed_slot_mask) continue;
+			proto = dp.binary_proto;
+			dst = dp.slot | (k_typed_dst_store << k_typed_dst_shift);
+			store = vm_instruction{opcode::op_store, dp.symbol, dp.slot, dp.flags};
+			break;
+		}
+		case opcode::op_fused_cmp_jump: {
+			const fused_binary_proto& p = c.fused_binary_protos[ins.b];
+			opcode op;
+			uint32_t l, r;
+			if (!jump_op(static_cast<token_type>(p.op), op) || !operand(p.left, l) || !operand(p.right, r)) continue;
+			typed_site_at(ip).orig = ins;
+			code[ip] = vm_instruction{op, l, r, ins.a};
+			continue;
+		}
+		default:
+			continue;
+		}
+		const fused_binary_proto& p = c.fused_binary_protos[proto];
+		opcode op;
+		uint32_t l, r;
+		if (!arith_op(static_cast<token_type>(p.op), op) || !operand(p.left, l) || !operand(p.right, r)) continue;
+		chunk::typed_site& site = typed_site_at(ip);
+		site.orig = ins;
+		site.orig2 = store;
+		site.stamp = stamp;
+		code[ip] = vm_instruction{op, dst, l, r};
+	}
+	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }
+	chunk_ = saved;
+}
 
 void vm_compiler::lower_typed_ops(chunk& c) {
 	if (!typed_lowering_) return;

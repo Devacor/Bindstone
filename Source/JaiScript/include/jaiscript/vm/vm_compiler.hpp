@@ -118,6 +118,7 @@ namespace jai::vm {
         static bool raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, std::vector<const function_decl*>& visiting);
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
+        void lower_dynamic_ops(chunk& c);
         bool try_lower_decl_move(const std::shared_ptr<variable_decl>& decl, const expression* init);
         bool fusable_index_expr(const expression* e);
         bool index_read_partner_shape(const binary_expr* rb);

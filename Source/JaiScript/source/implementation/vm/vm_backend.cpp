@@ -10674,6 +10674,133 @@ op_status vm_backend::exec_typed_cmp_jump(frame& f, const vm_instruction& ins) {
 	return exec_fused_cmp_jump(f, f.code->typed_sites[f.ip].orig);
 }
 
+// ---- dynamic slot-operand set (opcode.hpp op_d_*) ----
+
+// a slot (or a literal) as the general op's operand read gives it; null = the original instruction runs (a slot not live yet, or
+// a reference whose dereference a host could observe, which the general op would then read a second time)
+JAI_FORCEINLINE const script_value* vm_backend::dyn_operand(frame& f, uint32_t v) {
+	if (v & k_typed_const_bit) { return &f.code->constants[v & ~k_typed_const_bit]; }
+	const script_value* s = frame_slot(f, v);
+	if (s && s->raw_storage_index() == script_value::TYPEID_REFERENCE) { return lane_deref_silent(*s) ? &s->deref() : nullptr; }
+	return s;
+}
+
+// binary_fused_compute's numeric and int bitwise rows into the op's landing; false = the original instruction runs
+JAI_FORCEINLINE bool vm_backend::dyn_arith_fast(frame& f, const vm_instruction& ins) {
+	const script_value* lp = dyn_operand(f, ins.b);
+	const script_value* rp = lp ? dyn_operand(f, ins.c) : nullptr;
+	if (!rp) return false;
+	const size_t li = lp->raw_storage_index(), ri = rp->raw_storage_index();
+	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+		const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+		script_int r;
+		if (ins.op <= opcode::op_d_mod) {
+			if (has_custom_numeric_ops_) return false;
+			switch (ins.op) {
+			case opcode::op_d_add: if (!ints::try_add(a, b, r)) return false; break;
+			case opcode::op_d_sub: if (!ints::try_sub(a, b, r)) return false; break;
+			case opcode::op_d_mul: if (!ints::try_mul(a, b, r)) return false; break;
+			case opcode::op_d_div: if (b == 0 || !ints::try_div(a, b, r)) return false; break;
+			default: if (b == 0) return false; r = ints::mod(a, b); break;
+			}
+		} else {
+			if (operator_table_ && operator_table_->any()) return false;
+			switch (ins.op) {
+			case opcode::op_d_and: r = a & b; break;
+			case opcode::op_d_or: r = a | b; break;
+			case opcode::op_d_xor: r = a ^ b; break;
+			case opcode::op_d_shl: if (b < 0 || b > 63) return false; r = a << b; break;
+			default: if (b < 0 || b > 63) return false; r = a >> b; break;
+			}
+		}
+		return dyn_land(f, ins.a, script_value::TYPEID_INT, r, 0.0);
+	}
+	if (ins.op > opcode::op_d_mod || has_custom_numeric_ops_) return false;
+	if ((li != script_value::TYPEID_INT && li != script_value::TYPEID_FLOAT) || (ri != script_value::TYPEID_INT && ri != script_value::TYPEID_FLOAT)) return false;
+	const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
+	const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
+	script_float r;
+	switch (ins.op) {
+	case opcode::op_d_add: r = a + b; break;
+	case opcode::op_d_sub: r = a - b; break;
+	case opcode::op_d_mul: r = a * b; break;
+	case opcode::op_d_div: if (b == 0.0) return false; r = a / b; break;
+	default: if (b == 0.0) return false; r = std::fmod(a, b); break;
+	}
+	return dyn_land(f, ins.a, script_value::TYPEID_FLOAT, 0, r);
+}
+
+// the landing the replaced instruction's sink gives a raw int or float: a temp as temp_lane_sink, a declaration as the decl lane (its
+// type's int or float row, an int widening into a float declaration), a store as store_popped_value's head; false = anything else
+bool vm_backend::dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, script_float fv) {
+	const bool is_int = kind == script_value::TYPEID_INT;
+	switch (a >> k_typed_dst_shift) {
+	case k_typed_dst_temp:
+		return is_int ? typed_land_int(f, a, iv) : typed_land_float(f, a, fv);
+	case k_typed_dst_decl: {
+		const type_info* stamp = f.code->typed_sites[f.ip].stamp;
+		const script_value_type bt = stamp ? stamp->base_type : script_value_type::jai_any_type;
+		if (bt == script_value_type::jai_any_type || bt == (is_int ? script_value_type::jai_int_type : script_value_type::jai_float_type)) {
+			return is_int ? typed_land_int(f, a, iv) : typed_land_float(f, a, fv);
+		}
+		if (is_int && bt == script_value_type::jai_float_type) { return typed_land_float(f, a, static_cast<script_float>(iv)); }
+		return false;
+	}
+	case k_typed_dst_store:
+		return store_slot_raw(f, f.code->typed_sites[f.ip].orig2, kind, iv, fv);
+	default:
+		return false;
+	}
+}
+
+op_status vm_backend::exec_dyn_arith(frame& f, const vm_instruction& ins) {
+	if (dyn_arith_fast(f, ins)) return {};
+	return exec_typed_fallback(f, f.code->typed_sites[f.ip].orig);
+}
+
+// exec_fused_cmp_jump's numeric rows; anything else is the original instruction
+op_status vm_backend::exec_dyn_cmp_jump(frame& f, const vm_instruction& ins) {
+	if (!has_custom_numeric_ops_) {
+		const script_value* lp = dyn_operand(f, ins.a);
+		const script_value* rp = lp ? dyn_operand(f, ins.b) : nullptr;
+		if (rp) {
+			const size_t li = lp->raw_storage_index(), ri = rp->raw_storage_index();
+			bool truthy;
+			bool done = true;
+			if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+				const script_int x = lp->unchecked_as_int(), y = rp->unchecked_as_int();
+				switch (ins.op) {
+				case opcode::op_d_jlt: truthy = x < y; break;
+				case opcode::op_d_jle: truthy = x <= y; break;
+				case opcode::op_d_jgt: truthy = x > y; break;
+				case opcode::op_d_jge: truthy = x >= y; break;
+				case opcode::op_d_jeq: truthy = x == y; break;
+				default: truthy = x != y; break;
+				}
+			} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+				const script_float x = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
+				const script_float y = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
+				switch (ins.op) {
+				case opcode::op_d_jlt: truthy = x < y; break;
+				case opcode::op_d_jle: truthy = x <= y; break;
+				case opcode::op_d_jgt: truthy = x > y; break;
+				case opcode::op_d_jge: truthy = x >= y; break;
+				case opcode::op_d_jeq: truthy = x == y; break;
+				default: truthy = x != y; break;
+				}
+			} else {
+				done = false;
+				truthy = false;
+			}
+			if (done) {
+				f.ip = truthy ? f.ip + 1 : ins.c;
+				return {};
+			}
+		}
+	}
+	return exec_fused_cmp_jump(f, f.code->typed_sites[f.ip].orig);
+}
+
 // `T x = y;` as one op: exec_decl_var's fast path over the slot LOAD would have pushed
 op_status vm_backend::exec_typed_decl_mov(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
@@ -20080,7 +20207,7 @@ void vm_backend::dump_opcode_profile() const {
 // branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
 // unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
 #if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
-#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
+#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
 #define JAI_DISPATCH_AT(at) { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
@@ -20254,6 +20381,19 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_t_jlt_ii: JAI_OP_LABEL(op_t_jlt_ii) case opcode::op_t_jle_ii: JAI_OP_LABEL(op_t_jle_ii) case opcode::op_t_jgt_ii: JAI_OP_LABEL(op_t_jgt_ii) case opcode::op_t_jge_ii: JAI_OP_LABEL(op_t_jge_ii) case opcode::op_t_jeq_ii: JAI_OP_LABEL(op_t_jeq_ii) case opcode::op_t_jne_ii: JAI_OP_LABEL(op_t_jne_ii)
 			case opcode::op_t_jlt_ff: JAI_OP_LABEL(op_t_jlt_ff) case opcode::op_t_jle_ff: JAI_OP_LABEL(op_t_jle_ff) case opcode::op_t_jgt_ff: JAI_OP_LABEL(op_t_jgt_ff) case opcode::op_t_jge_ff: JAI_OP_LABEL(op_t_jge_ff) case opcode::op_t_jeq_ff: JAI_OP_LABEL(op_t_jeq_ff) case opcode::op_t_jne_ff: JAI_OP_LABEL(op_t_jne_ff)
 				VM_TRY_OP_SHARED(exec_typed_cmp_jump(f, ins));
+				if (is_unwinding_) [[unlikely]] {
+					if (!handle_throw_unwind(fp, records_base)) {
+						return {};
+					}
+					continue;
+				}
+				JAI_DISPATCH_HERE();
+			case opcode::op_d_add: JAI_OP_LABEL(op_d_add) case opcode::op_d_sub: JAI_OP_LABEL(op_d_sub) case opcode::op_d_mul: JAI_OP_LABEL(op_d_mul) case opcode::op_d_div: JAI_OP_LABEL(op_d_div) case opcode::op_d_mod: JAI_OP_LABEL(op_d_mod) case opcode::op_d_and: JAI_OP_LABEL(op_d_and) case opcode::op_d_or: JAI_OP_LABEL(op_d_or) case opcode::op_d_xor: JAI_OP_LABEL(op_d_xor) case opcode::op_d_shl: JAI_OP_LABEL(op_d_shl) case opcode::op_d_shr: JAI_OP_LABEL(op_d_shr)
+				VM_TRY_OP_SHARED(exec_dyn_arith(f, ins));
+				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				JAI_NEXT_OP();
+			case opcode::op_d_jlt: JAI_OP_LABEL(op_d_jlt) case opcode::op_d_jle: JAI_OP_LABEL(op_d_jle) case opcode::op_d_jgt: JAI_OP_LABEL(op_d_jgt) case opcode::op_d_jge: JAI_OP_LABEL(op_d_jge) case opcode::op_d_jeq: JAI_OP_LABEL(op_d_jeq) case opcode::op_d_jne: JAI_OP_LABEL(op_d_jne)
+				VM_TRY_OP_SHARED(exec_dyn_cmp_jump(f, ins));
 				if (is_unwinding_) [[unlikely]] {
 					if (!handle_throw_unwind(fp, records_base)) {
 						return {};

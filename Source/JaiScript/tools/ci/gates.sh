@@ -21,7 +21,7 @@ GLOOM_FRAME=7fecc09815bb64e0
 GLOOM_STATE=3580805725
 DEMOREEL_STREAM=006d304a70772e5f
 CRAWLER_STATE=3849293868
-GATORQUEST_STATE=3237070200
+GATORQUEST_STATE=3218840367
 
 # Deep-recursion tests outgrow Linux's 8 MB main-thread stack in Debug builds; the
 # Windows binaries link a 128 MB stack, so match it where the shell allows.

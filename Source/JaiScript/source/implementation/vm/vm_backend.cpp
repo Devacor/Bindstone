@@ -5899,6 +5899,19 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 			}
 		}
 	}
+	// int bitwise rows: binary_general's with no registered operator to consult (a shift outside 0..63 raises there)
+	if (lp->raw_storage_index() == script_value::TYPEID_INT && rp->raw_storage_index() == script_value::TYPEID_INT &&
+	    (!operator_table_ || !operator_table_->any())) {
+		const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
+		switch (op) {
+		case token_type::ampersand: emit_int(a & b); return {};
+		case token_type::pipe: emit_int(a | b); return {};
+		case token_type::caret: emit_int(a ^ b); return {};
+		case token_type::left_shift: if (b >= 0 && b <= 63) { emit_int(a << b); return {}; } break;
+		case token_type::right_shift: if (b >= 0 && b <= 63) { emit_int(a >> b); return {}; } break;
+		default: break;
+		}
+	}
 
 	// Fallback: snapshot ident/const operands (isolation from mutation by nested calls;
 	// constant templates get their engine ref, exactly as op_const would have).

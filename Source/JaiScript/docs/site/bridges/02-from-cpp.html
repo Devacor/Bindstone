@@ -155,7 +155,7 @@ print(area(4));</code></pre></div>
 == error: 'area' expects 2 arguments, got 1</code></pre></div>
 <h3 id="no-slicing">A base-typed variable keeps the whole object<a class="hlink" href="#no-slicing" aria-label="link">&#8203;</a></h3>
 <div class="callout cpp"><p>This is where JaiScript departs from C++: a <code>Base</code> slot holding a <code>Derived</code> keeps the whole object and its overrides, where C++ would slice it.</p></div>
-<p>Copying a derived value into a base-typed variable, parameter or element keeps all of it: no slicing. The variable's type decides what the checker lets you name, and <code>cast&lt;T&amp;&gt;</code> reaches the rest:</p>
+<p>Copying a derived value into a base-typed variable, parameter or element keeps all of it: no slicing. Assigning one into a base-typed slot that already holds an object keeps that object and turns it into the derived class in place. The variable's type decides what the checker lets you name, and <code>cast&lt;T&amp;&gt;</code> reaches the rest:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Shape { string kind() { return "shape"; } }
 class Circle : Shape { float r = 1.5; string kind() override { return "circle"; } }
 Shape s = Circle();

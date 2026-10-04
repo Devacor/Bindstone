@@ -39,8 +39,9 @@ public:
             // var is the runtime hatch: the element boundary (a declaration literal, push, a
             // subscript store, a map value store, the reference route) admits a var-held instance
             // of the element class or a subclass, a new element carries its class, a store over an
-            // existing element copy-assigns into it (Dev ruling 2026-10-03: a subclass slices), and a
-            // rejection names the payload's type, never the var tag; byte-identical on both backends
+            // existing element assigns into it, the element keeping its object and taking the source's class (Dev rulings
+            // 2026-10-03 and 2026-10-04), and a rejection names the payload's type, never the var tag; byte-identical on
+            // both backends
             const char* src = R"(
                 class Animal { int id = 1; }
                 class Dog : Animal { int extra = 2; }
@@ -76,7 +77,7 @@ public:
             }
             check_eq(seen[0], seen[1], "both backends land and reject identically");
             const std::vector<std::string> expected = {
-                "decl:Animal,Dog,1", "push:Animal,Dog,2", "store:Animal,1", "ref:Animal,1", "map:Animal", "copy:1",
+                "decl:Animal,Dog,1", "push:Animal,Dog,2", "store:Dog,1", "ref:Dog,1", "map:Animal", "copy:1",
                 "box-store!Cannot assign 'Box' to element of type 'Animal'",
                 "box-push!Cannot push 'Box' to array<Animal>",
                 "box-ref!Cannot assign 'Box' to element of type 'Animal'",
@@ -1704,8 +1705,8 @@ public:
             // Declared class-typed fields accept same class, subtypes, null, and shared_ptr
             // wrappers (JaiScript objects travel as object OR shared_ptr over one holder).
             // A subtype member is reached through cast<T&> or a var receiver: the field's
-            // static class is S, and S has no 't' (exactly like C++). A null field takes the
-            // subtype; one holding an S copy-assigns (Dev ruling 2026-10-03), so it is cleared first.
+            // static class is S, and S has no 't' (exactly like C++). A field holding an S keeps
+            // its object and takes the subtype's class (Dev ruling 2026-10-04: no slicing).
             check_both(R"(
                 class S { int x = 1; }
                 class T : S { int t = 2; }
@@ -1713,7 +1714,6 @@ public:
                 auto h = H();
                 h.p = S();
                 var a = h.p.x;
-                h.p = null;
                 h.p = T();
                 var b = cast<T&>(h.p).t;
                 var hv = h.p;
@@ -2727,7 +2727,7 @@ public:
 			// slot keeps its own class tag; whole-array conversions prove the source class once
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B(), D()]; to_string(arr.size()) + \",\" + to_string(arr[1].b)", "2,2", "a subclass element keeps its own class (per-slot tag): its fields stay reachable");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr.push(D()); to_string(arr.size()) + \",\" + to_string(arr[1].a)", "2,1", "push of a subclass into array<Base>");
-			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; D d = D(); d.a = 5; arr[0] = d; to_string(arr[0].a) + type_of(arr[0])", "5B", "store of a subclass over an element copy-assigns the base's members (Dev ruling 2026-10-03)");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; D d = D(); d.a = 5; arr[0] = d; to_string(arr[0].a) + type_of(arr[0]) + to_string(arr[0].b)", "5D2", "store of a subclass over an element takes the subclass in place (Dev ruling 2026-10-04: no slicing)");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } class E : D { int c = 3; } array<B> deep = [E()]; to_string(deep[0].c)", "3", "two inheritance levels");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<D> ds = [D()]; array<B> bs = ds; bs[0].a = 9; to_string(ds[0].a) + \",\" + to_string(bs[0].a)", "1,9", "array<Derived> into array<Base> is a copy (value semantics)");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [D(), D()]; array<D> back = bs; to_string(back.size()) + \",\" + to_string(back[1].b)", "2,2", "array<Base> whose elements are all Derived converts to array<Derived>");

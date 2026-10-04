@@ -1982,6 +1982,24 @@ public:
 			check_true(msg.find("custom operator dispatch on class instances is not admitted in a parallel body") != std::string::npos);
 		});
 
+		test("class_changing_assignment_denied_with_verdict", [this]() {
+			// An assignment of another class into a by-value slot re-classes the slot's object (Dev ruling 2026-10-04: no
+			// slicing): its dropped levels' destructors and the class registry are not worker territory
+			auto e = make_engine();
+			e->parallel_thread_count(4);
+			auto r = e->execute(R"(
+				class Leaf { int v = 0; Leaf() {} }
+				class Leaf2 : Leaf { int w = 1; Leaf2() {} }
+				class Node { Leaf a = Leaf(); Leaf b = Leaf2(); Node() {} }
+				array<Node> nodes = [];
+				for (int i = 0; i < 64; i++) { nodes.push(Node()); }
+				try { parallel_for (auto& n : nodes) { n.a = n.b; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto msg = r.as<std::string>();
+			check_true(msg.find("an assignment that changes an object's class is not admitted in a parallel body") != std::string::npos, msg);
+		});
+
 		test("unsafe_mode_method_calls_fan_out_on_warm_names", [this]() {
 			// Unsafe mode bypasses the method pins (a trusted script may call anything), and a
 			// region of eight elements fans out to eight workers since the cost model took over

@@ -278,13 +278,117 @@ public:
             )", "r:r|r");
         });
 
-        test("assignment_from_a_derived_source_slices", [this]() {
-            expect_log(R"(
-                class Base { int a = 1; Base() {} }
-                class Derived : Base { int b = 2; Derived() {} }
-                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; Derived d = Derived(); d.a = 5; x = d; return to_string(x.a) + type_of(x) + to_string(same_object(h, x)); }
+        // No slicing (Dev ruling 2026-10-04): a source of another class the slot admits re-classes the slot's object in place:
+        // the levels it loses die (destructor body, then their members), it takes the source's class, every member assigns
+        // from the source; references, handles and same_object keep seeing the one object
+        test("assignment_from_a_subclass_source_reclasses_the_object", [this]() {
+            expect_log(std::string(k_family) + R"(
+                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; D2 s = D2(); s.a = 5; s.d2 = 6; x = s; LOG = LOG + "|";
+                    return to_string(x.a) + type_of(h) + to_string(same_object(h, x)) + to_string(cast<D2&>(x).d2); }
+                string out = f(); out + ":" + LOG;
+            )", "5D2true6:|2B2B");
+        });
+
+        test("a_sibling_source_destroys_only_the_levels_the_object_loses", [this]() {
+            expect_log(std::string(k_family) + R"(
+                function f() -> string { Base x = D1(); shared_ptr<Base> h = x; D2 s = D2(); s.a = 7; LOG = LOG + "|"; x = s; LOG = LOG + "|";
+                    return to_string(x.a) + to_string(cast<D2&>(h).d2) + to_string(same_object(h, x)); }
+                string out = f(); out + ":" + LOG;
+            )", "73true:|1t|2B2B");
+        });
+
+        test("a_base_source_drops_the_derived_level_and_keeps_the_base_members", [this]() {
+            expect_log(std::string(k_family) + R"(
+                function f() -> string { Base x = D1(); shared_ptr<Base> h = x; Base b = Base(); b.a = 9; LOG = LOG + "|"; x = b; LOG = LOG + "|";
+                    string r = to_string(x.a) + type_of(h) + to_string(same_object(h, x));
+                    try { int k = cast<D1&>(x).d1; r = r + "no"; } catch (e) { r = r + "!"; }
+                    return r; }
+                string out = f(); out + ":" + LOG;
+            )", "9Basetrue!:|1t|BB");
+        });
+
+        test("a_reference_to_a_dropped_member_raises", [this]() {
+            expect_log(std::string(k_family) + R"(
+                function f() -> string { Base x = D1(); D1& dx = cast<D1&>(x); int& r = dx.d1; Token& t = dx.t1; x = Base(); string out = "";
+                    try { int k = r; out = out + "read"; } catch (e) { out = out + e; }
+                    out = out + "/";
+                    try { r = 4; out = out + "write"; } catch (e) { out = out + e; }
+                    out = out + "/";
+                    try { string n = t.name; out = out + "member"; } catch (e) { out = out + e; }
+                    LOG = "";
+                    return out; }
                 f();
-            )", "5Basetrue");
+            )", "Reference to a removed field/Reference to a removed field/Reference to a removed field");
+        });
+
+        test("an_unrelated_source_still_raises", [this]() {
+            expect_log(std::string(k_family) + R"(
+                [[warn_mode]]
+                class Other { int a = 1; Other() {} }
+                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; var o = Other(); string r = "";
+                    try { x = o; r = "no"; } catch (e) { r = e; }
+                    return r + "|" + type_of(h) + to_string(same_object(h, x)); }
+                string out = f(); LOG = ""; out;
+            )", "Cannot assign Other to 'x' (declared Base)|Basetrue");
+        });
+
+        test("every_by_value_slot_reclasses_in_place", [this]() {
+            const std::string family = std::string(k_family);
+            expect_log(family + R"(
+                function f() -> string { array<Base> a; a.push(Base()); shared_ptr<Base> h = a[0]; a[0] = D2(); return type_of(a[0]) + to_string(same_object(h, a[0])) + to_string(cast<D2&>(h).d2); }
+                string out = f(); LOG = ""; out;
+            )", "D2true3");
+            expect_log(family + R"(
+                class Holder { Base b; }
+                function f() -> string { Holder o; shared_ptr<Base> h = o.b; o.b = D2(); return type_of(h) + to_string(same_object(h, o.b)) + to_string(cast<D2&>(o.b).d2); }
+                string out = f(); LOG = ""; out;
+            )", "D2true3");
+            expect_log(family + R"(
+                class S { static Base st; }
+                function f() -> string { shared_ptr<Base> h = S::st; S::st = D2(); return type_of(h) + to_string(same_object(h, S::st)) + to_string(cast<D2&>(S::st).d2); }
+                string out = f(); LOG = ""; out;
+            )", "D2true3");
+            expect_log(family + R"(
+                function f() -> string { map<string, Base> m; m["k"] = Base(); shared_ptr<Base> h = m["k"]; m["k"] = D2(); return type_of(h) + to_string(same_object(h, m["k"])) + to_string(cast<D2&>(m["k"]).d2); }
+                string out = f(); LOG = ""; out;
+            )", "D2true3");
+            expect_log(family + R"(
+                function put(Base& p) -> void { p = D2(); }
+                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; Base& r = x; r = D1(); string first = type_of(h); put(x);
+                    return first + type_of(h) + to_string(same_object(h, x)); }
+                string out = f(); LOG = ""; out;
+            )", "D1D2true");
+            expect_log(family + R"(
+                class Acc { int n = 0; Acc() {} Acc(int v) { n = v; } function operator+(Acc o) -> Acc { return Sum(n + o.n); } }
+                class Sum : Acc { int parts = 2; Sum(int v) { n = v; } }
+                function f() -> string { Acc x = Acc(1); shared_ptr<Acc> h = x; Acc two = Acc(2); x += two; return type_of(h) + to_string(h.n) + to_string(same_object(h, x)) + to_string(cast<Sum&>(x).parts); }
+                string out = f(); LOG = ""; out;
+            )", "Sum3true2");
+        });
+
+        test("a_reference_declared_narrower_than_its_storage_keeps_its_class", [this]() {
+            expect_log(std::string(k_family) + R"(
+                [[warn_mode]]
+                function f() -> string { Base x = D1(); D1& r = cast<D1&>(x); string out = "";
+                    try { var s = D2(); r = s; out = "no"; } catch (e) { out = e; }
+                    return out + "|" + type_of(x); }
+                string out = f(); LOG = ""; out;
+            )", "Cannot assign D2 to 'r' (declared D1&)|D1");
+        });
+
+        test("a_reclassed_object_dies_as_its_new_class", [this]() {
+            expect_log(R"(
+                class P { int a = 0; P() {} }
+                class Q : P { Q() {} ~Q() { LOG = LOG + "Q"; } }
+                function f() -> void { P x = P(); x = Q(); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "Q|Q");
+            expect_log(R"(
+                class P { int a = 0; P() {} ~P() { LOG = LOG + "P"; } }
+                class Q : P { Q() {} ~Q() { LOG = LOG + "Q"; } }
+                function f() -> void { P x = Q(); x = P(); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "QP|P");
         });
 
         test("field_element_map_and_static_stores_copy_assign", [this]() {
@@ -351,7 +455,29 @@ public:
             )").as_string();
             check_eq(std::string("y9true:"), got);
         });
+
+        test("a_reclassed_instance_migrates_with_its_new_class", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->execute(std::string(k_prelude) + k_family + R"(
+                Base held = Base();
+                shared_ptr<Base> alias = held;
+                held = D2();
+            )");
+            const std::string got = eng->execute(R"(
+                class D2 : Base { int d2 = 3; int extra = 5; D2() {} ~D2() { LOG = LOG + "2"; } }
+                LOG = "";
+                type_of(alias) + to_string(cast<D2&>(held).extra) + to_string(same_object(alias, held)) + ":" + LOG;
+            )").as_string();
+            check_eq(std::string("D25true:"), got);
+        });
     }
+
+    static constexpr const char* k_family = R"(
+        class Base { int a = 1; Base() {} ~Base() { LOG = LOG + "B"; } }
+        class D1 : Base { int d1 = 2; Token t1 = Token("t"); D1() {} ~D1() { LOG = LOG + "1"; } }
+        class D2 : Base { int d2 = 3; D2() {} ~D2() { LOG = LOG + "2"; } }
+    )";
 };
 
 }

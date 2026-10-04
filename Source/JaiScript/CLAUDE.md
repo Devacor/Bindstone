@@ -306,7 +306,8 @@ engine stays usable", not by `check_throws`.
   copy). `.jaibite` version 24.
 - **Class-typed arrays admit subclasses** (Dev ruling 2026-09-02): `array<Base>` holds `Base`
   or any subclass (exact id first, parent walk on a name mismatch); each slot keeps its own
-  class tag; `array<Derived>` converts to `array<Base>` by value; unrelated classes raise.
+  class tag (a store of another admitted class over an element re-classes its object in place, no slicing, Dev ruling
+  2026-10-04); `array<Derived>` converts to `array<Base>` by value; unrelated classes raise.
   The element boundary judges the instance behind a `var` (a var-held `Base` stores; a rejection
   names the payload's type, never `any`). **Handle-typed elements take null** (Dev ruling
   2026-09-08): `array<shared_ptr<T>>`, `array<weak_ptr<T>>` and `map<K, shared_ptr<T>>` values
@@ -519,11 +520,22 @@ engine stays usable", not by `check_throws`.
   the body: `op_kill_slot`; the interpreter gates on `engine::destructors_armed()`); grafts refuse such callees.
 - **Assignment into a by-value class slot is C++ copy assignment** (Dev ruling 2026-10-03; suite `Destructor Timing`): a
   typed local, field, static, array element, map value, reference target or compound result (`x += y`) holding an instance
-  keeps its object (references, handles and `same_object` see it), the declared class's members take the source's by the
-  member-copy rule (`clone_element`; a derived source slices), then a temporary source dies (`detail::user_assign_operator`
-  -> `class_copy_assign` / `implicit_copy_assign`, `class_instance::field_store`, `class_definition::static_store`,
-  `detail::element_copy_assign`, `detail::compound_slot_store`); a `var` slot replaces, a `shared_ptr` rebinds, a host class
-  keeps its replace. A replacing store of a uniquely held aggregate moves it in (`detail::take_for_assignment`,
+  keeps its object (references, handles and `same_object` see it), every member takes the source's by the member-copy rule
+  (`clone_element`), then a temporary source dies (`detail::user_assign_operator` -> `class_copy_assign` /
+  `implicit_copy_assign`, `class_instance::field_store`, `class_definition::static_store`, `detail::element_copy_assign`,
+  `detail::compound_slot_store`); a `var` slot replaces, a `shared_ptr` rebinds, a host class keeps its replace. **No slicing**
+  (Dev ruling 2026-10-04): a source of another class the slot's declared class admits (it or a subclass; the declared type
+  comes from the field, static, element or reference holder, else the slot's tag) re-classes the object in place
+  (`detail::reclass_assign`): the levels it loses die first (`class_definition::destroy_levels`: each dropped level's
+  destructor body, then its own members in reverse), `class_instance::reclass(def, drop_undeclared)` moves the kept cells and
+  retires the dropped ones holding the absent marker (a FIELD reference to one raises `Reference to a removed field`), the
+  holder's name and a tag naming the old class follow, every member then assigns from the source (a member the source lacks
+  takes its default). Same class stays the plain copy (one pointer compare). The object registers with its new class (hot
+  reload migrates it); a re-class into a chain with a destructor arms it (`late_destructor_`, run by `~class_instance`), and
+  an allocation-armed deleter runs the chain of the class the instance has when it dies. A user `operator=` never runs for a
+  source of the slot's family (it converts other sources); a `T&` reference's declared class bounds the source too; a
+  parallel worker raises `an assignment that changes an object's class is not admitted in a parallel body`. Pure script
+  classes only (no VM lane changes: proofs and member ICs guard on class identity; `extended_ever` is not set). A replacing store of a uniquely held aggregate moves it in (`detail::take_for_assignment`,
   `convert_container_element_taking`: a new map key, a `var`, an untyped element); a discarded assignment's value and an
   interpreter statement's value die at the statement's end; `push` copies and its private temp dies after it
   (`push_proto::value_temp`).

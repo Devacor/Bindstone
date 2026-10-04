@@ -1759,6 +1759,40 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			check_true(listing.find("C_APPEND") == std::string::npos, listing.c_str());
 		});
 
+		test("every_back_edge_a_block_runs_polls_the_budget", [this]() {
+			// a loop whose body is a closed inner loop (counted, while, nested), a function whose loops one region covers, an endless loop under a
+			// try: every back edge the block runs takes part in the budget's tick, and a spent budget raises the same terminal text the general
+			// form raises, under the clock-free step budget and the wall-clock budget, both backends, with an injected miss at every position
+			const char* shapes[] = {
+				"function f() { int i = 0; while (i < 2) { for (int j = 0; j < 8; ++j) {} } } f();",
+				"function f() { int i = 0; while (i < 2) { int j = 0; while (j < 8) { j = j + 1; } } } f();",
+				"function f() { int s = 0; for (int i = 0; i < 2; i = i) { for (int j = 0; j < 4; ++j) { for (int k = 0; k < 3; ++k) { s = (s + k) % 7; } } } } f();",
+				"array<int> A = [1, 2, 3, 4];\nint g(int k, array<int>& a) { int s = k; while (true) { for (int q = 0; q < 4; ++q) { s = (s + a[q]) % 1000; } if (s < 0) { break; } } return s; }\ng(3, A);",
+				"function f() { int i = 0; while (i < 2) { for (int j = 0; j < 8; ++j) {} } } var r = 0; try { f(); } catch (e) { r = 7; } r;",
+			};
+			auto run = [](bool vm, const char* src, uint64_t steps, double seconds, uint32_t miss_every) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				stdlib::register_all(*e);
+				if (steps) { e->execution_step_budget(steps); }
+				e->execution_budget(seconds);
+				if (miss_every) { e->cells_miss_every(miss_every); }
+				try { return e->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (const char* s : shapes) {
+				for (bool vm : { false, true }) {
+					const std::string by_steps = run(vm, s, 64, 30.0, 0);
+					check_true(by_steps.find("Script execution budget exceeded") != std::string::npos, std::string(vm ? "vm" : "interpreter") + " step budget: " + by_steps + "\n" + s);
+					const std::string by_clock = run(vm, s, 0, 0.2, 0);
+					check_true(by_clock.find("Script execution budget exceeded") != std::string::npos, std::string(vm ? "vm" : "interpreter") + " wall budget: " + by_clock + "\n" + s);
+				}
+				if (!engine::miss_injection_available()) continue;
+				for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+					const std::string got = run(true, s, 64, 30.0, every);
+					check_true(got.find("Script execution budget exceeded") != std::string::npos, "vm step budget under an injected miss at every " + std::to_string(every) + ": " + got);
+				}
+			}
+		});
 		test("a_block_holds_up_to_256_cells", [this]() {
 			// draw_seg's column loop with its column bodies grafted holds more than 128 cells (its locals, the outer locals it reads, its
 			// compiler values, its argument values, its environment values and the grafts' locals); loops over 80 and 140 locals close

@@ -3490,6 +3490,7 @@ private:
 				checkBuiltinArity(recv, m, c);
 			}
 			stamp(c->builtin_receiver, proven, uint8_t(0));
+			stamp(c->builtin_receiver_open, uint8_t(!proven && (recv.kind == ctype::unknown || recv.kind == ctype::string_k || recv.kind == ctype::array_k || recv.kind == ctype::map_k)), uint8_t(0));
 			{
 				std::vector<proof_global> deps;
 				auto* rid = m->object && m->object->get_type() == node_type::identifier_expr ? static_cast<identifier_expr*>(m->object.get()) : nullptr;

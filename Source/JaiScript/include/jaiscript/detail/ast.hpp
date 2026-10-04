@@ -386,6 +386,7 @@ namespace jai {
         mutable std::weak_ptr<const class function_decl> proven_callee_decl;
         mutable std::weak_ptr<const class function_decl> proven_method_decl;   // `recv.m(...)` on an object receiver in a frame slot: the one overload of the receiver's class the checker resolved (the inliner's method graft)
         mutable uint8_t builtin_receiver = 0;   // the checker proved the method receiver: 1 string, 2 array, 3 map (0 unproven)   // the one free script function a plain identifier callee resolves to (exact arity, a body, not a coroutine; reference parameters allowed): the inliner's identity
+        mutable uint8_t builtin_receiver_open = 0;   // unproven, yet no class: the receiver may be a string, array or map (the vm picks the builtin by its kind)
         std::vector<uint8_t> arg_captures;   // per argument, the capture its value needs before a later argument runs (detail::arg_capture_kind); empty = none
         mutable method_site_cache sibling_cache;   // interpreter: a bare call of a method of this frame's receiver
 

@@ -134,8 +134,34 @@ namespace jai::detail {
 		if (m->getter_id == UINT64_MAX) {
 			m->getter_id = symbolizer->get_getter_id_with_view(member_id).first;
 		}
-		return class_def->user_accessor(m->getter_id) != nullptr ||
-		       class_def->user_accessor(symbolizer->get_setter_id_with_view(member_id).first) != nullptr;
+		if (m->setter_id == UINT64_MAX) {
+			m->setter_id = symbolizer->get_setter_id_with_view(member_id).first;
+		}
+		return class_def->user_accessor(m->getter_id) != nullptr || class_def->user_accessor(m->setter_id) != nullptr;
+	}
+
+	// The instance behind a member step's receiver when the site's verdict for its class still holds: the member is a plain script
+	// field (the full ladder found no C++ property, a script-backed declaration, no user accessor, a public chain), so only the
+	// instance's own field is left to read. Never consulted or written during a parallel region (a frozen symbolizer).
+	inline class_instance* ref_plain_script_field(const script_value& receiver, const member_expr* m, string_symbolizer* symbolizer) {
+		if (receiver.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
+		const auto* holder = receiver.peek_object_holder();
+		if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return nullptr; }
+		auto* instance = static_cast<class_instance*>(holder->data.get());
+		const class_definition* def = instance->get_class_definition();
+		if (!def || def != m->ref_field_class || def->field_shape_epoch() != m->ref_field_shape ||
+		    def->method_epoch() != m->ref_field_methods || symbolizer->frozen()) {
+			return nullptr;
+		}
+		return instance;
+	}
+
+	inline void ref_note_plain_script_field(const class_definition* def, const member_expr* m, uint64_t member_id, string_symbolizer* symbolizer) {
+		if (!def || !def->is_script_class() || def->chain_has_nonpublic() || symbolizer->frozen()) { return; }
+		m->ref_field_class = def;
+		m->ref_field_shape = def->field_shape_epoch();
+		m->ref_field_methods = def->method_epoch();
+		m->ref_field_declared = def->get_field_declared_type(member_id).get();
 	}
 
 	// Mirrors script_value::deref() with checked errors instead of throws (bind-time
@@ -436,6 +462,31 @@ namespace jai::detail {
 			if (step->get_type() == node_type::member_expr) {
 				const auto* m = static_cast<const member_expr*>(step);
 				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
+				if (class_instance* plain = ref_plain_script_field(cur, m, symbolizer)) {
+					script_value* field_value = plain->find_field_value(member_id);
+					if (!field_value) {
+						return ref_non_lvalue_error();
+					}
+					if (!is_final) {
+						auto derefed = ref_checked_deref(*field_value);
+						if (!derefed) { return derefed; }
+						cur = std::move(derefed.value());
+						continue;
+					}
+					if (field_value->is_reference()) {
+						if (!field_value->get_reference_holder()) {
+							return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
+						}
+						return script_value(*field_value);
+					}
+					type_info_ptr tag = m->ref_field_declared ? type_info_ptr{m->ref_field_declared} : field_value->get_type_info();
+					type_info_ptr constraint = nullptr;
+					if (tag && tag->base_type != script_value_type::jai_any_type && tag->base_type != script_value_type::jai_null_type) {
+						constraint = tag;
+					}
+					const auto& data = cur.peek_object_holder()->data;
+					return rooted(script_value::make_field_reference(std::shared_ptr<class_instance>(data, plain), member_id, eng, constraint));
+				}
 				// Binder .property() members bind on every receiver kind (a same-named
 				// script field shadows: getter_id 0 keeps the FIELD path below); a
 				// non-final property step reads through a native getter only
@@ -468,6 +519,7 @@ namespace jai::detail {
 				    ref_field_has_user_accessor(instance, m, member_id, symbolizer)) {
 					return ref_non_lvalue_error();
 				}
+				ref_note_plain_script_field(property.view.def, m, member_id, symbolizer);
 				if (is_final) {
 					if (field_value->is_reference()) {
 						// Field already holds a reference: share its holder (matches
@@ -718,6 +770,18 @@ namespace jai::detail {
 		return kind && kind != 0xFF && declared_ref_kind(enforced) == kind;
 	}
 
+	// null or a handle tagged T stored through a shared_ptr<T>& into a variable or field declared exactly T: T's step is the
+	// identity (typed_store_convert's handle head) and the storage's own step, the same table, stamps T
+	inline bool ref_identity_handle_store(const script_value& ref, const type_info* declared, const script_value& value) {
+		if (!declared || declared->base_type != script_value_type::jai_shared_ptr_type || declared->dynamic_pointee) { return false; }
+		const size_t vi = value.raw_storage_index();
+		if (vi != script_value::TYPEID_NULL && !(vi == script_value::TYPEID_OBJECT && value.type_info_raw() == declared)) { return false; }
+		const auto* holder = ref.get_reference_holder();
+		if (!holder || holder->property || holder->component_base) { return false; }
+		if (holder->owner_instance) { return holder->container_element_type.get() == declared; }
+		return !holder->container_element_type && holder->plain_cell() && holder->cell()->type_info_raw() == declared;
+	}
+
 	// The value a declared reference names, a variable's cell read directly (no out-of-line dereference)
 	inline const script_value& ref_declared_current(const script_value& ref) {
 		const auto* holder = ref.get_reference_holder();
@@ -809,7 +873,8 @@ namespace jai::detail {
 	                                              type_info* declared_static = nullptr, uint8_t static_kind = 0, std::string_view name = {}) {
 		const slot_site site{slot_kind::assignment, name, {}, !name.empty()};
 		if (const uint8_t kind = static_kind ? static_kind : ref_declared_kind(refLocal);
-		    kind && kind != value.deref().raw_storage_index() && !ref_storage_enforces(refLocal, static_kind ? declared_static : ref_declared_type(refLocal))) [[unlikely]] {
+		    kind && kind != value.deref().raw_storage_index() && !ref_storage_enforces(refLocal, static_kind ? declared_static : ref_declared_type(refLocal)) &&
+		    !ref_identity_handle_store(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value)) [[unlikely]] {
 			auto converted = ref_declared_convert(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value, eng, site);
 			if (!converted) { return {}; }
 			if (!*converted) { return converted->error_value(); }

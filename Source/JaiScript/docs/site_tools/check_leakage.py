@@ -5,7 +5,7 @@ Leakage: machine paths, engine-internal names, working-session vocabulary. Stale
 spellings the static-checking redesign retired (opt-in checking, warn as the default, the old
 error texts, C.s for a static field, old .jaibite versions).
 
-    python assets/tools/check_leakage.py [--notes]
+    python site_tools/check_leakage.py [--notes]
 
 Every hit is printed as file:line: pattern | context. Exit code 1 when a hard rule matches.
 --notes also prints the heuristic rules (words like "session" or "opt-in" that are usually
@@ -17,7 +17,7 @@ import re
 import sys
 from html.parser import HTMLParser
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 LEAKAGE = [
     (r"[A-Za-z]:\\git\\|[A-Za-z]:/git/", "drive path"),

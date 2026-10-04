@@ -6,7 +6,7 @@ the sidebar, the prev/next footer nav, and the site footer. Everything between
 <main> and </main> is copied through byte-for-byte, except the one <nav class="prevnext">
 block, which is chrome that happens to live inside the article.
 
-Run it from anywhere:  python assets/tools/apply_chrome.py [--check]
+Run it from anywhere:  python site_tools/apply_chrome.py [--check]
 --check reports which files would change and exits 1 if any would, touching nothing.
 """
 
@@ -15,11 +15,10 @@ import pathlib
 import re
 import sys
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 VERSION = "0.1.0"
 REPO = "https://github.com/Devacor/JaiScript"
-BUILD_DATE = "2026-10-01"
 
 FONTS = (
     '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
@@ -117,7 +116,7 @@ SECTION_INDEX_DESC = {
     "bridges/index.html":
         "Three pages for programmers arriving from JavaScript, C++ or C#: the familiar spellings side by side, the habits that get a different answer, and a complete program for each.",
     "guide/index.html":
-        "Fifteen chapters covering the whole core language - every sample executed on both backends before it was written down.",
+        "Fifteen chapters covering the whole core language - every standalone sample runs on both backends, with the output it prints.",
     "embedding/index.html":
         "Fifteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, and host math types.",
     "examples/index.html":
@@ -216,8 +215,7 @@ def footer(root):
         '<p>JaiScript %s &middot; <a href="%s/blob/master/LICENSE">MIT license</a> &middot; '
         '<a href="%s">source</a> &middot; <a href="%s/issues">report a docs bug</a></p>'
         % (VERSION, REPO, REPO, REPO),
-        '<p class="foot-note">every example on this site was run on both backends &middot; built %s</p>'
-        % BUILD_DATE,
+        '<p class="foot-note">every standalone script sample on this site runs on both backends, and the output shown is what they print</p>',
         "</footer>",
         '<script src="%sassets/search-index.js"></script>' % root,
         '<script src="%sassets/site.js"></script>' % root,
@@ -383,7 +381,7 @@ def main():
                               '<script src="assets/site.js"></script>\n<script src="assets/hero.js"></script>')
         if rel == "reference/api.html":
             out = out.replace("</body>", '<script src="../assets/api-reference.js"></script>\n</body>')
-            out = re.sub(r'<p class="foot-note">.*?</p>', '<p class="foot-note">Source-audited API reference &middot; built 2026-10-01</p>', out)
+            out = re.sub(r'<p class="foot-note">.*?</p>', '<p class="foot-note">Source-audited API reference</p>', out)
             newline = "\r\n" if "\r\n" in src else "\n"
             out = out.replace("\r\n", "\n").replace("\n", newline)
         if out != src:

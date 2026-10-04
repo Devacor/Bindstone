@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Grep the site for the retired error texts listed in docs/diagnostics.md ("before" column).
 
-    python assets/tools/check_old_texts.py
+    python site_tools/check_old_texts.py
 
 Every hit is printed as file:line: text | context. Exit code 1 when anything is found.
 """
@@ -11,7 +11,7 @@ import pathlib
 import re
 import sys
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 OLD_TEXTS = [
     r"Member '[^']*' accessed on null",

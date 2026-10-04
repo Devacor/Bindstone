@@ -4,7 +4,7 @@
 Balanced structural tags, exactly one <h1> and one <main>, the shared chrome present,
 no leftover template placeholders, no duplicate ids, every heading id unique.
 
-    python assets/tools/check_html.py
+    python site_tools/check_html.py
 
 Exit code 1 when anything is off.
 """
@@ -14,7 +14,7 @@ import re
 import sys
 from html.parser import HTMLParser
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 STRUCTURAL = {"html", "head", "body", "header", "main", "aside", "article", "section", "nav",
               "footer", "div", "table", "thead", "tbody", "tr", "td", "th", "ul", "ol", "li",

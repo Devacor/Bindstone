@@ -14,7 +14,7 @@ data-budget="N" runs with --budget=N. A label that says the block needs the host
 host above", "needs the host", "sketch", "under the ... cap") is reported as host-dependent
 but unmarked.
 
-    python assets/tools/run_samples.py [--runner PATH] [--out DIR] [--keep] [--page SUBSTR]
+    python site_tools/run_samples.py [--runner PATH] [--out DIR] [--keep] [--page SUBSTR]
 
 Reports, per sample: load or runtime failures the page's own output block does not show,
 backend divergence (vm and interp print different text), and expected-output drift (a line of
@@ -30,7 +30,7 @@ import subprocess
 import sys
 from html.parser import HTMLParser
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 REPO = SITE.parents[1]
 DEFAULT_RUNNER = REPO / "out" / "build" / "x64-Release BENCHMARKS" / "bin" / "jaiscript.exe"
 
@@ -243,7 +243,7 @@ def main():
     if not runner.exists():
         print("runner not found: %s" % runner)
         return 2
-    out = (pathlib.Path(args.out) if args.out else SITE / "assets" / "tools" / "_samples").resolve()
+    out = (pathlib.Path(args.out) if args.out else pathlib.Path(__file__).resolve().parent / "_samples").resolve()
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Find every em-dash that lives in PROSE (outside <code> and <pre>).
 
-    python assets/tools/dedash_report.py            # full listing, context per hit
-    python assets/tools/dedash_report.py --counts   # per-page totals only
-    python assets/tools/dedash_report.py PATH ...   # limit to some pages
+    python site_tools/dedash_report.py            # full listing, context per hit
+    python site_tools/dedash_report.py --counts   # per-page totals only
+    python site_tools/dedash_report.py PATH ...   # limit to some pages
 
 Code spans keep their dashes; only prose is reported. Exit code 1 when prose hits remain.
 """
@@ -12,7 +12,7 @@ import pathlib
 import re
 import sys
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 DASH = re.compile(r"—|&mdash;|&#x2014;|&#8212;", re.IGNORECASE)
 BLOCK = re.compile(r"<(code|pre)\b.*?</\1>|<(code|pre)\b[^>]*/>", re.IGNORECASE | re.DOTALL)
 

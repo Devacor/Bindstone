@@ -6356,6 +6356,63 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("enum_arguments_and_guarded_element_members_in_ternary_arms_keep_the_loop_a_block", [this]() {
+			// Gator Quest's status_tick: an enum value by name as a call's argument (`fx(Fx.fire, m)`), a ternary whose arms read members of
+			// elements of two global tables (the second through a guarded index, its temp slot reused by the other arm), a true-sense compare
+			const std::string defs =
+				"enum Fx { sparks, blood, splash, fire, frost }\n"
+				"class Pt { int x = 3; int y = 4; }\n"
+				"Pt P;\n"
+				"class Ch { int buff = 0; }\n"
+				"class Mo { int fireproof = 0; int regen = 1; }\n"
+				"array<Ch> CH; array<Mo> MO; array<int> KIND; array<int> SLOT; array<int> HP; array<int> LOG;\n"
+				"int TICK = 5;\n"
+				"void fx(int kind, int amount) { LOG.push(kind * 10 + amount); }\n"
+				"int run(int n) { int s = 0; for (int m = 0; m < n; ++m) { if (KIND[m] < 0 || HP[m] <= 0) { continue; } int slot = SLOT[m];"
+				" bool proof = slot >= 0 ? CH[slot].buff > TICK : MO[KIND[m]].fireproof != 0; if (!proof) { fx(Fx.fire, m); s = s + 1; }"
+				" if (m % 3 == 0) { fx(Fx.frost, P.x); } s = s + HP[m]; } return s; }\n"
+				"for (int k = 0; k < 4; ++k) { Ch c; c.buff = k * 3; CH.push(c); Mo mo; mo.fireproof = k % 2; MO.push(mo); }\n"
+				"for (int i = 0; i < 200; ++i) { KIND.push(i % 5 - 1); SLOT.push(i % 7 == 0 ? i % 4 : -1); HP.push(i % 6); }\n";
+			const std::string src = defs + "string a = to_string(run(200)) + \" \" + to_string(LOG.size()) + \" \" + to_string(LOG[LOG.size() - 1]);"
+			                               " P.x = 9; MO[1].fireproof = 0; CH[2].buff = 1; a + \" \" + to_string(run(200)) + \" \" + to_string(LOG[LOG.size() - 1]);";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "status loop");
+			both(src, oracle, "status loop, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t rb = l.find("== run ");
+			const std::string rl = rb == std::string::npos ? l : l.substr(rb, l.find("\n== ", rb + 1) - rb);
+			check_true(rl.find("-- cell loop") != std::string::npos && rl.find("-- open loop") == std::string::npos && rl.find("C_REBIND") != std::string::npos, "run's loop closes: " + rl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("a_true_sense_comparison_leaf_keeps_every_operand_kind", [this]() {
+			// `a < b || ...` jumps on a compare-jump that falls through to the true edge: ints, floats with NaN, strings, null, mixed kinds and a
+			// class operator agree with the interpreter, inside and outside a loop
+			const std::string src = R"(
+				class V { int n = 0; V(int x) { n = x; } bool operator<(V o) { return n < o.n; } bool operator==(V o) { return n == o.n; } }
+				string t(var a, var b) {
+					string r = "";
+					if (a < b || r == "x") { r += "lt"; } else { r += "ge"; }
+					if (a == b || r == "x") { r += "eq"; }
+					if (!(a < b) && r != "x") { r += "!lt"; }
+					return r;
+				}
+				int count(array<float> xs, float lim) { int c = 0; for (int i = 0; i < xs.size(); ++i) { if (xs[i] < lim || xs[i] != xs[i]) { c += 1; } } return c; }
+				float nan = math::NAN_VALUE;
+				t(1, 2) + t(2, 1) + t(1.5, 1) + t(nan, 1.0) + t(1.0, nan) + t("a", "b") + t("b", "a") + t(1, 1.0) + t(V(1), V(2)) + t(V(2), V(1)) + t(V(3), V(3))
+				+ " " + to_string(count([1.0, 5.0, nan, 2.0, 9.0], 3.0)) + " " + to_string(count([nan, nan], 0.0));
+			)";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "true-sense leaves");
+			both(src, oracle, "true-sense leaves, proofs off", false);
+		});
 		test("pushes_onto_an_environment_array_run_inside_the_block", [this]() {
 			// a global array receiver resolves through its lookup at entry and at each push; a call that rebinds the global between pushes lands
 			// the next push on the new array, a typed receiver keeps its element rule

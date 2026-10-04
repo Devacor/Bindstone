@@ -5490,6 +5490,22 @@ void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand&
 	if (call->arguments.size() == 2) {   // a scalar pair row: each argument an operand, in source order
 		fused_binary_proto p;
 		compile_math_argument(call->arguments[0], p.left);
+		const expression* a0 = call->arguments[0].get();
+		const expression* a1 = call->arguments[1].get();
+		if (a0->get_type() == node_type::identifier_expr && ((!private_local(a0) && observing_hoist_in(a1)) || (env_identifier(a0) && hoist_in(a1)) || read_ahead_of(a0, a1))) {
+			// the first argument takes its value before the second's evaluation can run user code that writes it (C++17 argument order)
+			fused_binary_proto snap;
+			snap.left = std::move(p.left);
+			chunk_->fused_binary_protos.push_back(std::move(snap));
+			const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+			++temp_next_;
+			if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+			emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), t0);
+			p.left = fused_operand{};
+			p.left.slot = t0;
+			p.left.symbol = temp_symbol_index();
+			p.left.direct = true;
+		}
 		compile_math_argument(call->arguments[1], p.right);
 		chunk_->fused_binary_protos.push_back(std::move(p));
 		const uint32_t t = static_cast<uint32_t>(temp_next_);

@@ -8358,7 +8358,7 @@ class_instance* vm_backend::cells_member_prefix(frame& f, class_instance* inst, 
 // a member site's field of an instance (an alias's element at each rebind): the read-side probe answers the class's slot once per
 // class per site (a subclass element re-probes, a call between reads re-probes: a reload may have moved the fields), the field's
 // value dereferenced; a field that is not an int, a float or a bool is the general form's
-const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe) {
+const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe) {
 	cell_state& cs = *f.cells;
 	auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
 	inst = cells_member_prefix(f, inst, expr, off);
@@ -8366,7 +8366,16 @@ const script_value* vm_backend::cells_member_field(frame& f, class_instance* ins
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
 	uint32_t slot;
-	if (!reprobe && cs.site_member_class[off] == cd) { slot = cs.site_member_slot[off]; }
+	if (cached_global_env_) {
+		// the site's own member_ic row, per class and method epoch (the field-read IC's guard), so a rebind per iteration probes once per class
+		chunk& code = *f.code;
+		if (code.member_ic.size() < code.code.size()) { code.member_ic.resize(code.code.size()); }
+		chunk::member_ic_entry& entry = code.member_ic[site];
+		if (entry.cd == cd && entry.epoch == cd->method_epoch()) { slot = entry.slot; }
+		else { slot = member_read_slot_probe(cd, expr); entry.cd = cd; entry.epoch = cd->method_epoch(); entry.slot = slot; }
+		if (slot == UINT32_MAX) return nullptr;
+	}
+	else if (!reprobe && cs.site_member_class[off] == cd) { slot = cs.site_member_slot[off]; }
 	else {
 		slot = member_read_slot_probe(cd, expr);
 		if (slot == UINT32_MAX) { cs.site_member_class[off] = nullptr; return nullptr; }
@@ -8615,7 +8624,7 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 	for (const uint32_t d : rb.dependents) {
 		const uint32_t cip = loop.sites[d];
 		if (f.code->code[cip].op == opcode::op_c_mload || f.code->code[cip].op == opcode::op_c_mstore) {
-			const script_value* fv = inst ? cells_member_field(f, inst, f.code->code[cip].b, cip - loop.copy_head, reprobe) : nullptr;
+			const script_value* fv = inst ? cells_member_field(f, inst, f.code->code[cip].b, cip, cip - loop.copy_head, reprobe) : nullptr;
 			if (!fv) return false;
 			cs.site_member[cip - loop.copy_head] = fv;
 		} else {
@@ -15080,8 +15089,8 @@ uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* e
 		}
 		// The SYNTHESIZED accessor is verbatim get_field; a USER _get_/_set_ anywhere in the
 		// chain takes the field off the fast lanes (the ladder dispatches to it)
-		if (cd->user_accessor(getter_id) ||
-		    cd->user_accessor(symbolizer_->get_setter_id_with_view(expr->member_id).first)) {
+		if (expr->setter_id == UINT64_MAX) { expr->setter_id = symbolizer_->get_setter_id_with_view(expr->member_id).first; }
+		if (cd->user_accessor(getter_id) || cd->user_accessor(expr->setter_id)) {
 			return UINT32_MAX;
 		}
 	}

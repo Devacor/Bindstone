@@ -233,7 +233,7 @@ namespace jai::vm {
         uint64_t profile_cells_push_[4] = {};            // block pushes: 0 a raw int into a typed buffer, 1 a raw float, 2 a string handle, 3 a value (boxed or a value source)
         uint64_t profile_cell_ops_[256] = {};            // cell instructions dispatched by the block loop, by opcode
         uint64_t profile_cell_cycles_[256] = {};         // rdtsc cycles per cell opcode (the block loop's own switch; diagnostic builds)
-        uint64_t profile_cell_cost_cyc_[8] = {}, profile_cell_cost_n_[8] = {};   // block runs, entries, flushes, misses, landings, raw entries, raw returns, door calls (inclusive)
+        uint64_t profile_cell_cost_cyc_[16] = {}, profile_cell_cost_n_[16] = {};   // block runs, entries, flushes, misses, landings, raw entries, raw returns, door calls, boundary parks, resumes (inclusive)
         std::string profile_filter_name_;                // JAI_VMPROF_FUNCTION: one function's own tables (empty = none)
         const chunk* profile_filter_chunk_ = nullptr;    // the first chunk whose function_name matched, bound when it first runs
         uint64_t profile_fn_counts_[256] = {}, profile_fn_cycles_[256] = {};           // that function's general instructions

@@ -2128,6 +2128,7 @@ namespace jai::vm {
         class_instance* cells_member_prefix(frame& f, class_instance* inst, const member_expr* expr, size_t off);   // a nested member site's prefix instance (`p.pos` of `p.pos.x`); inst itself for a direct site; nullptr = the general form
         const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t off, bool reprobe);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
+        bool cells_sites_reenter(frame& f, const chunk::cell_loop& loop);   // a re-entry in the same call: every site still names the node its last resolution found
         bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again
         bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index, bool reprobe);   // the alias's sites take the table's element at index, a plain array node, else false
         op_status exec_c_rebind(frame& f, const vm_instruction& ins);

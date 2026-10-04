@@ -1,9 +1,10 @@
-/* Landing-page hot-reload demo: the editor's spd value flips on each "save" while the gator keeps its slices. */
+/* Landing-page hot-reload demo: a "save" re-runs gator.jai, whose reload hook copies the edited spd onto the live gator. */
 (function () {
   "use strict";
   var demo = document.getElementById("hero-demo");
   if (!demo) return;
   var spdEl = document.getElementById("demo-spd");
+  var hookEl = document.getElementById("demo-hook");
   var status = document.getElementById("demo-status");
   var label = document.getElementById("demo-label");
   var saveBtn = document.getElementById("demo-save");
@@ -13,11 +14,14 @@
 
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)");
   var still = !!(reduce && reduce.matches);
-  var spd = 4, values = [4, 1], vi = 0;
-  var x = 30, tick = 0, slices = 0, nom = 0, step = 0;
-  var visible = true, running = false, statusTimer = 0, autoTimer = 0;
+  var TICK = 1000 / 60, START = 30;
+  var gator = { spd: editedSpd(), slices: 0, x: START };
+  var frameNo = 0, nom = 0, lastTs = 0, acc = 0;
+  var visible = true, running = false, statusTimer = 0;
   var colors = {};
   var GATOR = "#3fae5a", GATOR_DARK = "#2a7a3d", BELLY = "#c9e7a1";
+
+  function editedSpd() { return parseInt(spdEl.textContent, 10) || 1; }
 
   function readColors() {
     var cs = getComputedStyle(document.documentElement);
@@ -25,8 +29,8 @@
     colors.accent = cs.getPropertyValue("--accent").trim() || "#ffb43c";
   }
 
-  function gator(px, py) {
-    var leg = (step % 2) * 3;
+  function drawGator(px, py) {
+    var leg = (((px - START) / 20 | 0) % 2) * 3;
     g.fillStyle = GATOR_DARK;
     g.fillRect(px - 34, py + 10, 14, 6); g.fillRect(px - 44, py + 12, 12, 4); g.fillRect(px - 52, py + 13, 10, 3);
     g.fillStyle = GATOR; g.fillRect(px - 22, py, 44, 18);
@@ -43,7 +47,7 @@
   }
 
   function cake(cx, cy, eaten) {
-    var flick = (tick >> 3) % 2, wdt = 44 - eaten;
+    var flick = (frameNo >> 3) % 2, wdt = 44 - eaten;
     g.fillStyle = "#8b5a2b"; g.fillRect(cx + eaten, cy + 14, wdt, 16);
     g.fillStyle = "#f6d3e0"; g.fillRect(cx + eaten, cy + 6, wdt, 10);
     g.fillStyle = "#ffffff"; for (var d = eaten; d < 44; d += 8) g.fillRect(cx + d, cy + 15, 5, 4);
@@ -52,7 +56,7 @@
   }
 
   function setLabel() {
-    label.textContent = "gator at spd " + spd + " · slices " + slices + (spd < 4 ? " (cake rush)" : "");
+    label.textContent = "gator at spd " + gator.spd + " · slices " + gator.slices + (gator.spd > 1 ? " (cake rush)" : "");
   }
 
   function draw() {
@@ -60,29 +64,34 @@
     g.clearRect(0, 0, w, cv.height);
     g.fillStyle = colors.ground;
     for (var i = 0; i < w; i += 32) g.fillRect(i, 118, 28, 6);
-    cake(w - 96, 88, Math.min(18, slices * 6));
-    gator(x, 92);
+    cake(w - 96, 88, Math.min(18, gator.slices * 6));
+    drawGator(gator.x, 92);
     if (nom > 0) {
       g.fillStyle = colors.accent;
       g.font = '600 15px "JetBrains Mono", Consolas, monospace';
-      g.fillText("Nom.", x + 20, 72);
+      g.fillText("Nom.", gator.x + 20, 72);
     }
   }
 
-  function advance() {
-    tick++;
+  function tick() {
+    frameNo++;
     if (nom > 0) {
-      nom--;
-      if (nom === 0) { x = 30; if (slices >= 3) slices = 0; setLabel(); }
-    } else if (tick % (spd * 5) === 0) {
-      x += 5; step++;
-      if (x >= cv.width - 150) { slices++; nom = 50; setLabel(); }
+      if (--nom === 0) {
+        gator.x = START;
+        if (gator.slices >= 3) gator.slices = 0;
+        save();
+      }
+      return;
     }
+    gator.x += gator.spd;
+    if (gator.x >= cv.width - 150) { gator.slices++; nom = 50; setLabel(); }
   }
 
-  function frame() {
-    if (!running) return;
-    advance();
+  function frame(ts) {
+    if (!running) { lastTs = 0; return; }
+    acc += lastTs ? Math.min(ts - lastTs, 250) : TICK;
+    lastTs = ts;
+    for (; acc >= TICK; acc -= TICK) tick();
     draw();
     requestAnimationFrame(frame);
   }
@@ -91,15 +100,19 @@
     var want = !still && visible && !document.hidden;
     if (want && !running) { running = true; requestAnimationFrame(frame); }
     else if (!want) running = false;
-    clearInterval(autoTimer);
-    autoTimer = want ? setInterval(reload, 3600) : 0;
   }
 
-  function reload() {
-    vi = 1 - vi; spd = values[vi];
-    spdEl.textContent = spd;
-    spdEl.classList.add("flash");
-    setTimeout(function () { spdEl.classList.remove("flash"); }, 900);
+  function flash(el) {
+    if (!el) return;
+    el.classList.add("flash");
+    setTimeout(function () { el.classList.remove("flash"); }, 900);
+  }
+
+  function save() {
+    spdEl.textContent = editedSpd() === 1 ? 4 : 1;
+    flash(spdEl);
+    gator.spd = editedSpd();
+    flash(hookEl);
     status.classList.remove("idle");
     status.textContent = "saved · reloaded in 4 ms · slices kept";
     setLabel();
@@ -111,7 +124,7 @@
   readColors();
   setLabel();
   draw();
-  if (saveBtn) saveBtn.addEventListener("click", reload);
+  if (saveBtn) saveBtn.addEventListener("click", save);
   new MutationObserver(function () { readColors(); if (!running) draw(); })
     .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   if (reduce && reduce.addEventListener) {

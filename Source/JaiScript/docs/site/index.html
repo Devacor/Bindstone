@@ -53,16 +53,20 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
   </div>
   <div class="demo" id="hero-demo" role="group" aria-label="Hot reload demo: a script class edited while it runs">
     <div class="demo-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="file">gator.jai</span><span class="demo-status idle" id="demo-status">running</span><button class="demo-save" id="demo-save" type="button">Save</button></div>
-<pre><span class="tk-com">// lower spd: a faster gator</span>
+<pre><span class="tk-com">// raise spd: a faster gator</span>
 <span class="tk-kw">class</span> Gator : Mob {
-    <span class="tk-ty">int</span> spd = <span class="tk-num edit" id="demo-spd">4</span>;
+    <span class="tk-ty">int</span> spd = <span class="tk-num edit" id="demo-spd">1</span>;
     <span class="tk-ty">int</span> slices = <span class="tk-num">0</span>;
     <span class="tk-ty">void</span> <span class="tk-fn">tick</span>() {
-        <span class="tk-kw">if</span> (frame % spd == <span class="tk-num">0</span>) { <span class="tk-fn">step_toward</span>(cake); }
+        <span class="tk-fn">step_toward</span>(cake, spd);
         <span class="tk-kw">if</span> (<span class="tk-fn">beside</span>(cake)) { slices++; <span class="tk-fn">say</span>(<span class="tk-str">"Nom."</span>); }
     }
+}
+Gator gator;  <span class="tk-com">// kept by every reload</span>
+<span class="tk-ty">void</span> <span class="tk-fn">hot_reload_migrate</span>(map&lt;<span class="tk-ty">string</span>, <span class="tk-ty">var</span>&gt; previous) {
+    <span class="edit" id="demo-hook">gator.spd = <span class="tk-fn">Gator</span>().spd;</span>  <span class="tk-com">// live gator takes the edit</span>
 }</pre>
-    <div class="scene"><canvas id="demo-scene" width="640" height="150" role="img" aria-label="A pixel gator walks toward a cake and eats a slice"></canvas><span class="scene-label" id="demo-label">gator at spd 4 &middot; slices 0</span></div>
+    <div class="scene"><canvas id="demo-scene" width="640" height="150" role="img" aria-label="A pixel gator walks toward a cake at the speed spd gives it and eats a slice"></canvas><span class="scene-label" id="demo-label">gator at spd 1 &middot; slices 0</span></div>
   </div>
 </section>
 

@@ -3475,13 +3475,13 @@ struct region_plan {
 checked_result<void> run_region(engine& eng, region_plan& plan) {
 	parallel_engine_state& state = eng.parallel_state();
 	recover_pending_registrations(state);
-	const std::string pfx = std::string(plan.prefix) + ": ";
+	const std::string_view prefix = plan.prefix;
 	auto raise = [&state](std::error_code code, std::string message) {
 		state.error_text = std::move(message);
 		return checked_result<void>(code, std::string_view(state.error_text));
 	};
-	auto usage = [&raise, &pfx](std::string message) {
-		return raise(make_error_code(runtime_error_code::unsupported_operation), pfx + std::move(message));
+	auto usage = [&raise, prefix](std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), std::string(prefix) + ": " + std::move(message));
 	};
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t0 = __rdtsc();
@@ -4132,7 +4132,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		std::error_code code = winner->code ? winner->code
 			: make_error_code(runtime_error_code::unsupported_operation);
-		return raise(code, winner->message.empty() ? pfx + "worker failed" : winner->message);
+		return raise(code, winner->message.empty() ? std::string(prefix) + ": worker failed" : winner->message);
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	if (plan.prof) { plan.prof->join_cyc += __rdtsc() - prof_t4; }

@@ -1793,6 +1793,49 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				}
 			}
 		});
+		test("a_math_pairs_first_argument_takes_its_value_before_the_second_calls", [this]() {
+			// math::min(G, bump() ? 4 : 8) in a loop: the first argument takes its value before the second argument's call writes it (C++17
+			// argument order), for a global, a bare field, this.x, another object's field, a global element, a reference local and a captured
+			// local, in nested loops and straight-line code, both backends, proofs on and off, and under an injected miss
+			const std::string script = R"(
+				int G = 5; array<int> A = [5, 0];
+				bool bump() { G = G - 2; A[0] = A[0] - 2; return false; }
+				class C {
+					int x = 5;
+					bool dec() { x = x - 2; return false; }
+					function bare(int n) -> int { int s = 0; for (int i = 0; i < n; i++) { for (int j = 0; j < 2; j++) { s += math::min(x, dec() ? 4 : 8); } } return s; }
+					function own(int n) -> int { int s = 0; for (int i = 0; i < n; i++) { s += math::max(this.x, dec() ? 0 : -100); } return s; }
+				}
+				function globals(int n) -> int { int s = 0; for (int i = 0; i < n; i++) { int k = 0; while (k < 2) { s += math::min(G, bump() ? 4 : 8); k++; } } return s; }
+				function elements(int n) -> int { int s = 0; for (int i = 0; i < n; i++) { s += math::max(A[0], bump() ? 0 : -100); } return s; }
+				function fields(int n) -> int { C c = C(); int s = 0; for (int i = 0; i < n; i++) { s += math::min(c.x, c.dec() ? 4 : 8); } return s; }
+				function refs(int n) -> int { int& r = G; int s = 0; for (int i = 0; i < n; i++) { s += math::min(r, bump() ? 4 : 8); } return s; }
+				function captured(int n) -> int { int L = 5; var dl = [&]() { L = L - 2; return false; }; int s = 0; for (int i = 0; i < n; i++) { s += math::min(L, dl() ? 4 : 8); } return s; }
+				function pows(int n) -> int { float s = 0.0; for (int i = 0; i < n; i++) { s += math::pow(G, bump() ? 1 : 2); } return math::itrunc(s); }
+				function straight() -> int { int s = math::min(G, bump() ? 4 : 8); s += math::min(G, bump() ? 4 : 8); return s; }
+				function run() -> string {
+					string out = "" + globals(2);
+					G = 5; A[0] = 5; out += "," + elements(3);
+					G = 5; out += "," + fields(3) + "," + C().bare(2) + "," + C().own(3);
+					G = 5; out += "," + refs(3);
+					out += "," + captured(3);
+					G = 5; out += "," + pows(3);
+					G = 5; out += "," + straight();
+					return out;
+				}
+				run();
+			)";
+			const std::string expected = "8,9,9,8,9,9,9,35,8";
+			both(script, expected, "a pair's first argument before the second's call");
+			both(script, expected, "proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				std::string got;
+				try { got = e->execute(script).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(expected, got, "under an injected miss at every " + std::to_string(every));
+			}
+		});
 		test("a_block_holds_up_to_256_cells", [this]() {
 			// draw_seg's column loop with its column bodies grafted holds more than 128 cells (its locals, the outer locals it reads, its
 			// compiler values, its argument values, its environment values and the grafts' locals); loops over 80 and 140 locals close

@@ -183,6 +183,13 @@ public:
 			}
 			check_eq(0, problems, first.empty() ? "no problems" : first);
 		});
+		test("an_argument_read_ahead_of_a_writing_sibling_holds_its_value", [this]() {
+			// a math pair whose first argument a call in the second writes, inside a loop (repro: jaiscript_fuzz --order-args --seed 2051052)
+			const fuzz::order::generated g = fuzz::order::generate(2051052, true);
+			const fuzz::compare_result cr = fuzz::compare_program(g.original, 0.25);
+			check_true(cr.kind != fuzz::compare_result::diverge, "order-args seed 2051052:\n" + cr.diff);
+			if (g.model_ok && cr.kind == fuzz::compare_result::agree) { check_eq(g.expected, cr.vm.printed, "order-args seed 2051052: the model"); }
+		});
 	}
 };
 

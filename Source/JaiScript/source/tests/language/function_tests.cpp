@@ -1213,6 +1213,31 @@ public:
             check_eq(eng->get_variable("x").as<int64_t>(), int64_t(100));
             check_eq(eng->get_variable("y").as<int64_t>(), int64_t(200));
         });
+
+        // T& parameters bound to the caller's locals (the vm's plain frame with references): a plain local boxes, a recursive
+        // pass shares, a reference local shares its target, a closure keeps the reference, a declared T& still admits only T
+        test("reference_parameters_from_caller_locals", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            check_eq(std::string("16 441 7.0float 10/10 [Cannot pass int to parameter 'f' of 'setf' (declared float&)] 3"), eng->execute(R"(
+                void bump(int& r, int by) { r = r + by; }
+                void fill(array<int>& a, int n) { if (n == 0) { return; } a.push(n); fill(a, n - 1); }
+                void setf(float& f, int v) { f = v; }
+                int keep(int& r) { auto g = [&]() { r = r * 2; }; g(); return r; }
+                function run() -> string {
+                    int x = 1; bump(x, 2); bump(x, 3);
+                    array<int> a = []; fill(a, 4);
+                    var v = 1.5; setf(v, 7);
+                    int k = 5; int got = keep(k);
+                    var iv = 3; string err = "";
+                    try { setf(iv, 2); } catch (e) { err = e; }
+                    int& rx = x; bump(rx, 10);
+                    return to_string(x) + " " + to_string(a.size()) + to_string(a[0]) + to_string(a[3]) + " " + to_string(v) + type_of(v) + " " +
+                           to_string(k) + "/" + to_string(got) + " [" + err + "] " + to_string(iv);
+                }
+                run();
+            )").to_string());
+        });
     }
 };
 

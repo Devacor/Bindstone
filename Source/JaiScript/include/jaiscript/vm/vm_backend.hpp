@@ -2274,7 +2274,8 @@ namespace jai::vm {
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);
         op_status parked_call_threw(size_t args_base);
-        bool push_plain_frame(frame& caller, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc);
+        bool push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc);
+        bool bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc);
         // Callee-first probe for member / computed callees (op_probe_member)
         op_status exec_probe_member(frame& f, const vm_instruction& ins);
         op_status push_script_frame_pinned(frame& caller,

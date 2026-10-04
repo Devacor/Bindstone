@@ -12665,7 +12665,7 @@ op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, co
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	const size_t args_base = stack_.size() - argc;
-	if (ins.c == 0 && push_plain_frame(f, fn, pin, args_base, argc)) { return {}; }
+	if (ins.c == 0 && push_plain_frame(f, site, fn, pin, args_base, argc)) { return {}; }
 	try {
 		// Real TCO (Dev ruling: no artificial depth limit): a tail-flagged bare call
 		// resolving to the CURRENTLY EXECUTING chunk splices the live record instead
@@ -12862,19 +12862,72 @@ static JAI_FORCEINLINE bool binds_in_place(const script_defined_function& functi
 	return true;
 }
 
+// The parameters of a plain plan with references (frame plan 3): each a by-value primitive slot in order or a T& without a default
+static bool plain_reference_parameters(const script_defined_function& function) {
+	const auto& ps = function.parameters();
+	bool any = false;
+	for (size_t i = 0; i < ps.size(); ++i) {
+		const parameter& p = ps[i];
+		if (p.default_value || p.slot_index != i) { return false; }
+		if (p.is_reference) { any = true; continue; }
+		const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
+		if (p.ref_escaping || (bt != script_value_type::jai_any_type && bt != script_value_type::jai_int_type && bt != script_value_type::jai_float_type &&
+		                       bt != script_value_type::jai_bool_type && bt != script_value_type::jai_char_type)) { return false; }
+	}
+	return any;
+}
+
+// bind_parameters for frame plan 3, every argument bound as its first row would: a primitive in place, a T& to the caller's frame-slot
+// local named at the site (bind_site_reference's first rung), the T& admission and the escape stamp after; false leaves whatever it
+// bound for the general binding, which binds it again identically and raises where this declines
+bool vm_backend::bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc) {
+	const auto& ps = function.parameters();
+	if (argc != ps.size()) { return false; }
+	for (size_t i = 0; i < argc; ++i) {
+		const parameter& p = ps[i];
+		const script_value& a = stack_[args_base + i];
+		if (!p.is_reference) {
+			const size_t ri = a.raw_storage_index();
+			const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
+			if (!((ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT || ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR) &&
+			      (bt == script_value_type::jai_any_type ||
+			       (bt == script_value_type::jai_int_type && ri == script_value::TYPEID_INT) || (bt == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
+			       (bt == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) || (bt == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR)))) { return false; }
+			continue;
+		}
+		if (i >= site.arg_symbols.size() || i >= site.arg_slots.size() || site.arg_symbols[i] == UINT64_MAX || site.arg_slots[i] == k_invalid_u32 ||
+		    detail::deferred_argument(a)) { return false; }
+		script_value* local = frame_slot(caller, site.arg_slots[i]);
+		if (!local || (local->is_reference() && !local->get_reference_holder())) { return false; }
+		stack_[args_base + i] = share_env_ref(*local);
+	}
+	for (size_t i = 0; i < argc; ++i) {
+		const parameter& p = ps[i];
+		if (!p.is_reference) { continue; }
+		script_value& bound = stack_[args_base + i];
+		if (p.type && !detail::reference_binding_admits(p.type.get(), bound, engine_)) { return false; }
+		if (p.ref_escaping || p.declared_ref_escapes) [[unlikely]] {
+			detail::ref_declare(bound, const_cast<type_info*>(detail::parameter_declared_ref(p)), engine_);
+		}
+	}
+	return true;
+}
+
 // The plain frame: a function without a closure or a frame environment, called outside a block scope, whose arguments are already its
-// parameter slots, takes push_script_frame_pinned's env-untouched lane with nothing that can throw; false = the general push
-bool vm_backend::push_plain_frame(frame& caller, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc) {
+// parameter slots (or its T& parameters name the caller's frame-slot locals), takes push_script_frame_pinned's env-untouched lane with
+// nothing that can throw; false = the general push
+bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc) {
 #ifdef JAISCRIPT_VM_PROFILE
 	return false;   // the profile's push sections account the general push
 #endif
 	chunk* body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 	if (!body_chunk || parallel_worker_ || current_call_depth_ >= limits_->vm_depth_gate || call_records_top_ == call_records_.size()) { return false; }
 	if (function.backend_frame_plan == 0) {
-		function.backend_frame_plan = !body_chunk->needs_frame_env && !function.closure_env && lean_bind_of(function) == 1 ? 2 : 1;
+		function.backend_frame_plan = body_chunk->needs_frame_env || function.closure_env ? 1 : lean_bind_of(function) == 1 ? 2 : plain_reference_parameters(function) ? 3 : 1;
 	}
-	if (function.backend_frame_plan != 2 || (!function.block_defined && environment_ && environment_->block_scope()) ||
-	    !binds_in_place(function, stack_.data() + args_base, argc)) { return false; }
+	if (function.backend_frame_plan == 1 || (!function.block_defined && environment_ && environment_->block_scope())) { return false; }
+	if (function.backend_frame_plan == 2 ? !binds_in_place(function, stack_.data() + args_base, argc)
+	                                     : !bind_plain_references(function, caller, site, args_base, argc)) { return false; }
 	if (++budget_tick_ >= 1024 || limits_->memory_tripped()) [[unlikely]] {
 		--budget_tick_;
 		return false;   // the general push runs the budget check

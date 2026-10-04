@@ -1149,6 +1149,9 @@ namespace jai {
         // The same for the math vector node pool
         void*& vec_node_pool_slot();
         void set_vec_node_pool_teardown(void (*teardown)(void*));
+        // The weak list of cells an escaped closure kept past a frame-exit cycle check (script_value::release_cell_cycles)
+        void*& cell_cycle_registry_slot();
+        void set_cell_cycle_registry_teardown(void (*teardown)(void*));
         // True while a parallel region's workers run (main thread parked). Worker-side
         // mints must not touch the single-threaded pool.
         bool parallel_region_active() const;

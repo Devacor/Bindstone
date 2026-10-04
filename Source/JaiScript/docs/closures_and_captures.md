@@ -22,6 +22,17 @@ creation**:
   cell **outlives the frame** — escaping a `[&]` capture is legal and safe (no dangling,
   unlike C++).
 - Parameters capture exactly like locals (they are slots 0..N).
+- **A cell and the closures holding it can form a cycle** (`var g; g = [&](int n) { ... g(n - 1) ... };`:
+  the cell holds the closure, the closure's captures hold the cell). When a frame whose locals a lambda
+  captured by reference exits (a function's or a lambda's frame, a coroutine's when it finishes or is
+  dropped, and a loop iteration's declaration when the next one replaces it), it checks the cells it
+  shared: a cell that only closures reachable from those cells still hold is cleared, so the cycle dies
+  there and the destructors of what it held run at that exit. A closure that escaped (returned, stored
+  in a global, a field, a container or another frame) keeps the cycle alive and working; such cells are
+  checked again as the engine's list of them grows, and at engine teardown. The check is refcount
+  arithmetic over the frame's own cells and the closures they reach (`script_value::release_cell_cycles`),
+  never a heap scan, and a frame whose locals no lambda captures by reference does no work for it (the
+  parser marks the function body, `block_stmt::shares_cells`, and the VM's chunk carries it).
 - The source of a captured name is resolved in the runtime's lookup order - the
   enclosing frame's locals and parameters, then the class's members (a `[&]` on a bare
   field cell-shares the field), then the environment chain - so a same-named global

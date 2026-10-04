@@ -885,6 +885,18 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	std::optional<script_value> parked_exception_value;
 	uint64_t parked_catch_marker = 0;
 	bool started = false;
+
+	// A fiber dropped while suspended: its window dies here, then the cells it shared are checked for cycles
+	~vm_coroutine_state() override {
+		if (!body_chunk || !body_chunk->shares_cells || !f.window_backed) { return; }
+		std::vector<script_value> shared;
+		const size_t end = std::min(stack_storage.size(), f.window_base + f.window_live);
+		if (end > f.window_base) { script_value::gather_shared_cells(&stack_storage[f.window_base], end - f.window_base, shared); }
+		if (shared.empty()) { return; }
+		engine* eng = shared.front().get_engine();
+		stack_storage.clear();
+		script_value::release_cell_cycles(shared, eng);
+	}
 };
 
 vm_backend::vm_coroutine_state& vm_backend::coroutine_fiber_state(coroutine_handle& handle) {
@@ -1187,6 +1199,11 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	// Completed, errored, or threw: the fiber's stacks die here (window included) -
 	// clear while they are still the live ones; the guard then swaps the empties back
 	// into state storage.
+	std::vector<script_value> shared_cells;
+	if (state.body_chunk && state.body_chunk->shares_cells && state.f.window_backed && !parallel_worker_) [[unlikely]] {
+		const size_t end = std::min(stack_.size(), state.f.window_base + state.f.window_live);
+		if (end > state.f.window_base) { script_value::gather_shared_cells(&stack_[state.f.window_base], end - state.f.window_base, shared_cells); }
+	}
 	truncate_detached(try_records_, 0);
 	truncate_detached(iter_states_, 0);
 	cfor_states_.clear();
@@ -1198,6 +1215,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	return_value_ = std::move(prev_return);
 	environment_ = prev_env;
 	active_coroutine_ = prev_active;
+	script_value::release_cell_cycles(shared_cells, engine_);
 
 	if (pending) {
 		handle.set_status(coroutine_handle::status::failed);
@@ -2170,6 +2188,14 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 		value = script_value::make_cell_reference(std::move(value), engine_);
 	}
 	if (slot_index != SIZE_MAX && f.locals && !f.top_level) {
+		if (box_cell && !parallel_worker_) [[unlikely]] {
+			// a loop's next iteration drops the cell the last one shared: checked for a cycle once the slot lets go
+			std::vector<script_value> replaced;
+			if (const script_value* old = frame_slot(f, slot_index)) { script_value::gather_shared_cells(old, 1, replaced); }
+			frame_slot_set(f, slot_index, std::move(value));
+			script_value::release_cell_cycles(replaced, engine_);
+			return {};
+		}
 		frame_slot_set(f, slot_index, std::move(value));
 	} else if (!environment_->define_variable(name_id, std::move(value))) [[unlikely]] {
 		return raise_from(detail::inline_redefinition(*symbolizer_, name_id, decl));
@@ -20405,7 +20431,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 
 			case opcode::op_kill_slot:
-				if (script_value* slot = frame_slot(f, ins.a)) { script_value dying = std::move(*slot); }   // the destructor may reenter: the slot is null first
+				if (script_value* slot = frame_slot(f, ins.a)) {
+					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); break; }
+					script_value dying = std::move(*slot);   // the destructor may reenter: the slot is null first
+				}
 				break;
 
 			case opcode::op_error: {
@@ -21421,6 +21450,10 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 // + depth guard). Destroys the callee's script_value state NOW — deferring destruction
 // is observable.
 void vm_backend::pop_script_frame_core(call_record& rec) {
+	if (rec.locals.boxed_cells) [[unlikely]] {
+		pop_script_frame_boxed_cells(rec);
+		return;
+	}
 	JAI_COARSE(coarse_pop_, coarse_pops_)
 #ifdef JAISCRIPT_VM_PROFILE
 	uint64_t prof_pc0 = __rdtsc();
@@ -21438,6 +21471,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// Lazy frames never created an env (environment_ is the CALLER's), so there is
 		// nothing to clear; clearing it poisoned a method caller's this-binding.
 		clear_this_on_frame_exit(rec.f.entry_env);
+		if (rec.f.code && rec.f.code->shares_cells) [[unlikely]] { gather_frame_shared_cells(rec.f); }
 	}
 	if (!rec.env_untouched) {
 		// env-untouched frames never moved environment_ (prev_env is null — assigning
@@ -21461,6 +21495,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	if (!rec.env_lazy) {
 		// Moved out first so the pool's use_count()==1 guard sees today's count
 		release_scope_env(std::move(rec.f.entry_env));
+		if (rec.f.code && rec.f.code->shares_cells) [[unlikely]] { release_frame_shared_cells(); }
 	} else if (rec.f.entry_env) {
 		rec.f.entry_env = nullptr;
 	}
@@ -21499,6 +21534,76 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	--call_records_top_;
 	JAI_POP_SUB(4);
 #undef JAI_POP_SUB
+}
+
+// A frame one of whose slots was boxed on demand (note_boxed_slot): its cells are gathered before the ordinary pop and
+// checked after it
+void vm_backend::pop_script_frame_boxed_cells(call_record& rec) {
+	rec.locals.boxed_cells = false;
+	std::vector<script_value> cells;
+	if (rec.f.window_backed) {
+		const size_t end = std::min(stack_.size(), static_cast<size_t>(rec.f.window_base) + rec.f.window_live);
+		if (end > rec.f.window_base) { script_value::gather_shared_cells(&stack_[rec.f.window_base], end - rec.f.window_base, cells); }
+	} else if (rec.f.locals) {
+		script_value::gather_shared_cells(rec.f.locals->locals.data(), rec.f.locals->locals.size(), cells);
+	}
+	pop_script_frame_core(rec);
+	script_value::release_cell_cycles(cells, engine_);
+}
+
+// The record whose slots hold `storage` (a slot just boxed on demand) checks its cells at its exit; a frame whose chunk
+// shares cells already does
+void vm_backend::note_boxed_slot(const script_value& storage) {
+	if (parallel_worker_) return;
+	const script_value* base = stack_.slots;
+	const bool on_stack = base && &storage >= base && &storage < base + stack_.size();
+	for (size_t i = call_records_top_; i-- > 0;) {
+		call_record& r = *call_records_[i];
+		bool owns = false;
+		if (r.f.window_backed) {
+			if (on_stack) {
+				const size_t idx = static_cast<size_t>(&storage - base);
+				owns = idx >= r.f.window_base && idx < static_cast<size_t>(r.f.window_base) + r.f.window_live;
+			}
+		} else if (r.f.locals) {
+			const auto& l = r.f.locals->locals;
+			owns = !l.empty() && &storage >= l.data() && &storage < l.data() + l.size();
+		}
+		if (owns) {
+			if (r.env_lazy || !r.f.code || !r.f.code->shares_cells) { r.locals.boxed_cells = true; }
+			return;
+		}
+	}
+}
+
+// A scope exit kills a slot holding a cell a lambda shared: the cell is checked for a cycle once the slot lets go
+void vm_backend::kill_shared_cell_slot(script_value& slot) {
+	std::vector<script_value> cells;
+	script_value::gather_shared_cells(&slot, 1, cells);
+	{ script_value dying = std::move(slot); }
+	script_value::release_cell_cycles(cells, engine_);
+}
+
+void vm_backend::gather_frame_shared_cells(const frame& f) {
+	shared_cell_bases_.push_back(shared_cells_.size());
+	if (parallel_worker_) {
+		return;
+	}
+	if (f.window_backed) {
+		const size_t end = std::min(stack_.size(), f.window_base + f.window_live);
+		if (end > f.window_base) { script_value::gather_shared_cells(&stack_[f.window_base], end - f.window_base, shared_cells_); }
+	} else if (f.locals) {
+		script_value::gather_shared_cells(f.locals->locals.data(), f.locals->locals.size(), shared_cells_);
+	}
+}
+
+void vm_backend::release_frame_shared_cells() {
+	const size_t base = shared_cell_bases_.back();
+	shared_cell_bases_.pop_back();
+	if (shared_cells_.size() == base) return;
+	std::vector<script_value> cells(std::make_move_iterator(shared_cells_.begin() + base), std::make_move_iterator(shared_cells_.end()));
+	shared_cells_.erase(shared_cells_.begin() + base, shared_cells_.end());
+	script_value::release_cell_cycles(cells, engine_);
 }
 
 // Cold bodies of the return doors (kept out of the hot epilogues and the dispatch loop)
@@ -21968,6 +22073,7 @@ script_value vm_backend::share_env_ref(script_value& storage) {
 		script_value inner = std::move(storage);
 		storage = script_value::make_cell_reference(std::move(inner), engine_);
 		for (auto& cs : cfor_states_) { cs.fast = false; }
+		note_boxed_slot(storage);
 	}
 	return script_value(storage);
 }

@@ -307,6 +307,14 @@ namespace detail { struct argument_capture_storage; }
         // cell keeps the value alive for as long as any handle exists (escape-legal semantics).
         // `boxed` must not itself be a reference (callers deref first).
         static script_value make_cell_reference(script_value&& boxed, engine* eng);
+        // Cells a lambda shares by reference close a cycle through the closures they hold (cell -> function -> capture
+        // environment -> cell). A frame that shares cells gathers its cell references before its locals die, and after
+        // they die release_cell_cycles clears the cells only that cycle still holds: refcount arithmetic over those cells
+        // and the closures they reach, never a heap scan. A cell an escaped closure keeps is checked again later (a weak
+        // list swept as it grows) and at engine teardown (release_deferred_cell_cycles).
+        static void gather_shared_cells(const script_value* values, size_t count, std::vector<script_value>& out);
+        static void release_cell_cycles(std::vector<script_value>& cells, engine* eng);
+        static void release_deferred_cell_cycles(engine* eng);
         // Map-entry reference: pins the owning map (strong) and re-resolves find(key) on
         // every deref/assign-through - an erased entry errors instead of dangling, and a
         // reference into a temporary map keeps the map alive.
@@ -2107,6 +2115,7 @@ namespace detail { struct argument_capture_storage; }
         // acquire falls back to plain make_strong blocks that never touch the pool.
         struct reference_holder_pool;
         static strong_ptr<reference_holder> acquire_reference_holder(engine* eng);
+        struct cell_cycle_registry;
         
         
         // Tag type for invalid values

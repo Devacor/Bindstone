@@ -6635,7 +6635,7 @@ script_value interpreter::string_element_pin(script_value& base_raw, const expre
     }
     if (base_expr->get_type() == node_type::identifier_expr) {
         if (script_value* cell = string_receiver_cell(static_cast<const identifier_expr*>(base_expr))) {
-            return share_boxed_env_storage(*cell, engine_);
+            return share_boxed_slot(*cell);
         }
         return make_value();
     }
@@ -6808,6 +6808,13 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             detail::ref_declare(value, decl->type->element_type().get(), engine_);
         }
         if (decl->slot_index != SIZE_MAX && !call_stack_.empty()) {
+            if (decl->ref_escaping && !parallel_worker_) [[unlikely]] {
+                // a loop's next iteration drops the cell the last one shared: checked for a cycle once the slot lets go
+                detail::shared_cell_release replaced{engine_};
+                if (const script_value* old = call_stack_.back().get_local(decl->slot_index)) { script_value::gather_shared_cells(old, 1, replaced.cells); }
+                call_stack_.back().set_local(decl->slot_index, std::move(value));
+                return {};
+            }
             // Local variable with slot - use O(1) slot-based storage
             call_stack_.back().set_local(decl->slot_index, std::move(value));
         } else {
@@ -7028,7 +7035,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             } else {
                 // Box the variable's storage into a cell and alias it (escape-legal:
                 // the ref keeps the cell alive after the env dies)
-                JAISCRIPT_TRY(define_variable(share_boxed_env_storage(*targetPtr, engine_)));
+                JAISCRIPT_TRY(define_variable(share_boxed_slot(*targetPtr)));
             }
         } else {
             // C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value)
@@ -7043,7 +7050,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     if (storage.is_reference() && !storage.get_reference_holder()) {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
                     }
-                    JAISCRIPT_TRY(define_variable(share_boxed_env_storage(storage, engine_)));
+                    JAISCRIPT_TRY(define_variable(share_boxed_slot(storage)));
                     return {};
                 }
             }
@@ -9532,7 +9539,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     if (src.global) { continue; }   // a global resolves when the lambda runs (KEEP BYTE-PARALLEL with vm exec_closure)
                     if (src.cell) {
                         if (capture_by_ref) {
-                            captureEnv->define(var_id, share_boxed_env_storage(*src.cell, engine_));
+                            captureEnv->define(var_id, share_boxed_slot(*src.cell));
                         } else {
                             captureEnv->define(var_id, detail::clone_for_capture(src.cell->deref(), string_symbolizer_));
                         }
@@ -9580,7 +9587,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                         return checked_result<void>(make_error_code(runtime_error_code::capture_reference_failed),
                             "Cannot capture variable '{0}' by reference", capture.symbol_id);
                     }
-                    captureEnv->define(this_id, share_boxed_env_storage(*targetPtr, engine_));
+                    captureEnv->define(this_id, share_boxed_slot(*targetPtr));
                 } else {
                     // [this] captures the instance itself, as C++ captures the this pointer (KEEP BYTE-PARALLEL with vm_backend::exec_closure)
                     auto capture_result = environment_->get(this_id);
@@ -9612,7 +9619,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             if (capture.by_reference) {
                 // Cell share (escape-legal, C++ [&x] semantics): the storage boxes in
                 // place; the closure and the original share the cell
-                captureEnv->define(capture.symbol_id, share_boxed_env_storage(*src.cell, engine_));
+                captureEnv->define(capture.symbol_id, share_boxed_slot(*src.cell));
             } else {
                 captureEnv->define(capture.symbol_id, detail::clone_for_capture(src.cell->deref(), string_symbolizer_));
             }
@@ -9635,7 +9642,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     if (expr->default_capture == lambda_expr::capture_default::by_reference) {
                         // C++ [&] semantics: share the cell (the slot boxes in place;
                         // escape-legal - the cell outlives the frame)
-                        captureEnv->define(ref.symbol_id, share_boxed_env_storage(*slot_val, engine_));
+                        captureEnv->define(ref.symbol_id, share_boxed_slot(*slot_val));
                     } else {
                         // Automatic / [=] capture of a local: by value
                         captureEnv->define(ref.symbol_id, detail::clone_for_capture(slot_val->deref(), string_symbolizer_));
@@ -10230,7 +10237,7 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
                 }
                 operand = std::move(aliased.value());
             } else {
-                operand = share_boxed_env_storage(*targetPtr, engine_);
+                operand = share_boxed_slot(*targetPtr);
             }
             break;
         }
@@ -10271,7 +10278,7 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
                     if (storage.is_reference() && !storage.get_reference_holder()) {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
                     }
-                    operand = share_boxed_env_storage(storage, engine_);
+                    operand = share_boxed_slot(storage);
                 }
             }
             break;
@@ -10579,7 +10586,15 @@ void interpreter::kill_scope_slot(const statement* decl) {
             return;   // a primitive, a string, a weak_ptr or a reference owns no instance
         }
     }
-    if (script_value* slot = call_stack_.back().get_local(v->slot_index)) { script_value dying = std::move(*slot); }
+    if (script_value* slot = call_stack_.back().get_local(v->slot_index)) {
+        if (slot->is_reference() && !parallel_worker_) [[unlikely]] {   // a cell a lambda shared: checked for a cycle once the slot lets go
+            detail::shared_cell_release killed{engine_};
+            script_value::gather_shared_cells(slot, 1, killed.cells);
+            script_value dying = std::move(*slot);
+            return;
+        }
+        script_value dying = std::move(*slot);
+    }
 }
 
 // The initializer's variables die after the loop (KEEP BYTE-PARALLEL with vm_compiler::compile_for)
@@ -11805,7 +11820,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                             environment_->undefined_text(ident->symbol_id, "Cannot take reference of undefined variable"), ident->symbol_id);
                     }
                 } else {
-                    out.emplace(share_boxed_env_storage(*storage, engine_));
+                    out.emplace(share_boxed_slot(*storage));
                 }
             } else if (detail::is_ref_bindable_lvalue(stmt->value.get())) {
                 auto resolved = detail::resolve_ref_lvalue(stmt->value.get(),
@@ -11836,7 +11851,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                         if (storage.is_reference() && !storage.get_reference_holder()) {
                             return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
                         }
-                        out.emplace(share_boxed_env_storage(storage, engine_));
+                        out.emplace(share_boxed_slot(storage));
                     }
                 }
             }
@@ -14463,7 +14478,22 @@ checked_result<script_value> interpreter::component_reference(const expression* 
                                                               const std::shared_ptr<environment>& caller_env) {
     return detail::math::component_reference(e, detail::caller_frame_view{caller_locals}, caller_env.get(),
         caller_env ? caller_env->find_access_context() : nullptr, engine_, string_symbolizer_,
-        [this](script_value& storage) { return share_boxed_env_storage(storage, engine_); });
+        [this](script_value& storage) { return share_boxed_slot(storage); });
+}
+
+// Boxing a frame's slot on demand (a reference argument, a reference declaration) marks that frame: its exit checks the
+// cells it shared, as a frame whose locals a lambda captures by reference does
+script_value interpreter::share_boxed_slot(script_value& storage) {
+    if (!storage.is_reference() && !parallel_worker_) [[unlikely]] {
+        for (size_t i = call_stack_.size(); i-- > 0;) {
+            auto& locals = call_stack_[i].locals;
+            if (!locals.empty() && &storage >= locals.data() && &storage < locals.data() + locals.size()) {
+                call_stack_[i].boxed_cells = true;
+                break;
+            }
+        }
+    }
+    return share_boxed_env_storage(storage, engine_);
 }
 
 checked_result<bool> interpreter::reference_to_storage(script_value& storage, script_value& out) {
@@ -14475,7 +14505,7 @@ checked_result<bool> interpreter::reference_to_storage(script_value& storage, sc
     // Share the holder (zero alloc; cells alias the same box, element/field refs keep
     // their container/instance re-resolution), boxing on demand when the variable
     // predates its escape mark (cross-execute global, C++ define, dynamic shape)
-    out = share_boxed_env_storage(storage, engine_);
+    out = share_boxed_slot(storage);
     return true;
 }
 
@@ -14839,8 +14869,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         // destructors that reenter call_function and grow call_stack_, which must never
         // happen mid-pop_back (vector reentrancy UB). Mirrors the VM's stable-record
         // teardown: destructors fire after the caller env/state is restored.
+        detail::shared_cell_release shared_cells{engine_};   // declared first: its check runs after the frame's locals die
         call_frame dying_frame = std::move(call_stack_.back());
         call_stack_.pop_back();
+        if ((dying_frame.boxed_cells || (function.body && function.body->shares_cells)) && !parallel_worker_) [[unlikely]] {
+            script_value::gather_shared_cells(dying_frame.locals.data(), dying_frame.locals.size(), shared_cells.cells);
+        }
 
         auto function_env = environment_;
         if (clear_this) {
@@ -15476,7 +15510,19 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
         detail::call_depth_guard depth_guard(current_call_depth_);
         // Detached frames die LAST (after the caller state is restored): releasing their
         // locals can fire destructors that reenter call_function
+        detail::shared_cell_release dying_cells{engine_};   // the cells the finished frames shared, checked after they die
         std::vector<call_frame> dying_frames;
+        struct gather_dying_cells {
+            std::vector<call_frame>& frames;
+            std::vector<script_value>& cells;
+            ~gather_dying_cells() {
+                for (auto& frame : frames) {
+                    if (frame.boxed_cells || (frame.function && frame.function->body && frame.function->body->shares_cells)) {
+                        script_value::gather_shared_cells(frame.locals.data(), frame.locals.size(), cells);
+                    }
+                }
+            }
+        } gather_dying{dying_frames, dying_cells.cells};
         struct caller_state_restore {
             interpreter* in;
             std::shared_ptr<environment> env;

@@ -1758,6 +1758,7 @@ struct engine::implementation {
     // any vector is still out, so its place in the destruction order does not matter)
     type_info* type_info_math_[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};   // vec2, vec3, ivec2, ivec3, vec4, color
     ref_holder_pool_slot_holder vec_node_pool_;
+    ref_holder_pool_slot_holder cell_cycle_registry_;
     int8_t aggregate_lowering_ = -1;   // engine::aggregate_lowering: 1 on, 0 off, -1 the backend's default (on for the vm)
     uint64_t aggregate_lowered_locals_ = 0;
     uint64_t aggregate_lowered_sites_ = 0;
@@ -1841,6 +1842,14 @@ void*& engine::reference_holder_pool_slot() {
 
 void engine::set_reference_holder_pool_teardown(void (*teardown)(void*)) {
     impl->ref_holder_pool_.teardown = teardown;
+}
+
+void*& engine::cell_cycle_registry_slot() {
+    return impl->cell_cycle_registry_.pool;
+}
+
+void engine::set_cell_cycle_registry_teardown(void (*teardown)(void*)) {
+    impl->cell_cycle_registry_.teardown = teardown;
 }
 
 void*& engine::vec_node_pool_slot() {
@@ -2000,6 +2009,7 @@ engine::~engine() {
         if (impl->global_environment_) { impl->global_environment_->clear_values(); }
         for (auto& [name, def] : impl->class_registry_.script_classes_) { if (def) { def->release_values_for_teardown(); } }
         for (auto& [name, def] : impl->classes) { if (def && def->is_script_class()) { def->release_values_for_teardown(); } }
+        script_value::release_deferred_cell_cycles(this);
     }
 }
 

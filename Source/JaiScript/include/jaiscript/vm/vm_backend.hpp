@@ -1150,6 +1150,14 @@ namespace jai::vm {
                                            const std::shared_ptr<function_decl>& ast, const std::vector<script_value>& arguments, const call_site* site);
         void anchor_method_result(script_value& result, script_value& receiver);
         void pop_script_frame_core(call_record& rec);
+        // A sharing frame's cells (chunk::shares_cells), gathered before its locals die and checked after
+        void gather_frame_shared_cells(const frame& f);
+        void pop_script_frame_boxed_cells(call_record& rec);
+        void note_boxed_slot(const script_value& storage);
+        void kill_shared_cell_slot(script_value& slot);
+        void release_frame_shared_cells();
+        std::vector<script_value> shared_cells_;
+        std::vector<size_t> shared_cell_bases_;
         op_status return_from_script_frame(frame*& fp, const vm_instruction& ins);
         // Shared return epilogue (classification switch + pop + result push); the
         // return superinstructions feed it a result they resolved without the stack

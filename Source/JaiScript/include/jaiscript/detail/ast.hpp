@@ -641,6 +641,9 @@ namespace jai {
     class block_stmt : public statement {
     public:
         std::vector<declaration_ptr> declarations;
+        // A function body whose locals a lambda captures by reference: its frame exit clears the cell cycles they close
+        // (script_value::release_cell_cycles); set by the escape-mark pass
+        bool shares_cells = false;
 
         block_stmt(const source_location& loc, std::vector<declaration_ptr> decls)
             : statement(loc, node_type::block_stmt), declarations(std::move(decls)) {}    };

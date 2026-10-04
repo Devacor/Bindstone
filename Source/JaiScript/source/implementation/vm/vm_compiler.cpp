@@ -536,27 +536,35 @@ size_t vm_compiler::emit(opcode op, uint32_t a, uint32_t b, uint32_t c) {
 // the test and fall into the body with its value stranded on the stack.
 size_t vm_compiler::emit_cond_jump_false(const expression* cond_expr) {
 	const uint32_t proved = expression_returns_bool(cond_expr) ? 1u : 0u;
-	auto& code = chunk_->code;
-	if (!code.empty() && code.back().op == opcode::op_binary_fused &&
-	    cond_expr && cond_expr->get_type() == node_type::binary_expr) {
-		switch (static_cast<token_type>(chunk_->fused_binary_protos[code.back().a].op)) {
-			case token_type::less:
-			case token_type::less_equal:
-			case token_type::greater:
-			case token_type::greater_equal:
-			case token_type::equal_equal:
-			case token_type::bang_equal: {
-				vm_instruction& ins = code.back();
-				ins.op = opcode::op_fused_cmp_jump;
-				ins.b = ins.a;            // fused proto index
-				ins.a = k_invalid_u32;    // patched by the caller
-				ins.c = proved;
-				return code.size() - 1;
-			}
-			default: break;
-		}
-	}
+	if (fuse_cond_compare(cond_expr, k_invalid_u32, proved)) return chunk_->code.size() - 1;
 	return emit(opcode::op_jump_if_false, k_invalid_u32, proved);
+}
+// the true sense of a leaf comparison: the compare-jump falls through to a jump taken when it holds and skips it otherwise, so the
+// comparison stays a compare-jump (a typed one where proven) instead of a value pushed for JUMP_IF_TRUE. Returns the jump to patch
+size_t vm_compiler::emit_cond_jump_true(const expression* cond_expr) {
+	const uint32_t proved = expression_returns_bool(cond_expr) ? 1u : 0u;
+	if (fuse_cond_compare(cond_expr, static_cast<uint32_t>(chunk_->code.size() + 1), proved)) return emit(opcode::op_jump, k_invalid_u32);
+	return emit(opcode::op_jump_if_true, k_invalid_u32, proved);
+}
+bool vm_compiler::fuse_cond_compare(const expression* cond_expr, uint32_t false_target, uint32_t proved) {
+	auto& code = chunk_->code;
+	if (code.empty() || code.back().op != opcode::op_binary_fused || !cond_expr || cond_expr->get_type() != node_type::binary_expr) return false;
+	switch (static_cast<token_type>(chunk_->fused_binary_protos[code.back().a].op)) {
+		case token_type::less:
+		case token_type::less_equal:
+		case token_type::greater:
+		case token_type::greater_equal:
+		case token_type::equal_equal:
+		case token_type::bang_equal: {
+			vm_instruction& ins = code.back();
+			ins.op = opcode::op_fused_cmp_jump;
+			ins.b = ins.a;            // fused proto index
+			ins.a = false_target;     // k_invalid_u32: patched by the caller
+			ins.c = proved;
+			return true;
+		}
+		default: return false;
+	}
 }
 
 // Compound store to an identifier whose RHS was just compiled. When the RHS's last
@@ -1463,7 +1471,7 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 	const expression_ptr& leaf = hoisted ? hoisted : cond;
 	compile_expression(leaf);
 	if (leaf->get_type() == node_type::member_expr) { member_tail_into_temp(leaf.get()); }
-	true_jumps.push_back(emit(opcode::op_jump_if_true, k_invalid_u32, expression_returns_bool(leaf.get()) ? 1u : 0u));
+	true_jumps.push_back(emit_cond_jump_true(leaf.get()));
 	leaf_grafts_ = grafts;
 }
 

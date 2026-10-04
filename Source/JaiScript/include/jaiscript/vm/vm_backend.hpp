@@ -2250,6 +2250,7 @@ namespace jai::vm {
         // op_store's exact post-pop tail, shared with op_binary_fused_store
         op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         op_status store_popped_value_full(frame& f, const vm_instruction& ins, script_value value);
+        bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
         op_status exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
         const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);

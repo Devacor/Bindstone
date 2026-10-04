@@ -88,6 +88,12 @@ public:
     // fields infer from the current value's tag then enforce. Callers store the returned
     // value via set_field_unchecked. Defined out-of-line.
     checked_result<script_value> enforce_field_write(uint64_t id, script_value value) const;
+    // A store into field id: a by-value class field holding an instance takes the source in place (the copy assignment or a
+    // user operator=; the field keeps its object, which is the result); otherwise copy() makes the stored value and the
+    // field's conversion runs (enforce_field_write). The source is the store's own operand, never a copy of it, so an lvalue
+    // source runs no extra destructor
+    std::optional<checked_result<void>> assign_field_in_place(uint64_t id, const script_value& source) const;
+    template <class Copy> checked_result<script_value> field_store(uint64_t id, const script_value& source, Copy&& copy) const;
 
     const script_value& get_field(uint64_t id, bool throw_if_missing = true) const;
     script_value& get_field(uint64_t id, bool throw_if_missing = true);
@@ -824,6 +830,8 @@ public:
     // declared type (its held tag when 'auto'). Callers store the returned value via
     // set_static_field. Defined out-of-line.
     checked_result<script_value> enforce_static_write(uint64_t id, script_value value) const;
+    // The static twin of class_instance::field_store
+    template <class Copy> checked_result<script_value> static_store(uint64_t id, const script_value& source, Copy&& copy) const;
 
     // Hot reload: clear the instance-method overload sets + resolution cache so a reload
     // rebuilds them fresh (re-adding each method via add_script_method) instead of appending
@@ -3342,14 +3350,50 @@ inline checked_result<void> enforce_member_access(const class_definition* cls, u
         "Cannot access private member '{0}' of class '{1}'", member_id, declarer->get_type_id());
 }
 
-// operator= on a plain store (docs/static_checking.md rule table; C++ assignment): a destination holding a class
-// instance whose class (or an in-script base) declares operator= takes a source that is not that class, a subclass, a
-// handle to one, or null through the operator, on the held instance. nullopt when it does not apply. A parallel region
-// never dispatches it (the operator-dispatch verdict). KEEP the one kernel for every plain-store site of both backends.
-inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng) {
+// operator= on a plain store (docs/static_checking.md rule table; C++ assignment, Dev ruling 2026-10-03). A destination slot
+// holding a class instance by value keeps its object: a source of the slot's class or a subclass assigns that class's
+// members into it (the implicit copy assignment: a by-value class member assigns in turn, any other member takes the
+// member-copy rule, clone_element; a derived source slices), and a source of another class goes through a user operator= on
+// the held instance. nullopt when neither applies (a handle slot rebinds, a host class keeps its replace). A parallel region
+// never dispatches a user operator (the operator-dispatch verdict). KEEP the one kernel for every plain-store site of both
+// backends.
+inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng);
+
+// The members `layout` declares (its whole chain, base first) copied from source into dest
+inline checked_result<void> implicit_copy_assign(class_instance* dest, const class_definition* layout, class_instance* source, engine* eng) {
+    const uint32_t n = layout->field_slot_count();
+    const class_definition* dest_layout = dest->get_class_definition();
+    for (uint32_t slot = 0; slot < n; ++slot) {
+        if (layout->slot_is_cpp_property(slot)) { continue; }
+        const uint64_t id = layout->slot_field(slot);
+        const script_value* from = source->find_field_value(id);
+        if (!from) { continue; }
+        const script_value& member = from->is_reference() ? from->deref() : *from;
+        const type_info_ptr declared = layout->get_field_declared_type(id);
+        script_value* to = dest->find_field_value(id);
+        if (to && declared && declared->base_type == script_value_type::jai_object_type && !declared->type_name.empty()) {
+            if (auto nested = user_assign_operator(*to, member, eng)) {
+                if (!*nested) { return *nested; }
+                continue;
+            }
+        }
+        const uint32_t dest_slot = dest_layout ? dest_layout->field_slot(id) : class_definition::k_no_field_slot;
+        if (dest_slot == class_definition::k_no_field_slot) { continue; }
+        dest->field_slot_write(dest_slot, member.clone_element());
+    }
+    return {};
+}
+
+// The implicit copy assignment alone: a slot holding a class instance by value takes a source of the slot's class or a
+// subclass member by member, the slot keeping its object (an element or a map value assigns this way; nullopt otherwise)
+inline std::optional<checked_result<void>> class_copy_assign(const script_value& current_in, const script_value& value_in, engine* eng);
+
+inline std::optional<checked_result<void>> class_copy_assign(const script_value& current_in, const script_value& value_in, engine* eng) {
     if (!eng) { return std::nullopt; }
     const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
     if (current.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
+    const type_info_ptr tag = current.get_type_info();
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
     auto holder = const_cast<script_value&>(current).get_object_holder();
     if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
     auto* instance = static_cast<class_instance*>(holder->data.get());
@@ -3357,12 +3401,54 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     if (!def) { return std::nullopt; }
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
     if (value.is_null()) { return std::nullopt; }
+    // the slot's class: its declared type names the held instance's class or one of its bases
+    const class_definition* slot_class = def;
+    if (tag && tag->base_type == script_value_type::jai_object_type && !tag->type_name.empty() && def->get_name() != tag->type_name) {
+        std::function<const class_definition*(const class_definition*)> find_base = [&](const class_definition* c) -> const class_definition* {
+            if (!c) { return nullptr; }
+            if (c->get_name() == tag->type_name) { return c; }
+            for (const auto& parent : c->get_parent_classes()) {
+                if (const class_definition* found = find_base(parent.get())) { return found; }
+            }
+            return nullptr;
+        };
+        if (const class_definition* found = find_base(def)) { slot_class = found; }
+    }
     const size_t vi = value.raw_storage_index();
     if (vi == script_value::TYPEID_OBJECT || vi == script_value::TYPEID_SHARED_PTR) {
         auto source_holder = const_cast<script_value&>(value).get_object_holder();
         if (source_holder && source_holder->is_class_instance_wrapper && source_holder->data) {
+            auto* source = static_cast<class_instance*>(source_holder->data.get());
+            const class_definition* source_def = source->get_class_definition();
+            if (source_def && (source_def == slot_class || source_def->derives_from(slot_class))) {
+                if (!slot_class->is_script_class() || slot_class->find_cpp_base_class()) { return std::nullopt; }   // a host object keeps its replace
+                if (source == instance) { return checked_result<void>(); }   // self-assignment
+                return implicit_copy_assign(instance, slot_class, source, eng);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng) {
+    if (auto copied = class_copy_assign(current_in, value_in, eng)) { return copied; }
+    if (!eng) { return std::nullopt; }
+    const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
+    if (current.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
+    const type_info_ptr tag = current.get_type_info();
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return std::nullopt; }   // a handle rebinds
+    auto holder = const_cast<script_value&>(current).get_object_holder();
+    if (!holder || !holder->is_class_instance_wrapper || !holder->data) { return std::nullopt; }
+    auto* instance = static_cast<class_instance*>(holder->data.get());
+    const class_definition* def = instance->get_class_definition();
+    if (!def) { return std::nullopt; }
+    const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
+    if (value.is_null()) { return std::nullopt; }
+    if (value.raw_storage_index() == script_value::TYPEID_OBJECT || value.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
+        auto source_holder = const_cast<script_value&>(value).get_object_holder();
+        if (source_holder && source_holder->is_class_instance_wrapper && source_holder->data) {
             const class_definition* source_def = static_cast<class_instance*>(source_holder->data.get())->get_class_definition();
-            if (source_def && (source_def == def || source_def->derives_from(def))) { return std::nullopt; }
+            if (source_def && (source_def == def || source_def->derives_from(def))) { return std::nullopt; }   // a host class's own copy keeps its replace
         }
     }
     const uint64_t assign_id = eng->get_symbolizer()->intern("=");
@@ -3450,6 +3536,63 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
         return std::move(value);
     }
     return detail::declared_slot_write(class_def_->get_field_declared_type(id), [&] { return find_field_value(id); }, std::move(value), engine_, id, class_def_, false);
+}
+
+inline std::optional<checked_result<void>> class_instance::assign_field_in_place(uint64_t id, const script_value& source) const {
+    if (!class_def_) { return std::nullopt; }
+    const type_info_ptr declared = class_def_->get_field_declared_type(id);
+    if (!declared || declared->base_type != script_value_type::jai_object_type || declared->type_name.empty()) { return std::nullopt; }
+    const script_value* current = find_field_value(id);
+    if (!current) { return std::nullopt; }
+    return detail::user_assign_operator(*current, source, engine_);
+}
+
+template <class Copy>
+inline checked_result<script_value> class_instance::field_store(uint64_t id, const script_value& source, Copy&& copy) const {
+    if (auto in_place = assign_field_in_place(id, source)) {
+        if (!*in_place) { return in_place->error_value(); }
+        const script_value* kept = find_field_value(id);
+        return kept ? script_value(kept->deref()) : script_value(std::monostate{}, engine_);
+    }
+    return enforce_field_write(id, copy());
+}
+
+template <class Copy>
+inline checked_result<script_value> class_definition::static_store(uint64_t id, const script_value& source, Copy&& copy) const {
+    auto it = static_declared_types_.find(id);
+    if (it != static_declared_types_.end() && it->second && it->second->base_type == script_value_type::jai_object_type && !it->second->type_name.empty()) {
+        if (const script_value* current = get_static_field_ptr(id)) {
+            if (auto in_place = detail::user_assign_operator(*current, source, engine_)) {
+                if (!*in_place) { return in_place->error_value(); }
+                return script_value(current->deref());
+            }
+        }
+    }
+    return enforce_static_write(id, copy());
+}
+
+namespace detail {
+// A slot declared a class by value: a store into it assigns into the held instance (the proven field lanes step aside for it)
+inline bool by_value_class_type(const type_info* t) noexcept {
+    return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty();
+}
+
+// An operator's result stored back by a compound assignment: a slot holding a class by value copy-assigns it (the slot keeps
+// its object, the result dies after), any other slot takes it
+inline checked_result<void> compound_slot_store(script_value& target, script_value&& result, engine* eng) {
+    if (by_value_class_type(target.type_info_raw())) {
+        if (auto assigned = user_assign_operator(target, result, eng)) { return *assigned; }
+    }
+    target = std::move(result);
+    return {};
+}
+
+// An element or map value declared a class (array<T>, map<K, T>) holding an instance takes a source of that class by the copy
+// assignment, the element keeping its object; nullopt for a var element or any other store, which replaces
+inline std::optional<checked_result<void>> element_copy_assign(const script_value& current, const script_value& source, const type_info_ptr& element_type, engine* eng) {
+    if (!element_type || element_type->base_type != script_value_type::jai_object_type || element_type->type_name.empty()) { return std::nullopt; }
+    return class_copy_assign(current, source, eng);
+}
 }
 
 inline checked_result<script_value> class_definition::enforce_static_write(uint64_t id, script_value value) const {

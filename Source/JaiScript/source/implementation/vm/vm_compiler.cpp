@@ -6931,6 +6931,7 @@ bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	proto.receiver = make_fused_operand(member->object);
 	proto.value = value_landed ? landed : make_fused_operand(arg);
 	proto.value_is_subscript = value_is_subscript;
+	proto.value_temp = value_landed;
 	if (value_is_subscript) {
 		proto.value_index_flags = is_lvalue_shaped(static_cast<const binary_expr*>(arg.get())->left.get()) ? index_flag_lvalue_shape : 0;
 	}

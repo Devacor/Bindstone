@@ -660,7 +660,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
                         return detail::write_cpp_property(this_object_, instance->get_class_definition(), setter_id, value);
                     }
                     // Typed fields enforce like locals (declared type; auto infers)
-                    auto enforced = instance->enforce_field_write(id, clone_for_assignment(value));
+                    auto enforced = instance->field_store(id, value, [&] { return clone_for_assignment(value); });
                     if (!enforced) {
                         return enforced.error_value();
                     }
@@ -674,7 +674,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
         if (class_definition* owner = detail::bare_static_owner(class_def_.get(), nullptr, id)) {
-            auto enforced = owner->enforce_static_write(id, clone_for_assignment(value));
+            auto enforced = owner->static_store(id, value, [&] { return clone_for_assignment(value); });
             if (!enforced) {
                 return enforced.error_value();
             }
@@ -733,7 +733,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
                         return detail::write_cpp_property(this_object_, instance->get_class_definition(), setter_id, value);
                     }
                     // Typed fields enforce like locals (declared type; auto infers)
-                    auto enforced = instance->enforce_field_write(id, std::move(value));
+                    auto enforced = instance->field_store(id, value, [&] { return std::move(value); });
                     if (!enforced) {
                         return enforced.error_value();
                     }
@@ -747,7 +747,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
     // Kind-specific fallback: assign to static fields for static_method environments
     if (kind_ == env_kind::static_method && class_def_) {
         if (class_definition* owner = detail::bare_static_owner(class_def_.get(), nullptr, id)) {
-            auto enforced = owner->enforce_static_write(id, std::move(value));
+            auto enforced = owner->static_store(id, value, [&] { return std::move(value); });
             if (!enforced) {
                 return enforced.error_value();
             }

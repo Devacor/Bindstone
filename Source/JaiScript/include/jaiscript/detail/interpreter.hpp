@@ -797,12 +797,12 @@ namespace jai {
                 return result;
             }
 
-            // Discard top value without constructing it (optimization for ignored return values)
+            // Discard the top value (ignored return values)
             void discard() {
                 if (top_ == 0) {
                     throw runtime_error("Internal error: empty value stack");
                 }
-                --top_;  // Just decrement, don't move/copy the value
+                script_value released = std::move(values_[--top_]);   // a discarded value dies now, not when the slot is reused
             }
 
             bool empty() const { return top_ == 0; }

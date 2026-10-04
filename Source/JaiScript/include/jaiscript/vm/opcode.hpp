@@ -418,6 +418,7 @@ namespace jai::vm {
     inline constexpr uint32_t index_flag_lvalue_write = 2; // outermost target of an assignment
     inline constexpr uint32_t index_flag_transient_read = 4; // read consumed transiently: elide the reference mint (transient_read.hpp)
     inline constexpr uint32_t index_flag_string_target = 8;  // a store target: a string base mints a STRING-ELEMENT reference, c = chunk::string_target_sites index
+    inline constexpr uint32_t index_flag_no_result = 16;     // an op_index_store a fused statement store runs: its caller pops the result, nothing reads it back
 
     struct vm_instruction {
         opcode op;

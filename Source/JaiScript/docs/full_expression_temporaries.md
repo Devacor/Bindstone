@@ -62,6 +62,8 @@ Both backends flush at exactly these, so the logs agree:
 
 ### Open points
 
-- Assignment: `x = Token("b")` replaces `x`'s object today (the old object dies, logging its own name); C++ copy-assigns
-  into `x` and destroys the temporary. Awaiting Dev's ruling on assignment semantics; the queue is independent of it.
+- Assignment (Dev ruling 2026-10-03): `x = Token("b")` copy-assigns into `x`'s object and the temporary dies at the
+  statement's end, a flush point in this design too. A `var` slot keeps replace: the old value dies when the store drops
+  it and a temporary moves in. Operator arguments still copy (`x += Token("b")` through `operator+(Token o)` binds `o`
+  from a copy, so the temporary and `o` both die); the queue's flush would order them, elision would remove the copy.
 - A cell block region never parks (class temporaries do not enter cells); a flush inside a closed loop is not needed.

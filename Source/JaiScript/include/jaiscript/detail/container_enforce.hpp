@@ -10,6 +10,7 @@
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/math_values.hpp>
+#include <jaiscript/detail/uniquely_held.hpp>
 
 // Typed-container enforcement kernel, shared VERBATIM by both backends and the field
 // kernel (parity by construction — stage 0 of docs/typed_array_design.md). Two layers:
@@ -346,6 +347,20 @@ namespace jai::detail {
 		}
 
 		return actual_element.clone_element();
+	}
+
+	// A replacing element store: a prvalue class instance (uniquely held) moves in and is the stored object, carrying its
+	// class as the object row's copy would; anything else takes the converting copy
+	inline checked_result<script_value> convert_container_element_taking(engine* eng, script_value& element, const type_info_ptr& element_type) {
+		if (element_type && element_type->base_type == script_value_type::jai_object_type &&
+		    element.raw_storage_index() == script_value::TYPEID_OBJECT && uniquely_held(element)) {
+			const type_info* tag = element.get_type_info().get();
+			if (!tag || tag->base_type == script_value_type::jai_any_type) {
+				if (auto own = object_element_own_tag(element, eng)) { element.set_type_info(std::move(own)); }
+			}
+			return std::move(element);
+		}
+		return convert_container_element(eng, element, element_type);
 	}
 
 	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02)

@@ -12,22 +12,9 @@
 
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/uniquely_held.hpp>
 
 namespace jai::detail {
-
-    // A prvalue reaching a by-value parameter: an aggregate no other handle, slot, field or element holds (C++17 guaranteed
-    // elision constructs it directly in the parameter - moving it there runs one destructor where a copy would run two)
-    inline bool uniquely_held(const script_value& v) noexcept {
-        switch (v.raw_storage_index()) {
-        case script_value::TYPEID_OBJECT: {
-            const auto& holder = v.unchecked_object_handle();
-            return holder && holder.use_count() == 1 && holder->is_class_instance_wrapper && holder->data && holder->data.use_count() == 1;
-        }
-        case script_value::TYPEID_ARRAY: return v.unchecked_get_array_storage() && v.unchecked_get_array_storage().use_count() == 1;
-        case script_value::TYPEID_MAP: return v.unchecked_get_map_storage() && v.unchecked_get_map_storage().use_count() == 1;
-        default: return false;
-        }
-    }
 
     enum class return_conv : uint8_t {
         unclassified = 0,

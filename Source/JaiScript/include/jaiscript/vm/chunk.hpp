@@ -95,6 +95,7 @@ namespace jai::vm {
         // replay path reproduces both
         bool value_is_subscript = false;
         uint32_t value_index_flags = 0;
+        bool value_temp = false;          // the value is a compiler temp only this push reads: it dies once the push took its copy
     };
 
     // Per-call-site argument metadata: symbol id per argument (UINT64_MAX = not an identifier)

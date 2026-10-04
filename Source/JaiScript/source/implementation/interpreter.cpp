@@ -1,5 +1,6 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
+#include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/enum_value.hpp>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/stdlib/containers.hpp>
@@ -4518,7 +4519,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
         if (holder && holder->is_class_instance_wrapper && holder->data) {
             auto* inst = static_cast<class_instance*>(holder->data.get());
             if (memberExpr->member_id != UINT64_MAX && inst->find_field_value(memberExpr->member_id)) {
-                auto enforced = inst->enforce_field_write(memberExpr->member_id, clone_for_assignment(value));
+                auto enforced = inst->field_store(memberExpr->member_id, value, [&] { return clone_for_assignment(value); });
                 if (!enforced) {
                     return enforced.error_value();
                 }
@@ -4556,7 +4557,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     } else if (target.has_field(member_id)) {
         // Direct field assignment (deep copy for value types, share for shared_ptr);
         // typed fields enforce like locals
-        auto enforced = target.instance->enforce_field_write(member_id, clone_for_assignment(value));
+        auto enforced = target.instance->field_store(member_id, value, [&] { return clone_for_assignment(value); });
         if (!enforced) {
             return enforced.error_value();
         }
@@ -4868,7 +4869,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         std::optional<script_value> custom_result;
                         if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
                         if (custom_result.has_value()) {
-                            target = std::move(custom_result.value());
+                            JAISCRIPT_TRY(detail::compound_slot_store(target, std::move(custom_result.value()), engine_));
                             push_value(expression_result_needed_ ? target.clone() : target);
                             return {};
                         }
@@ -5215,7 +5216,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             if (prop_setter) {
                                 JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
                             } else {
-                                auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(custom_result.value()));
+                                auto enforced = instance->field_store(identifier->symbol_id, custom_result.value(), [&] { return clone_for_assignment(custom_result.value()); });
                                 if (!enforced) {
                                     return enforced.error_value();
                                 }
@@ -5314,7 +5315,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                             instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
                     }
                 } else {
-                    auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(resultValue));
+                    auto enforced = instance->field_store(identifier->symbol_id, resultValue, [&] { return clone_for_assignment(resultValue); });
                     if (!enforced) {
                         return enforced.error_value();
                     }
@@ -5335,7 +5336,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 if (!cls) {
                     return cls.error_value();
                 }
-                auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, clone_for_assignment(result));
+                auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, result, [&] { return clone_for_assignment(result); });
                 if (!stored) {
                     return stored.error_value();
                 }
@@ -5875,10 +5876,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         const bool proven_identity = expr->static_store_proof == proof_same_type && slot_type &&
                                                      detail::same_type_payload(value, slot_type.get());
                         // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
-                        if (!proven_identity && slot_type && slot_type->base_type == script_value_type::jai_object_type) {
+                        if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {   // a proven same-class store copy-assigns too
                             if (auto assigned = detail::user_assign_operator(*storage, value, engine_)) {
                                 if (!*assigned) { return assigned->error_value(); }
-                                push_value(clone_for_assignment(*storage));   // the expression's value is the destination's
+                                push_value(expression_result_needed_ ? clone_for_assignment(*storage) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
                                 return {};
                             }
                         }
@@ -5901,6 +5902,11 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 detail::var_stamp(value, slot_type, engine_);
                             }
                         }
+                        if (detail::uniquely_held(value)) {   // a prvalue is the stored object (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
+                            *storage = std::move(value);
+                            push_value(expression_result_needed_ ? clone_for_assignment(*storage) : script_value(*storage));
+                            return {};
+                        }
                         // Direct assignment to call frame local (or its cell); the
                         // kernel deep-copies values and shares shared_ptr handles
                         *storage = clone_for_assignment(value);
@@ -5920,6 +5926,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 // landing below with its conversion gated by the proof (KEEP BYTE-PARALLEL with
                 // vm_backend store_popped_value's proven lane)
                 if (identifier->proven_class && identifier->proven_field_write && !parallel_worker_ &&
+                    !detail::by_value_class_type(identifier->proven_field_type) &&
                     member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
                     if (class_instance* inst = detail::proven_field_instance(*member_scope_.this_storage,
                                                                              identifier->proven_class, identifier->proven_epoch)) {
@@ -6198,7 +6205,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     if (target_type && target_type->base_type == script_value_type::jai_object_type) {
                         if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_)) {
                             if (!*assigned) { return assigned->error_value(); }
-                            push_value(clone_for_assignment(*currentVal));   // the expression's value is the destination's
+                            push_value(expression_result_needed_ ? clone_for_assignment(*currentVal) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
                             return {};
                         }
                     }
@@ -6321,13 +6328,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                         value = value.detached_for_store();
                                     }
                                     if (is_lvalue_read) {
-                                        auto enforced = instance->enforce_field_write(identifier->symbol_id, clone_for_assignment(value));
+                                        auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
                                         if (!enforced) {
                                             return enforced.error_value();
                                         }
                                         instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                                     } else {
-                                        auto enforced = instance->enforce_field_write(identifier->symbol_id, std::move(value));
+                                        auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return std::move(value); });
                                         if (!enforced) {
                                             return enforced.error_value();
                                         }
@@ -6347,13 +6354,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                         value = value.detached_for_store();
                                     }
                                     if (is_lvalue_read) {
-                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, clone_for_assignment(value));
+                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
                                         if (!stored) {
                                             return stored.error_value();
                                         }
                                         if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
                                     } else {
-                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, std::move(value));
+                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, value, [&] { return std::move(value); });
                                         if (!stored) {
                                             return stored.error_value();
                                         }
@@ -6377,13 +6384,13 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         value = value.detached_for_store();
                     }
                     if (is_lvalue_read) {
-                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, clone_for_assignment(value));
+                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
                         if (!stored) {
                             return stored.error_value();
                         }
                         if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
                     } else {
-                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, std::move(value));
+                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, value, [&] { return std::move(value); });
                         if (!stored) {
                             return stored.error_value();
                         }
@@ -6430,7 +6437,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
                 // The rhs is the one evaluated at the top of this branch: re-dispatching it
                 // here ran every side effect twice (and fired a yield twice)
-                auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, clone_for_assignment(value));
+                auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, value, [&] { return clone_for_assignment(value); });
                 if (!stored) {
                     return stored.error_value();
                 }
@@ -6479,7 +6486,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // Proven field store (docs/type_proofs_design.md I-M2): assign_member_value's field
             // branch minus the ladder (KEEP BYTE-PARALLEL with vm_backend exec_set_member's
             // proven lane)
-            if (memberExpr->proven_class && memberExpr->proven_field_write && !parallel_worker_) {
+            if (memberExpr->proven_class && memberExpr->proven_field_write && !parallel_worker_ &&
+                !detail::by_value_class_type(memberExpr->proven_field_type)) {
                 if (class_instance* inst = detail::proven_field_instance(dereferenced, memberExpr->proven_class,
                                                                          memberExpr->proven_epoch)) {
                     const uint64_t member_id = memberExpr->member_id != UINT64_MAX
@@ -6587,7 +6595,11 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
 
     // Validate element type if this is a container subscript reference
     type_info_ptr element_type = refHolder->container_element_type;
-    if (element_type) {
+    // a class element keeps its object: the copy assignment (Dev ruling 2026-10-03; KEEP BYTE-PARALLEL with vm_backend::exec_index_assign)
+    const auto in_place = detail::element_copy_assign(*target_ptr, value, element_type, engine_);
+    if (in_place && !*in_place) { return *in_place; }
+    if (in_place) {
+    } else if (element_type) {
         if (!detail::container_element_compatible(value, element_type, target_ptr->get_engine())) {
             std::string value_type = detail::container_value_type_name(value);
             std::string expected_type = detail::type_info_display_name(element_type);
@@ -6599,12 +6611,12 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
                 value_type_id, expected_type_id);
         }
         // Convert element if needed (e.g., int -> float for array<float>)
-        auto converted = detail::convert_container_element(engine_, value, element_type);
+        auto converted = detail::convert_container_element_taking(engine_, value, element_type);
         if (!converted) { return converted.error_value(); }
         *target_ptr = std::move(converted.value());
     } else {
         // No element type constraint - values deep-copy, shared_ptr handles share
-        *target_ptr = clone_for_assignment(value);
+        *target_ptr = detail::take_for_assignment(value);
     }
     if (typed_element) {
         refHolder->container->set(refHolder->container_index, *target_ptr);
@@ -12993,7 +13005,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
                 // Typed fields enforce like locals (declared type; auto infers from the
                 // initialized value); the converted value is what gets stored and returned
-                auto enforced = instance->enforce_field_write(field_id, args[1]);
+                auto enforced = instance->field_store(field_id, args[1], [&] { return args[1]; });
                 if (!enforced) {
                     return enforced;
                 }
@@ -13098,7 +13110,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
 
                 // Typed fields enforce like locals (declared type; auto infers from the
                 // initialized value); the converted value is what gets stored and returned
-                auto enforced = instance->enforce_field_write(field_id, args[1]);
+                auto enforced = instance->field_store(field_id, args[1], [&] { return args[1]; });
                 if (!enforced) {
                     return enforced;
                 }
@@ -15041,10 +15053,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // Execute function body without creating another environment
     // (since we already created one for the function call)
     // Track which declaration index we're at (needed for coroutine yield)
+    const size_t body_stack_mark = valueStack_.size();
     for (size_t body_idx = 0; body_idx < function.body->declarations.size(); ++body_idx) {
         last_body_idx = body_idx;
         const auto& decl = function.body->declarations[body_idx];
         auto result = dispatch_decl(decl.get());
+        while (valueStack_.size() > body_stack_mark) { (void)valueStack_.pop(); }   // a statement's value dies at its end (visit_block_stmt parity)
 
         // Check for error codes - propagate errors
         if (!result && result.error() != std::error_code()) {

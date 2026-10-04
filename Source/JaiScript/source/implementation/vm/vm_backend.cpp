@@ -5501,6 +5501,12 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 			if (i >= INT32_MIN && i <= INT32_MAX) { typed_land_int(f, dst, i); return {}; }
 		}
 	}
+	if (detail::math_scalar_unary(fn) && (v->raw_storage_index() == script_value::TYPEID_FLOAT || v->raw_storage_index() == script_value::TYPEID_INT)) {
+		const detail::scalar_num r = detail::eval_scalar_unary(fn, v->raw_storage_index() == script_value::TYPEID_INT ? static_cast<script_float>(v->unchecked_as_int()) : v->unchecked_as_float());
+		const uint32_t dst = ins.b | (k_typed_dst_temp << k_typed_dst_shift);
+		if (r.is_int) { typed_land_int(f, dst, r.i); } else { typed_land_float(f, dst, r.f); }
+		return {};
+	}
 	if (v->raw_storage_index() == script_value::TYPEID_FLOAT) {
 		const script_float x = v->unchecked_as_float();
 		if (fn == detail::math_fn::itrunc) {
@@ -7726,6 +7732,7 @@ void vm_backend::cells_writeback(frame& f, const chunk::cell_loop& loop) {
 // debugger and the numeric operators are as they were, and every slot cell and landing check holds again (cells_resync); f.ip is then the
 // resume copy ip. Otherwise the block stays closed (its cells were clean at the park) and the general form continues at f.ip
 const chunk::cell_loop* vm_backend::cells_unpark(frame& f) {
+	JAI_CELL_COST(9)
 	cell_state& cs = *f.cells;
 	const uint32_t li = cs.park_loop;
 	cs.park_at = k_invalid_u32;
@@ -7747,10 +7754,19 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	const uint32_t define = loop.boundaries[cs.park_boundary].define;
+	// a compiler value live at the resume (a graft's parameter or local around a statement of its body) is read back as a local is: the park wrote
+	// it, and the statement may have written it since; a string one leaves the block closed
+	const size_t at = f.ip - loop.copy_head;
+	const chunk::cell_mask live = at < loop.live_temps.size() ? loop.live_temps[at] : chunk::cell_mask{};
 	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		const uint8_t have = cs.kind[k];
-		if (have == 0 || k == define || cl.temp || cl.env_operand != k_invalid_u32 || cl.iter_index || (have != kint && have != kflt && have != kbool)) continue;
+		if (have == 0 || k == define || cl.env_operand != k_invalid_u32 || cl.iter_index) continue;
+		if (cl.temp && (cl.slot >= f.code->local_count || !live.test(k))) continue;
+		if (have != kint && have != kflt && have != kbool) {
+			if (cl.temp && have == static_cast<uint8_t>(script_value::TYPEID_STRING)) return false;
+			continue;
+		}
 		const script_value* s = frame_slot(f, cl.slot);
 		if (!s || s->get_engine() != engine_) return false;
 		const uint8_t want = cl.kind != 0 ? cl.kind : static_cast<uint8_t>(s->raw_storage_index());
@@ -7774,6 +7790,7 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 		cs.kind[k] = cl.kind;
 		cs.stamp[k] = nullptr;
 	}
+	JAI_CELL_COST(6)
 	return cells_reland_effects(f, loop);
 }
 
@@ -8248,7 +8265,10 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			// a push site: the receiver a frame-slot array (a typed hetero array converts on the general form), the source of an element
 			// push a second container (a slot or an environment array); a landing after a call asks for this resolution again
 			const push_proto& p = f.code->push_protos[ci.a];
-			const script_value* cp = frame_slot(f, p.receiver.slot);
+			const bool env_receiver = p.receiver.slot == k_invalid_u32;
+			const size_t receiver_cache = static_cast<size_t>(ci.c) * 3;
+			const script_value* cp = env_receiver ? fused_cmp_operand(f, p.receiver, receiver_cache) : frame_slot(f, p.receiver.slot);
+			if (!p.value_is_subscript) { if (env_receiver) { cs.site_env[k] = env_binding(cp, receiver_cache); } else { cs.site_slot[k] = p.receiver.slot; } }   // the hold check after a call names the receiver again (an element push's source asks for this resolution)
 			if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return refuse_site(ip, "a push receiver behind a non-plain reference"); cp = &cp->deref(); }
 			if (!cp || cp->raw_storage_index() != script_value::TYPEID_ARRAY) return refuse_site(ip, "a push receiver that is not an array");
 			node = cp->unchecked_array_node();
@@ -8372,7 +8392,7 @@ bool vm_backend::cells_rebinds_hold(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	const size_t at = f.ip - loop.copy_head;
 	for (const chunk::cell_loop::rebind& rb : loop.rebinds) {
-		if (at < loop.live_temps.size() && !loop.live_temps[at].test(rb.cell)) continue;
+		if ((at < loop.live_temps.size() && !loop.live_temps[at].test(rb.cell)) || cs.kind[rb.cell] == 0) continue;   // an alias not bound in this run: its rebind defines it before any read
 		if (cs.kind[rb.cell] != static_cast<uint8_t>(script_value::TYPEID_REFERENCE) || !cells_rebind_apply(f, loop, rb, static_cast<script_int>(cs.payload[rb.cell]), true)) return false;
 	}
 	return true;
@@ -8806,6 +8826,7 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_boundary: {
 		// a boundary operation: the dirty cells the statement may read go back, the block parks (its cells stay valid), and the general form runs
 		// the statement from its first instruction; the statement's end resumes the block (cells_unpark)
+		JAI_CELL_COST(8)
 		cell_state& cs = *f.cells;
 		materialize_raw_window(f);
 		cells_writeback(f, loop);
@@ -9194,6 +9215,7 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop) {
 	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return false;
 	// the environment and its epoch as at entry: the bindings recorded there still answer (the lookup cache's own rule)
 	const bool env_ok = environment_.get() == cs.env_of && env_symbolizer_->env_epoch() == cs.env_serial;
+	{ JAI_CELL_COST(10)
 	for (const uint32_t k : loop.env_cells) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
@@ -9207,6 +9229,8 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop) {
 		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.kind[k] || v->type_info_raw() != cs.stamp[k]) return false;
 		cs.payload[k] = cs.kind[k] == kint ? static_cast<int64_t>(v->unchecked_as_int()) : cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_FLOAT) ? cell_bits_of_float(v->unchecked_as_float()) : cs.kind[k] == static_cast<uint8_t>(script_value::TYPEID_STRING) ? reinterpret_cast<int64_t>(v->unchecked_string_handle().get()) : (v->unchecked_as_bool() ? 1 : 0);
 	}
+	}
+	{ JAI_CELL_COST(15)
 	for (const uint32_t k : loop.string_candidates) {
 		// a string cell backed by a slot borrows the slot's node: re-borrowed after a call or an observed callee getter (a callee may have rebound the slot
 		// through a reference parameter); another kind in the slot is the general form's business
@@ -9216,10 +9240,19 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop) {
 		if (!s || s->raw_storage_index() != script_value::TYPEID_STRING) return false;
 		cs.payload[k] = reinterpret_cast<int64_t>(s->unchecked_string_handle().get());
 	}
+	}
+	{ JAI_CELL_COST(11)
 	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return false;
+	}
+	{ JAI_CELL_COST(12)
 	if (!loop.rebinds.empty() && !cells_rebinds_hold(f, loop)) return false;
+	}
+	{ JAI_CELL_COST(13)
 	if (!loop.inline_sites.empty()) { for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; } }   // a callee rebound the inlined leaf's name
+	}
+	{ JAI_CELL_COST(14)
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) return false; }
+	}
 	return true;
 }
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any
@@ -9724,7 +9757,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction
 	auto miss = [&]() -> op_status { cells_miss(f, loop, original_ip, 3); return {}; };
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	script_array* node = const_cast<script_array*>(cs.site_node[f.ip - loop.copy_head]);
-	const script_value* recv = frame_slot(f, p.receiver.slot);
+	const script_value* recv = p.receiver.slot != k_invalid_u32 ? frame_slot(f, p.receiver.slot) : fused_cmp_operand(f, p.receiver, static_cast<size_t>(original_ip) * 3);
 	if (!node || !recv) return miss();
 	if (recv->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*recv)) return miss(); recv = &recv->deref(); }
 	if (recv->raw_storage_index() != script_value::TYPEID_ARRAY || recv->unchecked_array_node() != node) return miss();
@@ -10126,7 +10159,12 @@ op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cel
 		kind = static_cast<uint8_t>(script_value::TYPEID_INT);
 		bits = xi;
 		break;
-	default: return miss();
+	default: {
+		if (!detail::math_scalar_unary(fn)) return miss();
+		const detail::scalar_num r = detail::eval_scalar_unary(fn, xd);
+		if (r.is_int) { kind = static_cast<uint8_t>(script_value::TYPEID_INT); bits = r.i; } else { bits = cell_bits_of_float(r.f); }
+		break;
+	}
 	}
 	if (!cell_land(f, loop, dk, kind, bits)) return miss();
 	++f.ip;
@@ -19847,13 +19885,14 @@ void vm_backend::dump_opcode_profile() const {
 			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
 			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[13], (unsigned long long)profile_cells_[7],
 			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
+		fprintf(stderr, "[vm-profile] cell counters: entries %llu | boundaries %llu | resumes %llu | misses %llu\n", cells_counters_.entries, cells_counters_.boundaries, cells_counters_.resumes, cells_counters_.misses);
 		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
 			(unsigned long long)profile_cells_push_[0], (unsigned long long)profile_cells_push_[1], (unsigned long long)profile_cells_push_[2], (unsigned long long)profile_cells_push_[3]);
 		{
 			// inclusive: a block run holds its entry, its body, its flushes and misses; a miss holds its flush; a landing may hold a miss
-			static const char* const cost_names[8] = { "block runs from the dispatcher", "entries (guards, unboxing, sites)", "flushes (reboxing)", "misses", "landings after a call", "raw entries", "raw returns", "door calls (callee push or a native callee's run)" };
+			static const char* const cost_names[16] = { "block runs from the dispatcher", "entries (guards, unboxing, sites)", "flushes (reboxing)", "misses", "landings after a call", "raw entries", "raw returns", "door calls (callee push or a native callee's run)", "boundary parks", "resumes (resync, reland)", "reland: environment cells", "reland: sites", "reland: rebinds", "reland: grafts", "reland: stdlib aliases", "reland: strings" };
 			fprintf(stderr, "[vm-profile] cell block costs (inclusive Mcycles, count, avg cycles):");
-			for (int i = 0; i < 8; ++i) {
+			for (int i = 0; i < 16; ++i) {
 				fprintf(stderr, " %s %.1f / %llu / %.0f |", cost_names[i], profile_cell_cost_cyc_[i] / 1e6, (unsigned long long)profile_cell_cost_n_[i],
 					profile_cell_cost_n_[i] ? double(profile_cell_cost_cyc_[i]) / double(profile_cell_cost_n_[i]) : 0.0);
 			}

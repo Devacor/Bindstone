@@ -6293,6 +6293,94 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("a_boundary_statement_inside_a_graft_body_keeps_the_loop_a_block", [this]() {
+			// a statement of a grafted callee the block does not take (a map store, a member store, a map read through a member key) is a boundary
+			// of its own: the callee's parameters and locals live after it are read back at the resume, one it declares defines its cell
+			const std::string defs =
+				"map<string, int> M = {\"a\": 4, \"q\": 9};\n"
+				"class Box { int v = 0; string s = \"a\"; }\n"
+				"Box B;\n"
+				"int bump(int i, int j) { int k = i & 7; M[\"a\"] = i; int r = k + j; B.s = i % 3 == 0 ? \"q\" : \"a\"; return r; }\n"
+				"int reread(int i) { int k = i & 7; k = k + M[B.s] % 5; int z = M[B.s] % 3 + k; return k * 10 + z; }\n"
+				"int run(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + bump(i, 3) * 2; s = (s + reread(i)) % 100003; } return s; }\n";
+			const std::string src = defs + "to_string(run(1000)) + \" \" + to_string(M[\"a\"]) + B.s;";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "graft boundaries");
+			both(src, oracle, "graft boundaries, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t rb = l.find("== run ");
+			const std::string rl = rb == std::string::npos ? l : l.substr(rb, l.find("\n== ", rb + 1) - rb);
+			check_true(rl.find("C_BOUNDARY") != std::string::npos && rl.find("defines") != std::string::npos && rl.find("-- open loop") == std::string::npos, "run's loop closes with boundaries inside its grafts: " + rl);
+			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			e->execute(defs);
+			const cell_counters c0 = e->cells_counters();
+			e->execute("run(500);");
+			const cell_counters c1 = e->cells_counters();
+			const std::string label = "entries " + std::to_string(c1.entries - c0.entries) + ", boundaries " + std::to_string(c1.boundaries - c0.boundaries) + ", resumes " + std::to_string(c1.resumes - c0.resumes) + ", misses " + std::to_string(c1.misses - c0.misses);
+			check_true(c1.entries - c0.entries <= 2 && c1.boundaries - c0.boundaries >= 4 * 500 - 8 && c1.resumes - c0.resumes + 8 >= c1.boundaries - c0.boundaries, "one entry, four boundaries an iteration, each resumed: " + label);
+			check_eq(uint64_t{0}, c1.misses - c0.misses, "nothing misses: " + label);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("scalar_math_rows_run_in_temps_and_cells", [this]() {
+			// the one-argument scalar library (exp, log, log2, log10, exp2, cbrt, trunc, asin, acos, atan, sinh, cosh, tanh, saturate, sign) over
+			// int and float arguments: a compiler temp lands the kernel's value and kind, the block runs them as cell math
+			const std::string defs =
+				"float f(int n) { float s = 0.0; for (int i = 0; i <= n; ++i) { float x = 1.0 / (1.0 + i); s += math::exp(x) + math::log2(1.0 + i) - math::tanh(0.25 * i) + math::sign(i - 50);"
+				" s += math::cbrt(x) + math::trunc(x * 7.5) + math::saturate(x * 3.0 - 1.0) + math::asin(x) + math::acos(x) + math::atan(x * 9.0) + math::sinh(x) + math::cosh(x);"
+				" s += math::log(1.0 + i) + math::log10(2.0 + i) + math::exp2(x) + math::sign(0.5 - x) + math::exp(i % 3) + math::sign(i % 4 - 2); } return s; }\n"
+				"float g(var v) { float s = 0.0; for (int i = 0; i < 4; ++i) { s += math::exp(v); s += math::sign(v); } return s; }\n";
+			const std::string src = defs + "to_string(f(300)) + \" \" + to_string(math::sign(-3)) + \" \" + type_of(math::sign(2.5)) + \" \" + to_string(math::log(0.0)) + \" \" + to_string(g(1)) + \" \" + to_string(g(0.5)) + \" \" + to_string(math::asin(2.0));";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "scalar math rows");
+			both(src, oracle, "scalar math rows, proofs off", false);
+			const std::string bad = defs + "g(\"x\");";
+			check_eq(run_on(false, bad), run_on(true, bad), "a string argument raises the kernel's text on both backends");
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== f ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("math w") != std::string::npos && fl.find("-- open loop") == std::string::npos, "f's loop closes with its math in cells: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("pushes_onto_an_environment_array_run_inside_the_block", [this]() {
+			// a global array receiver resolves through its lookup at entry and at each push; a call that rebinds the global between pushes lands
+			// the next push on the new array, a typed receiver keeps its element rule
+			const std::string defs =
+				"array<int> Q; var V = []; array<int> R;\n"
+				"void reset() { R = []; }\n"
+				"int fill(int n) { Q = []; V = []; for (int i = 0; i < n; ++i) { int t = i * 2; Q.push(t); V.push(i); V.push(Q[i]); } return Q.size() + V.size(); }\n"
+				"int rebind(int n) { R = [7]; int s = 0; for (int i = 0; i < n; ++i) { R.push(i); if (i == n / 2) { reset(); } s += R.size(); } return s * 100 + R.size(); }\n"
+				"string bad(int n) { Q = []; string out = \"\"; try { for (int i = 0; i < n; ++i) { Q.push(i); if (i == 3) { Q.push(1.5); } } } catch (e) { out = e; } return out + to_string(Q.size()); }\n";
+			const std::string src = defs + "to_string(fill(200)) + \" \" + to_string(rebind(40)) + \" \" + to_json(R) + \" \" + bad(10) + \" \" + to_string(Q[3]) + \" \" + to_string(V[7]);";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "environment receivers");
+			both(src, oracle, "environment receivers, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== fill ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("C_PUSH") != std::string::npos && fl.find("-- open loop") == std::string::npos, "fill's pushes run inside the block: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_loop_inside_a_graft_is_its_callers_statement", [this]() {
 			// Gator Quest's building(): fill_rect's two loops graft with set_tile grafted in the inner one; an exit inside the grafted body (set_tile's
 			// guarded store, in_world's return) flushes what the caller's whole statement defined ahead of it (the grafts' parameters and locals),

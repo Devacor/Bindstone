@@ -267,6 +267,39 @@ namespace jai::detail {
         default: return false;
         }
     }
+    // the one-argument rows of the scalar library a compiler temp carries (and a cell block runs): a number in (an int converts), a
+    // float out (sign an int)
+    inline bool math_scalar_unary(math_fn fn) noexcept {
+        switch (fn) {
+        case math_fn::trunc_: case math_fn::cbrt_: case math_fn::exp_: case math_fn::exp2_: case math_fn::log_: case math_fn::log2_: case math_fn::log10_:
+        case math_fn::asin_: case math_fn::acos_public_: case math_fn::atan_: case math_fn::sinh_: case math_fn::cosh_: case math_fn::tanh_:
+        case math_fn::saturate_: case math_fn::sign_:
+            return true;
+        default: return false;
+        }
+    }
+    inline scalar_num eval_scalar_unary(math_fn fn, script_float x) noexcept {
+        scalar_num r;
+        switch (fn) {
+        case math_fn::trunc_: r.f = std::trunc(x); break;
+        case math_fn::cbrt_: r.f = std::cbrt(x); break;
+        case math_fn::exp_: r.f = std::exp(x); break;
+        case math_fn::exp2_: r.f = std::exp2(x); break;
+        case math_fn::log_: r.f = std::log(x); break;
+        case math_fn::log2_: r.f = std::log2(x); break;
+        case math_fn::log10_: r.f = std::log10(x); break;
+        case math_fn::asin_: r.f = std::asin(x); break;
+        case math_fn::acos_public_: r.f = std::acos(x); break;
+        case math_fn::atan_: r.f = std::atan(x); break;
+        case math_fn::sinh_: r.f = std::sinh(x); break;
+        case math_fn::cosh_: r.f = std::cosh(x); break;
+        case math_fn::tanh_: r.f = std::tanh(x); break;
+        case math_fn::saturate_: r.f = std::fmax(0.0, std::fmin(x, 1.0)); break;
+        case math_fn::sign_: r.is_int = true; r.i = static_cast<script_int>((x > 0.0) - (x < 0.0)); break;
+        default: r.is_int = true; r.i = fn == math_fn::is_nan_ ? std::isnan(x) : fn == math_fn::is_inf_ ? std::isinf(x) : 0; break;
+        }
+        return r;
+    }
     inline bool math_alias_kernel(math_fn fn) noexcept {
         switch (fn) {
         case math_fn::floor_: case math_fn::ceil_: case math_fn::sqrt_: case math_fn::sin_: case math_fn::cos_: case math_fn::tan_:
@@ -1113,89 +1146,87 @@ namespace jai::detail {
                 if (!math_arity_ok<math_fn::trunc_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::trunc expects a numeric argument"); }
-                return script_value(std::trunc(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::cbrt_: {
                 if (!math_arity_ok<math_fn::cbrt_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::cbrt expects a numeric argument"); }
-                return script_value(std::cbrt(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::exp_: {
                 if (!math_arity_ok<math_fn::exp_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::exp expects a numeric argument"); }
-                return script_value(std::exp(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::exp2_: {
                 if (!math_arity_ok<math_fn::exp2_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::exp2 expects a numeric argument"); }
-                return script_value(std::exp2(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::log_: {
                 if (!math_arity_ok<math_fn::log_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::log expects a numeric argument"); }
-                return script_value(std::log(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::log2_: {
                 if (!math_arity_ok<math_fn::log2_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::log2 expects a numeric argument"); }
-                return script_value(std::log2(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::log10_: {
                 if (!math_arity_ok<math_fn::log10_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::log10 expects a numeric argument"); }
-                return script_value(std::log10(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::asin_: {
                 if (!math_arity_ok<math_fn::asin_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::asin expects a numeric argument"); }
-                return script_value(std::asin(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::acos_public_: {
                 if (!math_arity_ok<math_fn::acos_public_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::acos expects a numeric argument"); }
-                return script_value(std::acos(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::atan_: {
                 if (!math_arity_ok<math_fn::atan_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::atan expects a numeric argument"); }
-                return script_value(std::atan(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::sinh_: {
                 if (!math_arity_ok<math_fn::sinh_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::sinh expects a numeric argument"); }
-                return script_value(std::sinh(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::cosh_: {
                 if (!math_arity_ok<math_fn::cosh_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::cosh expects a numeric argument"); }
-                return script_value(std::cosh(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::tanh_: {
                 if (!math_arity_ok<math_fn::tanh_>(argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math::tanh expects a numeric argument"); }
-                return script_value(std::tanh(a.d()), eng);
+                return script_value(eval_scalar_unary(fn, a.d()).f, eng);
             }
             case math_fn::sign_: case math_fn::is_nan_: case math_fn::is_inf_: case math_fn::saturate_: {
                 if (!math_arity_accepts(fn, argc)) { return bad_arity(math_arity_of(fn).text); }
                 const num a = read(*args[0]);
                 if (!a.ok) { return bad_type("math scalar helper expects a numeric argument"); }
-                const auto x = a.d();
-                if (fn == math_fn::sign_) { return script_value(script_int((x > 0.0) - (x < 0.0)), eng); }
-                if (fn == math_fn::is_nan_) { return script_value(std::isnan(x), eng); }
-                if (fn == math_fn::is_inf_) { return script_value(std::isinf(x), eng); }
-                return script_value(std::fmax(0.0, std::fmin(x, 1.0)), eng);
+                const scalar_num r = eval_scalar_unary(fn, a.d());
+                if (fn == math_fn::is_nan_ || fn == math_fn::is_inf_) { return script_value(r.i != 0, eng); }
+                return r.is_int ? script_value(r.i, eng) : script_value(r.f, eng);
             }
             case math_fn::fmod_: case math_fn::hypot_: {
                 if (!math_arity_accepts(fn, argc)) { return bad_arity(math_arity_of(fn).text); }

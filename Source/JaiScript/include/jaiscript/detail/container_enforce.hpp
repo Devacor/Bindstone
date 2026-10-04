@@ -253,10 +253,42 @@ namespace jai::detail {
 	inline container_boundary_outcome enforce_container_boundary(script_value value, const type_info_ptr& target_type, engine* eng);
 
 	// The one text for an element that does not belong, interned the way the backends do
-	inline error_propagator container_mismatch_error(engine* eng, const std::string& offending, const std::string& expected) {
+	JAI_NOINLINE inline error_propagator container_mismatch_error(engine* eng, const std::string& offending, const std::string& expected) {
 		auto* sym = eng ? eng->get_symbolizer() : nullptr;
 		return error_propagator{ make_error_code(runtime_error_code::array_element_type_mismatch), container_boundary_mismatch_text,
 		                         sym ? sym->intern(offending) : 0, sym ? sym->intern(expected) : 0 };
+	}
+
+	// The element stores' mismatch texts, spelled out of line (the per-element store stays free of string temporaries)
+	JAI_NOINLINE inline error_propagator element_kind_mismatch_error(engine* eng, const script_value& actual, const type_info& element_type) {
+		return container_mismatch_error(eng, container_value_type_name(actual), element_type.canonical_name());
+	}
+	JAI_NOINLINE inline error_propagator byte_element_mismatch_error(engine* eng, const script_value& actual, const type_info& element_type) {
+		return container_mismatch_error(eng, container_value_type_name(actual), "array<" + element_type.canonical_name() + ">");
+	}
+
+	// A typed container's element or key text: {0} the value's spelling, {1} the declared type's
+	JAI_NOINLINE inline error_propagator element_type_error(string_symbolizer* sym, runtime_error_code code, std::string_view text,
+	                                                        const script_value& value, const type_info_ptr& declared) {
+		const uint64_t value_id = sym->intern(container_value_type_name(value));
+		const uint64_t declared_id = sym->intern(type_info_display_name(declared));
+		return error_propagator{make_error_code(code), text, value_id, declared_id};
+	}
+
+	inline constexpr std::string_view array_index_out_of_bounds_text = "Array index {0} out of bounds for array of size {1}";
+	inline constexpr std::string_view string_index_out_of_bounds_text = "String index {0} out of bounds for string of size {1}";
+	inline constexpr std::string_view array_index_out_of_bounds_slotless = "Array index out of bounds";
+	inline constexpr std::string_view string_index_out_of_bounds_slotless = "String index out of bounds";
+	// An index past the end: the numbers ride interned spellings; a parallel worker cannot intern them and gets the text without
+	JAI_NOINLINE inline error_propagator index_out_of_bounds_error(string_symbolizer* sym, std::string_view text, std::string_view text_slotless,
+	                                                               script_int index, size_t size) {
+		const auto code = make_error_code(runtime_error_code::index_out_of_bounds);
+		if (sym->frozen()) {
+			return error_propagator{code, text_slotless, 0, 0};
+		}
+		const uint64_t index_id = sym->intern(std::to_string(index));
+		const uint64_t size_id = sym->intern(std::to_string(size));
+		return error_propagator{code, text, index_id, size_id};
 	}
 
 	// The element boundary's numeric rows are the scalar slot's rows: a float into an int
@@ -283,7 +315,7 @@ namespace jai::detail {
 			// a node that already fits comes back as the same handle and gets the one copy
 			// value semantics owe the store, exactly like a flat element.
 			if (elem_type != target_type) {
-				return container_mismatch_error(eng, container_value_type_name(actual_element), element_type->canonical_name());
+				return element_kind_mismatch_error(eng, actual_element, *element_type);
 			}
 			auto inner = enforce_container_boundary(actual_element, element_type, eng);
 			if (inner.error) { return *inner.error; }
@@ -307,7 +339,7 @@ namespace jai::detail {
 			} else if (elem_type == script_value_type::jai_bool_type) {
 				v = actual_element.unchecked_as_bool() ? 1 : 0;
 			} else {
-				return container_mismatch_error(eng, container_value_type_name(actual_element), "array<" + element_type->canonical_name() + ">");
+				return byte_element_mismatch_error(eng, actual_element, *element_type);
 			}
 			if (!byte_element_fits(element_type->is_signed, v)) { return byte_range_error(eng, element_type->is_signed, v); }
 			return script_value(v, eng);
@@ -782,7 +814,8 @@ namespace jai::detail {
 	checked_result<void> homogeneous_entries(const Entries& entries, const arity_count_symbols& counts, const Symbolizer& symbols) {
 		const runtime_error_code code = Map ? runtime_error_code::map_value_type_mismatch : runtime_error_code::array_element_type_mismatch;
 		script_value_type kind = script_value_type::jai_null_type;
-		std::string class_name;
+		type_info_ptr class_info;   // keeps class_name's text alive
+		std::string_view class_name;
 		size_t index = 0;
 		for (const auto& entry : entries) {
 			const script_value* raw;
@@ -791,7 +824,7 @@ namespace jai::detail {
 			if (index == 0) {
 				kind = value.type();
 				if (kind == script_value_type::jai_object_type) {
-					if (auto info = value.get_type_info()) { class_name = info->type_name; }
+					if (auto info = value.get_type_info()) { class_info = std::move(info); class_name = class_info->type_name; }
 				}
 			} else {
 				if (value.type() != kind) {
@@ -799,7 +832,7 @@ namespace jai::detail {
 				}
 				if (kind == script_value_type::jai_object_type && !class_name.empty()) {
 					auto info = value.get_type_info();
-					if ((info ? std::string(info->type_name) : std::string()) != class_name) {
+					if ((info ? std::string_view(info->type_name) : std::string_view()) != class_name) {
 						return homogeneity_error(code, Map ? auto_map_classes : auto_array_classes, Map ? auto_map_classes_at : auto_array_classes_at, index, counts, symbols);
 					}
 				}

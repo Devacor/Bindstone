@@ -636,7 +636,7 @@ namespace jai::detail {
 		return actual_element.clone();
 	}
 
-	inline checked_result<void> ref_element_error(string_symbolizer* symbolizer, const script_value& value, type_info_ptr constraint) {
+	JAI_NOINLINE inline checked_result<void> ref_element_error(string_symbolizer* symbolizer, const script_value& value, type_info_ptr constraint) {
 		uint64_t value_type_id = symbolizer->intern(container_value_type_name(value));
 		uint64_t expected_type_id = symbolizer->intern(type_info_display_name(constraint));
 		return checked_result<void>(make_error_code(runtime_error_code::array_element_type_mismatch),
@@ -659,6 +659,13 @@ namespace jai::detail {
 		                           holder.field_id == UINT64_MAX ? 0 : holder.field_id, owner);
 	}
 
+	JAI_NOINLINE inline error_propagator ref_return_mismatch(string_symbolizer* symbolizer, const script_value& actual, const type_info& return_type) {
+		uint64_t got = symbolizer->intern(container_value_type_name(actual));
+		uint64_t want = symbolizer->intern(return_type.type_name);
+		return error_propagator{make_error_code(runtime_error_code::type_mismatch),
+			"Cannot return reference to '{0}' from a function returning '{1}'", got, want};
+	}
+
 	// Typed reference-return epilogue (int& f() / -> auto&): the result passes through
 	// as the reference HANDLE - the cell/element/field/map-entry pin is the lifetime,
 	// so a returned reference outliving its frame is legal. Non-reference results
@@ -677,10 +684,7 @@ namespace jai::detail {
 		    referent->type_name != "auto") {
 			const script_value& actual = result.deref();
 			if (!reference_binding_admits(referent.get(), actual, actual.get_engine())) {
-				uint64_t got = symbolizer->intern(container_value_type_name(actual));
-				uint64_t want = symbolizer->intern(return_type->type_name);
-				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
-					"Cannot return reference to '{0}' from a function returning '{1}'", got, want);
+				return ref_return_mismatch(symbolizer, actual, *return_type);
 			}
 		}
 		return std::move(result);

@@ -1263,6 +1263,9 @@ namespace jai {
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null
         checked_result<void> method_value_error(const member_expr* expr, const script_value& object, bool bindable);   // obj.method without a call
+        // the unwinding state for a composed text, built out of line so the member paths carry no string temporaries
+        void raise_script_text(const std::string& text, const source_location& location);
+        void raise_no_member(std::string_view kind, std::string_view member, const source_location& location);
         checked_result<void> bare_method_value_error(const identifier_expr* expr, const script_value& self);   // a bare method name without a call
         std::optional<checked_result<void>> bare_method_reference_error(const identifier_expr* expr);   // a reference to a bare method name
 

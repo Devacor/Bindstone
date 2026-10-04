@@ -106,13 +106,16 @@ namespace jai::detail {
 	}
 
 	// Presence, the field ladder, the write; the stored value is the expression result.
-	inline checked_result<script_value> store_static_member(class_definition& cls, uint64_t member_id, script_value incoming) {
+	// source: the store's operand (a by-value class static holding an instance takes it in place); copy(): the stored value otherwise
+	template <class Copy>
+	inline checked_result<script_value> store_static_member(class_definition& cls, uint64_t member_id, const script_value& source, Copy&& copy) {
 		if (!cls.has_static_field(member_id)) {
+			script_value incoming = copy();
 			if (auto accessed = store_static_accessor(cls, member_id, incoming)) { return std::move(*accessed); }
 			return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable),
 				"Cannot assign to static member: field '{0}' not found", member_id);
 		}
-		auto enforced = cls.enforce_static_write(member_id, std::move(incoming));
+		auto enforced = cls.static_store(member_id, source, copy);
 		if (!enforced) {
 			return enforced.error_value();
 		}

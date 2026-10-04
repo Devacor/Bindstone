@@ -513,6 +513,16 @@ engine stays usable", not by `check_throws`.
   engine teardown in reverse construction order (Dev ruling), a destructor's error reported through the script error
   handler. Scope exits kill only slots that may own a destructor (`slot_may_own_destructor`, decided when the vm compiles
   the body: `op_kill_slot`; the interpreter gates on `engine::destructors_armed()`); grafts refuse such callees.
+- **Assignment into a by-value class slot is C++ copy assignment** (Dev ruling 2026-10-03; suite `Destructor Timing`): a
+  typed local, field, static, array element, map value, reference target or compound result (`x += y`) holding an instance
+  keeps its object (references, handles and `same_object` see it), the declared class's members take the source's by the
+  member-copy rule (`clone_element`; a derived source slices), then a temporary source dies (`detail::user_assign_operator`
+  -> `class_copy_assign` / `implicit_copy_assign`, `class_instance::field_store`, `class_definition::static_store`,
+  `detail::element_copy_assign`, `detail::compound_slot_store`); a `var` slot replaces, a `shared_ptr` rebinds, a host class
+  keeps its replace. A replacing store of a uniquely held aggregate moves it in (`detail::take_for_assignment`,
+  `convert_container_element_taking`: a new map key, a `var`, an untyped element); a discarded assignment's value and an
+  interpreter statement's value die at the statement's end; `push` copies and its private temp dies after it
+  (`push_proto::value_temp`).
 - **Constructor exits** (Dev ruling 2026-09-26): a bare `return;` ends a constructor body early and the call
   yields the instance; `return expr;` in a constructor's own body is a parse error (a lambda or nested function
   inside it returns freely); a `throw` propagates, the assignment target keeps its value and the half-built

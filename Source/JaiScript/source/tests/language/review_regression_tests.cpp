@@ -4463,7 +4463,7 @@ public:
             const char* prelude = "var log = \"\"; class T { string n; T(string s) { n = s; } ~T() { log += n + \";\"; } } ";
             const std::pair<const char*, const char*> rows[] = {
                 {"function f() { T a = T(\"a\"); T b = a; b.n = \"b\"; } f();", "a;b;"},
-                {"function f() { T a = T(\"a\"); T b = T(\"x\"); b = a; b.n = \"b\"; } f();", "x;a;b;"},
+                {"function f() { T a = T(\"a\"); T b = T(\"x\"); b = a; b.n = \"b\"; } f();", "a;b;"},   // b = a copy-assigns: b keeps its object (Dev ruling 2026-10-03)
                 {"function h(T p) { p.n = \"p\"; } function f() { T a = T(\"a\"); h(a); } f();", "p;a;"},
                 {"function r() -> T { T a = T(\"r\"); return a; } function f() { T x = r(); x.n = \"x\"; } f();", "x;"},
                 {"function f() { T a = T(\"a\"); array<T> arr = [a]; arr[0].n = \"e\"; } f();", "a;e;"},

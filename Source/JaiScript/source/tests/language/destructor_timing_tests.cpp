@@ -249,6 +249,108 @@ public:
                 f(); LOG;
             )", "|r|a|");
         });
+
+        // Assignment into a slot holding a class instance by value is C++'s copy assignment (Dev ruling 2026-10-03): the
+        // slot keeps its object, the declared class's members take the source's, then a temporary source dies
+        test("assignment_copy_assigns_and_the_temporary_dies", [this]() {
+            expect_log(R"(
+                function f() -> void { Token x = Token("a"); x = Token("b"); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "b|b");
+            expect_log(R"(
+                function f() -> void { Token x = Token("a"); Token y = Token("c"); x = y; LOG = LOG + "|"; }
+                f(); LOG;
+            )", "|cc");
+            expect_log(R"(
+                function f() -> void { Token x = Token("a"); Token y = (x = Token("b")); LOG = LOG + to_string(same_object(x, y)) + "|"; }
+                f(); LOG;
+            )", "bfalse|bb");
+        });
+
+        test("assignment_keeps_the_object_references_and_handles_name", [this]() {
+            expect_log(R"(
+                function f() -> string { Token x = Token("a"); Token& r = x; shared_ptr<Token> h = x; x = Token("b"); return r.name + h.name + to_string(same_object(h, x)); }
+                string out = f(); out + ":" + LOG;
+            )", "bbtrue:bb");
+            expect_log(R"(
+                function f() -> string { Token x = Token("a"); Token& r = x; r = Token("r"); LOG = LOG + "|"; return x.name; }
+                string out = f(); out + ":" + LOG;
+            )", "r:r|r");
+        });
+
+        test("assignment_from_a_derived_source_slices", [this]() {
+            expect_log(R"(
+                class Base { int a = 1; Base() {} }
+                class Derived : Base { int b = 2; Derived() {} }
+                function f() -> string { Base x = Base(); shared_ptr<Base> h = x; Derived d = Derived(); d.a = 5; x = d; return to_string(x.a) + type_of(x) + to_string(same_object(h, x)); }
+                f();
+            )", "5Basetrue");
+        });
+
+        test("field_element_map_and_static_stores_copy_assign", [this]() {
+            expect_log(R"(
+                class Holder { Token t; }
+                function f() -> string { Holder o; shared_ptr<Token> h = o.t; o.t = Token("n"); LOG = LOG + "|"; return h.name + to_string(same_object(h, o.t)); }
+                string out = f(); out + ":" + LOG;
+            )", "ntrue:n|n");
+            expect_log(R"(
+                function f() -> string { array<Token> a; Token p = Token("p"); a.push(p); shared_ptr<Token> h = a[0]; a[0] = Token("q"); LOG = LOG + "|"; return h.name + to_string(same_object(h, a[0])); }
+                string out = f(); out + ":" + LOG;
+            )", "qtrue:q|pq");
+            expect_log(R"(
+                function f() -> string { map<string, Token> m; m["k"] = Token("m"); LOG = LOG + "/"; shared_ptr<Token> h = m["k"]; m["k"] = Token("n"); LOG = LOG + "|"; return h.name + to_string(same_object(h, m["k"])); }
+                string out = f(); out + ":" + LOG;
+            )", "ntrue:/n|n");
+            expect_log(R"(
+                class S { static Token st; }
+                function f() -> string { shared_ptr<Token> h = S::st; S::st = Token("s"); LOG = LOG + "|"; return h.name + to_string(same_object(h, S::st)); }
+                string out = f(); out + ":" + LOG;
+            )", "strue:s|");
+        });
+
+        test("a_fresh_element_takes_the_temporary_and_a_pushed_one_copies", [this]() {
+            expect_log(R"(
+                function f() -> void { map<string, Token> m; m["k"] = Token("m"); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "|m");
+            expect_log(R"(
+                function f() -> void { array<Token> a; a.push(Token("p")); LOG = LOG + "/"; a[0] = Token("q"); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "p/q|q");
+        });
+
+        test("a_compound_assignment_copy_assigns_the_operator_result", [this]() {
+            expect_log(R"(
+                class Acc { int n = 0; Acc(int v) { n = v; } ~Acc() { LOG = LOG + to_string(n); } function operator+(Acc o) -> Acc { return Acc(n + o.n); } }
+                function f() -> string { Acc x = Acc(1); shared_ptr<Acc> h = x; Acc two = Acc(2); x += two; LOG = LOG + "|"; return to_string(h.n) + to_string(same_object(h, x)); }
+                string out = f(); out + ":" + LOG;
+            )", "3true:23|23");
+        });
+
+        test("a_var_slot_replaces_its_value", [this]() {
+            expect_log(R"(
+                function f() -> string { var v = Token("a"); shared_ptr<Token> h = v; v = Token("b"); LOG = LOG + "|"; return h.name + v.name; }
+                string out = f(); out + ":" + LOG;
+            )", "ab:|ab");
+        });
+
+        test("a_hot_reloaded_instance_copy_assigns_with_the_new_layout", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            eng->execute(std::string(k_prelude) + R"(
+                Token held = Token("x");
+                shared_ptr<Token> alias = held;
+            )");
+            const std::string got = eng->execute(R"(
+                class Token { string name = ""; int hp = 7; Token() {} Token(string n) { name = n; } ~Token() { LOG = LOG + name; } }
+                LOG = "";
+                Token next = Token("y");
+                next.hp = 9;
+                held = next;
+                alias.name + to_string(alias.hp) + to_string(same_object(alias, held)) + ":" + LOG;
+            )").as_string();
+            check_eq(std::string("y9true:"), got);
+        });
     }
 };
 

@@ -164,7 +164,7 @@ namespace {
 			out << pre << "push_protos " << ch.push_protos.size() << "\n";
 			for (size_t i = 0; i < ch.push_protos.size(); ++i) {
 				const push_proto& p = ch.push_protos[i];
-				out << pre << " " << i << " recv=" << operand(ch, p.receiver) << " value=" << operand(ch, p.value) << " site=" << u(p.site) << " subscript=" << b(p.value_is_subscript) << " flags=" << p.value_index_flags << "\n";
+				out << pre << " " << i << " recv=" << operand(ch, p.receiver) << " value=" << operand(ch, p.value) << " site=" << u(p.site) << " subscript=" << b(p.value_is_subscript) << " flags=" << p.value_index_flags << " temp=" << b(p.value_temp) << "\n";
 			}
 			out << pre << "member_store_protos " << ch.member_store_protos.size() << "\n";
 			for (size_t i = 0; i < ch.member_store_protos.size(); ++i) {

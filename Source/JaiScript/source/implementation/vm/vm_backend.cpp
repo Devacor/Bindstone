@@ -1,5 +1,6 @@
 #include <jaiscript/detail/structural_ordering.hpp>
 #include <jaiscript/detail/float_text.hpp>
+#include <jaiscript/detail/uniquely_held.hpp>
 #include <charconv>
 #include <jaiscript/vm/vm_backend.hpp>
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
@@ -3810,6 +3811,7 @@ op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const bool rhs_lvalue = (ins.c & store_flag_rhs_lvalue) != 0;
+	auto result_used = [&] { return !(ins.c & store_flag_no_result) && assignment_result_used(f); };
 
 	// Element/subscript reads arrive as reference wrappers (rhs-lvalue read shape);
 	// assignment consumes the VALUE - normalize like every other consumer
@@ -3878,10 +3880,10 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			const bool proven_identity = (ins.c & store_flag_same_type) && slot_type &&
 			                             detail::same_type_payload(value, slot_type.get());
 			// A user operator= writes the held instance (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr)
-			if (!proven_identity && slot_type && slot_type->base_type == script_value_type::jai_object_type) {
+			if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {   // a proven same-class store copy-assigns too
 				if (auto assigned = detail::user_assign_operator(*storage, value, engine_)) {
 					if (!*assigned) { return raise_from(*assigned); }
-					stack_.push_back(clone_for_assignment(*storage));   // the expression's value is the destination's
+					stack_.push_back(result_used() ? clone_for_assignment(*storage) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source at the pop
 					return {};
 				}
 			}
@@ -3903,6 +3905,11 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				     value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
 					detail::var_stamp(value, slot_type, engine_);
 				}
+			}
+			if (detail::uniquely_held(value)) {   // a prvalue is the stored object
+				*storage = std::move(value);
+				stack_.push_back(result_used() ? clone_for_assignment(*storage) : script_value(*storage));
+				return {};
 			}
 			*storage = clone_for_assignment(value);
 			stack_.push_back(std::move(value));
@@ -3958,7 +3965,8 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 			// V-S3 proven bare this-field store: == the this-field landing below with the
 			// conversion gated by the proof (KEEP BYTE-PARALLEL with interpreter I-S3)
 			if (bare_field_proof_frame(f)) {
-				if (const identifier_expr* idn = ident_node_at(f); idn && idn->proven_class && idn->proven_field_write) {
+				if (const identifier_expr* idn = ident_node_at(f); idn && idn->proven_class && idn->proven_field_write &&
+				    !detail::by_value_class_type(idn->proven_field_type)) {
 					if (class_instance* inst = detail::proven_field_instance(*f.locals->scope_this, idn->proven_class, idn->proven_epoch)) {
 						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 							value = value.detached_for_store();
@@ -4222,7 +4230,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		if (target_type && target_type->base_type == script_value_type::jai_object_type && currentVal) {
 			if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_)) {
 				if (!*assigned) { return raise_from(*assigned); }
-				stack_.push_back(clone_for_assignment(*currentVal));   // the expression's value is the destination's
+				stack_.push_back(result_used() ? clone_for_assignment(*currentVal) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source at the pop
 				return {};
 			}
 		}
@@ -4286,13 +4294,13 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 							value = value.detached_for_store();
 						}
 						if (rhs_lvalue) {
-							auto enforced = instance->enforce_field_write(sym, clone_for_assignment(value));
+							auto enforced = instance->field_store(sym, value, [&] { return clone_for_assignment(value); });
 							if (!enforced) {
 								return raise_from(enforced);
 							}
 							instance->set_field_unchecked(sym, enforced.value());
 						} else {
-							auto enforced = instance->enforce_field_write(sym, std::move(value));
+							auto enforced = instance->field_store(sym, value, [&] { return std::move(value); });
 							if (!enforced) {
 								return raise_from(enforced);
 							}
@@ -4311,13 +4319,13 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 						}
 						// Typed statics enforce like fields (shared kernel, interp parity)
 						if (rhs_lvalue) {
-							auto stored = detail::store_static_member(*class_def, sym, clone_for_assignment(value));
+							auto stored = detail::store_static_member(*class_def, sym, value, [&] { return clone_for_assignment(value); });
 							if (!stored) {
 								return raise_from(stored);
 							}
-							if (assignment_result_used(f)) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
+							if (result_used()) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
 						} else {
-							auto stored = detail::store_static_member(*class_def, sym, std::move(value));
+							auto stored = detail::store_static_member(*class_def, sym, value, [&] { return std::move(value); });
 							if (!stored) {
 								return raise_from(stored);
 							}
@@ -4340,13 +4348,13 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				value = value.detached_for_store();
 			}
 			if (rhs_lvalue) {
-				auto stored = detail::store_static_member(*static_owner, sym, clone_for_assignment(value));
+				auto stored = detail::store_static_member(*static_owner, sym, value, [&] { return clone_for_assignment(value); });
 				if (!stored) {
 					return raise_from(stored);
 				}
-				if (assignment_result_used(f)) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
+				if (result_used()) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
 			} else {
-				auto stored = detail::store_static_member(*static_owner, sym, std::move(value));
+				auto stored = detail::store_static_member(*static_owner, sym, value, [&] { return std::move(value); });
 				if (!stored) {
 					return raise_from(stored);
 				}
@@ -4466,7 +4474,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				std::optional<script_value> custom_result;
 				if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
 				if (custom_result.has_value()) {
-					target = std::move(custom_result.value());
+					VM_TRY(detail::compound_slot_store(target, std::move(custom_result.value()), engine_));
 					if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 					return {};
 				}
@@ -4765,7 +4773,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				if (prop_setter) {
 					VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
 				} else {
-					auto enforced = instance->enforce_field_write(sym, clone_for_assignment(custom_result.value()));
+					auto enforced = instance->field_store(sym, custom_result.value(), [&] { return clone_for_assignment(custom_result.value()); });
 					if (!enforced) {
 						return raise_from(enforced);
 					}
@@ -4864,7 +4872,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 	if (prop_setter) {
 		VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
 	} else {
-		auto enforced = instance->enforce_field_write(sym, clone_for_assignment(resultValue));
+		auto enforced = instance->field_store(sym, resultValue, [&] { return clone_for_assignment(resultValue); });
 		if (!enforced) {
 			return raise_from(enforced);
 		}
@@ -6704,6 +6712,7 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
+	auto result_used = [&] { return !(ins.a & index_flag_no_result) && assignment_result_used(f); };
 
 	if (!target_ref.is_reference()) {
 		return raise_(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
@@ -6717,7 +6726,7 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	if (refHolder && refHolder->string_element()) {
 		auto stored = detail::store_string_element(*refHolder, value, engine_);
 		if (!stored) { return raise_from(stored); }
-		stack_.push_back(assignment_result_used(f) ? clone_for_assignment(value.deref()) : std::move(value));
+		stack_.push_back(result_used() ? clone_for_assignment(value.deref()) : std::move(value));
 		return {};
 	}
 	const bool typed_element = refHolder && refHolder->typed_element();
@@ -6735,7 +6744,11 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	}
 
 	type_info_ptr element_type = refHolder->container_element_type;
-	if (element_type) {
+	// a class element keeps its object: the copy assignment (Dev ruling 2026-10-03)
+	const auto in_place_1 = detail::element_copy_assign(*target_ptr, value, element_type, engine_);
+	if (in_place_1 && !*in_place_1) { return raise_from(*in_place_1); }
+	if (in_place_1) {
+	} else if (element_type) {
 		if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
 			std::string value_type = vm_value_type_name(value);
 			std::string expected_type = vm_type_info_name(element_type);
@@ -6746,18 +6759,18 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 				"Cannot assign '{0}' to element of type '{1}'",
 				value_type_id, expected_type_id);
 		}
-		auto converted_result = vm_convert_array_element(engine_, value, element_type);
+		auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
 		if (!converted_result) { return raise_from(converted_result); }
 		script_value converted = std::move(converted_result.value());
 		*target_ptr = std::move(converted);
 	} else {
 		// No element type constraint - values deep-copy, shared_ptr handles share
-		*target_ptr = clone_for_assignment(value);
+		*target_ptr = detail::take_for_assignment(value);
 	}
 	if (typed_element) {
 		refHolder->container->set(refHolder->container_index, *target_ptr);
 	}
-	stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value
+	stack_.push_back(result_used() ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value
 	return {};
 }
 
@@ -6862,7 +6875,11 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 		}
 	}
 	type_info_ptr element_type = refHolder->container_element_type;
-	if (element_type) {
+	// a class element keeps its object: the copy assignment (Dev ruling 2026-10-03)
+	const auto in_place_2 = detail::element_copy_assign(*target_ptr, resultValue, element_type, engine_);
+	if (in_place_2 && !*in_place_2) { return raise_from(*in_place_2); }
+	if (in_place_2) {
+	} else if (element_type) {
 		if (!vm_is_element_type_compatible(resultValue, element_type, *target_ptr)) {
 			std::string value_type = vm_value_type_name(resultValue);
 			std::string expected_type = vm_type_info_name(element_type);
@@ -6894,6 +6911,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 // replays the exact INDEX(lvalue_write)+INDEX_ASSIGN sequence, so semantics and error
 // text stay byte-identical by construction.
 op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
+	auto result_used = [&] { return !(ins.a & index_flag_no_result) && assignment_result_used(f); };
 	// stack: [value, container, index]. Decision peeks are read-only; committed fast
 	// paths pop into locals first - conversions can run user code that grows the value
 	// stack (invariant 2b: never hold references into stack_ across a possible push).
@@ -6916,7 +6934,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 					script_value value = std::move(stack_.back());
 					stack_.pop_back();
 					storage->bytes()[static_cast<size_t>(index)] = static_cast<uint8_t>(value.deref().unchecked_as_int());
-					stack_.push_back(assignment_result_used(f) ? storage->get(static_cast<size_t>(index), engine_) : std::move(value));
+					stack_.push_back(result_used() ? storage->get(static_cast<size_t>(index), engine_) : std::move(value));
 					return {};
 				}
 			}
@@ -6932,7 +6950,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 					script_value value = std::move(stack_.back());
 					stack_.pop_back();
 					storage->set(static_cast<size_t>(index), value.deref());
-					stack_.push_back(assignment_result_used(f) ? storage->get(static_cast<size_t>(index), engine_) : std::move(value));   // the stored element is the expression's value
+					stack_.push_back(result_used() ? storage->get(static_cast<size_t>(index), engine_) : std::move(value));   // the stored element is the expression's value
 					return {};
 				}
 			}
@@ -6945,7 +6963,11 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 				script_value value = std::move(stack_.back());
 				stack_.pop_back();
 				script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
-				if (element_type) {
+				// a class element keeps its object: the copy assignment (Dev ruling 2026-10-03)
+				const auto in_place_3 = detail::element_copy_assign(*target_ptr, value, element_type, engine_);
+				if (in_place_3 && !*in_place_3) { return raise_from(*in_place_3); }
+				if (in_place_3) {
+				} else if (element_type) {
 					if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
 						std::string value_type = vm_value_type_name(value);
 						std::string expected_type = vm_type_info_name(element_type);
@@ -6956,15 +6978,15 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 							"Cannot assign '{0}' to element of type '{1}'",
 							value_type_id, expected_type_id);
 					}
-					auto converted_result = vm_convert_array_element(engine_, value, element_type);
+					auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
 					if (!converted_result) { return raise_from(converted_result); }
 					script_value converted = std::move(converted_result.value());
 					*target_ptr = std::move(converted);
 				} else {
 					// No element type constraint - values deep-copy, shared_ptr handles share
-					*target_ptr = clone_for_assignment(value);
+					*target_ptr = detail::take_for_assignment(value);
 				}
-				stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value
+				stack_.push_back(result_used() ? clone_for_assignment(*target_ptr) : std::move(value));   // a copy of the stored element is the expression's value
 				return {};
 			}
 		}
@@ -6982,7 +7004,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 			stack_.pop_back();
 			script_value value = std::move(stack_.back());
 			stack_.pop_back();
-			stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*stored) : std::move(value));
+			stack_.push_back(result_used() ? clone_for_assignment(*stored) : std::move(value));
 			return {};
 		}
 	}
@@ -11098,7 +11120,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 					return {};
 				}
 			}
-			const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, p.string_target};
+			const vm_instruction store_ins{opcode::op_index_store, ins.b | (no_result ? index_flag_no_result : 0u), 0, p.string_target};
 			const op_status st = exec_index_store(f, store_ins);
 			if (st == op_status::failed) { return st; }
 			if (no_result && !is_unwinding_) { stack_.pop_back(); }
@@ -11202,7 +11224,11 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			script_value value = value_operand ? script_value(*value_ptr) : std::move(stack_.back());
 			if (!value_operand) { stack_.pop_back(); }
 			script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
-			if (element_type) {
+			// a class element keeps its object: the copy assignment (Dev ruling 2026-10-03)
+			const auto in_place_4 = detail::element_copy_assign(*target_ptr, value, element_type, engine_);
+			if (in_place_4 && !*in_place_4) { return raise_from(*in_place_4); }
+			if (in_place_4) {
+			} else if (element_type) {
 				if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
 					std::string value_type = vm_value_type_name(value);
 					std::string expected_type = vm_type_info_name(element_type);
@@ -11213,13 +11239,13 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 						"Cannot assign '{0}' to element of type '{1}'",
 						value_type_id, expected_type_id);
 				}
-				auto converted_result = vm_convert_array_element(engine_, value, element_type);
+				auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
 				if (!converted_result) { return raise_from(converted_result); }
 				script_value converted = std::move(converted_result.value());
 				*target_ptr = std::move(converted);
 			} else {
 				// No element type constraint - values deep-copy, shared_ptr handles share
-				*target_ptr = clone_for_assignment(value);
+				*target_ptr = detail::take_for_assignment(value);
 			}
 			if (!no_result) { stack_.push_back(assignment_result_used(f) ? clone_for_assignment(*target_ptr) : std::move(value)); }   // a copy of the stored element is the expression's value
 			return {};
@@ -11252,7 +11278,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	else if (computed_index) { stack_.push_back(std::move(*computed_index)); }
 	else if (p.index.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.index.const_index)); }
 	else { stack_.push_back(*index_ptr); }
-	const vm_instruction store_ins{opcode::op_index_store, ins.b, 0, p.string_target};
+	const vm_instruction store_ins{opcode::op_index_store, ins.b | (no_result ? index_flag_no_result : 0u), 0, p.string_target};
 	const op_status st = exec_index_store(f, store_ins);
 	if (st == op_status::failed) { return st; }
 	if (no_result && !is_unwinding_) { stack_.pop_back(); }
@@ -11344,7 +11370,11 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));
 					auto container_type_info = container.get_type_info();
 					type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
-					if (element_type) {
+					// a class element keeps its object: the copy assignment (Dev ruling 2026-10-03)
+					const auto in_place_5 = detail::element_copy_assign(*target_ptr, resultValue, element_type, engine_);
+					if (in_place_5 && !*in_place_5) { return raise_from(*in_place_5); }
+					if (in_place_5) {
+					} else if (element_type) {
 						if (!vm_is_element_type_compatible(resultValue, element_type, *target_ptr)) {
 							std::string value_type = vm_value_type_name(resultValue);
 							std::string expected_type = vm_type_info_name(element_type);
@@ -14583,7 +14613,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 		if (holder && holder->is_class_instance_wrapper && holder->data) {
 			auto* inst = static_cast<class_instance*>(holder->data.get());
 			if (member->member_id != UINT64_MAX && inst->find_field_value(member->member_id)) {
-				auto enforced = inst->enforce_field_write(member->member_id, clone_for_assignment(value));
+				auto enforced = inst->field_store(member->member_id, value, [&] { return clone_for_assignment(value); });
 				if (!enforced) {
 					return raise_from(enforced);
 				}
@@ -14620,7 +14650,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 		}
 	} else if (target.has_field(member_id)) {
 		// Typed fields enforce like locals
-		auto enforced = target.instance->enforce_field_write(member_id, clone_for_assignment(value));
+		auto enforced = target.instance->field_store(member_id, value, [&] { return clone_for_assignment(value); });
 		if (!enforced) {
 			return raise_from(enforced);
 		}
@@ -14857,7 +14887,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
                                                              const script_value& dereferenced, const script_value& value) {
 	// V-M2 proven field write: == the member_ic hit with the conversion gated by the
 	// proof (KEEP BYTE-PARALLEL with interpreter I-M2)
-	if (member->proven_class && member->proven_field_write && cached_global_env_) {
+	if (member->proven_class && member->proven_field_write && cached_global_env_ && !detail::by_value_class_type(member->proven_field_type)) {
 		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch)) {
 			script_value incoming = clone_for_assignment(value);
 			if (proof == proof_same_type && member->proven_field_type &&
@@ -14908,8 +14938,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 							}
 							return op_status{};
 						}
-						auto enforced = inst->enforce_field_write(member->member_id,
-						                                          clone_for_assignment(value));
+						auto enforced = inst->field_store(member->member_id, value, [&] { return clone_for_assignment(value); });
 						if (!enforced) {
 							return raise_from(enforced);
 						}
@@ -15003,7 +15032,7 @@ op_status vm_backend::store_static_target(frame& f, member_expr* member, const s
 	if (!cls) {
 		return raise_from(cls);
 	}
-	auto stored = detail::store_static_member(*cls.value(), member->member_id, clone_for_assignment(result));
+	auto stored = detail::store_static_member(*cls.value(), member->member_id, result, [&] { return clone_for_assignment(result); });
 	if (!stored) {
 		return raise_from(stored);
 	}
@@ -15026,7 +15055,7 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	if (!cls) {
 		return raise_from(cls);
 	}
-	auto stored = detail::store_static_member(*cls.value(), member->member_id, clone_for_assignment(value));
+	auto stored = detail::store_static_member(*cls.value(), member->member_id, value, [&] { return clone_for_assignment(value); });
 	if (!stored) {
 		return raise_from(stored);
 	}
@@ -15307,6 +15336,7 @@ op_status vm_backend::exec_typed_push(frame& f, const vm_instruction& ins) {
 				if (lane == push_append::appended) {
 					if (next_op_discards_result(f)) { ++f.ip; }
 					else { stack_.push_back(make_null()); }
+					if (f.code->push_protos[ins.c].value_temp) { script_value dying = std::move(*frame_slot(f, ins.b)); }
 					return {};
 				}
 			}
@@ -15325,6 +15355,11 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 	const push_proto& p = f.code->push_protos[ins.a];
 	const call_site& site = f.code->call_sites[p.site];
 	std::optional<script_value> rscratch, vscratch;
+	auto release_value_temp = [&]() {   // a private temp's value dies with the statement that took its copy
+		if (p.value_temp) {
+			if (script_value* slot = frame_slot(f, p.value.slot)) { script_value dying = std::move(*slot); }
+		}
+	};
 	const script_value* recv = fused_cmp_operand(f, p.receiver, f.ip * 3);
 	if (!recv) {
 		recv = fused_ident_value(f, p.receiver, rscratch, f.ip * 3);
@@ -15354,6 +15389,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 	auto land_discarded = [&]() {
 		if (next_op_discards_result(f)) { ++f.ip; }
 		else { stack_.push_back(make_null()); }
+		release_value_temp();
 	};
 	const script_value& objd = recv->deref();
 	if (objd.raw_storage_index() == script_value::TYPEID_ARRAY && f.code->builtin_indexed &&
@@ -15445,6 +15481,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 	} else {
 		if (!resolve_value()) return op_status::failed;
 		stack_.push_back(val->deref());
+		release_value_temp();
 	}
 	const vm_instruction call_ins{opcode::op_call_method, 1, p.site, 0};
 	VM_TRY(exec_call_method(f, call_ins));
@@ -16860,7 +16897,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				auto instance = args[0].as<std::shared_ptr<class_instance>>();
 				// Typed fields enforce like locals (declared type; auto infers from the
 				// initialized value); the converted value is what gets stored and returned
-				auto enforced = instance->enforce_field_write(field_id, args[1]);
+				auto enforced = instance->field_store(field_id, args[1], [&] { return args[1]; });
 				if (!enforced) {
 					return enforced;
 				}
@@ -16945,7 +16982,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				auto instance = args[0].as<std::shared_ptr<class_instance>>();
 				// Typed fields enforce like locals (declared type; auto infers from the
 				// initialized value); the converted value is what gets stored and returned
-				auto enforced = instance->enforce_field_write(field_id, args[1]);
+				auto enforced = instance->field_store(field_id, args[1], [&] { return args[1]; });
 				if (!enforced) {
 					return enforced;
 				}

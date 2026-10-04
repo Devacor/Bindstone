@@ -1143,7 +1143,7 @@ public:
 		});
 
 		test("worker_copied_instances_register_at_the_join", [this]() {
-			// An instance a worker copies (a by-value store into its element) parks in the worker's
+			// An instance a worker copies (a by-value store into a cleared field: one holding an instance copy-assigns) parks in the worker's
 			// pending list and joins the class registry after the region: a later hot reload must
 			// still migrate it (the registry is how migration finds live instances)
 			auto e = make_engine();
@@ -1153,7 +1153,7 @@ public:
 				class Node { Leaf a = Leaf(0); Leaf b = Leaf(0); Node() {} Node(int n) { a = Leaf(n); b = Leaf(-1); } }
 				array<Node> nodes = [];
 				for (int i = 0; i < 100; i++) { nodes.push(Node(i)); }
-				parallel_for (auto& n : nodes) { n.b = n.a; }
+				parallel_for (auto& n : nodes) { n.b = null; n.b = n.a; }
 			)");
 			e->execute(R"(
 				class Leaf { int v = 0; int extra = 7; Leaf() {} Leaf(int n) { v = n; } }
@@ -3080,7 +3080,7 @@ public:
 		)");
 		auto call = eng->jaibite(R"(
 			parallel_for (auto& n : pending_nodes) {
-				if (pending_copy_enabled) { n.b = n.a; }
+				if (pending_copy_enabled) { n.b = null; n.b = n.a; }
 			}
 			pending_nodes.size();
 		)");
@@ -3286,7 +3286,7 @@ public:
 				}
 			)");
 			auto region = eng->jaibite(R"(
-				parallel_for (auto& n : registry_nodes) { n.b = n.a; }
+				parallel_for (auto& n : registry_nodes) { n.b = null; n.b = n.a; }
 				registry_shared_leaves();
 			)");
 			auto& state = eng->parallel_state();

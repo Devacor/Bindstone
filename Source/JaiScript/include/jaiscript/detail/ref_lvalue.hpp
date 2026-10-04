@@ -833,6 +833,7 @@ namespace jai::detail {
 			ref_write_through(refLocal, std::move(stored.value()));
 			return {};
 		}
+		if (auto in_place = element_copy_assign(refLocal.deref(), value, constraint, eng)) { return *in_place; }   // a class element keeps its object
 		if (!ref_element_constraint_compatible(value, constraint, eng)) {
 			return ref_element_error(symbolizer, value, constraint);
 		}
@@ -938,6 +939,10 @@ namespace jai::detail {
 			auto stored = ref_field_store(*holder, resultValue, eng);
 			if (!stored) { return stored.error_value(); }
 			ref_write_through(refLocal, std::move(stored.value()));
+			return resultValue;
+		}
+		if (auto in_place = element_copy_assign(refLocal.deref(), resultValue, constraint, eng)) {
+			if (!*in_place) { return in_place->error_value(); }
 			return resultValue;
 		}
 		if (!ref_element_constraint_compatible(resultValue, constraint, eng)) {

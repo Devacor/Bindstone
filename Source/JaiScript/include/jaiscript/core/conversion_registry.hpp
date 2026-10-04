@@ -25,6 +25,9 @@ class engine;
 
 namespace conversions {
 
+// std::runtime_error(prefix + type_name), out of line so the registry templates carry one call
+[[noreturn]] JAI_NOINLINE void throw_unregistered_conversion(const char* prefix, const char* type_name);
+
 // type_id is already defined in conversion_registry_fwd.hpp
 
 // Conversion function signatures

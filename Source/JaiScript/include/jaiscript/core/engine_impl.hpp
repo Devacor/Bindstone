@@ -95,11 +95,10 @@ script_value engine::make_object(std::shared_ptr<T> data) {
         }
     }
 
-    std::string type_name = get_registered_name<T>();
-
     try {
         std::shared_ptr<detail::first_type_t<class_definition, T>> class_def = get_class_definition_by_type(std::type_index(typeid(T)));
         if (class_def) {
+            const std::string& type_name = class_def->get_name();
             auto instance = class_def->create_instance();
 
             uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
@@ -113,6 +112,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
     }
 
     // Fallback: store as raw C++ object (properties won't work)
+    std::string type_name = get_registered_name<T>();
     auto type_id = get_symbolizer()->intern(type_name);
     return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(data), this);
 }

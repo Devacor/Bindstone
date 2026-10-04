@@ -81,6 +81,10 @@ class engine;
                     return conversions::convert_script_map_to_stdmap<key_type, value_type>(v, eng);
                 } else if constexpr (std::is_class_v<T> && !std::is_same_v<T, std::string>) {
                     if (v.is_object()) {
+                        // a borrowed object has no owner to share: copy it without the shared attempt's throw
+                        if (const auto* holder = v.peek_object_holder(); holder && holder->bound_ptr && !holder->data) {
+                            return v.as<T>();
+                        }
                         try {
                             auto ptr = v.as<std::shared_ptr<T>>();
                             return *ptr;
@@ -175,8 +179,8 @@ class engine;
             // Throwing version - for backward compatibility with existing bindings
             static int from(const script_value& v, engine* eng) {
                 auto result = checked_from(v, eng);
-                if (!result) {
-                    throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+                if (!result) [[unlikely]] {
+                    throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
                 }
                 return result.value();
             }
@@ -199,8 +203,8 @@ class engine;
 
             static float from(const script_value& v, engine* eng) {
                 auto result = checked_from(v, eng);
-                if (!result) {
-                    throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+                if (!result) [[unlikely]] {
+                    throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
                 }
                 return result.value();
             }
@@ -223,8 +227,8 @@ class engine;
 
             static double from(const script_value& v, engine* eng) {
                 auto result = checked_from(v, eng);
-                if (!result) {
-                    throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+                if (!result) [[unlikely]] {
+                    throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
                 }
                 return result.value();
             }

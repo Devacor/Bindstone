@@ -111,6 +111,10 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 
 namespace conversions {
 
+[[noreturn]] JAI_NOINLINE void throw_unregistered_conversion(const char* prefix, const char* type_name) {
+    throw std::runtime_error(std::string(prefix) + type_name);
+}
+
 void conversion_registry::register_builtin_conversion(script_value_type from, script_value_type to, int cost,
                                std::function<script_value(const script_value&)> converter) {
     auto it = std::find_if(builtin_conversions_.begin(), builtin_conversions_.end(),

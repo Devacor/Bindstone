@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <map>
 #include <unordered_map>
@@ -302,6 +303,8 @@ namespace jai {
     public:
         exception(const std::string& message, const source_location& location = {})
             : std::runtime_error(message), location_(location) {}
+        // a literal throws without a temporary std::string or source_location at the throw site
+        explicit exception(const char* message) : std::runtime_error(message) {}
 
         const source_location& location() const { return location_; }
 
@@ -317,6 +320,17 @@ namespace jai {
     class runtime_error : public exception {
         using exception::exception;
     };
+
+    // Cold throwers (value.cpp): a hot function's failure branch is one call, its text is built out of line
+    [[noreturn]] JAI_NOINLINE void throw_runtime_error(std::string_view message);
+    // runtime_error(format_error_message_numeric(message, id1, id2))
+    [[noreturn]] JAI_NOINLINE void throw_numeric_error(std::string_view message, uint64_t id1, uint64_t id2);
+    // runtime_error(prefix + expected + " arguments, got " + got): a bound thunk's argument count
+    [[noreturn]] JAI_NOINLINE void throw_binder_arity(const char* prefix, size_t expected, size_t got);
+    // runtime_error(text + count)
+    [[noreturn]] JAI_NOINLINE void throw_text_with_count(const char* text, size_t count);
+    // runtime_error(a + b + c)
+    [[noreturn]] JAI_NOINLINE void throw_concat(std::string_view a, std::string_view b, std::string_view c = {});
 
     // Control flow exceptions for break/continue statements
     class break_exception : public exception {

@@ -274,15 +274,15 @@ namespace detail { struct argument_capture_storage; }
         // Engine-aware factory methods (preferred - ALWAYS use these)
         static script_value make_array(type_info_ptr element_type, engine* eng);
         static script_value make_map(type_info_ptr keyType, type_info_ptr valueType, engine* eng);
-        static script_value make_object(const std::string& type_name, std::shared_ptr<void> data, engine* eng);
+        static script_value make_object(std::string_view type_name, std::shared_ptr<void> data, engine* eng);
         // Optimized version with cached type_id
-        static script_value make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class = true);
+        static script_value make_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class = true);
         static script_value make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng);   // an instance of the class in hand (no registry lookup)
         // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
-        static script_value make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
+        static script_value make_cpp_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
         // Non-owning C++ object holder that still knows its owner weakly (an extended object's
         // _cpp_object): T& extraction reads the pointer, shared_ptr extraction locks the weak one.
-        static script_value make_cpp_reference(const std::string& type_name, uint64_t type_id, void* object,
+        static script_value make_cpp_reference(std::string_view type_name, uint64_t type_id, void* object,
                                                std::weak_ptr<void> owner, engine* eng);
     public:
         // Reallocation-safe reference to a vector element (range-for auto&, arr[i] lvalue):
@@ -642,40 +642,40 @@ namespace detail { struct argument_capture_storage; }
         // These throwing versions delegate to checked_* versions for consistency
         inline script_int as_int() const {
             auto result = checked_as_int();
-            if (!result) {
-                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+            if (!result) [[unlikely]] {
+                throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
             }
             return result.value();
         }
 
         inline script_float as_float() const {
             auto result = checked_as_float();
-            if (!result) {
-                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+            if (!result) [[unlikely]] {
+                throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
             }
             return result.value();
         }
 
         inline const script_string& as_string() const {
             auto result = checked_as_string();
-            if (!result) {
-                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+            if (!result) [[unlikely]] {
+                throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
             }
             return *result.value();
         }
 
         inline script_bool as_bool() const {
             auto result = checked_as_bool();
-            if (!result) {
-                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+            if (!result) [[unlikely]] {
+                throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
             }
             return result.value();
         }
 
         inline script_char as_char() const {
             auto result = checked_as_char();
-            if (!result) {
-                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+            if (!result) [[unlikely]] {
+                throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
             }
             return result.value();
         }
@@ -860,8 +860,8 @@ namespace detail { struct argument_capture_storage; }
 
         inline const std::vector<script_value>& as_array() const {
             auto result = checked_as_array();
-            if (!result) {
-                throw runtime_error(std::string(result.message()));
+            if (!result) [[unlikely]] {
+                throw_runtime_error(result.message());
             }
             return *result.value();
         }
@@ -883,8 +883,8 @@ namespace detail { struct argument_capture_storage; }
         
         inline const script_map& as_map() const {
             auto result = checked_as_map();
-            if (!result) {
-                throw runtime_error(std::string(result.message()));
+            if (!result) [[unlikely]] {
+                throw_runtime_error(result.message());
             }
             return *result.value();
         }
@@ -977,12 +977,11 @@ namespace detail { struct argument_capture_storage; }
         template<typename T>
         T as() const {
             auto result = checked_as<T>();
-            if (!result) {
+            if (!result) [[unlikely]] {
                 if (result.message().empty()) {
-                    throw runtime_error("Type conversion failed");
+                    throw_runtime_error("Type conversion failed");
                 }
-                // Format the error message with symbol IDs
-                throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+                throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
             }
             return std::move(result.value());
         }
@@ -1038,8 +1037,8 @@ namespace detail { struct argument_capture_storage; }
 								throw runtime_error("Object type mismatch");
 							}
 							auto result = detail::checked_native_reference(*this, typeid(base_type));
-							if (!result) {
-								throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2()));
+							if (!result) [[unlikely]] {
+								throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
 							}
 							return *static_cast<base_type*>(result.value());
 						}

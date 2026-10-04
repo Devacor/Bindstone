@@ -951,16 +951,21 @@ public:
         }
 
         if (throw_if_missing) {
-            std::string name;
-            if (auto eng = engine_) {
-                name = eng->get_symbolizer()->get_string(id);
-            } else {
-                name = std::to_string(id);
-            }
-            throw runtime_error("Method '" + name + "' not found in class '" + name_ + "'");
+            throw_method_missing("Method '", id);
         }
 
         return script_value::make_invalid(engine_);
+    }
+
+    // kind + name + "' not found in class '" + class + "'", out of line so the chain walks stay lean
+    [[noreturn]] JAI_NOINLINE void throw_method_missing(const char* kind, uint64_t id) const {
+        std::string name;
+        if (auto eng = engine_) {
+            name = eng->get_symbolizer()->get_string(id);
+        } else {
+            name = std::to_string(id);
+        }
+        throw runtime_error(kind + name + "' not found in class '" + name_ + "'");
     }
 
     bool has_method(uint64_t id) const {
@@ -1007,13 +1012,7 @@ public:
         }
 
         if (throw_if_missing) {
-            std::string name;
-            if (auto eng = engine_) {
-                name = eng->get_symbolizer()->get_string(id);
-            } else {
-                name = std::to_string(id);
-            }
-            throw runtime_error("Static method '" + name + "' not found in class '" + name_ + "'");
+            throw_method_missing("Static method '", id);
         }
         return script_value::make_null(engine_);
     }
@@ -3088,6 +3087,15 @@ inline std::optional<script_value> field_store_value(slot_conversion& out, const
 // and handles, "null", the primitive names, "array" / "map" - never a var tag. Every spelling
 // is already interned (base names at backend init, class names at definition), so an error
 // path may intern it even while the symbolizer is frozen.
+inline std::string slot_source_type_name(const script_value& value_in, engine* eng);
+
+// A class slot whose class has no converting constructor for the source
+JAI_NOINLINE inline error_propagator no_converting_constructor_error(string_symbolizer* symbols, const script_value& source, const type_info& target,
+                                                                     engine* eng) {
+    return error_propagator{make_error_code(runtime_error_code::type_mismatch), "Cannot convert {0} to {1} (no suitable single-argument constructor)",
+                            symbols->intern(slot_source_type_name(source, eng)), target.id};
+}
+
 inline std::string slot_source_type_name(const script_value& value_in, engine* eng) {
     const script_value& v = value_in.is_reference() ? value_in.deref() : value_in;
     const type_info* tag = v.get_type_info().get();
@@ -3605,6 +3613,32 @@ inline checked_result<script_value> declared_slot_write(type_info_ptr declared, 
     return field_store_convert(value, declared, eng, id, owner, is_static);
 }
 
+// The class_instance lookups' failure texts, out of line so the lookups stay lean
+[[noreturn]] JAI_NOINLINE inline void throw_field_missing(const class_definition* def, uint64_t id) {
+    std::string field_name;
+    if (def) {
+        if (auto eng = def->get_engine()) {
+            field_name = eng->get_symbolizer()->get_string(id);
+        } else {
+            field_name = std::to_string(id);
+        }
+    } else {
+        field_name = std::to_string(id);
+    }
+    throw runtime_error("Field '" + field_name + "' not found and no default value available");
+}
+
+[[noreturn]] JAI_NOINLINE inline void throw_no_class_definition(uint64_t id) {
+    throw runtime_error("Class definition not available for method with ID " + std::to_string(id) + " lookup");
+}
+
+[[noreturn]] JAI_NOINLINE inline void throw_field_store_rejection(const script_value& value, const type_info& declared, uint64_t id,
+                                                                  const class_definition& def, engine* eng) {
+    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    throw runtime_error(typed_slot_rejection_text(value, declared,
+        slot_site{slot_kind::field, symbols ? symbols->get_string(id) : std::string_view{}, def.get_name()}, eng));
+}
+
 } // namespace detail
 
 inline checked_result<script_value> class_instance::enforce_field_write(uint64_t id, script_value value) const {
@@ -3706,12 +3740,8 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
         if (type_info_ptr declared = class_def_->get_field_declared_type(id);
             declared && declared->base_type != script_value_type::jai_any_type) {
             auto converted = detail::field_store_convert_no_script(value, declared, engine_);
-            if (!converted) {
-                string_symbolizer* symbols = engine_ ? engine_->get_symbolizer() : nullptr;
-                throw runtime_error(detail::typed_slot_rejection_text(value, *declared,
-                    detail::slot_site{detail::slot_kind::field,
-                                      symbols ? symbols->get_string(id) : std::string_view{},
-                                      class_def_->get_name()}, engine_));
+            if (!converted) [[unlikely]] {
+                detail::throw_field_store_rejection(value, *declared, id, *class_def_, engine_);
             }
             set_field_unchecked(id, *converted);
             return;
@@ -3871,7 +3901,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
                                 "'. The registered copy function returned null.");
                         }
                         new_instance->set_field(cpp_obj_id,
-                            script_value::make_cpp_object(std::string(get_class_name()), class_def_->get_type_id(), new_cpp_obj, cell->get_engine()));
+                            script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, cell->get_engine()));
                         continue;
                     }
                 }
@@ -3897,7 +3927,7 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
 
                     auto eng_ref = value.get_engine();
                     new_instance->set_field(cpp_obj_id,
-                        script_value::make_cpp_object(std::string(get_class_name()), class_def_->get_type_id(), new_cpp_obj, eng_ref));
+                        script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, eng_ref));
                     return;
                 }
             }
@@ -3949,17 +3979,7 @@ inline const script_value& class_instance::get_field(uint64_t id, bool throw_if_
     }
 
     if (throw_if_missing) {
-        std::string field_name;
-        if (class_def_) {
-            if (auto eng = class_def_->get_engine()) {
-                field_name = eng->get_symbolizer()->get_string(id);
-            } else {
-                field_name = std::to_string(id);
-            }
-        } else {
-            field_name = std::to_string(id);
-        }
-        throw runtime_error("Field '" + field_name + "' not found and no default value available");
+        detail::throw_field_missing(class_def_, id);
     }
 
     if (class_def_) {
@@ -4003,17 +4023,7 @@ inline script_value& class_instance::get_field(uint64_t id, bool throw_if_missin
     }
 
     if (throw_if_missing) {
-        std::string field_name;
-        if (class_def_) {
-            if (auto eng = class_def_->get_engine()) {
-                field_name = eng->get_symbolizer()->get_string(id);
-            } else {
-                field_name = std::to_string(id);
-            }
-        } else {
-            field_name = std::to_string(id);
-        }
-        throw runtime_error("Field '" + field_name + "' not found and no default value available");
+        detail::throw_field_missing(class_def_, id);
     }
 
     if (class_def_) {
@@ -4037,7 +4047,7 @@ inline script_value class_instance::get_method(uint64_t id, bool throw_if_missin
     }
 
     if (throw_if_missing) {
-        throw runtime_error("Class definition not available for method with ID " + std::to_string(id) + " lookup");
+        detail::throw_no_class_definition(id);
     }
     return script_value::make_invalid(nullptr);
 }

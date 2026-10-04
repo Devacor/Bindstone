@@ -65,6 +65,10 @@ private:
         }
     }
 
+    [[noreturn]] JAI_NOINLINE static void throw_byte_range(bool is_signed, script_int x) {
+        throw runtime_error("Cannot store " + std::to_string(x) + (is_signed ? " in array<int8> (-128..127)" : " in array<uint8> (0..255)"));
+    }
+
     // A byte buffer (array<uint8> / array<int8>) takes an int inside its kind's range, the script store's rule
     static script_value fit_node(const script_array& n, script_value v) {
         if (n.kind() != script_array::kind_t::u8 && n.kind() != script_array::kind_t::i8) { return v; }
@@ -74,17 +78,17 @@ private:
             x = v.unchecked_as_int();
         } else if (v.is_float()) {
             auto converted = detail::checked_float_to_integer(v.unchecked_as_float());
-            if (!converted) { throw runtime_error(std::string(detail::float_to_integer_error)); }
+            if (!converted) { throw_runtime_error(detail::float_to_integer_error); }
             x = converted.value();
         } else if (v.is_bool()) {
             x = v.unchecked_as_bool() ? 1 : 0;
         } else if (v.is_char()) {
             x = static_cast<script_int>(static_cast<unsigned char>(v.unchecked_as_char()));
         } else {
-            throw runtime_error(std::string("Cannot store a non-number in array<") + (is_signed ? "int8>" : "uint8>"));
+            throw_runtime_error(is_signed ? "Cannot store a non-number in array<int8>" : "Cannot store a non-number in array<uint8>");
         }
         if (is_signed ? (x < -128 || x > 127) : (x < 0 || x > 255)) {
-            throw runtime_error("Cannot store " + std::to_string(x) + (is_signed ? " in array<int8> (-128..127)" : " in array<uint8> (0..255)"));
+            throw_byte_range(is_signed, x);
         }
         return script_value(x, v.get_engine());
     }

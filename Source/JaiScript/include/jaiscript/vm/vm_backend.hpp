@@ -287,6 +287,8 @@ namespace jai::vm {
         script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;
         void prepare_for_execution() override;
         checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override;
+        prepared_callback* prepare_callback(const script_value& callable) override;
+        void release_callback(prepared_callback* prepared) override;
 
         script_value get_variable(const std::string& name) const override;
         void push_external_call_scope() override;
@@ -2244,6 +2246,19 @@ namespace jai::vm {
         op_status exec_size_temp(frame& f, const vm_instruction& ins);
         std::deque<std::vector<script_value>> builtin_arg_pool_;   // op_call_builtin's argument vectors by nesting depth: a builtin may call back into the VM, and a deeper call's vector must not move this one
         size_t builtin_arg_depth_ = 0;
+        // A builtin's script callback: call_script_function's entry with the per-call work it repeats decided once
+        struct callback_session final : prepared_callback {
+            vm_backend* vm = nullptr;
+            const script_function* callable = nullptr;
+            const script_defined_function* fn = nullptr;
+            std::shared_ptr<chunk> body;
+            call_frame locals;
+            frame f;
+            size_t window_slots = 0;
+            bool lazy = false;
+            checked_result<script_value> call(const std::vector<script_value>& args) override { return vm->run_callback(*this, args); }
+        };
+        checked_result<script_value> run_callback(callback_session& s, const std::vector<script_value>& args);
         op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);
         // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
         // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /
@@ -2310,6 +2325,7 @@ namespace jai::vm {
         // the call paths' catch: the active exception becomes the unwinding state (out of line, no texts on the caller's
         // frame); truncate_to drops the stack first (SIZE_MAX keeps it)
         op_status call_threw(size_t truncate_to);
+        bool call_host_direct(const script_function& callee, size_t argc, op_status& st);
         bool push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc);
         bool bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc);
         // Callee-first probe for member / computed callees (op_probe_member)
@@ -2382,6 +2398,8 @@ namespace jai::vm {
         uint64_t raw_epoch_ = 1;
         cell_counters cells_counters_{};   // entries, boundaries, resumes, misses (engine::cells_counters)
         void raw_epoch_advance() { raw_epoch_ += 2; }
+        std::vector<std::unique_ptr<callback_session>> callback_sessions_;   // by nesting depth: frames_ holds &f while a call runs
+        size_t callback_depth_ = 0;
     };
 
 } // namespace jai::vm

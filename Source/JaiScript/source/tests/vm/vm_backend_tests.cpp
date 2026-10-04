@@ -3941,6 +3941,81 @@ public:
 			check_eq(i1, v1, "::s builtin receiver parity");
 		});
 
+		test("builtin_callback_entry_parity", [this, run_both_backends_stdlib]() {
+			// a builtin's callback runs on one prepared frame per builtin call: captures, a [this] lambda, a named function, a
+			// defaulted parameter, a nested builtin, a throw out of a comparator, a T& element, a destructor in the body
+			auto [i1, v1] = run_both_backends_stdlib(R"(
+				class Tally {
+					int hits = 0;
+					int big(array<int> xs, int limit) { return xs.filter([this, limit](int x) -> bool { hits += 1; return x > limit; }).size(); }
+				}
+				class Noisy { int id = 0; Noisy(int i) { id = i; } ~Noisy() { log = log + "~" + to_string(id); } }
+				string log = "";
+				int compares = 0;
+				bool desc(int a, int b) { compares += 1; return a > b; }
+				array<int> a = [5, 3, 9, 1, 7, 2, 8];
+				a.sort(desc);
+				log = log + to_string(a[0]) + to_string(a[6]) + ":" + to_string(compares);
+				int seen = 0;
+				a.sort([&](int x, int y) -> bool { seen += 1; return x < y; });
+				log = log + "|" + to_string(a[0]) + ":" + to_string(seen);
+				var t = Tally();
+				log = log + "|" + to_string(t.big(a, 4)) + ":" + to_string(t.hits);
+				int defaulted = 0;
+				[4, 5].for_each([&](int x, int i = 7) { defaulted += i; });
+				log = log + "|" + to_string(defaulted);
+				array<array<int>> rows = [[3, 1, 2], [9, 8], [5]];
+				rows.sort([](array<int> p, array<int> q) -> bool { p.sort([](int x, int y) -> bool { return x > y; }); return p.size() < q.size(); });
+				log = log + "|" + to_string(rows[0][0]) + to_string(rows[2][0]);
+				try { [3, 1, 2].sort([](int x, int y) -> bool { if (x == 2) { throw "cmp"; } return x < y; }); } catch (e) { log = log + "|" + e; }
+				array<int> b = [1, 2, 3];
+				b.for_each([](int& x) { x = x * 10; });
+				log = log + "|" + to_string(b.reduce([](int s, int x) -> int { return s + x; }, 0));
+				[1, 2].for_each([](int k) { Noisy n = Noisy(k); });
+				log = log + "|" + to_string([1, 2, 3].find([](int x) -> bool { return x > 1; }));
+				log;
+			)");
+			check_eq(std::string("91:13|1:9|4:7|1|53|cmp|60~1~2|2"), i1, "interp: builtin callbacks");
+			check_eq(i1, v1, "builtin callback parity");
+		});
+
+		test("host_function_direct_entry_parity", [this]() {
+			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
+			// throw, a callback into script, a re-registration while it runs, a closed loop calling it
+			std::string out[2];
+			int idx = 0;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				stdlib::register_all(*e);
+				jai::engine* raw = e.get();
+				e->add_function("add_one", [](jai::script_int x) -> jai::script_int { return x + 1; });
+				e->add_function("half", [](jai::script_float x) -> jai::script_float { return x / 2; });
+				e->add_function("shout", [](std::string s, bool loud) -> std::string { return loud ? s + "!" : s; });
+				e->add_function("fails", [](jai::script_int x) -> jai::script_int { if (x > 1) { throw std::runtime_error("too big"); } return x; });
+				e->add_function("relay", [raw](jai::script_int x) -> jai::script_int { return raw->execute("twice(" + std::to_string(x) + ")").as_int(); });
+				e->add_function("swap_self", [raw](jai::script_int x) -> jai::script_int {
+					raw->add_function("swap_self", [](jai::script_int y) -> jai::script_int { return y * 100; });
+					return x;
+				});
+				try {
+					out[idx] = e->execute(R"(
+						int twice(int v) { return v * 2; }
+						int count = 0;
+						for (int i = 0; i < 1000; ++i) { count = add_one(count); }
+						string log = to_string(count) + " " + to_string(half(5)) + " " + to_string(half(3.0)) + " " + shout("hi", true) + shout("lo", false);
+						try { fails(5); } catch (e) { log += " " + e; }
+						log += " " + to_string(fails(1)) + " " + to_string(relay(21));
+						log += " " + to_string(swap_self(3)) + " " + to_string(swap_self(3));
+						log
+					)").to_string();
+				} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+				++idx;
+			}
+			check_eq(std::string("1000 2.5 1.5 hi!lo too big 1 42 3 300"), out[0], "interp: host direct entry");
+			check_eq(out[0], out[1], "host direct entry parity");
+		});
+
 		test("global_qualified_missing_global_error_parity", [this, run_both_backends_in]() {
 			// A ::name with no global never falls back to a same-named member or local:
 			// the undefined-variable text is identical on both backends for every consumer

@@ -12992,6 +12992,19 @@ JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 	}
 }
 
+// A host function's direct entry (engine::overload_dispatch::try_direct) on the arguments where they are on the stack
+JAI_NOINLINE bool vm_backend::call_host_direct(const script_function& callee, size_t argc, op_status& st) {
+	const auto* od = callee.target<engine::overload_dispatch>();
+	if (!od) return false;
+	const size_t base = stack_.size() - argc;
+	std::optional<checked_result<script_value>> out;
+	if (!od->try_direct(stack_.data() + base, argc, out)) return false;
+	stack_.truncate(base);
+	if (!*out) { st = raise_from(*out); return true; }
+	stack_.push_back(std::move(out->value()));
+	return true;
+}
+
 JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_push_, coarse_pushes_)
 	const size_t argc = ins.a;
@@ -13088,6 +13101,9 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 		}
 	}
 #endif
+	if (pc.native()) {
+		if (op_status st{}; call_host_direct(*pc.pin, argc, st)) { return st; }
+	}
 	auto arguments = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &arguments};
 	const size_t base = stack_.size() - argc;
@@ -23189,6 +23205,172 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		result = implicit_this_result(locals);
 	}
 
+	cleanup();
+	return result;
+}
+
+prepared_callback* vm_backend::prepare_callback(const script_value& callable) {
+	if (parallel_worker_ || is_unwinding_ || !is_executing()) { return nullptr; }
+	const script_value& c = callable.deref();
+	if (c.raw_storage_index() != script_value::TYPEID_FUNCTION) { return nullptr; }
+	const auto* thunk = c.unchecked_as_function().target<script_callable_thunk>();
+	if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn) { return nullptr; }
+	if (detail::native_stack_low()) [[unlikely]] { return nullptr; }
+	const script_defined_function& function = *thunk->payload.fn;
+	auto body = std::static_pointer_cast<chunk>(function.backend_body_cache);
+	if (!body) {
+		body = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
+		function.backend_body_cache = body;
+	}
+	lean_bind_of(function);
+	if (callback_depth_ == callback_sessions_.size()) { callback_sessions_.push_back(std::make_unique<callback_session>()); }
+	callback_session& s = *callback_sessions_[callback_depth_++];
+	s.vm = this;
+	s.callable = &c.unchecked_as_function();
+	s.fn = &function;
+	s.body = std::move(body);
+	s.locals.function_name = function.name;
+	s.lazy = !s.body->needs_frame_env &&
+	         (!function.closure_env || (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
+	s.window_slots = std::max(function.local_count, static_cast<size_t>(s.body->local_count));
+	frame& f = s.f;
+	f = frame{};
+	f.code = s.body.get();
+	f.locals = &s.locals;
+	f.window_backed = true;
+	f.return_type = function.return_type;
+	f.return_conv_class = static_cast<uint8_t>(detail::return_conv_of(function));
+	f.unit = function.unit;
+	return &s;
+}
+
+void vm_backend::release_callback(prepared_callback* prepared) {
+	auto& s = *static_cast<callback_session*>(prepared);
+	assert(callback_depth_ > 0 && callback_sessions_[callback_depth_ - 1].get() == &s);
+	--callback_depth_;
+	s.f = frame{};
+	s.body.reset();
+	s.locals = call_frame{};
+	s.callable = nullptr;
+	s.fn = nullptr;
+}
+
+// call_script_function's entry for a builtin's callback: no pending site (the builtin's own arguments are not the
+// callback's), the lazy environment of an in-loop push, primitive arguments bound by copy
+checked_result<script_value> vm_backend::run_callback(callback_session& s, const std::vector<script_value>& args) {
+	const script_defined_function& function = *s.fn;
+	if (is_unwinding_ || args.size() != function.parameters().size() ||
+	    (pending_site_ctx_.site && detail::same_arguments(pending_site_ctx_.arguments, args))) [[unlikely]] {
+		return (*s.callable)(args);
+	}
+	pending_site_ctx_ = {};
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return *blocked; }
+	}
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return execution_limit_failure();
+	}
+	detail::call_depth_guard depth_guard(current_call_depth_);
+
+	frame& f = s.f;
+	call_frame& locals = s.locals;
+	locals.reset_member_scope();
+	const bool untouched = s.lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope());
+	std::shared_ptr<environment> previous_env;
+	if (!untouched) {
+		previous_env = std::move(environment_);
+		if (!s.lazy) {
+			try {
+				setup_callee_env(function, locals, previous_env);
+			} catch (...) {
+				environment_ = std::move(previous_env);
+				throw;
+			}
+		} else {
+			environment_ = function.closure_env ? function.closure_env : environment::call_parent(previous_env, false);
+		}
+	}
+	f.entry_env = s.lazy && !function.closure_env ? nullptr : environment_;
+	f.ip = 0;
+	f.window_base = stack_.size();
+	f.stack_base = f.window_base;
+	f.window_live = 0;
+
+	const bool previous_has_return = has_return_value_;
+	std::optional<script_value> previous_return = std::move(return_value_);
+	has_return_value_ = false;
+	const unit_stamp caller_unit = current_unit();
+	unit_sync_scope unit_sync{this};
+	frame_guard guard(this, &f);
+	enter_unit(function.unit);
+
+	const size_t entry_pending = pending_callees_.size();
+	auto cleanup = [&]() {
+		if (is_unwinding_ && !trace_captured_) capture_stack_trace();
+		truncate_detached(pending_callees_, entry_pending);
+		if (!s.lazy) { clear_this_on_frame_exit(f.entry_env); }
+		std::vector<script_value> shared_cells;
+		if ((f.code->shares_cells || locals.boxed_cells) && !parallel_worker_) [[unlikely]] { gather_native_frame_cells(f, locals, shared_cells); }
+		if (!untouched) { environment_ = std::move(previous_env); }
+		has_return_value_ = previous_has_return;
+		return_value_ = std::move(previous_return);
+		if (stack_.size() > f.stack_base) {
+			stack_.truncate(f.stack_base);
+		}
+		f.window_live = 0;
+		if (!s.lazy) { release_scope_env(std::move(f.entry_env)); }
+		else { f.entry_env = nullptr; }
+		if (!shared_cells.empty()) [[unlikely]] { script_value::release_cell_cycles(shared_cells, engine_); }
+		if (locals.is_method) {
+			*locals.this_object_ptr = make_null();
+			locals.is_method = false;
+		}
+		if (locals.static_class_def) {
+			locals.static_class_def = nullptr;
+			locals.is_static_method = false;
+		}
+	};
+
+	const bool bound_in_place = binds_in_place(function, args.data(), args.size());
+	if (bound_in_place) {
+		for (const script_value& a : args) { stack_.push_back(a); }
+		f.window_live = static_cast<uint32_t>(args.size());
+	} else {
+		op_status bound{};
+		try {
+			bound = bind_parameters(function.parameters(), args, 0, args.size(), f, *s.body,
+			                        untouched ? environment_ : previous_env, nullptr, nullptr, nullptr, nullptr, &function, caller_unit);
+		} catch (...) {
+			cleanup();
+			throw;
+		}
+		if (bound == op_status::failed) {
+			cleanup();
+			return pending_error_;
+		}
+	}
+	stack_.fill_null_to(f.window_base + s.window_slots, engine_);
+
+	checked_result<void> body_result;
+	try {
+		body_result = run(f);
+	} catch (...) {
+		cleanup();
+		throw;
+	}
+	if (!body_result) {
+		if (!trace_captured_) capture_stack_trace();
+		cleanup();
+		return body_result.error_value();
+	}
+	script_value result = make_null();
+	if (has_return_value_) {
+		result = std::move(return_value_.value());
+	} else if (!s.lazy) {
+		result = implicit_this_result(locals);
+	} else if (environment_->is_method_env()) {
+		result = environment_->get_this_object();
+	}
 	cleanup();
 	return result;
 }

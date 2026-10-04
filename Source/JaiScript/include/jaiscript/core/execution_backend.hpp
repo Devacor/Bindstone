@@ -106,6 +106,14 @@ namespace detail {
     };
 }
 
+// A builtin's script callback (sort's comparator, filter's predicate) prepared once per builtin call: each call binds its
+// arguments and runs the body on one reused frame, with the function value's observable behavior
+class prepared_callback {
+public:
+    virtual ~prepared_callback() = default;
+    virtual checked_result<script_value> call(const std::vector<script_value>& args) = 0;
+};
+
 /**
  * Abstract interface for script execution backends.
  * This allows us to have both interpreter and bytecode VM implementations.
@@ -113,6 +121,10 @@ namespace detail {
 class execution_backend {
 public:
     virtual ~execution_backend() = default;
+
+	// Null: the callable runs through its function value. A prepared callback is released before the builtin returns.
+	virtual prepared_callback* prepare_callback(const script_value&) { return nullptr; }
+	virtual void release_callback(prepared_callback*) {}
 
 	// Cold library bridge: sorting uses the backend's ordinary < expression semantics.
 	// Primitive buffers bypass this only while the backend's < has no global override.

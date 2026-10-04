@@ -439,6 +439,7 @@ public:
                 { "single statement function called twice", "function twice(int x) -> int { return x * 2; }\nvar a = twice(1);\nvar b = twice(a);\nvar c = twice(twice(b));\n" },
                 { "recursion", "function fact(int n) -> int {\n    if (n <= 1) return 1;\n    return n * fact(n - 1);\n}\nvar f = fact(4);\n" },
                 { "builtin callback", "function g(int x) -> int {\n    return x * 2;\n}\nvar arr = [1, 2, 3];\nvar m = array::map(arr, g);\nvar n = m.size();\n" },
+                { "dot builtin callbacks", "function less(int a, int b) -> bool { return a < b; }\narray<int> arr = [3, 1, 2];\narr.sort(less);\nvar t = 0;\narr.for_each([&](int x) {\n    t += x;\n});\narr.sort([](int a, int b) -> bool { return a > b; });\nvar n = arr.filter((x) => x > 1).size();\n" },
                 { "nested function and class declarations", "var r = 0;\nfor (var i = 0; i < 2; i += 1) {\n    function inner(int v) -> int { return v + 1; }\n    r = inner(r);\n}\nclass K { int z = 3; }\nauto k = K();\nvar d = r + k.z;\n" },
                 { "coroutine", "coroutine gen(int n) -> int {\n    for (int i = 0; i < n; i++) {\n        yield i;\n    }\n}\nvar s = 0;\nfor (auto v : gen(3)) {\n    s += v;\n}\nvar d = s;\n" },
                 { "namespace", "namespace ns {\n    int base = 4;\n    int twice(int x) { return x * 2; }\n    class P { int q = 1; }\n    int third = base + 1;\n}\nvar d = ns::twice(ns::base);\n" },

@@ -76,11 +76,13 @@ namespace stdlib {
         // Register container utility functions using variadic approach
         eng.add_variadic_function("merge", [](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 2) {
-                return checked_result<script_value>(
-                    make_error_code(runtime_error_code::argument_count_mismatch),
-                    "merge() expects exactly 2 arguments, got {0}",
-                    static_cast<uint64_t>(args.size())
-                );
+                // {0} is a symbol: the count rides the interned spelling of the number
+                engine* eng = args.empty() ? nullptr : args[0].get_engine();
+                const auto ec = make_error_code(runtime_error_code::argument_count_mismatch);
+                if (!eng) { return checked_result<script_value>(ec, "merge() expects exactly 2 arguments, got 0"); }
+                auto* symbols = eng->get_symbolizer();
+                if (symbols->frozen()) { return checked_result<script_value>(ec, "merge() expects exactly 2 arguments"); }
+                return checked_result<script_value>(ec, "merge() expects exactly 2 arguments, got {0}", symbols->intern(std::to_string(args.size())));
             }
             return map_merge(args[0], args[1]);
         });

@@ -23,11 +23,26 @@ namespace jai::detail {
 		return k == script_value::TYPEID_STRING || k == script_value::TYPEID_UTF8_STRING;
 	}
 
-	inline checked_result<void> string_element_out_of_bounds(size_t index, size_t size, engine* eng) {
+	JAI_NOINLINE inline checked_result<void> string_element_out_of_bounds(size_t index, size_t size, engine* eng) {
 		string_symbolizer* symbolizer = eng->get_symbolizer();
+		if (symbolizer->frozen()) {   // a parallel worker cannot intern the numbers: the same text without them
+			return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds), "String index out of bounds");
+		}
 		return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
 			"String index {0} out of bounds for string of size {1}",
 			symbolizer->intern(std::to_string(index)), symbolizer->intern(std::to_string(size)));
+	}
+
+	JAI_NOINLINE inline checked_result<void> string_element_kind_error(const script_value& value, engine* eng) {
+		string_symbolizer* symbolizer = eng->get_symbolizer();
+		const std::string spelled = container_value_type_name(value);
+		const auto known = symbolizer->frozen() ? symbolizer->find(spelled) : std::optional<uint64_t>(symbolizer->intern(spelled));
+		if (!known) {
+			return checked_result<void>(make_error_code(runtime_error_code::array_element_type_mismatch),
+				"Cannot assign to a string character (it takes a char or a string)");
+		}
+		return checked_result<void>(make_error_code(runtime_error_code::array_element_type_mismatch),
+			"Cannot assign {0} to a string character (it takes a char or a string)", *known);
 	}
 
 	// Character `index` of `storage` becomes the text of `value_in`
@@ -41,9 +56,7 @@ namespace jai::detail {
 			default:
 				if (value.is_char()) { text.assign(1, static_cast<char>(value.as_char())); break; }
 				if (value.is_string()) { text = value.as_string(); break; }
-				return checked_result<void>(make_error_code(runtime_error_code::array_element_type_mismatch),
-					"Cannot assign {0} to a string character (it takes a char or a string)",
-					eng->get_symbolizer()->intern(container_value_type_name(value)));
+				return string_element_kind_error(value, eng);
 		}
 		if (storage.raw_storage_index() == script_value::TYPEID_UTF8_STRING) {
 			const bool cache = !eng->parallel_region_active();

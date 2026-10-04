@@ -250,6 +250,8 @@ namespace jai::vm {
         size_t emit(opcode op, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0);
         // Fuses a trailing fused-comparison condition with its jump_if_false
         size_t emit_cond_jump_false(const expression* cond_expr);
+        size_t emit_cond_jump_true(const expression* cond_expr);
+        bool fuse_cond_compare(const expression* cond_expr, uint32_t false_target, uint32_t proved);
         // Fuses a whole-RHS trailing fused-binary/load/const with its identifier compound store
         void emit_compound_store(uint32_t symbol_index, uint32_t slot, uint32_t kind_flags, const expression* rhs, uint8_t typed_class = operand_class_unknown);
         void patch_jump(size_t at, size_t target);

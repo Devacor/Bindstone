@@ -19979,15 +19979,18 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	size_t prof_ip = 0;
 	uint64_t prof_nested_mark = profile_nested_cycles_;
 #endif
+	const chunk* code_owner = nullptr;
+	const vm_instruction* code_base = nullptr;
 	for (;;) {
 		// Rebound every iteration: frame switches write fp and `continue`
 		frame& f = *fp;
-		const auto& code = f.code->code;
+		// the instruction base is held across ops: the fetch reads it beside f.ip instead of behind f.code
+		if (f.code != code_owner) [[unlikely]] { code_owner = f.code; code_base = f.code->code.data(); }
 		// Every chunk compiler ends its code with op_halt and no jump target passes it,
 		// so the halt case IS the end-of-chunk exit (Debug asserts the invariant)
-		assert(f.ip < code.size());
+		assert(f.ip < f.code->code.size());
 		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
-		const vm_instruction& ins = code[f.ip];
+		const vm_instruction& ins = code_base[f.ip];
 		JAI_COVERAGE_GENERAL(f);
 #ifdef JAISCRIPT_VM_PROFILE
 		{

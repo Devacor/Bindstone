@@ -319,7 +319,7 @@ private:
     bool destructor_armed_ = false;
     bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
     uint32_t live_field_refs_ = 0;
-    std::unique_ptr<std::vector<field_cell>> retired_cells_;
+    std::unique_ptr<std::vector<std::pair<uint64_t, field_cell>>> retired_cells_;
     // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
     // swap-removes in O(1) instead of scanning and locking the whole list. Atomic because a
     // swap-remove re-points it under the registry lock while its dying owner reads it unlocked.
@@ -2584,13 +2584,24 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
             flat_fields_[slot] = std::move(cell);
         } else if (drop_undeclared) {
             *cell = script_value::make_invalid(engine_);
-            if (!retired_cells_) { retired_cells_ = std::make_unique<std::vector<field_cell>>(); }
-            retired_cells_->push_back(std::move(cell));
+            if (!retired_cells_) { retired_cells_ = std::make_unique<std::vector<std::pair<uint64_t, field_cell>>>(); }
+            retired_cells_->emplace_back(id, std::move(cell));
         } else if (cell->raw_storage_index() != script_value::TYPEID_INVALID) {
             if (!overflow_fields_) {
                 overflow_fields_ = std::make_unique<std::unordered_map<uint64_t, script_value>>();
             }
             overflow_fields_->insert_or_assign(id, std::move(*cell));
+        }
+    }
+    if (retired_cells_) {   // a field the object regains takes back its retired cell (repeated re-classes allocate nothing)
+        for (auto it = retired_cells_->begin(); it != retired_cells_->end();) {
+            const uint32_t slot = class_def_->field_slot(it->first);
+            if (slot != class_definition::k_no_field_slot && slot < flat_fields_.size() && !flat_fields_[slot]) {
+                flat_fields_[slot] = std::move(it->second);
+                it = retired_cells_->erase(it);
+            } else {
+                ++it;
+            }
         }
     }
     rehome_overflow_fields();

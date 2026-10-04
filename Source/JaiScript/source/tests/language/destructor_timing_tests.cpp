@@ -319,6 +319,13 @@ public:
                     return out; }
                 f();
             )", "Reference to a removed field/Reference to a removed field/Reference to a removed field");
+            expect_log(std::string(k_family) + R"(
+                function f() -> string { Base x = D1(); D1& dx = cast<D1&>(x); int& r = dx.d1; string out = "";
+                    for (int i = 0; i < 3; i++) { x = D2(); D1 back = D1(); back.d1 = 10 + i; x = back; out = out + to_string(r); }
+                    LOG = "";
+                    return out; }
+                f();
+            )", "101112");
         });
 
         test("an_unrelated_source_still_raises", [this]() {

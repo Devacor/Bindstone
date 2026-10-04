@@ -528,7 +528,8 @@ engine stays usable", not by `check_throws`.
   comes from the field, static, element or reference holder, else the slot's tag) re-classes the object in place
   (`detail::reclass_assign`): the levels it loses die first (`class_definition::destroy_levels`: each dropped level's
   destructor body, then its own members in reverse), `class_instance::reclass(def, drop_undeclared)` moves the kept cells and
-  retires the dropped ones holding the absent marker (a FIELD reference to one raises `Reference to a removed field`), the
+  retires the dropped ones holding the absent marker (a FIELD reference to one raises `Reference to a removed field`; a
+  later re-class that regains the field takes the cell back, so ping-pong re-classes allocate nothing), the
   holder's name and a tag naming the old class follow, every member then assigns from the source (a member the source lacks
   takes its default). Same class stays the plain copy (one pointer compare). The object registers with its new class (hot
   reload migrates it); a re-class into a chain with a destructor arms it (`late_destructor_`, run by `~class_instance`), and

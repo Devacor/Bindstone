@@ -107,6 +107,8 @@ namespace jai::vm {
 
 namespace {
 
+	constexpr uint8_t k_member_ic_var_field = 0xFF;   // a member_ic store row's field declared var (no scalar_type)
+
 	inline checked_result<void> vm_int_overflow_v(const char* msg) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
 	}
@@ -14709,6 +14711,29 @@ op_status vm_backend::local_member_receiver(frame& f, const member_expr* member,
 op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 	const script_value* base = frame_slot(f, ins.c);
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
+	// exec_get_member's proven and cached field reads over the slot itself: the cell lands in the temp with no receiver copy
+	if (base && cached_global_env_ && !(member->object && member->object->get_type() == node_type::member_expr)) {
+		const script_value& objd = base->deref();
+		if (member->proven_class) {
+			if (script_value* cell = detail::proven_field_cell(objd, member->proven_class, member->proven_epoch, member->proven_slot, nullptr)) {
+				frame_slot_set(f, ins.b, *cell);
+				return {};
+			}
+		}
+		if (objd.raw_storage_index() == script_value::TYPEID_OBJECT && !f.code->member_ic.empty()) {
+			const auto& holder = objd.unchecked_object_handle();
+			if (holder && holder->is_class_instance_wrapper && holder->data) {
+				auto* inst = static_cast<class_instance*>(holder->data.get());
+				const auto& entry = f.code->member_ic[static_cast<size_t>(&ins - f.code->code.data())];
+				if (class_definition* cd = inst->get_class_definition(); cd && entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) {
+					if (script_value* v = inst->field_slot_value(entry.slot)) {
+						frame_slot_set(f, ins.b, *v);
+						return {};
+					}
+				}
+			}
+		}
+	}
 	if (member->object && member->object->get_type() == node_type::member_expr) {
 		script_value receiver = make_null();
 		VM_TRY(local_member_receiver(f, member, ins.c, receiver));
@@ -15074,6 +15099,15 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 							}
 							return op_status{};
 						}
+						if (entry.scalar_kind == k_member_ic_var_field) {
+							// a var field takes a scalar or a string as field_store leaves it: unconverted, its own copy
+							const size_t vi = value.raw_storage_index();
+							if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
+							    vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING) {
+								inst->field_slot_write(entry.slot, script_value(value));
+								return op_status{};
+							}
+						}
 						auto enforced = inst->field_store(member->member_id, value, [&] { return clone_for_assignment(value); });
 						if (!enforced) {
 							return raise_from(enforced);
@@ -15104,6 +15138,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 						if (declared == ti_int_) { entry.scalar_type = declared; entry.scalar_kind = script_value::TYPEID_INT; }
 						else if (declared == ti_float_) { entry.scalar_type = declared; entry.scalar_kind = script_value::TYPEID_FLOAT; }
 						else if (declared == ti_bool_) { entry.scalar_type = declared; entry.scalar_kind = script_value::TYPEID_BOOL; }
+						else if (declared && declared->base_type == script_value_type::jai_any_type) { entry.scalar_kind = k_member_ic_var_field; }
 					}
 					// resolve through the ladder this once; hits serve from here on
 				}

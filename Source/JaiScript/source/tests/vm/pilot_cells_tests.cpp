@@ -2656,6 +2656,19 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(run_on(false, kinds, proofs), run_on(true, kinds, proofs), std::string("typed receivers, a declined kind and an index past the end agree") + (proofs ? "" : " (proofs off)"));
 			}
 		});
+		test("an_element_push_from_an_element_alias_reads_the_element_of_each_iteration", [this]() {
+			// fuzz seed 181 (element band): the push's source container is a range variable or a `var&` alias the block rebinds per iteration
+			const char* src = "var T = [[1, \"bb\", 1], [false, \"a\", 2], [false, \"q r\", 1], [3, \"z\", 4]]; var G = [];"
+			                  " function local_range() -> string { var out = []; for (auto& r : T) { out.push(r[1]); } return to_json(out); }"
+			                  " function global_range() -> string { G = []; for (auto& r : T) { G.push(r[1]); } return to_json(G); }"
+			                  " function local_alias() -> string { var out = []; for (int i = 0; i < T.size(); ++i) { var& r = T[i]; out.push(r[2]); } return to_json(out); }"
+			                  " local_range() + global_range() + local_alias();";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, src, proofs), in = run_on(false, src, proofs);
+				check_eq(in, vm, std::string("each element pushed") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("\"a\"") != std::string::npos, "the second element is read: " + vm);
+			}
+		});
 		test("ternary_arms_take_every_landing_and_an_int_cell_takes_a_float", [this]() {
 			// the ray step's column loop shapes (GLOOM pure.jai 28..62) without its inner while: `float adx = rdx < 0.0 ? -rdx : rdx;`
 			// (a unary arm), `int mx = posx;` and `int texcol = wallx * 64.0;` (a float into an int, truncated as the declaration

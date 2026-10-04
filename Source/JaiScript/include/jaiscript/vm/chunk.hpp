@@ -384,6 +384,11 @@ namespace jai::vm {
         mutable std::vector<env_lookup_cache_entry> env_lookup_cache;
         // Per instruction: the statement node in effect (raw pointer into the pinned tree)
         std::vector<const ast_node*> stmt_nodes;
+        // The statements the debugger stops at, each with its instruction range [start, end): a statement's range holds its
+        // children's. The compiler records them; the first armed dispatch sorts them, links parents and fills debug_innermost.
+        struct debug_span { uint32_t start; uint32_t end; const ast_node* node; uint32_t parent; };
+        mutable std::vector<debug_span> debug_spans;
+        mutable std::vector<uint32_t> debug_innermost;   // per instruction: 1 + the innermost span holding it, 0 for none
 
         std::vector<script_value> constants;               // engine-less AST-literal templates
         // Instruction ranges [begin, end) evaluating call arguments; consulted only on the

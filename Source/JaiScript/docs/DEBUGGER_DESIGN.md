@@ -331,10 +331,9 @@ debugger; ships first. A later LSP can layer semantic highlighting + diagnostics
    architecture against the SAME engine-owned controller (bloom/snapshot/step state all live
    controller-side — nothing duplicated): a cached `debug_hook_` gate tested once per dispatch
    iteration (a predictable branch when no session — the vm hot-loop band holds, see the cost
-   table), statement boundaries from `chunk::stmt_nodes[ip]` via an out-of-line edge detector
-   (`debug_statement_boundary`: fires when the stamped node changes OR a backward jump
-   re-enters the same statement, so loop-body breakpoints re-fire per iteration; out of line so
-   `run_dispatch`'s Debug frame stays flat — invariants.md §5), sync points at
+   table), statement entries from `chunk::debug_spans` via an out-of-line detector
+   (`debug_statement_boundary`, out of line so `run_dispatch`'s Debug frame stays flat —
+   invariants.md §5; see "Where a stop lands" below), sync points at
    `prepare_for_execution` + the vm's 1024-tick budget twin + park exit, and the SAME park (the
    script thread blocks in the hook inside `run_dispatch`; suspended fibers just stay suspended
    — no fiber-level suspension machinery needed, and none was). A stopped frame's locals are
@@ -342,10 +341,26 @@ debugger; ships first. A later LSP can layer semantic highlighting + diagnostics
    (`debug_paused_frame_`, exact even for native-entry frames) for decl/load/store/incdec
    operands PLUS the fused side tables (`fused_binary_protos`, `counted_for_protos`,
    `compound_fused_protos`, `iter_protos`, `destructure_protos`) and maps symbol→name through
-   the interner. No name table baked into release chunks. Known deltas from the interpreter: a
-   breakpoint on a loop-HEADER line (`for`/`while` condition) re-fires per iteration on the vm
-   (the header ops re-execute; the interpreter dispatches the loop statement once), and a
+   the interner. No name table baked into release chunks. Known delta from the interpreter: a
    parameter the body never references is invisible in the vm Locals view.
+
+   **Where a stop lands (both backends, one sequence).** A stop is one execution of a statement
+   that does work of its own: `debug::controller::stops_at` excludes blocks and `case`/`default`
+   labels (they hold statements), a `for` initializer belongs to its header's stop, and a
+   coroutine resume continues the statements it re-enters rather than starting them. A loop
+   header stops once per loop, its body's statements once per iteration. The interpreter fires at
+   `dispatch_stmt`/`dispatch_decl` (a for initializer and a resume's replay path pass
+   `debug_quiet_node_`); the vm compiler records each stop statement's instruction range
+   (`chunk::debug_spans`, a tree), and the detector fires every range that holds the dispatched
+   instruction but not the frame's previous one, enclosing first, so a back edge inside a loop's
+   range starts nothing and leaving a statement through a jump re-enters nothing. Instructions
+   outside every range (trampolines, cell copies, the halt) neither stop nor move the previous
+   instruction; a frame at ip 0 that was not the last frame dispatched is new and enters from
+   outside everything (every host entry clears the last frame); a frame whose edge state predates
+   the session stops at its innermost statement. The `Debugger` suite's
+   `step_line_sequences_match_the_interpreter_over_statement_shapes` drives every shape (loops,
+   branches, switch, short-circuit, ternary, calls, recursion, builtin callbacks, coroutines,
+   namespaces, throws) by step into, step over, a mixed cycle and breakpoints, on both backends.
    `engine::wire_backend` re-wires the controller across backend swaps, so
    `debugger()`-before-`set_backend(vm)` works in either order.
 6. **Value history ("step back") + LSP.** Snapshot touched variables per stop for read-only

@@ -1021,6 +1021,9 @@ namespace jai {
         // statement; when no debugger was ever constructed that test is the hook's
         // entire cost. Written ONLY by sync_debug_hook on this thread.
         debug::controller* debug_hook_ = nullptr;
+        // The next dispatch is no new statement execution (set only while armed): a for initializer, whose header
+        // stopped, or a statement a coroutine resume re-enters.
+        const ast_node* debug_quiet_node_ = nullptr;
 
         // Debug sync point (out of line: needs the controller type). Refreshes
         // debug_hook_ + the controller's hot cache, and hands a session-end a fresh

@@ -502,11 +502,12 @@ namespace jai::vm {
             uint32_t window_live = 0;
             bool window_backed = false;
             bool raw = false;                          // raw-entered: its window is reserved and built when the general form first needs it
-            // Debug statement-boundary edge state (touched only while a session is armed).
-            // Stale values across record reuse are harmless: a fresh frame enters at ip 0,
-            // and ip <= debug_stmt_ip re-fires the boundary (also the loop back-edge case).
-            const ast_node* debug_stmt = nullptr;
-            size_t debug_stmt_ip = 0;
+            // Debugger edge state (touched only while a session is armed): the last instruction this frame dispatched
+            // inside a stop span, of which chunk, under which session. A reused record enters at ip 0, which the backend
+            // tells from a back edge to ip 0 by the frame it dispatched last.
+            const chunk* debug_prev_code = nullptr;
+            uint32_t debug_prev_ip = 0;
+            uint32_t debug_epoch = 0;
             struct cell_state* cells = nullptr;        // the record's raw area (null: a frame that never runs cells)
         };
         // a byte per cell: a cell store marks its cell with one byte write, so consecutive stores carry no read-modify-write chain
@@ -874,6 +875,12 @@ namespace jai::vm {
         // Script-thread cached statement-hook gate: non-null only while a session is
         // enabled; run_dispatch tests this one plain pointer per dispatch iteration.
         debug::controller* debug_hook_ = nullptr;
+        // Bumped at every arming: a frame's edge state from an earlier session is stale. The last dispatch's frame
+        // tells a new frame at ip 0 from a jump back to ip 0.
+        uint32_t debug_epoch_ = 1;
+        const frame* debug_last_frame_ = nullptr;
+        const chunk* debug_last_code_ = nullptr;
+        size_t debug_last_depth_ = SIZE_MAX;
         // The frame parked at the current stop (set around on_statement) — exact locals
         // source for get_current_frame_locals while the script thread is parked.
         frame* debug_paused_frame_ = nullptr;
@@ -1107,6 +1114,7 @@ namespace jai::vm {
         // Statement-boundary edge detection + hook fire; out of line so run_dispatch's
         // Debug frame stays flat (JAI_MAX_CALL_DEPTH path). Called only when armed.
         void debug_statement_boundary(frame& f);
+        void debug_stop_at(const ast_node* node);   // a statement the backend runs outside any chunk (a namespace's class)
 
         // the compiled body of a function object, cached per (body, unit): the unit is the function's own
         std::shared_ptr<chunk> chunk_for_body(std::string_view name,

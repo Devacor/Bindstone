@@ -566,25 +566,79 @@ void vm_backend::sync_debug_hook() {
 	auto* dbg = debug_controller_.load(std::memory_order_acquire);
 	debug::controller* next = (dbg && dbg->sync_hot_state()) ? dbg : nullptr;
 	if (debug_hook_ && !next) { arm_execution_deadline(); }
+	if (!debug_hook_ && next) { ++debug_epoch_; debug_last_frame_ = nullptr; }
 	if (debug_hook_ != next) { raw_epoch_advance(); }   // an attach or a detach: no raw call plan outlives it
 	debug_hook_ = next;
 }
 
-// Statement boundary: the stamped node changed, we entered a different chunk, or a
-// backward jump re-entered the same statement (ip <= the ip the hook last fired at in
-// this frame — loop iterations re-fire, straight-line ops inside one statement don't).
+namespace {
+// Sorted by start, an enclosing span before the spans it holds; parents linked through a stack, the innermost span of each
+// instruction written last.
+void build_debug_index(const chunk& c) {
+	auto& spans = c.debug_spans;
+	std::vector<uint32_t> order(spans.size());
+	for (uint32_t i = 0; i < order.size(); ++i) { order[i] = i; }
+	std::stable_sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+		if (spans[a].start != spans[b].start) return spans[a].start < spans[b].start;
+		if (spans[a].end != spans[b].end) return spans[a].end > spans[b].end;
+		return a > b;   // recorded after its children: the later record of one range encloses
+	});
+	std::vector<chunk::debug_span> sorted;
+	sorted.reserve(spans.size());
+	for (const uint32_t i : order) { sorted.push_back(spans[i]); }
+	spans = std::move(sorted);
+	c.debug_innermost.assign(c.code.size(), 0);
+	std::vector<uint32_t> open;
+	for (uint32_t i = 0; i < spans.size(); ++i) {
+		while (!open.empty() && spans[open.back()].end <= spans[i].start) { open.pop_back(); }
+		spans[i].parent = open.empty() ? 0 : open.back() + 1;
+		open.push_back(i);
+		for (uint32_t ip = spans[i].start; ip < spans[i].end && ip < c.debug_innermost.size(); ++ip) { c.debug_innermost[ip] = i + 1; }
+	}
+}
+}
+
+// A statement stops each time control enters its instruction range from outside it (the interpreter dispatches it): every
+// stop span holding the instruction and not the frame's previous one fires, enclosing first. A back edge inside a loop's
+// range starts nothing; instructions outside every span (trampolines, cell copies, the halt) neither stop nor move the
+// previous instruction. A new frame enters from outside everything; a frame whose edge state predates this session stops
+// at its innermost statement only.
 void vm_backend::debug_statement_boundary(frame& f) {
-	const ast_node* sn = f.ip < f.code->stmt_nodes.size() ? f.code->stmt_nodes[f.ip] : nullptr;
-	if (!sn) { return; }
-	if (sn == f.debug_stmt && f.ip > f.debug_stmt_ip) { return; }
-	f.debug_stmt = sn;
-	f.debug_stmt_ip = f.ip;
-	if (debug_hook_->wants_statement(static_cast<uint32_t>(sn->location.line))) {
+	const chunk& c = *f.code;
+	if (c.debug_innermost.size() != c.code.size()) { build_debug_index(c); }
+	const size_t depth = call_records_top_ + static_cast<size_t>(current_call_depth_);
+	const bool same_frame = &f == debug_last_frame_ && f.code == debug_last_code_ && depth == debug_last_depth_;
+	debug_last_frame_ = &f;
+	debug_last_code_ = f.code;
+	debug_last_depth_ = depth;
+	const uint32_t at = f.ip < c.debug_innermost.size() ? c.debug_innermost[f.ip] : 0;
+	if (!at) { return; }
+	const bool fresh = f.ip == 0 && !same_frame;
+	const bool known = !fresh && f.debug_epoch == debug_epoch_ && f.debug_prev_code == f.code;
+	const uint32_t prev = f.debug_prev_ip;
+	f.debug_prev_code = f.code;
+	f.debug_prev_ip = static_cast<uint32_t>(f.ip);
+	f.debug_epoch = debug_epoch_;
+	uint32_t entered[64];
+	size_t count = 0;
+	for (uint32_t s = at; s && count < 64; s = c.debug_spans[s - 1].parent) {
+		const chunk::debug_span& span = c.debug_spans[s - 1];
+		if (known && prev >= span.start && prev < span.end) { break; }
+		entered[count++] = s;
+		if (!fresh && !known) { break; }
+	}
+	while (count) {
+		const ast_node* sn = c.debug_spans[entered[--count] - 1].node;
+		if (!debug_hook_ || !debug_hook_->wants_statement(static_cast<uint32_t>(sn->location.line))) { continue; }
 		debug_paused_frame_ = &f;
-		debug_hook_->on_statement(sn,
-			static_cast<int>(call_records_top_ + static_cast<size_t>(current_call_depth_)));
+		debug_hook_->on_statement(sn, static_cast<int>(depth));
 		debug_paused_frame_ = nullptr;
 	}
+}
+
+void vm_backend::debug_stop_at(const ast_node* node) {
+	if (!debug_hook_->wants_statement(static_cast<uint32_t>(node->location.line))) { return; }
+	debug_hook_->on_statement(node, static_cast<int>(call_records_top_ + static_cast<size_t>(current_call_depth_)));
 }
 
 std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_locals() const {
@@ -17377,6 +17431,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 				class_decl_ptr->name_id = symbolizer_->intern(class_decl_ptr->name);
 			}
 
+			if (debug_hook_) [[unlikely]] { debug_stop_at(class_decl_ptr); }
 			VM_TRY(exec_class_decl_node(class_decl_ptr));
 
 			auto [class_var_id, class_var_name] = symbolizer_->get_class_var_id_with_view(class_decl_ptr->name_id);
@@ -19137,6 +19192,7 @@ checked_result<void> vm_backend::run(frame& entry) {
 #endif
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
+	if (debug_hook_) [[unlikely]] { debug_last_frame_ = nullptr; }   // a host-entered frame at ip 0 is a new frame, whatever record holds it
 #ifdef JAISCRIPT_VM_PROFILE
 	// host-entered frames (execute, execute_callable, a fiber's body) never go through the
 	// in-loop push and pop, so their inclusive span is taken here

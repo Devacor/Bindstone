@@ -1793,6 +1793,36 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				}
 			}
 		});
+		test("an_endless_loop_around_a_closed_loop_and_a_host_call_ends_at_every_step_budget", [this]() {
+			// jaiscript_fuzz seeds 5792 and 9516 (--max-depth 3) on the vm ran past the budget in most runs: the loop counter is reset inside the
+			// body (i /= 94; a loop storing 0 into it), the body holds a closed counted loop, a host call and a continue; whether the deadline
+			// fell on the block's back edge or on the general form's decided it, so the vm tries every step budget up to 24 polls (the interpreter,
+			// which has no blocks, a few)
+			const char* shapes[] = {
+				"function f() { for (int i = 0; i < 6; ++i) { array<int> a = [41, 35, 36, 31, 27, 14, 60, 19]; int s = 7;\n"
+				"for (int k = 0; k < 8; k += 1) { s = s / 5 + a[k]; s = (s + i % 97) % 100003; }\n"
+				"sink(s, a[7]); i /= (91 + 3); auto b = (!false); continue; } } f();",
+				"function f() { var m = {\"k0\": 1}; for (int i = 0; i < 5; ++i) { sink(m); array<int> a = [-2, 13, 35, 7, -3]; int s = 8;\n"
+				"for (int k = 0; k < 5; k++) { int t = a[k] + k; s = (s + t) % 100003; for (int j = 0; j < 2; j++) { a[j] += 4; } int u = a[k] + k; s = (s + u) % 100003; }\n"
+				"sink(s, a[1]); for (int r = 0; r < 6; r++) { i = (-((r * 0))); } } } f();",
+			};
+			auto run = [](bool vm, const char* src, uint64_t steps) -> std::string {
+				auto e = engine::make();
+				if (vm) { e->set_backend(backend_type::vm); }
+				e->add_variadic_function("sink", [raw = e.get()](const std::vector<script_value>&) { return script_value(std::monostate{}, raw); });
+				e->execution_step_budget(steps);
+				e->execution_budget(30.0);
+				try { return e->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			for (const char* s : shapes) {
+				for (bool vm : { false, true }) {
+					for (uint64_t steps = 1; steps <= 24; steps += vm ? 1 : 7) {
+						const std::string got = run(vm, s, steps);
+						check_true(got.find("Script execution budget exceeded") != std::string::npos, std::string(vm ? "vm" : "interpreter") + " step budget " + std::to_string(steps) + ": " + got + "\n" + s);
+					}
+				}
+			}
+		});
 		test("a_math_pairs_first_argument_takes_its_value_before_the_second_calls", [this]() {
 			// math::min(G, bump() ? 4 : 8) in a loop: the first argument takes its value before the second argument's call writes it (C++17
 			// argument order), for a global, a bare field, this.x, another object's field, a global element, a reference local and a captured

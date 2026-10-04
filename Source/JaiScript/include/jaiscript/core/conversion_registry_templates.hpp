@@ -57,7 +57,7 @@ inline T conversion_registry::convert_from_script(const script_value& v) const {
     }
     
     // No fallback - caller should handle this
-    throw std::runtime_error("No conversion registered in convert_from_script for type: " + std::string(typeid(T).name()));
+    throw_unregistered_conversion("No conversion registered in convert_from_script for type: ", typeid(T).name());
 }
 
 template<typename T>
@@ -69,7 +69,7 @@ inline script_value conversion_registry::convert_to_script(const T& value) const
     }
     
     // No conversion registered
-    throw std::runtime_error("No conversion registered for type: " + std::string(typeid(T).name()));
+    throw_unregistered_conversion("No conversion registered for type: ", typeid(T).name());
 }
 
 template<typename T>

@@ -93,8 +93,7 @@ void bind_observable_change_method(engine& a_engine, class_definition& class_def
 			throw runtime_error("Method called without 'this' object");
 		}
 		if (args.size() != 2) {
-			throw runtime_error("Method expects " + std::to_string(1) +
-				" arguments, got " + std::to_string(args.size() - 1));
+			throw_binder_arity("Method expects ", 1, args.size() - 1);
 		}
 
 		void* self = access.extract(args[0], native_type_id);
@@ -217,7 +216,7 @@ void bind_schema_math_property(engine& a_engine, class_definition& class_def, se
 	auto setter = [prop_name, bridge, access](void* self, const script_value& arg) {
 		uint32_t words[4] = {0, 0, 0, 0};
 		if (!arg.math_words_as(bridge.kind, words)) {
-			throw runtime_error(format_error_message_numeric(script_value::math_conversion_text(bridge.kind), arg.deref().type_id(), 0));
+			throw_numeric_error(script_value::math_conversion_text(bridge.kind), arg.deref().type_id(), 0);
 		}
 		if (jai::property_base* prop = access.find(self, prop_name)) {
 			bridge.assign(*prop, words);

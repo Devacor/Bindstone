@@ -10,6 +10,29 @@
 
 namespace jai {
 
+[[noreturn]] JAI_NOINLINE void throw_runtime_error(std::string_view message) {
+    throw runtime_error(std::string(message));
+}
+
+[[noreturn]] JAI_NOINLINE void throw_numeric_error(std::string_view message, uint64_t id1, uint64_t id2) {
+    throw runtime_error(format_error_message_numeric(message, id1, id2));
+}
+
+[[noreturn]] JAI_NOINLINE void throw_binder_arity(const char* prefix, size_t expected, size_t got) {
+    throw runtime_error(prefix + std::to_string(expected) + " arguments, got " + std::to_string(got));
+}
+
+[[noreturn]] JAI_NOINLINE void throw_text_with_count(const char* text, size_t count) {
+    throw runtime_error(text + std::to_string(count));
+}
+
+[[noreturn]] JAI_NOINLINE void throw_concat(std::string_view a, std::string_view b, std::string_view c) {
+    std::string text;
+    text.reserve(a.size() + b.size() + c.size());
+    text.append(a).append(b).append(c);
+    throw runtime_error(text);
+}
+
 script_value::script_value(script_int i, engine* eng) : type_info_(nullptr), engine_(eng), storage_(i) {
     if (eng) {
         type_info_ = eng->get_type_info_int();
@@ -809,7 +832,7 @@ std::string_view interned_type_text(engine* eng, std::string_view name, uint64_t
 }
 }
 
-script_value script_value::make_object(const std::string& type_name, std::shared_ptr<void> data, engine* eng) {
+script_value script_value::make_object(std::string_view type_name, std::shared_ptr<void> data, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
     }
@@ -818,7 +841,7 @@ script_value script_value::make_object(const std::string& type_name, std::shared
     return make_object(type_name, type_id, data, eng);
 }
 
-script_value script_value::make_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class) {
+script_value script_value::make_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng, bool is_cpp_class) {
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
     }
@@ -827,7 +850,7 @@ script_value script_value::make_object(const std::string& type_name, uint64_t ty
 
     auto class_def = eng->get_class_definition(type_id);
     if (!class_def) {
-        throw runtime_error("Cannot create object of unregistered class '" + type_name +
+        throw runtime_error("Cannot create object of unregistered class '" + std::string(type_name) +
             "'. Classes must be registered with engine.register_class() before instantiation.");
     }
 
@@ -867,7 +890,7 @@ script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_p
     return v;
 }
 
-script_value script_value::make_cpp_object(const std::string& type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng) {
+script_value script_value::make_cpp_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create cpp_object with null engine pointer");
     }
@@ -876,7 +899,7 @@ script_value script_value::make_cpp_object(const std::string& type_name, uint64_
 
     auto class_def = eng->get_class_definition(type_id);
     if (!class_def) {
-        throw runtime_error("Cannot create cpp_object of unregistered class '" + type_name +
+        throw runtime_error("Cannot create cpp_object of unregistered class '" + std::string(type_name) +
             "'. Classes must be registered with engine.register_class() before instantiation.");
     }
 
@@ -892,14 +915,14 @@ script_value script_value::make_cpp_object(const std::string& type_name, uint64_
     return v;
 }
 
-script_value script_value::make_cpp_reference(const std::string& type_name, uint64_t type_id, void* object,
+script_value script_value::make_cpp_reference(std::string_view type_name, uint64_t type_id, void* object,
                                               std::weak_ptr<void> owner, engine* eng) {
     if (!eng) {
         throw runtime_error("Cannot create cpp_reference with null engine pointer");
     }
     auto class_def = eng->get_class_definition(type_id);
     if (!class_def) {
-        throw runtime_error("Cannot create cpp_reference of unregistered class '" + type_name + "'");
+        throw runtime_error("Cannot create cpp_reference of unregistered class '" + std::string(type_name) + "'");
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = class_def->get_type_info();

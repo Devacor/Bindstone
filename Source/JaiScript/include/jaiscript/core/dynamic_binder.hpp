@@ -672,8 +672,7 @@ public:
             
             // Validate argument count (first arg is 'this', so we need sizeof...(Args) + 1 total)
             if (args.size() != sizeof...(Args) + 1) {
-                throw runtime_error("Method expects " + std::to_string(sizeof...(Args)) +
-                                 " arguments, got " + std::to_string(args.size() - 1));
+                throw_binder_arity("Method expects ", sizeof...(Args), args.size() - 1);
             }
 
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
@@ -714,8 +713,7 @@ public:
 
             // Validate argument count (first arg is 'this', so we need sizeof...(Args) + 1 total)
             if (args.size() != sizeof...(Args) + 1) {
-                throw runtime_error("Method expects " + std::to_string(sizeof...(Args)) +
-                                 " arguments, got " + std::to_string(args.size() - 1));
+                throw_binder_arity("Method expects ", sizeof...(Args), args.size() - 1);
             }
 
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
@@ -781,8 +779,7 @@ public:
                     throw runtime_error("Method called without 'this' object");
                 }
                 if (args.size() != traits::arity) {
-                    throw runtime_error("Method expects " + std::to_string(traits::arity - 1) +
-                                     " arguments, got " + std::to_string(args.size() - 1));
+                    throw_binder_arity("Method expects ", traits::arity - 1, args.size() - 1);
                 }
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
                 if (auto eng = engine_ptr) {
@@ -831,8 +828,7 @@ public:
         auto static_method_func = [func, engine_ptr = &engine_](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
             // Validate argument count (no 'this' for static methods)
             if (args.size() != sizeof...(Args)) {
-                throw runtime_error("Static method expects " + std::to_string(sizeof...(Args)) + 
-                                 " arguments, got " + std::to_string(args.size()));
+                throw_binder_arity("Static method expects ", sizeof...(Args), args.size());
             }
             if constexpr (writeback != 0) {
                 return callWithWriteback<R, std::tuple<Args...>, 0, 0>(func, args, std::index_sequence_for<Args...>{}, engine_ptr);
@@ -875,8 +871,7 @@ public:
         auto static_method_func = [callable = std::forward<Callable>(callable), engine_ptr = &engine_](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
             // Validate argument count
             if (args.size() != traits::arity) {
-                throw runtime_error("Static method expects " + std::to_string(traits::arity) + 
-                                 " arguments, got " + std::to_string(args.size()));
+                throw_binder_arity("Static method expects ", traits::arity, args.size());
             }
             if constexpr (writeback != 0) {
                 return callWithWriteback<typename traits::return_type, typename traits::argument_types, 0, 0>(callable, args, std::make_index_sequence<traits::arity>{}, engine_ptr);
@@ -1224,7 +1219,7 @@ public:
         using SetterArg = std::decay_t<std::tuple_element_t<0, typename setter_traits::argument_types>>;
         class_def_->add_static_method(engine_.symbolize("_set_" + name), [setter = std::forward<Setter>(setter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
             if (args.size() != 1) {
-                throw runtime_error("Static property setter expects 1 argument, got " + std::to_string(args.size()));
+                throw_text_with_count("Static property setter expects 1 argument, got ", args.size());
             }
             setter(detail::value_converter<SetterArg>::from(args[0], engine_ptr));
             return script_value(std::monostate{}, engine_ptr);
@@ -1676,7 +1671,7 @@ public:
 					}
 					auto holder = v.get_object_holder();
 					if (!holder) {
-						throw runtime_error("Cannot convert script_value to shared_ptr<" + class_name + ">");
+						throw_concat("Cannot convert script_value to shared_ptr<", class_name, ">");
 					}
 					return std::static_pointer_cast<T>(detail::native_cast_or_throw(
 						detail::checked_native_object(v.get_engine(), *holder, typeid(T), class_def->get_type_id()), v.get_engine()));
@@ -1734,7 +1729,7 @@ public:
 					[class_def = class_def_](const script_value& v) -> T {
 						auto holder = v.get_object_holder();
 						if (!holder) {
-							throw runtime_error("Cannot convert non-object to " + class_def->get_name());
+							throw_concat("Cannot convert non-object to ", class_def->get_name());
 						}
 						return *detail::extract_cpp_object_ptr<T>(v, class_def->get_type_id());
 					},
@@ -1776,7 +1771,7 @@ public:
 					}
 					auto holder = v.get_object_holder();
 					if (!holder) {
-						throw runtime_error("Cannot convert script_value to shared_ptr<" + class_name + ">");
+						throw_concat("Cannot convert script_value to shared_ptr<", class_name, ">");
 					}
 					return std::static_pointer_cast<T>(detail::native_cast_or_throw(
 						detail::checked_native_object(v.get_engine(), *holder, typeid(T), class_def->get_type_id()), v.get_engine()));
@@ -1987,7 +1982,7 @@ private:
             std::shared_ptr<T> made;
             auto result = callWithWriteback<void, std::tuple<Args...>, 0, 0>([&made](auto&&... a) { made = std::make_shared<T>(std::forward<decltype(a)>(a)...); },
                                                                          args, std::index_sequence<Is...>{}, eng);
-            if (!result) { throw runtime_error(format_error_message_numeric(result.message(), result.symbol_id(), result.symbol_id2())); }
+            if (!result) { throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2()); }
             return made;
         } else {
             return std::make_shared<T>(detail::value_converter<Args>::from(args[Is], eng)...);

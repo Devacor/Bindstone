@@ -12665,6 +12665,7 @@ op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, co
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	const size_t args_base = stack_.size() - argc;
+	if (ins.c == 0 && push_plain_frame(f, fn, pin, args_base, argc)) { return {}; }
 	try {
 		// Real TCO (Dev ruling: no artificial depth limit): a tail-flagged bare call
 		// resolving to the CURRENTLY EXECUTING chunk splices the live record instead
@@ -12827,6 +12828,97 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 	return invoke_callee(f, std::move(pc.value), arguments, site);
 }
 
+static JAI_NOINLINE uint8_t lean_bind_of(const script_defined_function& function) {
+	if (function.backend_lean_bind == 0) {
+		uint8_t lean = 1;
+		const auto& ps = function.parameters();
+		for (size_t i = 0; i < ps.size(); ++i) {
+			const parameter& p = ps[i];
+			const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
+			if (p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i ||
+			    (bt != script_value_type::jai_any_type && bt != script_value_type::jai_int_type && bt != script_value_type::jai_float_type &&
+			     bt != script_value_type::jai_bool_type && bt != script_value_type::jai_char_type)) { lean = 2; break; }
+		}
+		function.backend_lean_bind = lean;
+	}
+	return function.backend_lean_bind;
+}
+
+// bind_parameters' in-place row for every parameter: a primitive argument whose storage matches its by-value slot is already the slot
+static JAI_FORCEINLINE bool binds_in_place(const script_defined_function& function, const script_value* args, size_t argc) {
+	if ((function.backend_lean_bind ? function.backend_lean_bind : lean_bind_of(function)) != 1) { return false; }
+	const auto& ps = function.parameters();
+	if (argc != ps.size()) { return false; }
+	for (size_t i = 0; i < argc; ++i) {
+		const size_t ri = args[i].raw_storage_index();
+		const type_info* pt = ps[i].type.get();
+		const script_value_type bt = pt ? pt->base_type : script_value_type::jai_any_type;
+		const bool ok = (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT || ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR) &&
+		                (bt == script_value_type::jai_any_type ||
+		                 (bt == script_value_type::jai_int_type && ri == script_value::TYPEID_INT) || (bt == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
+		                 (bt == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) || (bt == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR));
+		if (!ok) { return false; }
+	}
+	return true;
+}
+
+// The plain frame: a function without a closure or a frame environment, called outside a block scope, whose arguments are already its
+// parameter slots, takes push_script_frame_pinned's env-untouched lane with nothing that can throw; false = the general push
+bool vm_backend::push_plain_frame(frame& caller, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc) {
+#ifdef JAISCRIPT_VM_PROFILE
+	return false;   // the profile's push sections account the general push
+#endif
+	chunk* body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
+	if (!body_chunk || parallel_worker_ || current_call_depth_ >= limits_->vm_depth_gate || call_records_top_ == call_records_.size()) { return false; }
+	if (function.backend_frame_plan == 0) {
+		function.backend_frame_plan = !body_chunk->needs_frame_env && !function.closure_env && lean_bind_of(function) == 1 ? 2 : 1;
+	}
+	if (function.backend_frame_plan != 2 || (!function.block_defined && environment_ && environment_->block_scope()) ||
+	    !binds_in_place(function, stack_.data() + args_base, argc)) { return false; }
+	if (++budget_tick_ >= 1024 || limits_->memory_tripped()) [[unlikely]] {
+		--budget_tick_;
+		return false;   // the general push runs the budget check
+	}
+	assert(!has_return_value_);
+	if (function.backend_return_conv == 0) {
+		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
+	}
+	call_record& rec = *call_records_[call_records_top_];
+	++call_records_top_;
+	rec.caller = &caller;
+	rec.return_type = function.return_type;
+	rec.return_conv_class = function.backend_return_conv;
+	rec.direct_pin = std::move(pin);
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
+	rec.locals.function_name = function.name;
+	rec.locals.reset_member_scope();
+	rec.locals.scope_state = static_cast<uint8_t>(detail::member_scope_state::none);
+	if (!body_chunk->cell_loops.empty()) { rec.cells.reset_call(body_chunk->max_cells); }
+	rec.f.cells = &rec.cells;
+	rec.env_lazy = true;
+	rec.env_untouched = true;
+	++current_call_depth_;
+	rec.f.code = body_chunk;
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
+	rec.f.window_backed = true;
+	rec.f.window_base = args_base;
+	rec.f.window_live = static_cast<uint32_t>(argc);
+	rec.f.stack_base = args_base;
+	rec.f.top_level = false;
+	rec.f.unit = function.unit;
+	enter_unit(function.unit);
+	frames_.push_back(&rec.f);
+	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
+	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
+	switch_to_ = &rec.f;
+	return true;
+}
+
 // Zero-copy frame push for probe-called frames: no callee value below the window,
 // the record's direct_pin holds the callable (hot reload cannot kill the executing
 // function; the pin releases at pop exactly where the callee slot died).
@@ -12888,7 +12980,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
-	rec.cells.reset_call(body_chunk->max_cells);
+	if (!body_chunk->cell_loops.empty()) { rec.cells.reset_call(body_chunk->max_cells); }
 	rec.f.cells = &rec.cells;
 	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
@@ -12938,30 +13030,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	frames_.push_back(&rec.f);
 	JAI_CALL_PUSH_SECTION(3);
 
-	if (function.backend_lean_bind == 0) {
-		uint8_t lean = 1;
-		const auto& ps = function.parameters();
-		for (size_t i = 0; i < ps.size(); ++i) {
-			const parameter& p = ps[i];
-			const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
-			if (p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i ||
-			    (bt != script_value_type::jai_any_type && bt != script_value_type::jai_int_type && bt != script_value_type::jai_float_type &&
-			     bt != script_value_type::jai_bool_type && bt != script_value_type::jai_char_type)) { lean = 2; break; }
-		}
-		function.backend_lean_bind = lean;
-	}
-	// bind_parameters' in-place row for every parameter: a primitive argument whose storage matches its by-value slot is already the slot
-	bool bound_in_place = function.backend_lean_bind == 1 && argc == function.parameters().size();
-	for (size_t i = 0; bound_in_place && i < argc; ++i) {
-		const script_value& a = stack_[args_base + i];
-		const size_t ri = a.raw_storage_index();
-		const type_info* pt = function.parameters()[i].type.get();
-		const script_value_type bt = pt ? pt->base_type : script_value_type::jai_any_type;
-		bound_in_place = (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT || ri == script_value::TYPEID_BOOL || ri == script_value::TYPEID_CHAR) &&
-		                 (bt == script_value_type::jai_any_type ||
-		                  (bt == script_value_type::jai_int_type && ri == script_value::TYPEID_INT) || (bt == script_value_type::jai_float_type && ri == script_value::TYPEID_FLOAT) ||
-		                  (bt == script_value_type::jai_bool_type && ri == script_value::TYPEID_BOOL) || (bt == script_value_type::jai_char_type && ri == script_value::TYPEID_CHAR));
-	}
+	const bool bound_in_place = binds_in_place(function, stack_.data() + args_base, argc);
 	if (!bound_in_place) {
 		op_status bound{};
 		try {

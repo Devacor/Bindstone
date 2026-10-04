@@ -298,16 +298,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         // Validate element type compatibility
         if (!detail::container_element_compatible(args[0], element_type, self.get_engine())) {
-            // Get type names for error message
-            std::string value_type = detail::container_value_type_name(args[0]);
-            std::string expected_type = detail::type_info_display_name(element_type);
-            // Intern the type names for the error message
-            uint64_t value_type_id = ctx.get_string_symbolizer()->intern(value_type);
-            uint64_t expected_type_id = ctx.get_string_symbolizer()->intern(expected_type);
-            return checked_result<script_value>(
-                make_error_code(runtime_error_code::array_element_type_mismatch),
-                "Cannot push '{0}' to array<{1}>",
-                value_type_id, expected_type_id);
+            return detail::element_type_error(ctx.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", args[0], element_type);
         }
 
         // Convert element if needed (e.g., int -> float for array<float>)
@@ -741,9 +732,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			script_value value = mapped.value().is_reference() ? mapped.value().deref().clone_element() : std::move(mapped.value());
 			if (element_type) {
 				if (!detail::container_element_compatible(value, element_type, eng)) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
-						ctx.get_string_symbolizer()->intern(detail::container_value_type_name(value)),
-						ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
+					return detail::element_type_error(ctx.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", value, element_type);
 				}
 				auto converted = detail::convert_container_element(eng, value, element_type);
 				if (!converted) { return converted.error_value(); }
@@ -920,8 +909,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 				script_value value = input->get(i, eng).clone_element();
 				if (type) {
 					if (!detail::container_element_compatible(value, type, eng)) {
-						return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot push '{0}' to array<{1}>",
-							a_context.get_string_symbolizer()->intern(detail::container_value_type_name(value)), a_context.get_string_symbolizer()->intern(detail::type_info_display_name(type)));
+						return detail::element_type_error(a_context.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", value, type);
 					}
 					auto converted = detail::convert_container_element(eng, value, type);
 					if (!converted) { return converted.error_value(); }
@@ -945,15 +933,12 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         auto& node = *self.unchecked_get_array_storage();
         const script_int index = args[0].unchecked_as_int();
         if (index < 0 || index > static_cast<script_int>(node.size())) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::index_out_of_bounds), "Cannot insert at index {0} of an array of size {1}",
-                ctx.get_string_symbolizer()->intern(std::to_string(index)), ctx.get_string_symbolizer()->intern(std::to_string(node.size())));
+            return detail::index_out_of_bounds_error(ctx.get_string_symbolizer(), "Cannot insert at index {0} of an array of size {1}", "Cannot insert outside the array", index, node.size());
         }
         auto array_type_info = self.get_type_info();
         type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
         if (!detail::container_element_compatible(args[1], element_type, eng)) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::array_element_type_mismatch), "Cannot insert '{0}' into array<{1}>",
-                ctx.get_string_symbolizer()->intern(detail::container_value_type_name(args[1])),
-                ctx.get_string_symbolizer()->intern(detail::type_info_display_name(element_type)));
+            return detail::element_type_error(ctx.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot insert '{0}' into array<{1}>", args[1], element_type);
         }
         auto converted = detail::convert_container_element(eng, args[1], element_type);
         if (!converted) { return converted.error_value(); }
@@ -3938,10 +3923,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 // Numbers intern as symbols: the {0}/{1} machinery resolves symbol ids,
                 // so raw counts printed garbage names ("Array index bool out of bounds
                 // for array of size class_definition")
-                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
-                    "Array index {0} out of bounds for array of size {1}",
-                    string_symbolizer_->intern(std::to_string(index)),
-                    string_symbolizer_->intern(std::to_string(node->size())));
+                return detail::index_out_of_bounds_error(string_symbolizer_, detail::array_index_out_of_bounds_text, detail::array_index_out_of_bounds_slotless, index, node->size());
             }
 
             // Check if the left side is an lvalue (variable, member access, or subscript)
@@ -4003,10 +3985,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         if (type_info_ptr key_type = map_tag->key_type();
                             key_type && key_type->base_type != script_value_type::jai_any_type &&
                             key.deref().type() != key_type->base_type) {
-                            uint64_t got_id = string_symbolizer_->intern(detail::container_value_type_name(key.deref()));
-                            uint64_t want_id = string_symbolizer_->intern(detail::type_info_display_name(key_type));
-                            return checked_result<void>(make_error_code(runtime_error_code::map_key_type_mismatch),
-                                "Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+                            return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type);
                         }
                     }
                     const size_t prior_map_size = map.size();
@@ -4042,10 +4021,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                         auto map_tag = left.get_type_info();
                         type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
                         if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
-                            uint64_t got_id = string_symbolizer_->intern(detail::container_value_type_name(right.deref()));
-                            uint64_t want_id = string_symbolizer_->intern(detail::type_info_display_name(key_type));
-                            return checked_result<void>(make_error_code(runtime_error_code::map_key_type_mismatch),
-                                "Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+                            return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", right.deref(), key_type);
                         }
                         (void)detail::map_compound_insert_default(left, right, engine_);
                     }
@@ -4100,10 +4076,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             const auto& str = left.unchecked_as_string();
             script_int index = right.unchecked_as_int();
             if (index < 0 || index >= static_cast<script_int>(str.size())) {
-                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
-                    "String index {0} out of bounds for string of size {1}",
-                    string_symbolizer_->intern(std::to_string(index)),
-                    string_symbolizer_->intern(std::to_string(str.size())));
+                return detail::index_out_of_bounds_error(string_symbolizer_, detail::string_index_out_of_bounds_text, detail::string_index_out_of_bounds_slotless, index, str.size());
             }
             const script_char byte = static_cast<script_char>(str[static_cast<size_t>(index)]);
             if (want_string_target) {
@@ -4124,10 +4097,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             const size_t len = detail::utf8::length(text, cache);
             script_int index = right.unchecked_as_int();
             if (index < 0 || index >= static_cast<script_int>(len)) {
-                return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds),
-                    "String index {0} out of bounds for string of size {1}",
-                    string_symbolizer_->intern(std::to_string(index)),
-                    string_symbolizer_->intern(std::to_string(len)));
+                return detail::index_out_of_bounds_error(string_symbolizer_, detail::string_index_out_of_bounds_text, detail::string_index_out_of_bounds_slotless, index, len);
             }
             if (want_string_target) {
                 script_value pin = string_element_pin(left_raw, expr->left.get());
@@ -4563,11 +4533,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
         }
         target.instance->set_field_unchecked(member_id, enforced.value());
     } else {
-        const std::string_view cls = target.class_name();
-        std::string text = "Cannot assign to '" + std::string(memberExpr->member) + "': " + (cls.empty() ? std::string("object") : std::string(cls)) + " has no such member";
-        active_exception_value_ = make_value(text);
-        current_exception_ = script_exception(text, memberExpr->location);
-        is_unwinding_ = true;
+        raise_script_text(no_such_member_store_text(memberExpr->member, target.class_name()), memberExpr->location);
         return {};
     }
     return {};
@@ -5548,9 +5514,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // Check if it's an object
             if (!target_obj.is_object()) {
                 // Set exception state instead of throwing
-                active_exception_value_ = make_value(std::string("Cannot assign to member of non-object type"));
-                current_exception_ = script_exception("Cannot assign to member of non-object type", memberExpr->location);
-                is_unwinding_ = true;
+                raise_script_text(non_object_member_store_text({}, {}), memberExpr->location);
                 push_value(make_value());
                 return {};
             }
@@ -6030,8 +5994,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         auto value_type_info = value.get_type_info();
                         if (expected_type && value_type_info &&
                             expected_type->base_type != script_value_type::jai_any_type) {
-                            std::string expected_class = expected_type->type_name;
-                            std::string actual_class = value_type_info->element_type()
+                            const std::string& expected_class = expected_type->type_name;
+                            const std::string& actual_class = value_type_info->element_type()
                                 ? value_type_info->element_type()->type_name
                                 : value_type_info->type_name;
 
@@ -6473,12 +6437,8 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // Check if it's an object
             if (!dereferenced.is_object()) {
                 // Set exception state instead of throwing
-                const std::string_view cls = class_named_by_dot_receiver(memberExpr->object.get(), dereferenced, engine_);
-                const std::string text = cls.empty() ? std::string("Cannot assign to member of non-object type")
-                                                     : class_dot_member_text(cls, memberExpr->member);
-                active_exception_value_ = make_value(text);
-                current_exception_ = script_exception(text, memberExpr->location);
-                is_unwinding_ = true;
+                raise_script_text(non_object_member_store_text(class_named_by_dot_receiver(memberExpr->object.get(), dereferenced, engine_),
+                                                                       memberExpr->member), memberExpr->location);
                 push_value(make_value());
                 return {};
             }
@@ -6601,14 +6561,7 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
     if (in_place) {
     } else if (element_type) {
         if (!detail::container_element_compatible(value, element_type, target_ptr->get_engine())) {
-            std::string value_type = detail::container_value_type_name(value);
-            std::string expected_type = detail::type_info_display_name(element_type);
-            uint64_t value_type_id = string_symbolizer_->intern(value_type);
-            uint64_t expected_type_id = string_symbolizer_->intern(expected_type);
-            return checked_result<void>(
-                make_error_code(runtime_error_code::array_element_type_mismatch),
-                "Cannot assign '{0}' to element of type '{1}'",
-                value_type_id, expected_type_id);
+            return detail::element_type_error(string_symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type);
         }
         // Convert element if needed (e.g., int -> float for array<float>)
         auto converted = detail::convert_container_element_taking(engine_, value, element_type);
@@ -6880,8 +6833,8 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 auto value_type_info = value.get_type_info();
                 if (expected_type && value_type_info &&
                     expected_type->base_type != script_value_type::jai_any_type) {
-                    std::string expected_class = expected_type->type_name;
-                    std::string actual_class = value_type_info->element_type()
+                    const std::string& expected_class = expected_type->type_name;
+                    const std::string& actual_class = value_type_info->element_type()
                         ? value_type_info->element_type()->type_name
                         : value_type_info->type_name;
 
@@ -8031,11 +7984,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         const script_method_dispatch* d = method_val.is_function()
                             ? method_val.as_function().target<script_method_dispatch>() : nullptr;
                         if (!d || d->eng != engine_) {
-                            const std::string_view cls = target.class_name();
-                            std::string text = (cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(member ? member->member : sibling->name) + "'";
-                            active_exception_value_ = make_value(text);
-                            current_exception_ = script_exception(text, expr->callee->location);
-                            is_unwinding_ = true;
+                            raise_no_member(target.class_name(), member ? std::string_view(member->member) : std::string_view(sibling->name), expr->callee->location);
                             push_value(make_value());
                             return {};
                         }
@@ -8582,6 +8531,16 @@ checked_result<void> interpreter::bare_method_value_error(const identifier_expr*
 
 // obj.method without a call (Dev ruling 2026-09-30): a method is called or bound, never read bare. KEEP BYTE-PARALLEL with
 // vm_backend::raise_method_value
+JAI_NOINLINE void interpreter::raise_script_text(const std::string& text, const source_location& location) {
+    active_exception_value_ = make_value(text);
+    current_exception_ = script_exception(text, location);
+    is_unwinding_ = true;
+}
+
+JAI_NOINLINE void interpreter::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
+    raise_script_text(no_member_text(kind, member), location);
+}
+
 checked_result<void> interpreter::method_value_error(const member_expr* expr, const script_value& object, bool bindable) {
     if (parallel_worker_) [[unlikely]] {
         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
@@ -8813,11 +8772,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 push_value(std::move(*error_member));
                 return {};
             }
-            // Set exception state instead of throwing
-            std::string text = std::string(objectValue.is_utf8_string() ? "utf8_string" : "string") + " has no member '" + std::string(expr->member) + "'";
-            active_exception_value_ = make_value(text);
-            current_exception_ = script_exception(text, expr->location);
-            is_unwinding_ = true;
+            raise_no_member(objectValue.is_utf8_string() ? "utf8_string" : "string", expr->member, expr->location);
             push_value(make_value());
             return {};
         }
@@ -8841,11 +8796,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             return {};
         }
         else {
-            // Set exception state instead of throwing
-            std::string text = "array has no member '" + std::string(expr->member) + "'";
-            active_exception_value_ = make_value(text);
-            current_exception_ = script_exception(text, expr->location);
-            is_unwinding_ = true;
+            raise_no_member("array", expr->member, expr->location);
             push_value(make_value());
             return {};
         }
@@ -9111,11 +9062,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
     }
 
-    const std::string_view cls = target.class_name();
-    std::string text = (cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(expr->member) + "'";
-    active_exception_value_ = make_value(text);
-    current_exception_ = script_exception(text, expr->location);
-    is_unwinding_ = true;
+    raise_no_member(target.class_name(), expr->member, expr->location);
     push_value(make_value());  // Push null for failed member access
     return {};
 }
@@ -9860,8 +9807,8 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
             if (expected_type && obj_type_info &&
                 expected_type->base_type != script_value_type::jai_any_type) {
                 // Get the actual class name from the shared_ptr's inner type
-                std::string expected_class = expected_type->type_name;
-                std::string actual_class = obj_type_info->element_type()
+                const std::string& expected_class = expected_type->type_name;
+                const std::string& actual_class = obj_type_info->element_type()
                     ? obj_type_info->element_type()->type_name
                     : obj_type_info->type_name;
 
@@ -13597,7 +13544,7 @@ checked_result<void> interpreter::evaluate_field_initializers(std::shared_ptr<cl
             if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
                 return result.error_value();
             }
-            throw runtime_error("Failed to evaluate field initializer for '" + std::string(string_symbolizer_->get_string(field_id)) + "'");
+            throw_concat("Failed to evaluate field initializer for '", string_symbolizer_->get_string(field_id), "'");
         }
         script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
         if (!field_value.has_valid_engine() && engine_) {
@@ -13880,9 +13827,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                 }
                                             } else {
                                                 // Ancestor is a C++ class - call its constructor NOW
-                                                auto cpp_name = ancestor->get_name();
+                                                const std::string& cpp_name = ancestor->get_name();
                                                 auto cpp_ctor_result = environment_->get(cpp_name);
-                                                if (ancestor_args.empty() && (!cpp_ctor_result || !cpp_ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, std::string(cpp_name)))) {
+                                                if (ancestor_args.empty() && (!cpp_ctor_result || !cpp_ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, cpp_name))) {
                                                     return detail::no_default_constructor(ancestor->get_type_id());
                                                 }
                                                 if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
@@ -13976,9 +13923,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                         // Parent is a C++ class - call its constructor
                         try {
                             // Get the C++ class constructor function
-                            auto parent_name = parent_class->get_name();
+                            const std::string& parent_name = parent_class->get_name();
                             auto ctor_result = environment_->get(parent_name);
-                            if (init_args.empty() && (!ctor_result || !ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, std::string(parent_name)))) {
+                            if (init_args.empty() && (!ctor_result || !ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, parent_name))) {
                                 return detail::no_default_constructor(parent_class->get_type_id());
                             }
                             if (ctor_result && ctor_result.value().is_function()) {
@@ -15362,10 +15309,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
 
     if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
         (out.v == verdict::reject || out.v == verdict::reject_class)) {
-        return checked_result<script_value>(
-            make_error_code(runtime_error_code::type_mismatch),
-            "Cannot convert {0} to {1} (no suitable single-argument constructor)",
-            string_symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_)), target_type->id);
+        return detail::no_converting_constructor_error(string_symbolizer_, derefed_arg, *target_type, engine_);
     }
     return detail::typed_slot_rejection(derefed_arg, *target_type, site, engine_);
 }

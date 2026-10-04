@@ -162,14 +162,6 @@ namespace {
 		}
 	}
 
-	std::string vm_value_type_name(const script_value& val) {
-		return detail::container_value_type_name(val);
-	}
-
-	std::string vm_type_info_name(type_info_ptr info) {
-		return info ? info->canonical_name() : "unknown";
-	}
-
 	// Element compatibility/conversion live in the shared kernel
 	// (detail/container_enforce.hpp, used verbatim by both backends and the field
 	// kernel). These forwards keep the historical local names.
@@ -3558,10 +3550,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 
 	if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
 	    (out.v == verdict::reject || out.v == verdict::reject_class)) {
-		return checked_result<script_value>(
-			make_error_code(runtime_error_code::type_mismatch),
-			"Cannot convert {0} to {1} (no suitable single-argument constructor)",
-			symbolizer_->intern(detail::slot_source_type_name(derefed_arg, engine_)), target_type->id);
+		return detail::no_converting_constructor_error(symbolizer_, derefed_arg, *target_type, engine_);
 	}
 	return detail::typed_slot_rejection(derefed_arg, *target_type, site, engine_);
 }
@@ -6481,10 +6470,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 			// Numbers intern as symbols: the {0}/{1} machinery resolves symbol ids,
 			// so raw counts printed garbage names (KEEP BYTE-PARALLEL with the
 			// interpreter subscript path)
-			return raise_(make_error_code(runtime_error_code::index_out_of_bounds),
-				"Array index {0} out of bounds for array of size {1}",
-				symbolizer_->intern(std::to_string(index)),
-				symbolizer_->intern(std::to_string(node->size())));
+			return raise_from(detail::index_out_of_bounds_error(symbolizer_, detail::array_index_out_of_bounds_text, detail::array_index_out_of_bounds_slotless, index, node->size()));
 		}
 
 		if (lvalue_shape && !transient_read) {
@@ -6516,10 +6502,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 					if (type_info_ptr key_type = map_tag->key_type();
 					    key_type && key_type->base_type != script_value_type::jai_any_type &&
 					    key.deref().type() != key_type->base_type) {
-						uint64_t got_id = symbolizer_->intern(vm_value_type_name(key.deref()));
-						uint64_t want_id = symbolizer_->intern(vm_type_info_name(key_type));
-						return raise_(make_error_code(runtime_error_code::map_key_type_mismatch),
-							"Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type));
 					}
 				}
 				const size_t prior_map_size = map.size();
@@ -6592,10 +6575,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		const auto& str = left.unchecked_as_string();
 		script_int index = right.unchecked_as_int();
 		if (index < 0 || index >= static_cast<script_int>(str.size())) {
-			return raise_(make_error_code(runtime_error_code::index_out_of_bounds),
-				"String index {0} out of bounds for string of size {1}",
-				symbolizer_->intern(std::to_string(index)),
-				symbolizer_->intern(std::to_string(str.size())));
+			return raise_from(detail::index_out_of_bounds_error(symbolizer_, detail::string_index_out_of_bounds_text, detail::string_index_out_of_bounds_slotless, index, str.size()));
 		}
 		const script_char byte = static_cast<script_char>(str[static_cast<size_t>(index)]);
 		if (string_target) {
@@ -6619,10 +6599,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		const size_t len = detail::utf8::length(text, cache);
 		script_int index = right.unchecked_as_int();
 		if (index < 0 || index >= static_cast<script_int>(len)) {
-			return raise_(make_error_code(runtime_error_code::index_out_of_bounds),
-				"String index {0} out of bounds for string of size {1}",
-				symbolizer_->intern(std::to_string(index)),
-				symbolizer_->intern(std::to_string(len)));
+			return raise_from(detail::index_out_of_bounds_error(symbolizer_, detail::string_index_out_of_bounds_text, detail::string_index_out_of_bounds_slotless, index, len));
 		}
 		if (string_target) {
 			script_value pin = string_element_pin(f, left_raw, (ins.a & index_flag_string_target) != 0 ? ins.c : k_invalid_u32);
@@ -6724,14 +6701,7 @@ op_status vm_backend::exec_index_assign(frame& f, const vm_instruction& ins) {
 	if (in_place_1) {
 	} else if (element_type) {
 		if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
-			std::string value_type = vm_value_type_name(value);
-			std::string expected_type = vm_type_info_name(element_type);
-			uint64_t value_type_id = symbolizer_->intern(value_type);
-			uint64_t expected_type_id = symbolizer_->intern(expected_type);
-			return raise_(
-				make_error_code(runtime_error_code::array_element_type_mismatch),
-				"Cannot assign '{0}' to element of type '{1}'",
-				value_type_id, expected_type_id);
+			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type));
 		}
 		auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
 		if (!converted_result) { return raise_from(converted_result); }
@@ -6855,14 +6825,7 @@ op_status vm_backend::exec_index_compound(frame& f, const vm_instruction& ins) {
 	if (in_place_2) {
 	} else if (element_type) {
 		if (!vm_is_element_type_compatible(resultValue, element_type, *target_ptr)) {
-			std::string value_type = vm_value_type_name(resultValue);
-			std::string expected_type = vm_type_info_name(element_type);
-			uint64_t value_type_id = symbolizer_->intern(value_type);
-			uint64_t expected_type_id = symbolizer_->intern(expected_type);
-			return raise_(
-				make_error_code(runtime_error_code::array_element_type_mismatch),
-				"Cannot assign '{0}' to element of type '{1}'",
-				value_type_id, expected_type_id);
+			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", resultValue, element_type));
 		}
 		auto converted_result = vm_convert_array_element(engine_, resultValue, element_type);
 		if (!converted_result) { return raise_from(converted_result); }
@@ -6943,14 +6906,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 				if (in_place_3) {
 				} else if (element_type) {
 					if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
-						std::string value_type = vm_value_type_name(value);
-						std::string expected_type = vm_type_info_name(element_type);
-						uint64_t value_type_id = symbolizer_->intern(value_type);
-						uint64_t expected_type_id = symbolizer_->intern(expected_type);
-						return raise_(
-							make_error_code(runtime_error_code::array_element_type_mismatch),
-							"Cannot assign '{0}' to element of type '{1}'",
-							value_type_id, expected_type_id);
+						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type));
 					}
 					auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
 					if (!converted_result) { return raise_from(converted_result); }
@@ -10938,10 +10894,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 	if (map_tag) {
 		if (const type_info_ptr& key_type = map_tag->type_params.empty() ? no_type : map_tag->type_params[0];
 		    key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
-			uint64_t got_id = symbolizer_->intern(vm_value_type_name(key));
-			uint64_t want_id = symbolizer_->intern(vm_type_info_name(key_type));
-			return raise_(make_error_code(runtime_error_code::map_key_type_mismatch),
-				"Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key, key_type));
 		}
 	}
 	auto& map = const_cast<script_map&>(container.as_map());
@@ -10966,12 +10919,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 		value_ref = value;
 	} else if (value_type) {
 		if (!vm_is_element_type_compatible(value, value_type, value_ref)) {
-			std::string value_type_name = vm_value_type_name(value);
-			std::string expected_type = vm_type_info_name(value_type);
-			uint64_t value_type_id = symbolizer_->intern(value_type_name);
-			uint64_t expected_type_id = symbolizer_->intern(expected_type);
-			return raise_(make_error_code(runtime_error_code::array_element_type_mismatch),
-				"Cannot assign '{0}' to element of type '{1}'", value_type_id, expected_type_id);
+			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, value_type));
 		}
 		auto converted_result = vm_convert_array_element(engine_, value, value_type);
 		if (!converted_result) { return raise_from(converted_result); }
@@ -11239,14 +11187,7 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 			if (in_place_4) {
 			} else if (element_type) {
 				if (!vm_is_element_type_compatible(value, element_type, *target_ptr)) {
-					std::string value_type = vm_value_type_name(value);
-					std::string expected_type = vm_type_info_name(element_type);
-					uint64_t value_type_id = symbolizer_->intern(value_type);
-					uint64_t expected_type_id = symbolizer_->intern(expected_type);
-					return raise_(
-						make_error_code(runtime_error_code::array_element_type_mismatch),
-						"Cannot assign '{0}' to element of type '{1}'",
-						value_type_id, expected_type_id);
+					return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", value, element_type));
 				}
 				auto converted_result = detail::convert_container_element_taking(engine_, value, element_type);
 				if (!converted_result) { return raise_from(converted_result); }
@@ -11312,10 +11253,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 			auto tag = container.get_type_info();
 			type_info_ptr key_type = tag ? tag->key_type() : nullptr;
 			if (key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
-				uint64_t got_id = symbolizer_->intern(vm_value_type_name(key));
-				uint64_t want_id = symbolizer_->intern(vm_type_info_name(key_type));
-				return raise_(make_error_code(runtime_error_code::map_key_type_mismatch),
-					"Cannot use '{0}' as a key of type '{1}'", got_id, want_id);
+				return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key, key_type));
 			}
 			(void)detail::map_compound_insert_default(container, key, engine_);
 		}
@@ -11385,14 +11323,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 					if (in_place_5) {
 					} else if (element_type) {
 						if (!vm_is_element_type_compatible(resultValue, element_type, *target_ptr)) {
-							std::string value_type = vm_value_type_name(resultValue);
-							std::string expected_type = vm_type_info_name(element_type);
-							uint64_t value_type_id = symbolizer_->intern(value_type);
-							uint64_t expected_type_id = symbolizer_->intern(expected_type);
-							return raise_(
-								make_error_code(runtime_error_code::array_element_type_mismatch),
-								"Cannot assign '{0}' to element of type '{1}'",
-								value_type_id, expected_type_id);
+							return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot assign '{0}' to element of type '{1}'", resultValue, element_type));
 						}
 						// Numeric-to-numeric conversion: no user code (int/float only)
 						auto converted_result = vm_convert_array_element(engine_, resultValue, element_type);
@@ -11614,8 +11545,8 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			auto value_type_info = value.get_type_info();
 			if (expected_type && value_type_info &&
 			    expected_type->base_type != script_value_type::jai_any_type) {
-				std::string expected_class = expected_type->type_name;
-				std::string actual_class = value_type_info->element_type()
+				const std::string& expected_class = expected_type->type_name;
+				const std::string& actual_class = value_type_info->element_type()
 					? value_type_info->element_type()->type_name
 					: value_type_info->type_name;
 				if (expected_class != actual_class && engine_) {
@@ -12454,7 +12385,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			? site.bi_string != builtin_method_registries::k_no_builtin
 			: builtins_.string_methods.find(member_id) != builtins_.string_methods.end();
 		if (!known) {
-			raise_script_exception("string has no member '" + std::string(member->member) + "'", member->location);
+			raise_no_member("string", member->member, member->location);
 		}
 		return {};
 	}
@@ -12463,7 +12394,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			? site.bi_string != builtin_method_registries::k_no_builtin && builtins_.utf8_by_index[site.bi_string]
 			: builtins_.utf8_methods.find(member_id) != builtins_.utf8_methods.end();
 		if (!known) {
-			raise_script_exception("utf8_string has no member '" + std::string(member->member) + "'", member->location);
+			raise_no_member("utf8_string", member->member, member->location);
 		}
 		return {};
 	}
@@ -12472,7 +12403,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			? site.bi_array != builtin_method_registries::k_no_builtin
 			: builtins_.array_methods.find(member_id) != builtins_.array_methods.end();
 		if (!known) {
-			raise_script_exception("array has no member '" + std::string(member->member) + "'", member->location);
+			raise_no_member("array", member->member, member->location);
 		}
 		return {};
 	}
@@ -12574,10 +12505,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			}
 		}
 	}
-	{
-		const std::string_view cls = target.class_name();
-		raise_script_exception((cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(member->member) + "'", member->location);
-	}
+	raise_no_member(target.class_name(), member->member, member->location);
 	return {};
 }
 
@@ -13745,10 +13673,14 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 // Members, methods, classes (mirror interpreter semantics)
 // ============================================================
 
-void vm_backend::raise_script_exception(const std::string& message, const source_location& location) {
+JAI_NOINLINE void vm_backend::raise_script_exception(const std::string& message, const source_location& location) {
 	active_exception_value_ = script_value(message, engine_);
 	current_exception_ = script_exception(message, location);
 	is_unwinding_ = true;
+}
+
+JAI_NOINLINE void vm_backend::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
+	raise_script_exception(no_member_text(kind, member), location);
 }
 
 checked_result<script_value> vm_backend::eval_expression(const expression_ptr& expr, const std::shared_ptr<environment>& env) {
@@ -14040,8 +13972,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			out = std::move(*error_member);
 			return {};
 		}
-		std::string member_str(expr->member);
-		raise_script_exception(std::string(objectValue.is_utf8_string() ? "utf8_string" : "string") + " has no member '" + member_str + "'", expr->location);
+		raise_no_member(objectValue.is_utf8_string() ? "utf8_string" : "string", expr->member, expr->location);
 		out = make_null();
 		return {};
 	}
@@ -14058,8 +13989,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
 		}
-		std::string member_str(expr->member);
-		raise_script_exception("array has no member '" + member_str + "'", expr->location);
+		raise_no_member("array", expr->member, expr->location);
 		out = make_null();
 		return {};
 	}
@@ -14269,10 +14199,7 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 		}
 	}
 
-	{
-		const std::string_view cls = target.class_name();
-		raise_script_exception((cls.empty() ? std::string("object") : std::string(cls)) + " has no member '" + std::string(expr->member) + "'", expr->location);
-	}
+	raise_no_member(target.class_name(), expr->member, expr->location);
 	out = make_null();
 	return {};
 }
@@ -14797,8 +14724,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 		}
 		target.instance->set_field_unchecked(member_id, enforced.value());
 	} else {
-		const std::string_view cls = target.class_name();
-		raise_script_exception("Cannot assign to '" + std::string(member->member) + "': " + (cls.empty() ? std::string("object") : std::string(cls)) + " has no such member", member->location);
+		raise_script_exception(no_such_member_store_text(member->member, target.class_name()), member->location);
 		return {};
 	}
 	return {};
@@ -14844,8 +14770,7 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 			if (want_result) { stack_.push_back(assignment_result_used(f) ? std::move(stored) : std::move(value)); }
 			return {};
 		}
-		const std::string_view cls = class_named_by_dot_receiver(member->object.get(), dereferenced, engine_);
-		raise_script_exception(cls.empty() ? std::string("Cannot assign to member of non-object type") : class_dot_member_text(cls, member->member),
+		raise_script_exception(non_object_member_store_text(class_named_by_dot_receiver(member->object.get(), dereferenced, engine_), member->member),
 		                       member->location);
 		if (want_result) { stack_.push_back(make_null()); }
 		return {};
@@ -15556,14 +15481,7 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 			auto array_type_info = objd.get_type_info();
 			type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 			if (!vm_is_element_type_compatible(*val, element_type, const_cast<script_value&>(objd))) {
-				std::string value_type = vm_value_type_name(val->deref());
-				std::string expected_type = vm_type_info_name(element_type);
-				uint64_t value_type_id = symbolizer_->intern(value_type);
-				uint64_t expected_type_id = symbolizer_->intern(expected_type);
-				return raise_(
-					make_error_code(runtime_error_code::array_element_type_mismatch),
-					"Cannot push '{0}' to array<{1}>",
-					value_type_id, expected_type_id);
+				return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", val->deref(), element_type));
 			}
 			// The unfused pair pinned the node through the receiver's stack copy; a
 			// conversion can run user code, so pin it the same way before converting
@@ -15976,14 +15894,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					auto array_type_info = objd.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 					if (!vm_is_element_type_compatible(stack_[args_base], element_type, objd)) {
-						std::string value_type = vm_value_type_name(stack_[args_base].deref());   // an element-reference argument names its referent
-						std::string expected_type = vm_type_info_name(element_type);
-						uint64_t value_type_id = symbolizer_->intern(value_type);
-						uint64_t expected_type_id = symbolizer_->intern(expected_type);
-						return raise_(
-							make_error_code(runtime_error_code::array_element_type_mismatch),
-							"Cannot push '{0}' to array<{1}>",
-							value_type_id, expected_type_id);
+						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", stack_[args_base].deref(), element_type));
 					}
 #ifdef JAISCRIPT_VM_PROFILE
 					const uint64_t push_t1 = __rdtsc(); profile_push_sections_[3] += push_t1 - push_t0;
@@ -16286,14 +16197,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 					auto array_type_info = objv.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 					if (!vm_is_element_type_compatible(arguments[0], element_type, objv)) {
-						std::string value_type = vm_value_type_name(arguments[0].deref());
-						std::string expected_type = vm_type_info_name(element_type);
-						uint64_t value_type_id = symbolizer_->intern(value_type);
-						uint64_t expected_type_id = symbolizer_->intern(expected_type);
-						return raise_(
-							make_error_code(runtime_error_code::array_element_type_mismatch),
-							"Cannot push '{0}' to array<{1}>",
-							value_type_id, expected_type_id);
+						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", arguments[0].deref(), element_type));
 					}
 					auto converted_result = vm_convert_array_element(engine_, arguments[0], element_type);
 					if (!converted_result) { return raise_from(converted_result); }
@@ -16457,8 +16361,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		auto obj_type_info = obj.get_type_info();
 		if (expected_type && obj_type_info &&
 		    expected_type->base_type != script_value_type::jai_any_type) {
-			std::string expected_class = expected_type->type_name;
-			std::string actual_class = obj_type_info->element_type()
+			const std::string& expected_class = expected_type->type_name;
+			const std::string& actual_class = obj_type_info->element_type()
 				? obj_type_info->element_type()->type_name
 				: obj_type_info->type_name;
 			if (expected_class != actual_class && engine_) {
@@ -17403,7 +17307,7 @@ checked_result<void> vm_backend::evaluate_field_initializers(std::shared_ptr<cla
 			if (result.error() == make_error_code(runtime_error_code::max_recursion_depth)) {
 				return result.error_value();
 			}
-			throw runtime_error("Failed to evaluate field initializer for '" + std::string(symbolizer_->get_string(field_id)) + "'");
+			throw_concat("Failed to evaluate field initializer for '", symbolizer_->get_string(field_id), "'");
 		}
 		script_value field_value = initializer_store_value(std::move(result.value()), initializer_ast.get());
 		if (!field_value.has_valid_engine() && engine_) {
@@ -17601,9 +17505,9 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 														ancestor_script->get_type_id(), ancestor_args.data(), ancestor_args.size(), engine_, true);
 												}
 											} else {
-												auto cpp_name = ancestor->get_name();
+												const std::string& cpp_name = ancestor->get_name();
 												auto cpp_ctor_result = environment_->get(cpp_name);
-												if (ancestor_args.empty() && (!cpp_ctor_result || !cpp_ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, std::string(cpp_name)))) {
+												if (ancestor_args.empty() && (!cpp_ctor_result || !cpp_ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, cpp_name))) {
 													return detail::no_default_constructor(ancestor->get_type_id());
 												}
 												if (cpp_ctor_result && cpp_ctor_result.value().is_function()) {
@@ -17678,9 +17582,9 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 						}
 					} else {
 						try {
-							auto parent_name = parent_class->get_name();
+							const std::string& parent_name = parent_class->get_name();
 							auto ctor_result = environment_->get(parent_name);
-							if (init_args.empty() && (!ctor_result || !ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, std::string(parent_name)))) {
+							if (init_args.empty() && (!ctor_result || !ctor_result.value().is_function() || detail::host_lacks_default_constructor(engine_, parent_name))) {
 								return detail::no_default_constructor(parent_class->get_type_id());
 							}
 							if (ctor_result && ctor_result.value().is_function()) {

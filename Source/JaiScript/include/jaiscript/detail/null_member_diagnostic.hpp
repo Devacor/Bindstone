@@ -50,6 +50,21 @@ inline std::string class_dot_member_text(std::string_view cls, std::string_view 
     return "'" + std::string(cls) + "' is a class; use " + std::string(cls) + "::" + std::string(member);
 }
 
+// `x.m` on a receiver without m: kind is the receiver's class or builtin kind (empty: object)
+inline std::string no_member_text(std::string_view kind, std::string_view member) {
+    return std::string(kind.empty() ? std::string_view("object") : kind) + " has no member '" + std::string(member) + "'";
+}
+
+// `x.m = v` on an object without m
+inline std::string no_such_member_store_text(std::string_view member, std::string_view cls) {
+    return "Cannot assign to '" + std::string(member) + "': " + std::string(cls.empty() ? std::string_view("object") : cls) + " has no such member";
+}
+
+// `x.m = v` on a non-object (cls: the class a dot receiver names, else empty)
+inline std::string non_object_member_store_text(std::string_view cls, std::string_view member) {
+    return cls.empty() ? std::string("Cannot assign to member of non-object type") : class_dot_member_text(cls, member);
+}
+
 // The raise's (text, symbol): a frozen symbolizer (a parallel worker) gets the name-free shape
 template <class Symbolizer>
 inline std::pair<std::string_view, uint64_t> class_dot_member_error(Symbolizer& symbols, bool frozen, std::string_view cls,

@@ -18,7 +18,14 @@ capitalized first word):
 - numbers render as numbers (arity counts ride the pre-interned count table);
 - error paths intern nothing new while the symbolizer is frozen (a parallel region): a composed
   description (`parameter 'n' of 'fib' (declared int)`, `(int, string)`) is interned only on
-  the main thread; a worker gets the slot-less / list-free shape of the same text.
+  the main thread; a worker gets the slot-less / list-free shape of the same text
+  (`Array index out of bounds`, `String index out of bounds`, `Cannot insert outside the array`,
+  `Cannot cast the value to the target type` when a spelling was never interned,
+  `Cannot assign to a string character (it takes a char or a string)`, `merge() expects exactly 2 arguments`,
+  `'f' was called with the wrong number of arguments` for a callee declaring 64 or more parameters);
+- a text is composed only once the failure is decided, out of line (`JAI_NOINLINE` kernels such as
+  `detail::element_type_error`, `detail::index_out_of_bounds_error`, `no_member_text`, `throw_numeric_error`), so a
+  hot path's frame carries no string temporaries for the error it does not raise.
 
 Symbol arguments: `{0}`/`{1}` are the two `checked_result` symbol slots. Base-type spellings
 are interned once at backend init (`base_type_symbols`), arity counts once at init

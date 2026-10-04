@@ -1490,6 +1490,8 @@ namespace jai::vm {
         checked_result<bool> language_equal(const script_value& a, const script_value& b);   // the language's == (a global operator==, the value's own)
 
         void raise_script_exception(const std::string& message, const source_location& location);
+        // the member paths' composed texts, built out of line (no string temporaries in the handlers)
+        void raise_no_member(std::string_view kind, std::string_view member, const source_location& location);
 
         // Runs a standalone expression chunk (node-keyed cache) in the given environment
         checked_result<script_value> eval_expression(const expression_ptr& expr, const std::shared_ptr<environment>& env);

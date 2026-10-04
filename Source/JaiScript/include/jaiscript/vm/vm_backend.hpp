@@ -1105,7 +1105,11 @@ namespace jai::vm {
         bool execution_budget_exhausted();
         // Combined limit check at loop back-edges / call entry (budget tick + memory
         // high-water) and its cold raise twin. KEEP BYTE-PARALLEL with the interpreter.
-        bool execution_limit_exhausted();
+        JAI_FORCEINLINE bool execution_limit_exhausted() {
+            if (budget_tick_ < 1023 && !limits_->memory_tripped()) [[likely]] { ++budget_tick_; return false; }
+            return execution_limit_exhausted_slow();
+        }
+        bool execution_limit_exhausted_slow();
         error_propagator execution_limit_failure();
         // Debug sync point (execute entry + every 1024 budget ticks + park exit via the
         // controller): mirrors debug_controller_ into the plain per-op gate and hands a

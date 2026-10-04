@@ -636,7 +636,7 @@ std::vector<std::pair<std::string, script_value>> vm_backend::get_current_frame_
 	return out;
 }
 
-bool vm_backend::execution_limit_exhausted() {
+JAI_NOINLINE bool vm_backend::execution_limit_exhausted_slow() {
 	return execution_budget_exhausted() || limits_->memory_tripped();
 }
 

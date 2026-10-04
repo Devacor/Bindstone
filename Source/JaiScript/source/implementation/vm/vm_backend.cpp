@@ -3409,6 +3409,18 @@ detail::slot_site decl_site(const variable_decl* decl) {
 
 checked_result<script_value> vm_backend::enforce_type_compatibility(script_value value, type_info_ptr target_type,
                                                                     std::string_view var_name, detail::slot_kind kind, std::string_view owner) {
+	return enforce_type_compatibility_named(std::move(value), std::move(target_type), [var_name] { return var_name; }, kind, owner);
+}
+
+// the variable's name is read off the symbolizer only by a rejection
+checked_result<script_value> vm_backend::enforce_type_compatibility(script_value value, type_info_ptr target_type, uint64_t name_sym) {
+	return enforce_type_compatibility_named(std::move(value), std::move(target_type), [this, name_sym] { return symbolizer_->get_string(name_sym); },
+	                                        detail::slot_kind::assignment, {});
+}
+
+template <class NameOf>
+checked_result<script_value> vm_backend::enforce_type_compatibility_named(script_value value, type_info_ptr target_type, NameOf&& name_of,
+                                                                          detail::slot_kind kind, std::string_view owner) {
 	if (!target_type || detail::var_slot(target_type.get())) {
 		return std::move(value);
 	}
@@ -3459,7 +3471,7 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 			}
 			[[fallthrough]];
 		default:
-			return detail::typed_slot_rejection(value, *target_type, detail::slot_site{kind, var_name, owner}, engine_);
+			return detail::typed_slot_rejection(value, *target_type, detail::slot_site{kind, name_of(), owner}, engine_);
 	}
 }
 
@@ -3467,9 +3479,18 @@ checked_result<script_value> vm_backend::enforce_type_compatibility(script_value
 // targets keep the promoted result and re-tag it 'any' so the variable stays dynamic.
 // KEEP BYTE-PARALLEL with interpreter::compound_typed_store_back.
 op_status vm_backend::compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name) {
+	return compound_typed_store_back_named(target, std::move(promoted), [var_name] { return var_name; });
+}
+
+op_status vm_backend::compound_typed_store_back(script_value& target, script_value promoted, uint64_t name_sym) {
+	return compound_typed_store_back_named(target, std::move(promoted), [this, name_sym] { return symbolizer_->get_string(name_sym); });
+}
+
+template <class NameOf>
+op_status vm_backend::compound_typed_store_back_named(script_value& target, script_value promoted, NameOf&& name_of) {
 	type_info_ptr tag = target.get_type_info();
 	if (tag && !detail::var_slot(tag.get())) {
-		auto enforced = enforce_type_compatibility(std::move(promoted), tag, var_name);
+		auto enforced = enforce_type_compatibility_named(std::move(promoted), tag, name_of, detail::slot_kind::assignment, {});
 		if (!enforced) {
 			return raise_from(enforced);
 		}
@@ -3889,7 +3910,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			                  slot_type->base_type == script_value_type::jai_array_type ||
 			                  slot_type->base_type == script_value_type::jai_map_type ||
 			                  (slot_type->base_type == script_value_type::jai_shared_ptr_type && value.get_type_info().get() != slot_type.get()))) {
-				auto enforced = enforce_type_compatibility(std::move(value), slot_type, symbolizer_->get_string(sym));
+				auto enforced = enforce_type_compatibility(std::move(value), slot_type, sym);
 				if (!enforced) {
 					return raise_from(enforced);
 				}
@@ -4235,7 +4256,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		// V-S2: same_type proof + payload guard = identity conversion
 		if (!((ins.c & store_flag_same_type) && target_type &&
 		      detail::same_type_payload(value, target_type.get()))) {
-			auto enforced = enforce_type_compatibility(std::move(value), target_type, symbolizer_->get_string(sym));
+			auto enforced = enforce_type_compatibility(std::move(value), target_type, sym);
 			if (!enforced) {
 				return raise_from(enforced);
 			}
@@ -4515,7 +4536,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			const token_type baseOp = compound_kind_token(kind);
 			VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
 			if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) { target.assign_through(std::move(promoted)); }
-			else { VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym))); }
+			else { VM_TRY(compound_typed_store_back(target, std::move(promoted), sym)); }
 			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 			return {};
 		}
@@ -4645,7 +4666,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 				default: return raise_(make_error_code(runtime_error_code::unknown_operator));
 			}
 			VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
-			VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym)));
+			VM_TRY(compound_typed_store_back(target, std::move(promoted), sym));
 			if (!no_result) { stack_.push_back(result_needed ? target.clone() : target); }
 			return {};
 		}
@@ -4662,7 +4683,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					if (!rf) { return raise_from(detail::compound_mismatch(0, target, derefRight, engine_)); }
 					target.unchecked_as_float_ref() += rf.value();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() + derefRight.unchecked_as_float(), engine_), sym));
 				} else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
 					// engine::memory_cap chokepoint: deny the append before it exists
 					if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
@@ -4676,7 +4697,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					// error, unlike binary +, by pinned design). KEEP
 					// BYTE-PARALLEL with the interpreter's in-place switch.
 					VM_TRY_ASSIGN(script_value joined, evaluate_arithmetic(target, token_type::plus, derefRight, 0));
-					VM_TRY(compound_typed_store_back(target, std::move(joined), symbolizer_->get_string(sym)));
+					VM_TRY(compound_typed_store_back(target, std::move(joined), sym));
 				} else {
 					return raise_from(detail::compound_mismatch(0, target, derefRight, engine_));
 				}
@@ -4693,7 +4714,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					if (!rf) { return raise_from(detail::compound_mismatch(1, target, derefRight, engine_)); }
 					target.unchecked_as_float_ref() -= rf.value();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() - derefRight.unchecked_as_float(), engine_), sym));
 				} else {
 					return raise_from(detail::compound_mismatch(1, target, derefRight, engine_));
 				}
@@ -4710,7 +4731,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					if (!rf) { return raise_from(detail::compound_mismatch(2, target, derefRight, engine_)); }
 					target.unchecked_as_float_ref() *= rf.value();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() * derefRight.unchecked_as_float(), engine_), sym));
 				} else {
 					return raise_from(detail::compound_mismatch(2, target, derefRight, engine_));
 				}
@@ -4733,7 +4754,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					if (!rf) { return raise_from(detail::compound_mismatch(3, target, derefRight, engine_)); }
 					target.unchecked_as_float_ref() /= rf.value();
 				} else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_), symbolizer_->get_string(sym)));
+					VM_TRY(compound_typed_store_back(target, script_value(target.unchecked_as_int() / derefRight.unchecked_as_float(), engine_), sym));
 				} else {
 					return raise_from(detail::compound_mismatch(3, target, derefRight, engine_));
 				}
@@ -4744,7 +4765,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 					return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 				}
 				VM_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight, 4));
-				VM_TRY(compound_typed_store_back(target, std::move(promoted), symbolizer_->get_string(sym)));
+				VM_TRY(compound_typed_store_back(target, std::move(promoted), sym));
 				break;
 			}
 			default:

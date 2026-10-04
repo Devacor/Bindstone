@@ -1465,6 +1465,11 @@ namespace jai::vm {
         // Compound-assignment store-back (x op= rhs ≡ x = T(x op rhs)); interpreter twin:
         // interpreter::compound_typed_store_back
         op_status compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name = {});
+        op_status compound_typed_store_back(script_value& target, script_value promoted, uint64_t name_sym);
+        template <class NameOf> op_status compound_typed_store_back_named(script_value& target, script_value promoted, NameOf&& name_of);
+        checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type, uint64_t name_sym);
+        template <class NameOf> checked_result<script_value> enforce_type_compatibility_named(script_value value, type_info_ptr target_type, NameOf&& name_of,
+                                                                                              detail::slot_kind kind, std::string_view owner);
         checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
                                                                const detail::slot_site& site = detail::slot_site{});
         checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound = -1);

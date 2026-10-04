@@ -306,7 +306,7 @@ namespace jai::vm {
         // both operands frame slots or literals (k_typed_const_bit | constant index). Each execution reads both tags and runs the
         // general kernel's numeric rows in place; any other kind, a property reference, an overflow, a zero divisor or a shift
         // out of range runs the original instruction from chunk::typed_sites (vm_compiler::lower_dynamic_ops)
-        // arithmetic: a = dst slot | dst kind << k_typed_dst_shift (temp, decl or store), b = left, c = right
+        // arithmetic: a = dst slot | dst kind << k_typed_dst_shift (temp, decl, store, or k_dyn_dst_push: the operand stack), b = left, c = right
         op_d_add, op_d_sub, op_d_mul, op_d_div, op_d_mod,
         op_d_and, op_d_or, op_d_xor, op_d_shl, op_d_shr,
         // compare and jump-if-false: a = left, b = right, c = target
@@ -330,6 +330,7 @@ namespace jai::vm {
     inline constexpr uint32_t k_typed_dst_store = 2;
     inline constexpr uint32_t k_typed_dst_compound = 3;   // `x op= y` on an int-holding slot: in place, int rows only
     inline constexpr uint32_t k_typed_env_bit = 0x40000000u;   // an operand that is an environment value: the bit | its chunk::typed_env_operands index
+    inline constexpr uint32_t k_dyn_dst_push = 3;   // an op_d_* arithmetic result pushed onto the operand stack (op_binary_fused's landing)
 
     // op_load c flags
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<

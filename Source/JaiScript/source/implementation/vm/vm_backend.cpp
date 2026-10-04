@@ -10596,6 +10596,7 @@ op_status vm_backend::exec_typed_fallback(frame& f, const vm_instruction& orig) 
 		temp_lane_sink lane{this, f, orig.b};
 		return binary_fused_compute(f, orig.a, lane);
 	}
+	case opcode::op_binary_fused: return exec_binary_fused(f, orig);
 	case opcode::op_binary_fused_decl: return exec_binary_fused_decl(f, orig);
 	case opcode::op_binary_fused_store: return exec_binary_fused_store(f, orig);
 	case opcode::op_fused_cmp_jump: return exec_fused_cmp_jump(f, orig);
@@ -10776,6 +10777,9 @@ bool vm_backend::dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, scri
 	}
 	case k_typed_dst_store:
 		return store_slot_raw(f, f.code->typed_sites[f.ip].orig2, kind, iv, fv);
+	case k_dyn_dst_push:
+		stack_.push_back(is_int ? script_value(iv, engine_) : script_value(fv, engine_));
+		return true;
 	default:
 		return false;
 	}

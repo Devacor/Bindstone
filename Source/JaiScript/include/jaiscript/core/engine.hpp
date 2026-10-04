@@ -701,6 +701,12 @@ namespace jai {
             auto binder = make_functionBinder(std::forward<Func>(func), this);
             script_function boundFunc = binder.bind();
             stage_host_result(host_result_kind<return_type>());
+            if constexpr (!tuple_has_references<typename traits::argument_types>() && std::is_same_v<Requirements, privilege>) {
+                if (required == privilege::none) {
+                    using call_t = typename decltype(binder)::by_value_call;
+                    stage_host_direct({&call_t::invoke, &call_t::locate});
+                }
+            }
             
             // Wrap the function to handle type conversion for return values
             script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
@@ -768,6 +774,12 @@ namespace jai {
         }
         // the result kind of the registration about to be made (register_overload_impl consumes it; unstaged = unknown)
         void stage_host_result(script_value_type kind);
+        // the registration about to be made is a by-value binding: its callable's own entry, found inside the stored function
+        struct host_direct_entry {
+            checked_result<script_value> (*invoke)(const void*, const script_value*, size_t) = nullptr;
+            const void* (*locate)(const script_function&) = nullptr;
+        };
+        void stage_host_direct(host_direct_entry entry);
 
         // The single overloaded-function registration algorithm shared by every public entry point
         // (add_function*, add_overloaded_function*, add_variadic_function). createSetOnFirst is the
@@ -1198,7 +1210,9 @@ namespace jai {
             engine* eng;
             uint64_t name_id;
             std::string name;
+            const void* set = nullptr;   // the engine's overload set of the name: its entry is never erased
             checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+            bool try_direct(const script_value* args, size_t argc, std::optional<checked_result<script_value>>& out) const;
             // how the overloads taking argc arguments bind argument i (detail::arg_binding bits)
             uint8_t argument_binding(size_t i, size_t argc) const;
         };

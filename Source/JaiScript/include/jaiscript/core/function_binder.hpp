@@ -808,37 +808,46 @@ class engine;
                     }
                 };
             } else {
-                // Use standard calling for functions without reference parameters
-                return [func = func_, eng = engine_](const std::vector<script_value>& args) -> checked_result<script_value> {
-                    using traits = detail::function_traits<Func>;
-                    using return_type = typename traits::return_type;
-                    using args_tuple = typename traits::argument_types;
-
-                    // Check argument count
-                    if (args.size() != traits::arity) {
-                        return checked_result<script_value>(
-                            make_error_code(runtime_error_code::argument_count_mismatch),
-                            "Function expects {0} arguments, got {1}",
-                            static_cast<uint64_t>(traits::arity), static_cast<uint64_t>(args.size())
-                        );
-                    }
-
-                    // Call the function with unpacked arguments, catching any C++ exceptions
-                    try {
-                        return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
-                    } catch (const std::exception& e) {
-                        return host_exception_error(eng, e.what());
-                    }
-                };
+                return by_value_call{func_, engine_};
             }
         }
-        
+
+        // The binding of a function without reference parameters; invoke is the same call without the std::function
+        struct by_value_call {
+            Func func;
+            engine* eng;
+            checked_result<script_value> operator()(const std::vector<script_value>& args) const { return call(args.data(), args.size()); }
+            checked_result<script_value> call(const script_value* args, size_t argc) const {
+                using traits = detail::function_traits<Func>;
+                using return_type = typename traits::return_type;
+                using args_tuple = typename traits::argument_types;
+
+                if (argc != traits::arity) {
+                    return checked_result<script_value>(
+                        make_error_code(runtime_error_code::argument_count_mismatch),
+                        "Function expects {0} arguments, got {1}",
+                        static_cast<uint64_t>(traits::arity), static_cast<uint64_t>(argc)
+                    );
+                }
+
+                try {
+                    return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+                } catch (const std::exception& e) {
+                    return host_exception_error(eng, e.what());
+                }
+            }
+            static checked_result<script_value> invoke(const void* self, const script_value* args, size_t argc) {
+                return static_cast<const by_value_call*>(self)->call(args, argc);
+            }
+            static const void* locate(const script_function& f) { return f.template target<by_value_call>(); }
+        };
+
     private:
         Func func_;
         engine* engine_;
         
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
-        static script_value call_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+        static script_value call_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, engine* eng) {
             if constexpr (std::is_void_v<R>) {
                 // Void function
                 call_void_impl_static<ArgsTuple>(std::forward<F>(func), args, std::index_sequence<Is...>{}, eng);
@@ -856,12 +865,12 @@ class engine;
         // the call path free of engine writes lets ref-free bindings (the whole math
         // stdlib) run inside parallel regions without touching shared engine state.
         template<typename ArgsTuple, typename F, size_t... Is>
-        static void call_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+        static void call_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, engine* eng) {
             func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
 
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
-        static R call_non_void_impl_static(F&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+        static R call_non_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, engine* eng) {
             return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
         

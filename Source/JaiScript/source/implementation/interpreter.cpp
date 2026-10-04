@@ -105,9 +105,25 @@ namespace {
         return script_value::make_element_reference(self.unchecked_get_array_storage(), index, ctx.get_engine(), tag ? tag->element_type() : nullptr);
     }
 
+    // A builtin's callback, prepared by the backend once for the builtin's whole run
+    class builtin_callback {
+        const script_function& fn_;
+        execution_backend* backend_ = nullptr;
+        prepared_callback* prepared_ = nullptr;
+    public:
+        builtin_callback(const script_value& callback, engine* eng) : fn_(callback.deref().unchecked_as_function()) {
+            backend_ = eng ? eng->get_execution_backend() : nullptr;
+            prepared_ = backend_ ? backend_->prepare_callback(callback) : nullptr;
+        }
+        ~builtin_callback() { if (prepared_) { backend_->release_callback(prepared_); } }
+        builtin_callback(const builtin_callback&) = delete;
+        builtin_callback& operator=(const builtin_callback&) = delete;
+        checked_result<script_value> operator()(const std::vector<script_value>& args) const { return prepared_ ? prepared_->call(args) : fn_(args); }
+    };
+
     // A callback call whose lvalue positions get a cell holding the element; the element takes the cell's value back
     // after the call (the builtin works on its own copies of the container's elements)
-    checked_result<script_value> call_with_lvalues(const script_function& callback, uint32_t positions,
+    checked_result<script_value> call_with_lvalues(const builtin_callback& callback, uint32_t positions,
                                                    std::initializer_list<script_value*> elements, engine* eng) {
         std::vector<script_value> call_args;
         call_args.reserve(elements.size());
@@ -149,14 +165,14 @@ namespace {
     // callback declares a parameter for it, as JavaScript's and C#'s do. A T& element parameter is the live element (an element
     // reference, the array's element type its constraint), as std::for_each hands its function the element itself.
     struct element_callback {
-        const script_function& fn;
+        builtin_callback fn;
         uint32_t lvalues;
         bool with_index;
         size_t leading;   // arguments ahead of the element (reduce's accumulator)
         type_info_ptr element_type;
 
-        element_callback(const script_value& callback, size_t lead, const script_value& self)
-            : fn(callback.unchecked_as_function()), lvalues(0), with_index(false), leading(lead) {
+        element_callback(const script_value& callback, size_t lead, const script_value& self, engine* eng)
+            : fn(callback, eng), lvalues(0), with_index(false), leading(lead) {
             const auto* params = callback_parameters(callback);
             with_index = params && params->size() >= lead + 2;
             lvalues = callback_lvalue_positions(callback, lead + (with_index ? 2 : 1)) & ((1u << (lead + 1)) - 1);   // the index is a value
@@ -166,9 +182,10 @@ namespace {
             }
         }
 
+        mutable std::vector<script_value> args;   // one buffer for the builtin's whole run
+
         checked_result<script_value> call(const strong_ptr<script_array>& array, size_t i, script_value* lead, engine* eng) const {
-            std::vector<script_value> args;
-            args.reserve(leading + 2);
+            struct release { std::vector<script_value>& a; ~release() { a.clear(); } } done{args};
             if (leading) { args.push_back((lvalues & 1) ? script_value::make_cell_reference(script_value(lead->deref()), eng) : *lead); }
             args.push_back(((lvalues >> leading) & 1) ? script_value::make_element_reference(array, i, eng, element_type) : array->get(i, eng));
             if (with_index) { args.push_back(script_value(static_cast<script_int>(i), eng)); }
@@ -189,7 +206,7 @@ namespace {
 
     // A map callback (key, value): the value position aliases the entry (a map-entry reference, the map's value type as its
     // constraint), the key position gets a copy (a map key is const, as std::map's is)
-    checked_result<script_value> call_map_entry(const script_function& callback, uint32_t positions, script_value& map_value,
+    checked_result<script_value> call_map_entry(const builtin_callback& callback, uint32_t positions, script_value& map_value,
                                                 const script_value& key, engine* eng) {
         const auto map_type = map_value.get_type_info();
         std::vector<script_value> call_args{
@@ -471,7 +488,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			if (!a_args[0].is_function()) { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "filter() requires a function argument"); }
 			auto* eng = a_context.get_engine();
 			const auto array = a_self.unchecked_get_array_storage();
-			const element_callback callback(a_args[0], 0, a_self);
+			const element_callback callback(a_args[0], 0, a_self, eng);
 			script_value result = a_context.copy_array_result ? script_value::make_array(callback.element_type, eng) : a_context.make_value();
 			std::vector<uint8_t> selected;
 			const size_t count = array->size();
@@ -533,7 +550,9 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			// User comparisons operate on a snapshot: callback reentry cannot invalidate
 			// std::sort's iterators. Commit the ordering only after every comparison succeeds.
 			std::vector<script_value> values = node.is_typed() ? node.materialize_values(a_context.get_engine()) : node.values();
-			const script_function* predicate = a_args.empty() ? nullptr : &a_args[0].unchecked_as_function();
+			std::optional<builtin_callback> comparator;
+			if (!a_args.empty()) { comparator.emplace(a_args[0], a_context.get_engine()); }
+			const builtin_callback* predicate = comparator ? &*comparator : nullptr;
 			const bool hasNaN = a_args.empty() && backend && backend->native_less_available() && std::any_of(values.begin(), values.end(), [](const script_value& a_value) { return a_value.is_float() && std::isnan(a_value.unchecked_as_float()); });
 			const uint32_t lvalues = predicate ? callback_lvalue_positions(a_args[0], 2) : 0;
 			std::vector<script_value> arguments;
@@ -622,7 +641,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
 		const auto storage = self.unchecked_get_array_storage();
 		auto& node = *storage;
-		const auto& predicate = args[0].unchecked_as_function();
+		const builtin_callback predicate(args[0], ctx.get_engine());
 		const uint32_t lvalues = callback_lvalue_positions(args[0], 1);
 		script_int removed_count = 0;
 
@@ -716,7 +735,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 		}
 		engine* eng = ctx.get_engine();
 		const strong_ptr<script_array> array = self.unchecked_get_array_storage();
-		const element_callback callback(args[0], 0, self);
+		const element_callback callback(args[0], 0, self, eng);
 		type_info_ptr declared;
 		callback_parameters(args[0], &declared);
 		const bool typed = declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != script_value_type::jai_null_type &&
@@ -774,7 +793,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             accumulator = array->get(0, eng).clone_element();
             start = 1;
         }
-        const element_callback callback(args[0], 1, self);
+        const element_callback callback(args[0], 1, self, eng);
         const size_t count = array->size();
         for (size_t i = start; i < count && i < array->size(); ++i) {
             auto next = callback.call(array, i, &accumulator, eng);
@@ -795,7 +814,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         engine* eng = ctx.get_engine();
         const strong_ptr<script_array> array = self.unchecked_get_array_storage();
-        const element_callback callback(args[0], 0, self);
+        const element_callback callback(args[0], 0, self, eng);
         const size_t count = array->size();
         for (size_t i = 0; i < count && i < array->size(); ++i) {
             auto done = callback.call(array, i, nullptr, eng);
@@ -815,7 +834,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         engine* eng = ctx.get_engine();
         const strong_ptr<script_array> array = self.unchecked_get_array_storage();
-        const element_callback callback(args[0], 0, self);
+        const element_callback callback(args[0], 0, self, eng);
         const size_t count = array->size();
         for (size_t i = 0; i < count && i < array->size(); ++i) {
             auto answer = callback.call(array, i, nullptr, eng);
@@ -836,7 +855,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         engine* eng = ctx.get_engine();
         const strong_ptr<script_array> array = self.unchecked_get_array_storage();
-        const element_callback callback(args[0], 0, self);
+        const element_callback callback(args[0], 0, self, eng);
         const size_t count = array->size();
         for (size_t i = 0; i < count && i < array->size(); ++i) {
             auto answer = callback.call(array, i, nullptr, eng);
@@ -857,7 +876,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         engine* eng = ctx.get_engine();
         const strong_ptr<script_array> array = self.unchecked_get_array_storage();
-        const element_callback callback(args[0], 0, self);
+        const element_callback callback(args[0], 0, self, eng);
         const size_t count = array->size();
         for (size_t i = 0; i < count && i < array->size(); ++i) {
             auto answer = callback.call(array, i, nullptr, eng);
@@ -878,7 +897,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         engine* eng = ctx.get_engine();
         const strong_ptr<script_array> array = self.unchecked_get_array_storage();
-        const element_callback callback(args[0], 0, self);
+        const element_callback callback(args[0], 0, self, eng);
         const size_t count = array->size();
         for (size_t i = 0; i < count && i < array->size(); ++i) {
             auto answer = callback.call(array, i, nullptr, eng);
@@ -1079,7 +1098,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         auto& mapPtr = self.unchecked_get_map_storage();
-        const auto& predicate = args[0].unchecked_as_function();
+        const builtin_callback predicate(args[0], ctx.get_engine());
         const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
         script_int removed_count = 0;
 
@@ -1117,7 +1136,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         script_value receiver = self;
         const auto source = receiver.unchecked_get_map_storage();
         const auto& map = *source;
-        const auto& predicate = args[0].unchecked_as_function();
+        const builtin_callback predicate(args[0], ctx.get_engine());
         const uint32_t lvalues = callback_lvalue_positions(args[0], 2);
         auto tag = self.get_type_info();
         script_value result = ctx.copy_array_result

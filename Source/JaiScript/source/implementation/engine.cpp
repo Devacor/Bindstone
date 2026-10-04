@@ -433,6 +433,8 @@ struct engine::implementation {
             script_value function;
             std::vector<param_type_info> paramTypes; // Extended type signature for type-based matching
             std::function<bool(const std::vector<script_value>&)> typeMatcher; // Custom type matcher
+            engine::host_direct_entry direct;
+            const void* direct_target = nullptr;   // the binding inside function that direct.invoke runs
 
             Overload(size_t count, const script_value& func, const std::vector<param_type_info>& types = {})
                 : argCount(count), function(func), paramTypes(types) {}
@@ -469,8 +471,14 @@ struct engine::implementation {
             add_overload_with_types(argCount, func, paramTypes);
         }
 
-        void add_overload_with_types(size_t argCount, const script_value& func, const std::vector<param_type_info>& paramTypes) {
+        void add_overload_with_types(size_t argCount, const script_value& func, const std::vector<param_type_info>& paramTypes,
+                                     engine::host_direct_entry direct = {}) {
             resolved_[0] = resolved_[1] = resolved_shape{};
+            auto set_direct = [&](Overload& o) {
+                o.direct = direct;
+                o.direct_target = direct.locate ? direct.locate(o.function.as_function()) : nullptr;
+                if (!o.direct_target) { o.direct = {}; }
+            };
             // If we have type info, check for exact type match first
             if (!paramTypes.empty()) {
                 auto it = std::find_if(overloads.begin(), overloads.end(),
@@ -479,6 +487,7 @@ struct engine::implementation {
                     });
                 if (it != overloads.end()) {
                     it->function = func;
+                    set_direct(*it);
                     return;
                 }
             } else {
@@ -489,11 +498,13 @@ struct engine::implementation {
                     });
                 if (it != overloads.end()) {
                     it->function = func;
+                    set_direct(*it);
                     return;
                 }
             }
             
             overloads.emplace_back(argCount, func, paramTypes);
+            set_direct(overloads.back());
         }
         
         // The overload an argument shape (the count and each argument's type, no object among them: an object's cost
@@ -936,6 +947,7 @@ struct engine::implementation {
     // Host functions' declared scalar results (engine::host_function_result): jai_null_type = unknown or disagreeing
     std::unordered_map<std::string, script_value_type> host_results_;
     script_value_type staged_host_result_ = script_value_type::jai_null_type;
+    engine::host_direct_entry staged_host_direct_;
 
     static void literal_unit_paths(const std::vector<declaration_ptr>& decls, std::vector<std::string>& out) {
         for (const auto& d : decls) {
@@ -1884,7 +1896,7 @@ detail::math_rng_state& engine::math_rng() {
 
 void engine::implementation::updateOverloadedFunction(const std::string& name, engine* engine_ptr) {
     // Create a dispatch function that selects the right overload
-    script_function dispatcher = engine::overload_dispatch{ engine_ptr, string_symbolizer_.intern(name), name };
+    script_function dispatcher = engine::overload_dispatch{ engine_ptr, string_symbolizer_.intern(name), name, &overloadedFunctions.at(name) };
     
     // Update in global environment
     script_value dispatcherValue = script_value::make_function(dispatcher, engine_ptr);
@@ -1892,14 +1904,36 @@ void engine::implementation::updateOverloadedFunction(const std::string& name, e
     if (engine_ptr) { engine_ptr->bump_definition_epoch(); }
 }
 
+// The one overload, typed, every argument of its parameter's exact kind: the selection findBestMatch makes, run on the
+// arguments where they are (no vector, no hop)
+bool engine::overload_dispatch::try_direct(const script_value* args, size_t argc, std::optional<checked_result<script_value>>& out) const {
+    const auto* overloads = static_cast<const implementation::OverloadSet*>(set);
+    if (!overloads || overloads->overloads.size() != 1) { return false; }
+    const auto& only = overloads->overloads.front();
+    if (!only.direct_target || only.argCount != argc || only.paramTypes.size() != argc) { return false; }
+    for (size_t i = 0; i < argc; ++i) {
+        const script_value_type want = only.paramTypes[i].base_type;
+        if (!(want == script_value_type::jai_int_type || want == script_value_type::jai_float_type || want == script_value_type::jai_bool_type ||
+              want == script_value_type::jai_char_type || want == script_value_type::jai_string_type) || args[i].deref().type() != want) { return false; }
+    }
+    const script_value pin = only.function;   // a re-registration during the call cannot free the running binding
+    out.emplace(only.direct.invoke(only.direct_target, args, argc));
+    return true;
+}
+
 checked_result<script_value> engine::overload_dispatch::operator()(const std::vector<script_value>& args) const {
-    auto it = eng->impl->overloadedFunctions.find(name);
-    if (it == eng->impl->overloadedFunctions.end()) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
-            "Overloaded function '{0}' not found", name_id);
+    const auto* overloads = static_cast<const implementation::OverloadSet*>(set);
+    if (!overloads) {
+        auto it = eng->impl->overloadedFunctions.find(name);
+        if (it == eng->impl->overloadedFunctions.end()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::not_a_function),
+                "Overloaded function '{0}' not found", name_id);
+        }
+        overloads = &it->second;
     }
 
-    script_value bestMatch = it->second.findBestMatch(args, !eng->impl->string_symbolizer_.frozen());
+    if (std::optional<checked_result<script_value>> out; try_direct(args.data(), args.size(), out)) { return std::move(*out); }
+    script_value bestMatch = overloads->findBestMatch(args, !eng->impl->string_symbolizer_.frozen());
     if (bestMatch.is_null()) {
         return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
             name_id, args.data(), args.size(), eng);
@@ -3081,6 +3115,10 @@ void engine::stage_host_result(script_value_type kind) {
     impl->staged_host_result_ = kind;
 }
 
+void engine::stage_host_direct(host_direct_entry entry) {
+    impl->staged_host_direct_ = entry;
+}
+
 bool engine::host_function_result(const std::string& name, script_value_type& out) const {
     auto it = impl->host_results_.find(name);
     if (it == impl->host_results_.end() || it->second == script_value_type::jai_null_type) { return false; }
@@ -3093,6 +3131,7 @@ void engine::register_overload_impl(const std::string& name, size_t arity, scrip
     ++impl->check_surface_epoch_;   // the static checker can see registered functions
     const script_value_type result = impl->staged_host_result_;
     impl->staged_host_result_ = script_value_type::jai_null_type;
+    const host_direct_entry direct = std::exchange(impl->staged_host_direct_, host_direct_entry{});
     if (auto [it, fresh] = impl->host_results_.try_emplace(name, result); !fresh && it->second != result) { it->second = script_value_type::jai_null_type; }
     auto existing_result = impl->global_environment_->get(name);
     bool hasExisting = existing_result && existing_result.value().is_function();
@@ -3112,7 +3151,7 @@ void engine::register_overload_impl(const std::string& name, size_t arity, scrip
 
     if (setExists || createSetOnFirst || !paramTypes.empty()) {
         // A set exists (or we want one now): add this overload and (re)install the dispatcher.
-        impl->getOrCreateOverloadSet(name).add_overload_with_types(arity, script_value::make_function(std::move(func), this), paramTypes);
+        impl->getOrCreateOverloadSet(name).add_overload_with_types(arity, script_value::make_function(std::move(func), this), paramTypes, direct);
         impl->updateOverloadedFunction(name, this);
     } else {
         // First registration of a single untyped function: keep it a plain global. A set is built

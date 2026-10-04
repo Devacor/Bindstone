@@ -2284,6 +2284,9 @@ namespace jai::vm {
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);
         op_status parked_call_threw(size_t args_base);
+        // the call paths' catch: the active exception becomes the unwinding state (out of line, no texts on the caller's
+        // frame); truncate_to drops the stack first (SIZE_MAX keeps it)
+        op_status call_threw(size_t truncate_to);
         bool push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc);
         bool bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc);
         // Callee-first probe for member / computed callees (op_probe_member)

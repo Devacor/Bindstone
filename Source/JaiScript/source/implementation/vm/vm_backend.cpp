@@ -216,125 +216,6 @@ namespace {
 		return script_value(source);
 	}
 
-	checked_result<void> vm_validate_container_homogeneous(const script_value& container, const std::string& path,
-	                                                       const detail::arity_count_symbols& counts, const string_symbolizer& symbols);
-
-	checked_result<void> vm_validate_map_homogeneous(const script_value& map_value, const std::string& path,
-	                                                 const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
-		if (!map_value.is_map()) {
-			return {};
-		}
-		const auto& map = map_value.as_map();
-		if (map.size() <= 1) {
-			if (map.size() == 1) {
-				const script_value& first_val = map.begin()->second.is_reference() ?
-					map.begin()->second.deref() : map.begin()->second;
-				JAISCRIPT_TRY(vm_validate_container_homogeneous(first_val, path + "[0]", counts, symbols));
-			}
-			return {};
-		}
-
-		auto first_it = map.begin();
-		const script_value& first_val = first_it->second.is_reference() ? first_it->second.deref() : first_it->second;
-		script_value_type deduced_type = first_val.type();
-
-		std::string deduced_class_name;
-		if (deduced_type == script_value_type::jai_object_type) {
-			auto type_info = first_val.get_type_info();
-			if (type_info) {
-				deduced_class_name = type_info->type_name;
-			}
-		}
-
-		JAISCRIPT_TRY(vm_validate_container_homogeneous(first_val, path + "[first]", counts, symbols));
-
-		size_t idx = 1;
-		for (auto it = ++map.begin(); it != map.end(); ++it, ++idx) {
-			const script_value& val = it->second.is_reference() ? it->second.deref() : it->second;
-			script_value_type val_type = val.type();
-
-			if (val_type != deduced_type) {
-				return detail::homogeneity_error(runtime_error_code::map_value_type_mismatch,
-					detail::auto_map_values, detail::auto_map_values_at, idx, counts, symbols);
-			}
-
-			if (deduced_type == script_value_type::jai_object_type && !deduced_class_name.empty()) {
-				auto val_type_info = val.get_type_info();
-				std::string val_class_name = val_type_info ? val_type_info->type_name : "";
-				if (val_class_name != deduced_class_name) {
-					return detail::homogeneity_error(runtime_error_code::map_value_type_mismatch,
-						detail::auto_map_classes, detail::auto_map_classes_at, idx, counts, symbols);
-				}
-			}
-
-			JAISCRIPT_TRY(vm_validate_container_homogeneous(val, path + "[" + std::to_string(idx) + "]", counts, symbols));
-		}
-		return {};
-	}
-
-	checked_result<void> vm_validate_array_homogeneous(const script_value& array_value, const std::string& path,
-	                                                   const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
-		if (!array_value.is_array()) {
-			return {};
-		}
-		if (array_value.unchecked_array_node()->is_typed()) {
-			return {};   // raw int/float buffers are homogeneous by construction
-		}
-		const auto& elements = array_value.as_array();
-		if (elements.size() <= 1) {
-			if (elements.size() == 1) {
-				const script_value& first = elements[0].is_reference() ? elements[0].deref() : elements[0];
-				JAISCRIPT_TRY(vm_validate_container_homogeneous(first, path + "[0]", counts, symbols));
-			}
-			return {};
-		}
-
-		const script_value& first = elements[0].is_reference() ? elements[0].deref() : elements[0];
-		script_value_type deduced_type = first.type();
-
-		std::string deduced_class_name;
-		if (deduced_type == script_value_type::jai_object_type) {
-			auto type_info = first.get_type_info();
-			if (type_info) {
-				deduced_class_name = type_info->type_name;
-			}
-		}
-
-		JAISCRIPT_TRY(vm_validate_container_homogeneous(first, path + "[0]", counts, symbols));
-
-		for (size_t i = 1; i < elements.size(); ++i) {
-			const script_value& elem = elements[i].is_reference() ? elements[i].deref() : elements[i];
-			script_value_type elem_type = elem.type();
-
-			if (elem_type != deduced_type) {
-				return detail::homogeneity_error(runtime_error_code::array_element_type_mismatch,
-					detail::auto_array_elements, detail::auto_array_elements_at, i, counts, symbols);
-			}
-
-			if (deduced_type == script_value_type::jai_object_type && !deduced_class_name.empty()) {
-				auto elem_type_info = elem.get_type_info();
-				std::string elem_class_name = elem_type_info ? elem_type_info->type_name : "";
-				if (elem_class_name != deduced_class_name) {
-					return detail::homogeneity_error(runtime_error_code::array_element_type_mismatch,
-						detail::auto_array_classes, detail::auto_array_classes_at, i, counts, symbols);
-				}
-			}
-
-			JAISCRIPT_TRY(vm_validate_container_homogeneous(elem, path + "[" + std::to_string(i) + "]", counts, symbols));
-		}
-		return {};
-	}
-
-	checked_result<void> vm_validate_container_homogeneous(const script_value& container, const std::string& path,
-	                                                       const detail::arity_count_symbols& counts, const string_symbolizer& symbols) {
-		if (container.is_array()) {
-			return vm_validate_array_homogeneous(container, path, counts, symbols);
-		} else if (container.is_map()) {
-			return vm_validate_map_homogeneous(container, path, counts, symbols);
-		}
-		return {};
-	}
-
 	// The tail's destructors may run script destructors that re-enter the VM and grow the vector: they run after the
 	// vector no longer holds it, in the order erase would run them
 #if defined(_MSC_VER)
@@ -11880,7 +11761,7 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 			}
 
 			if (requires_homogeneity) {
-				VM_TRY(vm_validate_container_homogeneous(value, "", arity_count_ids_, *symbolizer_));
+				VM_TRY(detail::validate_container_homogeneous(value, arity_count_ids_, *symbolizer_));
 				// A uniform primitive literal infers the element type and takes its
 				// representation (KEEP BYTE-PARALLEL with the interpreter's decl)
 				if (value.is_array()) {
@@ -12775,6 +12656,26 @@ JAI_NOINLINE op_status vm_backend::parked_call_threw(size_t args_base) {
 	}
 }
 
+JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
+	try {
+		throw;
+	} catch (const script_exception& e) {
+		if (truncate_to != SIZE_MAX) { stack_.truncate(truncate_to); }
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	} catch (const std::exception& e) {
+		if (truncate_to != SIZE_MAX) { stack_.truncate(truncate_to); }
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	}
+}
+
 JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_push_, coarse_pushes_)
 	const size_t argc = ins.a;
@@ -13297,22 +13198,10 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 			try {
 				return push_script_frame(f, std::move(stack_[args_base - 1]), *direct_fn,
 				                         stack_, args_base, argc, &site);
-			} catch (const script_exception& e) {
+			} catch (...) {
 				// pre-record throws leave callee+args on the stack; drop them like the
 				// pooled path already had (bind-time throws pop-core'd them already)
-				stack_.truncate(args_base - 1);
-				active_exception_value_ = script_value(std::string(e.what()), engine_);
-				current_exception_ = e;
-				is_unwinding_ = true;
-				stack_.push_back(make_null());
-				return {};
-			} catch (const std::exception& e) {
-				stack_.truncate(args_base - 1);
-				active_exception_value_ = script_value(std::string(e.what()), engine_);
-				current_exception_ = script_exception(e.what());
-				is_unwinding_ = true;
-				stack_.push_back(make_null());
-				return {};
+				return call_threw(args_base - 1);
 			}
 		}
 	}
@@ -13449,18 +13338,8 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 		try {
 			return push_script_frame(f, std::move(callee), *thunk->payload.fn,
 			                         arguments, 0, argc, &site);
-		} catch (const script_exception& e) {
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = e;
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
-		} catch (const std::exception& e) {
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = script_exception(e.what());
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
+		} catch (...) {
+			return call_threw(SIZE_MAX);
 		}
 	}
 	if (!direct) {
@@ -13471,18 +13350,8 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	std::optional<checked_result<script_value>> callOutcome;
 	try {
 		callOutcome.emplace(call_script_function(*thunk->payload.fn, arguments, &site, &f, f.code));
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
+	} catch (...) {
+		return call_threw(SIZE_MAX);
 	}
 	checked_result<script_value>& result_checked = *callOutcome;
 
@@ -13506,18 +13375,8 @@ op_status vm_backend::invoke_native(frame& f, const script_function& func, std::
 			~pending_restore() { vm->pending_site_ctx_ = saved; }
 		} restore_pending{this, saved_pending};
 		callOutcome.emplace(func(arguments));
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
+	} catch (...) {
+		return call_threw(SIZE_MAX);
 	}
 	checked_result<script_value>& result_checked = *callOutcome;
 
@@ -16026,20 +15885,8 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 								bool taken = false;
 								try {
 									taken = (*native)(self, objd, stack_.data() + args_base, argc, out);
-								} catch (const script_exception& e) {
-									stack_.truncate(args_base - 1);
-									active_exception_value_ = script_value(std::string(e.what()), engine_);
-									current_exception_ = e;
-									is_unwinding_ = true;
-									stack_.push_back(make_null());
-									return {};
-								} catch (const std::exception& e) {
-									stack_.truncate(args_base - 1);
-									active_exception_value_ = script_value(std::string(e.what()), engine_);
-									current_exception_ = script_exception(e.what());
-									is_unwinding_ = true;
-									stack_.push_back(make_null());
-									return {};
+								} catch (...) {
+									return call_threw(args_base - 1);
 								}
 								if (taken) {
 									stack_.truncate(args_base - 1);
@@ -18072,18 +17919,8 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		op_status pushed;
 		try {
 			pushed = push_method_frame(f, std::move(method), *dispatch, matching_ctor, std::move(this_value), args, site);
-		} catch (const script_exception& e) {
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = e;
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
-		} catch (const std::exception& e) {
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = script_exception(e.what());
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
+		} catch (...) {
+			return call_threw(SIZE_MAX);
 		}
 		if (pushed == op_status::failed) {
 			return pushed;
@@ -18115,18 +17952,8 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	op_status pushed;
 	try {
 		pushed = push_script_frame(f, make_null(), ctor_func, args, 0, args.size(), nullptr);
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
+	} catch (...) {
+		return call_threw(SIZE_MAX);
 	}
 	if (pushed == op_status::failed) {
 		return pushed;
@@ -21175,18 +21002,8 @@ op_status vm_backend::enter_script_method(frame& caller, script_value&& method_v
 	try {
 		return push_method_frame(caller, std::move(method_val), dispatch, ast, std::move(receiver),
 		                         arguments, &site);
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
+	} catch (...) {
+		return call_threw(SIZE_MAX);
 	}
 }
 
@@ -21199,22 +21016,10 @@ op_status vm_backend::enter_script_method_sliced(frame& caller, script_value&& m
 	try {
 		return push_method_frame_sliced(caller, std::move(method_val), dispatch, ast,
 		                                receiver_owned, frame_base, args_base, argc, &site);
-	} catch (const script_exception& e) {
+	} catch (...) {
 		// The frame's stack territory is still live in slice mode: drop it like the
 		// plain slice path's pre-record throw handling (exec_call's in-loop catch)
-		stack_.truncate(frame_base);
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		stack_.truncate(frame_base);
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
+		return call_threw(frame_base);
 	}
 }
 
@@ -21575,18 +21380,8 @@ bool vm_backend::enter_static_method(frame& caller, script_value& callee, const 
 	if (!ast->body || ast->is_coroutine) return false;   // a coroutine mints a handle: the opaque call's execute_method_ast
 	try {
 		st = push_static_method_frame(caller, std::move(callee), *dispatch, ast, arguments, &site);
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		st = {};
-	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		st = {};
+	} catch (...) {
+		st = call_threw(SIZE_MAX);
 	}
 	return true;
 }

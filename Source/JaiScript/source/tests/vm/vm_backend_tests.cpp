@@ -3111,11 +3111,11 @@ public:
 				d.id = 4;
 				shared_ptr<Animal> kept = h.pet;
 				put(h.pet, d);
-				same_object(kept, h.pet) ? h.pet.id : -1;
+				same_object(kept, h.pet) ? h.pet.id * 10 + h.pet.extra : -1;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("4"), i_out, "interp: Dog copy-assigns through Animal-constrained field ref (Dev ruling 2026-10-03)");
-			check_eq(std::string("4"), v_out, "vm: Dog copy-assigns through Animal-constrained field ref (Dev ruling 2026-10-03)");
+			check_eq(std::string("41"), i_out, "interp: Dog takes the Animal-constrained field in place through a field ref (Dev ruling 2026-10-04)");
+			check_eq(std::string("41"), v_out, "vm: Dog takes the Animal-constrained field in place through a field ref (Dev ruling 2026-10-04)");
 		});
 
 		// A var local's tag is 'any'; the constraint check resolves the actual instance

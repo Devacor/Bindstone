@@ -180,11 +180,14 @@ public:
 
     void set_class_definition(std::shared_ptr<class_definition> class_def);
 
-    // Re-class this instance in place (extend's re-derive): every field cell moves to the
+    // Re-class this instance in place (extend's re-derive, an assignment of another class): every field cell moves to the
     // new definition's slot for its id - cells never relocate, so captured field addresses
     // survive exactly as under hot reload - and ids the new class does not declare stay
-    // reachable in overflow. Every handle to this instance sees the new class.
-    void reclass(const std::shared_ptr<class_definition>& class_def);
+    // reachable in overflow, or with drop_undeclared go absent (their cells retire holding the absent marker until the
+    // instance dies). Every handle to this instance sees the new class; a chain with a destructor arms it.
+    void reclass(const std::shared_ptr<class_definition>& class_def, bool drop_undeclared = false);
+    // Armed when the instance was minted (the allocation's deleter runs the chain of its class at death)
+    void note_destructor_armed() noexcept { destructor_armed_ = true; }
 
     // Field iteration, slot order (first build ≈ declaration order, base-first) then
     // runtime-overflow entries; replaces get_fields()/get_fields_mutable() — flat
@@ -313,7 +316,10 @@ private:
     bool script_layer_retired_ = false;
     bool seeded_from_plan_ = false;   // create_instance landed every default through the class plan
     bool construction_pending_ = false;
+    bool destructor_armed_ = false;
+    bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
     uint32_t live_field_refs_ = 0;
+    std::unique_ptr<std::vector<field_cell>> retired_cells_;
     // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
     // swap-removes in O(1) instead of scanning and locking the whole list. Atomic because a
     // swap-remove re-points it under the registry lock while its dying owner reads it unlocked.
@@ -780,7 +786,9 @@ public:
     bool value_tree_runs_destructor() const;
     // C++ destruction of a dying instance from `level` down: the level's destructor body, its own fields in reverse
     // declaration order, then its bases in reverse order
-    void destroy_chain(class_instance* instance, const class_definition* level) const;
+    void destroy_chain(class_instance* instance, const class_definition* level) const { destroy_levels(instance, level, nullptr); }
+    // destroy_chain for the levels `kept` does not share (a re-class drops them): kept and its bases stay alive
+    void destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const;
     // The same question for a declared type (null, var and unknown kinds can hold anything)
     bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
@@ -1167,12 +1175,17 @@ public:
 
         if (has_script_dtor_) {
             auto* raw_instance = new class_instance(class_instance::interned_name_t{}, interned_name(), engine_);
+            raw_instance->note_destructor_armed();
             auto class_def = shared_from_this();
             if (engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
 
             instance = std::shared_ptr<class_instance>(raw_instance, [class_def](class_instance* ptr) {
                 if (!ptr) { return; }
-                if (!ptr->construction_pending()) { class_def->destroy_chain(ptr, class_def.get()); }
+                if (!ptr->construction_pending()) {
+                    const class_definition* now = ptr->get_class_definition();   // a re-classed instance dies as its class now
+                    if (!now) { now = class_def.get(); }
+                    now->destroy_chain(ptr, now);
+                }
                 delete ptr;
             });
         } else {
@@ -2543,8 +2556,12 @@ inline void class_instance::set_class_definition(std::shared_ptr<class_definitio
     rehome_overflow_fields();
 }
 
-inline void class_instance::reclass(const std::shared_ptr<class_definition>& class_def) {
+inline void class_instance::reclass(const std::shared_ptr<class_definition>& class_def, bool drop_undeclared) {
     if (!class_def || class_def.get() == class_def_) { return; }
+    if (!destructor_armed_ && engine_ && class_def->is_script_class() && class_def->chain_declares_destructor(*engine_)) {
+        destructor_armed_ = late_destructor_ = true;
+        if (!engine_->destructors_armed()) { engine_->note_destructors_armed(); }
+    }
     std::vector<std::pair<uint64_t, field_cell>> cells;
     if (class_def_) {
         cells.reserve(flat_fields_.size());
@@ -2565,6 +2582,10 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
         if (slot != class_definition::k_no_field_slot) {
             if (slot >= flat_fields_.size()) { flat_fields_.resize(static_cast<size_t>(slot) + 1); }
             flat_fields_[slot] = std::move(cell);
+        } else if (drop_undeclared) {
+            *cell = script_value::make_invalid(engine_);
+            if (!retired_cells_) { retired_cells_ = std::make_unique<std::vector<field_cell>>(); }
+            retired_cells_->push_back(std::move(cell));
         } else if (cell->raw_storage_index() != script_value::TYPEID_INVALID) {
             if (!overflow_fields_) {
                 overflow_fields_ = std::make_unique<std::unordered_map<uint64_t, script_value>>();
@@ -3350,14 +3371,18 @@ inline checked_result<void> enforce_member_access(const class_definition* cls, u
         "Cannot access private member '{0}' of class '{1}'", member_id, declarer->get_type_id());
 }
 
-// operator= on a plain store (docs/static_checking.md rule table; C++ assignment, Dev ruling 2026-10-03). A destination slot
-// holding a class instance by value keeps its object: a source of the slot's class or a subclass assigns that class's
-// members into it (the implicit copy assignment: a by-value class member assigns in turn, any other member takes the
-// member-copy rule, clone_element; a derived source slices), and a source of another class goes through a user operator= on
-// the held instance. nullopt when neither applies (a handle slot rebinds, a host class keeps its replace). A parallel region
-// never dispatches a user operator (the operator-dispatch verdict). KEEP the one kernel for every plain-store site of both
-// backends.
-inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng);
+// operator= on a plain store (docs/static_checking.md rule table; C++ assignment, Dev ruling 2026-10-03; no slicing, Dev ruling
+// 2026-10-04). A destination slot holding a class instance by value keeps its object: a source of the held instance's class
+// assigns every member into it (the implicit copy assignment: a by-value class member assigns in turn, any other member
+// takes the member-copy rule, clone_element); a source of another class the slot's declared class admits (that class or a
+// subclass) first destroys the levels the object loses, re-classes it in place to the source's class, then assigns every
+// member; a source outside the slot's family goes through a user operator= on the held instance. nullopt when none applies
+// (a handle slot rebinds, a host class keeps its replace). declared: the slot's declared type where the value's tag does not
+// carry it (a field, a static, an element, a map value); bound: a reference's declared class the source must also derive.
+// A parallel region never dispatches a user operator or re-classes (the operator-dispatch verdict). KEEP the one kernel for
+// every plain-store site of both backends.
+inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng,
+                                                                const type_info* declared = nullptr, const type_info* bound = nullptr);
 
 // The members `layout` declares (its whole chain, base first) copied from source into dest
 inline checked_result<void> implicit_copy_assign(class_instance* dest, const class_definition* layout, class_instance* source, engine* eng) {
@@ -3372,7 +3397,7 @@ inline checked_result<void> implicit_copy_assign(class_instance* dest, const cla
         const type_info_ptr declared = layout->get_field_declared_type(id);
         script_value* to = dest->find_field_value(id);
         if (to && declared && declared->base_type == script_value_type::jai_object_type && !declared->type_name.empty()) {
-            if (auto nested = user_assign_operator(*to, member, eng)) {
+            if (auto nested = user_assign_operator(*to, member, eng, declared.get())) {
                 if (!*nested) { return *nested; }
                 continue;
             }
@@ -3384,11 +3409,52 @@ inline checked_result<void> implicit_copy_assign(class_instance* dest, const cla
     return {};
 }
 
-// The implicit copy assignment alone: a slot holding a class instance by value takes a source of the slot's class or a
-// subclass member by member, the slot keeping its object (an element or a map value assigns this way; nullopt otherwise)
-inline std::optional<checked_result<void>> class_copy_assign(const script_value& current_in, const script_value& value_in, engine* eng);
+// The class named `name` in c's chain (c itself or a base), null when none
+inline const class_definition* chain_class_named(const class_definition* c, std::string_view name) {
+    if (!c) { return nullptr; }
+    if (c->get_name() == name) { return c; }
+    for (const auto& parent : c->get_parent_classes()) {
+        if (const class_definition* found = chain_class_named(parent.get(), name)) { return found; }
+    }
+    return nullptr;
+}
 
-inline std::optional<checked_result<void>> class_copy_assign(const script_value& current_in, const script_value& value_in, engine* eng) {
+inline bool names_class(const type_info* t) noexcept {
+    return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty();
+}
+
+// An assignment whose source is of another class than the slot's object: the levels the object loses die (their destructor
+// bodies, then their members, as a dying instance runs them), the object takes the source's class in place (the dropped
+// members go absent, a reference to one raises), every member assigns from the source and a member the source does not
+// hold takes its default. Every handle to the object sees the new class; the slot's own tag follows when it named the old
+// class.
+inline checked_result<void> reclass_assign(script_value& current, auto& holder, const class_definition* slot_class,
+                                           class_instance* source, const class_definition* source_def, engine* eng) {
+    if (eng->parallel_region_active()) {
+        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+            "an assignment that changes an object's class is not admitted in a parallel body");
+    }
+    std::shared_ptr<class_instance> self = std::static_pointer_cast<class_instance>(holder.data);   // a destructor body may drop the slot or the source
+    std::shared_ptr<class_instance> source_pin = source->weak_from_this().lock();
+    class_instance* instance = self.get();
+    const class_definition* def = instance->get_class_definition();
+    def->destroy_levels(instance, def, source_def);
+    instance->reclass(std::const_pointer_cast<class_definition>(source_def->shared_from_this()), true);
+    holder.type_name = source_def->interned_name();
+    holder.type_id = source_def->get_type_id();
+    if (current.type_info_raw() == def->get_type_info().get() && def != slot_class) { current.set_type_info(source_def->get_type_info()); }
+    auto copied = implicit_copy_assign(instance, source_def, source, eng);
+    if (!copied) { return copied; }
+    for (const auto& [id, default_value] : source_def->get_all_field_defaults()) {
+        if (!instance->has_field_value(id)) { instance->set_field(id, default_value.clone_element()); }
+    }
+    return {};
+}
+
+// The implicit copy assignment alone: a slot holding a class instance by value takes a source of its declared class or a
+// subclass, the slot keeping its object (an element or a map value assigns this way; nullopt otherwise)
+inline std::optional<checked_result<void>> class_copy_assign(const script_value& current_in, const script_value& value_in, engine* eng,
+                                                             const type_info* declared = nullptr, const type_info* bound = nullptr) {
     if (!eng) { return std::nullopt; }
     const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
     if (current.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
@@ -3400,38 +3466,30 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     const class_definition* def = instance->get_class_definition();
     if (!def) { return std::nullopt; }
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
-    if (value.is_null()) { return std::nullopt; }
-    // the slot's class: its declared type names the held instance's class or one of its bases
-    const class_definition* slot_class = def;
-    if (tag && tag->base_type == script_value_type::jai_object_type && !tag->type_name.empty() && def->get_name() != tag->type_name) {
-        std::function<const class_definition*(const class_definition*)> find_base = [&](const class_definition* c) -> const class_definition* {
-            if (!c) { return nullptr; }
-            if (c->get_name() == tag->type_name) { return c; }
-            for (const auto& parent : c->get_parent_classes()) {
-                if (const class_definition* found = find_base(parent.get())) { return found; }
-            }
-            return nullptr;
-        };
-        if (const class_definition* found = find_base(def)) { slot_class = found; }
-    }
     const size_t vi = value.raw_storage_index();
-    if (vi == script_value::TYPEID_OBJECT || vi == script_value::TYPEID_SHARED_PTR) {
-        auto source_holder = const_cast<script_value&>(value).get_object_holder();
-        if (source_holder && source_holder->is_class_instance_wrapper && source_holder->data) {
-            auto* source = static_cast<class_instance*>(source_holder->data.get());
-            const class_definition* source_def = source->get_class_definition();
-            if (source_def && (source_def == slot_class || source_def->derives_from(slot_class))) {
-                if (!slot_class->is_script_class() || slot_class->find_cpp_base_class()) { return std::nullopt; }   // a host object keeps its replace
-                if (source == instance) { return checked_result<void>(); }   // self-assignment
-                return implicit_copy_assign(instance, slot_class, source, eng);
-            }
-        }
+    if (vi != script_value::TYPEID_OBJECT && vi != script_value::TYPEID_SHARED_PTR) { return std::nullopt; }
+    auto source_holder = const_cast<script_value&>(value).get_object_holder();
+    if (!source_holder || !source_holder->is_class_instance_wrapper || !source_holder->data) { return std::nullopt; }
+    auto* source = static_cast<class_instance*>(source_holder->data.get());
+    const class_definition* source_def = source->get_class_definition();
+    if (!source_def) { return std::nullopt; }
+    // the slot's class: its declared type names the held instance's class or one of its bases
+    const type_info* slot_type = names_class(declared) ? declared : tag.get();
+    const class_definition* slot_class = def;
+    if (names_class(slot_type) && def->get_name() != slot_type->type_name) {
+        if (const class_definition* found = chain_class_named(def, slot_type->type_name)) { slot_class = found; }
     }
-    return std::nullopt;
+    if (source_def != slot_class && !source_def->derives_from(slot_class)) { return std::nullopt; }
+    if (!slot_class->is_script_class() || slot_class->find_cpp_base_class()) { return std::nullopt; }   // a host object keeps its replace
+    if (source == instance) { return checked_result<void>(); }   // self-assignment
+    if (source_def == def) { return implicit_copy_assign(instance, def, source, eng); }
+    if (source_def->find_cpp_base_class() || (names_class(bound) && !chain_class_named(source_def, bound->type_name))) { return std::nullopt; }
+    return reclass_assign(const_cast<script_value&>(current), *holder, slot_class, source, source_def, eng);
 }
 
-inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng) {
-    if (auto copied = class_copy_assign(current_in, value_in, eng)) { return copied; }
+inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng,
+                                                                const type_info* declared, const type_info* bound) {
+    if (auto copied = class_copy_assign(current_in, value_in, eng, declared, bound)) { return copied; }
     if (!eng) { return std::nullopt; }
     const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
     if (current.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
@@ -3520,7 +3578,7 @@ inline checked_result<script_value> declared_slot_write(type_info_ptr declared, 
     }
     if (declared->base_type == script_value_type::jai_object_type) {
         if (const script_value* current = current_slot()) {
-            if (auto assigned = user_assign_operator(*current, value, eng)) {
+            if (auto assigned = user_assign_operator(*current, value, eng, declared.get())) {
                 if (!*assigned) { return assigned->error_value(); }
                 return *current;   // the operator wrote the held instance: the store keeps it
             }
@@ -3544,7 +3602,7 @@ inline std::optional<checked_result<void>> class_instance::assign_field_in_place
     if (!declared || declared->base_type != script_value_type::jai_object_type || declared->type_name.empty()) { return std::nullopt; }
     const script_value* current = find_field_value(id);
     if (!current) { return std::nullopt; }
-    return detail::user_assign_operator(*current, source, engine_);
+    return detail::user_assign_operator(*current, source, engine_, declared.get());
 }
 
 template <class Copy>
@@ -3562,7 +3620,7 @@ inline checked_result<script_value> class_definition::static_store(uint64_t id, 
     auto it = static_declared_types_.find(id);
     if (it != static_declared_types_.end() && it->second && it->second->base_type == script_value_type::jai_object_type && !it->second->type_name.empty()) {
         if (const script_value* current = get_static_field_ptr(id)) {
-            if (auto in_place = detail::user_assign_operator(*current, source, engine_)) {
+            if (auto in_place = detail::user_assign_operator(*current, source, engine_, it->second.get())) {
                 if (!*in_place) { return in_place->error_value(); }
                 return script_value(current->deref());
             }
@@ -3591,7 +3649,7 @@ inline checked_result<void> compound_slot_store(script_value& target, script_val
 // assignment, the element keeping its object; nullopt for a var element or any other store, which replaces
 inline std::optional<checked_result<void>> element_copy_assign(const script_value& current, const script_value& source, const type_info_ptr& element_type, engine* eng) {
     if (!element_type || element_type->base_type != script_value_type::jai_object_type || element_type->type_name.empty()) { return std::nullopt; }
-    return class_copy_assign(current, source, eng);
+    return class_copy_assign(current, source, eng, element_type.get());
 }
 }
 
@@ -3972,6 +4030,7 @@ inline class_instance::class_instance(std::string_view class_name, engine* eng)
 }
 
 inline class_instance::~class_instance() {
+    if (late_destructor_ && class_def_ && !construction_pending_) { class_def_->destroy_chain(this, class_def_); }
     if (class_def_) {
         class_def_->unregister_instance(this);
     }

@@ -110,14 +110,15 @@ bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_d
     return runs;
 }
 
-void class_definition::destroy_chain(class_instance* instance, const class_definition* level) const {
-    if (!level) { return; }
+void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const {
+    if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
     if (engine_) {
         const uint64_t id = engine_->symbolize("~" + level->name_);
         auto it = id != 0 ? level->methods_.find(id) : level->methods_.end();
         if (it != level->methods_.end()) {
             try {
-                std::shared_ptr<class_instance> self(instance, [](class_instance*) {});
+                std::shared_ptr<class_instance> self = instance->weak_from_this().lock();   // a living instance (a re-class) keeps its owner
+                if (!self) { self = std::shared_ptr<class_instance>(instance, [](class_instance*) {}); }
                 const script_function& body = it->second.as_function();
                 auto ran = body({script_value::make_object(level->name_, self, engine_)});
                 if (!ran) { engine_->report_script_error(format_error(ran, *engine_->get_symbolizer()), ran.error()); }   // reported, never propagated
@@ -133,7 +134,7 @@ void class_definition::destroy_chain(class_instance* instance, const class_defin
         if (slot != k_no_field_slot) { instance->release_field_slot(slot); }
     }
     for (auto parent = level->parent_classes_.rbegin(); parent != level->parent_classes_.rend(); ++parent) {
-        destroy_chain(instance, parent->get());
+        destroy_levels(instance, parent->get(), kept);
     }
 }
 

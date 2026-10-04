@@ -597,7 +597,7 @@ namespace jai::detail {
 		if (holder.owner_instance && holder.container_element_type &&
 		    holder.container_element_type->base_type == script_value_type::jai_object_type) {
 			if (const script_value* current = holder.owner_instance->find_field_value(holder.field_id)) {
-				if (auto assigned = user_assign_operator(*current, value, eng)) {
+				if (auto assigned = user_assign_operator(*current, value, eng, holder.container_element_type.get())) {
 					if (!*assigned) { return assigned->error_value(); }
 					return *current;
 				}
@@ -783,7 +783,9 @@ namespace jai::detail {
 		if (declared->base_type == script_value_type::jai_object_type) {
 			auto current = ref_checked_deref(refLocal);
 			if (current) {
-				if (auto assigned = user_assign_operator(current.value(), value, eng)) {
+				const auto* holder = refLocal.get_reference_holder();
+				const type_info* storage = holder && holder->container_element_type ? holder->container_element_type.get() : nullptr;
+				if (auto assigned = user_assign_operator(current.value(), value, eng, storage, declared)) {
 					if (!*assigned) { return checked_result<script_value>(assigned->error_value()); }
 					return std::nullopt;
 				}

@@ -4366,6 +4366,37 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 	return {};
 }
 
+// The head runs `x op= y` for + - * over a plain slot holding an int or a float and a right operand of either: the full
+// path's in-place rows for those kinds, with every other shape (an overflow included, for its text) left to it
+op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
+	const uint32_t kind = ins.c & compound_kind_mask;
+	if (kind <= compound_star && !(ins.c & compound_flag_global_only) && ins.b != k_invalid_u32 && f.locals && !f.top_level && !has_custom_numeric_ops_) {
+		if (script_value* slot = frame_slot(f, ins.b)) {
+			const script_value& right = stack_.back();
+			const size_t ti = slot->raw_storage_index(), ri = right.raw_storage_index();
+			bool done = false;
+			if (ti == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+				script_int& t = slot->unchecked_as_int_ref();
+				const script_int r = right.unchecked_as_int();
+				script_int out;
+				const bool ok = kind == compound_plus ? ints::try_add(t, r, out) : kind == compound_minus ? ints::try_sub(t, r, out) : ints::try_mul(t, r, out);
+				if (ok) { t = out; done = true; }
+			} else if (ti == script_value::TYPEID_FLOAT && (ri == script_value::TYPEID_FLOAT || ri == script_value::TYPEID_INT)) {
+				const script_float r = ri == script_value::TYPEID_FLOAT ? right.unchecked_as_float() : static_cast<script_float>(right.unchecked_as_int());
+				script_float& t = slot->unchecked_as_float_ref();
+				t = kind == compound_plus ? t + r : kind == compound_minus ? t - r : t * r;
+				done = true;
+			}
+			if (done) {
+				stack_.pop_back();
+				if (!(ins.c & compound_flag_no_result)) { stack_.push_back(*slot); }
+				return op_status::ok;
+			}
+		}
+	}
+	return exec_compound_store_full(f, ins);
+}
+
 JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const uint32_t kind = ins.c & compound_kind_mask;

@@ -610,12 +610,12 @@ namespace jai::vm {
                 return ((trivial_payload_mask >> s.raw_storage_index()) & 1u) != 0;
             }
 
-            void push_back(const script_value& x) {
+            JAI_FORCEINLINE void push_back(const script_value& x) {
                 if (count == cap) [[unlikely]] { grow_push(script_value(x)); return; }
                 new (slots + count) script_value(x);
                 ++count;
             }
-            void push_back(script_value&& x) {
+            JAI_FORCEINLINE void push_back(script_value&& x) {
                 if (count == cap) [[unlikely]] { grow_push(std::move(x)); return; }
                 new (slots + count) script_value(std::move(x));
                 ++count;
@@ -628,7 +628,7 @@ namespace jai::vm {
             // slot dies in place while count still covers it (the re-entry pushes above it, never over it) and the loop
             // re-reads the buffer by index. A handle's destructor reads its pointer once, nulls it and releases through a
             // local, so the dying slot is not touched after the release, wherever the buffer went (invariants §2c).
-            void pop_back() noexcept {
+            JAI_FORCEINLINE void pop_back() noexcept {
                 assert(count);
                 script_value& s = slots[count - 1];
                 if (!dtor_elidable(s)) { s.~script_value(); }

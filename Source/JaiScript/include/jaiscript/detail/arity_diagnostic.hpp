@@ -19,6 +19,8 @@ inline constexpr std::string_view arity_named_many = "'{0}' expects {1} argument
 inline constexpr std::string_view arity_lambda = "lambda expects {0}";
 inline constexpr std::string_view arity_lambda_one = "lambda expects {0} argument";
 inline constexpr std::string_view arity_lambda_many = "lambda expects {0} arguments";
+inline constexpr std::string_view arity_named_count_free = "'{0}' was called with the wrong number of arguments";
+inline constexpr std::string_view arity_lambda_count_free = "lambda was called with the wrong number of arguments";
 inline constexpr std::string_view lambda_callee_name = "<lambda>";
 
 // Counts ride the checked_result symbol channel, so their decimal spellings are interned once
@@ -50,7 +52,11 @@ inline error_propagator arity_error(std::string_view callee, size_t expected, si
         if (anonymous) { return {ec, arity_lambda, detail, 0}; }
         return {ec, arity_named, symbolizer.intern(callee), detail};
     }
-    const uint64_t count = symbols(expected, symbolizer);
+    if (expected >= arity_count_symbols::count) {   // past the table a count would be a new string: the count-free twin
+        if (anonymous) { return {ec, arity_lambda_count_free, 0, 0}; }
+        return {ec, arity_named_count_free, symbolizer.intern(callee), 0};
+    }
+    const uint64_t count = symbols.ids[expected];
     if (anonymous) { return {ec, expected == 1 ? arity_lambda_one : arity_lambda_many, count, 0}; }
     return {ec, expected == 1 ? arity_named_one : arity_named_many, symbolizer.intern(callee), count};
 }

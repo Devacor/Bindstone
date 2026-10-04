@@ -108,10 +108,26 @@ namespace jai::detail {
 		return container_base_type_name(seen.type());
 	}
 
+	// a parallel worker cannot intern a spelling it has not seen: the same text without them
+	inline constexpr std::string_view cast_error_text_slotless = "Cannot cast the value to the target type";
+
+	JAI_NOINLINE inline error_propagator cast_error_propagator(const script_value& seen, const cast_expr& c, string_symbolizer* sym) {
+		const std::string source = cast_source_spelling(seen);
+		const std::string target = cast_target_spelling(c);
+		if (sym->frozen()) {
+			const auto source_id = sym->find(source);
+			const auto target_id = sym->find(target);
+			if (!source_id || !target_id) {
+				return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text_slotless, 0, 0};
+			}
+			return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text, *source_id, *target_id};
+		}
+		return error_propagator{make_error_code(runtime_error_code::type_mismatch), cast_error_text, sym->intern(source), sym->intern(target)};
+	}
+
 	template <typename T = script_value>
 	inline checked_result<T> cast_error(const script_value& seen, const cast_expr& c, string_symbolizer* sym) {
-		return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), cast_error_text,
-		                         sym->intern(cast_source_spelling(seen)), sym->intern(cast_target_spelling(c)));
+		return cast_error_propagator(seen, c, sym);
 	}
 
 	// Class target on a non-null operand: an object or handle whose dynamic class is T or

@@ -420,6 +420,17 @@ public:
             check_eq(eng->execute("merged[\"other\"]").as<std::string>(), "data");
         });
 
+        test("merge_arity_text_spells_the_count", [&]() {
+            auto eng = make_engine();
+            stdlib::register_all(eng);
+            auto caught = eng->execute(R"(
+                var text = "";
+                try { merge({"a": 1}); } catch (e) { text = e; }
+                text
+            )");
+            check_eq(std::string("merge() expects exactly 2 arguments, got 1"), caught.as<std::string>());
+        });
+
         test("map_with_numeric_string_keys", [&]() {
             auto eng = make_engine();
 

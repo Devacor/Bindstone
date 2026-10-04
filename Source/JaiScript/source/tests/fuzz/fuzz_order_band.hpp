@@ -596,6 +596,22 @@ namespace jai::fuzz::order {
 			}
 		}
 
+		// an expression of unknown static type (an auto declared from it is a var): a read of var storage, or arithmetic, a
+		// negation, a conditional or min/max/abs over such an operand
+		bool static_dyn(const eptr& e, frame& f) {
+			switch (e->kind) {
+			case ek::read: return e->p.kind == pk::var && resolve(e->p, f).t == ty::v;
+			case ek::bin: return !is_compare(e->op) && e->op != "&&" && e->op != "||" && (static_dyn(e->a, f) || static_dyn(e->b, f));
+			case ek::neg: return static_dyn(e->a, f);
+			case ek::tern: return static_dyn(e->b, f) || static_dyn(e->c, f);
+			case ek::math:
+				if (e->op == "abs") return static_dyn(e->args[0], f);
+				if (e->op == "min" || e->op == "max") return static_dyn(e->args[0], f) || static_dyn(e->args[1], f);
+				return false;
+			default: return false;
+			}
+		}
+
 		mval eval(const eptr& e, frame& f) {
 			switch (e->kind) {
 			case ek::lit: return e->lit;
@@ -611,32 +627,50 @@ namespace jai::fuzz::order {
 				if (e->op == "||") { if (truthy(eval(e->a, f))) return mb(true); return mb(truthy(eval(e->b, f))); }
 				const mval a = eval(e->a, f);
 				const mval b = eval(e->b, f);
-				return is_compare(e->op) ? compare(e->op, a, b) : arith(e->op, a, b);
+				if (is_compare(e->op)) { return compare(e->op, a, b); }
+				mval r = arith(e->op, a, b);
+				r.dyn = a.dyn || b.dyn;   // an operand of unknown static type makes the result's unknown (an auto from it is a var)
+				return r;
 			}
 			case ek::neg: {
 				const mval a = eval(e->a, f);
-				if (a.k == 'i') { if (a.i == INT64_MIN) no("negation"); return mi(-a.i); }
-				if (a.k == 'f') return mf(-a.f);
-				no("negation of a non-number");
+				mval r;
+				if (a.k == 'i') { if (a.i == INT64_MIN) no("negation"); r = mi(-a.i); }
+				else if (a.k == 'f') { r = mf(-a.f); }
+				else { no("negation of a non-number"); }
+				r.dyn = a.dyn;
+				return r;
 			}
 			case ek::lnot: return mb(!truthy(eval(e->a, f)));
-			case ek::tern: return truthy(eval(e->a, f)) ? eval(e->b, f) : eval(e->c, f);
+			case ek::tern: {   // the common type of both arms: unknown when either arm's is
+				const bool first = truthy(eval(e->a, f));
+				mval r = eval(first ? e->b : e->c, f);
+				r.dyn = r.dyn || static_dyn(first ? e->c : e->b, f);
+				return r;
+			}
 			case ek::call: return call(*e, f);
 			case ek::math: {
 				std::vector<mval> a;
 				for (const auto& x : e->args) { a.push_back(eval(x, f)); }
 				for (const auto& x : a) { if (x.k != 'i' && x.k != 'f') no("math on a non-number"); }
 				auto d = [](const mval& x) { return x.k == 'i' ? static_cast<double>(x.i) : x.f; };
-				if (e->op == "abs") { if (a[0].k == 'i') { if (a[0].i == INT64_MIN) no("abs"); return mi(a[0].i < 0 ? -a[0].i : a[0].i); } return mf(std::fabs(a[0].f)); }
-				if (e->op == "itrunc") { if (a[0].k == 'i') return a[0]; return mi(checked_trunc(a[0].f)); }
-				if (e->op == "ifloor") { if (a[0].k == 'i') return a[0]; return mi(checked_trunc(std::floor(a[0].f))); }
+				if (e->op == "abs") {   // the operand's type: unknown when the operand's is
+					if (a[0].k == 'i' && a[0].i == INT64_MIN) no("abs");
+					mval r = a[0].k == 'i' ? mi(a[0].i < 0 ? -a[0].i : a[0].i) : mf(std::fabs(a[0].f));
+					r.dyn = a[0].dyn;
+					return r;
+				}
+				if (e->op == "itrunc") { if (a[0].k == 'i') return mi(a[0].i); return mi(checked_trunc(a[0].f)); }
+				if (e->op == "ifloor") { if (a[0].k == 'i') return mi(a[0].i); return mi(checked_trunc(std::floor(a[0].f))); }
 				if (e->op == "sqrt") return mf(std::sqrt(d(a[0])));
 				if (e->op == "floor") return mf(std::floor(d(a[0])));
 				if (e->op == "ceil") return mf(std::ceil(d(a[0])));
 				if (e->op == "min" || e->op == "max") {
 					const bool mn = e->op == "min";
 					const bool pick_a = a[0].k == 'i' && a[1].k == 'i' ? (mn ? a[0].i <= a[1].i : a[0].i >= a[1].i) : (mn ? d(a[0]) <= d(a[1]) : d(a[0]) >= d(a[1]));
-					return pick_a ? a[0] : a[1];
+					mval r = pick_a ? a[0] : a[1];
+					r.dyn = a[0].dyn || a[1].dyn;   // the operands' type: unknown when either operand's is
+					return r;
 				}
 				no("math function");
 			}

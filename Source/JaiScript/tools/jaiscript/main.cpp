@@ -1136,7 +1136,10 @@ bool spill_file(const std::string& path, const std::string& content) {
 std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream* engine_out) {
 	auto eng = jai::engine::make();
 	eng->set_backend(opt.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
-	if (opt.miss_every) { eng->cells_miss_every(opt.miss_every); }
+	if (opt.miss_every) {
+		if (!jai::engine::miss_injection_available()) { std::fprintf(stderr, "--miss-every: this build carries no miss injection (configure with -DJAISCRIPT_MISS_INJECTION=ON)\n"); std::exit(2); }
+		eng->cells_miss_every(opt.miss_every);
+	}
 	if (opt.unsafe_parallel) { eng->allow_unsafe_parallel(true); }
 	eng->static_checking(opt.check == "off" ? jai::check_mode::off : opt.check == "warn" ? jai::check_mode::warn : jai::check_mode::strict);
 	eng->execution_budget(opt.budget);

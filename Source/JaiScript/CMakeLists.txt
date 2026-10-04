@@ -42,6 +42,10 @@ option(JAISCRIPT_VM_COVERAGE "Diagnostic build: the vm counts every instruction 
 if(JAISCRIPT_VM_COVERAGE)
     add_compile_definitions(JAISCRIPT_VM_COVERAGE)
 endif()
+option(JAISCRIPT_MISS_INJECTION "Testing build: the vm can force a cell block miss at every nth plain cell instruction (engine::cells_miss_every, --miss-every)" OFF)
+if(JAISCRIPT_MISS_INJECTION)
+    add_compile_definitions(JAISCRIPT_MISS_INJECTION)
+endif()
 
 # Optimization settings for different build configurations
 if(MSVC)

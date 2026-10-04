@@ -7281,17 +7281,22 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 			}
 			for (const size_t ip : capture_ips) { chunk_->code[ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }
-			uint32_t builtin_kind = 0;   // the checker proved the receiver and the name is that kind's builtin
-			if (builtins_ && !member->null_safe && expr->builtin_receiver != 0) {
+			uint32_t builtin_kind = 0;   // the checker proved the receiver and the name is that kind's builtin, or the receiver's kind picks at run time
+			if (builtins_ && !member->null_safe && member->object->get_type() != node_type::super_expr) {
 				const call_site& cs = chunk_->call_sites.back();
 				bool args_callout_free = true;   // an identifier string receiver is re-read after the arguments: none may run code
 				if (member->object->get_type() == node_type::identifier_expr) {
 					for (const auto& arg : expr->arguments) { args_callout_free = args_callout_free && detail::transient_read_marker::callout_free(arg.get()); }
 				}
-				if (expr->builtin_receiver == 1 && cs.bi_string != builtin_method_registries::k_no_builtin &&
-				    builtins_->string_mutates_by_index[cs.bi_string] == 0 && args_callout_free) { builtin_kind = 1; }   // a string mutator writes the variable: the general call
+				const bool string_builtin = cs.bi_string != builtin_method_registries::k_no_builtin;
+				const bool string_direct = string_builtin && builtins_->string_mutates_by_index[cs.bi_string] == 0 && args_callout_free;   // a string mutator writes the variable: the general call
+				if (expr->builtin_receiver == 1 && string_direct) { builtin_kind = 1; }
 				else if (expr->builtin_receiver == 2 && cs.bi_array != builtin_method_registries::k_no_builtin) { builtin_kind = 2; }
 				else if (expr->builtin_receiver == 3 && cs.bi_map != builtin_method_registries::k_no_builtin) { builtin_kind = 3; }
+				else if (expr->builtin_receiver == 0 && expr->builtin_receiver_open && (cs.bi_array != builtin_method_registries::k_no_builtin || cs.bi_map != builtin_method_registries::k_no_builtin) &&
+				         (!string_builtin || args_callout_free)) {
+					builtin_kind = string_direct ? 5 : 4;
+				}
 			}
 			if (builtin_kind != 0) {
 				uint32_t inline_op = 0;
@@ -7299,7 +7304,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				const std::string_view name = member->member;
 				if (n == 0 && (name == "size" || name == "length")) inline_op = 1;
 				else if (n == 0 && name == "empty") inline_op = 2;
-				else if (builtin_kind == 1) {
+				else if (builtin_kind == 1 || builtin_kind == 5) {
 					if (name == "find" && (n == 1 || n == 2)) inline_op = 3;
 					else if (name == "contains" && n == 1) inline_op = 4;
 					else if (name == "starts_with" && n == 1) inline_op = 5;
@@ -7307,9 +7312,11 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 					else if (name == "substr" && (n == 1 || n == 2)) inline_op = 7;
 					else if (name == "at" && n == 1) inline_op = 8;
 					else if (name == "to_float" && n <= 1) inline_op = 12;
-				} else if (builtin_kind == 2) {
+				}
+				if (inline_op == 0 && (builtin_kind == 2 || builtin_kind >= 4)) {
 					if (name == "pop" && n == 0) inline_op = 11;
-				} else if (builtin_kind == 3) {
+				}
+				if (inline_op == 0 && (builtin_kind == 3 || builtin_kind >= 4)) {
 					if (name == "has" && n == 1) inline_op = 9;
 					else if (name == "get" && n == 2) inline_op = 10;
 				}

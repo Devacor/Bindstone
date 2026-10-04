@@ -16027,6 +16027,21 @@ op_status vm_backend::exec_concat_append(frame& f) {
 	return {};
 }
 
+// A receiver the checker left open (rule 4, rule 5 with the string builtins too): the builtin its kind names, if the name has one
+JAI_NOINLINE const builtin_method* vm_backend::open_receiver_builtin(const call_site& site, size_t kind, uint32_t receiver_rule) const {
+	switch (kind) {
+	case script_value::TYPEID_STRING: return receiver_rule == 5 ? builtins_.string_by_index[site.bi_string] : nullptr;
+	case script_value::TYPEID_ARRAY: return site.bi_array != builtin_method_registries::k_no_builtin ? builtins_.array_by_index[site.bi_array] : nullptr;
+	case script_value::TYPEID_MAP: return site.bi_map != builtin_method_registries::k_no_builtin ? builtins_.map_by_index[site.bi_map] : nullptr;
+	default: return nullptr;
+	}
+}
+
+bool vm_backend::open_receiver_inline_fits(uint32_t inline_op, size_t kind) {
+	return inline_op <= 2 || (inline_op == 9 || inline_op == 10 ? kind == script_value::TYPEID_MAP
+	                          : inline_op == 11 ? kind == script_value::TYPEID_ARRAY : kind == script_value::TYPEID_STRING);
+}
+
 op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
@@ -16034,16 +16049,18 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 	const script_value& recv = stack_[base - 1].deref();
 	const size_t kind = recv.raw_storage_index();
 	const builtin_method* fn = nullptr;
-	switch (ins.c & 15u) {
+	const uint32_t receiver_rule = ins.c & 15u;
+	switch (receiver_rule) {
 	case 1: if (kind == script_value::TYPEID_STRING) fn = builtins_.string_by_index[site.bi_string]; break;
 	case 2: if (kind == script_value::TYPEID_ARRAY) fn = builtins_.array_by_index[site.bi_array]; break;
 	case 3: if (kind == script_value::TYPEID_MAP) fn = builtins_.map_by_index[site.bi_map]; break;
-	default: break;
+	default: fn = open_receiver_builtin(site, kind, receiver_rule); break;
 	}
 	if (!fn) {
 		return exec_call_method(f, vm_instruction{opcode::op_call_method, ins.a, ins.b, 0});
 	}
-	if (const uint32_t inline_op = ins.c >> 4; inline_op != 0) {
+	const uint32_t inline_op = ins.c >> 4;
+	if (inline_op != 0 && (receiver_rule <= 3 || open_receiver_inline_fits(inline_op, kind))) {
 		// the builtin's body on its happy path (the argument kinds it accepts); any other argument calls the builtin for its text
 		std::optional<script_value> result;
 		if (inline_op <= 2) {

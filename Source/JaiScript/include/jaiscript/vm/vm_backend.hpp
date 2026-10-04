@@ -2244,6 +2244,8 @@ namespace jai::vm {
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f);
         op_status exec_size_temp(frame& f, const vm_instruction& ins);
+        const builtin_method* open_receiver_builtin(const call_site& site, size_t kind, uint32_t receiver_rule) const;
+        static bool open_receiver_inline_fits(uint32_t inline_op, size_t kind);
         std::deque<std::vector<script_value>> builtin_arg_pool_;   // op_call_builtin's argument vectors by nesting depth: a builtin may call back into the VM, and a deeper call's vector must not move this one
         size_t builtin_arg_depth_ = 0;
         // A builtin's script callback: call_script_function's entry with the per-call work it repeats decided once

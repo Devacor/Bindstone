@@ -31,6 +31,7 @@ namespace {
 struct host_options {
 	int64_t seed = 1337;
 	std::string backend = "vm";
+	uint32_t miss_every = 0;   // engine::cells_miss_every (--miss-every N; a build with JAISCRIPT_MISS_INJECTION)
 	bool smoke = false;
 	bool dev = false;
 	bool god = false;
@@ -344,6 +345,7 @@ int main(int argc, char** argv) {
 		else if (a == "--backend") { opt.backend = next_arg("--backend"); }
 		else if (a == "--smoke") { opt.smoke = true; }
 		else if (a == "--turns") { opt.turns = std::stoll(next_arg("--turns")); }
+		else if (a == "--miss-every") { opt.miss_every = static_cast<uint32_t>(std::stoll(next_arg("--miss-every"))); }
 		else if (a == "--input") { opt.scripted_input = next_arg("--input"); }
 		else if (a == "--quiet") { opt.quiet = true; }
 		else if (a == "--time") { opt.time_turns = true; }
@@ -384,6 +386,7 @@ int main(int argc, char** argv) {
 		std::fprintf(stderr, "unknown backend: %s\n", opt.backend.c_str());
 		return 2;
 	}
+	if (opt.miss_every) { eng->cells_miss_every(opt.miss_every); }
 	eng->execution_budget(0.0);  // the game blocks on read_key(); wall-clock budgets don't apply
 	jai::stdlib::register_all(eng);
 

@@ -3996,6 +3996,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					op.b = k_typed_const_bit | pp.value.const_index;
 				} else if (pp.value_is_subscript) {
 					if (pp.value.subscript_chain.size() != 1 || pp.value.member_node != k_invalid_u32 || pp.value.load_flags != 0 || (pp.value.slot == k_invalid_u32 && pp.value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_representation, ip); break; }
+					if (pp.value.slot != k_invalid_u32 && is_alias(pp.value.slot)) { refuse(chunk::cell_refusal_translation, ip); break; }   // the source an alias the block rebinds: the entry resolves it once
 					const fused_subscript_index& si = pp.value.subscript_chain[0];
 					if (si.kind == fused_subscript_index::index_literal) {
 						c.constants.push_back(script_value(static_cast<script_int>(si.literal), static_cast<engine*>(nullptr)));

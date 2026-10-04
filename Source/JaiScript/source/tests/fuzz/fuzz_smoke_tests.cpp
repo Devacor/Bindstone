@@ -132,6 +132,23 @@ public:
 			const fuzz::compare_result cr = fuzz::compare_program(p, 0.25);
 			check_true(cr.kind != fuzz::compare_result::diverge, "seed 2004797 agrees under the budget: " + cr.diff);
 		});
+		test("seeds_5792_and_9516_end_under_the_step_budget", [this]() {
+			// --max-depth 3 (the CI gate's depth): an endless loop around a closed loop and a host call ran past the budget on the vm in most runs
+			using fuzz::band_mode;
+			for (uint64_t seed : { 5792ull, 9516ull }) {
+				const fuzz::program p = fuzz::generate_program(seed, 3, band_mode::sometimes, band_mode::sometimes, band_mode::sometimes, band_mode::sometimes, band_mode::sometimes);
+				for (bool vm : { false, true }) {
+					for (uint64_t steps : { 1ull, 7ull, 64ull }) {
+						fuzz::run_config cfg;
+						cfg.use_vm = vm;
+						cfg.budget_seconds = 30.0;
+						cfg.step_budget = steps;
+						const fuzz::run_outcome out = fuzz::run_program(p, cfg);
+						check_true(out.budget_hit && out.alive, "seed " + std::to_string(seed) + (vm ? " vm" : " interpreter") + " step budget " + std::to_string(steps));
+					}
+				}
+			}
+		});
 		test("call_args_band_seeds_no_new_divergence", [this]() {
 			// every program carries the call-argument band: element reads of different typed arrays as the arguments of one kept call
 			// in a counted loop (a block's copied read resolving another argument's array diverged in 239 of 500 band seeds)

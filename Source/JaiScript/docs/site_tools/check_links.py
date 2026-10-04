@@ -4,7 +4,7 @@
 Relative links must point at a file that exists; a #fragment must name an id in the
 target page; external URLs are listed, never fetched.
 
-    python assets/tools/check_links.py
+    python site_tools/check_links.py
 
 Exit code 1 when anything is broken.
 """
@@ -16,7 +16,7 @@ import sys
 from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 
 class Collector(HTMLParser):

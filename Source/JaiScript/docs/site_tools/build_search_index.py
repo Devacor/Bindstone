@@ -4,7 +4,7 @@
 Every page contributes its title, its section, and every <h2>/<h3> that carries an id, so the
 index can never drift from the headings a reader actually sees. Run it after editing any page:
 
-    python assets/tools/build_search_index.py [--check]
+    python site_tools/build_search_index.py [--check]
 
 --check reports whether the index would change and exits 1 if it would, writing nothing.
 """
@@ -16,7 +16,7 @@ import pathlib
 import re
 import sys
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 PAGES = (
     ["index.html", "tour/index.html", "bridges/index.html"]

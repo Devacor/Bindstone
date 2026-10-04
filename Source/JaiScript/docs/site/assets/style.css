@@ -347,6 +347,7 @@ article.chapter details p { margin: .45rem 0; }
   width: .7rem; height: 3px; margin: -.12em .5rem 0 0; border-radius: 2px; background: var(--tick);
 }
 .cb-cpp > .cb-label::before { background: linear-gradient(90deg, var(--r5), var(--r6)); }
+.cb-jai[data-host] > .cb-label::after { content: " \00b7  runs inside its host"; color: var(--fg-dim); opacity: .8; }
 .cb-output { background: var(--output-bg); border-color: var(--output-border); }
 .cb-output pre code { color: var(--output-fg); }
 .cb-output > .cb-label { padding-right: 1rem; color: var(--output-fg); background: transparent; border-bottom-color: var(--output-border); }

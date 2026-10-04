@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run every site check in one go.
 
-    python assets/tools/verify_site.py [--no-samples] [--runner PATH]
+    python site_tools/verify_site.py [--no-samples] [--runner PATH]
 
 Order: script syntax (node --check), links and anchors, HTML structure, internal leakage and stale facts, retired error
 texts, search index freshness, chrome freshness, then (unless --no-samples) every jaiscript
@@ -37,7 +37,7 @@ def main():
     print("== scripts")
     node = shutil.which("node")
     if node:
-        bad = [js.name for js in sorted((HERE.parent).glob("*.js"))
+        bad = [js.name for js in sorted((HERE.parent / "site" / "assets").glob("*.js"))
                if subprocess.call([node, "--check", str(js)]) != 0]
         print("-- scripts: %s" % ("FAILED (%s)" % ", ".join(bad) if bad else "ok"))
         if bad:
@@ -50,7 +50,7 @@ def main():
         print("=" * 72)
         print("== " + name)
         extra = runner if name == "samples" else []
-        rc = subprocess.call([sys.executable, str(HERE / cmd[0])] + cmd[1:] + extra, cwd=str(HERE.parents[1]))
+        rc = subprocess.call([sys.executable, str(HERE / cmd[0])] + cmd[1:] + extra, cwd=str(HERE.parent / "site"))
         print("-- %s: %s" % (name, "ok" if rc == 0 else "FAILED (exit %d)" % rc))
         if rc:
             failed.append(name)

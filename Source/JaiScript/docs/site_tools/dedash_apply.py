@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply hand-written (old, new) prose rewrites to one page.
 
-    python assets/tools/dedash_apply.py edits.json
+    python site_tools/dedash_apply.py edits.json
 
 edits.json: {"page": "guide/01-hello.html", "edits": [["old", "new"], ...]}
 
@@ -14,7 +14,7 @@ import pathlib
 import re
 import sys
 
-SITE = pathlib.Path(__file__).resolve().parents[2]
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 BLOCK = re.compile(r"<(code|pre)\b.*?</\1>", re.IGNORECASE | re.DOTALL)
 DASH = re.compile(r"—|&mdash;|&#x2014;|&#8212;", re.IGNORECASE)
 

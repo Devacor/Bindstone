@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-SITE=pathlib.Path(__file__).resolve().parents[2]
+SITE=pathlib.Path(__file__).resolve().parent.parent/"site"
 PROJECT=SITE.parents[1]
 
 def main():
@@ -54,7 +54,7 @@ def main():
 	if errors:
 		print('\n'.join(errors))
 		return 1
-	result=subprocess.run([sys.executable,str(SITE/'assets/tools/build_api_reference.py'),'--check'])
+	result=subprocess.run([sys.executable,str(pathlib.Path(__file__).resolve().parent/'build_api_reference.py'),'--check'])
 	if result.returncode:return result.returncode
 	print(f'Catalog coverage: {len(entries)} signatures, {len(data["fields"])} fields/constants; direct registration checks pass')
 	return 0

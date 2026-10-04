@@ -84,8 +84,12 @@ namespace {
 		case opcode::op_binary: case opcode::op_binary_fused: case opcode::op_binary_fused_decl: case opcode::op_binary_fused_store: case opcode::op_binary_fused_temp:
 		case opcode::op_unary: case opcode::op_unary_temp: case opcode::op_math: case opcode::op_math_temp: case opcode::op_compound_store: case opcode::op_compound_fused:
 		case opcode::op_incdec: case opcode::op_operand_temp: case opcode::op_cast: case opcode::op_to_bool: case opcode::op_case_eq:
+		case opcode::op_d_add: case opcode::op_d_sub: case opcode::op_d_mul: case opcode::op_d_div: case opcode::op_d_mod: case opcode::op_d_and: case opcode::op_d_or:
+		case opcode::op_d_xor: case opcode::op_d_shl: case opcode::op_d_shr:
 			return fam::arith;
-		case opcode::op_fused_cmp_jump: case opcode::op_jump: case opcode::op_jump_if_false: case opcode::op_jump_if_true: return fam::compare;
+		case opcode::op_fused_cmp_jump: case opcode::op_jump: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
+		case opcode::op_d_jlt: case opcode::op_d_jle: case opcode::op_d_jgt: case opcode::op_d_jge: case opcode::op_d_jeq: case opcode::op_d_jne:
+			return fam::compare;
 		case opcode::op_const: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup: case opcode::op_load:
 		case opcode::op_store: case opcode::op_decl_var: case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value: case opcode::op_decl_keep:
 		case opcode::op_decl_share: case opcode::op_ref_target_store:
@@ -126,6 +130,7 @@ namespace {
 	bool straight_op(opcode o) {
 		if (o >= opcode::op_t_add_ii && o <= opcode::op_t_mod_ff) return true;
 		if (o >= opcode::op_t_jlt_ii && o <= opcode::op_t_jne_ff) return true;
+		if (o >= opcode::op_d_add && o <= opcode::op_d_jne) return true;   // a dynamic op stands for the fused instruction it replaced
 		switch (o) {
 		case opcode::op_binary_fused: case opcode::op_binary_fused_decl: case opcode::op_binary_fused_temp: case opcode::op_binary_fused_store:
 		case opcode::op_fused_cmp_jump: case opcode::op_t_decl_mov: case opcode::op_t_decl_const: case opcode::op_t_store_mov: case opcode::op_t_store_const:

@@ -2161,6 +2161,11 @@ namespace jai::vm {
         op_status exec_typed_fallback(frame& f, const vm_instruction& orig);
         op_status exec_typed_arith(frame& f, const vm_instruction& ins);
         op_status exec_typed_cmp_jump(frame& f, const vm_instruction& ins);
+        const script_value* dyn_operand(frame& f, uint32_t v);
+        bool dyn_arith_fast(frame& f, const vm_instruction& ins);
+        bool dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, script_float fv);
+        op_status exec_dyn_arith(frame& f, const vm_instruction& ins);
+        op_status exec_dyn_cmp_jump(frame& f, const vm_instruction& ins);
         op_status exec_typed_decl_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_decl_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);

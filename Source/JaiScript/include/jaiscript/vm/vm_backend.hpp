@@ -76,7 +76,7 @@ namespace jai::vm {
 #endif
         cell_counters cells_counters() const override { return cells_counters_; }
 #ifdef JAISCRIPT_VM_PROFILE
-        ~vm_backend() override { dump_opcode_profile(); }
+        ~vm_backend() override { dump_opcode_profile(); release_site_pins(); }
         void dump_opcode_profile() const;
         void profile_reset() override;
         uint64_t profile_cycles_[256] = {};
@@ -274,10 +274,13 @@ namespace jai::vm {
         uint64_t profile_index_read_paths_[8] = {};
         std::map<std::string, uint64_t> profile_builtin_direct_names_;   // builtin-direct calls by name
 #elif defined(JAISCRIPT_VM_COARSE_PROFILE)
-        ~vm_backend() override { dump_coarse_profile(); }
+        ~vm_backend() override { dump_coarse_profile(); release_site_pins(); }
 #else
-        ~vm_backend() override = default;
+        ~vm_backend() override { release_site_pins(); }
 #endif
+        // A call site pins the callee it cached (ABA): a recursive function's own body pins the function, function -> body
+        // chunk -> site -> function; the backend drops every pin as it dies so the engine's functions die with the engine
+        void release_site_pins() noexcept;
 
         script_value execute(const std::vector<declaration_ptr>& declarations) override;
         script_value execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;

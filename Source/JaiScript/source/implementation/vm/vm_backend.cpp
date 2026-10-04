@@ -20393,6 +20393,24 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 // Execution entry points
 // ============================================================
 
+void vm_backend::release_site_pins() noexcept {
+	auto release = [](const std::shared_ptr<chunk>& code) {
+		if (!code) { return; }
+		for (auto& site : code->call_sites) {
+			site.ic_pin = {};
+			site.ic_identity = nullptr;
+			site.ic_fn = nullptr;
+			site.mic_method = script_value(std::monostate{}, nullptr);
+			site.mic_resolved.reset();
+			site.mic_dispatch = nullptr;
+			site.mic_cd = nullptr;
+		}
+	};
+	for (auto& [key, entry] : chunk_cache_) { release(entry.compiled); }
+	for (auto& [key, entry] : expr_chunk_cache_) { release(entry.compiled); }
+	for (auto& [key, entry] : decl_chunk_cache_) { release(entry.compiled); }
+}
+
 script_value vm_backend::execute(const std::vector<declaration_ptr>& declarations) {
 	compiler_.typed_lowering(!engine_ || engine_->type_proofs());
 	compiler_.ir_passes(!engine_ || engine_->ir_passes());

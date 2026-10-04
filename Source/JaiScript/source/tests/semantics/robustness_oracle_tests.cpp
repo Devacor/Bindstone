@@ -628,6 +628,23 @@ private:
 				check_true(registry.expired(), "conversion registry freed" + label);
 			}
 		});
+		// The VM's call sites pin the callee they cached: a recursive function's body pinned the function itself, so the
+		// function, its chunk and everything the chunk's sites pinned (here a host function's state) outlived the engine
+		test("a_recursive_function_dies_with_its_engine", [this]() {
+			for (const auto& c : robustness::configs()) {
+				std::weak_ptr<int> state;
+				{
+					auto token = std::make_shared<int>(0);
+					state = token;
+					auto e = robustness::make(c, check_mode::strict);
+					e->add_function("touch", [token]() -> script_int { return ++*token; });
+					token.reset();
+					e->execute("function rec(int n) -> int { touch(); return n <= 0 ? 0 : 1 + rec(n - 1); } int r = rec(4);");
+					check_eq((int64_t)4, e->execute("r").as_int(), std::string("ran [") + c.label + "]");
+				}
+				check_true(state.expired(), std::string("the host function's state freed [") + c.label + "]");
+			}
+		});
 	}
 
 	// docs/site/reference/api.html: sort(predicate) orders by the predicate, equal items may be reordered; a predicate that

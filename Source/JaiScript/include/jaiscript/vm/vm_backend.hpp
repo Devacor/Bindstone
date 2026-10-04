@@ -1916,6 +1916,7 @@ namespace jai::vm {
         op_status exec_load_impl(frame& f, const vm_instruction& ins);
         op_status exec_store(frame& f, const vm_instruction& ins);
         op_status exec_compound_store(frame& f, const vm_instruction& ins);
+        op_status exec_compound_store_full(frame& f, const vm_instruction& ins);
         op_status exec_incdec(frame& f, const vm_instruction& ins);
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
         op_status bind_graft_parameter(frame& f, const variable_decl* decl);   // a graft's by-value parameter: bind_parameters's by-value lane over the popped argument
@@ -2244,6 +2245,7 @@ namespace jai::vm {
                                 script_int& out, bool& handled);
         // op_store's exact post-pop tail, shared with op_binary_fused_store
         op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
+        op_status store_popped_value_full(frame& f, const vm_instruction& ins, script_value value);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
         op_status exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
         const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);

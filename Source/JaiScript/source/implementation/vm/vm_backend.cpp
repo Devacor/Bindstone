@@ -3761,7 +3761,43 @@ op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 // The ONE identifier-store tail (everything op_store does after consuming its value),
 // shared verbatim by op_store and op_binary_fused_store (dest-addressed fused binaries)
 // so the two spellings cannot drift.
+// The head takes a scalar into a plain slot that is untagged, var or of the scalar's own type: every row of the full
+// path below that such a store reaches leaves the slot holding the value (a var slot's own tag stamped on it) and
+// pushes the value. The full path keeps its frame (a stack probe and a cookie) off this lane.
 op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
+	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
+		const size_t vi = value.raw_storage_index();
+		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
+			if (script_value* slot = frame_slot(f, ins.b); slot && slot->raw_storage_index() != script_value::TYPEID_REFERENCE) {
+				const type_info* st = slot->type_info_raw();
+				const type_info* vt = value.type_info_raw();
+				const script_value_type vb = vt ? vt->base_type : script_value_type::jai_any_type;
+				if (!st) {
+					*slot = value;
+					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+					return op_status::ok;
+				}
+				if (st->base_type == script_value_type::jai_any_type && !st->dynamic_slot &&
+				    (vb == script_value_type::jai_any_type || vb == value.current_type())) {
+					value.set_type_info(type_info_ptr{const_cast<type_info*>(st)});
+					*slot = value;
+					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+					return op_status::ok;
+				}
+				if (st->base_type == value.current_type() && (vb == script_value_type::jai_any_type || vb == st->base_type)) {
+					*slot = value;
+					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+					return op_status::ok;
+				}
+			}
+		}
+	}
+	const op_status st = store_popped_value_full(f, ins, std::move(value));
+	if (st == op_status::ok && (ins.c & store_flag_no_result)) { stack_.pop_back(); }
+	return st;
+}
+
+JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_instruction& ins, script_value value) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const bool rhs_lvalue = (ins.c & store_flag_rhs_lvalue) != 0;
 	auto result_used = [&] { return !(ins.c & store_flag_no_result) && assignment_result_used(f); };
@@ -4330,7 +4366,7 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	return {};
 }
 
-op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
+JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const uint32_t kind = ins.c & compound_kind_mask;
 	const bool result_needed = (ins.c & compound_flag_result_needed) != 0;
@@ -5962,13 +5998,7 @@ op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& in
 		return {};   // compute unwound before its sink ran (pair parity: STORE never runs)
 	}
 	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
-	VM_TRY(store_popped_value(f, store_ins, std::move(*computed)));
-	// Statement position (the no-result door's rewrite): op_store's dispatch case pops
-	// the result under this flag — mirror it here, the tail always pushes
-	if (dp.flags & store_flag_no_result) {
-		stack_.pop_back();
-	}
-	return {};
+	return store_popped_value(f, store_ins, std::move(*computed));   // a statement-position store pushes nothing
 }
 
 // Cheap-shape operand resolver for exec_fused_cmp_jump: constants, frame slots and
@@ -10629,9 +10659,7 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 	}
 	JAI_TYPED_INPLACE(3);
 	VM_TRY(exec_load(f, site.orig));
-	VM_TRY(exec_store(f, site.orig2));
-	if (site.orig2.c & store_flag_no_result) { stack_.pop_back(); }
-	return {};
+	return exec_store(f, site.orig2);
 }
 
 op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins) {
@@ -10647,9 +10675,7 @@ op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins
 	}
 	JAI_TYPED_INPLACE(3);
 	stack_.push_back(std::move(v));
-	VM_TRY(exec_store(f, site.orig2));
-	if (site.orig2.c & store_flag_no_result) { stack_.pop_back(); }
-	return {};
+	return exec_store(f, site.orig2);
 }
 
 bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t) {
@@ -20017,7 +20043,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_load: VM_TRY_OP(exec_load(f, ins)); break;
 			case opcode::op_store:
 				VM_TRY_OP(exec_store(f, ins));
-				if (ins.c & store_flag_no_result) { stack_.pop_back(); }
 				break;
 			case opcode::op_compound_store: VM_TRY_OP(exec_compound_store(f, ins)); break;
 			case opcode::op_compound_fused: VM_TRY_OP_SHARED(exec_compound_fused(f, ins)); break;

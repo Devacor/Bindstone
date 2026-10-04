@@ -3774,20 +3774,26 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 				const type_info* st = slot->type_info_raw();
 				const type_info* vt = value.type_info_raw();
 				const script_value_type vb = vt ? vt->base_type : script_value_type::jai_any_type;
-				if (!st) {
-					*slot = value;
-					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
-					return op_status::ok;
-				}
-				if (st->base_type == script_value_type::jai_any_type && !st->dynamic_slot &&
+				const type_info* tag = vt;
+				bool lane = !st;
+				if (!lane && st->base_type == script_value_type::jai_any_type && !st->dynamic_slot &&
 				    (vb == script_value_type::jai_any_type || vb == value.current_type())) {
-					value.set_type_info(type_info_ptr{const_cast<type_info*>(st)});
-					*slot = value;
-					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
-					return op_status::ok;
+					lane = true;
+					tag = st;
+				} else if (!lane) {
+					lane = st->base_type == value.current_type() && (vb == script_value_type::jai_any_type || vb == st->base_type);
 				}
-				if (st->base_type == value.current_type() && (vb == script_value_type::jai_any_type || vb == st->base_type)) {
-					*slot = value;
+				if (lane) {
+					if (tag != vt) { value.set_type_info(type_info_ptr{const_cast<type_info*>(tag)}); }
+					// a slot already holding this kind from this engine takes the payload and the tag (the copy below writes nothing else)
+					if (slot->raw_storage_index() == vi && slot->get_engine() == value.get_engine() && vi != script_value::TYPEID_CHAR) {
+						if (vi == script_value::TYPEID_INT) { slot->unchecked_set_int_payload(value.unchecked_as_int()); }
+						else if (vi == script_value::TYPEID_FLOAT) { slot->unchecked_set_float_payload(value.unchecked_as_float()); }
+						else { slot->unchecked_set_bool_payload(value.unchecked_as_bool()); }
+						if (slot->type_info_raw() != tag) { slot->set_type_info(type_info_ptr{const_cast<type_info*>(tag)}); }
+					} else {
+						*slot = value;
+					}
 					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
 					return op_status::ok;
 				}
@@ -6036,15 +6042,44 @@ op_status vm_backend::exec_binary_fused_decl(frame& f, const vm_instruction& ins
 	return exec_decl_var(f, decl_ins);
 }
 
+// A raw int or float result into a slot already holding that kind from this engine: store_popped_value's head over the
+// value the kernel would mint (its canonical stamp; a var slot's own tag), written as payload and tag
+bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv) {
+	if (ins.b == k_invalid_u32 || !f.locals || f.top_level) return false;
+	script_value* slot = frame_slot(f, ins.b);
+	if (!slot || slot->raw_storage_index() != kind || slot->get_engine() != engine_) return false;
+	const bool is_int = kind == script_value::TYPEID_INT;
+	const type_info* st = slot->type_info_raw();
+	type_info* tag = is_int ? ti_int_ : ti_float_;
+	if (st && st->base_type != (is_int ? script_value_type::jai_int_type : script_value_type::jai_float_type)) {
+		if (st->base_type != script_value_type::jai_any_type || st->dynamic_slot) return false;
+		tag = const_cast<type_info*>(st);
+	}
+	if (is_int) { slot->unchecked_set_int_payload(iv); } else { slot->unchecked_set_float_payload(fv); }
+	if (st != tag) { slot->set_type_info(type_info_ptr{tag}); }
+	if (!(ins.c & store_flag_no_result)) { stack_.push_back(*slot); }
+	return true;
+}
+
 op_status vm_backend::exec_binary_fused_store(frame& f, const vm_instruction& ins) {
 	const fused_binary_dst_proto& dp = f.code->fused_binary_dst_protos[ins.a];
-	std::optional<script_value> computed;
-	VM_TRY(binary_fused_compute(f, dp.binary_proto, [&](script_value&& v) { computed.emplace(std::move(v)); }));
-	if (!computed) [[unlikely]] {
+	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
+	struct store_lane_sink {
+		vm_backend* vm;
+		frame& fr;
+		const vm_instruction& sins;
+		bool landed = false;
+		std::optional<script_value> boxed;
+		void operator()(script_value&& v) { boxed.emplace(std::move(v)); }
+		void raw_int(script_int iv) { if (vm->store_slot_raw(fr, sins, script_value::TYPEID_INT, iv, 0.0)) { landed = true; } else { boxed.emplace(script_value(iv, vm->engine_)); } }
+		void raw_float(script_float fv) { if (vm->store_slot_raw(fr, sins, script_value::TYPEID_FLOAT, 0, fv)) { landed = true; } else { boxed.emplace(script_value(fv, vm->engine_)); } }
+	} lane{this, f, store_ins};
+	VM_TRY(binary_fused_compute(f, dp.binary_proto, lane));
+	if (lane.landed) return {};
+	if (!lane.boxed) [[unlikely]] {
 		return {};   // compute unwound before its sink ran (pair parity: STORE never runs)
 	}
-	const vm_instruction store_ins{opcode::op_store, dp.symbol, dp.slot, dp.flags};
-	return store_popped_value(f, store_ins, std::move(*computed));   // a statement-position store pushes nothing
+	return store_popped_value(f, store_ins, std::move(*lane.boxed));   // a statement-position store pushes nothing
 }
 
 // Cheap-shape operand resolver for exec_fused_cmp_jump: constants, frame slots and

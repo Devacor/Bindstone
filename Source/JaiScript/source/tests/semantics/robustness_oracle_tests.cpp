@@ -96,6 +96,7 @@ public:
 		import_trees();
 		stored_element_results();
 		engine_teardown();
+		cell_cycles();
 	}
 
 private:
@@ -602,6 +603,122 @@ private:
 	// An engine frees what it made: the conversion registry's standard converters reached it through a captured shared_ptr
 	// (every engine's registry and the host classes its converters name lived forever), and a script class's methods and a
 	// closure held the program environment that held them
+	// Dev ruling 2026-10-03: a frame that shared local cells with [&] lambdas checks those cells at its exit; a cycle of
+	// cells and the closures they hold that nothing else reaches is cleared (its destructors run at the frame exit), an
+	// escaped closure keeps everything alive and working, and nothing still reachable is destroyed
+	void cell_cycles() {
+		const std::string counter = "int dead = 0;\nclass D { int v = 1; ~D() { dead++; } }\n";
+		test("a_recursive_lambda_over_its_own_cell_dies_with_its_frame", [this, counter]() {
+			expect("self cycle", counter + R"(
+				function f() -> int { var d = D(); var g; g = [&](int n) -> int { return n < 1 ? (d != null ? 0 : -1) : g(n - 1) + 1; }; return g(3); }
+				int r = f(); int one = dead; f(); int two = dead;
+				to_string(r) + " " + to_string(one) + " " + to_string(two)
+			)", "3 1 2");
+		});
+		test("lambdas_capturing_each_others_cells_die_with_their_frame", [this, counter]() {
+			expect("mutual cycle", counter + R"(
+				function f() -> int {
+					var d = D(); var a; var b;
+					a = [&](int n) -> int { return n < 1 ? (d != null ? 0 : -1) : b(n - 1) + 1; };
+					b = [&](int n) -> int { return n < 1 ? 0 : a(n - 1) + 1; };
+					return a(5);
+				}
+				int r = f(); int one = dead; f();
+				to_string(r) + " " + to_string(one) + " " + to_string(dead)
+			)", "5 1 2");
+		});
+		test("a_nested_lambda_sharing_the_outer_cells_dies_with_the_frame", [this, counter]() {
+			expect("nested", counter + R"(
+				function f() -> int {
+					var d = D(); var g;
+					g = [&](int n) -> int { auto inner = [&]() -> int { return n < 1 ? (d != null ? 0 : -1) : g(n - 1) + 1; }; return inner(); };
+					return g(4);
+				}
+				int r = f(); int one = dead; f();
+				to_string(r) + " " + to_string(one) + " " + to_string(dead)
+			)", "4 1 2");
+		});
+		test("an_escaped_closure_keeps_its_cycle_alive_and_working", [this, counter]() {
+			expect("escaped", counter + R"(
+				function make() -> var { var d = D(); int count = 0; var g; g = [&]() -> int { count++; return (d != null && g != null) ? count : -1; }; return g; }
+				var h = make();
+				int a = h(); int b = h(); int alive = dead;
+				array<var> kept = [];
+				function stash() { var d = D(); var g; g = [&]() -> int { return d != null && g != null ? 7 : -1; }; kept.push(g); }
+				stash(); stash();
+				int stashed = dead;
+				int c = kept[0]() + kept[1]();
+				to_string(a) + " " + to_string(b) + " " + to_string(alive) + " " + to_string(stashed) + " " + to_string(c) + " " + to_string(h())
+			)", "1 2 0 0 14 3");
+		});
+		test("dropped_escaped_cycles_are_reclaimed_as_the_deferred_list_grows", [this, counter]() {
+			expect("deferred sweep", counter + R"(
+				function make() -> var { var d = D(); var g; g = [&]() -> int { return d != null && g != null ? 1 : 0; }; return g; }
+				int sum = 0;
+				for (int i = 0; i < 300; i++) { var h = make(); sum += h(); }
+				to_string(sum) + " " + (dead >= 200 ? "reclaimed" : "kept " + to_string(dead))
+			)", "300 reclaimed");
+		});
+		test("a_loop_iteration_drops_the_cycle_it_shared", [this, counter]() {
+			expect("loop", counter + R"(
+				function f() -> int {
+					int ran = 0;
+					for (int i = 0; i < 5; i++) { var d = D(); var g; g = [&]() -> int { return d != null && g != null ? 1 : 0; }; ran += g(); }
+					return ran * 100 + dead;
+				}
+				int r = f();
+				to_string(r) + " " + to_string(dead)
+			)", "505 5");
+		});
+		test("a_coroutine_frame_drops_its_cycle_when_it_finishes_or_dies", [this, counter]() {
+			expect("coroutine", counter + R"(
+				coroutine gen() -> int { var d = D(); var g; g = [&](int n) -> int { return n < 1 ? (d != null ? 0 : -1) : g(n - 1) + 1; }; yield g(2); yield g(3); }
+				int total = 0;
+				for (auto v : gen()) { total += v; }
+				int finished = dead;
+				function abandon() -> int { auto c = gen(); return c.resume(); }
+				int first = abandon();
+				to_string(total) + " " + to_string(finished) + " " + to_string(first) + " " + to_string(dead)
+			)", "5 1 2 2");
+		});
+		test("a_reference_argument_a_callee_captures_dies_with_the_callers_frame", [this, counter]() {
+			expect("boxed on demand", counter + R"(
+				function set(var& r, var& keep) { r = [&](int n) -> int { return n < 1 ? (keep != null ? 0 : -1) : r(n - 1) + 1; }; }
+				function f() -> int { var d = D(); var g; set(g, d); return g(3); }
+				int total = 0;
+				string after = "";
+				for (int i = 0; i < 10; i++) { total += f(); after = after + to_string(dead) + " "; }
+				to_string(total) + ": " + after
+			)", "30: 1 2 3 4 5 6 7 8 9 10 ");
+		});
+		test("a_value_still_reachable_from_outside_the_cycle_survives_it", [this, counter]() {
+			expect("reachable", counter + R"(
+				var outside;
+				function f() -> int { var d = D(); var g; g = [&]() -> int { return d != null && g != null ? 1 : 0; }; outside = d; return g(); }
+				int r = f();
+				to_string(r) + " " + to_string(dead) + " " + to_string(outside.v)
+			)", "1 1 1");
+		});
+		test("a_cycle_an_escaped_closure_kept_dies_with_its_engine", [this]() {
+			for (const auto& c : robustness::configs()) {
+				std::weak_ptr<robustness_probe_host> token;
+				{
+					auto e = robustness::make(c, check_mode::strict);
+					dynamic_binder<robustness_probe_host>(*e, "RobustnessProbeHost").method("get", &robustness_probe_host::get).build();
+					e->add_function("token", [&token]() { auto t = std::make_shared<robustness_probe_host>(); token = t; return t; });
+					e->execute(R"(
+						function make() -> var { var t = token(); var g; g = [&]() -> int { return t.get() + (g != null ? 1 : 0); }; return g; }
+						var h = make();
+						int r = h();
+						h = null;
+					)");
+					check_eq((int64_t)1, e->execute("r").as_int(), std::string("ran [") + c.label + "]");
+				}
+				check_true(token.expired(), std::string("the cycle's host value freed with the engine [") + c.label + "]");
+			}
+		});
+	}
+
 	void engine_teardown() {
 		test("an_engine_frees_its_classes_and_registry_when_it_dies", [this]() {
 			for (const auto& c : robustness::configs()) {

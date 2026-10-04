@@ -539,6 +539,199 @@ script_value script_value::make_cell_reference(script_value&& boxed, engine* eng
     return v;
 }
 
+struct script_value::cell_cycle_registry {
+    std::vector<jai::weaker_ptr<reference_holder>> deferred;
+    size_t sweep_at = 64;
+    bool sweeping = false;
+    static void teardown(void* p) { delete static_cast<cell_cycle_registry*>(p); }
+};
+
+void script_value::gather_shared_cells(const script_value* values, size_t count, std::vector<script_value>& out) {
+    for (size_t i = 0; i < count; ++i) {
+        const script_value& v = values[i];
+        if (v.raw_storage_index() != TYPEID_REFERENCE) continue;
+        const auto& holder = *v.storage_.get_if<TYPEID_REFERENCE>();
+        if (holder && holder->plain_cell() && holder.use_count() > 1) out.push_back(v);
+    }
+}
+
+// Trial deletion over the cells, the function values a cell holds, their definitions and capture environments, and the
+// cells and functions those environments hold. A node referenced from outside that set (a count above its edges from
+// inside plus the handles in `cells`) is live, and so is everything it reaches; a cell left over is held only by the
+// cycle, and clearing its value lets the cycle die.
+void script_value::release_cell_cycles(std::vector<script_value>& cells, engine* eng) {
+    if (cells.empty()) return;
+    if (!eng || eng->parallel_region_active()) { cells.clear(); return; }
+    enum : uint8_t { node_cell, node_function, node_definition, node_environment };
+    struct node { const void* key; size_t count; size_t internal; uint32_t held; uint32_t first_edge; uint32_t edge_count; uint8_t kind; bool live; };
+    std::vector<node> nodes;
+    nodes.reserve(cells.size() * 4);
+    std::vector<uint32_t> edges;
+    std::unordered_map<const void*, uint32_t> index;   // past a few dozen nodes
+    auto find = [&](const void* key) -> uint32_t {
+        if (!index.empty()) {
+            auto it = index.find(key);
+            return it == index.end() ? UINT32_MAX : it->second;
+        }
+        for (uint32_t i = 0; i < nodes.size(); ++i) {
+            if (nodes[i].key == key) return i;
+        }
+        return UINT32_MAX;
+    };
+    auto add = [&](const void* key, size_t count, uint8_t kind) -> uint32_t {
+        const uint32_t id = static_cast<uint32_t>(nodes.size());
+        nodes.push_back({key, count, 0, 0, 0, 0, kind, false});
+        if (!index.empty()) {
+            index.emplace(key, id);
+        } else if (nodes.size() > 32) {
+            for (uint32_t i = 0; i < nodes.size(); ++i) index.emplace(nodes[i].key, i);
+        }
+        return id;
+    };
+    auto link = [&](const void* key, size_t count, uint8_t kind) {
+        uint32_t id = find(key);
+        if (id == UINT32_MAX) id = add(key, count, kind);
+        ++nodes[id].internal;
+        edges.push_back(id);
+    };
+    auto link_value = [&](const script_value& v) {
+        if (v.raw_storage_index() == TYPEID_REFERENCE) {
+            const auto& holder = *v.storage_.get_if<TYPEID_REFERENCE>();
+            if (holder && holder->plain_cell()) link(holder.get(), holder.use_count(), node_cell);
+        } else if (v.raw_storage_index() == TYPEID_FUNCTION) {
+            const auto& fn = *v.storage_.get_if<TYPEID_FUNCTION>();
+            if (fn) link(fn.get(), fn.use_count(), node_function);
+        }
+    };
+    for (const script_value& cell : cells) {
+        const auto& holder = *cell.storage_.get_if<TYPEID_REFERENCE>();
+        uint32_t id = find(holder.get());
+        if (id == UINT32_MAX) id = add(holder.get(), holder.use_count(), node_cell);
+        ++nodes[id].held;
+    }
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+        nodes[i].first_edge = static_cast<uint32_t>(edges.size());
+        const void* key = nodes[i].key;
+        switch (nodes[i].kind) {
+            case node_cell: {
+                auto* holder = static_cast<const reference_holder*>(key);
+                if (holder->plain_cell() && holder->cell()->raw_storage_index() == TYPEID_FUNCTION) link_value(*holder->cell());
+                break;
+            }
+            case node_function: {
+                auto* fn = const_cast<script_function*>(static_cast<const script_function*>(key));
+                const auto* thunk = fn->target<script_callable_thunk>();
+                if (thunk && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn) {
+                    link(thunk->payload.fn.get(), thunk->payload.fn.use_count(), node_definition);
+                }
+                break;
+            }
+            case node_definition: {
+                const auto& env = static_cast<const script_defined_function*>(key)->closure_env;
+                if (env) link(env.get(), env.use_count(), node_environment);
+                break;
+            }
+            case node_environment: {
+                for (const script_value& v : static_cast<const environment*>(key)->own_values()) link_value(v);
+                break;
+            }
+        }
+        nodes[i].edge_count = static_cast<uint32_t>(edges.size()) - nodes[i].first_edge;
+    }
+    std::vector<uint32_t> work;
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+        if (nodes[i].count != nodes[i].internal + nodes[i].held) {
+            nodes[i].live = true;
+            work.push_back(i);
+        }
+    }
+    while (!work.empty()) {
+        const uint32_t i = work.back();
+        work.pop_back();
+        for (uint32_t e = nodes[i].first_edge; e < nodes[i].first_edge + nodes[i].edge_count; ++e) {
+            if (!nodes[edges[e]].live) {
+                nodes[edges[e]].live = true;
+                work.push_back(edges[e]);
+            }
+        }
+    }
+    std::vector<script_value> trash;
+    for (const node& n : nodes) {
+        if (n.kind == node_cell && !n.live) {
+            auto* holder = const_cast<reference_holder*>(static_cast<const reference_holder*>(n.key));
+            if (holder->plain_cell()) trash.push_back(std::move(*holder->cell()));
+        }
+    }
+    // A live cell a closure holds is listed for a later check; a listed cell found garbage leaves the list (a callee
+    // listed its caller's cell, the caller's exit clears it). Only the newest entries are searched.
+    void*& slot = eng->cell_cycle_registry_slot();
+    auto listed_at = [&](const reference_holder* holder) -> size_t {
+        auto& deferred = static_cast<cell_cycle_registry*>(slot)->deferred;
+        const size_t floor = deferred.size() > 8 ? deferred.size() - 8 : 0;
+        for (size_t i = deferred.size(); i-- > floor;) {
+            if (deferred[i].owner_identity() == holder) return i;
+        }
+        return SIZE_MAX;
+    };
+    for (const script_value& cell : cells) {
+        const auto& holder = *cell.storage_.get_if<TYPEID_REFERENCE>();
+        const node& n = nodes[find(holder.get())];
+        if (n.live && n.internal > 0) {
+            if (!slot) {
+                slot = new cell_cycle_registry();
+                eng->set_cell_cycle_registry_teardown(&cell_cycle_registry::teardown);
+            }
+            if (listed_at(holder.get()) == SIZE_MAX) static_cast<cell_cycle_registry*>(slot)->deferred.emplace_back(holder);
+        } else if (slot && !n.live) {
+            const size_t at = listed_at(holder.get());
+            if (at != SIZE_MAX) {
+                auto& deferred = static_cast<cell_cycle_registry*>(slot)->deferred;
+                deferred.erase(deferred.begin() + static_cast<std::ptrdiff_t>(at));
+            }
+        }
+    }
+    trash.clear();
+    cells.clear();
+    auto* registry = static_cast<cell_cycle_registry*>(slot);
+    if (registry && !registry->sweeping && registry->deferred.size() >= registry->sweep_at) {
+        registry->sweeping = true;
+        std::vector<script_value> roots;
+        {
+            auto deferred = std::move(registry->deferred);
+            registry->deferred.clear();
+            for (const auto& weak : deferred) {
+                if (auto holder = weak.lock()) {
+                    script_value v(std::monostate{}, eng);
+                    v.storage_ = std::move(holder);
+                    roots.push_back(std::move(v));
+                }
+            }
+        }
+        release_cell_cycles(roots, eng);
+        registry->sweep_at = std::max<size_t>(64, registry->deferred.size() * 2);
+        registry->sweeping = false;
+    }
+}
+
+void script_value::release_deferred_cell_cycles(engine* eng) {
+    void*& slot = eng->cell_cycle_registry_slot();
+    auto* registry = static_cast<cell_cycle_registry*>(slot);
+    if (!registry) return;
+    registry->sweeping = true;
+    std::vector<script_value> roots;
+    for (const auto& weak : registry->deferred) {
+        if (auto holder = weak.lock()) {
+            script_value v(std::monostate{}, eng);
+            v.storage_ = std::move(holder);
+            roots.push_back(std::move(v));
+        }
+    }
+    registry->deferred.clear();
+    release_cell_cycles(roots, eng);
+    slot = nullptr;
+    delete registry;
+}
+
 script_value script_value::make_map_entry_reference(const strong_ptr<script_map>& map_storage,
                                                     const script_value& key, engine* eng, type_info_ptr value_type) {
     if (!map_storage) {

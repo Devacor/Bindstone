@@ -649,6 +649,9 @@ namespace jai::vm {
         // Compile-time lazy-env gate: false = every op proven not to need the per-call
         // scope environment, so plain in-loop callees skip creating it (fail-closed default)
         bool needs_frame_env = true;
+        // A lambda captures one of the body's locals by reference (block_stmt::shares_cells): the frame's exit checks
+        // the cells it shared for cycles. Implies needs_frame_env, so the check sits on the env frame's exit only
+        bool shares_cells = false;
         // Compiler had the builtin registries: call_site bi_* indices are authoritative
         // (invalid = not a builtin). False (raw-compiler tests) keeps the find fallback.
         bool builtin_indexed = false;

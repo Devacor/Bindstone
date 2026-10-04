@@ -131,6 +131,20 @@ namespace jai {
         // it across every later resume (return-site conversion, debugger locals)
         std::optional<script_defined_function> function;
 
+        // A coroutine dropped while suspended: its frames die here, then the cells they shared are checked for cycles
+        ~interpreter_coroutine_state() override {
+            std::vector<script_value> shared;
+            for (auto& frame : saved_call_stack) {
+                if (frame.boxed_cells || (frame.function && frame.function->body && frame.function->body->shares_cells)) {
+                    script_value::gather_shared_cells(frame.locals.data(), frame.locals.size(), shared);
+                }
+            }
+            if (shared.empty()) { return; }
+            engine* eng = shared.front().get_engine();
+            saved_call_stack.clear();
+            script_value::release_cell_cycles(shared, eng);
+        }
+
         void push_continuation(ast_node* node, size_t index,
                                std::shared_ptr<environment> env = nullptr,
                                std::optional<script_value> container = std::nullopt) {
@@ -1066,6 +1080,8 @@ namespace jai {
         [[nodiscard]] checked_result<void> dispatch_decl(declaration* decl);
 
         // Helper to get the last evaluated value (inlined for performance)
+        script_value share_boxed_slot(script_value& storage);
+
         inline script_value pop_value() {
             return valueStack_.pop();
         }

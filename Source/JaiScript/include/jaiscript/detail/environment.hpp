@@ -313,6 +313,7 @@ namespace jai {
         // lookup caches never memoize this/static-field fallbacks. nullptr = the prefix is
         // exhausted; the caller runs its original full lookup for the fallback tails.
         script_value* vm_storage_lookup(uint64_t id, bool& cacheable);
+        const std::deque<script_value>& own_values() const noexcept { return local_storage_; }
 
     protected:
         void validate_parent_chain(std::shared_ptr<environment> /*new_parent*/) const {
@@ -457,6 +458,18 @@ struct reverse_destroyed_values : std::vector<script_value> {
     ~reverse_destroyed_values() { while (!empty()) { pop_back(); } }
 };
 
+namespace detail {
+    // The cells a dying frame shared with its lambdas, checked for cycles once the frame's locals have died
+    struct shared_cell_release {
+        engine* eng;
+        std::vector<script_value> cells;
+        explicit shared_cell_release(engine* e) noexcept : eng(e) {}
+        shared_cell_release(const shared_cell_release&) = delete;
+        shared_cell_release& operator=(const shared_cell_release&) = delete;
+        ~shared_cell_release() { if (!cells.empty()) { script_value::release_cell_cycles(cells, eng); } }
+    };
+}
+
 struct call_frame {
         std::shared_ptr<environment> closure_env;
 
@@ -498,6 +511,8 @@ struct call_frame {
 
         /// O(1) access by slot index - much faster than hash map or linear search
         reverse_destroyed_values locals;
+        // A slot was boxed into a cell on demand (a reference bound to it): the frame's exit checks its cells for cycles
+        bool boxed_cells = false;
 
         /// Invalid slot constant - SIZE_MAX naturally fails bounds check
         static constexpr size_t INVALID_SLOT = SIZE_MAX;

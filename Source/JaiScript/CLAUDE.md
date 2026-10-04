@@ -482,7 +482,11 @@ engine stays usable", not by `check_throws`.
   bite). A closure's parent is its program scope (the globals or its namespace), never the creating frame. A default
   capture (`[=]`, `[&]`) or `[]` never captures a program-scope name: the lambda reads it when it runs; `[g]` copies
   it at creation and an init-capture `[x = e]` copies `e` into the lambda's own `x` (Dev ruling 2026-09-27,
-  `docs/closures_and_captures.md`; `.jaibite` version 32).
+  `docs/closures_and_captures.md`; `.jaibite` version 32). A frame whose locals a lambda captures by reference
+  (`block_stmt::shares_cells`, `chunk::shares_cells`) checks the cells it shared when it exits (Dev ruling 2026-10-03):
+  a cell only the closures it reaches still hold is cleared, so `var g; g = [&]() { g(); };` dies with its frame; an
+  escaped closure keeps its cycle, rechecked as the engine's weak list grows and at teardown
+  (`script_value::release_cell_cycles`, refcounts over the frame's cells and their closures, no heap scan).
 - **Required returns** (Dev request 2026-09-30): a function or lambda whose declared result holds no null (int,
   float, bool, char, string, utf8_string, a reference) and that can fall off its body or `return;` is a strict load
   error (`detail/return_flow.hpp`, load-time only: no runtime guard, opcode or per-call work); a nullable result

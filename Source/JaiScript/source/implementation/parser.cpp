@@ -47,6 +47,7 @@ namespace {
             // parser-resolved slot is exact under block shadowing; the symbol double-checks
             // identifiers whose slot resolved to an ENCLOSING function's numbering.
             std::unordered_map<size_t, slot_decl_type> slot_types;
+            block_stmt* body = nullptr;   // the function body this scope's frame runs
         };
         std::vector<scope> scopes;
         // class bodies being walked: inside one, an unqualified name resolves to a member (a script field or a
@@ -58,7 +59,7 @@ namespace {
         string_symbolizer* symbolizer = nullptr;
         bool names_execute_elapsed = false;   // the engine stamps host entries once a loaded program can read them
 
-        void escape(uint64_t symbol) {
+        void escape(uint64_t symbol, bool lambda_capture = false) {
             if (symbol == UINT64_MAX) {
                 return;
             }
@@ -80,6 +81,7 @@ namespace {
                     found = true;
                 }
                 if (found) {
+                    if (lambda_capture && it->body) { it->body->shares_cells = true; }
                     return;
                 }
             }
@@ -118,7 +120,7 @@ namespace {
                     sc.range_vars.count(symbol) || sc.destructures.count(symbol);
                 if (declared_here) {
                     if (i < boundary) {
-                        escape(symbol);
+                        escape(symbol, true);
                     }
                     return;
                 }
@@ -496,6 +498,7 @@ namespace {
                            const std::vector<constructor_initializer>* inits = nullptr,
                            bool returns_reference = false) {
             scopes.emplace_back();
+            if (body && body->get_type() == node_type::block_stmt) { scopes.back().body = static_cast<block_stmt*>(body); }
             ref_return_stack.push_back(returns_reference ? 1 : 0);
             for (auto& p : params) { p.declared_ref_escapes = false; }
             for (auto& p : params) {
@@ -604,7 +607,7 @@ namespace {
                             if (cap.symbol_id == UINT64_MAX && symbolizer) {
                                 cap.symbol_id = symbolizer->intern(std::string(cap.name));
                             }
-                            escape(cap.symbol_id);
+                            escape(cap.symbol_id, true);
                         }
                     }
                     // Default-[&]: the boundary is the lambda's own scope (pushed by

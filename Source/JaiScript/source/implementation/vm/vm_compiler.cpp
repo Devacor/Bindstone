@@ -869,6 +869,8 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 	}
 	emit(opcode::op_halt);
 	result->needs_frame_env = body_needs_frame_env(*result);
+	result->shares_cells = body->shares_cells;
+	if (result->shares_cells) { result->needs_frame_env = true; }
 	// The lazy safe list is a strict subset of the sticky list, so env-free bodies qualify
 	result->method_env_reusable = !result->needs_frame_env || method_body_env_reusable(*result);
 	// Register-file temps live above local_count: raise it to the watermark so the

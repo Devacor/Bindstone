@@ -124,6 +124,14 @@ public:
 			run_seed_range(300, 40, true, fuzz::band_mode::never, fuzz::band_mode::always, 2);
 			run_seed_range(300, 40, true, fuzz::band_mode::never, fuzz::band_mode::always, 1);
 		});
+		test("a_budget_spent_inside_a_block_ends_the_run", [this]() {
+			// seed 2004797 with the call-argument band (jaiscript_fuzz's default rolls otherwise): a loop whose body is a closed inner loop ran
+			// past every budget on the vm while the interpreter raised at once; both backends must end the run with the same outcome
+			using fuzz::band_mode;
+			const fuzz::program p = fuzz::generate_program(2004797, 4, band_mode::sometimes, band_mode::sometimes, band_mode::always, band_mode::sometimes, band_mode::sometimes);
+			const fuzz::compare_result cr = fuzz::compare_program(p, 0.25);
+			check_true(cr.kind != fuzz::compare_result::diverge, "seed 2004797 agrees under the budget: " + cr.diff);
+		});
 		test("call_args_band_seeds_no_new_divergence", [this]() {
 			// every program carries the call-argument band: element reads of different typed arrays as the arguments of one kept call
 			// in a counted loop (a block's copied read resolving another argument's array diverged in 239 of 500 band seeds)

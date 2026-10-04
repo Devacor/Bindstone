@@ -355,7 +355,111 @@ public:
         check_eq(static_cast<int64_t>(8), pout[3]);
     }
 
+    // How a run is driven at each stop: one step kind, a fixed cycle of them, or breakpoints on the odd lines and a resume.
+    enum class drive { into, over, mixed, odd_breakpoints };
+
+    // Drives a whole run from its first statement on the script thread (the stop callback queues the next step before the park
+    // waits) and returns the stop lines. Stops past the cap resume, so a runaway sequence still ends.
+    static std::vector<int> step_line_sequence(jai::backend_type type, const std::string& src, drive how = drive::into) {
+        auto eng = make_backend_engine(type);
+        auto& dbg = eng->debugger();
+        std::vector<int> lines;
+        dbg.set_on_stopped([&](const jai::debug::stop_info& si) {
+            lines.push_back(si.line);
+            if (lines.size() > 4000 || how == drive::odd_breakpoints) { dbg.resume(); return; }
+            static constexpr jai::debug::step_mode mixed[] = { jai::debug::step_mode::into, jai::debug::step_mode::into,
+                jai::debug::step_mode::into, jai::debug::step_mode::over, jai::debug::step_mode::into, jai::debug::step_mode::out };
+            const auto mode = how == drive::mixed ? mixed[(lines.size() - 1) % 6]
+                : how == drive::over ? jai::debug::step_mode::over : jai::debug::step_mode::into;
+            switch (mode) {
+                case jai::debug::step_mode::over: dbg.step_over(); break;
+                case jai::debug::step_mode::out: dbg.step_out(); break;
+                default: dbg.step_into(); break;
+            }
+        });
+        if (how == drive::odd_breakpoints) {
+            std::vector<int> odd;
+            for (int line = 1; line < 64; line += 2) { odd.push_back(line); }
+            dbg.set_breakpoints("<script>", odd);
+        }
+        dbg.set_enabled(true);
+        if (how != drive::odd_breakpoints) { dbg.request_pause(); }
+        try { eng->execute(src); } catch (...) { lines.push_back(-1); }
+        dbg.set_enabled(false);
+        return lines;
+    }
+
+    static std::string line_list(const std::vector<int>& lines) {
+        std::string out;
+        for (int l : lines) { out += (out.empty() ? "" : " ") + std::to_string(l); }
+        return out;
+    }
+
     void forge_tests() override {
+        test("step_into_line_sequence_through_hot_loops", [this]() {
+            const std::string src =
+                "int s = 0;\n"                                   // 1
+                "int t = 0;\n"                                   // 2
+                "for (int i = 0; i < 4; i += 1) {\n"             // 3
+                "    t = t + 60;\n"                              // 4
+                "    if (t > 100) { s = 0; }\n"                  // 5
+                "}\n"
+                "auto done = s + t;\n";                          // 7
+            // one stop per statement execution: the header once, then each iteration's statements (the then-branch's
+            // block holds a statement, it is not one)
+            const std::string expected = "1 2 3 4 5 4 5 5 4 5 5 4 5 5 7";
+            check_eq(expected, line_list(step_line_sequence(jai::backend_type::interpreter, src)));
+            check_eq(expected, line_list(step_line_sequence(jai::backend_type::vm, src)), "the vm stops where the interpreter stops");
+        });
+
+        test("step_line_sequences_match_the_interpreter_over_statement_shapes", [this]() {
+            struct shape { const char* name; const char* src; };
+            const shape shapes[] = {
+                { "untyped loop, if last", "var s = 0;\nvar t = 0;\nfor (var i = 0; i < 4; i += 1) {\n    t = t + 60;\n    if (t > 100) { s = 0; }\n}\nvar done = s;\n" },
+                { "if/else blocks", "var a = 3;\nif (a > 2) {\n    a = 1;\n} else {\n    a = 2;\n}\nif (a > 2) {\n    a = 5;\n} else {\n    a = 6;\n}\nvar b = a;\n" },
+                { "if/else one line", "var a = 3;\nif (a > 2) a = 1; else a = 2;\nif (a > 2) a = 5; else { a = 6; }\nvar b = a;\n" },
+                { "else if chain", "var a = 0;\nfor (var i = 0; i < 4; i += 1) {\n    if (i == 0) a += 1;\n    else if (i == 1) a += 2;\n    else if (i == 2) { a += 3; }\n    else a += 4;\n}\nvar b = a;\n" },
+                { "while", "var n = 0;\nwhile (n < 3) {\n    n += 1;\n}\nwhile (n < 6) n += 1;\nvar b = n;\n" },
+                { "typed while", "int n = 0;\nint m = 0;\nwhile (n < 5) {\n    n += 1;\n    m += n;\n}\nauto b = m;\n" },
+                { "do while", "var n = 0;\ndo {\n    n += 1;\n} while (n < 3);\nvar b = n;\n" },
+                { "counted for, typed", "int s = 0;\nfor (int i = 0; i < 5; i++) {\n    s += i;\n}\nauto b = s;\n" },
+                { "nested loops break continue", "var s = 0;\nfor (var i = 0; i < 3; i += 1) {\n    for (var j = 0; j < 3; j += 1) {\n        if (j == 1) continue;\n        if (i == 2) break;\n        s += j;\n    }\n}\nvar b = s;\n" },
+                { "range for", "var s = 0;\nvar arr = [1, 2, 3];\nfor (auto x : arr) {\n    s += x;\n}\nfor (auto& y : arr) y *= 2;\nvar b = s;\n" },
+                { "switch", "var r = 0;\nfor (var i = 0; i < 4; i += 1) {\n    switch (i) {\n        case 0:\n            r += 1;\n        case 1:\n            r += 2;\n            fallthrough;\n        case 2:\n            r += 3;\n        default:\n            r += 4;\n    }\n}\nvar b = r;\n" },
+                { "and or chains", "var a = 1;\nvar b = 0;\nfor (var i = 0; i < 3; i += 1) {\n    if (a > 0 && b < 2 || i == 7) {\n        b += 1;\n    }\n    var c = a > 0 && b > 1;\n    if (!(a < 0 || b > 5)) a += 1;\n}\nvar d = b;\n" },
+                { "ternary", "var a = 0;\nfor (var i = 0; i < 3; i += 1) {\n    a = i > 1 ? a + 10 : a + 1;\n    var c = (a > 5) ? 1 : 2;\n}\nvar d = a;\n" },
+                { "return with expression", "function f(int x) -> int {\n    if (x > 2) {\n        return x * 2;\n    }\n    return x + 1;\n}\nvar s = 0;\nfor (var i = 0; i < 4; i += 1) {\n    s += f(i);\n}\nvar d = s;\n" },
+                { "typed calls in a loop", "int add(int a, int b) {\n    return a + b;\n}\nint s = 0;\nfor (int i = 0; i < 4; i++) {\n    s = add(s, i);\n}\nauto d = s;\n" },
+                { "void call statement", "var total = 0;\nfunction bump(int by) {\n    total += by;\n}\nfor (var i = 0; i < 3; i += 1) {\n    bump(i);\n}\nvar d = total;\n" },
+                { "lambda", "var k = 2;\nauto mul = [k](int x) {\n    return x * k;\n};\nvar s = 0;\nfor (var i = 0; i < 3; i += 1) {\n    s += mul(i);\n}\nvar d = s;\n" },
+                { "class method", "class C {\n    int v = 0;\n    void add(int x) {\n        v += x;\n    }\n    int get() { return v; }\n}\nauto c = C();\nfor (var i = 0; i < 3; i += 1) {\n    c.add(i);\n}\nvar d = c.get();\n" },
+                { "try catch", "var r = 0;\ntry {\n    r = 1;\n    throw \"x\";\n    r = 2;\n} catch (e) {\n    r = 3;\n}\nvar d = r;\n" },
+                { "blocks and empty branches", "var a = 1;\n{\n    var b = 2;\n    a += b;\n}\nif (a > 0) { }\nif (a < 0) { } else { a += 1; }\nvar d = a;\n" },
+                { "while first in a function", "function drain(int n) -> int {\n    while (n > 0) {\n        n -= 1;\n    }\n    return n;\n}\nvar s = 0;\nfor (var i = 0; i < 3; i += 1) {\n    s += drain(i);\n}\nvar d = s;\n" },
+                { "single statement function called twice", "function twice(int x) -> int { return x * 2; }\nvar a = twice(1);\nvar b = twice(a);\nvar c = twice(twice(b));\n" },
+                { "recursion", "function fact(int n) -> int {\n    if (n <= 1) return 1;\n    return n * fact(n - 1);\n}\nvar f = fact(4);\n" },
+                { "builtin callback", "function g(int x) -> int {\n    return x * 2;\n}\nvar arr = [1, 2, 3];\nvar m = array::map(arr, g);\nvar n = m.size();\n" },
+                { "nested function and class declarations", "var r = 0;\nfor (var i = 0; i < 2; i += 1) {\n    function inner(int v) -> int { return v + 1; }\n    r = inner(r);\n}\nclass K { int z = 3; }\nauto k = K();\nvar d = r + k.z;\n" },
+                { "coroutine", "coroutine gen(int n) -> int {\n    for (int i = 0; i < n; i++) {\n        yield i;\n    }\n}\nvar s = 0;\nfor (auto v : gen(3)) {\n    s += v;\n}\nvar d = s;\n" },
+                { "namespace", "namespace ns {\n    int base = 4;\n    int twice(int x) { return x * 2; }\n    class P { int q = 1; }\n    int third = base + 1;\n}\nvar d = ns::twice(ns::base);\n" },
+                { "return from inside a loop", "function find(int target) -> int {\n    for (int i = 0; i < 10; i++) {\n        if (i == target) {\n            return i;\n        }\n    }\n    return -1;\n}\nvar a = find(2);\nvar b = find(20);\n" },
+                { "throw through a call", "function boom(int x) {\n    if (x > 1) {\n        throw \"x\";\n    }\n}\nvar r = 0;\nfor (var i = 0; i < 3; i += 1) {\n    try {\n        boom(i);\n        r += 1;\n    } catch (e) {\n        r += 10;\n    }\n}\nvar d = r;\n" },
+                { "typed cell loop body", "int s = 0;\nint t = 0;\nint i = 0;\nwhile (i < 6) {\n    t = t + 3;\n    s = s + t;\n    i = i + 1;\n}\nauto d = s;\n" },
+            };
+            std::string mismatches;
+            for (const auto& sh : shapes) {
+                for (auto how : { drive::into, drive::over, drive::mixed, drive::odd_breakpoints }) {
+                    const auto interp = line_list(step_line_sequence(jai::backend_type::interpreter, sh.src, how));
+                    const auto vm = line_list(step_line_sequence(jai::backend_type::vm, sh.src, how));
+                    if (interp != vm) {
+                        mismatches += std::string("\n    ") + sh.name + (how == drive::into ? " (into)" : how == drive::over ? " (over)" : how == drive::mixed ? " (mixed)" : " (breakpoints)")
+                            + "\n      interpreter: " + interp + "\n      vm:          " + vm;
+                    }
+                }
+            }
+            check_eq(std::string(), mismatches);
+        });
+
         test("native_and_source_breakpoints_with_same_spelling_remain_distinct", [this]() {
             auto eng = make_engine();
             eng->jaibite_cache(false);

@@ -11052,6 +11052,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
 
         // Execute initialization (if present)
         if (stmt->initializer) {
+            if (debug_hook_) [[unlikely]] { debug_quiet_node_ = stmt->initializer.get(); }
             auto result = dispatch_decl(stmt->initializer.get());
             if (!result) {
                 release_environment(loop_env);
@@ -13285,6 +13286,9 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             environment_ = detail::namespace_scope(*engine_, *ns_data);
             if (!var_decl->is_inline && !environment_->plain_declare(var_decl->name_id)) [[unlikely]] {
                 return detail::inline_redefinition(*string_symbolizer_, var_decl->name_id, var_decl);
+            }
+            if (debug_hook_ && debug_hook_->wants_statement(static_cast<uint32_t>(var_decl->location.line))) [[unlikely]] {
+                debug_hook_->on_statement(var_decl, static_cast<int>(call_stack_.size()));
             }
             JAISCRIPT_TRY(visit_variable_decl(var_decl));
             if (is_unwinding_) {
@@ -15906,7 +15910,11 @@ checked_result<void> interpreter::dispatch_stmt_resuming(statement* stmt) {
     if (!active_coroutine_) return dispatch_stmt(stmt);
     auto& coro_state = coroutine_state(*active_coroutine_);
     auto* cont = coro_state.peek_continuation(stmt);
-    if (!cont || cont->phase != rp_root) return dispatch_stmt(stmt);
+    if (!cont) return dispatch_stmt(stmt);
+    if (cont->phase != rp_root) {
+        if (debug_hook_) [[unlikely]] { debug_quiet_node_ = stmt; }   // continued, not started
+        return dispatch_stmt(stmt);
+    }
     coro_state.pop_continuation();
     switch (stmt->get_type()) {
         case node_type::expression_stmt: return visit_expression_stmt_t<true>(static_cast<expression_stmt*>(stmt));
@@ -15923,7 +15931,11 @@ checked_result<void> interpreter::dispatch_decl_resuming(declaration* decl) {
     }
     auto& coro_state = coroutine_state(*active_coroutine_);
     auto* cont = coro_state.peek_continuation(decl);
-    if (!cont || cont->phase != rp_root) return dispatch_decl(decl);
+    if (!cont) return dispatch_decl(decl);
+    if (cont->phase != rp_root) {
+        if (debug_hook_) [[unlikely]] { debug_quiet_node_ = decl; }
+        return dispatch_decl(decl);
+    }
     coro_state.pop_continuation();
     switch (decl->get_type()) {
         case node_type::variable_decl:        return visit_variable_decl_t<true>(static_cast<variable_decl*>(decl));
@@ -16067,7 +16079,8 @@ checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
     if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
     else top_level_node_ = stmt;
     if (debug_hook_) [[unlikely]] {
-        if (debug_hook_->wants_statement(static_cast<uint32_t>(stmt->location.line)))
+        if (stmt == debug_quiet_node_) debug_quiet_node_ = nullptr;
+        else if (debug_hook_->wants_statement(static_cast<uint32_t>(stmt->location.line)))
             debug_hook_->on_statement(stmt, static_cast<int>(call_stack_.size()));
     }
     switch (stmt->get_type()) {
@@ -16114,7 +16127,8 @@ checked_result<void> interpreter::dispatch_decl(declaration* decl) {
         // statement_decl is a pass-through wrapper: the inner dispatch_stmt fires the
         // hook — firing here too would stop twice on one statement (and a second park
         // after the resume is a join hang for anyone driving the controller).
-        if (decl->get_type() != node_type::statement_decl &&
+        if (decl == debug_quiet_node_) debug_quiet_node_ = nullptr;
+        else if (decl->get_type() != node_type::statement_decl &&
             debug_hook_->wants_statement(static_cast<uint32_t>(decl->location.line)))
             debug_hook_->on_statement(decl, static_cast<int>(call_stack_.size()));
     }

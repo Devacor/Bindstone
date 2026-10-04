@@ -123,6 +123,9 @@ public:
         return (bloom[b >> 6] >> (b & 63u)) & 1u;
     }
     void on_statement(const ast_node* node, int depth);
+    // A stop is a statement that does work of its own: a block or a case label only holds
+    // statements, and a for initializer belongs to its header's stop (the backends skip it).
+    static bool stops_at(const ast_node* node) noexcept;
 
     // Pull transport-side state (enable, breakpoint edits, pause requests) into the
     // script-thread hot cache. Called ONLY on the script thread at the debug sync points;

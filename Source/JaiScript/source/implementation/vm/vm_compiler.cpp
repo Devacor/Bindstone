@@ -5,6 +5,7 @@
 #include <jaiscript/detail/body_walker.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/debug/controller.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>
@@ -1035,6 +1036,23 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declara
 }
 
 void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_level) {
+	const size_t start = chunk_->code.size();
+	compile_declaration_code(decl, top_level);
+	note_debug_span(decl.get(), start);
+}
+
+void vm_compiler::note_debug_span(const ast_node* node, size_t start) {
+	const size_t end = chunk_->code.size();
+	if (end > start && debug::controller::stops_at(node) && (chunk_->debug_spans.empty() || chunk_->debug_spans.back().node != node)) {   // a statement compiled as a declaration records once
+		chunk_->debug_spans.push_back({ static_cast<uint32_t>(start), static_cast<uint32_t>(end), node, 0 });
+	}
+}
+
+void vm_compiler::drop_debug_span(const ast_node* node) {
+	if (!chunk_->debug_spans.empty() && chunk_->debug_spans.back().node == node) { chunk_->debug_spans.pop_back(); }
+}
+
+void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top_level) {
 	current_stmt_ = decl.get();
 	switch (decl->get_type()) {
 	case node_type::variable_decl:
@@ -1114,6 +1132,12 @@ void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_leve
 
 void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	if (!stmt) return;
+	const size_t start = chunk_->code.size();
+	compile_statement_code(stmt);
+	note_debug_span(stmt.get(), start);
+}
+
+void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 	current_stmt_ = stmt.get();
 	switch (stmt->get_type()) {
 	case node_type::expression_stmt: {
@@ -1471,6 +1495,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	kill_scopes_.emplace_back();
 	if (stmt->initializer) {
 		compile_declaration(stmt->initializer, false);
+		drop_debug_span(stmt->initializer.get());
 		note_kill_decl(stmt->initializer.get());
 	}
 
@@ -1582,6 +1607,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	}
 
 	compile_declaration(stmt->initializer, false);
+	drop_debug_span(stmt->initializer.get());
 
 	counted_for_proto proto;
 	proto.var = make_fused_operand(cond->left);

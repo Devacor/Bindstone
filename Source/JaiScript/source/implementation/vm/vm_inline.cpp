@@ -1794,6 +1794,7 @@ bool vm_compiler::try_inline_return(const statement_ptr& stmt) {
 	chunk_->nodes.push_back(nr);
 	const size_t from = chunk_->stmt_nodes.size();
 	compile_statement(nr);
+	drop_debug_span(nr.get());   // the return's own statement records the stop
 	for (size_t k = from; k < chunk_->stmt_nodes.size(); ++k) { if (chunk_->stmt_nodes[k] == nr.get()) { chunk_->stmt_nodes[k] = stmt.get(); } }   // one statement with its grafts: a block exit or bail at the return holds their results
 	current_stmt_ = stmt.get();
 	temp_next_ = mark;

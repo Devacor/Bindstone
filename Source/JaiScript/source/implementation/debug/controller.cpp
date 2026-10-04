@@ -301,7 +301,20 @@ bool controller::should_stop(const ast_node* node, int depth, std::string& reaso
     return false;
 }
 
+bool controller::stops_at(const ast_node* node) noexcept {
+    switch (node->get_type()) {
+        case node_type::block_stmt:
+        case node_type::case_stmt:
+        case node_type::default_stmt:
+        case node_type::statement_decl:
+            return false;
+        default:
+            return true;
+    }
+}
+
 void controller::on_statement(const ast_node* node, int depth) {
+    if (!stops_at(node)) return;
     // Reentrancy: a repl/inspection closure that runs script code must not itself trip
     // breakpoints or stepping (we'd park recursively). Same thread, so a plain flag.
     if (in_command_) return;

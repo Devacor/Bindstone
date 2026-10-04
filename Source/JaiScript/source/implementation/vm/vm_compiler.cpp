@@ -2684,6 +2684,10 @@ void vm_compiler::lower_dynamic_ops(chunk& c) {
 		type_info* stamp = nullptr;
 		vm_instruction store{opcode::op_halt, 0, 0, 0};
 		switch (ins.op) {
+		case opcode::op_binary_fused:
+			proto = ins.a;
+			dst = k_dyn_dst_push << k_typed_dst_shift;
+			break;
 		case opcode::op_binary_fused_temp:
 			if (ins.b >= k_typed_slot_mask) continue;
 			proto = ins.a;

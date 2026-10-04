@@ -19,6 +19,17 @@
 #include <thread>
 #endif
 
+#if defined(_MSC_VER)
+#define JAI_SP_FORCEINLINE __forceinline
+#define JAI_SP_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define JAI_SP_FORCEINLINE inline __attribute__((always_inline))
+#define JAI_SP_NOINLINE __attribute__((noinline))
+#else
+#define JAI_SP_FORCEINLINE inline
+#define JAI_SP_NOINLINE
+#endif
+
 namespace jai {
 
 template<typename T> class strong_ptr;
@@ -197,21 +208,21 @@ public:
     /// Deleted: use make_strong<T>() instead (enforces combined allocation)
     strong_ptr(T*) = delete;
 
-    strong_ptr(const strong_ptr& other) noexcept
+    JAI_SP_FORCEINLINE strong_ptr(const strong_ptr& other) noexcept
         : ptr_(other.ptr_) {
         if (ptr_) {
             cb()->add_strong();
         }
     }
 
-    strong_ptr(strong_ptr&& other) noexcept
+    JAI_SP_FORCEINLINE strong_ptr(strong_ptr&& other) noexcept
         : ptr_(other.ptr_) {
         other.ptr_ = nullptr;
     }
 
     // ===== Destructor =====
 
-    ~strong_ptr() {
+    JAI_SP_FORCEINLINE ~strong_ptr() {
         // CRITICAL: Save to a local before any operations that might
         // trigger re-entrant destruction via variant storage reuse.
         auto* local_ptr = ptr_;
@@ -219,26 +230,16 @@ public:
         // Null out the member FIRST to prevent re-entrancy issues
         ptr_ = nullptr;
 
-        if (local_ptr) {
-            // Derive from the local: ~T() never changes the address, and the memory is
-            // still allocated because this handle held live strong+weak counts.
-            auto* local_cb = detail::cb_from_object(local_ptr);
-            if (local_cb->release_strong()) {
-                // Last strong reference - destroy object (but don't free memory yet)
-                local_ptr->~T();
-
-                // Release the strong family's collective weak reference.
-                // Memory is only freed when all weaker_ptrs are also gone.
-                if (local_cb->release_weak()) {
-                    local_cb->dealloc_fn(local_cb);
-                }
-            }
+        // Derive from the local: ~T() never changes the address, and the memory is
+        // still allocated because this handle held live strong+weak counts.
+        if (local_ptr && detail::cb_from_object(local_ptr)->release_strong()) {
+            destroy_last(local_ptr);
         }
     }
 
     // ===== Assignment =====
 
-    strong_ptr& operator=(const strong_ptr& other) noexcept {
+    JAI_SP_FORCEINLINE strong_ptr& operator=(const strong_ptr& other) noexcept {
         if (this != &other) {
             strong_ptr tmp(other);
             swap(tmp);
@@ -246,7 +247,7 @@ public:
         return *this;
     }
 
-    strong_ptr& operator=(strong_ptr&& other) noexcept {
+    JAI_SP_FORCEINLINE strong_ptr& operator=(strong_ptr&& other) noexcept {
         if (this != &other) {
             strong_ptr tmp(std::move(other));
             swap(tmp);
@@ -301,6 +302,16 @@ private:
     T* ptr_ = nullptr;
 
     detail::control_block_base* cb() const noexcept { return detail::cb_from_object(ptr_); }
+
+    // The last strong reference: the object dies, then the strong family's collective weak reference
+    // (memory is freed when every weaker_ptr is gone too)
+    JAI_SP_NOINLINE static void destroy_last(T* local_ptr) noexcept {
+        auto* local_cb = detail::cb_from_object(local_ptr);
+        local_ptr->~T();
+        if (local_cb->release_weak()) {
+            local_cb->dealloc_fn(local_cb);
+        }
+    }
 
     // Adopts a count already established by the caller (make_strong's initial 1,
     // or weaker_ptr::lock()'s try_add_strong).

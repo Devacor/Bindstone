@@ -5003,6 +5003,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			loop.straight = true;
 			loop.trampoline = entry_trampoline(head, loop_index);
 		}
+		c.max_cells = std::max(c.max_cells, static_cast<uint32_t>(loop.cells.size()));
 		c.cell_loops.push_back(std::move(loop));
 	}
 	// a compare-headed loop's head is an entry too (after every translation, which reads the general code at the heads): the first iteration

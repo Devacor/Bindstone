@@ -6060,6 +6060,10 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 		}
 		return nullptr;
 	}
+	return fused_cmp_operand_env(f, operand, cache_slot);
+}
+// out of line: the member scope and lookup machinery keep their frame (and its stack cookie) off the slot and constant reads
+JAI_NOINLINE const script_value* vm_backend::fused_cmp_operand_env(frame& f, const fused_operand& operand, size_t cache_slot) {
 	// Member scope: fields/statics outrank env cells past the function's own scopes;
 	// a member-METHOD shadow answers nullptr and the caller bails to the pair.
 	if (f.locals && !f.top_level) {
@@ -7702,7 +7706,7 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 	JAI_COARSE(coarse_flush_, coarse_flushes_)
 	materialize_raw_window(f);
 	cells_writeback(f, loop);
-	f.cells->reset();
+	f.cells->reset(loop.cells.size());
 }
 
 // a compiler value is written back only where the general continuation reads it (its definition is live at this instruction): a
@@ -7715,7 +7719,7 @@ void vm_backend::cells_writeback(frame& f, const chunk::cell_loop& loop) {
 		if (!pending.test(k) || cs.kind[k] == 0) continue;
 		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } else { cell_flush_one(f, loop, k); }
 	}
-	cs.dirty.reset();
+	cs.dirty.reset(loop.cells.size());
 }
 
 // the end of a boundary statement (f.ip): the block parked for it resumes when no entry of another block in this frame came between, the
@@ -7729,9 +7733,9 @@ const chunk::cell_loop* vm_backend::cells_unpark(frame& f) {
 	const chunk::cell_loop& loop = f.code->cell_loops[li];
 	const size_t at = f.ip;
 	cs.loop = li;
-	cs.dirty.reset();
+	cs.dirty.reset(loop.cells.size());
 	f.ip = loop.boundaries[cs.park_boundary].resume;
-	if (!cells_resync(f, loop)) { cs.reset(); f.ip = at; return nullptr; }
+	if (!cells_resync(f, loop)) { cs.reset(loop.cells.size()); f.ip = at; return nullptr; }
 	++cells_counters_.resumes;
 	return &loop;
 }
@@ -7973,7 +7977,7 @@ op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) 
 	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
-	cs.dirty.reset();
+	cs.dirty.reset(loop.cells.size());
 	JAI_CELLS_COUNT(0);
 	f.ip = loop.copy_head + 1;   // the copy's head slot is a placeholder: a counted loop's block starts at its body
 	return cells_run(f, loop);
@@ -7999,7 +8003,7 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
-	cs.dirty.reset();
+	cs.dirty.reset(loop.cells.size());
 	JAI_CELLS_COUNT(0);
 	f.ip = loop.copy_head;
 	return cells_run(f, loop);
@@ -8014,7 +8018,7 @@ op_status vm_backend::exec_cells_enter(frame& f, const vm_instruction& ins) {
 	JAI_COVERAGE_ENTRY(f, ins.a, true);
 	cell_state& cs = *f.cells;
 	cs.loop = ins.a;
-	cs.dirty.reset();
+	cs.dirty.reset(loop.cells.size());
 	JAI_CELLS_COUNT(0);
 	f.ip = loop.copy_head;
 	return cells_run(f, loop);
@@ -9042,7 +9046,7 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 	rec.locals.function_name = fn.name;
 	rec.locals.reset_member_scope();
 	rec.locals.scope_state = static_cast<uint8_t>(detail::member_scope_state::none);   // a plain function without a closure: no member scope (compute_member_scope's answer)
-	rec.cells.reset_call();
+	rec.cells.reset_call(body->max_cells);
 	rec.f.cells = &rec.cells;
 	rec.env_lazy = true;
 	rec.env_untouched = true;
@@ -9068,7 +9072,10 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 	const size_t n = callee_loop.cells.size();
 	constexpr size_t small = 16;   // a small program's cells clear with fixed-size stores (the vectors keep at least this many)
 	if (ncs.payload.size() < n || ncs.payload.size() < small) { const size_t m = std::max(n, small); ncs.payload.resize(m); ncs.kind.resize(m); ncs.stamp.resize(m); }
-	if (n <= small) {
+	if (n <= 8) {
+		std::memset(ncs.kind.data(), 0, 8);
+		std::memset(static_cast<void*>(ncs.stamp.data()), 0, 8 * sizeof(type_info*));
+	} else if (n <= small) {
 		std::memset(ncs.kind.data(), 0, small);
 		std::memset(static_cast<void*>(ncs.stamp.data()), 0, small * sizeof(type_info*));
 	} else {
@@ -9128,7 +9135,7 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 		if (f.cells->dirty.any_of(loop.env_cells)) [[unlikely]] {   // the environment values the body wrote reach their bindings before the frame returns
 			for (const uint32_t k : loop.env_cells) { if (f.cells->dirty.test(k) && f.cells->kind[k] != 0) { env_flush_one(f, loop, k); } }
 		}
-		f.cells->reset();
+		f.cells->reset(loop.cells.size());
 		ip = ins.b;
 		return {};
 	}
@@ -9139,7 +9146,7 @@ op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins
 	rec->return_type = nullptr;
 	rec->f.raw = false;
 	rec->f.code = nullptr;
-	rec->cells.reset();
+	rec->cells.loop = k_invalid_u32;   // the next push clears what its body reads
 	--current_call_depth_;
 	frames_.pop_back();
 	sync_unit();
@@ -12602,6 +12609,80 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
+#ifndef JAISCRIPT_VM_PROFILE
+	pending_callee& top = pending_callees_.back();
+	if (top.fn) {
+		JAI_COARSE(coarse_push_, coarse_pushes_)
+		const script_defined_function& fn = *top.fn;
+		strong_ptr<script_function> pin = std::move(top.pin);
+		pending_callees_.pop_back();
+		return call_parked_script(f, ins, fn, std::move(pin));
+	}
+#endif
+	return exec_call_from_scratch_general(f, ins);
+}
+
+// a parked script function: the tail splice or the record push; a throw ahead of the record leaves the args on the stack
+op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin) {
+	const size_t argc = ins.a;
+	const call_site& site = f.code->call_sites[ins.b];
+	const size_t args_base = stack_.size() - argc;
+	try {
+		// Real TCO (Dev ruling: no artificial depth limit): a tail-flagged bare call
+		// resolving to the CURRENTLY EXECUTING chunk splices the live record instead
+		// of pushing. Gates — top record frame (fibers and non-record frames decline),
+		// self chunk (a mid-recursion global rebind resolves to a different chunk and
+		// declines, preserving the call-time-resolution contract), env-untouched
+		// activation (needs_frame_env false => environment_ provably never moved, so
+		// there is nothing to release or install), idempotent return-conv class (the
+		// dying frame's skipped epilogue and the spliced activation's are the same
+		// pass-through), no live try records (return-inside-try must keep the frame
+		// to catch callee throws), clean pending register. The budget check keeps
+		// infinite tail loops interruptible exactly like real pushes.
+		if (ins.c != 0 && call_records_top_ > 0) {
+			call_record& rec = *call_records_[call_records_top_ - 1];
+			const auto conv = static_cast<return_conv>(rec.return_conv_class);
+			if (&f == &rec.f && static_cast<chunk*>(fn.backend_body_cache.get()) == f.code &&
+			    rec.env_untouched &&
+			    (conv == return_conv::none ||
+			     (conv >= return_conv::prim_int && conv <= return_conv::prim_string)) &&
+			    try_records_.size() == rec.try_base &&
+			    pending_callees_.size() == rec.pending_base) {
+				if (execution_limit_exhausted()) [[unlikely]] {
+					return raise_from(execution_limit_failure());
+				}
+				return tail_splice_frame(rec, fn, std::move(pin), args_base, argc, &site);
+			}
+		}
+		return push_script_frame_pinned(f, fn, std::move(pin), args_base, argc, &site);
+	} catch (...) {
+		return parked_call_threw(args_base);
+	}
+}
+
+// out of line: the exception texts stay off the call path's frame
+JAI_NOINLINE op_status vm_backend::parked_call_threw(size_t args_base) {
+	try {
+		throw;
+	} catch (const script_exception& e) {
+		// pre-record throws leave the args on the stack; drop them like exec_call
+		stack_.truncate(args_base);
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = e;
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	} catch (const std::exception& e) {
+		stack_.truncate(args_base);
+		active_exception_value_ = script_value(std::string(e.what()), engine_);
+		current_exception_ = script_exception(e.what());
+		is_unwinding_ = true;
+		stack_.push_back(make_null());
+		return {};
+	}
+}
+
+JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_push_, coarse_pushes_)
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
@@ -12633,51 +12714,7 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 		cfs_probe_.bucket = 0;
 		if (!cfs_probe_.opaque_name.empty()) { profile_cfs_inloop_names_[cfs_probe_.opaque_name]++; }
 #endif
-		const size_t args_base = stack_.size() - argc;
-		try {
-			// Real TCO (Dev ruling: no artificial depth limit): a tail-flagged bare call
-			// resolving to the CURRENTLY EXECUTING chunk splices the live record instead
-			// of pushing. Gates — top record frame (fibers and non-record frames decline),
-			// self chunk (a mid-recursion global rebind resolves to a different chunk and
-			// declines, preserving the call-time-resolution contract), env-untouched
-			// activation (needs_frame_env false => environment_ provably never moved, so
-			// there is nothing to release or install), idempotent return-conv class (the
-			// dying frame's skipped epilogue and the spliced activation's are the same
-			// pass-through), no live try records (return-inside-try must keep the frame
-			// to catch callee throws), clean pending register. The budget check keeps
-			// infinite tail loops interruptible exactly like real pushes.
-			if (ins.c != 0 && call_records_top_ > 0) {
-				call_record& rec = *call_records_[call_records_top_ - 1];
-				const auto conv = static_cast<return_conv>(rec.return_conv_class);
-				if (&f == &rec.f && static_cast<chunk*>(pc.fn->backend_body_cache.get()) == f.code &&
-				    rec.env_untouched &&
-				    (conv == return_conv::none ||
-				     (conv >= return_conv::prim_int && conv <= return_conv::prim_string)) &&
-				    try_records_.size() == rec.try_base &&
-				    pending_callees_.size() == rec.pending_base) {
-					if (execution_limit_exhausted()) [[unlikely]] {
-						return raise_from(execution_limit_failure());
-					}
-					return tail_splice_frame(rec, *pc.fn, std::move(pc.pin), args_base, argc, &site);
-				}
-			}
-			return push_script_frame_pinned(f, *pc.fn, std::move(pc.pin), args_base, argc, &site);
-		} catch (const script_exception& e) {
-			// pre-record throws leave the args on the stack; drop them like exec_call
-			stack_.truncate(args_base);
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = e;
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
-		} catch (const std::exception& e) {
-			stack_.truncate(args_base);
-			active_exception_value_ = script_value(std::string(e.what()), engine_);
-			current_exception_ = script_exception(e.what());
-			is_unwinding_ = true;
-			stack_.push_back(make_null());
-			return {};
-		}
+		return call_parked_script(f, ins, *pc.fn, std::move(pc.pin));
 	}
 
 	if (pc.method) {
@@ -12770,8 +12807,9 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	if (current_call_depth_ >= limits_->vm_depth_gate) {
 		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
-	if (execution_limit_exhausted()) [[unlikely]] {
-		return raise_from(execution_limit_failure());
+	if (++budget_tick_ >= 1024 || limits_->memory_tripped()) [[unlikely]] {
+		--budget_tick_;   // the general check ticks it
+		if (execution_limit_exhausted()) { return raise_from(execution_limit_failure()); }
 	}
 	assert(!has_return_value_);
 
@@ -12812,7 +12850,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
-	rec.cells.reset_call();
+	rec.cells.reset_call(body_chunk->max_cells);
 	rec.f.cells = &rec.cells;
 	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
@@ -12820,6 +12858,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
 	if (rec.env_lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope())) {
 		rec.env_untouched = true;
+		rec.locals.scope_state = static_cast<uint8_t>(detail::member_scope_state::none);   // a plain function without a closure: no member scope (compute_member_scope's answer)
 	} else if (rec.env_lazy && !function.closure_env) {
 		// the caller stands in a block scope: the callee reads past it (KEEP BYTE-PARALLEL with the interpreter's call_function)
 		rec.env_untouched = false;
@@ -20827,7 +20866,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	rec.pending_base = pending_callees_.size();
 	rec.locals.function_name = function.name;
 	rec.locals.reset_member_scope();
-	rec.cells.reset_call();
+	rec.cells.reset_call(body_chunk->max_cells);
 	rec.f.cells = &rec.cells;
 	// Compile-time lazy elision: plain callees whose bodies provably never touch the
 	// per-call scope env skip creating it (methods/statics never elide — env kind
@@ -21035,7 +21074,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, script_value&& met
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
 	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
-	rec.cells.reset_call();
+	rec.cells.reset_call(body_chunk->max_cells);
 	rec.f.cells = &rec.cells;
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env &&
 	               dispatch.cls && !dispatch.cls->chain_has_nonpublic();
@@ -21199,7 +21238,7 @@ op_status vm_backend::push_method_frame(frame& caller, script_value&& method_val
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
 	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
-	rec.cells.reset_call();
+	rec.cells.reset_call(body_chunk->max_cells);
 	rec.f.cells = &rec.cells;
 	// Method-lazy (flatstack stage 5, this-in-frame): a body whose ops never park
 	// state in an env runs with environment_ = the DEFINITION env (globals chain,
@@ -21381,7 +21420,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, script_value&& met
 	rec.locals.function_name = ast->name;
 	rec.locals.reset_member_scope();
 	rec.locals.scope_static = dispatch.cls.get();
-	rec.cells.reset_call();
+	rec.cells.reset_call(body_chunk->max_cells);
 	rec.f.cells = &rec.cells;
 	rec.env_lazy = false;
 	rec.env_untouched = false;
@@ -21706,6 +21745,19 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		JAI_CALL_RET_SECTION(2);
 		return {};
 	}
+#undef JAI_CALL_RET_SECTION
+	return return_with_conversion(fp, std::move(result), mode);
+}
+
+// the converting return, out of line so the identity return keeps a small frame
+JAI_NOINLINE op_status vm_backend::return_with_conversion(frame*& fp, script_value result, uint32_t mode) {
+#ifdef JAISCRIPT_VM_PROFILE
+	uint64_t prof_p0 = __rdtsc();
+#define JAI_CALL_RET_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_call_ret_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
+#else
+#define JAI_CALL_RET_SECTION(idx)
+#endif
+	call_record& rec = *call_records_[call_records_top_ - 1];
 	// Deref + conversion run while the callee's env/frame are still live (native order);
 	// a reference return validated at its in-region site passes its handle through
 	auto conv = mode == return_mode_converted
@@ -21744,6 +21796,17 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 // by-value materialization moves the own slot out or deep-copies another lvalue.
 op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	frame& f = *fp;
+	if (ins.a != k_invalid_u32 && !(ins.c & (load_flag_global_only | load_flag_type_ctor)) && f.locals && !f.top_level) {
+		if (script_value* local = frame_slot(f, ins.a)) {   // fused_ident_value's slot rung
+			const script_value& resolved = local->deref();
+			if (detail::return_value_plain(resolved)) {
+				return return_with_result(fp, script_value(resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
+			}
+			script_value value(resolved);
+			materialize_return(f, value, detail::return_operand_ident, ins.a);
+			return return_with_result(fp, std::move(value), (ins.c & load_flag_return_proven) ? 1u : 0u);
+		}
+	}
 	fused_operand operand;
 	operand.slot = ins.a;
 	operand.symbol = ins.b;

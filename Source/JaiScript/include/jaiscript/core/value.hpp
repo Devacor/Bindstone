@@ -2305,7 +2305,9 @@ namespace detail { struct argument_capture_storage; }
             storage& operator=(T&& v) noexcept {
                 return *this = storage(std::forward<T>(v));
             }
-            ~storage() { destroy(); }
+            JAI_FORCEINLINE ~storage() {
+                if (!((k_trivial_mask >> index_) & 1u)) { destroy_handle(); }   // scalars: one test, no call
+            }
 
             JAI_FORCEINLINE size_t index() const noexcept { return index_; }
 
@@ -2369,10 +2371,7 @@ namespace detail { struct argument_capture_storage; }
                 (1u << TYPEID_PARALLEL_BORROW);
             static_assert(TYPEID_COLOR < 32, "k_trivial_mask is one bit per storage index");
 
-            JAI_FORCEINLINE void destroy() noexcept {
-                if ((k_trivial_mask >> index_) & 1u) {
-                    return;                                // scalars: one test, no dispatch
-                }
+            JAI_NOINLINE void destroy_handle() noexcept {
                 switch (index_) {
                     case TYPEID_STRING: p_.s.~strong_ptr(); break;
                     case TYPEID_ARRAY: p_.a.~strong_ptr(); break;

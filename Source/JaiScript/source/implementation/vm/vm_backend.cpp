@@ -10736,6 +10736,15 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 				*dst = v;
 				return {};
 			}
+			// a var slot: the store stamps the slot's own tag on the value (store_popped_value's var row)
+			const type_info* vt = v.type_info_raw();
+			if (slot_type->base_type == script_value_type::jai_any_type && !slot_type->dynamic_slot &&
+			    (!vt || vt->base_type == script_value_type::jai_any_type || vt->base_type == v.current_type())) {
+				JAI_TYPED_INPLACE(2);
+				*dst = v;
+				dst->set_type_info(type_info_ptr{const_cast<type_info*>(slot_type)});
+				return {};
+			}
 		}
 	}
 	JAI_TYPED_INPLACE(3);
@@ -10750,6 +10759,17 @@ op_status vm_backend::exec_typed_store_const(frame& f, const vm_instruction& ins
 		const type_info* slot_type = dst->type_info_raw();
 		if (!slot_type || detail::same_type_payload(v, slot_type)) {
 			JAI_TYPED_INPLACE(2);
+			*dst = std::move(v);
+			return {};
+		}
+		const size_t vi = v.raw_storage_index();
+		const type_info* vt = v.type_info_raw();
+		if (slot_type->base_type == script_value_type::jai_any_type && !slot_type->dynamic_slot &&
+		    (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
+		     vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING) &&
+		    (!vt || vt->base_type == script_value_type::jai_any_type || vt->base_type == v.current_type())) {
+			JAI_TYPED_INPLACE(2);
+			v.set_type_info(type_info_ptr{const_cast<type_info*>(slot_type)});
 			*dst = std::move(v);
 			return {};
 		}

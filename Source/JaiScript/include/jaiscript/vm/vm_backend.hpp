@@ -1182,6 +1182,8 @@ namespace jai::vm {
         void pop_script_frame_boxed_cells(call_record& rec);
         void note_boxed_slot(const script_value& storage);
         void kill_shared_cell_slot(script_value& slot);
+        // A native entry frame's cells (shared by a lambda, or a slot boxed on demand), gathered before its window dies
+        void gather_native_frame_cells(const frame& f, call_frame& locals, std::vector<script_value>& cells);
         void release_frame_shared_cells();
         std::vector<script_value> shared_cells_;
         std::vector<size_t> shared_cell_bases_;

@@ -717,6 +717,25 @@ private:
 				check_true(token.expired(), std::string("the cycle's host value freed with the engine [") + c.label + "]");
 			}
 		});
+		test("a_cycle_in_a_frame_a_builtin_or_host_entered_dies_with_that_frame", [this, counter]() {
+			expect("native entries", counter + R"(
+				function f(int k) -> int { var d = D(); var g; g = [&](int n) -> int { return n < 1 ? (d != null ? k : -1) : g(n - 1); }; return g(2); }
+				class M { int m(int k) { var d = D(); var g; g = [&](int n) -> int { return n < 1 ? (d != null ? k : -1) : g(n - 1); }; return g(2); } }
+				string log = "";
+				[1, 2].for_each([](int k) { var d = D(); var g; g = [&](int n) -> int { return n < 1 ? (d != null ? k : -1) : g(n - 1); }; g(2); });
+				log += to_string(dead);
+				[3].for_each(f);
+				log += " " + to_string(dead);
+				array<int> s = [3, 1, 2];
+				s.sort([](int a, int b) -> bool { var d = D(); var g; g = [&](int n) -> bool { return n < 1 ? (d != null && a < b) : g(n - 1); }; return g(1); });
+				log += " " + to_string(dead > 3) + to_string(s[0]);
+				int before = dead;
+				var m = M();
+				[4].for_each(reflect::bind(m, "m"));
+				log += " " + to_string(dead - before);
+				log
+			)", "2 3 true1 1");
+		});
 	}
 
 	void engine_teardown() {

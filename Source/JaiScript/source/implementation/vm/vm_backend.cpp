@@ -21774,6 +21774,21 @@ void vm_backend::note_boxed_slot(const script_value& storage) {
 			return;
 		}
 	}
+	if (!on_stack) return;
+	const size_t idx = static_cast<size_t>(&storage - base);
+	for (size_t i = frames_.size(); i-- > 0;) {
+		frame* nf = frames_[i];
+		if (nf->window_backed && nf->locals && idx >= nf->window_base && idx < static_cast<size_t>(nf->window_base) + nf->window_live) {
+			nf->locals->boxed_cells = true;
+			return;
+		}
+	}
+}
+
+JAI_NOINLINE void vm_backend::gather_native_frame_cells(const frame& f, call_frame& locals, std::vector<script_value>& cells) {
+	locals.boxed_cells = false;
+	const size_t end = std::min(stack_.size(), static_cast<size_t>(f.window_base) + f.window_live);
+	if (end > f.window_base) { script_value::gather_shared_cells(&stack_[f.window_base], end - f.window_base, cells); }
 }
 
 // A scope exit kills a slot holding a cell a lambda shared: the cell is checked for a cycle once the slot lets go
@@ -22903,13 +22918,17 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 		if (is_unwinding_ && !trace_captured_) capture_stack_trace();
 		truncate_detached(pending_callees_, entry_pending);
 		clear_this_on_frame_exit(f.entry_env);
+		std::vector<script_value> shared_cells;
+		if ((f.code->shares_cells || locals.boxed_cells) && !parallel_worker_) [[unlikely]] { gather_native_frame_cells(f, locals, shared_cells); }
 		environment_ = previousEnv;
 		has_return_value_ = previousHasReturn;
 		return_value_ = std::move(previousReturn);
 		if (stack_.size() > f.stack_base) {
 			stack_.truncate(f.stack_base);
 		}
+		f.window_live = 0;
 		release_scope_env(std::move(f.entry_env));
+		if (!shared_cells.empty()) [[unlikely]] { script_value::release_cell_cycles(shared_cells, engine_); }
 	};
 
 	{

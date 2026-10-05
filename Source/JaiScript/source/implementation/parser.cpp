@@ -450,6 +450,13 @@ namespace {
                             if (r == cls_unknown) return cls_unknown;
                             return (l == cls_int && r == cls_int) ? cls_int : cls_float;
                         }
+                        case token_type::ampersand:
+                        case token_type::pipe:
+                        case token_type::caret:
+                        case token_type::left_shift:
+                        case token_type::right_shift:
+                            // int rows only (a shift out of range raises, and the store aborts)
+                            return static_numeric_class(b->left.get()) == cls_int && static_numeric_class(b->right.get()) == cls_int ? cls_int : cls_unknown;
                         case token_type::left_bracket:
                             // Subscript read of a slot-resident typed container: the
                             // element class is a store-enforced invariant
@@ -459,7 +466,7 @@ namespace {
                             }
                             return cls_unknown;
                         default:
-                            return cls_unknown;   // comparisons/logical/bitwise: no proof
+                            return cls_unknown;   // comparisons/logical: no proof
                     }
                 }
                 case node_type::ternary_expr: {

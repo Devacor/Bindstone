@@ -2261,6 +2261,8 @@ namespace jai::vm {
         op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         op_status store_popped_value_full(frame& f, const vm_instruction& ins, script_value value);
         bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
+        op_status exec_math_kernel(size_t base, size_t argc, detail::math_fn fn);
+        op_status binary_fused_tail(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp, std::optional<script_value>& out);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
         op_status exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
         const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);

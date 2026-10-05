@@ -5912,20 +5912,6 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 			case token_type::bang_equal: sink(script_value(a != b, engine_)); return {};
 			default: break;
 			}
-		} else if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
-		           !lp->is_cpp_bound() && !rp->is_cpp_bound()) {
-			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
-			// engine::memory_cap chokepoint: deny the concat result before it exists
-			if (!limits_->memory_charge(sizeof(script_value) + lp->unchecked_as_string().size() + rp->unchecked_as_string().size())) [[unlikely]] {
-				return raise_from(detail::raise_memory_cap(*limits_));
-			}
-			sink(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
-			return {};
-		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-			// twin parity: bound operands keep this fused shape's zero-divisor error surface
-			if (auto z = bound_fastpath_zero_divisor(op, *lp, *rp, true, true)) {
-				return raise_(make_error_code(z->code), z->text);
-			}
 		}
 	}
 	// int bitwise rows: binary_general's with no registered operator to consult (a shift outside 0..63 raises there)
@@ -5942,6 +5928,34 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 		}
 	}
 
+	// the string, bound and general rows run out of line: the hot rows above keep no string temporary and no cookie in their frame
+	std::optional<script_value> out;
+	if (binary_fused_tail(p, op, lp, rp, out) == op_status::failed) return op_status::failed;
+	if (out) { sink(std::move(*out)); }
+	return {};
+}
+
+JAI_NOINLINE op_status vm_backend::binary_fused_tail(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp,
+                                                     std::optional<script_value>& out) {
+	if (!has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
+		const size_t li = lp->raw_storage_index();
+		const size_t ri = rp->raw_storage_index();
+		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
+		    !lp->is_cpp_bound() && !rp->is_cpp_bound()) {
+			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
+			// engine::memory_cap chokepoint: deny the concat result before it exists
+			if (!limits_->memory_charge(sizeof(script_value) + lp->unchecked_as_string().size() + rp->unchecked_as_string().size())) [[unlikely]] {
+				return raise_from(detail::raise_memory_cap(*limits_));
+			}
+			out.emplace(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
+			return {};
+		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
+			// twin parity: bound operands keep this fused shape's zero-divisor error surface
+			if (auto z = bound_fastpath_zero_divisor(op, *lp, *rp, true, true)) {
+				return raise_(make_error_code(z->code), z->text);
+			}
+		}
+	}
 	// Fallback: snapshot ident/const operands (isolation from mutation by nested calls;
 	// constant templates get their engine ref, exactly as op_const would have).
 	// Subscript-resolved operands pass through IN PLACE: their unfused twin pushed a
@@ -5965,7 +5979,7 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 	if (!result) {
 		return raise_from(result);
 	}
-	sink(std::move(result.value()));
+	out.emplace(std::move(result.value()));
 	return {};
 }
 
@@ -11686,24 +11700,21 @@ op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 		return raise_(make_error_code(runtime_error_code::unsupported_operation), "math:: intrinsic arity exceeds the compiled bound");
 	}
 	const size_t base = stack_.size() - argc;
-	const script_value* argp[8] = {};
-	for (size_t i = 0; i < argc; ++i) {
-		argp[i] = &stack_[base + i].deref();
-	}
-	// the scalar rows exec_math_temp runs off the kernel: numbers in, the kernel's own unary or pair rule, a number out
+	// the scalar rows exec_math_temp runs off the kernel: numbers in, the kernel's own unary or pair rule, a number out (a reference
+	// argument goes to the kernel)
 	const auto fn = static_cast<detail::math_fn>(ins.a);
 	auto number = [](const script_value& v, detail::scalar_num& n) {
-		const size_t raw = v.raw_storage_index();
-		if (raw == script_value::TYPEID_INT) { n.is_int = true; n.i = v.unchecked_as_int(); return true; }
-		if (raw == script_value::TYPEID_FLOAT) { n.is_int = false; n.f = v.unchecked_as_float(); return true; }
+		const size_t k = v.raw_storage_index();
+		if (k == script_value::TYPEID_INT) { n.is_int = true; n.i = v.unchecked_as_int(); return true; }
+		if (k == script_value::TYPEID_FLOAT) { n.is_int = false; n.f = v.unchecked_as_float(); return true; }
 		return false;
 	};
 	detail::scalar_num a, b, r;
 	bool lane = false;
-	if (argc == 1 && detail::math_scalar_unary(fn) && number(*argp[0], a)) {
+	if (argc == 1 && detail::math_scalar_unary(fn) && number(stack_[base], a)) {
 		r = detail::eval_scalar_unary(fn, a.is_int ? static_cast<script_float>(a.i) : a.f);
 		lane = true;
-	} else if (argc == 2 && detail::math_scalar_pair(fn) && number(*argp[0], a) && number(*argp[1], b)) {
+	} else if (argc == 2 && detail::math_scalar_pair(fn) && number(stack_[base], a) && number(stack_[base + 1], b)) {
 		lane = detail::eval_scalar_pair(fn, a, b, r);
 	}
 	if (lane) {
@@ -11712,8 +11723,15 @@ op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 		stack_.push_back(std::move(out));
 		return {};
 	}
-	auto result = detail::eval_math_intrinsic(static_cast<detail::math_fn>(ins.a), argp, argc,
-	                                          engine_, engine_->math_rng());
+	return exec_math_kernel(base, argc, fn);
+}
+
+JAI_NOINLINE op_status vm_backend::exec_math_kernel(size_t base, size_t argc, detail::math_fn fn) {
+	const script_value* argp[8] = {};
+	for (size_t i = 0; i < argc; ++i) {
+		argp[i] = &stack_[base + i].deref();
+	}
+	auto result = detail::eval_math_intrinsic(fn, argp, argc, engine_, engine_->math_rng());
 	if (!result) {
 		return raise_from(result);
 	}

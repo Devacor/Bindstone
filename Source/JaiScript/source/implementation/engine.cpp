@@ -758,10 +758,11 @@ struct engine::implementation {
     // place, stack and thrown value; an entry goes when nothing but this table holds the string
     struct caught_error {
         script_value text;
-        std::string file;
-        size_t line = 0;
-        size_t column = 0;
-        std::vector<std::string> stack;
+        bool has_site = false;   // a throw's own place; else the innermost frame's statement, read from the trace
+        std::string site_file;
+        size_t site_line = 0;
+        size_t site_column = 0;
+        std::vector<stack_frame> trace;   // spelled when e.stack / e.file is read
         script_value value;
     };
     std::unordered_map<const void*, caught_error> caught_errors_;
@@ -4826,6 +4827,11 @@ uint64_t engine::clock_sample_count() const noexcept {
 
 script_value engine::make_caught_error(const script_value& thrown_in, bool by_throw, const source_location* throw_site,
                                        const std::vector<stack_frame>& trace, const char* thrown_text) {
+    return make_caught_error(thrown_in, by_throw, throw_site, std::vector<stack_frame>(trace), thrown_text);
+}
+
+script_value engine::make_caught_error(const script_value& thrown_in, bool by_throw, const source_location* throw_site,
+                                       std::vector<stack_frame>&& trace, const char* thrown_text) {
     const script_value& thrown = thrown_in.deref();
     const std::string* text = thrown.text_bytes();
     script_value caught(text ? *text : thrown_text ? std::string(thrown_text) : thrown.to_string(), this);
@@ -4838,18 +4844,13 @@ script_value engine::make_caught_error(const script_value& thrown_in, bool by_th
         }
         impl->caught_errors_sweep_at_ = std::max<size_t>(32, table.size() * 2);
     }
-    implementation::caught_error info{caught, {}, 0, 0, {}, script_value(std::monostate{}, this)};
-    const auto spell = [](const std::string& file) { return file.empty() ? std::string("<script>") : file; };
+    implementation::caught_error info{caught, false, {}, 0, 0, std::move(trace), script_value(std::monostate{}, this)};
     if (throw_site && throw_site->line > 0) {
-        info.file = spell(throw_site->filename);
-        info.line = throw_site->line;
-        info.column = throw_site->column;
-    } else if (!trace.empty()) {
-        info.file = spell(trace.front().file);
-        info.line = trace.front().line;
-        info.column = trace.front().column;
+        info.has_site = true;
+        info.site_file = throw_site->filename;
+        info.site_line = throw_site->line;
+        info.site_column = throw_site->column;
     }
-    for (const auto& frame : trace) { info.stack.push_back(frame.elided ? elided_frames_text(frame.elided) : spell(frame.file) + ":" + std::to_string(frame.line)); }
     if (by_throw) { info.value = thrown; }
     table.erase(&caught.unchecked_as_string());
     table.emplace(&caught.unchecked_as_string(), std::move(info));
@@ -4863,14 +4864,25 @@ std::optional<script_value> engine::caught_error_member(const script_value& rece
     if (it == impl->caught_errors_.end()) { return std::nullopt; }
     const implementation::caught_error& info = it->second;
     const std::string_view name = get_symbolizer()->get_string(member_id);
+    const auto spell = [](const std::string& file) { return file.empty() ? std::string("<script>") : file; };
+    const stack_frame* innermost = info.trace.empty() ? nullptr : &info.trace.front();
     if (name == "message") { return script_value(r.unchecked_as_string(), this); }
-    if (name == "file") { return script_value(info.file, this); }
-    if (name == "line") { return script_value(static_cast<script_int>(info.line), this); }
-    if (name == "column") { return script_value(static_cast<script_int>(info.column), this); }
+    if (name == "file") {
+        return script_value(info.has_site ? spell(info.site_file) : innermost ? spell(innermost->file) : std::string(), this);
+    }
+    if (name == "line") {
+        return script_value(static_cast<script_int>(info.has_site ? info.site_line : innermost ? innermost->line : 0), this);
+    }
+    if (name == "column") {
+        return script_value(static_cast<script_int>(info.has_site ? info.site_column : innermost ? innermost->column : 0), this);
+    }
     if (name == "value") { return info.value; }
     if (name == "stack") {
         script_value frames = script_value::make_array(get_type_info_string(), this);
-        for (const auto& s : info.stack) { frames.unchecked_get_array_storage()->push(script_value(s, this)); }
+        for (const auto& frame : info.trace) {
+            frames.unchecked_get_array_storage()->push(script_value(
+                frame.elided ? elided_frames_text(frame.elided) : spell(frame.file) + ":" + std::to_string(frame.line), this));
+        }
         return frames;
     }
     // a thrown object or map answers its own fields through the error (catch (e) { e.code })

@@ -18099,8 +18099,9 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		if (handler.catch_var != 0 && !symbolizer_->get_string(handler.catch_var).empty()) {
 			const bool by_throw = current_exception_ && current_exception_->thrown;
 			script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_null(), by_throw,
-			                                                 by_throw ? &current_exception_->location() : nullptr, captured_trace_,
+			                                                 by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
 			                                                 by_throw ? current_exception_->what() : nullptr);
+			captured_trace_.clear();
 			if (handler.catch_slot != k_invalid_u32 && f.locals && !f.top_level) {
 				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {

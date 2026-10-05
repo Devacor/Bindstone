@@ -3022,7 +3022,9 @@ public:
 		// O(depth) and the ref-BST superlinear. Scaling ratio, not absolute time: 8x the
 		// work must stay near 8x the time (the walk made it ~250x).
 		test("recursive_generic_binary_cost_stays_linear", [this]() {
-			auto descent_ms = [this](bool use_vm, int depth) {
+			// a generic binary on a reference deep in a recursion consults the custom operators without walking the caller
+			// chain: environment lookup steps per call stay flat as the depth grows (a deterministic count, Debug builds)
+			auto descent_hops = [this](bool use_vm, int depth) {
 				auto e = jai::engine::make();
 				e->max_call_depth(jai::backend_type::interpreter, 1000);
 				if (use_vm) { e->set_backend(jai::backend_type::vm); }
@@ -3031,17 +3033,19 @@ public:
 					"class Box { int v = 0; }\nvar b = Box();\n"
 					"function f(var& x, int d) { if (d < -1) { return; } if (d == 0) { x = x + 1; return; } f(b.v, d - 1); }");
 				std::string run = "b.v = 0; for (int rep = 0; rep < 10; ++rep) { f(b.v, " + std::to_string(depth) + "); } b.v;";
-				auto t0 = std::chrono::steady_clock::now();
+				const uint64_t before = e->get_symbolizer()->env_hops();
 				auto result = e->execute(run);
-				double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+				const uint64_t hops = e->get_symbolizer()->env_hops() - before;
 				check_eq((int64_t)10, result.as_int(), "descent workload result");
-				return ms;
+				return hops;
 			};
 			for (bool use_vm : {false, true}) {
-				double small = std::max(descent_ms(use_vm, 50), 1.0);
-				double big = descent_ms(use_vm, 400);
-				check_lt(big, small * 40.0, use_vm ? "vm: deep descent must scale linearly"
-				                                   : "interp: deep descent must scale linearly");
+				const uint64_t small = descent_hops(use_vm, 50), big = descent_hops(use_vm, 400);
+				const uint64_t small_calls = 10 * 51, big_calls = 10 * 401;
+				// per call: the deep run may take at most twice the shallow run's steps, plus a constant
+				check_le(big * small_calls, 2 * small * big_calls + 4 * small_calls * big_calls,
+					std::string(use_vm ? "vm" : "interp") + ": lookup steps per call stay flat (" + std::to_string(small) + " at depth 50, " +
+					std::to_string(big) + " at depth 400)");
 			}
 		});
 

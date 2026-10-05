@@ -149,6 +149,10 @@ namespace jai {
 		// are unaffected; zero cost on the hit path.
 		inline void set_frozen(bool frozen) noexcept { frozen_ = frozen; }
 		inline bool frozen() const noexcept { return frozen_; }
+		// Steps environment lookups took up a parent chain (counted by Debug builds only, never while frozen): tests read it
+		// as a deterministic measure of lookup cost
+		inline void note_env_hop() const noexcept { if (!frozen_) { ++env_hops_; } }
+		[[nodiscard]] inline std::uint64_t env_hops() const noexcept { return env_hops_; }
 
 		// Get/create getter ID for a member - caches to avoid repeated concatenation.
 		// Returns both ID and interned string_view for the "_get_<member>" name.
@@ -240,6 +244,7 @@ namespace jai {
 
 		// Parallel-region tripwire (see set_frozen)
 		bool frozen_ = false;
+		mutable std::uint64_t env_hops_ = 0;
 
 		// Caches for getter/setter/class_var ID lookups (name_id -> derived_id)
 		mutable std::unordered_map<id_type, id_type> getter_cache_;

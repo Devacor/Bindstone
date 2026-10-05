@@ -3049,6 +3049,35 @@ public:
 			}
 		});
 
+		test("a_lookup_miss_deep_in_a_recursion_walks_the_chain_once", [this]() {
+			// a name no environment holds, read at the bottom of a recursion (plain frames and frames with an environment of their
+			// own): its lookup climbs the chain once, so the steps grow with the depth, never with its square
+			auto miss_hops = [this](bool use_vm, const char* fn, int depth) {
+				auto e = jai::engine::make();
+				e->max_call_depth(jai::backend_type::interpreter, 1000);
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->execution_budget(0);
+				e->static_checking(jai::check_mode::off);
+				e->execute(
+					"function plain(int d) -> int { if (d == 0) { int s = 0; for (int k = 0; k < 10; ++k) { try { s += nope; } catch (e) { s += 1; } } return s; } return plain(d - 1); }\n"
+					"function framed(int d) -> int { auto keep = [&]() -> int { return d; }; if (d == 0) { int s = 0; for (int k = 0; k < 10; ++k) { try { s += nope; } catch (e) { s += 1; } } return s + keep() * 0; } return framed(d - 1); }");
+				const uint64_t before = e->get_symbolizer()->env_hops();
+				auto result = e->execute(std::string(fn) + "(" + std::to_string(depth) + ");");
+				const uint64_t hops = e->get_symbolizer()->env_hops() - before;
+				check_eq((int64_t)10, result.as_int(), std::string(fn) + ": every miss raises and is caught");
+				return hops;
+			};
+			for (bool use_vm : {false, true}) {
+				for (const char* fn : {"plain", "framed"}) {
+					const uint64_t small = miss_hops(use_vm, fn, 50), big = miss_hops(use_vm, fn, 400);
+					// linear in the depth: the deep run takes at most twice the shallow run's steps per level, plus a constant
+					check_le(big * 50, 2 * small * 400 + 400 * 50 * 50,
+						std::string(use_vm ? "vm " : "interp ") + fn + ": miss steps stay linear in the depth (" + std::to_string(small) +
+						" at depth 50, " + std::to_string(big) + " at depth 400)");
+				}
+			}
+		});
+
 		// Ref-store error catchability is uniform: a removed element/field surfaces as the
 		// same caller-frame-catchable throw whether or not the bound container was typed;
 		// constraint violations are checked errors, catchable in the throwing frame.

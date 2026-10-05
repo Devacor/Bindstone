@@ -352,6 +352,8 @@ namespace jai {
         std::unordered_map<uint64_t, std::vector<uint32_t>> inline_cells_;   // an inline cell's declaring units
         std::unique_ptr<std::unordered_map<uint64_t, bool>> extern_names_;   // root only: plain externs (true = function)
         script_value* shadowed_cell(uint64_t id) const;
+        script_value* uncached_value_ptr(uint64_t id);
+        script_value* kind_fallback_ptr(uint64_t id);
 
         // Parent pointer kept for: closure semantics, 'this' lookup, debugging
         std::shared_ptr<environment> parent_;

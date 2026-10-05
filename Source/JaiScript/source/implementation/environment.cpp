@@ -166,7 +166,7 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
         }
     }
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             return ptr;   // provenance unknown (may be a this/static-field fallback): not cacheable
@@ -216,7 +216,7 @@ checked_result<script_value> environment::get(uint64_t id) const {
 
     // SLOW PATH: No ancestor had it cached - do full lookup
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             // Cache for future O(1) access
             flat_lookup_[id] = ptr;
@@ -498,7 +498,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 
     // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             return std::cref(*ptr);
@@ -574,7 +574,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 
     // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             return std::ref(*ptr);
@@ -650,7 +650,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
 
     // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             *ptr = value;
@@ -725,7 +725,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
 
     // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             *ptr = std::move(value);
@@ -797,7 +797,7 @@ bool environment::contains(uint64_t id) const {
 
     // SLOW PATH: Cache miss - walk parent chain
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             return true;
@@ -984,13 +984,41 @@ script_value* environment::get_value_ptr(uint64_t id) {
     // SLOW PATH: No ancestor had it cached - do full lookup
     // This handles first-time lookups, locals, 'this' fields, static fields, etc.
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             return ptr;
         }
     }
+    return kind_fallback_ptr(id);
+}
 
+// get_value_ptr's answer at this level once no cache from here up holds id (the recursion it replaces re-scanned every
+// ancestor's cache at every level): each level's own 'this' and unit shadows nearest first, then the kind fallbacks farthest
+// first; the levels between this one and the answering one memoize it, as the recursive form's returns did
+script_value* environment::uncached_value_ptr(uint64_t id) {
+    const uint64_t this_id = symbolizer_->get_this_id();
+    const bool shadows = symbolizer_->shadow_count() != 0;
+    auto memoize_below = [&](const environment* answering, script_value* ptr) {
+        for (environment* q = this; q != answering; q = chain_step(q->parent_.get())) { q->flat_lookup_[id] = ptr; }
+        return ptr;
+    };
+    std::vector<environment*> with_fallback;
+    for (environment* q = this; q != nullptr; q = chain_step(q->parent_.get())) {
+        if (q->kind_ == env_kind::method && id == this_id) { return memoize_below(q, &q->this_object_); }
+        if (shadows) [[unlikely]] {
+            if (script_value* cell = q->shadowed_cell(id)) { return memoize_below(q, cell); }
+        }
+        if (q->kind_ != env_kind::standard) { with_fallback.push_back(q); }
+    }
+    for (auto it = with_fallback.rbegin(); it != with_fallback.rend(); ++it) {
+        if (script_value* ptr = (*it)->kind_fallback_ptr(id)) { return memoize_below(*it, ptr); }
+    }
+    return nullptr;
+}
+
+// The kind-specific tail of get_value_ptr: a method environment's 'this' fields and statics, a static method's statics
+script_value* environment::kind_fallback_ptr(uint64_t id) {
     // Kind-specific fallback: check 'this' object fields for method environments
     if (kind_ == env_kind::method) {
         auto this_type = this_object_.type();
@@ -1047,7 +1075,7 @@ script_value* environment::get_env_var_ptr(uint64_t id) {
         }
     }
     if (parent_) {
-        script_value* ptr = parent_->get_value_ptr(id);
+        script_value* ptr = parent_->uncached_value_ptr(id);
         if (ptr) {
             flat_lookup_[id] = ptr;
             return ptr;

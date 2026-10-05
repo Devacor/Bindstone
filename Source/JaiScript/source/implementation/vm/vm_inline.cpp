@@ -1437,6 +1437,28 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		auto* id = static_cast<const identifier_expr*>(call->arguments[i].get());
 		c.renames[fn->parameters[i].slot_index] = copy_identifier(id, id->location, c);
 	};
+	// a scalar value parameter the body never writes, its argument a private local of the parameter's declared type that no other argument
+	// writes or binds by reference: the copy is unobservable, so the parameter is a renaming too (no move into the callee's slot)
+	auto forwards = [&](size_t i) -> bool {
+		const parameter& p = fn->parameters[i];
+		const expression_ptr& a = call->arguments[i];
+		if (p.is_reference || value_param(p) || !scalar_type(p.type.get()) || p.slot_index >= fn->local_count || !private_local(a.get())) return false;
+		auto* id = static_cast<identifier_expr*>(a.get());
+		const uint32_t slot = identifier_slot_operand(id);
+		const auto t = callable_.slot_types.find(slot);
+		if (t == callable_.slot_types.end() || !t->second || t->second->base_type != p.type->base_type) return false;
+		for (size_t j = 0; j < call->arguments.size(); ++j) {
+			if (j == i) continue;
+			if (slot_argument_in(call->arguments[j].get(), slot)) return false;
+			if (fn->parameters[j].is_reference && call->arguments[j]->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(call->arguments[j].get())->slot_index == id->slot_index) return false;
+		}
+		std::vector<parameter> as_reference = fn->parameters;
+		as_reference[i].is_reference = true;
+		detail::ref_write_analysis writes([](const identifier_expr&, std::vector<detail::ref_write_callee>&) { return false; });   // every callee unseen: an argument use counts as a write
+		return !writes.analyze(detail::ref_write_callee{&as_reference, fn->body.get(), {}, false, false}, i).writes;
+	};
+	std::vector<uint8_t> forwarded(fn->parameters.size(), 0);
+	for (size_t i = 0; i < fn->parameters.size() && i < call->arguments.size(); ++i) { forwarded[i] = forwards(i) ? 1 : 0; }
 	// the clone's verdict before anything is emitted, with the slots it will have: a body the plan's probe took and this clone does not keeps the
 	// call (the graft never compiles a body its clone refused)
 	refused = nullptr;
@@ -1457,7 +1479,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		for (const parameter& p : fn->parameters) { if (value_param(p)) { ++value_temps; } }
 		inline_context dry;
 		setup(dry, temp_next_ + temps + (r ? 1 : 0) + value_temps, r);
-		for (size_t i = 0; i < fn->parameters.size(); ++i) { if (fn->parameters[i].is_reference && call->arguments[i]->get_type() == node_type::identifier_expr) { rename(dry, i); } }
+		for (size_t i = 0; i < fn->parameters.size(); ++i) { if ((fn->parameters[i].is_reference && call->arguments[i]->get_type() == node_type::identifier_expr) || forwarded[i]) { rename(dry, i); } }
 		if (r) { dry.pins.push_back(r); }
 		(void)clone_body(fn->body->declarations, dry, true);
 		if (!dry.ok) { refused = dry.why ? dry.why : "a body the graft does not take"; return root; }
@@ -1619,7 +1641,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
 		const expression_ptr& a = call->arguments[i];
-		if (p.is_reference && a->get_type() == node_type::identifier_expr) { rename(ctx, i); continue; }
+		if ((p.is_reference && a->get_type() == node_type::identifier_expr) || forwarded[i]) { rename(ctx, i); continue; }
 		if (value_temp[i]) {
 			params.push_back(nullptr); param_arg.push_back(i);
 			auto d = std::make_shared<variable_decl>(call->location, p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), copy_identifier(value_temp[i].get(), a->location, ctx));

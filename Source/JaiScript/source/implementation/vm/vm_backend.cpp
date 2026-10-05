@@ -8358,10 +8358,10 @@ class_instance* vm_backend::cells_member_prefix(frame& f, class_instance* inst, 
 // a member site's field of an instance (an alias's element at each rebind): the read-side probe answers the class's slot once per
 // class per site (a subclass element re-probes, a call between reads re-probes: a reload may have moved the fields), the field's
 // value dereferenced; a field that is not an int, a float or a bool is the general form's
-const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe) {
+const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe, bool prefixed) {
 	cell_state& cs = *f.cells;
 	auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
-	inst = cells_member_prefix(f, inst, expr, off);
+	if (!prefixed) { inst = cells_member_prefix(f, inst, expr, off); }
 	if (!inst) return nullptr;
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return nullptr;
@@ -8621,11 +8621,36 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 		if (!actual || (actual->get_name() != referent->type_name &&
 			!detail::class_derives_from(engine_, actual->get_type_id(), referent->id))) { return false; }
 	}
+	// the alias's member sites over one element: a field (`pos.x` read and stored) or a prefix (`pos` of `pos.x`, `pos.y`) several sites name is
+	// resolved once per binding (no user code runs between them)
+	struct field_seen { uint64_t prefix_id; uint64_t member_id; const script_value* fv; };
+	field_seen seen[8];
+	uint32_t seen_count = 0;
+	std::pair<uint64_t, class_instance*> prefixes[4];
+	uint32_t prefix_count = 0;
 	for (const uint32_t d : rb.dependents) {
 		const uint32_t cip = loop.sites[d];
 		if (f.code->code[cip].op == opcode::op_c_mload || f.code->code[cip].op == opcode::op_c_mstore) {
-			const script_value* fv = inst ? cells_member_field(f, inst, f.code->code[cip].b, cip, cip - loop.copy_head, reprobe) : nullptr;
-			if (!fv) return false;
+			if (!inst) return false;
+			const auto* expr = static_cast<const member_expr*>(f.code->nodes[f.code->code[cip].b].get());
+			const uint64_t prefix_id = expr->object && expr->object->get_type() == node_type::member_expr ? static_cast<const member_expr*>(expr->object.get())->member_id : UINT64_MAX;
+			const script_value* fv = nullptr;
+			for (uint32_t s = 0; s < seen_count && !fv; ++s) { if (seen[s].prefix_id == prefix_id && seen[s].member_id == expr->member_id) { fv = seen[s].fv; } }
+			if (!fv) {
+				class_instance* holder = inst;
+				if (prefix_id != UINT64_MAX) {
+					holder = nullptr;
+					for (uint32_t s = 0; s < prefix_count && !holder; ++s) { if (prefixes[s].first == prefix_id) { holder = prefixes[s].second; } }
+					if (!holder) {
+						holder = cells_member_prefix(f, inst, expr, cip - loop.copy_head);
+						if (!holder) return false;
+						if (prefix_count < 4) { prefixes[prefix_count++] = { prefix_id, holder }; }
+					}
+				}
+				fv = cells_member_field(f, holder, f.code->code[cip].b, cip, cip - loop.copy_head, reprobe, true);
+				if (!fv) return false;
+				if (seen_count < 8) { seen[seen_count++] = field_seen{ prefix_id, expr->member_id, fv }; }
+			}
 			cs.site_member[cip - loop.copy_head] = fv;
 		} else {
 			if (!node) return false;

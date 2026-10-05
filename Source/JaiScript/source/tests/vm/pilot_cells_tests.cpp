@@ -6391,6 +6391,104 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("field_reads_through_a_class_reference_are_typed_rows", [this]() {
+			// `Body& b = bodies[i]; px = px + b.vx * m` takes the field's declared kind (the binding admits Body or a subclass): the arithmetic and
+			// the store run pinned; a subclass element, a user accessor, an int field, a slot two blocks declare with different types and a reload
+			// that retypes the field agree with the interpreter
+			const std::string defs = R"(
+				class Body { float x = 0.0; float vx = 0.0; int n = 0; Body(float a, float b, int c) { x = a; vx = b; n = c; } }
+				class Heavy : Body { float extra = 2.0; Heavy(float a, float b, int c) : super(a, b, c) {} }
+				class Acc { float raw = 1.0; float _get_v() { return raw * 2.0; } Acc(float r) { raw = r; } }
+				float f(array<Body>& bs, int count) {
+					float px = 0.0; int tally = 0;
+					for (int i = 0; i < count; ++i) { Body& b = bs[i]; float m = b.x; px = px + b.vx * m; if (b.n > 2) { tally = tally + b.n; } b.x = b.x + b.vx; }
+					return px + tally;
+				}
+				float g(array<Acc>& as) { float s = 0.0; for (int i = 0; i < as.size(); ++i) { Acc& a = as[i]; s = s + a.v * 0.5; } return s; }
+				float h(array<Body>& bs, int k) {
+					float out = 0.0;
+					if (k > 0) { int t = 0; for (int i = 0; i < bs.size(); ++i) { Body& b = bs[i]; t = t + b.n; } out = t; }
+					else { float t = 0.5; for (int i = 0; i < bs.size(); ++i) { Body& b = bs[i]; t = t + b.x; } out = t; }
+					return out;
+				}
+				array<Body> BS = [Body(1.0, 0.5, 1), Heavy(2.0, -0.25, 3), Body(0.5, 2.0, 5)];
+				array<Acc> AS = [Acc(1.0), Acc(3.0)];
+			)";
+			const std::string src = std::string(defs) + R"(
+				to_string(f(BS, 3)) + " " + to_string(f(BS, 3)) + " " + to_string(g(AS)) + " " + to_string(h(BS, 1)) + " " + to_string(h(BS, 0));
+			)";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "class reference field reads");
+			both(src, oracle, "class reference field reads, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== f ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("C_ARITH_ANY") == std::string::npos && fl.find("C_CMP_ANY") == std::string::npos, "f's loop runs pinned: " + fl);
+			const std::string reload = "class Body { int x = 0; float vx = 0.0; int n = 0; Body(float a, float b, int c) { x = a; vx = b; n = c; } }\n"
+			                           "BS = [Body(1.0, 0.5, 1), Body(4.0, 1.0, 3)];\n";
+			auto sequence = [&](bool vm) {
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e);
+				std::string got;
+				try { e->execute(defs); got = e->execute("to_string(f(BS, 3))").as_string(); e->execute(reload); got += " " + e->execute("to_string(f(BS, 2))").as_string(); }
+				catch (const std::exception& ex) { got += std::string(" throw:") + ex.what(); }
+				return got;
+			};
+			check_eq(sequence(false), sequence(true), "a reload that retypes the field");
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
+		test("an_unclassed_element_read_feeding_a_float_row_keeps_its_kind_checked", [this]() {
+			// JaiDOOM's point_side: `NX[n] * dy` over an int table is unclassed and its float result feeds a typed subtraction; the element lands
+			// as an int, so the multiply reads its kind (a float contract fixed by the typed read is no proof of the landing)
+			const std::string src = R"(
+				array<int> NX = [3, -2, 7, 1, -5, 4];
+				array<int> NY = [1, 6, -3, 2, 2, -7];
+				int side(float x, float y, int n) { float dx = x - 0.5; float dy = y + 0.25; float cross = NX[n] * dy - NY[n] * dx; return cross > 0.0 ? 1 : 0; }
+				int walk(float x, float y) { int s = 0; for (int n = 0; n < 6; ++n) { if (side(x, y, n) == 0) { s = s * 2; } else { s = s * 2 + 1; } } return s; }
+				int t = 0;
+				for (int i = 0; i < 20; ++i) { t = t * 3 + walk(i * 0.7 - 5.0, 3.0 - i * 0.4); t = t % 1000003; }
+				to_string(t);
+			)";
+			both(src, "803764", "an int element under a float row");
+			both(src, "803764", "an int element under a float row, proofs off", false);
+		});
+		test("an_alias_rebind_resolves_each_field_and_prefix_once", [this]() {
+			// `for (auto& p : pool)` reading and storing p.pos.x, p.pos.y and p.life: one probe per field and prefix per element; elements whose
+			// pos objects are different classes (x at another slot), a subclass element and a null pos agree with the interpreter
+			const std::string src = R"(
+				class V2 { float x = 0.0; float y = 0.0; V2(float a, float b) { x = a; y = b; } }
+				class V3 { float z = 9.0; float y = 0.0; float x = 0.0; V3(float a, float b) { x = a; y = b; } }
+				class P { var pos; var vel; int life = 3; P(var p, var v) { pos = p; vel = v; } }
+				class Q : P { int tag = 1; Q(var p, var v) : super(p, v) {} }
+				float step(array<P>& pool, int rounds) {
+					float s = 0.0;
+					for (int r = 0; r < rounds; ++r) {
+						for (auto& p : pool) { p.pos.x = p.pos.x + p.vel.x; p.pos.y = p.pos.y + p.vel.y; p.life = p.life - 1; if (p.pos.x > 4.0) { p.pos.x = 0.0; } s = s + p.pos.x + p.pos.y; }
+					}
+					return s;
+				}
+				array<P> POOL = [P(V2(0.0, 1.0), V2(0.5, 0.25)), P(V3(1.0, 2.0), V2(1.5, -0.5)), Q(V2(3.0, 0.0), V3(0.25, 0.75)), P(V3(0.0, 0.0), V3(2.0, 2.0))];
+				string bad() { array<P> b = [P(V2(1.0, 1.0), V2(1.0, 1.0)), P(null, V2(1.0, 1.0))]; string out = ""; try { step(b, 2); } catch (e) { out = "caught"; } return out; }
+				to_string(step(POOL, 6)) + " " + to_string(POOL[1].pos.x) + " " + to_string(POOL[2].life) + " " + bad();
+			)";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "alias rebind memo");
+			both(src, oracle, "alias rebind memo, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_graft_reads_a_read_only_scalar_parameter_from_the_argument", [this]() {
 			// a scalar value parameter the body never writes, bound to a private local no other argument writes, is the local itself inside the
 			// graft; a parameter the body writes, one another argument increments or binds by reference, and a converting one keep their copy

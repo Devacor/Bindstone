@@ -83,6 +83,8 @@ namespace jai::vm {
             std::unordered_set<uint32_t> primitive_slots;
             // the declared type of each value slot as its declaration compiled (null: untyped): what a store of the variable enforces
             std::unordered_map<uint32_t, const type_info*> slot_types;
+            // per value slot: the storage kind every declaration of it gives (int or float; 0 when one is another type or a reference)
+            std::unordered_map<uint32_t, uint8_t> slot_scalar_kinds;
             // per frame slot: the scalar kind an untyped local certainly holds (vm_compiler::infer_local_kinds), a stamp's input
             std::vector<script_value_type> slot_kinds;
             bool active = false;
@@ -305,6 +307,7 @@ namespace jai::vm {
         void compile_lambda(const std::shared_ptr<lambda_expr>& expr);
         static bool compound_rhs_inert(const expression* e);
         uint32_t declared_ref_at_bind(const variable_decl* decl) const;
+        void note_slot_scalar_kind(uint32_t slot, const type_info* declared);
         void note_slot_declared_ref(size_t slot, const type_info* referent);
         void compile_variable_decl(const std::shared_ptr<variable_decl>& decl);
         void compile_variable_decl_value(const std::shared_ptr<variable_decl>& decl);

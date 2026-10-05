@@ -714,9 +714,10 @@ namespace jai::detail {
 
 	// A store into a variable's own storage (a cell's value, a frame slot) obeys the variable's declared type: the assignment
 	// table and its text (Dev ruling 2026-09-28; the slot-less shape unless the caller names the slot, a store through `int& r`)
-	inline checked_result<void> variable_store(script_value& storage, script_value& value, engine* eng, slot_site site = {}) {
+	template <class SiteFn>
+	inline checked_result<void> variable_store_with(script_value& storage, script_value& value, engine* eng, SiteFn&& site_of) {
 		if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {   // a host-bound variable (add_global_ref): the C++ memory
-			auto stored = typed_store_convert(clone_for_assignment(value.deref()), storage.get_type_info(), eng, [site]() { return site; });
+			auto stored = typed_store_convert(clone_for_assignment(value.deref()), storage.get_type_info(), eng, site_of);
 			if (!stored) { return stored.error_value(); }
 			storage.assign_through(stored.value());
 			return {};
@@ -745,7 +746,7 @@ namespace jai::detail {
 		}
 		if (tag && tag->base_type != script_value_type::jai_reference_type) {
 			// the value copy first (value semantics: an array store never aliases its source), then the variable's table
-			auto stored = typed_store_convert(clone_for_assignment(value), tag, eng, [site]() { return site; });
+			auto stored = typed_store_convert(clone_for_assignment(value), tag, eng, site_of);
 			if (!stored) { return stored.error_value(); }
 			script_value v = std::move(stored.value());
 			v.set_type_info(tag);
@@ -754,6 +755,9 @@ namespace jai::detail {
 		}
 		storage = clone_for_assignment(value);
 		return {};
+	}
+	inline checked_result<void> variable_store(script_value& storage, script_value& value, engine* eng, slot_site site = {}) {
+		return variable_store_with(storage, value, eng, [site]() { return site; });
 	}
 
 	// The declared type of a reference (`int& r = v`, cast<int&>(v)): null for var&/auto& and every minted reference
@@ -846,8 +850,9 @@ namespace jai::detail {
 	// A store through a reference with a declared type T runs T's table first (Dev ruling 2026-09-30: `var v; int& r = v;
 	// r = 2.5` stores int 2), a class T its operator= on the referent; the storage's own rules follow. nullopt when the
 	// operator wrote it.
-	inline std::optional<checked_result<script_value>> ref_declared_convert(const script_value& refLocal, type_info* declared,
-	                                                                        const script_value& value, engine* eng, slot_site site = {}) {
+	template <class SiteFn>
+	inline std::optional<checked_result<script_value>> ref_declared_convert_with(const script_value& refLocal, type_info* declared,
+	                                                                             const script_value& value, engine* eng, SiteFn&& site_of) {
 		if (declared->base_type == script_value_type::jai_object_type) {
 			auto current = ref_checked_deref(refLocal);
 			if (current) {
@@ -861,37 +866,53 @@ namespace jai::detail {
 		}
 		const script_value& plain = value.deref();
 		if (ref_declared_matches(declared, plain)) { return script_value(plain); }
-		return typed_store_convert(clone_for_assignment(plain), type_info_ptr{declared}, eng, [site]() { return site; });
+		return typed_store_convert(clone_for_assignment(plain), type_info_ptr{declared}, eng, site_of);
+	}
+	inline std::optional<checked_result<script_value>> ref_declared_convert(const script_value& refLocal, type_info* declared,
+	                                                                        const script_value& value, engine* eng, slot_site site = {}) {
+		return ref_declared_convert_with(refLocal, declared, value, eng, [site]() { return site; });
 	}
 
-	inline checked_result<void> ref_store_through_storage(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer,
-	                                                      slot_site site = {});
+	template <class SiteFn>
+	inline checked_result<void> ref_store_through_storage_with(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer,
+	                                                           SiteFn&& site_of);
 
 
 	// Identifier-assignment through a reference local: unconstrained refs keep today's
 	// exact clone-through-deref line; constrained element/field refs enforce like the
 	// subscript-assign paths do.
 	// name: the reference variable a store names (`ry = v`), so a rejection reads `Cannot assign string to 'ry' (declared int&)`
-	inline checked_result<void> ref_store_through(script_value& refLocal, script_value& value,
-	                                              engine* eng, string_symbolizer* symbolizer,
-	                                              type_info* declared_static = nullptr, uint8_t static_kind = 0, std::string_view name = {}) {
-		const slot_site site{slot_kind::assignment, name, {}, !name.empty()};
+	// NameOf: the variable's name, read only by a rejection
+	template <class NameOf>
+	inline checked_result<void> ref_store_through_named(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer,
+	                                                    type_info* declared_static, uint8_t static_kind, NameOf&& name_of) {
+		auto site_of = [&name_of]() { const std::string_view name = name_of(); return slot_site{slot_kind::assignment, name, {}, !name.empty()}; };
 		if (const uint8_t kind = static_kind ? static_kind : ref_declared_kind(refLocal);
 		    kind && kind != value.deref().raw_storage_index() && !ref_storage_enforces(refLocal, static_kind ? declared_static : ref_declared_type(refLocal)) &&
 		    !ref_identity_handle_store(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value)) [[unlikely]] {
-			auto converted = ref_declared_convert(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value, eng, site);
+			auto converted = ref_declared_convert_with(refLocal, static_kind ? declared_static : ref_declared_type(refLocal), value, eng, site_of);
 			if (!converted) { return {}; }
 			if (!*converted) { return converted->error_value(); }
-			return ref_store_through_storage(refLocal, converted->value(), eng, symbolizer, site);
+			return ref_store_through_storage_with(refLocal, converted->value(), eng, symbolizer, site_of);
 		}
-		return ref_store_through_storage(refLocal, value, eng, symbolizer, site);
+		return ref_store_through_storage_with(refLocal, value, eng, symbolizer, site_of);
+	}
+	inline checked_result<void> ref_store_through(script_value& refLocal, script_value& value,
+	                                              engine* eng, string_symbolizer* symbolizer,
+	                                              type_info* declared_static = nullptr, uint8_t static_kind = 0, std::string_view name = {}) {
+		return ref_store_through_named(refLocal, value, eng, symbolizer, declared_static, static_kind, [name]() { return name; });
+	}
+	inline checked_result<void> ref_store_through_storage(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer,
+	                                                      slot_site site = {}) {
+		return ref_store_through_storage_with(refLocal, value, eng, symbolizer, [site]() { return site; });
 	}
 
-	inline checked_result<void> ref_store_through_storage(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer,
-	                                                      slot_site site) {
+	template <class SiteFn>
+	inline checked_result<void> ref_store_through_storage_with(script_value& refLocal, script_value& value, engine* eng, string_symbolizer* symbolizer,
+	                                                           SiteFn&& site_of) {
 		const auto* holder = refLocal.get_reference_holder();
 		if (holder && holder->plain_cell() && !holder->container_element_type) {
-			return variable_store(refLocal.deref(), value, eng, site);
+			return variable_store_with(refLocal.deref(), value, eng, site_of);
 		}
 		if (!holder || !holder->container_element_type) {
 			ref_write_through(refLocal, clone_for_assignment(value));

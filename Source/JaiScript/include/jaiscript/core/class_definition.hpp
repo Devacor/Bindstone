@@ -972,9 +972,15 @@ public:
         return methods_.find(id) != methods_.end();
     }
 
+    // "~Name", interned once per class (the name never changes)
+    uint64_t destructor_id(engine& eng) const {
+        if (destructor_id_ == 0) { destructor_id_ = eng.symbolize("~" + name_); }
+        return destructor_id_;
+    }
+
     // A class without its own destructor still runs its bases' (C++'s implicit destructor)
     bool chain_declares_destructor(engine& eng) const {
-        if (has_method(eng.symbolize("~" + name_))) { return true; }
+        if (has_method(destructor_id(eng))) { return true; }
         for (const auto& parent : parent_classes_) {
             if (parent && parent->chain_declares_destructor(eng)) { return true; }
         }
@@ -2352,6 +2358,7 @@ private:
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value null_field_value_;
     mutable uint64_t to_bool_memo_epoch_ = UINT64_MAX;
+    mutable uint64_t destructor_id_ = 0;
     mutable bool may_define_to_bool_ = true;
 
     class_type class_type_;

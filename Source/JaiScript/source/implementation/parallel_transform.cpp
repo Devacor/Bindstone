@@ -1858,8 +1858,7 @@ namespace {
 		for (const auto& entry : eng.get_class_registry().script_classes_) {
 			const class_definition* cls = entry.second.get();
 			if (!cls) { continue; }
-			const uint64_t id = eng.symbolize("~" + cls->get_name());
-			if (id != 0 && cls->has_method(id)) { return true; }
+			if (cls->has_method(cls->destructor_id(eng))) { return true; }
 		}
 		return false;
 	}

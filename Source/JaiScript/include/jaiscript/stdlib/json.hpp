@@ -196,7 +196,7 @@ namespace stdlib {
                     if (eng) {
                         for (const auto& propName : classDef->get_property_names()) {
                             // Call the getter method to get property value
-                            uint64_t getter_id = eng->symbolize("_get_" + propName);
+                            uint64_t getter_id = eng->get_symbolizer()->get_getter_id_with_view(eng->symbolize(propName)).first;
                             auto getter = classDef->get_method(getter_id);
                             if (getter.type() == script_value_type::jai_function_type) {
                                 try {

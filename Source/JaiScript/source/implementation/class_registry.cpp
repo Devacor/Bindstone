@@ -113,7 +113,7 @@ bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_d
 void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const {
     if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
     if (engine_) {
-        const uint64_t id = engine_->symbolize("~" + level->name_);
+        const uint64_t id = level->destructor_id(*engine_);
         auto it = id != 0 ? level->methods_.find(id) : level->methods_.end();
         if (it != level->methods_.end()) {
             try {

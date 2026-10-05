@@ -2538,7 +2538,7 @@ bool interpreter::object_to_bool_via_method(const script_value& value) {
         return true;  // Not a class object - treat as truthy
     }
 
-    auto method_id = string_symbolizer_->intern("to_bool");
+    auto method_id = to_bool_id_;
     auto method_val = target.method(method_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
         return true;  // No to_bool() method - objects are truthy by default
@@ -2642,7 +2642,7 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
     }
 
     // Look for "==" method - used by both script classes (operator==) and dynamic_binder
-    auto eq_id = string_symbolizer_->intern("==");
+    auto eq_id = eq_method_id_;
     auto method_val = target.method(eq_id);
     if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
         // Check if this is a transparent wrapper - if so, unwrap and retry
@@ -2906,6 +2906,8 @@ interpreter::interpreter()
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
+    to_bool_id_ = string_symbolizer_->intern("to_bool");
+    to_string_id_ = string_symbolizer_->intern("to_string");
     base_type_ids_.intern(*string_symbolizer_);
     arity_count_ids_.intern(*string_symbolizer_);
 
@@ -2977,6 +2979,8 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
+    to_bool_id_ = string_symbolizer_->intern("to_bool");
+    to_string_id_ = string_symbolizer_->intern("to_string");
     base_type_ids_.intern(*string_symbolizer_);
     arity_count_ids_.intern(*string_symbolizer_);
 
@@ -3048,6 +3052,8 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     done_id_ = string_symbolizer_->intern("done");
     same_as_id_ = string_symbolizer_->intern("same_as");
     eq_method_id_ = string_symbolizer_->intern("==");
+    to_bool_id_ = string_symbolizer_->intern("to_bool");
+    to_string_id_ = string_symbolizer_->intern("to_string");
     base_type_ids_.intern(*string_symbolizer_);
     arity_count_ids_.intern(*string_symbolizer_);
 
@@ -7379,7 +7385,7 @@ checked_result<std::string> interpreter::value_to_string_with_method(const scrip
     if (val.type() == script_value_type::jai_object_type) {
         auto target = resolve_member_target(val);
         if (target) {
-            auto method_id = string_symbolizer_->intern("to_string");
+            auto method_id = to_string_id_;
             auto method_val = target.method(method_id);
             if (!method_val.is_null() && !method_val.is_invalid() && method_val.is_function()) {
                 script_value bound = create_bound_method(val, method_val);

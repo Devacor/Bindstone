@@ -397,7 +397,7 @@ namespace stdlib {
             auto native = detail::checked_native_reference(v.deref(), typeid(date), date_type);
             return native ? static_cast<date*>(native.value()) : nullptr;
         };
-        auto checked_text = [eng](const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", eng->symbolize(text)); };
+        auto checked_text = [eng](const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", eng->park_error_text(text)); };
         for (const auto& [field, set] : {std::pair<const char*, std::string (date::*)(int64_t)>{"year", &date::set_year}, {"month", &date::set_month},
                                          {"day", &date::set_day}, {"hour", &date::set_hour}, {"minute", &date::set_minute},
                                          {"second", &date::set_second}, {"millisecond", &date::set_millisecond}}) {
@@ -454,7 +454,7 @@ namespace stdlib {
         };
         auto count_error = [](const char* text) { return R(make_error_code(runtime_error_code::argument_count_mismatch), text); };   // static texts: the result holds a view
         auto type_error = [](const char* text) { return R(make_error_code(runtime_error_code::type_mismatch), text); };
-        auto value_error = [](engine* e, const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", e->symbolize(text)); };
+        auto value_error = [](engine* e, const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", e->park_error_text(text)); };
         auto number = [](const script_value* v, double& out) {
             if (v->is_int()) { out = static_cast<double>(v->as_int()); return true; }
             if (v->is_float()) { out = v->as_float(); return true; }

@@ -105,12 +105,18 @@ inline void expect_min_args(const std::vector<script_value>& args, size_t n, con
     }
 }
 
-inline std::string expect_name(const std::vector<script_value>& args, size_t i, const char* who) {
+inline const std::string& expect_name(const std::vector<script_value>& args, size_t i, const char* who) {
     const script_value& d = args[i].deref();
     if (!d.is_string()) {
         throw runtime_error(std::string("reflect::") + who + ": name must be a string");
     }
     return d.as_string();
+}
+
+// A name the engine never interned names no member, function or namespace: the lookups ask without interning, so a
+// script probing unknown names does not grow the symbolizer (and nothing interns while it is frozen)
+inline std::optional<uint64_t> known_symbol(engine* eng, std::string_view name) {
+    return eng->get_symbolizer()->find(name);
 }
 
 // The B-group doors. KEEP ALIGNED with interpreter::resolve_member_target — the ONE
@@ -184,9 +190,11 @@ inline bool is_qualified_identifier(const std::string& name) {
 inline script_value resolve_free_callable(engine* eng, const std::string& name, const char* who) {
     if (auto pos = name.find("::"); pos != std::string::npos) {
         auto& spaces = eng->script_namespaces();
-        auto ns_it = spaces.find(eng->get_symbolizer()->intern(name.substr(0, pos)));
+        const auto ns_id = known_symbol(eng, std::string_view(name).substr(0, pos));
+        const auto member_known = known_symbol(eng, std::string_view(name).substr(pos + 2));
+        auto ns_it = ns_id && member_known ? spaces.find(*ns_id) : spaces.end();
         if (ns_it != spaces.end() && ns_it->second) {
-            const uint64_t member_id = eng->get_symbolizer()->intern(name.substr(pos + 2));
+            const uint64_t member_id = *member_known;
             if (ns_it->second->scope) {   // a function held by a namespace variable
                 if (auto* cell = ns_it->second->scope->get_own_value_ptr(member_id); cell && cell->deref().is_function()) {
                     return cell->deref();
@@ -205,8 +213,8 @@ inline script_value resolve_free_callable(engine* eng, const std::string& name, 
                 if (fn.is_function()) { return fn; }
             }
         }
-    } else {
-        auto found = eng->get_global_environment()->get(name);
+    } else if (const auto id = known_symbol(eng, name)) {
+        auto found = eng->get_global_environment()->get(*id);
         if (found && found.value().is_function()) {
             return std::move(found.value());
         }
@@ -478,9 +486,9 @@ inline void register_reflection_functions(engine& eng_ref) {
         if (!args[1].is_string()) { throw runtime_error("reflect::has_field expects a field name string"); }
         auto def = reflect_detail::resolve_class(eng, args[0], "has_field");
         if (!def) { return script_value(false, eng); }
-        const std::string field = args[1].as_string();
-        const uint64_t id = eng->symbolize(field);
-        if (def->get_all_field_defaults().count(id)) { return script_value(true, eng); }
+        const std::string& field = args[1].as_string();
+        const auto id = reflect_detail::known_symbol(eng, field);
+        if (id && def->get_all_field_defaults().count(*id)) { return script_value(true, eng); }
         for (auto sv : def->get_static_field_names()) {
             if (sv == field) { return script_value(true, eng); }
         }
@@ -495,8 +503,8 @@ inline void register_reflection_functions(engine& eng_ref) {
         if (!args[1].is_string()) { throw runtime_error("reflect::has_method expects a method name string"); }
         auto def = reflect_detail::resolve_class(eng, args[0], "has_method");
         if (!def) { return script_value(false, eng); }
-        const uint64_t id = eng->symbolize(args[1].as_string());
-        return script_value(def->defines_method(id), eng);
+        const auto id = reflect_detail::known_symbol(eng, args[1].as_string());
+        return script_value(id && def->defines_method(*id), eng);
     });
 
     add("classes", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -556,12 +564,13 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("get", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 2, "get");
-        const std::string name = reflect_detail::expect_name(args, 1, "get");
-        const uint64_t id = eng->get_symbolizer()->intern(name);
+        const std::string& name = reflect_detail::expect_name(args, 1, "get");
+        const auto known = reflect_detail::known_symbol(eng, name);
+        const uint64_t id = known ? *known : UINT64_MAX;
         const script_value& target = args[0].deref();
         if (target.is_string()) {   // class form: static read
             auto* def = reflect_detail::resolve_class(eng, target, "get");
-            if (const script_value* field = def->get_static_field_ptr(id)) {
+            if (const script_value* field = known ? def->get_static_field_ptr(id) : nullptr) {
                 return field->deref();
             }
             throw runtime_error("reflect::get: class '" + def->get_name() +
@@ -575,21 +584,22 @@ inline void register_reflection_functions(engine& eng_ref) {
         // (script classes synthesize an auto-getter whose body is the verbatim field
         // read, so this is raw-read-equivalent there; host .property() bindings and
         // computed getters only answer here). No access check: reads see everything.
-        if (door.def) {
-            script_value getter = door.def->get_method(
-                eng->get_symbolizer()->intern("_get_" + name), false);
-            if (getter.is_function()) {
-                return make_bound_method(target, getter).as_function()({});
+        if (known) {
+            if (door.def) {
+                script_value getter = door.def->get_method(eng->get_symbolizer()->get_getter_id_with_view(id).first, false);
+                if (getter.is_function()) {
+                    return make_bound_method(target, getter).as_function()({});
+                }
             }
-        }
-        if (door.instance) {
-            if (const script_value* field = door.instance->find_field_value(id)) {
-                return field->deref();
+            if (door.instance) {
+                if (const script_value* field = door.instance->find_field_value(id)) {
+                    return field->deref();
+                }
             }
-        }
-        if (door.def) {
-            if (const script_value* field = door.def->get_static_field_ptr(id)) {
-                return field->deref();
+            if (door.def) {
+                if (const script_value* field = door.def->get_static_field_ptr(id)) {
+                    return field->deref();
+                }
             }
         }
         throw runtime_error("reflect::get: '" +
@@ -599,13 +609,14 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("set", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 3, "set");
-        const std::string name = reflect_detail::expect_name(args, 1, "set");
-        const uint64_t id = eng->get_symbolizer()->intern(name);
+        const std::string& name = reflect_detail::expect_name(args, 1, "set");
+        const auto known = reflect_detail::known_symbol(eng, name);
+        const uint64_t id = known ? *known : UINT64_MAX;
         script_value value = args[2].deref();
         const script_value& target = args[0].deref();
         if (target.is_string()) {   // class form: static write
             auto* def = reflect_detail::resolve_class(eng, target, "set");
-            if (!def->get_static_field_ptr(id)) {
+            if (!known || !def->get_static_field_ptr(id)) {
                 throw runtime_error("reflect::set: class '" + def->get_name() +
                                     "' has no static field '" + name + "'");
             }
@@ -622,22 +633,21 @@ inline void register_reflection_functions(engine& eng_ref) {
         // raw-store-equivalent there; host property setters only answer here).
         // Access enforces from the caller's context BEFORE either door — the same
         // kernel and text as `v.name = x`.
-        if (door.def) {
-            script_value setter = door.def->get_method(
-                eng->get_symbolizer()->intern("_set_" + name), false);
+        if (known && door.def) {
+            script_value setter = door.def->get_method(eng->get_symbolizer()->get_setter_id_with_view(id).first, false);
             if (setter.is_function()) {
                 reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
                 return make_bound_method(target, setter).as_function()({std::move(value)});
             }
         }
-        if (door.instance && door.instance->find_field_value(id)) {
+        if (known && door.instance && door.instance->find_field_value(id)) {
             if (door.def) { reflect_detail::enforce_member_access_or_throw(eng, door.def, id); }
             auto converted = door.instance->enforce_field_write(id, std::move(value));
             if (!converted) { reflect_detail::throw_kernel_error(eng, converted); }
             door.instance->set_field_unchecked(id, std::move(converted.value()));
             return script_value(std::monostate{}, eng);
         }
-        if (door.def && door.def->get_static_field_ptr(id)) {
+        if (known && door.def && door.def->get_static_field_ptr(id)) {
             reflect_detail::enforce_member_access_or_throw(eng, door.def, id);
             (void)door.def->set_static_field(id, std::move(value));
             return script_value(std::monostate{}, eng);
@@ -649,13 +659,14 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("invoke", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 2, "invoke");
-        const std::string name = reflect_detail::expect_name(args, 1, "invoke");
-        const uint64_t id = eng->get_symbolizer()->intern(name);
+        const std::string& name = reflect_detail::expect_name(args, 1, "invoke");
+        const auto known = reflect_detail::known_symbol(eng, name);
+        const uint64_t id = known ? *known : UINT64_MAX;
         std::vector<script_value> call_args(args.begin() + 2, args.end());
         const script_value& target = args[0].deref();
         if (target.is_string()) {   // class form: static method
             auto* def = reflect_detail::resolve_class(eng, target, "invoke");
-            script_value method = def->get_static_method(id, false);
+            script_value method = known ? def->get_static_method(id, false) : script_value::make_null(eng);
             if (method.is_function()) {
                 reflect_detail::enforce_member_access_or_throw(eng, def, id);
                 return method.as_function()(call_args);
@@ -667,7 +678,7 @@ inline void register_reflection_functions(engine& eng_ref) {
         if (!door.def) {
             throw runtime_error("reflect::invoke expects an object or class name");
         }
-        script_value dispatcher = door.def->get_method(id, false);
+        script_value dispatcher = known ? door.def->get_method(id, false) : script_value::make_invalid(eng);
         if (!dispatcher.is_function()) {
             throw runtime_error("reflect::invoke: '" + door.def->get_name() +
                                 "' has no method '" + name + "'");
@@ -680,7 +691,7 @@ inline void register_reflection_functions(engine& eng_ref) {
     // and keeps it alive, exactly as a bound method always has; a value type's methods run on the value, so a lambda wraps them
     add("bind", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 2, "bind");
-        const std::string name = reflect_detail::expect_name(args, 1, "bind");
+        const std::string& name = reflect_detail::expect_name(args, 1, "bind");
         const script_value& target = args[0].deref();
         auto door = reflect_detail::resolve_member_door(eng, target);
         if (!door.def) {
@@ -688,8 +699,9 @@ inline void register_reflection_functions(engine& eng_ref) {
                                 reflect_detail::semantic_type_name(target, eng) +
                                 " run on the value: wrap the call in a lambda ([&]() { ... })");
         }
-        const uint64_t id = eng->get_symbolizer()->intern(name);
-        script_value dispatcher = door.def->get_method(id, false);
+        const auto known = reflect_detail::known_symbol(eng, name);
+        const uint64_t id = known ? *known : UINT64_MAX;
+        script_value dispatcher = known ? door.def->get_method(id, false) : script_value::make_invalid(eng);
         if (!dispatcher.is_function()) {
             throw runtime_error("reflect::bind: '" + door.def->get_name() + "' has no method '" + name + "'");
         }
@@ -699,7 +711,7 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("call", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 1, "call");
-        const std::string name = reflect_detail::expect_name(args, 0, "call");
+        const std::string& name = reflect_detail::expect_name(args, 0, "call");
         std::vector<script_value> call_args(args.begin() + 1, args.end());
         script_value fn = reflect_detail::resolve_free_callable(eng, name, "call");
         return fn.as_function()(call_args);
@@ -707,7 +719,7 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("construct", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 1, "construct");
-        const std::string name = reflect_detail::expect_name(args, 0, "construct");
+        const std::string& name = reflect_detail::expect_name(args, 0, "construct");
         std::vector<script_value> call_args(args.begin() + 1, args.end());
         // The same global the direct spelling Class(...) resolves
         auto ctor = eng->get_global_environment()->get(name);
@@ -719,7 +731,7 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("construct_shared", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_min_args(args, 1, "construct_shared");
-        const std::string name = reflect_detail::expect_name(args, 0, "construct_shared");
+        const std::string& name = reflect_detail::expect_name(args, 0, "construct_shared");
         std::vector<script_value> call_args(args.begin() + 1, args.end());
         auto ctor = eng->get_global_environment()->get(name);
         if (!ctor || !ctor.value().is_function()) {
@@ -755,12 +767,13 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("method_arguments", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 2, "method_arguments");
-        const std::string name = reflect_detail::expect_name(args, 1, "method_arguments");
+        const std::string& name = reflect_detail::expect_name(args, 1, "method_arguments");
         auto* def = reflect_detail::resolve_class(eng, args[0], "method_arguments");
         if (!def) { throw runtime_error("reflect::method_arguments expects a class or class name"); }
         reflect_detail::method_collector out{eng};
-        reflect_detail::collect_methods_of(eng, def, out,
-                                           eng->get_symbolizer()->intern(name));
+        if (const auto known = reflect_detail::known_symbol(eng, name)) {
+            reflect_detail::collect_methods_of(eng, def, out, *known);
+        }
         if (out.entries.empty()) {
             throw runtime_error("reflect::method_arguments: '" + def->get_name() +
                                 "' has no method '" + name + "'");
@@ -828,14 +841,16 @@ inline void register_reflection_functions(engine& eng_ref) {
 
     add("function_arguments", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 1, "function_arguments");
-        const std::string name = reflect_detail::expect_name(args, 0, "function_arguments");
+        const std::string& name = reflect_detail::expect_name(args, 0, "function_arguments");
         auto arr = script_value::make_array(nullptr, eng);
         if (auto pos = name.find("::"); pos != std::string::npos) {
             auto* sym = eng->get_symbolizer();
             auto& spaces = eng->script_namespaces();
-            auto ns_it = spaces.find(sym->intern(name.substr(0, pos)));
+            const auto ns_id = sym->find(std::string_view(name).substr(0, pos));
+            const auto member_id = sym->find(std::string_view(name).substr(pos + 2));
+            auto ns_it = ns_id && member_id ? spaces.find(*ns_id) : spaces.end();
             if (ns_it != spaces.end() && ns_it->second) {
-                auto fn_it = ns_it->second->functions.find(sym->intern(name.substr(pos + 2)));
+                auto fn_it = ns_it->second->functions.find(*member_id);
                 if (fn_it != ns_it->second->functions.end()) {
                     for (const auto& fd : fn_it->second) {
                         arr.as_array().push_back(
@@ -844,7 +859,7 @@ inline void register_reflection_functions(engine& eng_ref) {
                     return arr;
                 }
                 // a host entry that declares its signature answers it (arguments argN, as host methods do)
-                auto sig_it = ns_it->second->signatures.find(sym->intern(name.substr(pos + 2)));
+                auto sig_it = ns_it->second->signatures.find(*member_id);
                 if (sig_it != ns_it->second->signatures.end()) {
                     const host_entry_signature& sig = sig_it->second;
                     auto params = script_value::make_array(nullptr, eng);
@@ -857,8 +872,8 @@ inline void register_reflection_functions(engine& eng_ref) {
                     return arr;
                 }
             }
-        } else {
-            auto found = eng->get_global_environment()->get(name);
+        } else if (const auto id = reflect_detail::known_symbol(eng, name)) {
+            auto found = eng->get_global_environment()->get(*id);
             if (found && found.value().is_function()) {
                 // Script functions carry their decl in the callable payload; host
                 // registrations are type-erased — they answer an EMPTY overload list

@@ -1938,7 +1938,7 @@ private:
             std::shared_ptr<T> made;
             auto result = callWithWriteback<void, std::tuple<Args...>, 0, 0>([&made](auto&&... a) { made = std::make_shared<T>(std::forward<decltype(a)>(a)...); },
                                                                          args, std::index_sequence<Is...>{}, eng);
-            if (!result) { throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2()); }
+            if (!result) { throw_checked_error(eng, result.message(), result.symbol_id(), result.symbol_id2()); }
             return made;
         } else {
             return std::make_shared<T>(detail::value_converter<Args>::from(args[Is], eng)...);

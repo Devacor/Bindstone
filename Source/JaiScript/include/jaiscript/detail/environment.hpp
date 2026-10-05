@@ -111,6 +111,7 @@ namespace jai {
         // A plain extern names a global some unit or the host defines; a lookup that finds nothing says so
         void note_extern(uint64_t id, bool function);
         std::string_view undefined_text(uint64_t id, std::string_view otherwise = "Undefined variable '{0}'") const;
+        std::pair<std::string_view, uint64_t> unknown_name_error(std::string_view name) const;
 
         // Get a variable value (searches parent scopes, then this/static fields based on kind)
         // Returns checked_result to avoid exceptions in regular control flow

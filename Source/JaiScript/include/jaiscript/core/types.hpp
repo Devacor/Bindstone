@@ -325,6 +325,9 @@ namespace jai {
     [[noreturn]] JAI_NOINLINE void throw_runtime_error(std::string_view message);
     // runtime_error(format_error_message_numeric(message, id1, id2))
     [[noreturn]] JAI_NOINLINE void throw_numeric_error(std::string_view message, uint64_t id1, uint64_t id2);
+    class engine;
+    // throw_numeric_error, except a "{0}" text (a parked host or conversion exception's own text) reads its symbol
+    [[noreturn]] JAI_NOINLINE void throw_checked_error(engine* eng, std::string_view message, uint64_t id1, uint64_t id2);
     // runtime_error(prefix + expected + " arguments, got " + got): a bound thunk's argument count
     [[noreturn]] JAI_NOINLINE void throw_binder_arity(const char* prefix, size_t expected, size_t got);
     // runtime_error(text + count)

@@ -138,7 +138,7 @@ checked_result<script_value> engine::checked_host_entry(host_entry_body run, voi
     backend->begin_host_call();
     const auto failure = [&](const char* text) {
         backend->prepare_for_execution();
-        return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", symbolize(text));
+        return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", park_error_text(text));
     };
     try {
         auto result = run(*backend, context);
@@ -1972,7 +1972,7 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
     try {
         return ref_store_through(target, value, eng, eng->get_symbolizer());
     } catch (const std::exception& e) {
-        return checked_result<void>(make_error_code(runtime_error_code::cpp_exception), "{0}", symbolize_text(eng, e.what()));
+        return host_exception_error(eng, e.what());
     }
 }
 
@@ -3145,6 +3145,15 @@ string_symbolizer* engine::get_symbolizer() {
 
 uint64_t engine::symbolize(std::string_view str) const {
     return impl->string_symbolizer_.intern(str);
+}
+
+uint64_t engine::park_error_text(std::string_view text) const {
+    const string_symbolizer& symbols = impl->string_symbolizer_;
+    if (symbols.frozen()) {
+        const auto known = symbols.find(text);
+        return known ? *known : 0;
+    }
+    return symbols.park(text);
 }
 
 void engine::add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef) {

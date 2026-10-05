@@ -22,7 +22,13 @@ capitalized first word):
   (`Array index out of bounds`, `String index out of bounds`, `Cannot insert outside the array`,
   `Cannot cast the value to the target type` when a spelling was never interned,
   `Cannot assign to a string character (it takes a char or a string)`, `merge() expects exactly 2 arguments`,
-  `'f' was called with the wrong number of arguments` for a callee declaring 64 or more parameters);
+  `'f' was called with the wrong number of arguments` for a callee declaring 64 or more parameters,
+  `A host call failed during a parallel region`, `Undefined variable` for a host's by-name lookup of an unknown name);
+- a text that embeds a value (a host exception's `what()`, a binary reader's position, a `time::` date, a name nothing
+  declares) rides `{0}` as a PARKED symbol (`string_symbolizer::park`, `engine::park_error_text`): a bounded ring of
+  owned texts beside the interned table, so a call failing in a loop never grows it; a by-name lookup
+  (`environment::get(name)`, `reflect::get/set/invoke/bind/has_*`) asks without interning. A result held past 256 newer
+  parked texts reads `(the error text is no longer available)`;
 - a text is composed only once the failure is decided, out of line (`JAI_NOINLINE` kernels such as
   `detail::element_type_error`, `detail::index_out_of_bounds_error`, `no_member_text`, `throw_numeric_error`), so a
   hot path's frame carries no string temporaries for the error it does not raise.

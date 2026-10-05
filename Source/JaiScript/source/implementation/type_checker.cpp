@@ -3119,6 +3119,23 @@ private:
         return false;
     }
 
+    // a member read through a reference local declared of a class (`Body& b = bodies[i]; b.x`): the binding admits that class or a
+    // subclass, so a scalar field's declared kind is a proof source the typed rows guard, tentative for diagnostics (an element read's standing)
+    ctype reference_field_read(const member_expr* m) {
+        if (m->is_static || m->null_safe || !m->object || m->object->get_type() != node_type::identifier_expr) { return {}; }
+        const auto* local = find_local(static_cast<const identifier_expr*>(m->object.get())->name);
+        if (!local || !local->is_reference || !local->declared) { return {}; }
+        const ctype declared = ctype_from_type_info(local->declared);
+        if (declared.kind != ctype::object_k) { return {}; }
+        const member_hit h = lookup_member(declared.cls, m->member, false);
+        if (!h.found || h.methods || !h.field || h.field->is_static || !h.field->type || chain_has_user_accessor(declared.cls, m->member)) { return {}; }
+        ctype t = ctype_from_type_info(h.field->type.get());
+        if (t.kind != ctype::int_k && t.kind != ctype::float_k) { return {}; }
+        t.tentative = true;
+        t.element_proof = true;
+        return t;
+    }
+
     ctype infer_member(member_expr* m, bool writing, const variable_decl** typed_field_out = nullptr,
                        ctype* recv_out = nullptr, member_hit* hit_out = nullptr,
                        std::optional<field_proof>* proof_out = nullptr) {
@@ -3150,6 +3167,9 @@ private:
 			ctype c = ctype::make(detail::math::integral(kind) ? ctype::int_k : ctype::float_k);
 			c.tentative = true;
 			return c;
+		}
+		if (recv.is_unknown() && !writing) {
+			if (ctype t = reference_field_read(m); !t.is_unknown()) { return t; }
 		}
 		if (recv.is_unknown() || recv.kind == ctype::map_k || recv.kind == ctype::array_k ||
 			recv.kind == ctype::string_k || recv.kind == ctype::utf8_k || recv.kind == ctype::function_k || recv.kind == ctype::weak_k || recv.kind == ctype::null_k ||

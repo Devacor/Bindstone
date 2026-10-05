@@ -875,6 +875,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 		if (p.slot_index != SIZE_MAX && (p.is_reference || p.ref_escaping)) { callable_.escaping.insert(static_cast<uint32_t>(p.slot_index)); }
 		if (p.slot_index != SIZE_MAX && !p.is_reference && primitive_declared_type(p.type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(p.slot_index)); }
 		if (p.slot_index != SIZE_MAX && !p.is_reference) { callable_.slot_types[static_cast<uint32_t>(p.slot_index)] = p.type.get(); }
+		if (p.slot_index != SIZE_MAX) { note_slot_scalar_kind(static_cast<uint32_t>(p.slot_index), p.is_reference ? nullptr : p.type.get()); }
 #ifdef JAISCRIPT_VM_PROFILE
 		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
 #endif
@@ -2927,9 +2928,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				dst = static_cast<uint32_t>(decl->slot_index) | (k_typed_dst_decl << k_typed_dst_shift);
 				stamp = decl->type.get();
 			} else {
-
-				const uint32_t need = store_flag_no_result | store_flag_same_type | store_flag_type_provable;
-				if ((dp.flags & need) != need || (dp.flags & (store_flag_ref_alias | store_flag_global_only)) ||
+				// the parser's typed-store proof, or the checker's over a slot every declaration of which has the class's kind (a member read
+				// the parser cannot classify)
+				const uint32_t need = store_flag_no_result | store_flag_same_type;
+				const auto declared = dp.slot == k_invalid_u32 ? callable_.slot_scalar_kinds.end() : callable_.slot_scalar_kinds.find(dp.slot);
+				const bool slot_of_kind = declared != callable_.slot_scalar_kinds.end() &&
+				                          declared->second == static_cast<uint8_t>(bp.typed_class == 1 ? script_value::TYPEID_INT : script_value::TYPEID_FLOAT);
+				if ((dp.flags & need) != need || !((dp.flags & store_flag_type_provable) || slot_of_kind) || (dp.flags & (store_flag_ref_alias | store_flag_global_only)) ||
 				    dp.slot == k_invalid_u32 || dp.slot >= k_typed_slot_mask) { c.typed_env_operands.resize(env_mark); break; }
 				dst = dp.slot | (k_typed_dst_store << k_typed_dst_shift);
 			}
@@ -7649,6 +7654,7 @@ void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_dec
 	if (decl->ref_escaping && decl->slot_index != SIZE_MAX) { callable_.escaping.insert(static_cast<uint32_t>(decl->slot_index)); }   // a reference or a capture reaches it
 	if (!is_reference && decl->slot_index != SIZE_MAX && primitive_declared_type(decl->type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(decl->slot_index)); }   // a typed scalar slot holds that kind at every point
 	if (!is_reference && decl->slot_index != SIZE_MAX) { callable_.slot_types[static_cast<uint32_t>(decl->slot_index)] = decl->type.get(); }
+	if (decl->slot_index != SIZE_MAX) { note_slot_scalar_kind(static_cast<uint32_t>(decl->slot_index), is_reference ? nullptr : decl->type.get()); }
 	if (!is_reference && try_inline_variable_decl(decl)) return;
 
 	// Locals declared through env fallback in lambda contexts keep working because the
@@ -7684,6 +7690,13 @@ void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_dec
 
 	if (decl->initializer) { compile_decl_value(decl, decl->initializer); return; }
 	emit(opcode::op_decl_var, add_node(decl), 0, 0);
+}
+
+void vm_compiler::note_slot_scalar_kind(uint32_t slot, const type_info* declared) {
+	const auto b = declared ? declared->base_type : script_value_type::jai_null_type;
+	const uint8_t kind = b == script_value_type::jai_int_type ? static_cast<uint8_t>(script_value::TYPEID_INT) : b == script_value_type::jai_float_type ? static_cast<uint8_t>(script_value::TYPEID_FLOAT) : 0;
+	const auto [it, fresh] = callable_.slot_scalar_kinds.emplace(slot, kind);
+	if (!fresh && it->second != kind) { it->second = 0; }
 }
 
 void vm_compiler::note_slot_declared_ref(size_t slot, const type_info* referent) {

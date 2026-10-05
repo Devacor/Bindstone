@@ -678,10 +678,7 @@ public:
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
             // Call the method with unpacked arguments
-            if (auto eng = engine_ptr) {
-                return dynamic_binder<T>::callMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, eng);
-            }
-            throw runtime_error("Engine no longer exists");
+            return dynamic_binder<T>::callMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, engine_ptr);
         };
 
         // Add method to the class definition (for object.method() calls), carrying the C++
@@ -719,10 +716,7 @@ public:
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
             // Call the method with unpacked arguments
-            if (engine_ptr) {
-                return dynamic_binder<T>::callConstMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, engine_ptr);
-            }
-            throw runtime_error("Engine no longer exists");
+            return dynamic_binder<T>::callConstMethodImpl(cpp_obj, method, args, std::index_sequence_for<Args...>{}, engine_ptr);
         };
 
         // Add method to the class definition with its C++ parameter signature (see non-const
@@ -782,10 +776,7 @@ public:
                     throw_binder_arity("Method expects ", traits::arity - 1, args.size() - 1);
                 }
                 T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
-                if (auto eng = engine_ptr) {
-                    return callLambdaWithSelf<R, args_tuple>(callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, eng);
-                }
-                throw runtime_error("Engine no longer exists");
+                return callLambdaWithSelf<R, args_tuple>(callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, engine_ptr);
             };
 
             // the C++ parameter signature after the self parameter, so same-arity lambda overloads resolve by argument type
@@ -838,17 +829,11 @@ public:
             if constexpr (std::is_void_v<R>) {
                 callStaticFunctionImpl(func, args, std::make_index_sequence<sizeof...(Args)>{});
                 
-                if (auto eng = engine_ptr) {
-                    return script_value::make_null(eng);
-                }
-                throw runtime_error("Engine no longer exists");
+                return script_value::make_null(engine_ptr);
             } else {
                 auto result = callStaticFunctionImpl(func, args, std::make_index_sequence<sizeof...(Args)>{});
                 
-                if (auto eng = engine_ptr) {
-                    return script_value(result, eng);
-                }
-                throw runtime_error("Engine no longer exists");
+                return script_value(result, engine_ptr);
             }
         };
         
@@ -882,17 +867,11 @@ public:
             if constexpr (std::is_void_v<return_type>) {
                 callStaticCallableImpl(callable, args, std::make_index_sequence<traits::arity>{});
                 
-                if (auto eng = engine_ptr) {
-                    return script_value::make_null(eng);
-                }
-                throw runtime_error("Engine no longer exists");
+                return script_value::make_null(engine_ptr);
             } else {
                 auto result = callStaticCallableImpl(callable, args, std::make_index_sequence<traits::arity>{});
                 
-                if (auto eng = engine_ptr) {
-                    return script_value(result, eng);
-                }
-                throw runtime_error("Engine no longer exists");
+                return script_value(result, engine_ptr);
             }
         };
 
@@ -986,43 +965,40 @@ private:
 
             T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], native_type_id);
 
-            if (auto eng = engine_ptr) {
-                // Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
-                if constexpr (is_specialization_v<P, std::vector>) {
-                    using element_type = typename P::value_type;
-                    auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
-                        cpp_obj->*member, eng);
-                    return eng->make_object(wrapper);
-                }
-                else if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
-                    // Typed per-signature bindings (bind_signal_type) take precedence
-                    // when present; otherwise the generic "Signal" view serves the
-                    // member ceremony-free through the erased connect table.
-                    if (eng->template has_registered_class<P>()) {
-                        return convert_reference_with_registry(cpp_obj->*member, eng);
-                    }
-                    return eng->make_object(std::make_shared<signal_script_ops>(
-                        make_signal_script_ops(cpp_obj->*member)));
-                }
-                else if constexpr (std::is_class_v<P> &&
-                                   !math_adapted<P> &&
-                                   !std::is_same_v<P, std::string> &&
-                                   !std::is_same_v<P, script_value> &&
-                                   !dynamic_binder_validation::is_std_container<P>::value &&
-                                   !dynamic_binder_validation::is_std_function<P>::value &&
-                                   !is_specialization_v<P, std::shared_ptr> &&
-                                   !is_specialization_v<P, std::weak_ptr> &&
-                                   !is_specialization_v<P, std::unique_ptr>) {
-                    // Registered class members bind by reference (cpp_bound) so mutation and
-                    // signal connect act on the live member, not a copy (which non-copyables
-                    // like signal_emitter would reject outright); unregistered copyables copy.
-                    return convert_reference_with_registry(cpp_obj->*member, eng);
-                }
-                else {
-                    return detail::value_converter<P>::to(cpp_obj->*member, eng);
-                }
+            // Special handling for std::vector<T> - wrap in bound_cpp_vector for zero-copy access
+            if constexpr (is_specialization_v<P, std::vector>) {
+                using element_type = typename P::value_type;
+                auto wrapper = std::make_shared<bound_cpp_vector<element_type>>(
+                    cpp_obj->*member, engine_ptr);
+                return engine_ptr->make_object(wrapper);
             }
-            throw runtime_error("Engine no longer exists");
+            else if constexpr (dynamic_binder_validation::is_signal_type<P>::value) {
+                // Typed per-signature bindings (bind_signal_type) take precedence
+                // when present; otherwise the generic "Signal" view serves the
+                // member ceremony-free through the erased connect table.
+                if (engine_ptr->template has_registered_class<P>()) {
+                    return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
+                }
+                return engine_ptr->make_object(std::make_shared<signal_script_ops>(
+                    make_signal_script_ops(cpp_obj->*member)));
+            }
+            else if constexpr (std::is_class_v<P> &&
+                               !math_adapted<P> &&
+                               !std::is_same_v<P, std::string> &&
+                               !std::is_same_v<P, script_value> &&
+                               !dynamic_binder_validation::is_std_container<P>::value &&
+                               !dynamic_binder_validation::is_std_function<P>::value &&
+                               !is_specialization_v<P, std::shared_ptr> &&
+                               !is_specialization_v<P, std::weak_ptr> &&
+                               !is_specialization_v<P, std::unique_ptr>) {
+                // Registered class members bind by reference (cpp_bound) so mutation and
+                // signal connect act on the live member, not a copy (which non-copyables
+                // like signal_emitter would reject outright); unregistered copyables copy.
+                return convert_reference_with_registry(cpp_obj->*member, engine_ptr);
+            }
+            else {
+                return detail::value_converter<P>::to(cpp_obj->*member, engine_ptr);
+            }
         });
         class_def_->register_property_getter(engine_.symbolize(name), engine_.symbolize("_get_" + name));
 
@@ -1134,16 +1110,10 @@ public:
             // Check if getter is a member function pointer
             if constexpr (std::is_member_function_pointer_v<std::decay_t<Getter>>) {
                 // Call member function pointer: (obj->*getter)()
-                if (auto eng = engine_ptr) {
-                    return detail::value_converter<decltype((cpp_obj->*getter)())>::to((cpp_obj->*getter)(), eng);
-                }
-                throw runtime_error("Engine no longer exists");
+                return detail::value_converter<decltype((cpp_obj->*getter)())>::to((cpp_obj->*getter)(), engine_ptr);
             } else {
                 // Call lambda: getter(*cpp_obj)
-                if (auto eng = engine_ptr) {
-                    return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), eng);
-                }
-                throw runtime_error("Engine no longer exists");
+                return detail::value_converter<decltype(getter(*cpp_obj))>::to(getter(*cpp_obj), engine_ptr);
             }
         });
         class_def_->register_property_getter(engine_.symbolize(name), engine_.symbolize("_get_" + name));
@@ -1208,10 +1178,7 @@ public:
         std::string getter_name = "_get_" + name;
         uint64_t getter_id = engine_.symbolize(getter_name);
         class_def_->add_static_method(getter_id, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
-            if (auto eng = engine_ptr) {
-                return detail::value_converter<decltype(getter())>::to(getter(), eng);
-            }
-            throw runtime_error("Engine no longer exists");
+            return detail::value_converter<decltype(getter())>::to(getter(), engine_ptr);
         });
 
         using setter_traits = detail::function_traits<std::decay_t<Setter>>;
@@ -1707,18 +1674,13 @@ public:
                     auto cpp_obj = std::make_shared<T>(*static_cast<const T*>(obj));
 
                     // Store the C++ object in the class_instance
-                    if (auto eng = engine_ptr) {
-                        uint64_t cpp_object_field_id = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
-                        instance->set_field(cpp_object_field_id, script_value::make_cpp_object(class_name,
-                            class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
-                    }
+                    uint64_t cpp_object_field_id = engine_ptr->symbolize(class_constants::CPP_OBJECT_FIELD);
+                    instance->set_field(cpp_object_field_id, script_value::make_cpp_object(class_name,
+                        class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
 
                     // Return the class_instance wrapped in a value
-                    if (auto eng = engine_ptr) {
-                        return script_value::make_object(class_name,
-                            std::static_pointer_cast<void>(instance), eng);
-                    }
-                    throw runtime_error("Engine no longer exists");
+                    return script_value::make_object(class_name,
+                        std::static_pointer_cast<void>(instance), engine_ptr);
                 });
 
             // Also register with conversion registry for container conversions
@@ -1747,11 +1709,8 @@ public:
                                 class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
 
                         // Return the class_instance wrapped in a value
-                        if (auto eng = engine_ptr) {
-                            return script_value::make_object(class_name,
-                                std::static_pointer_cast<void>(instance), eng);
-                        }
-                        throw runtime_error("Engine no longer exists");
+                        return script_value::make_object(class_name,
+                            std::static_pointer_cast<void>(instance), engine_ptr);
                     }
                 );
             }
@@ -1791,11 +1750,8 @@ public:
                                 class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_ptr));
                         
                         // Return the class_instance wrapped in a value
-                        if (auto eng = engine_ptr) {
-                            return script_value::make_object(class_name, 
-                                std::static_pointer_cast<void>(instance), eng);
-                        }
-                        throw runtime_error("Engine no longer exists");
+                        return script_value::make_object(class_name, 
+                            std::static_pointer_cast<void>(instance), engine_ptr);
                     }
                 );
             }

@@ -3448,6 +3448,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		ir_op head_op;
 		const size_t first = counted != k_invalid_u32 ? head + 1 : head;
 		region.head = static_cast<uint32_t>(head); region.first = static_cast<uint32_t>(first); region.back = static_cast<uint32_t>(back);
+		// a condition's true-sense leaf (emit_cond_jump_true): the compare-jump at `at` skips the jump after it, which nothing else targets; the
+		// pair is one cmp taken in the jump's sense (its origin the compare-jump, the jump's copy a placeholder)
+		auto true_sense_leaf = [&](size_t at, uint32_t false_target) -> bool {
+			if (false_target != at + 2 || at + 1 >= back || code[at + 1].op != opcode::op_jump) return false;
+			const uint32_t t = code[at + 1].a;
+			if (!(t > at + 1 && (t <= back || line))) return false;
+			for (size_t j = first; j <= back; ++j) { if (j != at + 1 && branch_target(j) == at + 1) return false; }
+			return true;
+		};
 		if (refusal == chunk::cell_refusal_none && counted != k_invalid_u32) {
 			const counted_for_proto& p = c.counted_for_protos[counted];
 			use_slot(p.var.slot, kint, true, k_typed_dst_compound, nullptr, head);   // stepped in place by the back edge
@@ -4015,6 +4024,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const uint8_t kind = st.op <= opcode::op_t_jne_ii ? kint : kflt;
 				use_slot(st.a, kind, false, 0, nullptr, ip); use_slot(st.b, kind, false, 0, nullptr, ip);
 				op.kind = ir::cmp; op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
+				if (true_sense_leaf(ip, st.c)) { op.target = code[ip + 1].a; op.sense = true; ops.push_back(op); op = ir_op{}; op.kind = ir::skip; ++ip; }
 			} else if (st.op == opcode::op_load && (st.a == k_invalid_u32 || st.a < k_typed_slot_mask) && st.c == 0 && ip + 1 < back && (code[ip + 1].op == opcode::op_jump_if_true || code[ip + 1].op == opcode::op_jump_if_false)) {
 				// a truth test on a local or an environment value inside the body (`if (x)`, `if (!x)` through its sense, `if (NIGHTMARE)`):
 				// the truthiness of its int, float or bool with the jump's sense; a slot of another kind refuses at the entry
@@ -4060,6 +4070,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!cmp_tok(bp.op)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				if (!value(op, bp.left, 0, static_cast<uint32_t>(ip * 3), ip, op.a) || !value(op, bp.right, 0, static_cast<uint32_t>(ip * 3 + 1), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::cmp; op.tok = bp.op; op.target = st.a;
+				if (true_sense_leaf(ip, st.a)) { op.target = code[ip + 1].a; op.sense = true; ops.push_back(op); op = ir_op{}; op.kind = ir::skip; ++ip; }
 			} else if (st.op == opcode::op_cfor_prep) {
 				// an inner counted loop's head: `var cmp end`, the exit its false edge (the general form's CFOR_PREP tests once the same way); the var,
 				// the end and the step are cells, constants or environment scalars as the outer counted head requires
@@ -6450,25 +6461,21 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		return;
 	}
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
+		// the left side is jumping code (nested && / || and comparisons as compare-jumps, no bool materialized between them); the right side is
+		// the value, made a bool
 		const uint32_t first_ip = static_cast<uint32_t>(chunk_->code.size());
-		compile_expression(expr->left);
-		if (expr->op.type == token_type::ampersand_ampersand) {
-			size_t jump_false = emit(opcode::op_jump_if_false, k_invalid_u32, 0);
-			compile_expression(expr->right);
-			emit(opcode::op_to_bool);
-			size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
-			patch_jump(jump_false, chunk_->code.size());
-			emit(opcode::op_false);
-			patch_jump(jump_end, chunk_->code.size());
-		} else {
-			size_t jump_true = emit(opcode::op_jump_if_true, k_invalid_u32, 0);
-			compile_expression(expr->right);
-			emit(opcode::op_to_bool);
-			size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
-			patch_jump(jump_true, chunk_->code.size());
-			emit(opcode::op_true);
-			patch_jump(jump_end, chunk_->code.size());
-		}
+		const bool grafts = leaf_grafts_;
+		leaf_grafts_ = false;
+		std::vector<size_t> short_jumps;
+		if (expr->op.type == token_type::ampersand_ampersand) { compile_branch_condition(expr->left, short_jumps); }
+		else { compile_branch_condition_true(expr->left, short_jumps); }
+		leaf_grafts_ = grafts;
+		compile_expression(expr->right);
+		emit(opcode::op_to_bool);
+		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
+		for (size_t at : short_jumps) { patch_jump(at, chunk_->code.size()); }
+		emit(expr->op.type == token_type::ampersand_ampersand ? opcode::op_false : opcode::op_true);
+		patch_jump(jump_end, chunk_->code.size());
 		chunk_->logical_values.emplace_back(first_ip, static_cast<uint32_t>(chunk_->code.size()));   // a block holds the value in a cell (lower_typed_ops)
 		return;
 	}

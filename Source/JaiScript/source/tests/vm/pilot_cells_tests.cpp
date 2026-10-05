@@ -2037,7 +2037,7 @@ var cont = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { if (i ==
 			check(listing.find("-- ir 0:cmp->exit") != std::string::npos, "the while loop's head compare exits: " + listing);
 			check(listing.find(":jump->") != std::string::npos, "the diamond's else arm is a jump to an operation: " + listing);
 			check(listing.find(":exit->exit") != std::string::npos, "the break is an exit: " + listing);
-			check(listing.find(":jump->back") != std::string::npos, "the continue jumps to the back edge: " + listing);
+			check(listing.find(":cmp->back") != std::string::npos, "the continue's compare jumps to the back edge: " + listing);
 		});
 		test("pinned_operations_skip_their_kind_checks", [this]() {
 			// a loop over declared ints and floats runs its arithmetic and compares in the pinned forms; a var local (an adopted kind)

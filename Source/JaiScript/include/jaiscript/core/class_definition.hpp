@@ -574,7 +574,7 @@ public:
     // A host callable's C++ exception is the script's catchable runtime error with its text, wherever the runtime
     // calls it (a method, an operator, a property getter or setter, a static; docs/EXCEPTION_DESIGN.md)
     static checked_result<script_value> host_exception_result(engine* eng, const std::exception& e) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::cpp_exception), "{0}", symbolize_text(eng, e.what()));
+        return host_exception_error(eng, e.what());
     }
 
     // Typed overload: param_types is the C++ parameter signature (one entry per script argument,

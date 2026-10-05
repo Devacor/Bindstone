@@ -947,6 +947,9 @@ namespace jai {
 
         // Intern a string and return its unique ID (const-safe)
         uint64_t symbolize(std::string_view str) const;
+        // A transient error text's symbol (string_symbolizer::park): it rides an error's {0} without growing the
+        // interned table. While frozen it is the text's interned id when one exists, else 0 (the caller's slot-less text)
+        uint64_t park_error_text(std::string_view text) const;
 
         // Format a checked_result error to a human-readable string
         // Resolves symbol IDs to their string representations

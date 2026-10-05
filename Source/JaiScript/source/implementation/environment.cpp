@@ -175,9 +175,18 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
     return nullptr;
 }
 
+// By-name lookups ask the interner without inserting: a name it never saw is defined nowhere, and its undefined text
+// carries the name parked (never interned; the slot-less text while frozen)
+JAI_NOINLINE std::pair<std::string_view, uint64_t> environment::unknown_name_error(std::string_view name) const {
+    if (symbolizer_->frozen()) { return {"Undefined variable", 0}; }
+    const uint64_t parked = symbolizer_->park(name);
+    return {undefined_text(parked), parked};
+}
+
 checked_result<script_value> environment::get(const std::string& name) const {
-    uint64_t id = symbolizer_->intern(name);
-    return get(id);
+    if (const auto id = symbolizer_->find(name)) { return get(*id); }
+    const auto [text, parked] = unknown_name_error(name);
+    return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<script_value> environment::get(uint64_t id) const {
@@ -452,13 +461,15 @@ script_value* environment::shadowed_cell(uint64_t id) const {
 }
 
 checked_result<void> environment::assign(const std::string& name, const script_value& value) {
-    uint64_t id = symbolizer_->intern(name);
-    return assign(id, value);
+    if (const auto id = symbolizer_->find(name)) { return assign(*id, value); }
+    const auto [text, parked] = unknown_name_error(name);
+    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(const std::string& name) const {
-    uint64_t id = symbolizer_->intern(name);
-    return get_ref(id);
+    if (const auto id = symbolizer_->find(name)) { return get_ref(*id); }
+    const auto [text, parked] = unknown_name_error(name);
+    return checked_result<std::reference_wrapper<const script_value>>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
@@ -535,8 +546,9 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
-    uint64_t id = symbolizer_->intern(name);
-    return get_ref(id);
+    if (const auto id = symbolizer_->find(name)) { return get_ref(*id); }
+    const auto [text, parked] = unknown_name_error(name);
+    return checked_result<std::reference_wrapper<script_value>>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64_t id) {
@@ -610,8 +622,9 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 }
 
 checked_result<void> environment::assign(const std::string& name, script_value&& value) {
-    uint64_t id = symbolizer_->intern(name);
-    return assign(id, std::move(value));
+    if (const auto id = symbolizer_->find(name)) { return assign(*id, std::move(value)); }
+    const auto [text, parked] = unknown_name_error(name);
+    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<void> environment::assign(uint64_t id, const script_value& value) {
@@ -763,8 +776,8 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
 }
 
 bool environment::contains(const std::string& name) const {
-    uint64_t id = symbolizer_->intern(name);
-    return contains(id);
+    const auto id = symbolizer_->find(name);
+    return id && contains(*id);
 }
 
 bool environment::contains(uint64_t id) const {

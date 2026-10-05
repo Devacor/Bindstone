@@ -13,6 +13,7 @@
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <limits>
 #include <optional>
+#include <vector>
 
 namespace jai {
 
@@ -94,10 +95,30 @@ namespace jai {
 			return std::nullopt;
 		}
 
-		// Fast path for known IDs (no allocation). Returns empty view if OOB.
+		// Fast path for known IDs (no allocation). Returns empty view if OOB; a parked id reads its parked text.
 		[[nodiscard]] inline std::string_view get_string(id_type id) const noexcept {
-			return id < ids_.size() ? ids_[id] : std::string_view{};
+			if (id < ids_.size()) [[likely]] { return ids_[id]; }
+			return (id & k_parked_bit) ? parked_text(id) : std::string_view{};
 		}
+
+		// Transient texts (an error message that embeds a value, a host exception's what(), a name nothing declares):
+		// a bounded ring of owned texts whose ids live in their own range, so a failing call repeated in a loop never
+		// grows the interned table. An id outlived by k_parked_texts newer parks reads as k_parked_expired. The ring
+		// is written only while not frozen (a parallel worker must not park; callers take their slot-less text).
+		static constexpr id_type k_parked_bit = id_type(1) << 63;
+		static constexpr std::size_t k_parked_texts = 256;
+		static constexpr std::string_view k_parked_expired = "(the error text is no longer available)";
+		[[nodiscard]] id_type park(std::string_view text) const {
+			assert(!frozen_ && "string_symbolizer: park during a parallel region");
+			if (parked_.empty()) { parked_.resize(k_parked_texts); }
+			const id_type seq = parked_next_++;
+			parked_slot& slot = parked_[seq % k_parked_texts];
+			slot.seq = seq;
+			slot.text.assign(text.data(), text.size());
+			return k_parked_bit | seq;
+		}
+		// The interned table's size (parked texts never count)
+		[[nodiscard]] std::size_t size() const noexcept { return ids_.size(); }
 
 		[[nodiscard]] inline id_type get_this_id() const noexcept { return this_id_; }
 
@@ -187,6 +208,19 @@ namespace jai {
 		}
 
 	private:
+		JAI_NOINLINE std::string_view parked_text(id_type id) const noexcept {
+			const id_type seq = id & ~k_parked_bit;
+			if (parked_.empty()) { return k_parked_expired; }
+			const parked_slot& slot = parked_[seq % k_parked_texts];
+			return slot.seq == seq ? std::string_view(slot.text) : k_parked_expired;
+		}
+		struct parked_slot {
+			id_type seq = ~id_type(0);
+			std::string text;
+		};
+		mutable std::vector<parked_slot> parked_;
+		mutable id_type parked_next_ = 0;
+
 		// Mutable to allow const intern() - interning doesn't change observable state
 		// Owning storage with stable addresses (push_back/push_front do not invalidate references)
 		mutable std::deque<std::string> storage_;

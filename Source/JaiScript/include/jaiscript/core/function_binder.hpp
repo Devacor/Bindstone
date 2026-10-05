@@ -34,11 +34,15 @@ namespace jai {
     template<typename T>
     std::optional<script_value> try_convert_shared_ptr_with_registry(const std::shared_ptr<T>& ptr, engine* eng);
 
-    // engine is incomplete here; the dependent E defers the symbolize lookup to the
-    // instantiation point (where engine.hpp is complete) for conforming compilers.
+    // A host callable's C++ exception as the script's catchable error: its what() parked, never interned (a host call that
+    // fails in a loop with a varying text leaves the symbol table as it was); a frozen region's worker gets the slot-less text
+    inline constexpr std::string_view host_exception_slotless_text = "A host call failed during a parallel region";
+    // (engine is incomplete here; the dependent E defers the lookup to the instantiation point)
     template<typename E>
-    uint64_t symbolize_text(E* eng, const char* text) {
-        return eng ? eng->symbolize(text) : 0;
+    error_propagator host_exception_error(E* eng, const char* text) {
+        const uint64_t id = eng ? eng->park_error_text(text) : 0;
+        return error_propagator{make_error_code(runtime_error_code::cpp_exception),
+                                id || !eng ? std::string_view("{0}") : host_exception_slotless_text, id, 0};
     }
 
     // Wraps a script FUNCTION value as a std::function<Sig> so script lambdas can be
@@ -800,12 +804,7 @@ class engine;
                     try {
                         return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
-                        uint64_t msg_id = symbolize_text(eng, e.what());
-                        return checked_result<script_value>(
-                            make_error_code(runtime_error_code::cpp_exception),
-                            "{0}",
-                            msg_id
-                        );
+                        return host_exception_error(eng, e.what());
                     }
                 };
             } else {
@@ -828,12 +827,7 @@ class engine;
                     try {
                         return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
-                        uint64_t msg_id = symbolize_text(eng, e.what());
-                        return checked_result<script_value>(
-                            make_error_code(runtime_error_code::cpp_exception),
-                            "{0}",
-                            msg_id
-                        );
+                        return host_exception_error(eng, e.what());
                     }
                 };
             }

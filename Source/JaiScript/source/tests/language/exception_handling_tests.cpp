@@ -1268,6 +1268,46 @@ public:
             )");
             check_eq(std::string("c:strfail"), result.as_string());
         });
+
+        // Error texts that embed a value (a host exception, a binary reader past its end, a name nothing declares) never
+        // grow the symbol table: a failing call repeated in a loop leaves it as it was, and every text reads unchanged
+        test("failing_calls_in_a_loop_keep_the_symbol_table_flat", [this]() {
+            auto engine = make_engine();
+            jai::stdlib::register_all(*engine);
+            engine->add_function("fail", [](script_int n) -> script_int { throw std::runtime_error("fail " + std::to_string(n)); });
+            engine->execute(R"(
+                class Probe { int a = 0; }
+                int base = 0;
+                string last_host = "";
+                string last_reflect = "";
+                string last_binary = "";
+                void run(int n) {
+                    Probe p;
+                    string bytes = "abc";
+                    for (int i = 0; i < n; ++i) {
+                        try { fail(base + i); } catch (e) { last_host = e; }
+                        try { reflect::get(p, "nosuch" + to_string(base + i)); } catch (e) { last_reflect = e; }
+                        auto r = bytes.reader();
+                        try { r.skip(base + i + 10); } catch (e) { last_binary = e; }
+                    }
+                    base += n;
+                }
+            )");
+            engine->execute("run(50);");
+            engine->execute("run(50);");
+            const size_t before = engine->get_symbolizer()->size();
+            engine->execute("run(50);");
+            for (int i = 0; i < 50; ++i) {
+                auto missing = engine->get_global_environment()->get("missing_" + std::to_string(i));
+                check_false(static_cast<bool>(missing));
+                if (i == 49) { check_eq(std::string("Undefined variable 'missing_49'"), engine->format_error(missing)); }
+                check_false(engine->get_global_environment()->contains("missing_" + std::to_string(i)));
+            }
+            check_eq(before, engine->get_symbolizer()->size());
+            check_eq(std::string("fail 149"), engine->execute("last_host").as_string());
+            check_eq(std::string("reflect::get: 'Probe' has no member 'nosuch149'"), engine->execute("last_reflect").as_string());
+            check_eq(std::string("Cannot skip 159 bytes at position 0: the data is 3 bytes"), engine->execute("last_binary").as_string());
+        });
     }
 };
 

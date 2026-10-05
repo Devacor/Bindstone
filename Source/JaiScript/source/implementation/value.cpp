@@ -18,6 +18,11 @@ namespace jai {
     throw runtime_error(format_error_message_numeric(message, id1, id2));
 }
 
+[[noreturn]] JAI_NOINLINE void throw_checked_error(engine* eng, std::string_view message, uint64_t id1, uint64_t id2) {
+    if (eng && message == "{0}") { throw runtime_error(std::string(eng->get_symbolizer()->get_string(id1))); }
+    throw runtime_error(format_error_message_numeric(message, id1, id2));
+}
+
 [[noreturn]] JAI_NOINLINE void throw_binder_arity(const char* prefix, size_t expected, size_t got) {
     throw runtime_error(prefix + std::to_string(expected) + " arguments, got " + std::to_string(got));
 }

@@ -36,12 +36,13 @@ namespace jai {
 
     // Forward declarations for helper functions
     std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng);
-    // Interns a caught exception's text for a checked_result message (engine is
-    // incomplete here; the dependent E defers the lookup to the instantiation point)
-    template<typename E>
-    inline std::string_view intern_exception_text(E* eng, const char* text) {
-        if (!eng) { return "conversion failed"; }
-        return eng->get_symbolizer()->get_string(eng->symbolize(text));   // a view into the engine-owned interned copy
+    // A caught conversion exception's text as a checked_result: "{0}" over the text parked (never interned; engine is
+    // incomplete here, the dependent E defers the lookup to the instantiation point)
+    template<typename T, typename E>
+    inline checked_result<T> conversion_exception_result(E* eng, const char* text) {
+        const uint64_t id = eng ? eng->park_error_text(text) : 0;
+        if (!id) { return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), "conversion failed"); }
+        return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), "{0}", id);
     }
 
     // as<T&> bridges (defined in engine.cpp): validate an object holder's registered type
@@ -981,7 +982,7 @@ namespace detail { struct argument_capture_storage; }
                 if (result.message().empty()) {
                     throw_runtime_error("Type conversion failed");
                 }
-                throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
+                throw_checked_error(engine_, result.message(), result.symbol_id(), result.symbol_id2());
             }
             return std::move(result.value());
         }
@@ -1519,12 +1520,7 @@ namespace detail { struct argument_capture_storage; }
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            // the result's message is a non-owning view: intern the text (the
-                            // exception dies with this handler; a view of what() read freed memory)
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                intern_exception_text(engine_, e.what())
-                            );
+                            return conversion_exception_result<T>(engine_, e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1593,12 +1589,7 @@ namespace detail { struct argument_capture_storage; }
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            // the result's message is a non-owning view: intern the text (the
-                            // exception dies with this handler; a view of what() read freed memory)
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                intern_exception_text(engine_, e.what())
-                            );
+                            return conversion_exception_result<T>(engine_, e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1714,12 +1705,7 @@ namespace detail { struct argument_capture_storage; }
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            // the result's message is a non-owning view: intern the text (the
-                            // exception dies with this handler; a view of what() read freed memory)
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                intern_exception_text(engine_, e.what())
-                            );
+                            return conversion_exception_result<T>(engine_, e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),
@@ -1789,12 +1775,7 @@ namespace detail { struct argument_capture_storage; }
                         try {
                             return checked_result<T>(registry->template convert_from_script<T>(*this));
                         } catch (const runtime_error& e) {
-                            // the result's message is a non-owning view: intern the text (the
-                            // exception dies with this handler; a view of what() read freed memory)
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                intern_exception_text(engine_, e.what())
-                            );
+                            return conversion_exception_result<T>(engine_, e.what());
                         } catch (...) {
                             return checked_result<T>(
                                 make_error_code(runtime_error_code::type_mismatch),

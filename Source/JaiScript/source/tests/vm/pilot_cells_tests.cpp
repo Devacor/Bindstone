@@ -6391,6 +6391,23 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("a_bitwise_int_store_is_a_typed_store", [this]() {
+			// `cur = (last + cur) & mask` on int locals is a parse-proven typed store (the int rows of & | ^ << >>): the block runs it pinned; a
+			// shift out of range raises the general text with the slot unchanged, on both backends
+			const std::string src = R"(
+				int f(int n) { int last = 0; int cur = 1; int x = 3; while (n > 0) { n = n - 1; int tmp = cur; cur = (last + cur) & 0xFFFFFFFF; last = tmp; x = (x ^ cur) | (cur << 3) >> 2; } return cur + x; }
+				int g(int s) { int v = 1; string out = ""; try { for (int i = 0; i < 3; ++i) { v = v << s; } } catch (e) { out = e; } return v * 1000 + out.size(); }
+				to_string(f(1000)) + " " + to_string(g(2)) + " " + to_string(g(70));
+			)";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "bitwise typed stores");
+			both(src, oracle, "bitwise typed stores, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== f ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("C_ARITH_ANY") == std::string::npos, "f's loop runs pinned: " + fl);
+		});
 		test("a_true_sense_comparison_leaf_keeps_every_operand_kind", [this]() {
 			// `a < b || ...` jumps on a compare-jump that falls through to the true edge: ints, floats with NaN, strings, null, mixed kinds and a
 			// class operator agree with the interpreter, inside and outside a loop

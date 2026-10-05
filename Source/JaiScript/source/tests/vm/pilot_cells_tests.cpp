@@ -6391,6 +6391,44 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("a_graft_reads_a_read_only_scalar_parameter_from_the_argument", [this]() {
+			// a scalar value parameter the body never writes, bound to a private local no other argument writes, is the local itself inside the
+			// graft; a parameter the body writes, one another argument increments or binds by reference, and a converting one keep their copy
+			const std::string src = R"(
+				int add3(int a, int b, int c) { return a + b * 2 + c * 3; }
+				int dec(int n) { n = n - 1; return n * 2; }
+				int incref(int a, int& b) { b = b + 10; return a + b; }
+				float half(float f) { return f * 0.5; }
+				int pair(int a, int b) { return a * 100 + b; }
+				int run(int n) {
+					int s = 0;
+					for (int i = 0; i < n; ++i) {
+						int x = i % 7; int y = i % 5;
+						s = s + add3(x, y, i);
+						int before = x;
+						s = s + dec(x);
+						if (x != before) { s = -999999; }
+						s = s + incref(y, y);
+						int z = i;
+						s = s + pair(z, z++);
+						s = s + cast<int>(half(i));
+					}
+					return s;
+				}
+				to_string(run(300)) + " " + to_string(add3(1, 2, 3));
+			)";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "forwarded parameters");
+			both(src, oracle, "forwarded parameters, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_bitwise_int_store_is_a_typed_store", [this]() {
 			// `cur = (last + cur) & mask` on int locals is a parse-proven typed store (the int rows of & | ^ << >>): the block runs it pinned; a
 			// shift out of range raises the general text with the slot unchanged, on both backends

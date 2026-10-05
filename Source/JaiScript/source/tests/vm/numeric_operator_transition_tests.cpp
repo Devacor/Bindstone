@@ -81,6 +81,36 @@ public:
 				check_eq(oracle, run(backend_type::vm, proofs));
 			}
 		});
+		// operands that reach a binary through the stack (call results, member reads): the numeric rows, the failures and an
+		// operator registered mid-run read as the interpreter reads them
+		test("stack_operand_binaries_match_the_interpreter", [this]() {
+			const std::string script =
+				"class P { var a = 0; var b = 0; P(var x, var y) { a = x; b = y; } }\n"
+				"function id(var v) { return v; }\n"
+				"function rows(var x, var y) {\n"
+				"    var p = P(x, y);\n"
+				"    var out = [];\n"
+				"    out.push(p.a + p.b); out.push(p.a - p.b); out.push(p.a * p.b); out.push(id(x) < id(y)); out.push(id(x) >= id(y));\n"
+				"    out.push(id(x) == id(y)); out.push(id(x) != id(y)); out.push(p.a <= p.b); out.push(p.a > p.b);\n"
+				"    try { out.push(id(x) / id(y)); } catch (e) { out.push(\"caught: \" + e); }\n"
+				"    try { out.push(id(x) % id(y)); } catch (e) { out.push(\"caught: \" + e); }\n"
+				"    return to_string(out);\n"
+				"}\n"
+				"function big(var x) { try { return to_string(id(x) * id(x)); } catch (e) { return \"caught: \" + e; } }\n"
+				"rows(7, 3) + \"|\" + rows(2.5, 4) + \"|\" + rows(9, 0) + \"|\" + rows(1.0, 0.0) + \"|\" + rows(-4, 2.0) + \"|\" + big(4000000000) + \"|\" + big(3.0);\n";
+			auto run = [&](backend_type type, bool proofs) {
+				auto eng = engine::make();
+				if (type != backend_type::interpreter) { eng->set_backend(type); }
+				eng->type_proofs(proofs);
+				jai::stdlib::register_all(*eng);
+				return eng->execute(script).as_string();
+			};
+			const std::string oracle = run(backend_type::interpreter, true);
+			check_true(oracle.find("caught") != std::string::npos);
+			for (bool proofs : {true, false}) {
+				check_eq(oracle, run(backend_type::vm, proofs));
+			}
+		});
 		// a numeric operator registered while a dynamic op's frame runs is consulted by its next execution
 		test("dynamic_slot_operand_ops_see_an_operator_registered_mid_function", [this]() {
 			for (bool proofs : {true, false}) {

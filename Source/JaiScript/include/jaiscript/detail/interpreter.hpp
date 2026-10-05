@@ -950,6 +950,8 @@ namespace jai {
         uint64_t done_id_;
         uint64_t same_as_id_;
         uint64_t eq_method_id_ = 0;   // "==" interned at construction (worker probes must not intern)
+        uint64_t to_bool_id_ = 0;
+        uint64_t to_string_id_ = 0;
         base_type_symbols base_type_ids_;   // scalar_member_message spellings, interned at construction
         detail::arity_count_symbols arity_count_ids_;   // arity text count spellings, interned at construction
         bool identifier_callee_lookup_ = false;   // visit_call_expr -> visit_identifier: the bare name is being called

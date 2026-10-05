@@ -108,6 +108,8 @@ namespace jai::vm {
 namespace {
 
 	constexpr uint8_t k_member_ic_var_field = 0xFF;   // a member_ic store row's field declared var (no scalar_type)
+	const std::string k_empty_type_name;
+	const std::string k_unknown_type_name = "unknown";
 
 	inline checked_result<void> vm_int_overflow_v(const char* msg) {
 		return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), msg);
@@ -282,6 +284,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		engine_->vm_coverage_adopt(coverage_);
 #endif
 		ti_int_ = engine_->get_type_info_int(); ti_float_ = engine_->get_type_info_float(); ti_bool_ = engine_->get_type_info_bool(); ti_string_ = engine_->get_type_info_string();
+		shared_ptr_ctor_symbol_ = 0; weak_ptr_ctor_symbol_ = 0;
 		symbolizer_ = engine_->get_symbolizer();
 		env_symbolizer_ = symbolizer_;
 		if (auto global = engine_->get_global_environment()) {
@@ -1896,6 +1899,20 @@ script_value vm_backend::string_element_pin(frame& f, script_value& base_raw, ui
 // get_value_ptr tail still runs when the storage prefix misses (this/static fallbacks).
 // Member scopes consult the cache only PAST the member rungs (a cached global cell
 // must never outrank a same-named member).
+// The constructor a `shared_ptr<T>` / `weak_ptr<T>` name calls: the name before its '<', the two the compiler flags interned once
+uint64_t vm_backend::type_ctor_base_symbol(uint64_t sym) {
+	const std::string_view name = symbolizer_->get_string(sym);
+	if (name.starts_with("shared_ptr<")) {
+		if (!shared_ptr_ctor_symbol_) { shared_ptr_ctor_symbol_ = symbolizer_->intern("shared_ptr"); }
+		return shared_ptr_ctor_symbol_;
+	}
+	if (name.starts_with("weak_ptr<")) {
+		if (!weak_ptr_ctor_symbol_) { weak_ptr_ctor_symbol_ = symbolizer_->intern("weak_ptr"); }
+		return weak_ptr_ctor_symbol_;
+	}
+	return symbolizer_->intern(std::string(name.substr(0, name.find('<'))));
+}
+
 script_value* vm_backend::resolve_local_or_env_cached(frame& f, uint32_t slot, uint64_t symbol_id) {
 	if (slot != k_invalid_u32 && f.locals && !f.top_level) {
 		if (auto* ptr = frame_slot(f, slot)) {
@@ -3624,12 +3641,9 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 		}
 	}
 	if (ins.c & load_flag_type_ctor) {
-		std::string_view name = symbolizer_->get_string(sym);
-		size_t pos = name.find('<');
-		std::string base_type(name.substr(0, pos));
 		// nullable-pointer probe (checked_result stage 1): same ladder as get(), the
 		// miss is a null instead of a fat error result nobody reads
-		if (script_value* ctor = environment_->get_value_ptr(symbolizer_->intern(base_type));
+		if (script_value* ctor = environment_->get_value_ptr(type_ctor_base_symbol(sym));
 		    ctor && ctor->is_function()) {
 			stack_.push_back(*ctor);
 			return {};
@@ -3861,8 +3875,8 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 #endif
 					{
 						const uint8_t declared_kind = slot_declared_kind(f, ins.b);
-						VM_TRY(detail::ref_store_through(*frameLocal, value, engine_, symbolizer_,
-							declared_kind ? f.code->slot_declared_refs[ins.b] : nullptr, declared_kind, symbolizer_->get_string(sym)));
+						VM_TRY(detail::ref_store_through_named(*frameLocal, value, engine_, symbolizer_,
+							declared_kind ? f.code->slot_declared_refs[ins.b] : nullptr, declared_kind, [this, sym] { return symbolizer_->get_string(sym); }));
 					}
 					stack_.push_back(std::move(value));
 					return {};
@@ -3910,12 +3924,14 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			                  slot_type->base_type == script_value_type::jai_array_type ||
 			                  slot_type->base_type == script_value_type::jai_map_type ||
 			                  (slot_type->base_type == script_value_type::jai_shared_ptr_type && value.get_type_info().get() != slot_type.get()))) {
-				auto enforced = enforce_type_compatibility(std::move(value), slot_type, sym);
-				if (!enforced) {
-					return raise_from(enforced);
+				if (!detail::var_slot(slot_type.get())) {   // a var slot's table is the identity
+					auto enforced = enforce_type_compatibility(std::move(value), slot_type, sym);
+					if (!enforced) {
+						return raise_from(enforced);
+					}
+					value = std::move(enforced.value());
+					detail::keep_handle_slot_type(value, slot_type);
 				}
-				value = std::move(enforced.value());
-				detail::keep_handle_slot_type(value, slot_type);
 				// var slots keep a shared_ptr-tagged rhs's marker (decl parity;
 				// flattening to 'any' would detach at the copy)
 				if (detail::var_slot(slot_type.get()) &&
@@ -4045,7 +4061,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 #ifdef JAISCRIPT_VM_PROFILE
 				profile_store_last_path_ = 5;
 #endif
-				VM_TRY(detail::ref_store_through(*currentVal, value, engine_, symbolizer_, nullptr, 0, symbolizer_->get_string(sym)));
+				VM_TRY(detail::ref_store_through_named(*currentVal, value, engine_, symbolizer_, nullptr, 0, [this, sym] { return symbolizer_->get_string(sym); }));
 				stack_.push_back(std::move(value));
 				return {};
 			}
@@ -4078,8 +4094,8 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				auto value_type_info = value.get_type_info();
 				if (expected_type && value_type_info &&
 				    expected_type->base_type != script_value_type::jai_any_type) {
-					std::string expected_class = expected_type->type_name;
-					std::string actual_class = value_type_info->element_type()
+					const std::string& expected_class = expected_type->type_name;
+					const std::string& actual_class = value_type_info->element_type()
 						? value_type_info->element_type()->type_name
 						: value_type_info->type_name;
 					if (expected_class != actual_class && engine_) {
@@ -4111,7 +4127,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			script_value result = value;
 			auto ptr_type_info = currentVal->get_type_info();
 			auto expected_type = ptr_type_info->element_type();
-			std::string expected_type_name = expected_type ? expected_type->type_name : "";
+			const std::string& expected_type_name = expected_type ? expected_type->type_name : k_empty_type_name;
 
 			// Monotonic-ladder rule (Dev ruling 2026-07, refines c81c9812): a var-held
 			// (dynamic_pointee) holder behaves IDENTICALLY to a typed holder wherever
@@ -4122,7 +4138,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			if (ptr_type_info->dynamic_pointee &&
 			    value.type() == script_value_type::jai_object_type) {
 				auto src_ti = value.get_type_info();
-				std::string src_name = src_ti ? src_ti->type_name : "";
+				const std::string& src_name = src_ti ? src_ti->type_name : k_empty_type_name;
 				if (!src_name.empty()) {
 					dynamic_value_compatible = (src_name == expected_type_name);
 					if (!dynamic_value_compatible && engine_) {
@@ -4190,7 +4206,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				}
 
 				auto source_type_info = value.get_type_info();
-				std::string source_type_name = source_type_info ? source_type_info->type_name : "unknown";
+				const std::string& source_type_name = source_type_info ? source_type_info->type_name : k_unknown_type_name;
 
 				bool handled = false;
 				if (source_type_name == expected_type_name) {
@@ -4254,8 +4270,8 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		}
 
 		// V-S2: same_type proof + payload guard = identity conversion
-		if (!((ins.c & store_flag_same_type) && target_type &&
-		      detail::same_type_payload(value, target_type.get()))) {
+		if (target_type && !detail::var_slot(target_type.get()) && !((ins.c & store_flag_same_type) &&
+		      detail::same_type_payload(value, target_type.get()))) {   // no type or a var: the table is the identity
 			auto enforced = enforce_type_compatibility(std::move(value), target_type, sym);
 			if (!enforced) {
 				return raise_from(enforced);
@@ -5207,11 +5223,8 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 		}
 	}
 	if (operand.load_flags & load_flag_type_ctor) {
-		std::string_view name = symbolizer_->get_string(sym);
-		size_t pos = name.find('<');
-		std::string base_type(name.substr(0, pos));
 		// nullable-pointer probe (checked_result stage 1): same ladder, null miss
-		if (script_value* ctor = environment_->get_value_ptr(symbolizer_->intern(base_type));
+		if (script_value* ctor = environment_->get_value_ptr(type_ctor_base_symbol(sym));
 		    ctor && ctor->is_function()) {
 			scratch.emplace(*ctor);
 			return &scratch.value();

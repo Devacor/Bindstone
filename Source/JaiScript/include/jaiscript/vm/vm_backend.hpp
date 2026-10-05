@@ -850,6 +850,8 @@ namespace jai::vm {
         std::shared_ptr<environment> pending_instance_env_;
         engine* engine_ = nullptr;
         type_info* ti_int_ = nullptr; type_info* ti_float_ = nullptr; type_info* ti_bool_ = nullptr; type_info* ti_string_ = nullptr;   // the engine's canonical stamps, cached with the engine (row 156.1)
+        uint64_t shared_ptr_ctor_symbol_ = 0, weak_ptr_ctor_symbol_ = 0;   // type_ctor_base_symbol's two names, interned with this engine's symbolizer
+        uint64_t type_ctor_base_symbol(uint64_t sym);
 #ifdef JAISCRIPT_MISS_INJECTION
         uint32_t miss_every_ = 0;        // engine::cells_miss_every, read at every block entry
         uint32_t miss_countdown_ = 0;    // plain cell instructions until the next injected miss; runs across entries

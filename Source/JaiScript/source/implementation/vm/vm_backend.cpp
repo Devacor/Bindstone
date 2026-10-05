@@ -19951,6 +19951,22 @@ void vm_backend::dump_opcode_profile() const {
 }
 #endif
 
+// Replicated dispatch: a hot handler fetches and dispatches its successor itself, so each such tail is its own indirect
+// branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
+// unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
+#if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
+#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
+#define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
+#define JAI_OP_LABEL(o) L_##o:
+#define JAI_DISPATCH_HERE() { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + f.ip; switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
+#define JAI_NEXT_OP() { if (is_unwinding_) [[unlikely]] { break; } ++f.ip; JAI_DISPATCH_HERE() }
+#else
+#define JAI_OP_LABEL(o)
+#define JAI_DISPATCH_HERE() continue
+#define JAI_NEXT_OP() break
+#endif
+#define ins (*cur)
+
 #ifdef JAISCRIPT_VM_PROFILE
 op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	// Published as (counter at entry) + (this loop's whole span): a span already contains
@@ -19981,6 +19997,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 #endif
 	const chunk* code_owner = nullptr;
 	const vm_instruction* code_base = nullptr;
+	const vm_instruction* cur = nullptr;
 	for (;;) {
 		// Rebound every iteration: frame switches write fp and `continue`
 		frame& f = *fp;
@@ -19990,7 +20007,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 		// so the halt case IS the end-of-chunk exit (Debug asserts the invariant)
 		assert(f.ip < f.code->code.size());
 		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
-		const vm_instruction& ins = code_base[f.ip];
+		cur = code_base + f.ip;
 		JAI_COVERAGE_GENERAL(f);
 #ifdef JAISCRIPT_VM_PROFILE
 		{
@@ -20021,8 +20038,9 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			}
 		}
 #endif
+	L_main_switch:
 		switch (ins.op) {
-			case opcode::op_halt:
+			case opcode::op_halt: JAI_OP_LABEL(op_halt)
 				if (call_records_top_ == records_base) {
 					return {};
 				}
@@ -20034,14 +20052,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 
-			case opcode::op_const: push_constant(*f.code, ins.a); break;
+			case opcode::op_const: JAI_OP_LABEL(op_const) push_constant(*f.code, ins.a); JAI_NEXT_OP();
 
 			case opcode::op_null: stack_.push_back(make_null()); break;
 			case opcode::op_true: stack_.push_back(script_value(true, engine_)); break;
 			case opcode::op_false: stack_.push_back(script_value(false, engine_)); break;
-			case opcode::op_pop:
+			case opcode::op_pop: JAI_OP_LABEL(op_pop)
 				if (!stack_.empty()) { stack_.pop_back(); }
-				break;
+				JAI_NEXT_OP();
 			case opcode::op_dup: stack_.push_back(stack_.back()); break;
 			case opcode::op_parallel_advance: {
 				if (!parallel_cursors_ || stack_.empty()) {
@@ -20074,75 +20092,77 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (stack_.back().raw_storage_index() == script_value::TYPEID_REFERENCE) { script_value v = stack_.back().deref(); stack_.back() = std::move(v); }
 				break;
 
-			case opcode::op_load: VM_TRY_OP(exec_load(f, ins)); break;
-			case opcode::op_store:
+			case opcode::op_load: JAI_OP_LABEL(op_load) VM_TRY_OP(exec_load(f, ins)); JAI_NEXT_OP();
+			case opcode::op_store: JAI_OP_LABEL(op_store)
 				VM_TRY_OP(exec_store(f, ins));
-				break;
-			case opcode::op_compound_store: VM_TRY_OP(exec_compound_store(f, ins)); break;
+				JAI_NEXT_OP();
+			case opcode::op_compound_store: JAI_OP_LABEL(op_compound_store) VM_TRY_OP(exec_compound_store(f, ins)); JAI_NEXT_OP();
 			case opcode::op_compound_fused: VM_TRY_OP_SHARED(exec_compound_fused(f, ins)); break;
-			case opcode::op_incdec:
+			case opcode::op_incdec: JAI_OP_LABEL(op_incdec)
 				VM_TRY_OP(exec_incdec(f, ins));
 				if (ins.c & incdec_flag_no_result) { stack_.pop_back(); }
-				break;
-			case opcode::op_decl_var: VM_TRY_OP(exec_decl_var(f, ins)); break;
+				JAI_NEXT_OP();
+			case opcode::op_decl_var: JAI_OP_LABEL(op_decl_var) VM_TRY_OP(exec_decl_var(f, ins)); JAI_NEXT_OP();
 			case opcode::op_decl_ref_ident: VM_TRY_OP(exec_decl_ref_ident(f, ins)); break;
 			case opcode::op_decl_ref_value: VM_TRY_OP(exec_decl_ref_value(f, ins)); break;
 			case opcode::op_destructure: VM_TRY_OP(exec_destructure(f, ins)); break;
 			case opcode::op_binary: VM_TRY_OP(exec_binary(f, ins)); break;
-			case opcode::op_binary_fused: VM_TRY_OP_SHARED(exec_binary_fused(f, ins)); break;
-			case opcode::op_binary_fused_temp: {
+			case opcode::op_binary_fused: JAI_OP_LABEL(op_binary_fused) VM_TRY_OP_SHARED(exec_binary_fused(f, ins)); JAI_NEXT_OP();
+			case opcode::op_binary_fused_temp: JAI_OP_LABEL(op_binary_fused_temp) {
 				// Register-file producer: the fused kernel's result lands RAW in a
 				// compiler temp slot (inside the window; no store enforcement - temps
 				// are compiler-owned and consumed by the next fused operand read)
 				temp_lane_sink lane{this, f, ins.b};
 				VM_TRY_OP_SHARED(binary_fused_compute(f, ins.a, lane));
-				break;
+				JAI_NEXT_OP();
 			}
 			// Typed scalar set: arithmetic lands in a temp, decl or store slot and may run
 			// the general kernel on a miss (which can enter a script frame: operator
 			// overloads), compare-jumps retarget ip, moves land or replay their pair
-			case opcode::op_t_add_ii: case opcode::op_t_sub_ii: case opcode::op_t_mul_ii: case opcode::op_t_div_ii: case opcode::op_t_mod_ii:
-			case opcode::op_t_and_ii: case opcode::op_t_or_ii: case opcode::op_t_xor_ii: case opcode::op_t_shl_ii: case opcode::op_t_shr_ii:
-			case opcode::op_t_add_ff: case opcode::op_t_sub_ff: case opcode::op_t_mul_ff: case opcode::op_t_div_ff: case opcode::op_t_mod_ff:
+			case opcode::op_t_add_ii: JAI_OP_LABEL(op_t_add_ii) case opcode::op_t_sub_ii: JAI_OP_LABEL(op_t_sub_ii) case opcode::op_t_mul_ii: JAI_OP_LABEL(op_t_mul_ii) case opcode::op_t_div_ii: JAI_OP_LABEL(op_t_div_ii) case opcode::op_t_mod_ii: JAI_OP_LABEL(op_t_mod_ii)
+			case opcode::op_t_and_ii: JAI_OP_LABEL(op_t_and_ii) case opcode::op_t_or_ii: JAI_OP_LABEL(op_t_or_ii) case opcode::op_t_xor_ii: JAI_OP_LABEL(op_t_xor_ii) case opcode::op_t_shl_ii: JAI_OP_LABEL(op_t_shl_ii) case opcode::op_t_shr_ii: JAI_OP_LABEL(op_t_shr_ii)
+			case opcode::op_t_add_ff: JAI_OP_LABEL(op_t_add_ff) case opcode::op_t_sub_ff: JAI_OP_LABEL(op_t_sub_ff) case opcode::op_t_mul_ff: JAI_OP_LABEL(op_t_mul_ff) case opcode::op_t_div_ff: JAI_OP_LABEL(op_t_div_ff) case opcode::op_t_mod_ff: JAI_OP_LABEL(op_t_mod_ff)
 				VM_TRY_OP_SHARED(exec_typed_arith(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
-			case opcode::op_t_jlt_ii: case opcode::op_t_jle_ii: case opcode::op_t_jgt_ii: case opcode::op_t_jge_ii: case opcode::op_t_jeq_ii: case opcode::op_t_jne_ii:
-			case opcode::op_t_jlt_ff: case opcode::op_t_jle_ff: case opcode::op_t_jgt_ff: case opcode::op_t_jge_ff: case opcode::op_t_jeq_ff: case opcode::op_t_jne_ff:
+				JAI_NEXT_OP();
+			case opcode::op_t_jlt_ii: JAI_OP_LABEL(op_t_jlt_ii) case opcode::op_t_jle_ii: JAI_OP_LABEL(op_t_jle_ii) case opcode::op_t_jgt_ii: JAI_OP_LABEL(op_t_jgt_ii) case opcode::op_t_jge_ii: JAI_OP_LABEL(op_t_jge_ii) case opcode::op_t_jeq_ii: JAI_OP_LABEL(op_t_jeq_ii) case opcode::op_t_jne_ii: JAI_OP_LABEL(op_t_jne_ii)
+			case opcode::op_t_jlt_ff: JAI_OP_LABEL(op_t_jlt_ff) case opcode::op_t_jle_ff: JAI_OP_LABEL(op_t_jle_ff) case opcode::op_t_jgt_ff: JAI_OP_LABEL(op_t_jgt_ff) case opcode::op_t_jge_ff: JAI_OP_LABEL(op_t_jge_ff) case opcode::op_t_jeq_ff: JAI_OP_LABEL(op_t_jeq_ff) case opcode::op_t_jne_ff: JAI_OP_LABEL(op_t_jne_ff)
 				VM_TRY_OP_SHARED(exec_typed_cmp_jump(f, ins));
 				if (is_unwinding_) [[unlikely]] {
 					if (!handle_throw_unwind(fp, records_base)) {
 						return {};
 					}
+					continue;
 				}
-				continue;
-			case opcode::op_t_decl_mov: VM_TRY_OP_SHARED(exec_typed_decl_mov(f, ins)); break;
-			case opcode::op_t_decl_const: VM_TRY_OP_SHARED(exec_typed_decl_const(f, ins)); break;
-			case opcode::op_t_store_mov: VM_TRY_OP_SHARED(exec_typed_store_mov(f, ins)); break;
-			case opcode::op_t_store_const: VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); break;
+				JAI_DISPATCH_HERE();
+			case opcode::op_t_decl_mov: JAI_OP_LABEL(op_t_decl_mov) VM_TRY_OP_SHARED(exec_typed_decl_mov(f, ins)); JAI_NEXT_OP();
+			case opcode::op_t_decl_const: JAI_OP_LABEL(op_t_decl_const) VM_TRY_OP_SHARED(exec_typed_decl_const(f, ins)); JAI_NEXT_OP();
+			case opcode::op_t_store_mov: JAI_OP_LABEL(op_t_store_mov) VM_TRY_OP_SHARED(exec_typed_store_mov(f, ins)); JAI_NEXT_OP();
+			case opcode::op_t_store_const: JAI_OP_LABEL(op_t_store_const) VM_TRY_OP_SHARED(exec_typed_store_const(f, ins)); JAI_NEXT_OP();
 			case opcode::op_operand_temp: VM_TRY_OP_SHARED(exec_operand_temp(f, ins)); break;
 			case opcode::op_call_temp: VM_TRY_OP_SHARED(exec_call_temp(f, ins)); break;
-			case opcode::op_math_temp:
+			case opcode::op_math_temp: JAI_OP_LABEL(op_math_temp)
 				VM_TRY_OP_SHARED(exec_math_temp(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }   // a stdlib alias's real call entered a script frame
-				break;
+				JAI_NEXT_OP();
 			case opcode::op_math_guard: VM_TRY_OP_SHARED(exec_math_guard(f, ins)); break;
 			case opcode::op_unary_temp: VM_TRY_OP_SHARED(exec_unary_temp(f, ins)); break;
 
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep: VM_TRY_OP_SHARED(exec_cfor_prep(f, ins)); continue;
-			case opcode::op_cfor_back: VM_TRY_OP_SHARED(exec_cfor_back(f, ins)); continue;
+			case opcode::op_cfor_back: JAI_OP_LABEL(op_cfor_back) VM_TRY_OP_SHARED(exec_cfor_back(f, ins)); JAI_DISPATCH_HERE();
 
 			// Retargets f.ip on success; on script unwinding (custom comparison threw)
 			// ip stays parked here and the loop-bottom unwind handling is replicated
-			case opcode::op_fused_cmp_jump:
+			case opcode::op_fused_cmp_jump: JAI_OP_LABEL(op_fused_cmp_jump)
 				VM_TRY_OP_SHARED(exec_fused_cmp_jump(f, ins));
 				if (is_unwinding_) [[unlikely]] {
 					if (!handle_throw_unwind(fp, records_base)) {
 						return {};
 					}
+					continue;
 				}
-				continue;
+				JAI_DISPATCH_HERE();
 			case opcode::op_cfor_pop:
 				if (!cfor_states_.empty()) { cfor_states_.pop_back(); }
 				break;
@@ -20151,18 +20171,18 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_index_compound: VM_TRY_OP(exec_index_compound(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
 			case opcode::op_inline_guard: VM_TRY_OP(exec_inline_guard(f, ins)); continue;   // the executor sets the ip: the next instruction, or the fallback
-			case opcode::op_probe_callee:
+			case opcode::op_probe_callee: JAI_OP_LABEL(op_probe_callee)
 				VM_TRY_OP_SHARED(exec_probe_callee(f, ins));
 				break;
 			case opcode::op_probe_member:
 				VM_TRY_OP_SHARED(exec_probe_member(f, ins));
 				break;
-			case opcode::op_call_typed:
+			case opcode::op_call_typed: JAI_OP_LABEL(op_call_typed)
 				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && call_typed_land(f, stack_.back())) { stack_.pop_back(); ++f.ip; }   // a native callee's result: the consumer is skipped
 				break;
-			case opcode::op_call_from_scratch:
+			case opcode::op_call_from_scratch: JAI_OP_LABEL(op_call_from_scratch)
 				VM_TRY_OP_SHARED(exec_call_from_scratch(f, ins));
 				if (switch_to_) {
 					// Enter the pushed callee; the suspended caller's ip parks on the
@@ -20195,41 +20215,41 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// keeping the group's switch_to_ tail (operator replays may park callees).
 			// PLACED ABOVE the grouped labels — inserting them mid-group orphans the
 			// earlier labels onto the first direct body (caught by Debug's OOB assert)
-			case opcode::op_binary_fused_decl:
+			case opcode::op_binary_fused_decl: JAI_OP_LABEL(op_binary_fused_decl)
 				VM_TRY_OP_SHARED(exec_binary_fused_decl(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
-			case opcode::op_binary_fused_store:
+				JAI_NEXT_OP();
+			case opcode::op_binary_fused_store: JAI_OP_LABEL(op_binary_fused_store)
 				VM_TRY_OP_SHARED(exec_binary_fused_store(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
-			case opcode::op_index_fused:
+				JAI_NEXT_OP();
+			case opcode::op_index_fused: JAI_OP_LABEL(op_index_fused)
 				VM_TRY_OP_SHARED(exec_index_fused(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
-			case opcode::op_index_store_fused:
+				JAI_NEXT_OP();
+			case opcode::op_index_store_fused: JAI_OP_LABEL(op_index_store_fused)
 				VM_TRY_OP_SHARED(exec_index_store_fused(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
+				JAI_NEXT_OP();
 			case opcode::op_index_compound_operand:
 				VM_TRY_OP_SHARED(exec_index_compound_operand(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
-			case opcode::op_index_fused_decl:
+			case opcode::op_index_fused_decl: JAI_OP_LABEL(op_index_fused_decl)
 				VM_TRY_OP_SHARED(exec_index_fused_decl(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
+				JAI_NEXT_OP();
 			// The member trio (GET_MEMBER 477k / CALL_METHOD 983k per 200 GLOOM ticks)
 			// dispatch directly too; statement-position stores and calls drop their
 			// dead result together with the pop that follows
-			case opcode::op_get_member:
+			case opcode::op_get_member: JAI_OP_LABEL(op_get_member)
 				VM_TRY_OP_SHARED(exec_get_member(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
-			case opcode::op_member_temp:
+				JAI_NEXT_OP();
+			case opcode::op_member_temp: JAI_OP_LABEL(op_member_temp)
 				VM_TRY_OP_SHARED(exec_member_temp(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
+				JAI_NEXT_OP();
 			case opcode::op_size_temp:
 				VM_TRY_OP_SHARED(exec_size_temp(f, ins));
 				break;
@@ -20237,10 +20257,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP_SHARED(exec_set_member_fused(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
-			case opcode::op_set_member_value:
+			case opcode::op_set_member_value: JAI_OP_LABEL(op_set_member_value)
 				VM_TRY_OP_SHARED(exec_set_member_value(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
+				JAI_NEXT_OP();
 			case opcode::op_velem_load:
 				VM_TRY_OP_SHARED(exec_velem_load(f, ins));
 				break;
@@ -20252,7 +20272,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
-			case opcode::op_call_method:
+			case opcode::op_call_method: JAI_OP_LABEL(op_call_method)
 				VM_TRY_OP_SHARED(exec_call_method(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
@@ -20260,7 +20280,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_concat_append:
 				VM_TRY_OP_SHARED(exec_concat_append(f));
 				break;
-			case opcode::op_call_builtin:
+			case opcode::op_call_builtin: JAI_OP_LABEL(op_call_builtin)
 				VM_TRY_OP_SHARED(exec_call_builtin(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
@@ -20273,10 +20293,10 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP_SHARED(exec_typed_push(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
-			case opcode::op_t_load:
+			case opcode::op_t_load: JAI_OP_LABEL(op_t_load)
 				VM_TRY_OP_SHARED(exec_typed_load(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
-				break;
+				JAI_NEXT_OP();
 
 			// One grouped dispatch: a VM_TRY_OP temp per case would bloat run()'s
 			// Debug frame, which sits on the JAI_MAX_CALL_DEPTH recursion path
@@ -20353,11 +20373,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				exec_map(f, ins);
 				break;
 
-			case opcode::op_jump:
+			case opcode::op_jump: JAI_OP_LABEL(op_jump)
 				f.ip = ins.a;
-				continue;
+				JAI_DISPATCH_HERE();
 
-			case opcode::op_jump_if_false: {
+			case opcode::op_jump_if_false: JAI_OP_LABEL(op_jump_if_false) {
 				script_value cond = std::move(stack_.back());
 				stack_.pop_back();
 				bool truthy;
@@ -20369,12 +20389,12 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				if (!truthy) {
 					f.ip = ins.a;
-					continue;
+					JAI_DISPATCH_HERE();
 				}
-				break;
+				JAI_NEXT_OP();
 			}
 
-			case opcode::op_jump_if_true: {
+			case opcode::op_jump_if_true: JAI_OP_LABEL(op_jump_if_true) {
 				script_value cond = std::move(stack_.back());
 				stack_.pop_back();
 				bool truthy;
@@ -20386,17 +20406,17 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				if (truthy) {
 					f.ip = ins.a;
-					continue;
+					JAI_DISPATCH_HERE();
 				}
-				break;
+				JAI_NEXT_OP();
 			}
 
-			case opcode::op_loop_back:
+			case opcode::op_loop_back: JAI_OP_LABEL(op_loop_back)
 				if (execution_limit_exhausted()) [[unlikely]] {
 					VM_TRY_OP(checked_result<void>(execution_limit_failure()));
 				}
 				f.ip = ins.a;
-				continue;
+				JAI_DISPATCH_HERE();
 			// a block that made a call: the callee runs here with the caller parked on the call's copy (land_call_result steps it to
 			// the landing, whose case resumes the block); a callee that raised ahead of its frame unwinds from here
 			case opcode::op_cells_back:
@@ -20417,7 +20437,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
 
-		case opcode::op_return: {
+		case opcode::op_return: JAI_OP_LABEL(op_return) {
 				if (call_records_top_ == records_base) {
 					script_value v = ins.a ? std::move(stack_.back()) : make_null();
 					if (ins.a) {
@@ -20437,7 +20457,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// Return superinstructions (stage 6): entry frames mirror op_return's entry
 			// branch; record frames return without the stack round trip. A compute that
 			// set script unwinding falls to the loop bottom exactly like op_binary would.
-			case opcode::op_return_ident: {
+			case opcode::op_return_ident: JAI_OP_LABEL(op_return_ident) {
 				if (call_records_top_ == records_base) {
 					VM_TRY_OP_SHARED(exec_return_ident_entry(f, ins));
 					return {};
@@ -20446,7 +20466,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
-			case opcode::op_return_binary: {
+			case opcode::op_return_binary: JAI_OP_LABEL(op_return_binary) {
 				if (call_records_top_ == records_base) {
 					VM_TRY_OP_SHARED(exec_return_binary_entry(f, ins));
 					if (is_unwinding_) [[unlikely]] { break; }
@@ -20477,7 +20497,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				pop_scopes_pooled(ins.a);
 				break;
 
-			case opcode::op_kill_slot:
+			case opcode::op_kill_slot: JAI_OP_LABEL(op_kill_slot)
 				if (script_value* slot = frame_slot(f, ins.a)) {
 					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); break; }
 					script_value dying = std::move(*slot);   // the destructor may reenter: the slot is null first
@@ -20507,6 +20527,14 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	}
 }
 
+#undef ins
+#undef JAI_OP_LABEL
+#undef JAI_DISPATCH_HERE
+#undef JAI_NEXT_OP
+#if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
+#undef JAI_HOT_OPS
+#undef JAI_HOT_CASE
+#endif
 #undef VM_TRY_OP
 #undef VM_TRY_OP_SHARED
 

@@ -343,7 +343,7 @@ public:
         });
         */
         
-        test("bound_array_zero_copy_performance", [this]() {
+        test("bound_array_zero_copy_shares_the_node", [this]() {
             auto eng = make_engine();
 
             script_value arr_val = eng->make_array();
@@ -352,25 +352,18 @@ public:
                 arr.push_back(eng->make_value(i));
             }
 
-            auto start = std::chrono::high_resolution_clock::now();
+            // the reference view shares the node (a write lands in the value), the value form is its own copy
             bound_array<int> arr_ref(arr_val, eng.get());
-            auto ref_time = std::chrono::high_resolution_clock::now() - start;
-
-            // Iteration should be fast (no copying)
-            start = std::chrono::high_resolution_clock::now();
             int sum = 0;
             for (int val : arr_ref) {
                 sum += val;
             }
-            auto iter_time = std::chrono::high_resolution_clock::now() - start;
-
-            // Value copy should take time
-            start = std::chrono::high_resolution_clock::now();
             bound_array<int> arr_copy(arr_val);
-            auto copy_time = std::chrono::high_resolution_clock::now() - start;
-
-            // Reference creation should be much faster than copying
-            check(ref_time < copy_time / 10);
+            check_false(arr_ref.is_owned(), "the reference view is not a copy");
+            check_true(arr_copy.is_owned(), "the value form owns its copy");
+            arr_ref[0] = 7;
+            check_eq((int64_t)7, arr_val.as_array()[0].as_int(), "a write through the view lands in the array");
+            check_eq(0, static_cast<int>(arr_copy[0]), "the copy does not see it");
 
             check_eq(sum, (10000 * 9999) / 2);
         });

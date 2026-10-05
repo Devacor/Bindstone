@@ -198,6 +198,13 @@ namespace jai {
             return kind_ == env_kind::standard && local_ids_.empty();
         }
         environment* parent_raw() const noexcept { return parent_.get(); }
+        // a lookup's step up the parent chain; Debug builds count it (string_symbolizer::env_hops, a deterministic cost measure)
+        environment* chain_step(environment* p) const noexcept {
+#ifndef NDEBUG
+            if (p) { symbolizer_->note_env_hop(); }
+#endif
+            return p;
+        }
         bool is_program_scope() const noexcept { return !parent_ || namespace_scope_; }
         void mark_namespace_scope() noexcept { namespace_scope_ = true; }
 

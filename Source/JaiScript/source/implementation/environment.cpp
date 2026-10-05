@@ -148,7 +148,7 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
         cacheable = local_ids_.count(id) > 0;
         if (!cacheable) {
             // a memo of a parent's cell: cacheable when it is the cell of the nearest environment holding the name locally
-            for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+            for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
                 if (p->local_ids_.count(id) == 0) { continue; }
                 auto owner = p->flat_lookup_.find(id);
                 cacheable = owner != p->flat_lookup_.end() && owner->second == it->second;
@@ -157,7 +157,7 @@ script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
         }
         return it->second;
     }
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             flat_lookup_[id] = parent_it->second;
@@ -205,7 +205,7 @@ checked_result<script_value> environment::get(uint64_t id) const {
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             // Found in ancestor cache - copy to our cache and return
@@ -488,7 +488,7 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             flat_lookup_[id] = parent_it->second;
@@ -564,7 +564,7 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             flat_lookup_[id] = parent_it->second;
@@ -639,7 +639,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             flat_lookup_[id] = parent_it->second;
@@ -714,7 +714,7 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             flat_lookup_[id] = parent_it->second;
@@ -787,7 +787,7 @@ bool environment::contains(uint64_t id) const {
     }
 
     // FAST PATH: Iterate parent caches without function call overhead
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         if (p->flat_lookup_.find(id) != p->flat_lookup_.end()) {
             // Found in ancestor cache - we know it exists
             // Note: we don't cache here since contains() is just a check
@@ -972,7 +972,7 @@ script_value* environment::get_value_ptr(uint64_t id) {
     // This is critical for deep recursion (Fibonacci, BST) where the same
     // function name is looked up repeatedly at each call depth.
     // Once any ancestor has it cached, all descendants benefit.
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             // Found in ancestor cache - copy to our cache and return
@@ -1039,7 +1039,7 @@ script_value* environment::get_env_var_ptr(uint64_t id) {
     if (it != flat_lookup_.end()) {
         return it->second;
     }
-    for (auto* p = parent_.get(); p != nullptr; p = p->parent_.get()) {
+    for (auto* p = chain_step(parent_.get()); p != nullptr; p = chain_step(p->parent_.get())) {
         auto parent_it = p->flat_lookup_.find(id);
         if (parent_it != p->flat_lookup_.end()) {
             flat_lookup_[id] = parent_it->second;

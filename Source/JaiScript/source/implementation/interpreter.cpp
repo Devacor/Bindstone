@@ -11987,7 +11987,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
 
         // In-catch marker of the rethrow protocol (symbolize once here)
         if (auto eng = engine_) {
-            current_catch_var_id_ = eng->symbolize(stmt->catch_var);
+            current_catch_var_id_ = stmt->catch_var_id != UINT64_MAX ? stmt->catch_var_id : eng->symbolize(stmt->catch_var);
         }
 
         // Bind the catch variable as a local of the catch body (KEEP BYTE-PARALLEL with
@@ -11997,8 +11997,9 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         if (stmt->catch_var_id != UINT64_MAX && !resuming_catch) {
             const bool by_throw = current_exception_ && current_exception_->thrown;
             script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_value(), by_throw,
-                                                             by_throw ? &current_exception_->location() : nullptr, captured_trace_,
+                                                             by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
                                                              by_throw ? current_exception_->what() : nullptr);
+            captured_trace_.clear();
             if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
                 call_stack_.back().set_local(stmt->catch_slot_index, std::move(caught));
             } else {

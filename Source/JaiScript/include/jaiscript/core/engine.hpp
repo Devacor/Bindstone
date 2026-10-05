@@ -1282,6 +1282,10 @@ namespace jai {
         // thrown_text: the throw's own message (a thrown object's to_string(), engine::text_of), spoken for a value that is no text
         script_value make_caught_error(const script_value& thrown, bool by_throw, const source_location* throw_site,
                                        const std::vector<stack_frame>& trace, const char* thrown_text = nullptr);
+        // The backends' catch: the captured frames move into the error and are spelled only when e.file, e.line,
+        // e.column or e.stack is read
+        script_value make_caught_error(const script_value& thrown, bool by_throw, const source_location* throw_site,
+                                       std::vector<stack_frame>&& trace, const char* thrown_text = nullptr);
         // A member read on a string receiver that is a caught error (nullopt: not one, or not an error member; a thrown
         // object or map answers its own fields)
         std::optional<script_value> caught_error_member(const script_value& receiver, uint64_t member_id);

@@ -70,7 +70,7 @@ public:
 				"out;\n";
 			auto run = [&](backend_type type, bool proofs) {
 				auto eng = engine::make();
-				if (type != backend_type::interpreter) { eng->set_backend(type); }
+				eng->set_backend(type);
 				eng->type_proofs(proofs);
 				jai::stdlib::register_all(*eng);
 				return eng->execute(script).as_string();
@@ -100,7 +100,7 @@ public:
 				"rows(7, 3) + \"|\" + rows(2.5, 4) + \"|\" + rows(9, 0) + \"|\" + rows(1.0, 0.0) + \"|\" + rows(-4, 2.0) + \"|\" + big(4000000000) + \"|\" + big(3.0);\n";
 			auto run = [&](backend_type type, bool proofs) {
 				auto eng = engine::make();
-				if (type != backend_type::interpreter) { eng->set_backend(type); }
+				eng->set_backend(type);
 				eng->type_proofs(proofs);
 				jai::stdlib::register_all(*eng);
 				return eng->execute(script).as_string();

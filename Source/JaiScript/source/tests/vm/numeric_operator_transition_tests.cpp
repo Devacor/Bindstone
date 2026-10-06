@@ -116,6 +116,7 @@ public:
 			const std::string script =
 				"var g = 0; int gi = 1; float gf = 0.5; var gs = \"a\"; string gt = \"t\";\n"
 				"function floats(float x, float y) { float s = 0.0; for (int i = 0; i < 4; ++i) { s += x; s -= y * 0.5; s *= 1.5; } return s; }\n"
+				"function widen(int k) { float w = 1.5; float v = 0.25; for (int i = 0; i < 3; ++i) { w = k; v = i; } var q = (w = k + 1); var big = 9007199254740993; w = big; return to_string(w) + \",\" + to_string(v) + \",\" + to_string(q) + \",\" + type_of(q) + type_of(w); }\n"
 				"function strs(var a, var b) {\n"
 				"    var out = \"\";\n"
 				"    if (a < b) { out += \"lt\"; } if (a == b) { out += \"eq\"; } if (a != b) { out += \"ne\"; } if (a >= b) { out += \"ge\"; }\n"
@@ -156,7 +157,7 @@ public:
 				"    return to_string(a) + \",\" + to_string(b) + \",\" + to_string(arr) + \",\" + to_string(n.v) + \",\" + to_string(ti);\n"
 				"}\n"
 				"g = 9; gi = 3;\n"
-				"floats(2.0, 1.0) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi) + \"|\" + mixed(2.0, 4) + \"|\" + mixed(3, 2) + \"|\" + refs();\n";
+				"floats(2.0, 1.0) + \"|\" + widen(7) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi) + \"|\" + mixed(2.0, 4) + \"|\" + mixed(3, 2) + \"|\" + refs();\n";
 			auto run = [&](backend_type type, bool proofs) {
 				auto eng = engine::make();
 				if (type != backend_type::interpreter) { eng->set_backend(type); }

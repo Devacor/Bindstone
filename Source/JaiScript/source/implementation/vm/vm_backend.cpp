@@ -3811,6 +3811,12 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 		if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
 			if (script_value* slot = frame_slot(f, ins.b); slot && slot->raw_storage_index() != script_value::TYPEID_REFERENCE) {
 				if (store_scalar_lane(*slot, value, ins)) return op_status::ok;
+				// an int into a float slot: the full path's table row (int -> float), the converted value stored and pushed
+				if (vi == script_value::TYPEID_INT && slot->type_info_raw() && slot->type_info_raw()->base_type == script_value_type::jai_float_type) {
+					*slot = script_value(static_cast<script_float>(value.unchecked_as_int()), engine_);
+					if (!(ins.c & store_flag_no_result)) { stack_.push_back(*slot); }
+					return op_status::ok;
+				}
 			}
 		} else if (!(ins.c & store_flag_global_only) && cached_global_env_ && !parallel_worker_) {
 			// an environment variable through the load's armed cache: the full path's walk resolves the same cell (get_env_var_ptr
@@ -11117,6 +11123,12 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 				JAI_TYPED_INPLACE(2);
 				*dst = v;
 				dst->set_type_info(type_info_ptr{const_cast<type_info*>(slot_type)});
+				return {};
+			}
+			// an int into a float slot: the store's table row (int -> float)
+			if (vi == script_value::TYPEID_INT && slot_type->base_type == script_value_type::jai_float_type) {
+				JAI_TYPED_INPLACE(2);
+				*dst = script_value(static_cast<script_float>(v.unchecked_as_int()), engine_);
 				return {};
 			}
 		}

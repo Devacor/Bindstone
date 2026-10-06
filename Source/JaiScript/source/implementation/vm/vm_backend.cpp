@@ -3850,7 +3850,7 @@ JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction
 
 // a scalar into storage that is untagged, var or of the scalar's own type: the cell holds the value (a var's own tag stamped on it), the
 // value is the result; false = any other shape, nothing written
-bool vm_backend::store_scalar_lane(script_value& slot, script_value& value, const vm_instruction& ins) {
+JAI_FORCEINLINE bool vm_backend::store_scalar_lane(script_value& slot, script_value& value, const vm_instruction& ins) {
 	const size_t vi = value.raw_storage_index();
 	const type_info* st = slot.type_info_raw();
 	const type_info* vt = value.type_info_raw();

@@ -563,7 +563,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 try { out[idx] = e->execute(src).to_string(); }
@@ -584,7 +584,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 try { e->execute(setup); }
@@ -698,7 +698,7 @@ public:
         test("static_coroutine_survives_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->execute("class S { static int n = 5; coroutine static int f() { yield n; yield n + 1; return 0; } }\nvar h = S::f();\nvar a = h.resume();");
                 e->execute("class S { static int n = 5; string extra = \"e\"; coroutine static int f() { yield 99; return 0; } }");
@@ -710,7 +710,7 @@ public:
         test("coroutine_field_rejected", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 bool threw = false;
                 try { e->execute("class K { coroutine int x = 5; }"); }
                 catch (const std::exception& ex) {
@@ -776,7 +776,7 @@ public:
         test("coroutine_return_type_enforced_identically_across_spellings", [this]() {
             auto run = [](bool use_vm, const std::string& src) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->static_checking(jai::check_mode::strict);
                 jai::stdlib::register_all(e);
                 std::string out;
@@ -824,7 +824,7 @@ public:
                 check_true(i_out.find("Coroutines cannot return references") != std::string::npos, std::string("interp: ") + src + " -> " + i_out);
                 check_eq(i_out, v_out, std::string("parity: ") + src);
             }
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             try { e->execute("class C { coroutine gen() -> int& { yield 1; } }"); } catch (const std::exception&) {}
             check_eq(static_cast<script_int>(4), e->execute("2 + 2").as<script_int>(), "engine stays usable after the rejection");
         });
@@ -990,7 +990,7 @@ public:
             for (bool use_vm : {false, true}) {
                 {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->execution_budget(0);
                     auto r = e->execute(R"(
                         class Game { var co = null; coroutine int brain() { yield 1; yield 2; yield 3; } }
@@ -1000,7 +1000,7 @@ public:
                     )");
                     check_eq(static_cast<script_int>(1), r.as<script_int>());
                 }   // engine + suspended fiber/continuation + cycle all die here
-                auto fresh = jai::engine::make();
+                auto fresh = jai::foundry::make_engine();
                 check_eq(static_cast<script_int>(4), fresh->execute("2 + 2").as<script_int>());
             }
         });
@@ -1207,7 +1207,7 @@ public:
         test("hot_reload_mid_iteration_keeps_suspended_body", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 e->execute("class W { int v = 1; coroutine int gen() { for (int i = 0; i < 4; i++) { yield v + i; } return 0; } }\nvar w = W();\nw.v = 10;\nvar h = w.gen();\nvar first = h.resume();");
@@ -1231,7 +1231,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0.05);
                 try {
                     e->execute("coroutine int spin() { yield 1; while (true) { } return 0; }\nauto h = spin();\nh.resume();\nstring t = \"\";\ntry { h.resume(); } catch (e) { t = \"caught\"; }\nt");
@@ -1251,7 +1251,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { e->execute(src); out[idx] = "OK"; }
                     catch (const std::exception& ex) { out[idx] = std::string(ex.what()) + "\n" + e->format_stack_trace(); }
                     ++idx;
@@ -1585,7 +1585,7 @@ public:
         test("hot_reload_mid_expression_keeps_suspended_body", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 e->execute("int nz(var v) { return v == null ? 1 : 0; }\nclass W { int v = 1; coroutine int g() { return nz(yield 1) + v; } }\nvar w = W(); var h = w.g(); var a = h.resume();");

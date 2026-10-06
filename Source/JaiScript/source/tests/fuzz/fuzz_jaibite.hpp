@@ -23,7 +23,7 @@ namespace jai::fuzz {
 	inline std::shared_ptr<engine> mutation_engine(bool use_vm, bool proofs = true,
 	                                             bool param_alias = true) {
 		auto result = engine::make();
-		if (use_vm) result->set_backend(backend_type::vm);
+		result->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
 		// Semantic errors in generator programs are irrelevant to structural loading.
 		// Off still exercises the ordinary loader's marking and proof walks.
 		result->static_checking(check_mode::off);

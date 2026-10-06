@@ -120,7 +120,7 @@ public:
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
@@ -140,7 +140,7 @@ public:
             )";
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(std::string("2:false"), e->execute(src).as<std::string>(),
                          use_vm ? "vm weak correlation" : "interp weak correlation");
@@ -177,7 +177,7 @@ public:
             std::string expected[2] = {"3:1", "2:1"};   // interp, vm
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(expected[use_vm ? 1 : 0], e->execute(src).as<std::string>(),
                          use_vm ? "vm transient audit (report any change: copies-per-call moved)"
@@ -190,7 +190,7 @@ public:
             // at 1; a C++-side share (holder->data copy) bumps it
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 e->execute(R"(
                     class T { int x = 1; }

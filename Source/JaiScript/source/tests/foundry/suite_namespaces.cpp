@@ -23,7 +23,7 @@ public:
             for (bool use_vm : {false, true}) {
                 auto run = [&](const std::string& src) -> std::string {
                     auto eng = make_engine();
-                    if (use_vm) { eng->set_backend(backend_type::vm); }
+                    eng->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                     stdlib::register_all(eng);
                     try { return eng->execute(src).to_string(); } catch (const std::exception& e) { return std::string("ERROR: ") + e.what(); }
                 };
@@ -40,7 +40,7 @@ public:
                 check(run(utils + "using utils::add; using utils::add;").find("already named by a using declaration") != std::string::npos, std::string("one name, one using") + be);
                 // file-local: a later string of the same engine does not see it
                 auto eng = make_engine();
-                if (use_vm) { eng->set_backend(backend_type::vm); }
+                eng->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 eng->execute(utils + "using utils::add; var first = add(1, 1);");
                 bool leaked = true;
                 try { eng->execute("add(1, 1)"); } catch (const std::exception&) { leaked = false; }
@@ -50,17 +50,17 @@ public:
                 { std::ofstream(dir / "using_inc_a.jai") << "var from_a = add(2, 3);\n"; }
                 { std::ofstream(dir / "using_inc_b.jai") << "using utils::LIMIT;\nvar from_b = LIMIT;\n"; }
                 auto inc = make_engine();
-                if (use_vm) { inc->set_backend(backend_type::vm); }
+                inc->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 inc->add_include_path(dir.string());
                 bool inherited = true;
                 try { inc->execute(utils + "using utils::add; include \"using_inc_a.jai\";"); } catch (const std::exception&) { inherited = false; }
                 check(!inherited, std::string("an included file does not inherit the includer's using") + be);
                 auto inc2 = make_engine();
-                if (use_vm) { inc2->set_backend(backend_type::vm); }
+                inc2->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 inc2->add_include_path(dir.string());
                 check_eq((int64_t)7, inc2->execute(utils + "include \"using_inc_b.jai\"; from_b").as_int(), std::string("the included file's own using applies to its text") + be);
                 auto inc3 = make_engine();
-                if (use_vm) { inc3->set_backend(backend_type::vm); }
+                inc3->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 inc3->add_include_path(dir.string());
                 bool passed_on = true;
                 try { inc3->execute(utils + "include \"using_inc_b.jai\"; LIMIT"); } catch (const std::exception&) { passed_on = false; }

@@ -485,7 +485,7 @@ public:
 			struct source_t { engine* eng = nullptr; int throw_at = 3; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int throw_at) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (!proofs) { e->type_proofs(false); }
 				stdlib::register_all(*e);
 				source_t source{ e.get(), throw_at };

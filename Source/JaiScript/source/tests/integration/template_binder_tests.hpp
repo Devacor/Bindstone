@@ -206,7 +206,7 @@ public:
         test("audit_instantiations_register_and_dispatch_distinctly", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 // (a) registration/lookup: distinct definitions by name AND type_index
                 auto def_i = e->get_class_definition("PointI");
@@ -227,7 +227,7 @@ public:
         test("audit_shared_ptr_paths_key_per_instantiation", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 // (c) the composite intern path (the fixed one: new/shared_ptr<T>() nodes)
                 // and the factory path must both distinguish instantiations
@@ -251,7 +251,7 @@ public:
         test("audit_container_elements_and_upcast_keep_identity", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 // (d) container elements: each array's elements keep their own class
                 check_eq((int64_t)1, e->execute("array<PointI> ai = [PointI(5)]; ai[0].kind()").as_int());
@@ -269,7 +269,7 @@ public:
             // other. Uses the never-bound audit_opaque pair: dynamic_binder installs
             // converters for every class it registers (a REGISTERED sibling reporting
             // has_conversion()==true is the binder working, not key cross-talk).
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             auto reg = e->get_conversion_registry();
             check_not_null(reg.get());
             check_false(reg->has_conversion<audit_opaque<int>>());
@@ -288,7 +288,7 @@ public:
             // tokens: non-null, pointer identity, no cross-instantiation equality
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 audit_opaque<double> od1; audit_opaque<double> od2; audit_opaque<int> oi;
                 e->add_global("od1", e->make_value(&od1));
@@ -305,9 +305,9 @@ public:
         test("audit_registration_fingerprint_distinguishes_instantiations", [this]() {
             // (h) type_of reports the registered NAME, which both instantiations share, so
             // it does not distinguish them; the registration fingerprint DOES.
-            auto e_i = jai::engine::make();
+            auto e_i = jai::foundry::make_engine();
             dynamic_binder<audit_pt<int>>(*e_i, "AuditP").constructor<>().method("kind", &audit_pt<int>::kind).build();
-            auto e_f = jai::engine::make();
+            auto e_f = jai::foundry::make_engine();
             dynamic_binder<audit_pt<float>>(*e_f, "AuditP").constructor<>().method("kind", &audit_pt<float>::kind).build();
             // same registered NAME + shape, but the instances behave as their own C++ types
             check_eq((int64_t)1, e_i->execute("AuditP().kind()").as_int());
@@ -315,7 +315,7 @@ public:
             jai::stdlib::register_all(*e_i);
             check_eq(std::string("AuditP"), e_i->execute("type_of(AuditP())").as<std::string>());
             // and differently-shaped registrations fingerprint differently
-            auto e_two = jai::engine::make();
+            auto e_two = jai::foundry::make_engine();
             register_audit_points(*e_two);
             check_ne(e_i->registration_fingerprint(), e_two->registration_fingerprint());
         });

@@ -25,7 +25,7 @@ namespace {
 
     std::shared_ptr<engine> make_timed(bool use_vm, virtual_clock& clk, bool install = true) {
         auto e = engine::make();
-        if (use_vm) { e->set_backend(backend_type::vm); }
+        e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
         e->execution_budget(0);
         stdlib::register_all(e);
         engine* raw = e.get();
@@ -193,7 +193,7 @@ public:
             expect(R"(advance(1.5); "" + time::now() + " " + time::engine_elapsed();)", "101.5 101.5", "advancing the host clock");
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(e);
                 auto r = e->execute(R"(var a = time::now(); var b = time::engine_elapsed(); var c = time::now(); a >= 0.0 && b >= a && c >= b && a < 3600.0;)");
                 check_true(r.as<bool>(), "the system source counts from construction");
@@ -252,7 +252,7 @@ public:
             expect(R"(advance(0.5); "" + time::unix_ms();)", "1700000000623", "advancing the wall clock");
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(e);
                 const auto host_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                 const auto script_ms = e->execute("time::unix_ms();").as_int();
@@ -441,7 +441,7 @@ public:
         test("a_simulation_clock_drives_scripts", [this]() {
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(backend_type::vm); }
+                eng->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(eng);
                 auto out = std::make_shared<std::ostringstream>();
                 eng->set_output_stream(out);

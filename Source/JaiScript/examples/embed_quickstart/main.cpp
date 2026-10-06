@@ -5,7 +5,7 @@
 //   embed_quickstart               run every section and exit 0 when all checks hold
 //   embed_quickstart --debug       also listen for VS Code (DAP) on 127.0.0.1:52472
 //   embed_quickstart --debug-wait  listen, then wait for Enter before running game.jai
-//   embed_quickstart --vm          run the scripts on the bytecode VM instead of the interpreter
+//   embed_quickstart --interp      run the scripts on the tree-walking interpreter instead of the bytecode VM
 //
 // The hot-reload section writes live/rules.jai under the working directory and edits it mid-run.
 // VS Code: install tools/vscode-jaiscript, then an attach configuration
@@ -150,12 +150,12 @@ static void bind_game_api(jai::engine& eng) {
 }
 
 static int run(int argc, char** argv) {
-	bool debug = false, debug_wait = false, vm = false;
+	bool debug = false, debug_wait = false, interp = false;
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
 		if (a == "--debug") { debug = true; }
 		if (a == "--debug-wait") { debug = debug_wait = true; }
-		if (a == "--vm") { vm = true; }
+		if (a == "--interp") { interp = true; }
 	}
 
 	const fs::path scripts = fs::canonical(fs::path(EMBED_QUICKSTART_SCRIPTS));
@@ -165,7 +165,7 @@ static int run(int argc, char** argv) {
 
 	section("engine");
 	auto eng = jai::engine::make();
-	if (vm) { eng->set_backend(jai::backend_type::vm); }
+	if (interp) { eng->set_backend(jai::backend_type::interpreter); }
 	jai::stdlib::register_all(eng);
 	std::cout << "  backend: " << eng->get_backend_name() << "\n";
 	eng->add_include_path(live.string());
@@ -297,6 +297,7 @@ static int run(int argc, char** argv) {
 	expect(eng->execute("40 + 2").as_int() == 42, "engine still usable after the budget");
 
 	auto sandbox = jai::engine::make();
+	sandbox->set_backend(eng->get_backend_type());
 	jai::stdlib::register_all(sandbox);
 	sandbox->disable(jai::filesystem);
 	sandbox->register_privilege("game.cheats");

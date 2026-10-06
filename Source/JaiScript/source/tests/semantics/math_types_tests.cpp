@@ -30,7 +30,7 @@ public:
     void forge_tests() override {
         auto run = [](const std::string& src, bool use_vm, bool proofs, bool lowering) {
             auto e = jai::engine::make();
-            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             e->type_proofs(proofs);
             e->aggregate_lowering(lowering);
             e->execution_budget(0);
@@ -471,7 +471,7 @@ public:
                 agree(src, row[2]);
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->execution_budget(0);
                     jai::stdlib::register_all(e);
                     const std::string got = e->execute(src).to_string();
@@ -613,7 +613,7 @@ public:
                 check(listing.find("VELEM_LOAD") != std::string::npos && listing.find("VELEM_STORE") != std::string::npos,
                       "element components load and store straight from the buffer: " + listing.substr(0, 1500));
             }
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             jai::stdlib::register_all(e);
             script_value arr = e->execute("array<math::vec3> a = [math::vec3(1, 2, 3)]; a");
             const script_array* node = arr.unchecked_array_node();
@@ -636,7 +636,7 @@ public:
         });
 
         test("static_checker", [this]() {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             jai::stdlib::register_all(e);
             auto errors = [&](const std::string& src) {
                 std::string all;
@@ -723,7 +723,7 @@ public:
     static std::shared_ptr<jai::engine> host(bool use_vm) {
         using namespace adapter_hosts;
         auto e = jai::engine::make();
-        if (use_vm) { e->set_backend(jai::backend_type::vm); }
+        e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
         e->execution_budget(0);
         jai::stdlib::register_all(e);
         e->add_function("scale3", [](point3 p, float k) { return point3(p.x * k, p.y * k, p.z * k); });

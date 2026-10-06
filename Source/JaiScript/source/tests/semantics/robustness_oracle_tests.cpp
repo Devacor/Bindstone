@@ -51,7 +51,7 @@ inline std::vector<run_config> configs() {
 
 inline std::shared_ptr<engine> make(const run_config& c, check_mode mode) {
 	auto e = engine::make();
-	if (c.vm) { e->set_backend(backend_type::vm); }
+	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
 	e->static_checking(mode);
 	if (!c.proofs) { e->type_proofs(false); }
@@ -366,7 +366,7 @@ private:
 		});
 		test("parse_errors_name_the_fix", [this]() {
 			auto parse_text = [](const std::string& src) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_engine();
 				try { e->execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
 				return std::string("no error");
 			};

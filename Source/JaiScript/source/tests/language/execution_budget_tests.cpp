@@ -61,7 +61,7 @@ public:
 			for (bool use_vm : {false, true}) {
 				const std::string be = use_vm ? " (vm)" : " (interpreter)";
 				auto e = engine::make();
-				if (use_vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
 				e->add_function("nap", []() { std::this_thread::sleep_for(std::chrono::milliseconds(3)); });
 				e->execution_budget(1000.0);
 				e->execute("function run(int n) -> int { nap(); int acc = 0; for (int i = 0; i < n; i++) { acc += 1; } return acc; }\n"

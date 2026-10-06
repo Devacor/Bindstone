@@ -26,7 +26,7 @@ public:
 		for (bool vm : { false, true }) {
 			for (bool proofs : { true, false }) {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				if (!proofs) { e->type_proofs(false); }
 				std::string got;
@@ -232,7 +232,7 @@ public:
 		test("inline_is_a_program_scope_or_namespace_variable", [this]() {
 			for (const char* src : { "function f() { inline int x; }", "{ inline int y; }", "int G = 1; inline int& r = G;",
 			                         "namespace n { inline function f() { } }", "class C { inline int x; }" }) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_engine();
 				check_throws([&]() { e->execute(src); }, src);
 			}
 		});

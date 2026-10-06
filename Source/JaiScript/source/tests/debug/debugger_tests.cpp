@@ -43,7 +43,7 @@ public:
 
     static std::shared_ptr<jai::engine> make_backend_engine(jai::backend_type type) {
         auto eng = jai::engine::make();
-        if (type != jai::backend_type::interpreter) eng->set_backend(type);
+        eng->set_backend(type);
         return eng;
     }
 
@@ -604,7 +604,7 @@ public:
 
         test("detach_wakes_a_parked_thread", [this]() {
             // A client disconnect / shutdown must force-resume a parked script, never hang.
-            auto eng = jai::engine::make();
+            auto eng = jai::foundry::make_engine();
             auto& dbg = eng->debugger();
 
             std::mutex m;
@@ -645,13 +645,13 @@ public:
             )";
 
         benchmark("Hot Loop: no debugger constructed", [this]() {
-            if (!bench_eng_) bench_eng_ = jai::engine::make();
+            if (!bench_eng_) bench_eng_ = jai::foundry::make_engine();
             bench_eng_->execute(hot_loop_src);
         });
 
         benchmark("Hot Loop: controller constructed, no session", [this]() {
             if (!bench_eng_) {
-                bench_eng_ = jai::engine::make();
+                bench_eng_ = jai::foundry::make_engine();
                 bench_eng_->debugger();   // = connector listening, no client attached
             }
             bench_eng_->execute(hot_loop_src);
@@ -659,7 +659,7 @@ public:
 
         benchmark("Hot Loop: session enabled, no breakpoints", [this]() {
             if (!bench_eng_) {
-                bench_eng_ = jai::engine::make();
+                bench_eng_ = jai::foundry::make_engine();
                 bench_eng_->debugger().set_enabled(true);
             }
             bench_eng_->execute(hot_loop_src);
@@ -667,7 +667,7 @@ public:
 
         benchmark("Hot Loop: session enabled, bp in cold file", [this]() {
             if (!bench_eng_) {
-                bench_eng_ = jai::engine::make();
+                bench_eng_ = jai::foundry::make_engine();
                 auto& dbg = bench_eng_->debugger();
                 dbg.set_breakpoints("cold.jai", {50});   // no line in the script matches
                 dbg.set_enabled(true);
@@ -677,7 +677,7 @@ public:
 
         benchmark("Hot Loop: session enabled, bp line collides", [this]() {
             if (!bench_eng_) {
-                bench_eng_ = jai::engine::make();
+                bench_eng_ = jai::foundry::make_engine();
                 auto& dbg = bench_eng_->debugger();
                 dbg.set_breakpoints("cold.jai", {4});    // same line as the hot statement
                 dbg.set_enabled(true);

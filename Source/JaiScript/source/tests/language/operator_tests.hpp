@@ -216,7 +216,7 @@ public:
             )";
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(std::string("75|175|true"), e->execute(src).as<std::string>(),
                          use_vm ? "vm class-return operator" : "interp class-return operator");
@@ -244,7 +244,7 @@ public:
             )";
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(std::string("7|7"), e->execute(src).as<std::string>(),
                          use_vm ? "vm spelling parity" : "interp spelling parity");
@@ -398,7 +398,7 @@ public:
             )";
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 check_eq((int64_t)15, e->execute(src).as_int(),
                          use_vm ? "vm operator[] class return" : "interp operator[] class return");
             }

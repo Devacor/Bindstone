@@ -19,7 +19,7 @@ public:
     void forge_tests() override {
         auto run = [](const std::string& src, bool use_vm, bool proofs) {
             auto e = jai::engine::make();
-            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             e->type_proofs(proofs);
             e->execution_budget(0);
             jai::stdlib::register_all(e);
@@ -161,7 +161,7 @@ public:
             check_eq((size_t)1048576, jai::engine::make()->binary_scan_limit(), "the default limit is 1 MiB");
             auto run_limited = [](const std::string& src, bool use_vm, bool proofs, size_t limit) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->type_proofs(proofs);
                 e->binary_scan_limit(limit);
                 jai::stdlib::register_all(e);
@@ -326,7 +326,7 @@ public:
         });
 
         test("the_checker_knows_the_library", [this]() {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             jai::stdlib::register_all(e);
             auto errors = [&](const std::string& src) { return e->check(src).error_count(); };
             auto says = [&](const std::string& src, const std::string& text) {

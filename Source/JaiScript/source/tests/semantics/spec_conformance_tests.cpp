@@ -76,7 +76,7 @@ inline std::vector<run_config> configs() {
 
 inline std::shared_ptr<engine> make(const run_config& c, check_mode mode = check_mode::strict) {
 	auto e = engine::make();
-	if (c.vm) { e->set_backend(backend_type::vm); }
+	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
 	e->static_checking(mode);
 	if (!c.proofs) { e->type_proofs(false); }
@@ -1245,7 +1245,7 @@ private:
 			every_config("two engines", "Undefined variable 'g'", [](engine& e) {
 				e.execute("var g = 1;");
 				auto other = engine::make();
-				if (e.get_backend_type() == backend_type::vm) { other->set_backend(backend_type::vm); }
+				other->set_backend(e.get_backend_type());
 				other->static_checking(check_mode::off);
 				return other->execute("var r = \"\"; try { r = \"\" + g; } catch (x) { r = x; } r;").as_string();
 			});
@@ -1981,8 +1981,9 @@ private:
 			)", "x.jai|true");
 		});
 		test("a_bare_engine_has_no_host_file_functions", [this]() {
-			every_config("bare engine", "Undefined variable 'read_file'", [](engine&) {
+			every_config("bare engine", "Undefined variable 'read_file'", [](engine& e) {
 				auto bare = engine::make();
+				bare->set_backend(e.get_backend_type());
 				bare->static_checking(check_mode::off);
 				return bare->execute("var r = \"\"; try { read_file(\"x\"); } catch (e) { r = e; } r;").as_string();
 			});

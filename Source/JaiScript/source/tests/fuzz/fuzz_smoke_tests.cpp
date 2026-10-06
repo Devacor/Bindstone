@@ -84,7 +84,7 @@ public:
 		// differently, including typed arrays (the old as_array() view raised on them and gave
 		// [1] and [2] the same error text), entries past the display cap, and deep nesting
 		test("oracle_tells_unequal_values_apart", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_engine();
 			auto d = [&](const char* src) { return fuzz::describe_value(eng->execute(src)); };
 			check_ne(d("array<int> a = [1]; a;"), d("array<int> a = [2]; a;"), "typed int arrays");
 			check_ne(d("array<float> a = [1.0]; a;"), d("array<float> a = [1.5]; a;"), "typed float arrays");

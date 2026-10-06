@@ -461,7 +461,7 @@ public:
         // emit(args...), signal<Sig> stays the non-emittable consumer view — which
         // member a class exposes decides what script may do with it.
         test("script_emit_through_bound_emitter_fires_script_receiver", [this]() {
-            auto eng = engine::make();
+            auto eng = jai::foundry::make_engine();
             bind_signal_type<void(int)>(*eng, "SignalInt");
             dynamic_binder<emit_board>(*eng, "EmitBoard")
                 .constructor<>()
@@ -475,7 +475,7 @@ public:
         });
 
         test("script_emit_through_bound_emitter_fires_cpp_receiver", [this]() {
-            auto eng = engine::make();
+            auto eng = jai::foundry::make_engine();
             bind_signal_type<void(int)>(*eng, "SignalInt");
             dynamic_binder<emit_board>(*eng, "EmitBoard")
                 .constructor<>()
@@ -490,7 +490,7 @@ public:
         });
 
         test("signal_view_stays_non_emittable", [this]() {
-            auto eng = engine::make();
+            auto eng = jai::foundry::make_engine();
             bind_signal_type<void(int)>(*eng, "SignalInt");
             dynamic_binder<emit_board>(*eng, "EmitBoard")
                 .constructor<>()

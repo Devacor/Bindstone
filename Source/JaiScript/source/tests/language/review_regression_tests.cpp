@@ -83,7 +83,7 @@ public:
             // surfaces its own error before any target error
             for (bool vm : {false, true}) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 jai::stdlib::register_all(*e);
                 e->static_checking(check_mode::off);
                 const std::string label = vm ? "vm" : "interp";
@@ -114,7 +114,7 @@ public:
             // VM's, so the catch sees the language's error at every scope on both backends
             for (bool vm : {false, true}) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 jai::stdlib::register_all(*e);
                 e->static_checking(check_mode::off);
                 const std::string label = vm ? "vm" : "interp";
@@ -141,7 +141,7 @@ public:
             // comparison and the logical operators
             for (bool vm : {false, true}) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 jai::stdlib::register_all(*e);
                 e->static_checking(check_mode::off);
                 const std::string label = vm ? "vm" : "interp";
@@ -496,7 +496,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 check_throws([&]() { e->execute("auto x = 1; auto s = 64; x << s;"); });
                 check_throws([&]() { e->execute("auto x = 1; auto s = -1; x << s;"); });
                 check_throws([&]() { e->execute("auto x = 1; auto s = 64; x >> s;"); });
@@ -526,7 +526,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 if (!e->throw_on_overflow()) { return; }  // wrap build: nothing to compare
                 try { e->execute("(-((1 + 9223372036854775807))) <=> 1;"); }
                 catch (const std::exception& ex) { msg[idx] = ex.what(); }
@@ -547,7 +547,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 if (!e->throw_on_overflow()) {
                     // Wrap build: folding the wrapped value IS the policy
                     check_eq((int64_t)INT64_MIN, e->execute("9223372036854775807 + 1").as_int());
@@ -582,7 +582,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 if (!e->throw_on_overflow()) {
                     check_eq((int64_t)INT64_MIN, e->execute("var a = 9223372036854775807; a++; a;").as_int());
                     continue;
@@ -648,7 +648,7 @@ public:
             std::array<std::string, 2> got;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 got[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
             check(got[0].find("co[A has no member 'co']") != std::string::npos,
@@ -1008,7 +1008,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 if (!e->throw_on_overflow()) { return; }  // wrap build: loop exits via wrap
                 try { e->execute("for (var i = 9223372036854775806; i > 0; i++) { }"); }
                 catch (const std::exception& ex) { msg[idx] = ex.what(); }
@@ -1023,7 +1023,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 if (!e->throw_on_overflow()) { return; }
                 try { e->execute("for (var i = -9223372036854775807; i < 0; i -= 2) { }"); }
                 catch (const std::exception& ex) { msg[idx] = ex.what(); }
@@ -1043,7 +1043,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { e->execute(src); }
                     catch (const std::exception& ex) { msg[idx] = ex.what(); }
                     ++idx;
@@ -1065,7 +1065,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);   // deep recursion outruns the default budget in Debug
                 try { e->execute("function forever(int n) -> int { return n + forever(n - 1); } forever(3);"); }
                 catch (const std::exception& ex) { msg[idx] = ex.what(); }
@@ -1088,7 +1088,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->static_checking(mode);
                     try { e->execute(src); }
                     catch (const std::exception& ex) { msg[idx] = ex.what(); }
@@ -1124,7 +1124,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { out[idx] = e->execute(src).to_string(); }
                     catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                     ++idx;
@@ -1195,7 +1195,7 @@ public:
             for (bool use_vm : {false, true}) {
                 for (bool proofs : {true, false}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     jai::stdlib::register_all(*e);
                     if (!proofs) { e->type_proofs(false); }
                     std::string out;
@@ -1215,7 +1215,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->static_checking(check_mode::off);
                     jai::stdlib::register_all(e);
                     try { out[idx] = e->execute(src).to_string(); }
@@ -1246,7 +1246,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { e->execute(src); out[idx] = "OK"; }
                     catch (const std::exception& ex) { out[idx] = std::string(ex.what()) + "\n" + e->format_stack_trace(); }
                     ++idx;
@@ -1304,7 +1304,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { out[idx] = e->execute(src).to_string(); }
                     catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                     ++idx;
@@ -1383,7 +1383,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 out[idx++] = e->execute(src).as_string();
             }
@@ -1458,7 +1458,7 @@ public:
             for (bool use_vm : {false, true}) {
                 const std::string tag = use_vm ? "vm: " : "interp: ";
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->execute("string a = \"x\";");
                 script_value held = e->execute("a");
@@ -1482,7 +1482,7 @@ public:
             for (bool use_vm : {false, true}) {
                 const std::string tag = use_vm ? "vm: " : "interp: ";
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(5.0);
                 e->memory_cap(65536);
                 auto r = e->execute(R"(
@@ -1665,7 +1665,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->static_checking(mode);
                 try {
                     auto r = e->execute(src);
@@ -1979,7 +1979,7 @@ public:
         test("member_compound_receiver_once_hybrid", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 bind_hybrid_probe(*e);
                 e->execute(R"(
                     var log = "";
@@ -2307,7 +2307,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->static_checking(check_mode::off);   // the undef row is a RUNTIME text
                 bind_hybrid_probe(*e);
                 e->execute(R"(
@@ -2351,7 +2351,7 @@ public:
         // docs/reference_model.md CPP-MEMBER / PROPERTY). Every row runs both backends. ----
         auto propref_engine = [](bool use_vm) {
             auto e = jai::engine::make();
-            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             bind_hybrid_probe(*e);
             return e;
         };
@@ -2937,7 +2937,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->static_checking(check_mode::off);   // strict rejects these at load; the RUNTIME text is under test
                 e->execute(R"(
                     void f() {}
@@ -2974,7 +2974,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->static_checking(check_mode::off);
                 e->execute(R"(
                     void h(int a, int b = 2) {}
@@ -2994,7 +2994,7 @@ public:
         test("arity_text_uncaught_prefix", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->static_checking(check_mode::off);
                 bool threw = false;
                 std::string msg;
@@ -3012,7 +3012,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { out[idx] = e->execute(src).to_string(); }
                     catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                     ++idx;
@@ -3106,7 +3106,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->static_checking(check_mode::off);
                     try { out[idx] = e->execute(src).to_string(); }
                     catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
@@ -3153,7 +3153,7 @@ public:
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->static_checking(check_mode::off);   // the after-the-block rows are RUNTIME texts
                     jai::stdlib::register_all(e);
                     try { out[idx] = e->execute(src).to_string(); }
@@ -4473,7 +4473,7 @@ public:
             for (bool vm : {false, true}) {
                 for (const auto& [src, expected] : rows) {
                     auto e = make_engine();
-                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     jai::stdlib::register_all(e);
                     std::string got;
                     try { e->execute(std::string(prelude) + src); got = e->execute("log").as_string(); } catch (const std::exception& ex) { got = std::string("ERROR: ") + ex.what(); }
@@ -4502,7 +4502,7 @@ public:
             for (bool vm : {false, true}) {
                 for (const auto& [src, expected] : rows) {
                     auto e = make_engine();
-                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     jai::stdlib::register_all(e);
                     std::string got;
                     try { got = e->execute(src).to_string(); } catch (const std::exception& ex) { got = std::string("ERROR: ") + ex.what(); }
@@ -4674,7 +4674,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 try { out[idx] = e->execute(src).to_string(); }
@@ -4697,7 +4697,7 @@ public:
 						for (const auto& [op, result] : rows) {
 							for (bool member : {false, true}) {
 								auto e = jai::engine::make();
-								if (vm) { e->set_backend(jai::backend_type::vm); }
+								e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 								e->type_proofs(proofs);
 								e->ir_passes(passes);
 								const std::string setup = member ? "class Box { int n = 10; } function f() -> int { array<Box> a = [Box()]; "
@@ -4743,7 +4743,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 try { out[idx] = e->execute(src).to_string(); }
@@ -4789,7 +4789,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 if (with_probe) {
@@ -4922,7 +4922,7 @@ public:
             }
             for (bool use_vm : {false, true}) {   // the engine stays usable after the host-visible throw
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 check_throws([&]() { e->execute("nocopy class L { int total = 1; }\nL g = L();\nvar fg() { return g; }\nfg();\n"); });
                 check_eq((int64_t)3, e->execute("1 + 2").as_int());
             }
@@ -5062,7 +5062,7 @@ public:
         test("hot_reload_after_returned_copy", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class T { int v = 1; }\nT obj = T();\nvar g() { return obj; }\nvar c = g();\nc.v = 5;\n");
                 e->execute("class T { int v = 1; int w = 2; }");
                 check_eq((int64_t)9, e->execute("c.w + obj.w + c.v").as_int(), use_vm ? "vm: both migrate" : "interp: both migrate");
@@ -5072,7 +5072,7 @@ public:
         test("top_level_return_unchanged", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 auto r = e->execute("array<var> a = [1]; return a;");
                 e->execute("a.push(2);");
                 check_eq((size_t)2, r.as_array().size(), use_vm ? "vm: top-level return hands the host the global's handle" : "interp: top-level return hands the host the global's handle");
@@ -5091,7 +5091,7 @@ public:
     void forge_tests() override {
         auto run = [](const std::string& src, bool use_vm, bool proofs) {
             auto e = jai::engine::make();
-            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             e->type_proofs(proofs);
             e->execution_budget(0);
             jai::stdlib::register_all(e);
@@ -5421,7 +5421,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 try { out[idx] = e->execute(src).to_string(); }
@@ -5517,7 +5517,7 @@ public:
         test("host_methods_named_after_keywords", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 dynamic_binder<keyword_member_probe>(*e, "KeywordProbe")
                     .constructor<>()

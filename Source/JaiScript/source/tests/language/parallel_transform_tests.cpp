@@ -2054,7 +2054,7 @@ public:
 			)";
 			for (bool vm : {false, true}) {
 				auto e = make_engine();
-				if (vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->parallel_thread_count(4);
 				check_eq((int64_t)54, e->execute(src).as_int(), vm ? "vm" : "interp");
 				std::string text;
@@ -2087,7 +2087,7 @@ public:
 			for (bool vm : {false, true}) {
 				for (bool unsafe : {false, true}) {
 					auto e = make_engine();
-					if (vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					e->allow_unsafe_parallel(unsafe);
 					e->parallel_thread_count(8);
 					e->execution_budget(0);
@@ -2114,7 +2114,7 @@ public:
 			for (bool vm : {false, true}) {
 				for (int round = 0; round < 4; ++round) {
 					auto e = make_engine();
-					if (vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					e->parallel_thread_count(8);
 					e->execution_budget(0);
 					check_eq((int64_t)2208, e->execute(src).as_int(), vm ? "vm" : "interp");
@@ -2165,7 +2165,7 @@ public:
 				std::string seen[2];
 				for (bool vm : {false, true}) {
 					auto e = make_engine();
-					if (vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					e->allow_unsafe_parallel(true);
 					e->parallel_thread_count(8);
 					e->execution_budget(0);

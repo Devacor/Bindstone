@@ -303,7 +303,7 @@ public:
         });
 
         test("saved_lambda_outer_plan_preserves_bytes", [this]() {
-            auto author = engine::make();
+            auto author = jai::foundry::make_engine();
             auto bite = author->jaibite(R"(
                 int read() {
                     int a = 1; int b = 2; int c = 3; int value = 4;
@@ -319,7 +319,7 @@ public:
         });
 
         test("saved_lambda_local_capture_still_shadows_global", [this]() {
-            auto author = engine::make();
+            auto author = jai::foundry::make_engine();
             auto bite = author->jaibite(R"(
                 int value = 99;
                 int read() {
@@ -336,7 +336,7 @@ public:
         });
 
         test("saved_nested_coroutine_preserves_bytes", [this]() {
-            auto author = engine::make();
+            auto author = jai::foundry::make_engine();
             auto bite = author->jaibite(R"(
                 int read() {
                     int a = 1; int b = 2; int c = 3; int value = 4;

@@ -1932,6 +1932,7 @@ namespace jai::vm {
         op_status exec_compound_store_full(frame& f, const vm_instruction& ins);
         op_status exec_incdec(frame& f, const vm_instruction& ins);
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
+        op_status exec_decl_var_full(frame& f, const vm_instruction& ins);
         op_status bind_graft_parameter(frame& f, const variable_decl* decl);   // a graft's by-value parameter: bind_parameters's by-value lane over the popped argument
         op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);
         op_status exec_decl_ref_value(frame& f, const vm_instruction& ins);
@@ -1969,7 +1970,7 @@ namespace jai::vm {
         // sink-templated (defined in vm_backend.cpp): the plain op pushes, the decl
         // variant lands in the declared slot.
         template <bool SinkIsStack, typename Sink>
-        op_status index_fused_read(frame& f, const vm_instruction& ins, Sink&& sink);
+        op_status index_fused_read(frame& f, const vm_instruction& ins, Sink&& sink, uint32_t extra_flags = 0);
         // Typed element-read lane for the proven decl shape (fused_index_proto::typed_lane):
         // operands straight off the frame or the per-site cache, the int index folded raw,
         // the element landed in the declared slot by the decl lane's rules. false = a

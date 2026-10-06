@@ -50,6 +50,8 @@ STALE = [
     (r"\.jaibite\)? version (?:[0-9]|10)\b|jaibite v(?:[0-9]|10)\b|version (?:[0-9]|10) of the \.jaibite|k_jaibite_version = (?:[0-9]|10)\b",
      "old .jaibite version"),
     (r"check(?:ing|er) is off by default", "checker off by default"),
+    (r"engine[^.]{0,40}starts on the interpreter|runs the (?:tree-walking )?interpreter until you|interpreter\. The default|alias for the interpreter",
+     "interpreter as the engine default"),
     (r"strict(?:_mode| mode)? (?:is|must be) (?:enabled|turned on|switched on)", "strict must be enabled"),
     (r"(?:strict|checker|checking)[^.]{0,40}\bopt[- ]in\b|\bopt[- ]in\b[^.]{0,40}(?:strict|checker|checking)",
      "opt-in near strict/checker"),

@@ -41,7 +41,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 #include &lt;jaiscript/stdlib/stdlib.hpp&gt;
 
 auto eng = jai::engine::make();                 // shared_ptr&lt;engine&gt;
-// eng-&gt;set_backend(jai::backend_type::vm);     // optional: bytecode VM (before first execute)
+// eng-&gt;set_backend(jai::backend_type::interpreter);   // optional: tree-walking interpreter (before first execute)
 jai::stdlib::register_all(eng);                 // formatted print, format, to_string, type_of, to_json, ...
 jai::script_value r = eng-&gt;execute(&quot;2 + 2&quot;);
 int v = r.as_int();                             // 4</code></pre></div>
@@ -61,7 +61,7 @@ jaiscript --watch hello.jai    # re-run the file every time you save it</code></
 <tr><td><code>--check=strict|warn|off</code></td><td>The static checker&#x27;s mode. Default <code>strict</code>: typed mistakes and undeclared names fail the load before anything runs. <code>warn</code> prints them and runs anyway; <code>off</code> skips the walk.</td></tr>
 <tr><td><code>--budget=N</code></td><td>Seconds of wall clock per execute. An overrun ends the run with a terminal error the script cannot <code>catch</code> (the host sees an exception; see <a href="05-control-flow.html#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">Control Flow</a>). Default <code>0</code>: unlimited.</td></tr>
 </tbody></table></div>
-<div class="callout"><p><strong>The runner&#x27;s defaults are not the engine&#x27;s.</strong> An embedded <code>jai::engine</code> starts on the <em>interpreter</em> and enforces a <strong>5.0&nbsp;second</strong> execution budget per <code>execute()</code>. The runner starts on the <em>VM</em> with <strong>no budget at all</strong>, because an infinite loop in a script you are editing is your own business. Static checking is <code>strict</code> in both.</p></div>
+<div class="callout"><p><strong>The runner&#x27;s defaults are not the engine&#x27;s.</strong> Both start on the <em>VM</em>, but an embedded <code>jai::engine</code> enforces a <strong>5.0&nbsp;second</strong> execution budget per <code>execute()</code> and the runner has <strong>no budget at all</strong>, because an infinite loop in a script you are editing is your own business. Static checking is <code>strict</code> in both.</p></div>
 <p>One convention to know before you compare output. When a block on these pages ends in <code>== result: …</code>, that line is the value of the script&#x27;s last expression: what <code>execute()</code> hands back to a host. The runner does not echo it after a file run (an <code>int</code> result becomes the exit code; the REPL echoes every non-null result), so wrap the last expression in <code>print(...)</code> if you want to see it in a terminal. Everything above that line is <code>print</code> output and matches character for character. Two more shapes you will meet: a block that ends in <code>== error: …</code> shows the message the host would receive from an uncaught error (the runner prints it to stderr and exits 1), and a block that starts <code>jaiscript: static check failed:</code> is the runner&#x27;s own listing when the checker stops a load before anything runs.</p>
 <h2 id="values-and-literals">Values and literals<a class="hlink" href="#values-and-literals" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto i = 42;            // integer (64-bit)

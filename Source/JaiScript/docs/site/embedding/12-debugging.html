@@ -118,7 +118,7 @@ jai_crawler.exe --debug-port 40000 # attach on a different port</code></pre></di
 #include &lt;jaiscript/debug/controller.hpp&gt;
 #include &lt;thread&gt;
 
-auto eng = jai::engine::make();          // either backend debugs; vm via set_backend(backend_type::vm)
+auto eng = jai::engine::make();          // either backend debugs: the VM, or the interpreter via set_backend
 auto&amp; dbg = eng-&gt;debugger();
 
 // 1. React to stops. Fires ON the script thread the instant it parks.

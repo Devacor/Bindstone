@@ -100,8 +100,9 @@ Assertions: `check`, `check_eq`, `check_ne`, `check_near`, `check_throws`, `chec
 `check_false`, `check_null`, `check_not_null`, `check_gt`, `check_lt`, `check_ge`, `check_le`.
 
 Create engines through `foundry::make_engine()`, not `engine::make()` — it applies the
-runner's `--backend=` choice, and that is how `--backend=vm` reaches a suite. A test that
-calls `engine::make()` directly only ever runs on the interpreter.
+runner's `--backend=` choice (the interpreter unless `--backend=vm`), and that is how both
+suites reach a test. A test that calls `engine::make()` directly runs the engine's default, the
+VM, in both suites; one that needs a particular backend says so with `set_backend`.
 
 One thing to know about parse errors: a recoverable one makes the parser synchronize, so
 `execute()` may return null rather than throw. That is why "deeply nested input doesn't crash"

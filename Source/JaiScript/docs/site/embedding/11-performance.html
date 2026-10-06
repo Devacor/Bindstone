@@ -117,9 +117,9 @@ measurably cheaper than spelling out the read-modify-write.</li>
 <li><strong>Define classes once.</strong> Executing a <code>class</code> declaration does
 redefinition/hot-reload bookkeeping; keep class definitions out of per-frame scripts and re-run
 only the code that ticks.</li>
-<li><strong>Choose the VM.</strong> An engine you make runs the tree-walking interpreter until you call
-<code>eng-&gt;set_backend(jai::backend_type::vm)</code>, before its first execute (<a href="03-backends.html">Backends</a>).
-The standalone runner uses the VM already. Measure Release builds: a Debug build of the engine is many times slower.</li>
+<li><strong>Stay on the VM.</strong> An engine you make runs the bytecode VM, as the standalone runner does;
+<code>eng-&gt;set_backend(jai::backend_type::interpreter)</code> selects the tree-walking interpreter, the reference
+for checking rather than for speed (<a href="03-backends.html">Backends</a>). Measure Release builds: a Debug build of the engine is many times slower.</li>
 <li><strong>Walk containers by reference.</strong> <code>for (auto u : units)</code> copies each element, as in C++, and a
 write to <code>u</code> changes the copy; <code>for (auto&amp; u : units)</code> visits the elements themselves and copies nothing.</li>
 <li><strong>Copies are real, but read-only ones are free.</strong> <code>Unit u = units[i];</code> is a copy. Inside a function, when nothing after

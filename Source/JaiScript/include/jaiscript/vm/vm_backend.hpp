@@ -1930,6 +1930,7 @@ namespace jai::vm {
         op_status exec_store(frame& f, const vm_instruction& ins);
         op_status exec_compound_store(frame& f, const vm_instruction& ins);
         op_status exec_compound_store_full(frame& f, const vm_instruction& ins);
+        op_status compound_append_string(script_value& slot, const vm_instruction& ins);
         op_status exec_incdec(frame& f, const vm_instruction& ins);
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
         op_status exec_decl_var_full(frame& f, const vm_instruction& ins);
@@ -2282,6 +2283,8 @@ namespace jai::vm {
         op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         op_status store_popped_value_full(frame& f, const vm_instruction& ins, script_value value);
         bool store_scalar_lane(script_value& slot, script_value& value, const vm_instruction& ins);
+        bool store_ref_alias_var(frame& f, const vm_instruction& ins, script_value& value);
+        op_status dyn_string_add(frame& f, const vm_instruction& ins, bool& landed);
         script_value* env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id);
         bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
         op_status exec_math_kernel(size_t base, size_t argc, detail::math_fn fn);

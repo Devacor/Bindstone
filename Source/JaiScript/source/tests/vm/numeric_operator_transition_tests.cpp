@@ -146,8 +146,17 @@ public:
 				"    try { s /= 0; } catch (e) { s = s + 1000; }\n"
 				"    return to_string(s) + \",\" + to_string(t) + \",\" + to_string(acc) + \",\" + to_string(o.v) + to_string(o.n) + to_string(o.w);\n"
 				"}\n"
+				"class Node2 { var v = 0; var next = null; }\n"
+				"function setr(var& r, var v) { r = v; }\n"
+				"function refs() {\n"
+				"    var a = 1; var b = null; var arr = [1, 2]; int ti = 3;\n"
+				"    setr(a, 2.5); setr(b, Node2()); var n = b; n.v = 7; setr(arr[0], \"e\"); setr(a, b);\n"
+				"    var& ra = a; ra = 11; ra = \"s\"; setr(b, null);\n"
+				"    try { setr(ti, \"bad\"); } catch (e) { ra = ra + \" caught: \" + e; }\n"
+				"    return to_string(a) + \",\" + to_string(b) + \",\" + to_string(arr) + \",\" + to_string(n.v) + \",\" + to_string(ti);\n"
+				"}\n"
 				"g = 9; gi = 3;\n"
-				"floats(2.0, 1.0) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi) + \"|\" + mixed(2.0, 4) + \"|\" + mixed(3, 2);\n";
+				"floats(2.0, 1.0) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi) + \"|\" + mixed(2.0, 4) + \"|\" + mixed(3, 2) + \"|\" + refs();\n";
 			auto run = [&](backend_type type, bool proofs) {
 				auto eng = engine::make();
 				if (type != backend_type::interpreter) { eng->set_backend(type); }

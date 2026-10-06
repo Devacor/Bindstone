@@ -3803,6 +3803,24 @@ op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 // pushes the value. The full path keeps its frame (a stack probe and a cookie) off this lane.
 op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
 	const size_t vi = value.raw_storage_index();
+	// a store through a reference alias (`var& r`, a var& parameter) to a plain var cell: ref_store_through's variable store, its var row
+	if ((ins.c & store_flag_ref_alias) && ins.b != k_invalid_u32 && f.locals && !f.top_level && vi != script_value::TYPEID_REFERENCE) {
+		if (script_value* slot = frame_slot(f, ins.b); slot && slot->raw_storage_index() == script_value::TYPEID_REFERENCE &&
+		    slot_declared_kind(f, ins.b) == 0 && detail::ref_declared_kind(*slot) == 0) {
+			const auto* holder = slot->get_reference_holder();
+			if (holder && holder->plain_cell() && !holder->container_element_type) {
+				script_value& storage = slot->deref();
+				const type_info* tag = storage.type_info_raw();
+				if (storage.raw_storage_index() != script_value::TYPEID_CPP_BOUND && tag && detail::var_slot(tag)) {
+					script_value v = clone_for_assignment(value);
+					if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { detail::var_stamp(v, storage.get_type_info(), engine_); }
+					storage = std::move(v);
+					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+					return op_status::ok;
+				}
+			}
+		}
+	}
 	if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
 		if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
 			if (script_value* slot = frame_slot(f, ins.b); slot && slot->raw_storage_index() != script_value::TYPEID_REFERENCE) {

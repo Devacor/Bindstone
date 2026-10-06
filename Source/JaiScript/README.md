@@ -91,10 +91,10 @@ double len = e->execute("Vec2(3, 4).length()").as_float();   // 5.0
 Two knobs are worth knowing on day one:
 
 ```cpp
-e->set_backend(jai::backend_type::vm);       // bytecode VM instead of the interpreter;
-                                             // must come before the first execute
-e->static_checking(jai::check_mode::warn);   // collect diagnostics instead of gating on them;
-                                             // can change at any time
+e->set_backend(jai::backend_type::interpreter);   // tree-walking interpreter instead of the
+                                                  // VM; must come before the first execute
+e->static_checking(jai::check_mode::warn);        // collect diagnostics instead of gating on
+                                                  // them; can change at any time
 ```
 
 The embedding guide covers the rest: binding inheritance and operators, `shared_ptr` handles,

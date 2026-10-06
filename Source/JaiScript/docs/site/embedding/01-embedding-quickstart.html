@@ -77,7 +77,7 @@ set_property(TARGET my_game PROPERTY MSVC_RUNTIME_LIBRARY &quot;${JaiScript_MSVC
 cmake --build build --target jaiscript_runner
 build/bin/jaiscript hello.jai                   # run a file; no argument starts a REPL
 build/bin/jaiscript --backend=interp --check=warn hello.jai</code></pre></div>
-<p>The runner registers the whole standard library plus file and console functions, runs on the VM by default (an engine you make runs the interpreter until you <a href="03-backends.html">choose</a>), and lifts the execution budget (<code>--budget=N</code> puts one back). <code>examples/embed_quickstart/</code> in the repository is a complete host (a bound class, a signal, saves, hot reload, rails, the debugger) that builds either way. The headers a host usually includes:</p>
+<p>The runner registers the whole standard library plus file and console functions, runs on the VM like every engine (the interpreter is one <a href="03-backends.html">call</a> away), and lifts the execution budget (<code>--budget=N</code> puts one back). <code>examples/embed_quickstart/</code> in the repository is a complete host (a bound class, a signal, saves, hot reload, rails, the debugger) that builds either way. The headers a host usually includes:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;              // engine, script_value, the error types
 #include &lt;jaiscript/core/dynamic_binder.hpp&gt;      // dynamic_binder, convert_script_function
 #include &lt;jaiscript/stdlib/stdlib.hpp&gt;            // jai::stdlib::register_all

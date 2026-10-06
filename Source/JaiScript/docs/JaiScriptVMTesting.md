@@ -1,31 +1,32 @@
 # Testing the Bytecode VM Backend
 
-JaiScript has two swappable `execution_backend`s: the tree-walking interpreter (default) and the
-bytecode VM (`jai::vm`, `include/jaiscript/vm/`). Both must pass the FULL Foundry suite — the VM
+JaiScript has two swappable `execution_backend`s: the bytecode VM (`jai::vm`, `include/jaiscript/vm/`;
+the engine default) and the tree-walking interpreter (the oracle). Both must pass the FULL Foundry suite — the VM
 is held to exact parity: semantics, error-message text, stack-trace frames/lines, budget timing,
 coroutine drive order, hot-reload behavior.
 
 ## Running the suite on a backend
 
 ```
-jaiscript_tests.exe                    # interpreter (default)
+jaiscript_tests.exe                    # entire suite on the interpreter (the runner default)
 jaiscript_tests.exe --backend=vm       # entire suite on the bytecode VM
 jaiscript_tests.exe --backend=vm "Coroutine"   # combine with filters as usual
 ```
 
 The banner prints the active backend. Tests create engines through `jai::foundry::make_engine()`
-(honors the flag); never call `engine::make()` directly in a test. VM-specific suites live in
-`source/tests/vm/` and select the backend explicitly (`set_backend(backend_type::vm)`), so they
-run the VM even in a default run — including interpreter-vs-VM differential tests.
+(sets the flag's backend explicitly); a bare `engine::make()` runs the engine default (the VM) in
+both suites. VM-specific suites live in `source/tests/vm/` and select every backend explicitly
+(`set_backend(backend_type::vm)`, `set_backend(backend_type::interpreter)` for the oracle side of a
+differential test), so they mean the same thing in either run.
 
 ## Selecting a backend programmatically
 
 ```cpp
-auto eng = jai::engine::make();
-eng->set_backend(jai::backend_type::vm);   // BEFORE the first execute; forbidden after
+auto eng = jai::engine::make();                    // the VM
+eng->set_backend(jai::backend_type::interpreter);  // BEFORE the first execute; forbidden after
 ```
 
-`auto_select` is a legacy alias for `interpreter` (implicit length-based switching was removed).
+`auto_select` names the default: `set_backend` stores `vm`.
 Injected custom backends report `backend_type::custom`.
 
 ## Debugging tools

@@ -92,10 +92,12 @@ squirrel/               NOT built — benchmark comparison source only
 ```
 
 **Pipeline:** `lexer` → `parser` (recursive descent, builds AST) → one of TWO swappable
-`execution_backend`s: the tree-walking `interpreter` (default) or the bytecode `vm`
-(`jai::vm`, environment-backed frames, full Foundry parity). Select per engine with
-`engine->set_backend(backend_type::vm)` BEFORE the first execute (forbidden after), or run the
-whole test suite with `jaiscript_tests.exe --backend=vm`. Script callables execute through
+`execution_backend`s: the bytecode `vm` (default; `jai::vm`, environment-backed frames, full
+Foundry parity) or the tree-walking `interpreter` (the oracle). Select the interpreter per engine
+with `engine->set_backend(backend_type::interpreter)` BEFORE the first execute (forbidden after;
+`auto_select` stores vm). The test runner's `make_engine()` sets the runner's backend explicitly
+(interpreter by default, `jaiscript_tests.exe --backend=vm` for the VM); a test that needs one
+backend sets it itself. Script callables execute through
 `execution_backend::execute_callable` (thunks capture engine* + `script_callable` payload — never
 a backend pointer). `interpreter.cpp` is ~11k lines; arithmetic & comparison are inlined in
 `visit_binary` fast paths AND in `interpreter_dispatch.cpp` handlers; the vm's `op_binary` shape

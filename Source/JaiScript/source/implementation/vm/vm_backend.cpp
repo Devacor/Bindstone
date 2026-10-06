@@ -3804,22 +3804,8 @@ op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
 	const size_t vi = value.raw_storage_index();
 	// a store through a reference alias (`var& r`, a var& parameter) to a plain var cell: ref_store_through's variable store, its var row
-	if ((ins.c & store_flag_ref_alias) && ins.b != k_invalid_u32 && f.locals && !f.top_level && vi != script_value::TYPEID_REFERENCE) {
-		if (script_value* slot = frame_slot(f, ins.b); slot && slot->raw_storage_index() == script_value::TYPEID_REFERENCE &&
-		    slot_declared_kind(f, ins.b) == 0 && detail::ref_declared_kind(*slot) == 0) {
-			const auto* holder = slot->get_reference_holder();
-			if (holder && holder->plain_cell() && !holder->container_element_type) {
-				script_value& storage = slot->deref();
-				const type_info* tag = storage.type_info_raw();
-				if (storage.raw_storage_index() != script_value::TYPEID_CPP_BOUND && tag && detail::var_slot(tag)) {
-					script_value v = clone_for_assignment(value);
-					if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { detail::var_stamp(v, storage.get_type_info(), engine_); }
-					storage = std::move(v);
-					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
-					return op_status::ok;
-				}
-			}
-		}
+	if ((ins.c & store_flag_ref_alias) && ins.b != k_invalid_u32 && f.locals && !f.top_level && vi != script_value::TYPEID_REFERENCE && store_ref_alias_var(f, ins, value)) {
+		return op_status::ok;
 	}
 	if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
 		if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
@@ -3845,6 +3831,21 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	const op_status st = store_popped_value_full(f, ins, std::move(value));
 	if (st == op_status::ok && (ins.c & store_flag_no_result)) { stack_.pop_back(); }
 	return st;
+}
+
+JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction& ins, script_value& value) {
+	script_value* slot = frame_slot(f, ins.b);
+	if (!slot || slot->raw_storage_index() != script_value::TYPEID_REFERENCE || slot_declared_kind(f, ins.b) != 0 || detail::ref_declared_kind(*slot) != 0) return false;
+	const auto* holder = slot->get_reference_holder();
+	if (!holder || !holder->plain_cell() || holder->container_element_type) return false;
+	script_value& storage = slot->deref();
+	const type_info* tag = storage.type_info_raw();
+	if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND || !tag || !detail::var_slot(tag)) return false;
+	script_value v = clone_for_assignment(value);
+	if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { detail::var_stamp(v, storage.get_type_info(), engine_); }
+	storage = std::move(v);
+	if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+	return true;
 }
 
 // a scalar into storage that is untagged, var or of the scalar's own type: the cell holds the value (a var's own tag stamped on it), the
@@ -4484,13 +4485,7 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				t = kind == compound_plus ? t + r : kind == compound_minus ? t - r : t * r;
 				done = true;
 			} else if (kind == compound_plus && ti == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-				// the full path's string append row: the memory charge, then the append through the copy-on-write gate
-				if (!limits_->memory_charge(right.unchecked_as_string().size())) [[unlikely]] {
-					stack_.pop_back();
-					return raise_from(detail::raise_memory_cap(*limits_));
-				}
-				slot->unchecked_as_string_ref() += right.unchecked_as_string();
-				done = true;
+				return compound_append_string(*slot, ins);
 			}
 			if (done) {
 				stack_.pop_back();
@@ -4500,6 +4495,19 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 		}
 	}
 	return exec_compound_store_full(f, ins);
+}
+
+// the full path's string append row over a string slot and a string right operand on the stack: the memory charge, then the append
+// through the copy-on-write gate
+JAI_NOINLINE op_status vm_backend::compound_append_string(script_value& slot, const vm_instruction& ins) {
+	if (!limits_->memory_charge(stack_.back().unchecked_as_string().size())) [[unlikely]] {
+		stack_.pop_back();
+		return raise_from(detail::raise_memory_cap(*limits_));
+	}
+	slot.unchecked_as_string_ref() += stack_.back().unchecked_as_string();
+	stack_.pop_back();
+	if (!(ins.c & compound_flag_no_result)) { stack_.push_back(slot); }
+	return {};
 }
 
 JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_instruction& ins) {
@@ -6282,7 +6290,7 @@ JAI_NOINLINE const script_value* vm_backend::fused_cmp_operand_env(frame& f, con
 // like the unfused pair did before its jump executed).
 // The fused compare-jump's numeric, string and null rows (custom numeric operators already excluded by the caller): 1 = the compare
 // holds, 0 = it does not, -1 = the verbatim pair decides
-int vm_backend::fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op) {
+JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op) {
 	const size_t li = lv.raw_storage_index();
 	const size_t ri = rv.raw_storage_index();
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -10987,29 +10995,37 @@ bool vm_backend::dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, scri
 	}
 }
 
+// op_d_add on two strings: the fused kernel's string row landed as the replaced sink lands it; landed = false leaves the original instruction to run
+JAI_NOINLINE op_status vm_backend::dyn_string_add(frame& f, const vm_instruction& ins, bool& landed) {
+	const script_value* lp = dyn_operand(f, ins.b);
+	const script_value* rp = lp ? dyn_operand(f, ins.c) : nullptr;
+	if (rp && lp->raw_storage_index() == script_value::TYPEID_STRING && rp->raw_storage_index() == script_value::TYPEID_STRING) {
+		const uint32_t dst = ins.a >> k_typed_dst_shift;
+		const type_info* stamp = dst == k_typed_dst_decl ? f.code->typed_sites[f.ip].stamp : nullptr;
+		// a declaration the string lands in as the decl lane lands it (its type the string's or var); anything else replays
+		if (dst != k_typed_dst_decl || variable_decl::identity_payload(script_value::TYPEID_STRING, stamp)) {
+			std::optional<script_value> out;
+			if (fused_string_add(*lp, *rp, out) == op_status::failed) { landed = true; return op_status::failed; }
+			switch (dst) {
+			case k_typed_dst_temp: frame_slot_set(f, ins.a & k_typed_slot_mask, std::move(*out)); { landed = true; return {}; }
+			case k_typed_dst_decl:
+				if (stamp) { out->set_type_info(type_info_ptr{const_cast<type_info*>(stamp)}); }
+				frame_slot_set(f, ins.a & k_typed_slot_mask, std::move(*out));
+				{ landed = true; return {}; }
+			case k_typed_dst_store: landed = true; return store_popped_value(f, f.code->typed_sites[f.ip].orig2, std::move(*out));
+			default: stack_.push_back(std::move(*out)); { landed = true; return {}; }
+			}
+		}
+	}
+	return {};
+}
+
 op_status vm_backend::exec_dyn_arith(frame& f, const vm_instruction& ins) {
 	if (dyn_arith_fast(f, ins)) return {};
 	if (ins.op == opcode::op_d_add && !has_custom_numeric_ops_) {
-		const script_value* lp = dyn_operand(f, ins.b);
-		const script_value* rp = lp ? dyn_operand(f, ins.c) : nullptr;
-		if (rp && lp->raw_storage_index() == script_value::TYPEID_STRING && rp->raw_storage_index() == script_value::TYPEID_STRING) {
-			const uint32_t dst = ins.a >> k_typed_dst_shift;
-			const type_info* stamp = dst == k_typed_dst_decl ? f.code->typed_sites[f.ip].stamp : nullptr;
-			// a declaration the string lands in as the decl lane lands it (its type the string's or var); anything else replays
-			if (dst != k_typed_dst_decl || variable_decl::identity_payload(script_value::TYPEID_STRING, stamp)) {
-				std::optional<script_value> out;
-				if (fused_string_add(*lp, *rp, out) == op_status::failed) return op_status::failed;
-				switch (dst) {
-				case k_typed_dst_temp: frame_slot_set(f, ins.a & k_typed_slot_mask, std::move(*out)); return {};
-				case k_typed_dst_decl:
-					if (stamp) { out->set_type_info(type_info_ptr{const_cast<type_info*>(stamp)}); }
-					frame_slot_set(f, ins.a & k_typed_slot_mask, std::move(*out));
-					return {};
-				case k_typed_dst_store: return store_popped_value(f, f.code->typed_sites[f.ip].orig2, std::move(*out));
-				default: stack_.push_back(std::move(*out)); return {};
-				}
-			}
-		}
+		bool landed = false;
+		const op_status st = dyn_string_add(f, ins, landed);
+		if (landed || st == op_status::failed) return st;
 	}
 	return exec_typed_fallback(f, f.code->typed_sites[f.ip].orig);
 }

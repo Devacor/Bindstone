@@ -4009,7 +4009,7 @@ public:
 			int idx = 0;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				stdlib::register_all(*e);
 				jai::engine* raw = e.get();
 				e->add_function("add_one", [](jai::script_int x) -> jai::script_int { return x + 1; });

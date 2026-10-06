@@ -160,7 +160,7 @@ public:
 				"floats(2.0, 1.0) + \"|\" + widen(7) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi) + \"|\" + mixed(2.0, 4) + \"|\" + mixed(3, 2) + \"|\" + refs();\n";
 			auto run = [&](backend_type type, bool proofs) {
 				auto eng = engine::make();
-				if (type != backend_type::interpreter) { eng->set_backend(type); }
+				eng->set_backend(type);
 				eng->type_proofs(proofs);
 				jai::stdlib::register_all(*eng);
 				return eng->execute(script).as_string();

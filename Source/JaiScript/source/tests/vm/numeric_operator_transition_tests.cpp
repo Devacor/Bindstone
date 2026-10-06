@@ -111,6 +111,43 @@ public:
 				check_eq(oracle, run(backend_type::vm, proofs));
 			}
 		});
+		// the census rows: float compounds, string compares and concats through the dynamic ops, string appends, environment stores
+		test("general_form_string_float_and_environment_rows_match_the_interpreter", [this]() {
+			const std::string script =
+				"var g = 0; int gi = 1; float gf = 0.5; var gs = \"a\"; string gt = \"t\";\n"
+				"function floats(float x, float y) { float s = 0.0; for (int i = 0; i < 4; ++i) { s += x; s -= y * 0.5; s *= 1.5; } return s; }\n"
+				"function strs(var a, var b) {\n"
+				"    var out = \"\";\n"
+				"    if (a < b) { out += \"lt\"; } if (a == b) { out += \"eq\"; } if (a != b) { out += \"ne\"; } if (a >= b) { out += \"ge\"; }\n"
+				"    var c = a + b; string d = a + b; var e = \"\"; e = c + d; var n = null;\n"
+				"    if (n == a) { out += \"null\"; }\n"
+				"    for (int i = 0; i < 3; ++i) { out += a; out += \"-\"; }\n"
+				"    return out + \"|\" + c + \"|\" + d + \"|\" + e;\n"
+				"}\n"
+				"function globals() {\n"
+				"    for (int i = 0; i < 5; ++i) { g = i; gi = i * 2; gf = i + 0.25; gs = \"s\" + to_string(i); gt = gs; }\n"
+				"    g = 2.5; g = true; g = 'c';\n"
+				"    var r = to_string(g) + \",\" + to_string(gi) + \",\" + to_string(gf) + \",\" + gs + \",\" + gt + \",\" + type_of(g) + type_of(gi) + type_of(gf);\n"
+				"    var bad = \"no\"; var frac = 2.75;\n"
+				"    try { gi = bad; } catch (e) { r = r + \",caught: \" + e; }\n"
+				"    try { gi = frac; } catch (e) { r = r + \",caught: \" + e; }\n"
+				"    return r + \",\" + to_string(gi);\n"
+				"}\n"
+				"g = 9; gi = 3;\n"
+				"floats(2.0, 1.0) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi);\n";
+			auto run = [&](backend_type type, bool proofs) {
+				auto eng = engine::make();
+				if (type != backend_type::interpreter) { eng->set_backend(type); }
+				eng->type_proofs(proofs);
+				jai::stdlib::register_all(*eng);
+				return eng->execute(script).as_string();
+			};
+			const std::string oracle = run(backend_type::interpreter, true);
+			check_true(oracle.find("caught") != std::string::npos);
+			for (bool proofs : {true, false}) {
+				check_eq(oracle, run(backend_type::vm, proofs));
+			}
+		});
 		// a numeric operator registered while a dynamic op's frame runs is consulted by its next execution
 		test("dynamic_slot_operand_ops_see_an_operator_registered_mid_function", [this]() {
 			for (bool proofs : {true, false}) {

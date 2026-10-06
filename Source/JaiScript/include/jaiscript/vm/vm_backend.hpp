@@ -2175,6 +2175,7 @@ namespace jai::vm {
         bool dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, script_float fv);
         op_status exec_dyn_arith(frame& f, const vm_instruction& ins);
         op_status exec_dyn_cmp_jump(frame& f, const vm_instruction& ins);
+        int fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op);
         op_status exec_typed_decl_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_decl_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);
@@ -2279,8 +2280,11 @@ namespace jai::vm {
         // op_store's exact post-pop tail, shared with op_binary_fused_store
         op_status store_popped_value(frame& f, const vm_instruction& ins, script_value value);
         op_status store_popped_value_full(frame& f, const vm_instruction& ins, script_value value);
+        bool store_scalar_lane(script_value& slot, script_value& value, const vm_instruction& ins);
+        script_value* env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id);
         bool store_slot_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
         op_status exec_math_kernel(size_t base, size_t argc, detail::math_fn fn);
+        op_status fused_string_add(const script_value& l, const script_value& r, std::optional<script_value>& out);
         op_status binary_fused_tail(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp, std::optional<script_value>& out);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
         op_status exec_fused_cmp_jump(frame& f, const vm_instruction& ins);

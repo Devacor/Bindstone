@@ -133,8 +133,21 @@ public:
 				"    try { gi = frac; } catch (e) { r = r + \",caught: \" + e; }\n"
 				"    return r + \",\" + to_string(gi);\n"
 				"}\n"
+				"class Body { var v = 0; int n = 0; float w = 0.0; }\n"
+				"function sq(var k) { return k * k; }\n"
+				"function mixed(var a, var b) {\n"
+				"    var s = 0.5; var t = 1; var arr = [1, 2.5, 3]; var m = {\"k\": 4}; var acc = 0.0;\n"
+				"    var o = Body();\n"
+				"    for (var i = 0; i < 3; ++i) {\n"
+				"        s += a * b; s -= a; s *= 1.25; s /= b; s += i; s += 2; t += a;\n"
+				"        acc = acc + arr[i] * sq(i); acc = acc + m[\"k\"] * sq(i);\n"
+				"        o.v = i; o.v = s; o.v = \"str\"; o.n = i; o.w = s; var d = i; var e = s; d = d + 1;\n"
+				"    }\n"
+				"    try { s /= 0; } catch (e) { s = s + 1000; }\n"
+				"    return to_string(s) + \",\" + to_string(t) + \",\" + to_string(acc) + \",\" + to_string(o.v) + to_string(o.n) + to_string(o.w);\n"
+				"}\n"
 				"g = 9; gi = 3;\n"
-				"floats(2.0, 1.0) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi);\n";
+				"floats(2.0, 1.0) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi) + \"|\" + mixed(2.0, 4) + \"|\" + mixed(3, 2);\n";
 			auto run = [&](backend_type type, bool proofs) {
 				auto eng = engine::make();
 				if (type != backend_type::interpreter) { eng->set_backend(type); }

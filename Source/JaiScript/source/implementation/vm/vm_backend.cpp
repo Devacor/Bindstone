@@ -3802,35 +3802,24 @@ op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
 // path below that such a store reaches leaves the slot holding the value (a var slot's own tag stamped on it) and
 // pushes the value. The full path keeps its frame (a stack probe and a cookie) off this lane.
 op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, script_value value) {
-	if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
-		const size_t vi = value.raw_storage_index();
-		if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
+	const size_t vi = value.raw_storage_index();
+	if (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL || vi == script_value::TYPEID_CHAR) {
+		if (ins.b != k_invalid_u32 && f.locals && !f.top_level) {
 			if (script_value* slot = frame_slot(f, ins.b); slot && slot->raw_storage_index() != script_value::TYPEID_REFERENCE) {
-				const type_info* st = slot->type_info_raw();
-				const type_info* vt = value.type_info_raw();
-				const script_value_type vb = vt ? vt->base_type : script_value_type::jai_any_type;
-				const type_info* tag = vt;
-				bool lane = !st;
-				if (!lane && st->base_type == script_value_type::jai_any_type && !st->dynamic_slot &&
-				    (vb == script_value_type::jai_any_type || vb == value.current_type())) {
-					lane = true;
-					tag = st;
-				} else if (!lane) {
-					lane = st->base_type == value.current_type() && (vb == script_value_type::jai_any_type || vb == st->base_type);
-				}
-				if (lane) {
-					if (tag != vt) { value.set_type_info(type_info_ptr{const_cast<type_info*>(tag)}); }
-					// a slot already holding this kind from this engine takes the payload and the tag (the copy below writes nothing else)
-					if (slot->raw_storage_index() == vi && slot->get_engine() == value.get_engine() && vi != script_value::TYPEID_CHAR) {
-						if (vi == script_value::TYPEID_INT) { slot->unchecked_set_int_payload(value.unchecked_as_int()); }
-						else if (vi == script_value::TYPEID_FLOAT) { slot->unchecked_set_float_payload(value.unchecked_as_float()); }
-						else { slot->unchecked_set_bool_payload(value.unchecked_as_bool()); }
-						if (slot->type_info_raw() != tag) { slot->set_type_info(type_info_ptr{const_cast<type_info*>(tag)}); }
-					} else {
-						*slot = value;
+				if (store_scalar_lane(*slot, value, ins)) return op_status::ok;
+			}
+		} else if (!(ins.c & store_flag_global_only) && cached_global_env_ && !parallel_worker_) {
+			// an environment variable through the load's armed cache: the full path's walk resolves the same cell (get_env_var_ptr
+			// and vm_storage_lookup share the ladder), and a frame whose member scope is active keeps the full path's member rules
+			bool plain = !f.locals || f.top_level;
+			if (!plain) { ensure_frame_member_scope(f, environment_.get()); plain = !frame_scope_active(f); }
+			if (plain) {
+				if (script_value* cell = env_store_cell(f, f.ip * 3 + 2, f.code->symbols[ins.a])) {
+					const size_t ci = cell->raw_storage_index();
+					if (ci != script_value::TYPEID_REFERENCE && ci != script_value::TYPEID_CPP_BOUND && ci != script_value::TYPEID_WEAK_PTR &&
+					    store_scalar_lane(*cell, value, ins)) {
+						return op_status::ok;
 					}
-					if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
-					return op_status::ok;
 				}
 			}
 		}
@@ -3838,6 +3827,51 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	const op_status st = store_popped_value_full(f, ins, std::move(value));
 	if (st == op_status::ok && (ins.c & store_flag_no_result)) { stack_.pop_back(); }
 	return st;
+}
+
+// a scalar into storage that is untagged, var or of the scalar's own type: the cell holds the value (a var's own tag stamped on it), the
+// value is the result; false = any other shape, nothing written
+bool vm_backend::store_scalar_lane(script_value& slot, script_value& value, const vm_instruction& ins) {
+	const size_t vi = value.raw_storage_index();
+	const type_info* st = slot.type_info_raw();
+	const type_info* vt = value.type_info_raw();
+	const script_value_type vb = vt ? vt->base_type : script_value_type::jai_any_type;
+	const type_info* tag = vt;
+	bool lane = !st;
+	if (!lane && st->base_type == script_value_type::jai_any_type && !st->dynamic_slot &&
+	    (vb == script_value_type::jai_any_type || vb == value.current_type())) {
+		lane = true;
+		tag = st;
+	} else if (!lane) {
+		lane = st->base_type == value.current_type() && (vb == script_value_type::jai_any_type || vb == st->base_type);
+	}
+	if (!lane) return false;
+	if (tag != vt) { value.set_type_info(type_info_ptr{const_cast<type_info*>(tag)}); }
+	// storage already holding this kind from this engine takes the payload and the tag (the copy below writes nothing else)
+	if (slot.raw_storage_index() == vi && slot.get_engine() == value.get_engine() && vi != script_value::TYPEID_CHAR) {
+		if (vi == script_value::TYPEID_INT) { slot.unchecked_set_int_payload(value.unchecked_as_int()); }
+		else if (vi == script_value::TYPEID_FLOAT) { slot.unchecked_set_float_payload(value.unchecked_as_float()); }
+		else { slot.unchecked_set_bool_payload(value.unchecked_as_bool()); }
+		if (slot.type_info_raw() != tag) { slot.set_type_info(type_info_ptr{const_cast<type_info*>(tag)}); }
+	} else {
+		slot = value;
+	}
+	if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+	return true;
+}
+
+// the cell env_lookup_cached hands a load at this site when its two-compare head is armed (an environment-local cell; a this or static
+// fallback never arms); null = the full path resolves the store
+script_value* vm_backend::env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id) {
+	auto& cache = f.code->env_lookup_cache;
+	if (cache.size() > cache_slot) {
+		const env_lookup_cache_entry& e = cache[cache_slot];
+		if (e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) return e.fast_ptr;
+	}
+	script_value* ptr = env_lookup_cached(f, cache_slot, symbol_id);
+	if (!ptr || cache.size() <= cache_slot) return nullptr;
+	const env_lookup_cache_entry& e = cache[cache_slot];
+	return e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr == ptr ? ptr : nullptr;
 }
 
 JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_instruction& ins, script_value value) {
@@ -4430,6 +4464,14 @@ op_status vm_backend::exec_compound_store(frame& f, const vm_instruction& ins) {
 				const script_float r = ri == script_value::TYPEID_FLOAT ? right.unchecked_as_float() : static_cast<script_float>(right.unchecked_as_int());
 				script_float& t = slot->unchecked_as_float_ref();
 				t = kind == compound_plus ? t + r : kind == compound_minus ? t - r : t * r;
+				done = true;
+			} else if (kind == compound_plus && ti == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+				// the full path's string append row: the memory charge, then the append through the copy-on-write gate
+				if (!limits_->memory_charge(right.unchecked_as_string().size())) [[unlikely]] {
+					stack_.pop_back();
+					return raise_from(detail::raise_memory_cap(*limits_));
+				}
+				slot->unchecked_as_string_ref() += right.unchecked_as_string();
 				done = true;
 			}
 			if (done) {
@@ -5997,20 +6039,22 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 	return {};
 }
 
+// two plain strings' `+` (a string index is never a bound box): the concat, charged against the memory cap before it exists
+op_status vm_backend::fused_string_add(const script_value& l, const script_value& r, std::optional<script_value>& out) {
+	if (!limits_->memory_charge(sizeof(script_value) + l.unchecked_as_string().size() + r.unchecked_as_string().size())) [[unlikely]] {
+		return raise_from(detail::raise_memory_cap(*limits_));
+	}
+	out.emplace(script_value(l.unchecked_as_string() + r.unchecked_as_string(), engine_));
+	return {};
+}
+
 JAI_NOINLINE op_status vm_backend::binary_fused_tail(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp,
                                                      std::optional<script_value>& out) {
 	if (!has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
 		const size_t li = lp->raw_storage_index();
 		const size_t ri = rp->raw_storage_index();
-		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
-		    !lp->is_cpp_bound() && !rp->is_cpp_bound()) {
-			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
-			// engine::memory_cap chokepoint: deny the concat result before it exists
-			if (!limits_->memory_charge(sizeof(script_value) + lp->unchecked_as_string().size() + rp->unchecked_as_string().size())) [[unlikely]] {
-				return raise_from(detail::raise_memory_cap(*limits_));
-			}
-			out.emplace(script_value(lp->unchecked_as_string() + rp->unchecked_as_string(), engine_));
-			return {};
+		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
+			return fused_string_add(*lp, *rp, out);
 		} else if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
 			// twin parity: bound operands keep this fused shape's zero-divisor error surface
 			if (auto z = bound_fastpath_zero_divisor(op, *lp, *rp, true, true)) {
@@ -6218,6 +6262,81 @@ JAI_NOINLINE const script_value* vm_backend::fused_cmp_operand_env(frame& f, con
 // retargeted (fall-through = ip+1, jump = ins.a); on error or script unwinding ip is
 // left on this instruction (and the unwinding case leaves the result pushed, exactly
 // like the unfused pair did before its jump executed).
+// The fused compare-jump's numeric, string and null rows (custom numeric operators already excluded by the caller): 1 = the compare
+// holds, 0 = it does not, -1 = the verbatim pair decides
+int vm_backend::fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op) {
+	const size_t li = lv.raw_storage_index();
+	const size_t ri = rv.raw_storage_index();
+	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+		const script_int a = lv.unchecked_as_int(), b = rv.unchecked_as_int();
+		bool truthy;
+		switch (op) {
+		case token_type::less: truthy = a < b; break;
+		case token_type::less_equal: truthy = a <= b; break;
+		case token_type::greater: truthy = a > b; break;
+		case token_type::greater_equal: truthy = a >= b; break;
+		case token_type::equal_equal: truthy = a == b; break;
+		default: truthy = a != b; break;   // compiler fuses exactly the six comparisons
+		}
+		return truthy ? 1 : 0;
+	}
+	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
+	    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+		const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(lv.unchecked_as_int()) : lv.unchecked_as_float();
+		const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(rv.unchecked_as_int()) : rv.unchecked_as_float();
+		bool truthy;
+		switch (op) {
+		case token_type::less: truthy = a < b; break;
+		case token_type::less_equal: truthy = a <= b; break;
+		case token_type::greater: truthy = a > b; break;
+		case token_type::greater_equal: truthy = a >= b; break;
+		case token_type::equal_equal: truthy = a == b; break;
+		default: truthy = a != b; break;
+		}
+		return truthy ? 1 : 0;
+	}
+	// String lane: handle_equal / handle_less and kin compare two strings by bytes (a shared node is equal to itself);
+	// the custom-binary-op latch guards the global operator consult that precedes them
+	if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING && !has_custom_binary_ops_) {
+		const script_string& a = lv.unchecked_as_string();
+		const script_string& b = rv.unchecked_as_string();
+		bool truthy;
+		switch (op) {
+		case token_type::equal_equal: truthy = &a == &b || a == b; break;
+		case token_type::bang_equal: truthy = &a != &b && a != b; break;
+		case token_type::less: truthy = a < b; break;
+		case token_type::less_equal: truthy = a <= b; break;
+		case token_type::greater: truthy = a > b; break;
+		default: truthy = a >= b; break;
+		}
+		return truthy ? 1 : 0;
+	}
+	// Null-compare lane (`x == null` / `x != null`, the BST/gameplay guard shape):
+	// handle_equal answers a null operand from storage alone - null equals null and
+	// nothing else does (a transparent wrapper unwraps to a NON-null value or stays
+	// itself, so an object side never reads as null; class operator== is consulted
+	// only after that verdict). Kept on the general path: weak_ptr (expiry answer),
+	// cpp-bound (null-semantic pointers) and raw-invalid. The custom-binary-op latch
+	// guards the global `==` overload consult that precedes handle_equal.
+	if ((op == token_type::equal_equal || op == token_type::bang_equal) && !has_custom_binary_ops_ &&
+	    (li == script_value::TYPEID_NULL || ri == script_value::TYPEID_NULL)) {
+		int verdict = -1;
+		switch (li == script_value::TYPEID_NULL ? ri : li) {
+		case script_value::TYPEID_NULL: verdict = 1; break;
+		case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_STRING:
+		case script_value::TYPEID_BOOL: case script_value::TYPEID_CHAR: case script_value::TYPEID_ARRAY:
+		case script_value::TYPEID_MAP: case script_value::TYPEID_FUNCTION: case script_value::TYPEID_OBJECT:
+			verdict = 0; break;
+		default: break;
+		}
+		if (verdict >= 0) {
+			const bool truthy = (op == token_type::equal_equal) == (verdict == 1);
+			return truthy ? 1 : 0;
+		}
+	}
+	return -1;
+}
+
 op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[ins.b];
 #ifdef JAISCRIPT_VM_PROFILE
@@ -6247,78 +6366,10 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 		if (lp && rp) { const size_t lk = lp->raw_storage_index(), rk = rp->raw_storage_index(); if (lk == script_value::TYPEID_SHARED_PTR || rk == script_value::TYPEID_SHARED_PTR) ++profile_cmp_sptr_null_; }
 #endif
 		if (rp) {
-			const size_t li = lp->raw_storage_index();
-			const size_t ri = rp->raw_storage_index();
-			if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
-				bool truthy;
-				switch (op) {
-				case token_type::less: truthy = a < b; break;
-				case token_type::less_equal: truthy = a <= b; break;
-				case token_type::greater: truthy = a > b; break;
-				case token_type::greater_equal: truthy = a >= b; break;
-				case token_type::equal_equal: truthy = a == b; break;
-				default: truthy = a != b; break;   // compiler fuses exactly the six comparisons
-				}
-				f.ip = truthy ? f.ip + 1 : ins.a;
+			const int verdict = fused_cmp_rows(*lp, *rp, op);
+			if (verdict >= 0) {
+				f.ip = verdict ? f.ip + 1 : ins.a;
 				return {};
-			}
-			if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-			    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
-				const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
-				bool truthy;
-				switch (op) {
-				case token_type::less: truthy = a < b; break;
-				case token_type::less_equal: truthy = a <= b; break;
-				case token_type::greater: truthy = a > b; break;
-				case token_type::greater_equal: truthy = a >= b; break;
-				case token_type::equal_equal: truthy = a == b; break;
-				default: truthy = a != b; break;
-				}
-				f.ip = truthy ? f.ip + 1 : ins.a;
-				return {};
-			}
-			// String lane: handle_equal / handle_less and kin compare two strings by bytes (a shared node is equal to itself);
-			// the custom-binary-op latch guards the global operator consult that precedes them
-			if (li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING && !has_custom_binary_ops_) {
-				const script_string& a = lp->unchecked_as_string();
-				const script_string& b = rp->unchecked_as_string();
-				bool truthy;
-				switch (op) {
-				case token_type::equal_equal: truthy = &a == &b || a == b; break;
-				case token_type::bang_equal: truthy = &a != &b && a != b; break;
-				case token_type::less: truthy = a < b; break;
-				case token_type::less_equal: truthy = a <= b; break;
-				case token_type::greater: truthy = a > b; break;
-				default: truthy = a >= b; break;
-				}
-				f.ip = truthy ? f.ip + 1 : ins.a;
-				return {};
-			}
-			// Null-compare lane (`x == null` / `x != null`, the BST/gameplay guard shape):
-			// handle_equal answers a null operand from storage alone - null equals null and
-			// nothing else does (a transparent wrapper unwraps to a NON-null value or stays
-			// itself, so an object side never reads as null; class operator== is consulted
-			// only after that verdict). Kept on the general path: weak_ptr (expiry answer),
-			// cpp-bound (null-semantic pointers) and raw-invalid. The custom-binary-op latch
-			// guards the global `==` overload consult that precedes handle_equal.
-			if ((op == token_type::equal_equal || op == token_type::bang_equal) && !has_custom_binary_ops_ &&
-			    (li == script_value::TYPEID_NULL || ri == script_value::TYPEID_NULL)) {
-				int verdict = -1;
-				switch (li == script_value::TYPEID_NULL ? ri : li) {
-				case script_value::TYPEID_NULL: verdict = 1; break;
-				case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_STRING:
-				case script_value::TYPEID_BOOL: case script_value::TYPEID_CHAR: case script_value::TYPEID_ARRAY:
-				case script_value::TYPEID_MAP: case script_value::TYPEID_FUNCTION: case script_value::TYPEID_OBJECT:
-					verdict = 0; break;
-				default: break;
-				}
-				if (verdict >= 0) {
-					const bool truthy = (op == token_type::equal_equal) == (verdict == 1);
-					f.ip = truthy ? f.ip + 1 : ins.a;
-					return {};
-				}
 			}
 		}
 	}
@@ -10659,6 +10710,12 @@ bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
 		frame_slot_set(f, slot, std::move(nv));
 		return true;
 	}
+	case k_typed_dst_compound:
+		// the int row's mirror: the slot holds a float (the operand read proved it), the payload updates in place, tag untouched
+		if (!s || s->raw_storage_index() != script_value::TYPEID_FLOAT) { JAI_TYPED_LAND(8); return false; }
+		JAI_TYPED_LAND(7);
+		s->unchecked_set_float_payload(v);
+		return true;
 	default:
 		return false;
 	}
@@ -10863,6 +10920,28 @@ bool vm_backend::dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, scri
 
 op_status vm_backend::exec_dyn_arith(frame& f, const vm_instruction& ins) {
 	if (dyn_arith_fast(f, ins)) return {};
+	if (ins.op == opcode::op_d_add && !has_custom_numeric_ops_) {
+		const script_value* lp = dyn_operand(f, ins.b);
+		const script_value* rp = lp ? dyn_operand(f, ins.c) : nullptr;
+		if (rp && lp->raw_storage_index() == script_value::TYPEID_STRING && rp->raw_storage_index() == script_value::TYPEID_STRING) {
+			const uint32_t dst = ins.a >> k_typed_dst_shift;
+			const type_info* stamp = dst == k_typed_dst_decl ? f.code->typed_sites[f.ip].stamp : nullptr;
+			// a declaration the string lands in as the decl lane lands it (its type the string's or var); anything else replays
+			if (dst != k_typed_dst_decl || variable_decl::identity_payload(script_value::TYPEID_STRING, stamp)) {
+				std::optional<script_value> out;
+				if (fused_string_add(*lp, *rp, out) == op_status::failed) return op_status::failed;
+				switch (dst) {
+				case k_typed_dst_temp: frame_slot_set(f, ins.a & k_typed_slot_mask, std::move(*out)); return {};
+				case k_typed_dst_decl:
+					if (stamp) { out->set_type_info(type_info_ptr{const_cast<type_info*>(stamp)}); }
+					frame_slot_set(f, ins.a & k_typed_slot_mask, std::move(*out));
+					return {};
+				case k_typed_dst_store: return store_popped_value(f, f.code->typed_sites[f.ip].orig2, std::move(*out));
+				default: stack_.push_back(std::move(*out)); return {};
+				}
+			}
+		}
+	}
 	return exec_typed_fallback(f, f.code->typed_sites[f.ip].orig);
 }
 
@@ -10872,36 +10951,11 @@ op_status vm_backend::exec_dyn_cmp_jump(frame& f, const vm_instruction& ins) {
 		const script_value* lp = dyn_operand(f, ins.a);
 		const script_value* rp = lp ? dyn_operand(f, ins.b) : nullptr;
 		if (rp) {
-			const size_t li = lp->raw_storage_index(), ri = rp->raw_storage_index();
-			bool truthy;
-			bool done = true;
-			if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				const script_int x = lp->unchecked_as_int(), y = rp->unchecked_as_int();
-				switch (ins.op) {
-				case opcode::op_d_jlt: truthy = x < y; break;
-				case opcode::op_d_jle: truthy = x <= y; break;
-				case opcode::op_d_jgt: truthy = x > y; break;
-				case opcode::op_d_jge: truthy = x >= y; break;
-				case opcode::op_d_jeq: truthy = x == y; break;
-				default: truthy = x != y; break;
-				}
-			} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				const script_float x = li == script_value::TYPEID_INT ? static_cast<script_float>(lp->unchecked_as_int()) : lp->unchecked_as_float();
-				const script_float y = ri == script_value::TYPEID_INT ? static_cast<script_float>(rp->unchecked_as_int()) : rp->unchecked_as_float();
-				switch (ins.op) {
-				case opcode::op_d_jlt: truthy = x < y; break;
-				case opcode::op_d_jle: truthy = x <= y; break;
-				case opcode::op_d_jgt: truthy = x > y; break;
-				case opcode::op_d_jge: truthy = x >= y; break;
-				case opcode::op_d_jeq: truthy = x == y; break;
-				default: truthy = x != y; break;
-				}
-			} else {
-				done = false;
-				truthy = false;
-			}
-			if (done) {
-				f.ip = truthy ? f.ip + 1 : ins.c;
+			static constexpr token_type k_ops[] = {token_type::less, token_type::less_equal, token_type::greater, token_type::greater_equal,
+			                                       token_type::equal_equal, token_type::bang_equal};
+			const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)]);
+			if (verdict >= 0) {
+				f.ip = verdict ? f.ip + 1 : ins.c;
 				return {};
 			}
 		}

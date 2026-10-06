@@ -51,7 +51,7 @@ public:
         int64_t hash[2] = {0, 0};
         for (bool use_vm : {false, true}) {
             auto e = jai::engine::make();
-            if (use_vm) { e->set_backend(jai::backend_type::vm); }
+            e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             jai::stdlib::register_all(e);
             e->execution_budget(0);
             auto t0 = std::chrono::steady_clock::now();

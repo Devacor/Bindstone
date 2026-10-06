@@ -117,9 +117,8 @@ namespace MV {
 	std::shared_ptr<jai::engine> makeScriptEngine(const Services& a_services, size_t a_memoryCapBytes) {
 		auto engine = jai::engine::make();
 		if (environmentFlag("MV_SCRIPT_INTERPRETER")) {
+			engine->set_backend(jai::backend_type::interpreter); // must precede the first execute
 			MV::info("Script engine: interpreter backend forced via MV_SCRIPT_INTERPRETER");
-		} else {
-			engine->set_backend(jai::backend_type::vm); // must precede the first execute
 		}
 		engine->memory_cap(a_memoryCapBytes);
 		engine->add_include_path("Assets");   // include "Creatures/Shared/status.script" from any script

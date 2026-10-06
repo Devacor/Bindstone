@@ -805,7 +805,7 @@ public:
             )";
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 check_eq(std::string("99|99|5|41"), e->execute(src).as<std::string>(),
                          use_vm ? "vm new sugar" : "interp new sugar");
@@ -829,7 +829,7 @@ public:
             )";
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 check_eq(std::string("same|10|20|1"), e->execute(src).as<std::string>(),
                          use_vm ? "vm spelling parity" : "interp spelling parity");
@@ -848,7 +848,7 @@ public:
             )";
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 check_eq((int64_t)42, e->execute(src).as_int(),
                          use_vm ? "vm upcast" : "interp upcast");
             }
@@ -859,7 +859,7 @@ public:
             struct counter_probe { int n = 0; };
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 dynamic_binder<counter_probe>(*e, "CounterProbe")
                     .constructor<>()
                     .property("n", &counter_probe::n)
@@ -878,7 +878,7 @@ public:
         test("new_keyword_statement_and_error_shapes", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 // statement position: constructs and discards without error
                 const char* stmt_src = R"(
                     class P { int x = 0; P() { x = 0; } }
@@ -890,7 +890,7 @@ public:
                 // `new P;` without an argument list is a parse error (rejected either
                 // as a throw or a null result depending on recovery)
                 auto e2 = engine::make();
-                if (use_vm) { e2->set_backend(jai::backend_type::vm); }
+                e2->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 bool rejected = false;
                 try {
                     auto r = e2->execute("class P { int x = 0; } var p = new P;");
@@ -949,7 +949,7 @@ public:
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
@@ -984,7 +984,7 @@ public:
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
             check_eq(expected, outputs[0], "interp base/derived access");
@@ -1016,7 +1016,7 @@ public:
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->static_checking(check_mode::warn);   // the runtime raise (strict rejects S::counter at load)
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
@@ -1034,7 +1034,7 @@ public:
         test("name_resolution_locals_and_params_shadow_fields", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = make_engine();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 auto r = e->execute(R"(
                     class C {
                         string hp = "field";
@@ -1053,7 +1053,7 @@ public:
         test("name_resolution_fields_shadow_globals", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = make_engine();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 // C++ unqualified lookup: inside a method, the FIELD shadows a
                 // same-named global for reads AND writes; the global is untouched and
                 // stays reachable at top level; a global defined AFTER the class never
@@ -1092,7 +1092,7 @@ public:
         test("shared_ptr_construction_distinguishes_classes", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
@@ -1115,7 +1115,7 @@ public:
         test("shared_ptr_construction_same_arity_args_and_interleaved", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 0; Foo(int v) { x = v; } }
                     class Bar { int y = 0; Bar(int v) { y = v; } }
@@ -1136,7 +1136,7 @@ public:
             // against BAR even when shared_ptr<Foo> was interned first.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
@@ -1171,7 +1171,7 @@ public:
             // wrong-class errors, and null-after-establishment all mirror shared_ptr<T>.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
@@ -1214,7 +1214,7 @@ public:
             // at the escape hatches (var, or an explicit shared_ptr<T>)
             auto run_catch = [](bool use_vm, const char* src) -> std::string {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
                 return "<no throw>";
             };
@@ -1237,7 +1237,7 @@ public:
                                          "shared_ptr<var> n = null;",
                                          "function f(shared_ptr<var> a) { return a; }" }) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     bool rejected = false;
                     std::string msg;
                     try {
@@ -1257,7 +1257,7 @@ public:
                 }
                 // and plain var really does hold + rebind any class's handle (the why)
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
@@ -1281,7 +1281,7 @@ public:
             // spellings (shared_ptr<T>, shared_ptr<auto>, plain auto copies) keep enforcing.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
@@ -1350,7 +1350,7 @@ public:
             // a shadow emits ONE warning per colliding method per class definition.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 std::vector<std::string> warnings;
                 e->set_script_warning_handler([&](const std::string& m) { warnings.push_back(m); });
 
@@ -1387,7 +1387,7 @@ public:
         test("shared_ptr_construction_across_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
                     class Bar { int y = 2; }
@@ -1408,7 +1408,7 @@ public:
             // dispatch the NEW body immediately, on both backends.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class C { int f() { return 1; } }
                     var c = C();
@@ -1426,7 +1426,7 @@ public:
             // invalidate a hot site whose cached receiver class is the DERIVED.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class B { int f() { return 1; } }
                     class D : B { int pad = 0; }
@@ -1446,7 +1446,7 @@ public:
             std::array<std::string, 2> outcomes;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class T { int f(int x) { return x + 1; } }
                     var t = T();
@@ -1464,7 +1464,7 @@ public:
             // hot site must accept a different arg type on every call, no lock-in.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class U { int n = 0; void f(var v) { n += 1; } }
                     var u = U();
@@ -1483,7 +1483,7 @@ public:
             // miss-and-refill without ever dispatching the wrong class's method.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class A { int f() { return 1; } }
                     class Z { int f() { return 10; } }
@@ -1502,7 +1502,7 @@ public:
             std::array<std::string, 2> outcomes;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class S { int f() { return 1; } }
                     var s = S();
@@ -1529,7 +1529,7 @@ public:
             std::array<std::string, 2> removed;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class P { int x = 3; }
                     var p = P();
@@ -1578,7 +1578,7 @@ public:
             };
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class R2 { int y = 1; } var r2 = R2();");
                 for (const auto& [label, src] : shapes) {
                     check_eq(std::string(expected), e->execute(src).as<std::string>(),
@@ -1595,7 +1595,7 @@ public:
             std::array<std::string, 2> badstore;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class W { int x = 0; int log = 0; }
                     var w = W();
@@ -1636,7 +1636,7 @@ public:
             std::array<std::string, 2> err;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class S {
                         int v = 3; var brain = null; int ticks = 0;
@@ -1665,7 +1665,7 @@ public:
         test("leading_reference_return_type_on_methods", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 const std::string tag = use_vm ? " (vm)" : " (interpreter)";
                 auto run = [&](const char* src) {
@@ -1684,7 +1684,7 @@ public:
             // Host C++ get_field stays unrestricted by design.
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->execute("class R { public: int v = 4; } var r = R();");
                 check_eq((int64_t)4, e->execute("r.v").as_int(), "public before reload");

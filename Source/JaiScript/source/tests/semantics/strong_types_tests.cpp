@@ -21,7 +21,7 @@ public:
             for (bool vm : {false, true}) {
                 for (bool strict : {true, false}) {
                     auto e = engine::make();
-                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     if (!strict) { e->static_checking(check_mode::off); }
                     const std::string label = std::string(vm ? "vm" : "interp") + (strict ? " strict" : " off");
                     auto run = [&](const char* src) {
@@ -70,7 +70,7 @@ public:
             std::vector<std::string> seen[2];
             for (bool vm : {false, true}) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 const auto rows = e->execute(src).as_array();
                 for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
@@ -139,7 +139,7 @@ public:
 			std::vector<std::string> seen[2];
 			for (bool vm : {false, true}) {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				const auto rows = e->execute(src).as_array();
 				for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
@@ -221,7 +221,7 @@ public:
             std::vector<std::string> seen[2];
             for (bool vm : {false, true}) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 const auto rows = e->execute(src).as_array();
                 for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
@@ -274,7 +274,7 @@ public:
 			std::vector<std::string> seen[2];
 			for (bool vm : {false, true}) {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				const auto rows = e->execute(src).as_array();
 				for (const auto& r : rows) { seen[vm ? 1 : 0].push_back(r.as_string()); }
@@ -1414,7 +1414,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 e->static_checking(mode);
                 jai::stdlib::register_all(e);
@@ -1525,7 +1525,7 @@ public:
         test("compound_overflow_policy_covers_intermediate", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 if (!e->throw_on_overflow()) { return; }  // wrap build: policy off by design
                 bool threw = false;
                 try { e->execute("int x = 9223372036854775807; x += 1; x"); }
@@ -2138,7 +2138,7 @@ public:
         test("typed_field_set_field_cpp_api", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class C { int v = 0; var w = 0; }  auto c = C();");
                 auto obj = e->execute("c");
                 auto instance = obj.as<std::shared_ptr<jai::class_instance>>();
@@ -2277,7 +2277,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
                 try { out[idx] = e->execute(src).to_string(); }
@@ -2482,7 +2482,7 @@ public:
             std::string out[2];
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->add_function("==", [](const jai::script_value&, const jai::script_value&) { return true; });
                 out[use_vm ? 1 : 0] = e->execute("class N { int a = 1; } auto n = N(); int hits = 0; if (n == null) { hits += 1; } if (null == null) { hits += 10; } to_string(hits) + \",\" + to_string(n == null)").to_string();
@@ -2559,7 +2559,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 e->static_checking(mode);
                 jai::stdlib::register_all(e);
@@ -2800,7 +2800,7 @@ public:
             // both backends, proofs on and off, byte-identical outputs and error texts
             auto run = [](const std::string& src, bool use_vm, bool proofs) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->type_proofs(proofs);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -2870,7 +2870,7 @@ public:
             check(run("array<uint8> b = [300];", false, true).find("300 is outside uint8 (0..255)") != std::string::npos, "the checker reads a literal element");
             check(run("array<int8> b = [0]; b[0] = -200;", true, true).find("-200 is outside int8 (-128..127)") != std::string::npos, "the checker reads a literal store");
             // one byte per element in the node
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             auto v = e->execute("array<uint8> b = []; for (int i = 0; i < 1000; i++) { b.push(i % 256); } b");
             const jai::script_array* node = v.unchecked_array_node();
             check(node->kind() == jai::script_array::kind_t::u8, "array<uint8> holds the u8 byte buffer");
@@ -2883,7 +2883,7 @@ public:
             // the range, a std::vector<uint8_t> result is an array<uint8>
             for (bool use_vm : {false, true}) {
                 auto h = jai::engine::make();
-                if (use_vm) { h->set_backend(jai::backend_type::vm); }
+                h->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(h);
                 h->add_function("host_sum", [](std::vector<uint8_t> b) -> script_int { script_int s = 0; for (uint8_t x : b) { s += x; } return s; });
                 h->add_function("host_fill", [](jai::bound_array<uint8_t>& b) -> script_int { b[0] = 9; b.push_back(200); return static_cast<script_int>(b.size()); });
@@ -3097,7 +3097,7 @@ public:
         test("typed_storage_engages_raw_buffers", [this]() {
             // Not just parity: declared element types must actually produce typed nodes
             // (and the laundering path must actually demote)
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             jai::stdlib::register_all(e);
             auto v = e->execute("array<int> a = [1,2,3]; a");
             check(v.is_array(), "returns array");
@@ -3132,7 +3132,7 @@ public:
             // The boundary kernel itself: a typed node crossing into array<var> comes back as a
             // FRESH hetero node under the target tag; the source buffer is untouched. The stamp
             // net (set_type_info) demotes any typed node that still meets an open-element tag.
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_engine();
             jai::stdlib::register_all(e);
             auto ints = e->execute("array<int> ints = [1, 2, 3]; ints");
             check(ints.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "source is an i64 buffer");
@@ -3180,7 +3180,7 @@ public:
             for (bool use_vm : {false, true}) {
                 for (bool proofs : {true, false}) {
                     auto e = jai::engine::make();
-                    if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                    e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->type_proofs(proofs);
                     e->execution_budget(0);
                     jai::stdlib::register_all(e);
@@ -3467,7 +3467,7 @@ public:
             check_proof_run(thrice_then(unit, "probe(q, c, cc)"), "1310:1210:130:30:42:4:3", "typed receivers with user accessors: all four lanes agree");
             // an accessor-bearing field never carries a field proof; a sibling plain field still does
             auto members_after_two = [](const std::string& src) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_engine();
                 e->execute(src);
                 e->execute(src);
                 return e->last_proof_stats().members;
@@ -3481,7 +3481,7 @@ public:
             for (bool use_vm : {false, true}) {
                 const std::string tag = use_vm ? "vm: " : "interp: ";
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(
                     "class R { int f = 1; int log = 0; int raw() { return f; } }\n"
                     "var r = R();\n"
@@ -3726,7 +3726,7 @@ public:
             // to the initializer default when the live value converts only through script
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class C { int a = 0; C() {} C(int v) { a = v; } } class H { C c; string s = \"\"; } auto h = H();");
                 auto instance = e->execute("h").as<std::shared_ptr<jai::class_instance>>();
                 check_not_null(instance.get());

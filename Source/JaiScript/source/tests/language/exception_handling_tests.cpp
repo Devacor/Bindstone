@@ -323,7 +323,7 @@ public:
             std::string first_runtime, first_throw;
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(*e);
                 const std::string runtime = e->execute_file_source(path, runtime_src).to_string();
                 check_eq(std::string("Array index 5 out of bounds for array of size 1|Array index 5 out of bounds for array of size 1|2|") +

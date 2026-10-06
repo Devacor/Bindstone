@@ -31,7 +31,7 @@ public:
 
 	static std::shared_ptr<jai::engine> host(bool use_vm) {
 		auto e = jai::engine::make();
-		if (use_vm) { e->set_backend(jai::backend_type::vm); }
+		e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 		e->execution_budget(0);
 		jai::stdlib::register_all(e);
 		dynamic_binder<method_call_bench_hosts::tally>(*e, "Tally").constructor<>()

@@ -55,7 +55,7 @@ public:
 
 	std::string run_on(bool vm, const std::string& script, bool proofs = true, double budget = 0.0) {
 		auto e = engine::make();
-		if (vm) { e->set_backend(backend_type::vm); }
+		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		stdlib::register_all(*e);
 		if (!proofs) { e->type_proofs(false); }
 		if (budget > 0.0) { e->execution_budget(budget); }
@@ -105,7 +105,7 @@ public:
 				for (int backend = 0; backend < 2; ++backend) {
 					probe_box box;
 					auto e = engine::make();
-					if (backend == 1) { e->set_backend(backend_type::vm); }
+					e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 					e->type_proofs(proofs);
 					stdlib::register_all(*e);
 					dynamic_binder<probe_box>(*e, "probe_box")
@@ -142,7 +142,7 @@ public:
 			std::string seen[2];
 			for (int backend = 0; backend < 2; ++backend) {
 				auto e = engine::make();
-				if (backend == 1) { e->set_backend(backend_type::vm); }
+				e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				e->execute(spin);
 				script_value fn = e->get_variable("spin");

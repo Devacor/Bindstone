@@ -254,7 +254,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 if (unchecked) { e->static_checking(check_mode::off); }
                 jai::stdlib::register_all(e);

@@ -46,7 +46,7 @@ public:
 	signal_auto_binding_tests() : suite("Signal Auto Binding") {}
 
 	static std::shared_ptr<engine> make_bound_engine() {
-		auto eng = engine::make();
+		auto eng = jai::foundry::make_engine();
 		dynamic_binder<scoreboard>(*eng, "Scoreboard")
 			.constructor<>()
 			.method("score", &scoreboard::score)
@@ -87,7 +87,7 @@ public:
 		});
 
 		test("typed_bind_signal_type_keeps_precedence", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_engine();
 			bind_signal_type<void(int)>(*eng, "SignalInt");
 			dynamic_binder<scoreboard>(*eng, "Scoreboard")
 				.constructor<>()
@@ -138,7 +138,7 @@ public:
 					.build();
 			};
 			auto run = [&](bool a_baseFirst) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_engine();
 				if (a_baseFirst) { bindBase(*eng); bindDerived(*eng); }
 				else { bindDerived(*eng); bindBase(*eng); }
 				const char* order = a_baseFirst ? "base-first" : "derived-first";

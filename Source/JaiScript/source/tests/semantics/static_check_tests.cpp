@@ -353,7 +353,7 @@ public:
 			for (bool vm : {false, true}) {
 				for (bool proofs : {false, true}) {
 					auto e = engine::make();
-					if (vm) { e->set_backend(backend_type::vm); }
+					e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 					e->type_proofs(proofs);
 					check_true(e->check("int bad() {}").has_errors());
 					check_true(e->check("bool bad() { return; }").has_errors());
@@ -386,7 +386,7 @@ public:
 			for (bool vm : {false, true}) {
 				for (bool proofs : {false, true}) {
 					auto e = engine::make();
-					if (vm) { e->set_backend(backend_type::vm); }
+					e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 					e->type_proofs(proofs);
 					check_true(e->check(source).has_errors());
 					check_true(e->check("void take(array<int>& value) {} array<string> words = [\"a\"]; take(words);").has_errors());
@@ -447,7 +447,7 @@ public:
             const char* text = "cannot assign to read-only property 'ro'";
             auto fresh = [](bool use_vm) {
                 auto e = make_engine();
-                if (use_vm) { e->set_backend(jai::backend_type::vm); }
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 bind_read_only_probe(*e);
                 return e;
             };
@@ -1904,7 +1904,7 @@ public:
                 for (bool proofs : {false, true}) {
                     for (auto mode : {check_mode::strict, check_mode::warn, check_mode::off}) {
                         auto e = engine::make();
-                        if (vm) { e->set_backend(backend_type::vm); }
+                        e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                         e->type_proofs(proofs);
                         e->static_checking(mode);
                         check_eq(std::string("ALICE!|  alice  |ALICE!|BOB!|CARA!|CACHED!|CACHED!"), e->execute(source).as_string());
@@ -1936,7 +1936,7 @@ public:
             for (bool vm : {false, true}) {
                 for (bool proofs : {false, true}) {
                     auto e = engine::make();
-                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     e->type_proofs(proofs);
                     check_eq(std::string("named!|named!|literal!|ctor?|METHOD|static.|overload+|5"), e->execute(source).as_string());
                 }
@@ -1959,7 +1959,7 @@ public:
             for (bool vm : {false, true}) {
                 for (bool proofs : {false, true}) {
                     auto e = engine::make();
-                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     e->type_proofs(proofs);
                     check_eq(std::string("a!?|b!?|a!??|held!"), e->execute(source).as_string());
                 }
@@ -1970,7 +1970,7 @@ public:
             for (bool vm : {false, true}) {
                 std::string native_string{"native"};
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 e->add_global_ref("native_string", native_string);
                 e->add_function("bound_text", [engine_ptr = e.get()]() { return engine_ptr->get_variable("native_string"); });
                 check_eq(std::string("NATIVE"), e->execute("string upper(string& value) { value.to_upper(); return value; }\nupper(bound_text());").as_string());
@@ -2001,7 +2001,7 @@ public:
             for (bool vm : {false, true}) {
                 for (size_t workers : {1u, 2u, 4u}) {
                     auto e = engine::make();
-                    if (vm) { e->set_backend(backend_type::vm); }
+                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     e->parallel_thread_count(workers);
                     check_eq(int64_t{512}, e->execute(source).as_int());
                 }
@@ -2777,7 +2777,7 @@ public:
         // A tool's view of the walk (tools/lsp): the observer sees every inferred expression type and
         // changes nothing about the diagnostics.
         test("observer_reports_expression_types", [this]() {
-            auto e = engine::make();
+            auto e = jai::foundry::make_engine();
             const std::string src =
                 "class P { int hp = 3; }\n"
                 "P p = P();\n"
@@ -2811,7 +2811,7 @@ public:
         });
 
         test("parser_keeps_declarations_around_errors", [this]() {
-            auto e = engine::make();
+            auto e = jai::foundry::make_engine();
             const std::string src = "int a = 1;\nint broken( {\nint b = 2;\n";
             auto types = e->get_registered_template_types();
             lexer lex(src, e->get_symbolizer());

@@ -70,9 +70,9 @@ namespace jai {
     
     // Backend type enumeration
     enum class backend_type {
-        interpreter,    // Default tree-walk interpreter
-        vm,             // Bytecode virtual machine
-        auto_select,    // Legacy alias for interpreter (implicit length-based switching removed)
+        interpreter,    // Tree-walking interpreter (the reference oracle)
+        vm,             // Bytecode virtual machine (the default)
+        auto_select,    // The engine's default: set_backend stores vm
         custom          // Externally supplied via set_backend(std::unique_ptr<execution_backend>)
     };
 

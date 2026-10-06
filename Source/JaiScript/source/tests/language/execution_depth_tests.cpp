@@ -48,6 +48,7 @@ public:
 
 		test("interpreter_default_bounds_non_tail_recursion", [this]() {
 			auto eng = engine::make();
+			eng->set_backend(backend_type::interpreter);
 			eng->execution_budget(0);
 			depth_error(*eng, "int descend(int n) { if (n == 0) { return 0; } return descend(n - 1) + 1; } descend(512);");
 		});
@@ -204,7 +205,7 @@ public:
 			auto second = engine::make();
 			configure(*first, backend_type::interpreter, 12);
 			configure(*first, backend_type::vm, 48);
-			first->set_backend(backend_type::vm);
+			first->set_backend(backend_type::interpreter);
 			check_eq(size_t(12), configured(*first, backend_type::interpreter));
 			check_eq(size_t(48), configured(*first, backend_type::vm));
 			check_eq(size_t(256), configured(*second, backend_type::interpreter));

@@ -218,7 +218,7 @@ namespace jai::fuzz {
 	inline run_outcome run_program(const program& p, const run_config& cfg) {
 		run_outcome out;
 		auto eng = jai::engine::make();
-		if (cfg.use_vm) eng->set_backend(jai::backend_type::vm);
+		eng->set_backend(cfg.use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 		// both backends run under one call-depth cap (the interpreter's): the documented defaults differ (256 / 10,000),
 		// and the contract compared here is that equal caps raise the same catchable error at the same call
 		eng->max_call_depth(jai::backend_type::vm, eng->max_call_depth(jai::backend_type::interpreter));
@@ -635,7 +635,7 @@ namespace jai::fuzz {
 		os << "\tint idx = 0;\n";
 		os << "\tfor (bool use_vm : {false, true}) {\n";
 		os << "\t\tauto e = jai::engine::make();\n";
-		os << "\t\tif (use_vm) { e->set_backend(jai::backend_type::vm); }\n";
+		os << "\t\te->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);\n";
 		os << "\t\te->max_call_depth(jai::backend_type::vm, e->max_call_depth(jai::backend_type::interpreter));\n";
 		os << "\t\te->static_checking(jai::check_mode::warn);\n";
 		os << "\t\te->execution_budget(0);\n";

@@ -45,7 +45,7 @@ inline std::vector<run_config> configs() {
 
 inline std::shared_ptr<engine> make(const run_config& c, check_mode mode = check_mode::strict) {
 	auto e = engine::make();
-	if (c.vm) { e->set_backend(backend_type::vm); }
+	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
 	e->static_checking(mode);
 	if (!c.proofs) { e->type_proofs(false); }

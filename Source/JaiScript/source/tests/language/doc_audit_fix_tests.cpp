@@ -24,7 +24,7 @@ public:
 
     static std::shared_ptr<engine> fresh(bool use_vm, check_mode mode) {
         auto e = engine::make();
-        if (use_vm) { e->set_backend(backend_type::vm); }
+        e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
         e->execution_budget(0);
         e->static_checking(mode);
         stdlib::register_all(e);

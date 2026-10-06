@@ -34,7 +34,7 @@ class reflection_tests : public suite {
     }
 
     static std::shared_ptr<engine> make_reflective_engine() {
-        auto eng = engine::make();
+        auto eng = jai::foundry::make_engine();
         stdlib::register_all(*eng);
         return eng;
     }
@@ -62,7 +62,7 @@ public:
             for (auto mode : {check_mode::off, check_mode::strict}) {
                 for (const std::string name : {"jai", "jai::sub", "jai::sub::deep"}) {
                     for (const std::string body : {"function f() { return 1; }", "var value = 1;", "class Value { int value = 1; }"}) {
-                        auto eng = engine::make();
+                        auto eng = jai::foundry::make_engine();
                         eng->static_checking(mode);
                         const auto error = declaration_error(*eng, "namespace " + name + " { " + body + " }");
                         check(!error.empty(), "script declarations into " + name + " must be rejected");
@@ -75,7 +75,7 @@ public:
         test("reserved_namespace_error_text", [this]() {
             for (auto mode : {check_mode::off, check_mode::strict}) {
                 for (const std::string name : {"reflect", "reflect::sub", "jai", "jai::sub"}) {
-                    auto eng = engine::make();
+                    auto eng = jai::foundry::make_engine();
                     eng->static_checking(mode);
                     check_eq("Namespace '" + name + "' is reserved for the engine (C++-registered only)",
                         declaration_error(*eng, "namespace " + name + " { var value = 1; }"));
@@ -85,7 +85,7 @@ public:
 
         test("reserved_namespace_preserves_host_values", [this]() {
             for (const std::string name : {"jai", "jai::sub", "reflect", "reflect::sub"}) {
-                auto eng = engine::make();
+                auto eng = jai::foundry::make_engine();
                 auto& ns = eng->script_namespaces()[eng->symbolize(name)];
                 ns = std::make_shared<script_namespace_data>();
                 ns->variables[eng->symbolize("host_value")] = script_value(script_int{42}, eng.get());
@@ -102,10 +102,10 @@ public:
 
         test("reserved_namespace_saved_program_rejected", [this]() {
             for (auto mode : {check_mode::off, check_mode::strict}) {
-                auto writer = engine::make();
+                auto writer = jai::foundry::make_engine();
                 writer->static_checking(mode);
                 auto bytes = writer->jaibite("namespace jai::saved { var value = 1; }").save_bytes();
-                auto reader = engine::make();
+                auto reader = jai::foundry::make_engine();
                 reader->static_checking(mode);
                 auto bite = reader->jaibite_load_bytes(bytes);
                 std::string error;
@@ -122,7 +122,7 @@ public:
 
         test("reserved_namespace_prefix_boundaries", [this]() {
             for (const std::string name : {"jailed", "jai_script", "reflector", "reflective", "outer::jai"}) {
-                auto eng = engine::make();
+                auto eng = jai::foundry::make_engine();
                 check_eq(eng->execute("namespace " + name +
                     " { function answer() { return 42; } } " + name + "::answer()").as_int(), script_int{42});
             }

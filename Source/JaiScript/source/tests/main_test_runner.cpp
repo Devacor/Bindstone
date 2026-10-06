@@ -25,9 +25,7 @@ namespace {
 
 std::shared_ptr<jai::engine> make_engine() {
     auto eng = jai::engine::make();
-    if (g_test_backend != jai::backend_type::interpreter) {
-        eng->set_backend(g_test_backend);
-    }
+    eng->set_backend(g_test_backend);
     eng->import_recheck_interval(0);   // test engines touch a file and re-import at once: every reach checks (the throttle has its own tests)
     return eng;
 }

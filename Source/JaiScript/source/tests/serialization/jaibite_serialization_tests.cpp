@@ -59,7 +59,7 @@ namespace jaibite_test_detail {
         auto e = engine::make();
         jai::stdlib::register_all(e);
         if (setup) setup(*e);
-        if (use_vm) e->set_backend(backend_type::vm);
+        e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
         return e;
     }
 

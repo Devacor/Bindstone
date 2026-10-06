@@ -296,7 +296,7 @@ public:
         test("pin_ref_compound_on_stored_bound_never_reaches_cpp", [this]() {
             for (bool use_vm : {false, true}) {
                 auto eng = jai::engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 int c14 = 10;
                 eng->add_global_ref("c14", c14);
                 eng->execute("var arr = [c14];");
@@ -314,7 +314,7 @@ public:
         test("pin_implicit_this_member_store_detaches", [this]() {
             for (bool use_vm : {false, true}) {
                 auto eng = jai::engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 int c11 = 10;
                 eng->add_global_ref("c11", c11);
                 eng->add_function("mkBound11", [&c11, e = eng.get()]() {
@@ -370,7 +370,7 @@ public:
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
                 auto eng = jai::engine::make();
-                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bz = 0;
                 script_int bn = 3;
                 double bfz = 0.0;
@@ -426,7 +426,7 @@ public:
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
                 auto eng = jai::engine::make();
-                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
 
                 int8_t   mi8 = 0;  uint8_t  mu8 = 0;  int16_t mi16 = 0; int32_t mi32 = 0;
                 uint32_t mu32 = 0; int64_t mi64 = 0;  uint64_t mu64 = 0;
@@ -506,7 +506,7 @@ public:
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
                 auto eng = jai::engine::make();
-                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 std::string bstr = "content";
                 std::string bemp = "";
                 std::string sharedStr = "shared";
@@ -547,7 +547,7 @@ public:
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
                 auto eng = jai::engine::make();
-                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bg2 = 100;
                 eng->add_global_ref("bg2", bg2);
                 eng->execute("auto& rr1 = bg2; rr1 += 5;");
@@ -664,7 +664,7 @@ public:
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
                 auto eng = jai::engine::make();
-                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bz2 = 0;
                 eng->add_global_ref("bz2", bz2);
                 eng->execute("var za = [10];");
@@ -684,7 +684,7 @@ public:
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
                 auto eng = jai::engine::make();
-                if (useVm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bi = 10, bz = 0;
                 script_float bf = 1.5, bfz = 0.0;
                 eng->add_global_ref("bi", bi);

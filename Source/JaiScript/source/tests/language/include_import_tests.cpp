@@ -583,7 +583,7 @@ public:
             )");
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 auto r = eng->execute(R"(
                     var cfg = include "expr_config.jai";
@@ -600,7 +600,7 @@ public:
             auto leaf = create_temp_file("expr_leaf.jai", "21;");
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 // computed path form in expression position + in-call use
                 auto r = eng->execute(R"(
@@ -622,7 +622,7 @@ public:
             )");
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 int bumps = 0;
                 eng->add_function("bump_count", [&bumps]() { bumps++; });
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
@@ -670,7 +670,7 @@ public:
                 auto src = create_temp_file("cache_make.jai", "auto cache_make_v = 11;");
                 std::filesystem::remove(sibling_of(src));
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 eng->execute("include \"cache_make.jai\"");
                 check(std::filesystem::exists(sibling_of(src)), "include writes the sibling");
@@ -697,7 +697,7 @@ public:
                 std::filesystem::remove(sibling_of(src));
                 {
                     auto writer = engine::make();
-                    if (use_vm) { writer->set_backend(jai::backend_type::vm); }
+                    writer->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     writer->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)42, writer->execute("var r = include \"cache_skip.jai\"; r;").as_int());
                 }
@@ -707,7 +707,7 @@ public:
                 }
                 relabel_sibling(src);
                 auto reader = engine::make();
-                if (use_vm) { reader->set_backend(jai::backend_type::vm); }
+                reader->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 reader->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)42, reader->execute("var r = include \"cache_skip.jai\"; r;").as_int(),
                          use_vm ? "vm: cache hit skipped the parse" : "interp: cache hit skipped the parse");
@@ -725,7 +725,7 @@ public:
                 std::filesystem::remove(sibling_of(src));
                 {
                     auto writer = engine::make();
-                    if (use_vm) { writer->set_backend(jai::backend_type::vm); }
+                    writer->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { writer->execute_file(src); } catch (...) {}
                 }
                 {
@@ -734,7 +734,7 @@ public:
                 }
                 relabel_sibling(src);
                 auto reader = engine::make();
-                if (use_vm) { reader->set_backend(jai::backend_type::vm); }
+                reader->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 try { reader->execute_file(src); } catch (...) {}
                 auto trace = reader->last_stack_trace();
                 check(!trace.empty(), "trace captured from cache-loaded AST");
@@ -750,7 +750,7 @@ public:
                 auto src = create_temp_file("cache_edit.jai", "1;");
                 std::filesystem::remove(sibling_of(src));
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)1, eng->execute("var a = include \"cache_edit.jai\"; a;").as_int());
                 // edit lands on the very next include, same engine run, with the sibling's
@@ -775,7 +775,7 @@ public:
                     f << "JBITgarbage-not-a-real-bite";
                 }
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)7, eng->execute("var c = include \"cache_corrupt.jai\"; c;").as_int(),
                          "corrupt sibling -> silent reparse");
@@ -787,7 +787,7 @@ public:
                 }
                 relabel_sibling(src);
                 auto eng2 = engine::make();
-                if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
+                eng2->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng2->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)7, eng2->execute("var d = include \"cache_corrupt.jai\"; d;").as_int());
                 cleanup_temp_file(src);
@@ -801,7 +801,7 @@ public:
                 std::filesystem::remove(sibling_of(src));
                 {   // engine A stamps its (extra-function) fingerprint into the sibling
                     auto a = engine::make();
-                    if (use_vm) { a->set_backend(jai::backend_type::vm); }
+                    a->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     a->add_function("fp_extra", [](script_int v) -> script_int { return v; });
                     a->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)100, a->execute("var r = include \"cache_fp.jai\"; r;").as_int());
@@ -814,7 +814,7 @@ public:
                 relabel_sibling(src);
                 {   // engine B: different registration surface -> stale -> parses the source
                     auto b = engine::make();
-                    if (use_vm) { b->set_backend(jai::backend_type::vm); }
+                    b->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     b->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)200, b->execute("var r = include \"cache_fp.jai\"; r;").as_int(),
                              "fingerprint mismatch -> reparse");
@@ -828,7 +828,7 @@ public:
                 relabel_sibling(src);
                 {
                     auto c = engine::make();
-                    if (use_vm) { c->set_backend(jai::backend_type::vm); }
+                    c->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     c->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)200, c->execute("var r = include \"cache_fp.jai\"; r;").as_int(),
                              "matching fingerprint -> sibling loads");
@@ -856,7 +856,7 @@ public:
                     f.write(reinterpret_cast<const char*>(&fingerprint), 8);
                 }
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)42, eng->execute("var v = include \"cache_ver.jai\"; v;").as_int(),
                          "version mismatch -> silent reparse");
@@ -868,7 +868,7 @@ public:
                 }
                 relabel_sibling(src);
                 auto eng2 = engine::make();
-                if (use_vm) { eng2->set_backend(jai::backend_type::vm); }
+                eng2->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng2->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)42, eng2->execute("var w = include \"cache_ver.jai\"; w;").as_int(),
                          "rewritten sibling loads under the current version");
@@ -882,7 +882,7 @@ public:
                 auto src = create_temp_file("cache_off.jai", "5;");
                 std::filesystem::remove(sibling_of(src));
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 check(eng->jaibite_cache(), "cache defaults ON");
                 eng->jaibite_cache(false);
                 check(!eng->jaibite_cache(), "setter/getter");
@@ -899,7 +899,7 @@ public:
                 std::filesystem::remove(sibling_of(src));
                 std::filesystem::create_directory(sibling_of(src));   // sibling path unwritable
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
                 check_eq((int64_t)9, eng->execute("var r = include \"cache_ro.jai\"; r;").as_int(),
                          "unwritable sibling never surfaces as an error");
@@ -1574,13 +1574,13 @@ public:
             for (bool use_vm : {false, true}) {
                 for (const char* src : nested) {
                     auto eng = engine::make();
-                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                    eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     eng->add_include_path(jai::foundry::test_temp_directory().string());
                     check_eq((int64_t)11, eng->execute(src).as_int(), src);
                 }
                 for (const char* src : members) {
                     auto eng = engine::make();
-                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                    eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     std::string text;
                     try { (void)eng->execute(src); } catch (const std::exception& ex) { text = ex.what(); }
                     check_true(text.find("import is a statement, not a member: it is not allowed directly in a class or a namespace body") != std::string::npos, std::string("rejected with the rule: ") + src + " -> " + text);
@@ -1686,7 +1686,7 @@ public:
             std::filesystem::remove(asking / "lm.jai");
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 eng->add_include_path(lib.string());
                 const std::string root = (asking / "root.jai").string();
                 auto ask = [&]() { return eng->execute_file_source(root, "resolve_path(\"lm.jai\");").to_string(); };
@@ -1718,7 +1718,7 @@ public:
             };
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(*eng);
                 eng->import_recheck_interval(0);
                 eng->add_include_path(dir.string());
@@ -1755,7 +1755,7 @@ public:
             };
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(*eng);
                 check_near(0.2, eng->import_recheck_interval(), 1e-12);
                 eng->add_include_path(dir.string());
@@ -1817,7 +1817,7 @@ public:
             for (bool use_vm : {false, true}) {
                 for (bool host_clock : {false, true}) {
                     auto eng = engine::make();
-                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                    eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     jai::stdlib::register_all(*eng);
                     eng->add_include_path(dir.string());
                     auto fake = std::make_shared<std::chrono::nanoseconds>(std::chrono::seconds(100));
@@ -1865,7 +1865,7 @@ public:
             for (bool use_vm : {false, true}) {
                 for (bool proofs : {true, false}) {
                     auto eng = engine::make();
-                    if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                    eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(*eng);
                     if (!proofs) { eng->type_proofs(false); }
                     eng->add_include_path(dir.string());
@@ -1897,7 +1897,7 @@ public:
             const std::string path = (jai::foundry::test_temp_directory() / "root_listing.jai").generic_string();
             for (bool use_vm : {false, true}) {
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 std::string from_file, from_text;
                 try { eng->execute_file_source(path, "int x = \"s\";\n"); } catch (const std::exception& ex) { from_file = ex.what(); }
                 try { eng->execute("int y = \"s\";\n"); } catch (const std::exception& ex) { from_text = ex.what(); }
@@ -1978,7 +1978,7 @@ public:
                 auto src = create_temp_file("cache_imp.jai", "cache_imp_bump();");
                 std::filesystem::remove(sibling_of(src));
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 int bumps = 0;
                 eng->add_function("cache_imp_bump", [&bumps]() { bumps++; });
                 eng->add_include_path(jai::foundry::test_temp_directory().string());
@@ -2053,7 +2053,7 @@ public:
             for (bool use_vm : {false, true}) {
                 { std::ofstream(file, std::ios::binary | std::ios::trunc) << "12345"; }
                 auto eng = engine::make();
-                if (use_vm) { eng->set_backend(jai::backend_type::vm); }
+                eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(*eng);
                 eng->add_include_path(dir.string());
                 auto d = eng->execute("var d = file_data(\"save.dat\"); d;");

@@ -671,7 +671,7 @@ struct engine::implementation {
     std::shared_ptr<environment> global_environment_;
     
     execution_backend_ptr backend;   // constructed lazily via engine::backend()
-    backend_type current_backend_type = backend_type::interpreter; // Default to interpreter
+    backend_type current_backend_type = backend_type::vm;
     bool has_executed_ = false; // Once true, set_backend is forbidden (defined callables capture the backend)
     bool tearing_down = false;  // engine dtor: backend() must not reconstruct for late thunks
     bool custom_numeric_ops_flag_ = false; // sticky signal from add_function; applied at wiring
@@ -1782,7 +1782,6 @@ engine::implementation::implementation()
       class_definition_type_id_(string_symbolizer_.intern("class_definition")) {
     global_environment_ = std::make_shared<environment>(&string_symbolizer_);
 
-    current_backend_type = backend_type::interpreter;
     // The backend is constructed lazily by engine::backend() (callbacks/config applied
     // there via engine::wire_backend()), so unused engines never pay for one.
 
@@ -2057,7 +2056,6 @@ execution_backend* engine::backend() const {
         if (impl->current_backend_type == backend_type::vm) {
             impl->backend = create_vm_backend();
         } else {
-            // interpreter, and auto_select as its legacy alias
             impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
         }
         self->wire_backend();
@@ -3446,6 +3444,9 @@ void engine::wire_backend() {
 }
 
 void engine::set_backend(backend_type type) {
+    if (type == backend_type::auto_select) {
+        type = backend_type::vm;
+    }
     if (type == impl->current_backend_type) {
         return;
     }

@@ -150,7 +150,7 @@ public:
             };
             auto run = [&](bool vm, const std::string& src, std::string* lanes = nullptr) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 dynamic_binder<Acc>(*e, "Acc").constructor<>()
                     .method("add", &Acc::add)
@@ -234,7 +234,7 @@ public:
             )";
             auto run = [&](bool vm, bool proofs) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 if (!proofs) { e->type_proofs(false); }
                 std::string got;
@@ -289,7 +289,7 @@ public:
             )";
             auto run = [&](bool vm, bool proofs) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 if (!proofs) { e->type_proofs(false); }
                 std::string got;
@@ -313,7 +313,7 @@ public:
             };
             for (bool vm : {false, true}) {
                 auto e = engine::make();
-                if (vm) { e->set_backend(backend_type::vm); }
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 dynamic_binder<Acc>(*e, "Acc").constructor<>().method("add", &Acc::add).build();
                 e->execute("auto a = Acc(); function go(var acc, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s = s + acc.add(i); } return s; }");

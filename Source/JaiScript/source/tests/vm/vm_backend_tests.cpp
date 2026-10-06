@@ -33,6 +33,11 @@ class vm_backend_tests : public suite {
 		e->set_backend(jai::backend_type::vm);
 		return e;
 	}
+	static std::shared_ptr<jai::engine> interp_engine() {
+		auto e = jai::engine::make();
+		e->set_backend(jai::backend_type::interpreter);
+		return e;
+	}
 
 public:
 	vm_backend_tests() : suite("VM Backend") {}
@@ -94,6 +99,24 @@ public:
 		test("backend_name", [this]() {
 			auto e = vm_engine();
 			check_eq(std::string("vm"), e->get_backend_name());
+		});
+
+		test("a_new_engine_runs_the_vm_and_the_interpreter_is_selectable", [this]() {
+			auto e = jai::engine::make();
+			check_true(e->get_backend_type() == jai::backend_type::vm);
+			check_true(e->aggregate_lowering(), "the vm's default lowering");
+			check_eq(std::string("vm"), e->get_backend_name());
+			check_eq((int64_t)4, e->execute("2 + 2").as_int());
+			auto chosen = jai::engine::make();
+			chosen->set_backend(jai::backend_type::auto_select);
+			check_true(chosen->get_backend_type() == jai::backend_type::vm, "auto_select is the default");
+			auto i = jai::engine::make();
+			i->set_backend(jai::backend_type::interpreter);
+			check_true(i->get_backend_type() == jai::backend_type::interpreter);
+			check_false(i->aggregate_lowering());
+			check_eq((int64_t)4, i->execute("2 + 2").as_int());
+			check_eq(std::string("interpreter"), i->get_backend_name());
+			check_throws([&]() { i->set_backend(jai::backend_type::vm); }, "the backend is fixed once code ran");
 		});
 
 		// detail/effect_summary.hpp answers every callout question; under the gated policies it must agree with the
@@ -428,7 +451,7 @@ public:
 			)";
 			auto e = vm_engine();
 			check_eq((int64_t)0, e->execute(src).as_int());   // 10x past JAI_MAX_CALL_DEPTH
-			auto ie = jai::engine::make();
+			auto ie = interp_engine();
 			check_throws([&]() { ie->execute(src); }, "interpreter keeps the depth limit");
 		});
 
@@ -458,7 +481,7 @@ public:
 			auto e = vm_engine();
 			e->max_call_depth(jai::backend_type::vm, 10000);
 			check_eq((int64_t)-999, e->execute(src).as_int());
-			auto ie = jai::engine::make();
+			auto ie = interp_engine();
 			check_eq((int64_t)-999, ie->execute(src).as_int());   // parity: same shape both backends
 		});
 
@@ -493,7 +516,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)5, e->execute(unqualified_field_read).as_int(),
 					"unqualified field read after a plain-function call");
 				check_eq((int64_t)5, e->execute(qualified_this_read).as_int(),
@@ -515,7 +538,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)5, e->execute(src).as_int(),
 					"field read after a lazy-elided plain call");
 			}
@@ -532,7 +555,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)7, e->execute(src).as_int());
 			}
 		});
@@ -551,7 +574,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)7, e->execute(direct).as_int());
 			}
 		});
@@ -565,7 +588,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq(std::string("lazy bang"), e->execute(src).as<std::string>());
 			}
 		});
@@ -580,7 +603,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)12, e->execute(src).as_int());
 			}
 		});
@@ -699,7 +722,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)13102, e->execute(src).as_int(),
 					use_vm ? "[vm] receiver rebind" : "[interp] receiver rebind");
 			}
@@ -721,7 +744,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->disable(jai::filesystem);
 				const std::string path = "D:/virtual/sticky/unit.jai";
 				// first = (12+3)*2 = 30, second = 20+5 = 25
@@ -747,7 +770,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)55, e->execute(src).as_int(),
 					use_vm ? "[vm] recursive method" : "[interp] recursive method");
 			}
@@ -766,7 +789,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
 				auto out = e->execute(src).as<std::string>();
 				check_true(out.find("recursion") != std::string::npos,
@@ -789,7 +812,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)79, e->execute(src).as_int(),
 					use_vm ? "[vm] closures keep per-call env" : "[interp] closures keep per-call env");
 			}
@@ -800,7 +823,7 @@ public:
 			// mints a new dispatcher and the next call must resolve the new body.
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto first = e->execute(R"(
 					class H { int v() { return 1; } }
 					var h = H();
@@ -837,7 +860,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq(std::string("28|28|blocked"), e->execute(src).as<std::string>(),
 					use_vm ? "[vm] access context" : "[interp] access context");
 			}
@@ -858,7 +881,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
 				auto msg = e->execute(src).as<std::string>();
 				check_true(msg.find("recursion") != std::string::npos,
@@ -875,7 +898,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);   // depth-10000 method recursion outruns the default budget in Debug
 				auto msg = e->execute(src).as<std::string>();
 				check_true(msg.find("Maximum recursion depth") != std::string::npos,
@@ -897,7 +920,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)11, e->execute(src).as_int());
 			}
 		});
@@ -914,7 +937,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)7, e->execute(src).as_int());
 			}
 		});
@@ -935,7 +958,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)9, e->execute(src).as_int());
 			}
 		});
@@ -951,7 +974,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)6100, e->execute(src).as_int());
 			}
 		});
@@ -968,7 +991,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)6, e->execute(src).as_int());
 			}
 		});
@@ -983,7 +1006,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)6, e->execute(src).as_int());
 			}
 		});
@@ -998,7 +1021,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)1, e->execute(src).as_int());
 			}
 		});
@@ -1015,7 +1038,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)2, e->execute(src).as_int());
 			}
 		});
@@ -1030,7 +1053,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)20, e->execute(src).as_int());
 			}
 		});
@@ -1047,7 +1070,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)2, e->execute(src).as_int());
 			}
 		});
@@ -1065,7 +1088,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)32, e->execute(src).as_int());
 			}
 		});
@@ -1083,7 +1106,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)3103, e->execute(src).as_int());
 			}
 		});
@@ -1104,7 +1127,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)72, e->execute(src).as_int());
 			}
 		});
@@ -1123,7 +1146,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)6, e->execute(src).as_int());
 			}
 		});
@@ -1140,7 +1163,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)8, e->execute(src).as_int());
 			}
 		});
@@ -1156,7 +1179,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)10, e->execute(src).as_int());
 			}
 		});
@@ -1172,7 +1195,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)36, e->execute(src).as_int());
 			}
 		});
@@ -1193,7 +1216,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)42, e->execute(src).as_int());
 			}
 		});
@@ -1212,7 +1235,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto msg = e->execute(src).as<std::string>();
 				check_true(msg.find("removed array element") != std::string::npos,
 					"shrunk element write errors");
@@ -1233,7 +1256,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)1516, e->execute(src).as_int());
 			}
 		});
@@ -1287,7 +1310,7 @@ public:
 				std::string first;
 				for (bool use_vm : {false, true}) {
 					auto e = jai::engine::make();
-					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					auto msg = e->execute(src).as<std::string>();
 					check_true(msg.find("removed array element") != std::string::npos,
 						"arg-position OOB element ref caught by the calling frame's try");
@@ -1311,7 +1334,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto msg = e->execute(src).as<std::string>();
 				check_true(msg.find("removed array element") != std::string::npos,
 					"depth-2 write error unwinds to driver's try");
@@ -1335,7 +1358,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto msg = e->execute(src).as<std::string>();
 				check_true(msg.find("removed array element") != std::string::npos,
 					"typed-return frame does not mangle the in-flight error");
@@ -1352,7 +1375,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)99, e->execute(src).as_int());
 			}
 		});
@@ -1368,7 +1391,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)4, e->execute(src).as_int());
 			}
 		});
@@ -1387,7 +1410,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				check_eq(std::string("Cannot assign 'string' to element of type 'int'|int|2"),
 				         e->execute(src).as<std::string>());
@@ -1424,7 +1447,7 @@ public:
 				"|Cannot assign 'string' to element of type 'int'|7|104|retyped";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				check_eq(expected, e->execute(src).as<std::string>(),
 				         use_vm ? "vm element constraint shapes" : "interp element constraint shapes");
@@ -1445,7 +1468,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				check_eq(std::string("Cannot assign 'string' to element of type 'int'|6"),
 				         e->execute(src).as<std::string>());
@@ -1464,7 +1487,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)42, e->execute(src).as_int());
 			}
 		});
@@ -1480,7 +1503,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				check_eq(std::string("int:int"), e->execute(src).as<std::string>());
 			}
@@ -1501,7 +1524,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				check_eq(std::string("6|"), e->execute(src).as<std::string>());
 			}
@@ -1528,7 +1551,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				check_eq((int64_t)140, e->execute(src).as_int());
 			}
@@ -1548,7 +1571,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)99, e->execute(src).as_int());
 			}
 		});
@@ -1567,7 +1590,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)810, e->execute(src).as_int());
 			}
 		});
@@ -1586,7 +1609,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)50, e->execute(src).as_int());
 			}
 		});
@@ -1601,7 +1624,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)4, e->execute(src).as_int());
 			}
 		});
@@ -1616,7 +1639,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq(std::string("Function with reference return type must return an lvalue reference"),
 				         e->execute(src).as<std::string>());
 			}
@@ -1634,7 +1657,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_true(e->check(src).has_errors(), "strict rejects the referent at load");
 				e->static_checking(jai::check_mode::off);
 				check_eq(std::string("Cannot return reference to 'float' from a function returning 'int&'"),
@@ -1647,7 +1670,7 @@ public:
 			// the parse error surfaces as a throw and the engine stays usable
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_throws([&]() { e->execute("coroutine int& co() { yield 1; } 5;"); });
 				check_eq((int64_t)7, e->execute("3 + 4").as_int());   // engine stays usable
 			}
@@ -1669,7 +1692,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)122, e->execute(src).as_int());   // 11*10 + 12
 			}
 		});
@@ -1678,7 +1701,7 @@ public:
 			// A cell escaped through a closure survives into LATER execute() calls
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)122, e->execute(
 					"var f = null; { var v = 10; f = [&]() { v = v + 1; return v; }; } f() * 10 + f();").as_int());
 				check_eq((int64_t)13, e->execute("f()").as_int());
@@ -1693,7 +1716,7 @@ public:
 			// alive and writable through the held reference
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)5, e->execute(
 					"int& keep() { int v = 100; return v; } auto& r = keep(); r = 5; r;").as_int());
 				e->execute("function keep() { return 0; }");   // redefine while the cell escapes
@@ -1707,7 +1730,7 @@ public:
 			for (bool use_vm : {false, true}) {
 				{
 					auto e = jai::engine::make();
-					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					auto r = e->execute(
 						"var f = null; { var v = 1; f = [&]() { return v; }; } "
 						"int& mk() { int q = 2; return q; } auto& g = mk(); f() + g;");
@@ -1745,7 +1768,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)56, e->execute(src).as_int());
 			}
 		});
@@ -1760,7 +1783,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)9, e->execute(src).as_int());
 			}
 		});
@@ -1781,7 +1804,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)111110, e->execute(src).as_int());
 			}
 		});
@@ -1800,7 +1823,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)798, e->execute(src).as_int());
 			}
 		});
@@ -1825,7 +1848,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)640, e->execute(src).as_int(), use_vm ? "vm" : "interp");
 			}
 		});
@@ -1842,7 +1865,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)42, e->execute(src).as_int());
 			}
 		});
@@ -1857,7 +1880,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)6, e->execute(src).as_int());
 			}
 		});
@@ -1874,7 +1897,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto msg = e->execute(src).as<std::string>();
 				check_true(msg.find("Cannot assign string to field 'v' of Box (declared int)") != std::string::npos,
@@ -1899,7 +1922,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_eq(std::string("2|object"), got);
@@ -1924,7 +1947,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("str|1|") == 0, "var field binds unconstrained; int field unchanged");
@@ -1949,7 +1972,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("Cannot assign 'string' to element of type 'int'") != std::string::npos,
@@ -1974,7 +1997,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)63, e->execute(src).as_int());
 			}
 		});
@@ -1995,7 +2018,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("42|") == 0, "write through the ref survives realloc");
@@ -2026,7 +2049,7 @@ public:
 			for (bool use_vm : {false, true}) {
 				for (const char* c : cases) {
 					auto e = jai::engine::make();
-					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					e->static_checking(jai::check_mode::warn);   // the checker reports f(5) at load; the RUNTIME text is under test
 					auto msg = e->execute(std::string(setup) + c).as<std::string>();
 					check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
@@ -2034,7 +2057,7 @@ public:
 				}
 				{   // a method passed as a value is the method-value error (Dev ruling 2026-09-30), ahead of the reference binding
 					auto e = jai::engine::make();
-					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					e->static_checking(jai::check_mode::warn);
 					auto msg = e->execute(std::string(setup) + "try { f(arr.size); } catch (e) { msg = e; } msg;").as<std::string>();
 					check_eq(std::string("'size' is a method of array; call it with arr.size() or wrap the call in a lambda"), msg);
@@ -2044,7 +2067,7 @@ public:
 				// fires like any other rvalue argument (flipped from the old
 				// "Subscript can only be used on" eval-time error)
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto msg = e->execute(std::string(setup) + "try { f(s[0]); } catch (e) { msg = e; } msg;").as<std::string>();
 				check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
 					std::string("string subscript arg is a char rvalue: non-lvalue ref-bind error, got: ") + msg);
@@ -2066,7 +2089,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)501, e->execute(src).as_int());
 			}
 		});
@@ -2100,7 +2123,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_eq(std::string("201|103|120|107|130|1"), got);
@@ -2129,7 +2152,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("Cannot pass non-lvalue to reference parameter&") != std::string::npos,
 					"missing map key rejects: " + got);
@@ -2163,7 +2186,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("55|42|") == 0, got);
@@ -2187,7 +2210,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_true(got.find("9|") == 0, got);
@@ -2208,7 +2231,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)12, e->execute(src).as_int());
 			}
 		});
@@ -2233,7 +2256,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)16999, e->execute(src).as_int());
 			}
 		});
@@ -2256,7 +2279,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				jai::engine* raw = e.get();
 				e->add_function("reloadKeep", [raw]() -> jai::script_int {
@@ -2293,7 +2316,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)4065, e->execute(src).as_int());
 			}
 		});
@@ -2308,7 +2331,7 @@ public:
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				check_eq(std::string("int:8:8"), e->execute(src).as<std::string>());
 			}
@@ -2530,7 +2553,7 @@ public:
 				to_string(n * 10 + hit);
 			)";
 			for (const char* src : {catch_var_across_callee, bare_rethrow_no_active, break_pops_handler}) {
-				auto interp = jai::engine::make();
+				auto interp = interp_engine();
 				jai::stdlib::register_all(interp);
 				auto vm = vm_engine();
 				jai::stdlib::register_all(vm);
@@ -2682,7 +2705,7 @@ public:
 				"var n = 6; var r = n > 5 ? \"big\" : \"small\"; r;",
 			};
 			for (const char* script : scripts) {
-				auto interp = jai::engine::make();
+				auto interp = interp_engine();
 				auto vm = vm_engine();
 				auto lhs = interp->execute(script);
 				auto rhs = vm->execute(script);
@@ -2798,7 +2821,7 @@ public:
 				try { after = vm_included_flag; } catch (e) { after = -1; }
 				seen * 100 + after
 			)";
-			auto interp = jai::engine::make();
+			auto interp = interp_engine();
 			interp->add_include_path(temp_dir.string());
 			auto vm = vm_engine();
 			vm->add_include_path(temp_dir.string());
@@ -2817,7 +2840,7 @@ public:
 			int idx = 0;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
 				e->static_checking(mode);
 				if (interpreter_depth != 0) { e->max_call_depth(jai::backend_type::interpreter, interpreter_depth); }
@@ -3027,7 +3050,7 @@ public:
 			auto descent_hops = [this](bool use_vm, int depth) {
 				auto e = jai::engine::make();
 				e->max_call_depth(jai::backend_type::interpreter, 1000);
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
 				e->execute(
 					"class Box { int v = 0; }\nvar b = Box();\n"
@@ -3055,7 +3078,7 @@ public:
 			auto miss_hops = [this](bool use_vm, const char* fn, int depth) {
 				auto e = jai::engine::make();
 				e->max_call_depth(jai::backend_type::interpreter, 1000);
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
 				e->static_checking(jai::check_mode::off);
 				e->execute(
@@ -3250,7 +3273,7 @@ public:
 			std::string first;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				auto got = e->execute(src).as<std::string>();
 				check_eq(std::string("77|zz|false|true"), got, "kv.second writes the entry, kv.first writes the pair's copy only");
@@ -3360,7 +3383,7 @@ public:
 			int idx = 0;
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				e->execution_budget(0);
 				stdlib::register_all(*e);
 				try { out[idx] = e->execute(src).to_string(); }
@@ -3597,7 +3620,7 @@ public:
 				int idx = 0;
 				for (bool use_vm : {false, true}) {
 					auto e = jai::engine::make();
-					if (use_vm) { e->set_backend(jai::backend_type::vm); }
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					try { e->execute(src); }
 					catch (const std::exception& ex) { msg[idx] = ex.what(); }
 					++idx;
@@ -3630,7 +3653,7 @@ public:
 			for (bool use_vm : {false, true}) {
 				auto e = jai::engine::make();
 				if (!e->throw_on_overflow()) { return; }
-				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				bool threw = false;
 				try {
 					e->execute(
@@ -4533,7 +4556,7 @@ public:
 			for (bool proofs : {true, false}) {
 				for (int backend = 0; backend < 2; ++backend) {
 					probe_box box;
-					std::shared_ptr<jai::engine> e = backend == 0 ? jai::engine::make() : vm_engine();
+					std::shared_ptr<jai::engine> e = backend == 0 ? interp_engine() : vm_engine();
 					e->type_proofs(proofs);
 					jai::stdlib::register_all(*e);
 					jai::dynamic_binder<probe_box>(*e, "probe_box")
@@ -4588,7 +4611,7 @@ public:
 				run("string-shares", function() -> string { var r = []; int i = 0; r.push(ts[i]); ts[0] = "z"; return r[0] + ts[0]; });
 				return out;
 			)";
-			auto interp = jai::engine::make();
+			auto interp = interp_engine();
 			auto vmx = vm_engine();
 			jai::stdlib::register_all(*interp);
 			jai::stdlib::register_all(*vmx);
@@ -4642,7 +4665,7 @@ public:
 			};
 			for (bool proofs : {true, false}) {
 				for (const char* program : cases) {
-					auto interp = jai::engine::make();
+					auto interp = interp_engine();
 					jai::stdlib::register_all(*interp);
 					interp->type_proofs(proofs);
 					auto vmx = vm_engine();
@@ -4658,7 +4681,7 @@ public:
 			// steps aside for the operator table, exactly as the fused kernels do
 			for (bool proofs : {true, false}) {
 				const char* program = "string run() { int a = 3; int b = 4; int c = a + b; int d = 0; d = a * b; d += a; int acc = 0; for (int i = 0; i < 3; ++i) { acc = acc + i; } return to_string(c) + \",\" + to_string(d) + \",\" + to_string(acc); } run();";
-				auto interp = jai::engine::make();
+				auto interp = interp_engine();
 				jai::stdlib::register_all(*interp);
 				interp->type_proofs(proofs);
 				interp->add_function("+", [](script_int x, script_int y) { return x * 10 + y; });
@@ -4678,7 +4701,7 @@ public:
 			for (bool proofs : {true, false}) {
 				const char* define = "int calc(int a, int b) { int c = a + b; int d = (a + b) * 10; return c * 1000 + d; } function later() { install(); return calc(1, 1); }";
 				auto make = [&](bool interp) {
-					std::shared_ptr<jai::engine> e = interp ? jai::engine::make() : vm_engine();
+					std::shared_ptr<jai::engine> e = interp ? interp_engine() : vm_engine();
 					jai::stdlib::register_all(*e);
 					e->type_proofs(proofs);
 					std::weak_ptr<jai::engine> weak = e;
@@ -4752,7 +4775,7 @@ public:
 			};
 			for (bool proofs : {true, false}) {
 				for (const char* program : cases) {
-					auto interp = jai::engine::make();
+					auto interp = interp_engine();
 					jai::stdlib::register_all(*interp);
 					interp->type_proofs(proofs);
 					auto vmx = vm_engine();
@@ -4795,7 +4818,7 @@ public:
 			};
 			for (bool proofs : {true, false}) {
 				for (const char* program : cases) {
-					auto interp = jai::engine::make();
+					auto interp = interp_engine();
 					jai::stdlib::register_all(*interp);
 					interp->type_proofs(proofs);
 					auto vmx = vm_engine();
@@ -4844,7 +4867,7 @@ public:
 			};
 			for (bool proofs : {true, false}) {
 				for (const char* program : cases) {
-					auto interp = jai::engine::make();
+					auto interp = interp_engine();
 					jai::stdlib::register_all(*interp);
 					interp->type_proofs(proofs);
 					auto vmx = vm_engine();
@@ -4877,7 +4900,7 @@ public:
 			for (bool proofs : {true, false}) {
 				for (const char* body : cases) {
 					std::string program = std::string("string run() { ") + body + " } run();";
-					auto interp = jai::engine::make();
+					auto interp = interp_engine();
 					jai::stdlib::register_all(*interp);
 					interp->type_proofs(proofs);
 					auto vmx = vm_engine();
@@ -4966,7 +4989,7 @@ public:
 			for (const char* body : cases) {
 				// Preserve literal argument shapes and exercise the runtime lanes, including rejection.
 				std::string program = std::string("[[warn_mode]] string run() { ") + body + " } run();";
-				auto interp = jai::engine::make();
+				auto interp = interp_engine();
 				jai::stdlib::register_all(*interp);
 				auto vmx = vm_engine();
 				jai::stdlib::register_all(*vmx);
@@ -4978,7 +5001,7 @@ public:
 			// the append lane charges the kernel's exact bytes: the memory cap trips at the same push
 			{
 				const char* capped = "string run() { var a = []; int n = 0; try { while (true) { a.push(n); n = n + 1; } } catch (e) { return to_string(n) + \":\" + e; } return \"none\"; } run();";
-				auto interp = jai::engine::make();
+				auto interp = interp_engine();
 				jai::stdlib::register_all(*interp);
 				interp->memory_cap(64 * 1024);
 				auto capped_vm = vm_engine();

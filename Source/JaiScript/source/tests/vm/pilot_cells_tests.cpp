@@ -88,7 +88,8 @@ public:
 
 	std::string run_on(bool vm, const std::string& script, bool proofs = true) {
 		auto e = engine::make();
-		if (vm) { e->set_backend(backend_type::vm); e->max_call_depth(backend_type::vm, 10000); }   // a runaway recursion raises the cap text, as the interpreter does, inside the budget
+		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+		if (vm) { e->max_call_depth(backend_type::vm, 10000); }   // a runaway recursion raises the cap text, as the interpreter does, inside the budget
 		stdlib::register_all(*e); register_host_math_fixture(*e);
 		if (!proofs) { e->type_proofs(false); }
 		try { return e->execute(script).as_string(); }
@@ -265,7 +266,7 @@ public:
 				for (int backend = 0; backend < 2; ++backend) {
 					probe_box box;
 					auto e = engine::make();
-					if (backend == 1) { e->set_backend(backend_type::vm); }
+					e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 					e->type_proofs(proofs);
 					stdlib::register_all(*e); register_host_math_fixture(*e);
 					dynamic_binder<probe_box>(*e, "probe_box")
@@ -299,7 +300,7 @@ public:
 			std::string seen[2];
 			for (int backend = 0; backend < 2; ++backend) {
 				auto e = engine::make();
-				if (backend == 1) { e->set_backend(backend_type::vm); }
+				e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->execute(spin);
 				script_value fn = e->get_variable("spin");
@@ -696,7 +697,7 @@ public:
 				for (int backend = 0; backend < 2; ++backend) {
 					order_box box;
 					auto e = engine::make();
-					if (backend == 1) { e->set_backend(backend_type::vm); }
+					e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 					stdlib::register_all(*e); register_host_math_fixture(*e);
 					dynamic_binder<order_box>(*e, "order_box")
 						.property("values", [](order_box& b) { if (b.armed) { throw std::runtime_error("GETTER_FIRST"); } return b.values; }, nullptr)
@@ -766,7 +767,7 @@ public:
 			for (int backend = 0; backend < 2; ++backend) {
 				shadow_box box;
 				auto e = engine::make();
-				if (backend == 1) { e->set_backend(backend_type::vm); }
+				e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				dynamic_binder<shadow_box>(*e, "shadow_box")
 					.constructor<>()
@@ -1772,7 +1773,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			};
 			auto run = [](bool vm, const char* src, uint64_t steps, double seconds, uint32_t miss_every) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				if (steps) { e->execution_step_budget(steps); }
 				e->execution_budget(seconds);
@@ -1808,7 +1809,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			};
 			auto run = [](bool vm, const char* src, uint64_t steps) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				e->add_variadic_function("sink", [raw = e.get()](const std::vector<script_value>&) { return script_value(std::monostate{}, raw); });
 				e->execution_step_budget(steps);
 				e->execution_budget(30.0);
@@ -1990,7 +1991,7 @@ var across = function(int n) { string s = ""; try { s = to_string(looping(n)); }
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
@@ -2061,7 +2062,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 			// the switch off: the checked forms only, the same results (the differential the fuzz's --no-passes chain runs)
 			auto run_passes_off = [&](bool vm, const std::string& script) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->ir_passes(false);
 				try { return e->execute(script).as_string(); }
@@ -2099,7 +2100,7 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			// is about); otherwise through a literal, another unit, which shadows and leaves the loop on its own cell
 			auto run_with = [&](bool vm, const std::string& script, bool proofs, bool same_unit) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				e->disable(jai::filesystem);
@@ -2163,7 +2164,7 @@ var via_callee = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
@@ -2230,7 +2231,7 @@ var private_stays = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; 
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				stepper source;   // outlives the engine below
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
@@ -2290,7 +2291,7 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 			auto run_with = [&](bool vm, const char* first, const char* second, bool proofs) -> std::string {
 				stepper source;   // outlives the engine below
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
@@ -2336,7 +2337,7 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 			auto run_null = [&](bool vm, bool flips, bool proofs) -> std::string {
 				nulls source; source.flips = flips;
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
@@ -2370,7 +2371,7 @@ var conversion = function(int n) { array<int> Q = [0, 1, 2, 3]; int total = 0; i
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				try { return e->execute(script).as_string(); }
@@ -2420,7 +2421,7 @@ var MIXED = [3, 1, 4, 1, 5, "s", 2, 6];
 			// the memory cap reached inside the loop: the general form's text and post-state on both backends
 			auto capped = [&](bool vm) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->memory_cap(65536);
 				try { return e->execute(std::string(defs) + " var big = function(int n) { var s = \"\"; try { for (int i = 0; i < n; ++i) { s += WORDS[i % 3]; s += HALFG; } } catch (e) { return \"caught|\" + e; } return \"no cap\"; }; big(100000);").as_string(); }
@@ -2453,7 +2454,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				stepper source;   // outlives the engine below
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				engine* raw = e.get();
@@ -2768,7 +2769,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                         " string out = \"\"; try { out = to_string(h(3)); } catch (e) { out = \"caught \" + e; } out;";
 			for (bool vm : { false, true }) {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->execution_budget(0.00001);
 				std::string got;
@@ -2828,7 +2829,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			struct source_t { engine* eng = nullptr; int mode = 0; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int mode, const char* body) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (!proofs) { e->type_proofs(false); }
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				source_t source{ e.get(), mode };
@@ -3112,7 +3113,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(std::string("32"), run_on(true, alias_break));
 			auto budget_run = [&](bool vm, bool proofs, const std::string& src) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
 				e->execution_budget(0.05);
@@ -3206,7 +3207,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			)";
 			auto run = [&](bool vm, uint32_t every) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (every) { e->cells_miss_every(every); }
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(body).to_string(); }
@@ -3333,7 +3334,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(sv.rfind(";|3|int|6#s|string#,;,#1|", 0) == 0 && sv.size() > 25, "the stores ran and the int local raised: " + sv);
 			auto capped = [&](bool vm) -> std::string {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->memory_cap(65536);
 				try { return e->execute(prelude + "capped(100000);").as_string(); }
@@ -3936,7 +3937,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var run = function(Q& q, int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + q.get(); } return s; };\n"
 				"Q qq = Q();\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(qq, 4);").to_string();
@@ -4092,7 +4093,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int f(int a) { return a * 2; }\n"
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(i); } return s; };\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(6);").to_string();
@@ -4113,7 +4114,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int leaf(int a) { return a * 2 + 1; }\n"
 				"int caller(int n) { int s = 0; for (int i = 0; i < n; ++i) { int v = leaf(i); s = s + v; } return s; }\n";
 			auto sequence = [&](bool vm, bool redefine, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				try {
 					{ auto bite = e->jaibite(program); bite.execute(); }
@@ -4302,7 +4303,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int lim(int a) { return a + 10; }\n"
 				"var run = function(int n) { int c = 0; for (int i = 0; i < n; ++i) { if (lim(i) > 12) { c = c + 1; } } return c; };\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(5);").to_string();
@@ -4341,7 +4342,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                  "var probe = function(int x) { if (cell_at(x, 1) != 0) { return 7; } return add1(x); };\n"
 			                                  "to_string(run(6)) + \"|\" + to_string(probe(0)) + \"|\" + to_string(probe(1));\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
 				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -4367,7 +4368,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "float walk(int n) { float acc = 0.0; for (int i = 0; i < n; ++i) { acc = acc + span(i * 1.0); } return acc; }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nG = new World();\nto_string(sum(8)) + \"|\" + to_string(walk(4)) + \"|\" + to_string(width());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
 				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -4394,7 +4395,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int once() { return add1(MX[0]); }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nto_string(total(4)) + \"|\" + to_string(once());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -4432,7 +4433,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int probe() { int n = 0; if (live(0)) { n = n + 1; } if (live(1)) { n = n + 10; } if (live(7)) { n = n + 100; } int d = cheb(1, 2, 4, -3); return n + d; }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -4516,7 +4517,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"Ledger LED;\n"
 				"int probe() { return peek(LED, mark(5)); }\n"
 				"var r = \"\"; try { r = to_string(probe()); } catch (e) { r = e; } r + \"|\" + to_string(seen);";
-			auto ie = engine::make(); auto ve = engine::make(); ve->set_backend(backend_type::vm);
+			auto ie = engine::make(); ie->set_backend(backend_type::interpreter); auto ve = engine::make(); ve->set_backend(backend_type::vm);
 			stdlib::register_all(*ie); stdlib::register_all(*ve);
 			std::string iv, vv;
 			try { iv = ie->execute(nc).as_string(); } catch (const std::exception& ex) { iv = std::string("throw:") + ex.what(); }
@@ -4536,7 +4537,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int probe() { return boxv(BX, 1) * 10 + tagis(TAG); }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -4722,7 +4723,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                  "int by_enum() { for (int m = 0; m < X.size(); ++m) { fx_at(X[m], Fx.poison); } return LOG.size(); }\n"
 			                                  "to_string(by_enum()) + \"|\" + to_string(LOG[3]);\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); if (vm) { e->set_backend(backend_type::vm); } stdlib::register_all(*e);
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& text, const std::string&) { *listing += text; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -5188,7 +5189,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		test("host_math_alias_host_reregistration", [this]() {
 			auto run = [](bool vm) {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string out;
 				out += e->execute("function f(float x) -> string { return to_string(host_sqrt(x * 1.0)) + \" \" + to_string(host_sqrt(x)); } f(16.0);").as_string();
@@ -6227,7 +6228,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// call's; an argument of another kind than its parameter takes the binder's conversion on the general door
 			auto session = [](bool vm) {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string out;
 				try {
@@ -6592,7 +6593,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// arguments were proven against the old kind
 			auto session = [](bool vm) {
 				auto e = engine::make();
-				if (vm) { e->set_backend(backend_type::vm); }
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				engine* raw = e.get();
 				int flips = 0;

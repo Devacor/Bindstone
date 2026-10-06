@@ -20,7 +20,7 @@ public:
         // ============================================================
 
         test("bare_engine_ships_basic_print", [this]() {
-            auto engine = jai::engine::make();   // NO register_all
+            auto engine = jai::foundry::make_engine();   // NO register_all
             auto capture = std::make_shared<std::ostringstream>();
             engine->set_output_stream(capture);
             engine->execute("print(\"hello\");");
@@ -28,7 +28,7 @@ public:
         });
 
         test("bare_print_concatenates_without_formatting", [this]() {
-            auto engine = jai::engine::make();   // NO register_all
+            auto engine = jai::foundry::make_engine();   // NO register_all
             auto capture = std::make_shared<std::ostringstream>();
             engine->set_output_stream(capture);
             engine->execute("print(\"Value: {}\", 42);");

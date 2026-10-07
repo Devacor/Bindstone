@@ -13172,8 +13172,16 @@ static JAI_NOINLINE uint8_t lean_bind_of(const script_defined_function& function
 	return function.backend_lean_bind;
 }
 
+// a null, or an object tagged shared_ptr (a handle), that a var parameter takes as it is: the handle is shared, a null's copy is its clone
+static JAI_FORCEINLINE bool shares_as_argument(const script_value& a) {
+	const size_t ri = a.raw_storage_index();
+	if (ri == script_value::TYPEID_NULL) { return true; }
+	const type_info* t = a.type_info_raw();
+	return ri == script_value::TYPEID_OBJECT && t && t->base_type == script_value_type::jai_shared_ptr_type;
+}
+
 // bind_parameters' in-place rows: a primitive or string argument whose storage matches its by-value slot (any storage of those for a
-// var slot) is already the slot, its type tag verbatim (a primitive's or a string's copy is its clone)
+// var slot), or a handle or null into a var slot, is already the slot, its type tag verbatim (each one's copy is its binding)
 static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_value& a) {
 	const size_t ri = a.raw_storage_index();
 	const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
@@ -13183,6 +13191,7 @@ static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_val
 	case script_value::TYPEID_BOOL: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_bool_type;
 	case script_value::TYPEID_CHAR: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_char_type;
 	case script_value::TYPEID_STRING: return bt == script_value_type::jai_any_type || bt == script_value_type::jai_string_type;
+	case script_value::TYPEID_NULL: case script_value::TYPEID_OBJECT: return bt == script_value_type::jai_any_type && shares_as_argument(a);
 	default: return false;
 	}
 }
@@ -22852,6 +22861,12 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				continue;
 			}
 
+			// a handle or null into a var parameter: the general rows below share the handle and clone the null, the argument as it is
+			if ((!param.type || param.type->base_type == script_value_type::jai_any_type) && shares_as_argument(arg)) {
+				if (in_place && param.slot_index == i && !param.ref_escaping) { continue; }
+				frame_slot_set(callee, param.slot_index, boxed_param(script_value(arg)));
+				continue;
+			}
 #ifdef JAISCRIPT_VM_PROFILE
 			++profile_bind_paths_[3];
 #endif

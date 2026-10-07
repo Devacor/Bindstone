@@ -5061,54 +5061,97 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 	}
 }
 
-// two numbers with no operator to consult: the fused kernel's numeric rows into out (which may be l); false = no row decides, out
-// untouched
-JAI_FORCEINLINE bool vm_backend::stack_numeric_rows(const script_value& l, const script_value& r, token_type op, script_value& out) {
+// two numbers with no operator to consult: the fused kernel's numeric rows, the result over the left operand; false = no row decides,
+// both operands untouched
+JAI_FORCEINLINE bool vm_backend::stack_numeric_rows(script_value& l, const script_value& r, token_type op) {
 	const size_t li = l.raw_storage_index(), ri = r.raw_storage_index();
+	bool done = true;
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 		const script_int a = l.unchecked_as_int(), b = r.unchecked_as_int();
 		script_int v;
 		switch (op) {
-		case token_type::plus: if (!ints::try_add(a, b, v)) return false; out = script_value(v, engine_); return true;
-		case token_type::minus: if (!ints::try_sub(a, b, v)) return false; out = script_value(v, engine_); return true;
-		case token_type::star: if (!ints::try_mul(a, b, v)) return false; out = script_value(v, engine_); return true;
-		case token_type::slash: if (b == 0 || !ints::try_div(a, b, v)) return false; out = script_value(v, engine_); return true;
-		case token_type::percent: if (b == 0) return false; out = script_value(ints::mod(a, b), engine_); return true;
-		case token_type::less: out = script_value(a < b, engine_); return true;
-		case token_type::less_equal: out = script_value(a <= b, engine_); return true;
-		case token_type::greater: out = script_value(a > b, engine_); return true;
-		case token_type::greater_equal: out = script_value(a >= b, engine_); return true;
-		case token_type::equal_equal: out = script_value(a == b, engine_); return true;
-		case token_type::bang_equal: out = script_value(a != b, engine_); return true;
-		default: return false;
+		case token_type::plus: done = ints::try_add(a, b, v); if (done) { l = script_value(v, engine_); } break;
+		case token_type::minus: done = ints::try_sub(a, b, v); if (done) { l = script_value(v, engine_); } break;
+		case token_type::star: done = ints::try_mul(a, b, v); if (done) { l = script_value(v, engine_); } break;
+		case token_type::slash: done = b != 0 && ints::try_div(a, b, v); if (done) { l = script_value(v, engine_); } break;
+		case token_type::percent: done = b != 0; if (done) { l = script_value(ints::mod(a, b), engine_); } break;
+		case token_type::less: l = script_value(a < b, engine_); break;
+		case token_type::less_equal: l = script_value(a <= b, engine_); break;
+		case token_type::greater: l = script_value(a > b, engine_); break;
+		case token_type::greater_equal: l = script_value(a >= b, engine_); break;
+		case token_type::equal_equal: l = script_value(a == b, engine_); break;
+		case token_type::bang_equal: l = script_value(a != b, engine_); break;
+		default: done = false; break;
 		}
-	}
-	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+	} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
 		const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(l.unchecked_as_int()) : l.unchecked_as_float();
 		const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(r.unchecked_as_int()) : r.unchecked_as_float();
 		switch (op) {
-		case token_type::plus: out = script_value(a + b, engine_); return true;
-		case token_type::minus: out = script_value(a - b, engine_); return true;
-		case token_type::star: out = script_value(a * b, engine_); return true;
-		case token_type::slash: if (b == 0.0) return false; out = script_value(a / b, engine_); return true;
-		case token_type::percent: if (b == 0.0) return false; out = script_value(std::fmod(a, b), engine_); return true;
-		case token_type::less: out = script_value(a < b, engine_); return true;
-		case token_type::less_equal: out = script_value(a <= b, engine_); return true;
-		case token_type::greater: out = script_value(a > b, engine_); return true;
-		case token_type::greater_equal: out = script_value(a >= b, engine_); return true;
-		case token_type::equal_equal: out = script_value(a == b, engine_); return true;
-		case token_type::bang_equal: out = script_value(a != b, engine_); return true;
-		default: return false;
+		case token_type::plus: l = script_value(a + b, engine_); break;
+		case token_type::minus: l = script_value(a - b, engine_); break;
+		case token_type::star: l = script_value(a * b, engine_); break;
+		case token_type::slash: done = b != 0.0; if (done) { l = script_value(a / b, engine_); } break;
+		case token_type::percent: done = b != 0.0; if (done) { l = script_value(std::fmod(a, b), engine_); } break;
+		case token_type::less: l = script_value(a < b, engine_); break;
+		case token_type::less_equal: l = script_value(a <= b, engine_); break;
+		case token_type::greater: l = script_value(a > b, engine_); break;
+		case token_type::greater_equal: l = script_value(a >= b, engine_); break;
+		case token_type::equal_equal: l = script_value(a == b, engine_); break;
+		case token_type::bang_equal: l = script_value(a != b, engine_); break;
+		default: done = false; break;
 		}
+	} else {
+		done = false;
 	}
-	return false;
+	return done;
 }
 
 op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
-	// two numbers on the stack with no operator to consult: the numeric rows, the result over the left operand
+	// two numbers on the stack with no operator to consult: the fused kernel's numeric rows, the result over the left operand
 	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_.size() >= 2) {
 		script_value& l = stack_[stack_.size() - 2];
-		if (stack_numeric_rows(l, stack_.back(), static_cast<token_type>(ins.a), l)) {
+		const script_value& r = stack_.back();
+		const size_t li = l.raw_storage_index(), ri = r.raw_storage_index();
+		const token_type op = static_cast<token_type>(ins.a);
+		bool done = true;
+		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+			const script_int a = l.unchecked_as_int(), b = r.unchecked_as_int();
+			script_int v;
+			switch (op) {
+			case token_type::plus: done = ints::try_add(a, b, v); if (done) { l = script_value(v, engine_); } break;
+			case token_type::minus: done = ints::try_sub(a, b, v); if (done) { l = script_value(v, engine_); } break;
+			case token_type::star: done = ints::try_mul(a, b, v); if (done) { l = script_value(v, engine_); } break;
+			case token_type::slash: done = b != 0 && ints::try_div(a, b, v); if (done) { l = script_value(v, engine_); } break;
+			case token_type::percent: done = b != 0; if (done) { l = script_value(ints::mod(a, b), engine_); } break;
+			case token_type::less: l = script_value(a < b, engine_); break;
+			case token_type::less_equal: l = script_value(a <= b, engine_); break;
+			case token_type::greater: l = script_value(a > b, engine_); break;
+			case token_type::greater_equal: l = script_value(a >= b, engine_); break;
+			case token_type::equal_equal: l = script_value(a == b, engine_); break;
+			case token_type::bang_equal: l = script_value(a != b, engine_); break;
+			default: done = false; break;
+			}
+		} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+			const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(l.unchecked_as_int()) : l.unchecked_as_float();
+			const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(r.unchecked_as_int()) : r.unchecked_as_float();
+			switch (op) {
+			case token_type::plus: l = script_value(a + b, engine_); break;
+			case token_type::minus: l = script_value(a - b, engine_); break;
+			case token_type::star: l = script_value(a * b, engine_); break;
+			case token_type::slash: done = b != 0.0; if (done) { l = script_value(a / b, engine_); } break;
+			case token_type::percent: done = b != 0.0; if (done) { l = script_value(std::fmod(a, b), engine_); } break;
+			case token_type::less: l = script_value(a < b, engine_); break;
+			case token_type::less_equal: l = script_value(a <= b, engine_); break;
+			case token_type::greater: l = script_value(a > b, engine_); break;
+			case token_type::greater_equal: l = script_value(a >= b, engine_); break;
+			case token_type::equal_equal: l = script_value(a == b, engine_); break;
+			case token_type::bang_equal: l = script_value(a != b, engine_); break;
+			default: done = false; break;
+			}
+		} else {
+			done = false;
+		}
+		if (done) {
 			stack_.pop_back();
 			return {};
 		}
@@ -22095,14 +22138,12 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 	stack_.pop_back();
 	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
-	const script_value& left = left_raw.deref();
-	const script_value& right = right_raw.deref();
 	const token_type op = static_cast<token_type>(ins.a);
-	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(left, right, op, left_raw)) {
+	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(left_raw, right_raw, op)) {
 		if constexpr (Entry) { return entry_return_finish(*fp, std::move(left_raw), ins.c); }
 		else { return return_with_result(fp, std::move(left_raw), ins.c); }
 	}
-	auto result = binary_general(op, left, right);
+	auto result = binary_general(op, left_raw.deref(), right_raw.deref());
 	if (!result) {
 		return raise_from(result);
 	}

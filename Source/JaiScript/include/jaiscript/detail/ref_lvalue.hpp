@@ -463,7 +463,10 @@ namespace jai::detail {
 				const auto* m = static_cast<const member_expr*>(step);
 				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
 				if (class_instance* plain = ref_plain_script_field(cur, m, symbolizer)) {
-					script_value* field_value = plain->find_field_value(member_id);
+					// find_field_value's ladder with the slot kept for the reference's memory
+					const class_definition* plain_class = plain->get_class_definition();
+					const uint32_t slot = plain_class ? plain_class->field_slot(member_id) : class_definition::k_no_field_slot;
+					script_value* field_value = slot != class_definition::k_no_field_slot ? plain->field_slot_value(slot) : plain->find_field_value(member_id);
 					if (!field_value) {
 						return ref_non_lvalue_error();
 					}
@@ -485,7 +488,7 @@ namespace jai::detail {
 						constraint = tag;
 					}
 					const auto& data = cur.peek_object_holder()->data;
-					return rooted(script_value::make_field_reference(std::shared_ptr<class_instance>(data, plain), member_id, eng, std::move(constraint), *field_value));
+					return rooted(script_value::make_field_reference(std::shared_ptr<class_instance>(data, plain), member_id, eng, std::move(constraint), *field_value, slot));
 				}
 				// Binder .property() members bind on every receiver kind (a same-named
 				// script field shadows: getter_id 0 keeps the FIELD path below); a

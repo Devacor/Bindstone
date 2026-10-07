@@ -2002,6 +2002,7 @@ namespace jai::vm {
         JAI_FORCEINLINE bool typed_arith_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
+        template <class Index, class Stamp> JAI_FORCEINLINE bool typed_element_read(frame& f, const script_value* cp, uint32_t guard_temp, bool guard_always, uint32_t dslot, uint8_t expect, Index&& index_of, Stamp&& stamp_of);
         type_info* temp_stamp_for(const script_array& node, size_t at) const;
 #if defined(_MSC_VER)
         __declspec(noinline)
@@ -2238,7 +2239,7 @@ namespace jai::vm {
         static const script_array* lane_element_source(const script_value& v, bool& borrowed) noexcept;
         op_status exec_typed_load(frame& f, const vm_instruction& ins);
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
-        op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);
+        template <bool Lane> op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);   // Lane: try the typed element read first
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f);

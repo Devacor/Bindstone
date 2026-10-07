@@ -7553,47 +7553,52 @@ bool vm_backend::typed_decl_land_element(frame& f, uint32_t dslot, uint8_t expec
 	}
 }
 
-// op_t_load: typed_decl_read over the flattened site row (one line of memory instead of
-// the proto, its operands, the fold proto and the chain vector)
+// the typed element read both forms run (op_t_load over its flattened site row, op_index_fused_decl over its proto): the
+// container (a guard's materialized copy when the guard took it ahead of the index, a var& parameter dereferenced silently or
+// through the guard), the int index, the bounds, then the decl lane's landing; false = the general form's business
+template <class Index, class Stamp>
+JAI_FORCEINLINE bool vm_backend::typed_element_read(frame& f, const script_value* cp, uint32_t guard_temp, bool guard_always, uint32_t dslot, uint8_t expect,
+                                                    Index&& index_of, Stamp&& stamp_of) {
+	if (cp && guard_always) { cp = frame_slot(f, guard_temp); }   // the guard took the container's value ahead of the index
+	if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
+		if (guard_temp != k_invalid_u32 && !ref_plain_cell(*cp)) { cp = frame_slot(f, guard_temp); }   // the guard materialized it ahead of the index
+		else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }   // a getter-backed reference: the kernel reads it exactly once
+	}
+	bool borrowed = false;
+	const script_array* node = cp ? lane_element_source(*cp, borrowed) : nullptr;
+	if (!node) return false;
+	script_int index = 0;
+	if (!index_of(index) || index < 0 || static_cast<size_t>(index) >= node->size()) return false;   // the kernel raises
+	return typed_decl_land_element(f, dslot, expect, stamp_of(*node, static_cast<size_t>(index)), *node, static_cast<size_t>(index), borrowed);
+}
+
+// op_t_load: the typed element read over the flattened site row (one line of memory instead of the proto, its operands, the fold
+// proto and the chain vector)
 JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
 #ifdef JAISCRIPT_VM_PROFILE
 	++profile_typed_cont_src_[site.cont_slot != k_invalid_u32 ? 0 : 1];
 #endif
-	if (!has_custom_numeric_ops_) {
-		const script_value* cp = site.cont_slot != k_invalid_u32
-			? frame_slot(f, site.cont_slot)
-			: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
-		if (cp && site.guard_always) { cp = frame_slot(f, site.guard_temp); }   // the guard took the container's value ahead of the index
-		if (cp && cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
-			if (site.guard_temp != k_invalid_u32 && !ref_plain_cell(*cp)) { cp = frame_slot(f, site.guard_temp); }   // the guard materialized it ahead of the index
-			else { cp = lane_deref_silent(*cp) ? &cp->deref() : nullptr; }   // a getter-backed reference: the kernel reads it exactly once
-		}
-		bool borrowed = false;
-		if (const script_array* node = cp ? lane_element_source(*cp, borrowed) : nullptr) {
-			auto read_int = [&](uint32_t o, script_int& out) -> bool {
-				const script_value* v = (o & k_typed_const_bit) ? &f.code->constants[o & ~k_typed_const_bit] : frame_slot(f, o);
-				if (!v || v->raw_storage_index() != script_value::TYPEID_INT) return false;
-				out = v->unchecked_as_int();
-				return true;
-			};
-			script_int index = 0, r = 0;
+	if (has_custom_numeric_ops_) return false;
+	const script_value* cp = site.cont_slot != k_invalid_u32
+		? frame_slot(f, site.cont_slot)
+		: fused_cmp_operand(f, f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container, site.fold_count ? f.ip * 3 + 2 : f.ip * 3);
+	auto read_int = [&](uint32_t o, script_int& out) -> bool {
+		const script_value* v = (o & k_typed_const_bit) ? &f.code->constants[o & ~k_typed_const_bit] : frame_slot(f, o);
+		if (!v || v->raw_storage_index() != script_value::TYPEID_INT) return false;
+		out = v->unchecked_as_int();
+		return true;
+	};
+	return typed_element_read(f, cp, site.guard_temp, site.guard_always, ins.a, site.decl_expect,
+		[&](script_int& index) {
+			script_int r = 0;
 			bool ok = read_int(site.operands[0], index);
-			if (ok && site.fold_count) {
-				ok = read_int(site.operands[1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[0]), index, r, index);
-				for (uint8_t k = 1; ok && k < site.fold_count; ++k) {
-					ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index);
-				}
+			for (uint8_t k = 0; ok && k < site.fold_count; ++k) {
+				ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index);
 			}
-			if (ok && index >= 0 && static_cast<size_t>(index) < node->size() &&
-			    typed_decl_land_element(f, ins.a, site.decl_expect,
-			                            site.stamp ? site.stamp : (site.temp ? temp_stamp_for(*node, static_cast<size_t>(index)) : nullptr),
-			                            *node, static_cast<size_t>(index), borrowed)) {
-				return true;
-			}
-		}
-	}
-	return false;
+			return ok;
+		},
+		[&](const script_array& node, size_t at) { return site.stamp ? site.stamp : (site.temp ? temp_stamp_for(node, at) : nullptr); });
 }
 
 // a compiler temp lands an element with the engine's canonical stamp of the element's kind (in place
@@ -7624,7 +7629,7 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 	if (f.code->typed_sites[f.ip].speculative) { ++profile_typed_spec_[1]; }
 #endif
-	return exec_index_fused_decl(f, f.code->typed_sites[f.ip].orig);
+	return exec_index_fused_decl<false>(f, f.code->typed_sites[f.ip].orig);   // the lane just declined: the general decl read
 }
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -10956,26 +10961,10 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 	// The read's lvalue/transient flags do not matter here: for the payloads this lane lands
 	// (raw scalars, strings) the kernel's element reference is consumed by the same decl one
 	// op later as exactly this copy; every other element falls to the kernel untouched
-	const bool folded = p.index_binary != k_invalid_u32;
-	const script_value* cp = fast_operand(f, p.container, folded ? f.ip * 3 + 2 : f.ip * 3);
-	if (!cp) return false;
-	if (p.guard_always) { cp = frame_slot(f, p.container_guard); if (!cp) return false; }   // the guard took the container's value ahead of the index
-	if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) {   // a var& parameter
-		if (p.container_guard != k_invalid_u32 && !ref_plain_cell(*cp)) {
-			cp = frame_slot(f, p.container_guard);   // the guard materialized it ahead of the index
-			if (!cp) return false;
-		} else {
-			if (!lane_deref_silent(*cp)) return false;   // a getter-backed reference: the kernel reads it exactly once
-			cp = &cp->deref();
-		}
-	}
-	bool borrowed = false;
-	const script_array* node = lane_element_source(*cp, borrowed);
-	if (!node) return false;
-	script_int index;
-	if (!typed_fold_index(f, p, index)) return false;
-	if (index < 0 || static_cast<size_t>(index) >= node->size()) return false;   // the kernel raises
-	return typed_decl_land_element(f, p.decl_slot, p.decl_expect, p.decl_type, *node, static_cast<size_t>(index), borrowed);
+	const script_value* cp = fast_operand(f, p.container, p.index_binary != k_invalid_u32 ? f.ip * 3 + 2 : f.ip * 3);
+	return typed_element_read(f, cp, p.container_guard, p.guard_always, p.decl_slot, p.decl_expect,
+		[&](script_int& index) { return typed_fold_index(f, p, index); },
+		[&](const script_array&, size_t) { return p.decl_type; });
 }
 
 bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no_result) {
@@ -11052,9 +11041,10 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 	return true;
 }
 
+template <bool Lane>
 op_status vm_backend::exec_index_fused_decl(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
-	if (p.typed_lane && !has_custom_numeric_ops_ && f.locals && !f.top_level) {
+	if (Lane && p.typed_lane && !has_custom_numeric_ops_ && f.locals && !f.top_level) {
 #ifdef JAISCRIPT_VM_PROFILE
 		++profile_typed_decl_read_[0];
 #endif
@@ -19228,7 +19218,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_index_fused: return exec_index_fused(f, ins);
 		case opcode::op_index_store_fused: return exec_index_store_fused(f, ins);
 		case opcode::op_index_compound_operand: return exec_index_compound_operand(f, ins);
-		case opcode::op_index_fused_decl: return exec_index_fused_decl(f, ins);
+		case opcode::op_index_fused_decl: return exec_index_fused_decl<true>(f, ins);
 		case opcode::op_cast: return exec_cast(f, ins);
 		case opcode::op_take_temp: {
 			script_value* slot = frame_slot(f, ins.a);
@@ -20537,7 +20527,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				break;
 			case opcode::op_index_fused_decl: JAI_OP_LABEL(op_index_fused_decl)
-				VM_TRY_OP_SHARED(exec_index_fused_decl(f, ins));
+				VM_TRY_OP_SHARED(exec_index_fused_decl<true>(f, ins));
 				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
 				JAI_NEXT_OP();
 			// The member trio (GET_MEMBER 477k / CALL_METHOD 983k per 200 GLOOM ticks)

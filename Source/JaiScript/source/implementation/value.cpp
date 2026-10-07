@@ -1102,7 +1102,7 @@ script_value script_value::make_removed_element_reference(const strong_ptr<scrip
     return v;
 }
 
-script_value script_value::make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
+script_value script_value::make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
                                                 engine* eng, type_info_ptr field_type) {
     if (!owner) {
         throw runtime_error("Cannot create reference to null");
@@ -1117,8 +1117,8 @@ script_value script_value::make_field_reference(const std::shared_ptr<class_inst
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_reference(field_value->get_type_info());
     auto ref = acquire_reference_holder(eng);
-    ref->owner_instance = owner;          // pins the instance for the reference's lifetime
     owner->note_field_ref_minted();
+    ref->owner_instance = std::move(owner);          // pins the instance for the reference's lifetime
     ref->field_id = field_id;
     ref->container_element_type = field_type;
     v.storage_ = ref;

@@ -8904,7 +8904,34 @@ next_frame:
 		case opcode::op_c_math: f.ip = ip; st = exec_c_math(f, ci, regs); ip = f.ip; break;
 		case opcode::op_c_cfor_back: st = exec_c_cfor_back(f, ip, ci, regs); break;
 		case opcode::op_c_cmp_any: { size_t at = ip; st = exec_c_cmp_any(f, at, ci, regs, true); ip = at; } break;
-		case opcode::op_c_jcmp_any: { size_t at = ip; st = exec_c_cmp_any(f, at, ci, regs, false); ip = at; } break;
+		case opcode::op_c_jcmp_any: {
+			// two int cells, or an int cell and an int constant: the kernel's int row inline (the kinds are read here, every time)
+			const token_type op = static_cast<token_type>(ci.a >> k_cell_op_shift);
+			const uint32_t lo = ci.a & k_cell_index_mask;
+			if (hot.kinds[lo] == static_cast<uint8_t>(script_value::TYPEID_INT) && (op == token_type::less || op == token_type::less_equal || op == token_type::greater ||
+			    op == token_type::greater_equal || op == token_type::equal_equal || op == token_type::bang_equal)) {
+				script_int b;
+				bool have = false;
+				if (ci.b & k_typed_const_bit) { const script_value& rc = hot.consts[ci.b & ~k_typed_const_bit]; if (rc.raw_storage_index() == script_value::TYPEID_INT) { b = rc.unchecked_as_int(); have = true; } }
+				else if (hot.kinds[ci.b] == static_cast<uint8_t>(script_value::TYPEID_INT)) { b = static_cast<script_int>(hot.payload[ci.b]); have = true; }
+				if (have) {
+					const script_int a = static_cast<script_int>(hot.payload[lo]);
+					bool truthy;
+					switch (op) {
+					case token_type::less: truthy = a < b; break;
+					case token_type::less_equal: truthy = a <= b; break;
+					case token_type::greater: truthy = a > b; break;
+					case token_type::greater_equal: truthy = a >= b; break;
+					case token_type::equal_equal: truthy = a == b; break;
+					default: truthy = a != b; break;
+					}
+					JAI_CELLS_COUNT(7);
+					if (truthy != ((ci.c & 0x80000000u) != 0)) { ++ip; } else { ip = ci.c & 0x7FFFFFFFu; }
+					JAI_CELL_NEXT;
+				}
+			}
+			size_t at = ip; st = exec_c_cmp_any(f, at, ci, regs, false); ip = at;
+		} break;
 		case opcode::op_c_neg: { size_t at = ip; st = exec_c_neg(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_bnot: { size_t at = ip; st = exec_c_bnot(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_lnot: { size_t at = ip; st = exec_c_lnot(f, at, ci, regs); ip = at; } break;

@@ -485,7 +485,7 @@ namespace jai::detail {
 						constraint = tag;
 					}
 					const auto& data = cur.peek_object_holder()->data;
-					return rooted(script_value::make_field_reference(std::shared_ptr<class_instance>(data, plain), member_id, eng, constraint));
+					return rooted(script_value::make_field_reference(std::shared_ptr<class_instance>(data, plain), member_id, eng, std::move(constraint), *field_value));
 				}
 				// Binder .property() members bind on every receiver kind (a same-named
 				// script field shadows: getter_id 0 keeps the FIELD path below); a
@@ -544,7 +544,7 @@ namespace jai::detail {
 					    tag->base_type != script_value_type::jai_null_type) {
 						constraint = tag;
 					}
-					return rooted(script_value::make_field_reference(instance, member_id, eng, constraint));
+					return rooted(script_value::make_field_reference(instance, member_id, eng, std::move(constraint), *field_value));
 				}
 				auto derefed = ref_checked_deref(*field_value);
 				if (!derefed) { return derefed; }

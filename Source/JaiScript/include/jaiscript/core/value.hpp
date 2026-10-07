@@ -299,6 +299,9 @@ namespace detail { struct argument_capture_storage; }
         // field node by id (never a cached address), so hot reload cannot dangle it.
         static script_value make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type);
+        // the same over the field's current cell the caller found (present: a removed field never reaches it)
+        static script_value make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
+                                                 engine* eng, type_info_ptr field_type, const script_value& field_value);
         // A reference minted through an element of `root` (a chain rooted at arr[i]: nested
         // field, nested element) also counts in root->live_elem_refs, so a parallel fork over
         // `root` can prove its elements reference-free without touching one (value.cpp).

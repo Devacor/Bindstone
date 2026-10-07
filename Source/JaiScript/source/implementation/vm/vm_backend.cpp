@@ -5061,52 +5061,54 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 	}
 }
 
+// two numbers with no operator to consult: the fused kernel's numeric rows into out (which may be l); false = no row decides, out
+// untouched
+JAI_FORCEINLINE bool vm_backend::stack_numeric_rows(const script_value& l, const script_value& r, token_type op, script_value& out) {
+	const size_t li = l.raw_storage_index(), ri = r.raw_storage_index();
+	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
+		const script_int a = l.unchecked_as_int(), b = r.unchecked_as_int();
+		script_int v;
+		switch (op) {
+		case token_type::plus: if (!ints::try_add(a, b, v)) return false; out = script_value(v, engine_); return true;
+		case token_type::minus: if (!ints::try_sub(a, b, v)) return false; out = script_value(v, engine_); return true;
+		case token_type::star: if (!ints::try_mul(a, b, v)) return false; out = script_value(v, engine_); return true;
+		case token_type::slash: if (b == 0 || !ints::try_div(a, b, v)) return false; out = script_value(v, engine_); return true;
+		case token_type::percent: if (b == 0) return false; out = script_value(ints::mod(a, b), engine_); return true;
+		case token_type::less: out = script_value(a < b, engine_); return true;
+		case token_type::less_equal: out = script_value(a <= b, engine_); return true;
+		case token_type::greater: out = script_value(a > b, engine_); return true;
+		case token_type::greater_equal: out = script_value(a >= b, engine_); return true;
+		case token_type::equal_equal: out = script_value(a == b, engine_); return true;
+		case token_type::bang_equal: out = script_value(a != b, engine_); return true;
+		default: return false;
+		}
+	}
+	if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
+		const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(l.unchecked_as_int()) : l.unchecked_as_float();
+		const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(r.unchecked_as_int()) : r.unchecked_as_float();
+		switch (op) {
+		case token_type::plus: out = script_value(a + b, engine_); return true;
+		case token_type::minus: out = script_value(a - b, engine_); return true;
+		case token_type::star: out = script_value(a * b, engine_); return true;
+		case token_type::slash: if (b == 0.0) return false; out = script_value(a / b, engine_); return true;
+		case token_type::percent: if (b == 0.0) return false; out = script_value(std::fmod(a, b), engine_); return true;
+		case token_type::less: out = script_value(a < b, engine_); return true;
+		case token_type::less_equal: out = script_value(a <= b, engine_); return true;
+		case token_type::greater: out = script_value(a > b, engine_); return true;
+		case token_type::greater_equal: out = script_value(a >= b, engine_); return true;
+		case token_type::equal_equal: out = script_value(a == b, engine_); return true;
+		case token_type::bang_equal: out = script_value(a != b, engine_); return true;
+		default: return false;
+		}
+	}
+	return false;
+}
+
 op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
-	// two numbers on the stack with no operator to consult: the fused kernel's numeric rows, the result over the left operand
+	// two numbers on the stack with no operator to consult: the numeric rows, the result over the left operand
 	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_.size() >= 2) {
 		script_value& l = stack_[stack_.size() - 2];
-		const script_value& r = stack_.back();
-		const size_t li = l.raw_storage_index(), ri = r.raw_storage_index();
-		const token_type op = static_cast<token_type>(ins.a);
-		bool done = true;
-		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-			const script_int a = l.unchecked_as_int(), b = r.unchecked_as_int();
-			script_int v;
-			switch (op) {
-			case token_type::plus: done = ints::try_add(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::minus: done = ints::try_sub(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::star: done = ints::try_mul(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::slash: done = b != 0 && ints::try_div(a, b, v); if (done) { l = script_value(v, engine_); } break;
-			case token_type::percent: done = b != 0; if (done) { l = script_value(ints::mod(a, b), engine_); } break;
-			case token_type::less: l = script_value(a < b, engine_); break;
-			case token_type::less_equal: l = script_value(a <= b, engine_); break;
-			case token_type::greater: l = script_value(a > b, engine_); break;
-			case token_type::greater_equal: l = script_value(a >= b, engine_); break;
-			case token_type::equal_equal: l = script_value(a == b, engine_); break;
-			case token_type::bang_equal: l = script_value(a != b, engine_); break;
-			default: done = false; break;
-			}
-		} else if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-			const script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(l.unchecked_as_int()) : l.unchecked_as_float();
-			const script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(r.unchecked_as_int()) : r.unchecked_as_float();
-			switch (op) {
-			case token_type::plus: l = script_value(a + b, engine_); break;
-			case token_type::minus: l = script_value(a - b, engine_); break;
-			case token_type::star: l = script_value(a * b, engine_); break;
-			case token_type::slash: done = b != 0.0; if (done) { l = script_value(a / b, engine_); } break;
-			case token_type::percent: done = b != 0.0; if (done) { l = script_value(std::fmod(a, b), engine_); } break;
-			case token_type::less: l = script_value(a < b, engine_); break;
-			case token_type::less_equal: l = script_value(a <= b, engine_); break;
-			case token_type::greater: l = script_value(a > b, engine_); break;
-			case token_type::greater_equal: l = script_value(a >= b, engine_); break;
-			case token_type::equal_equal: l = script_value(a == b, engine_); break;
-			case token_type::bang_equal: l = script_value(a != b, engine_); break;
-			default: done = false; break;
-			}
-		} else {
-			done = false;
-		}
-		if (done) {
+		if (stack_numeric_rows(l, stack_.back(), static_cast<token_type>(ins.a), l)) {
 			stack_.pop_back();
 			return {};
 		}
@@ -12904,32 +12906,12 @@ op_status vm_backend::call_parked_script(frame& f, const vm_instruction& ins, co
 		}
 		return push_script_frame_pinned(f, fn, std::move(pin), args_base, argc, &site);
 	} catch (...) {
-		return parked_call_threw(args_base);
+		return call_threw(args_base);
 	}
 }
 
-// out of line: the exception texts stay off the call path's frame
-JAI_NOINLINE op_status vm_backend::parked_call_threw(size_t args_base) {
-	try {
-		throw;
-	} catch (const script_exception& e) {
-		// pre-record throws leave the args on the stack; drop them like exec_call
-		stack_.truncate(args_base);
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		stack_.truncate(args_base);
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	}
-}
-
+// out of line: the exception texts stay off the call path's frame; a pre-record throw leaves the arguments on the stack from
+// truncate_to up (SIZE_MAX: none)
 JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 	try {
 		throw;
@@ -13412,82 +13394,6 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 
-	// In-loop fast path peeks the callee below the args (Squirrel's OP_CALL→StartCall
-	// shape): exact-arity direct callees bind straight from the stack_ slice — no pooled
-	// arg vector, no per-arg move. Default-arg and arity-error calls fall through.
-	if (stack_.size() > argc && stack_[stack_.size() - argc - 1].is_function()) {
-		const size_t args_base = stack_.size() - argc;
-		const script_value& calleeVal = stack_[args_base - 1];
-		const script_defined_function* direct_fn = nullptr;
-		// Monomorphic callee cache hit: same pinned script_function payload at the same
-		// arity skips the target<>() RTTI validate (see call_site in chunk.hpp). The raw
-		// TYPEID gate keeps reference callees on the validate path (is_function derefs);
-		// the cached_global_env_ gate keeps workers out of chunk caches entirely (reads
-		// AND writes), mirroring env_lookup_cached.
-		if (cached_global_env_ &&
-		    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION &&
-		    &calleeVal.unchecked_as_function() == site.ic_identity &&
-		    argc == site.ic_argc) {
-			direct_fn = site.ic_fn;
-		} else {
-			const auto* thunk = calleeVal.as_function().target<script_callable_thunk>();
-			if (thunk && thunk->eng == engine_ &&
-			    thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn &&
-			    argc == thunk->payload.fn->parameters().size()) {
-				direct_fn = thunk->payload.fn.get();
-				// Fill gated exactly like the env-lookup caches: parallel workers share
-				// chunks with the main engine and must never write them. Closure callees
-				// (closure_env set) are NEVER cached: ic_pin holding one would pin its
-				// capture env — captured objects would outlive their scope, which is
-				// script-observable (alive counts, script destructor timing). Plain
-				// functions pin only engine-internal state (body AST, params).
-				if (cached_global_env_ && !thunk->payload.fn->closure_env &&
-				    calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
-					site.ic_pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
-					site.ic_identity = &calleeVal.unchecked_as_function();
-					site.ic_fn = direct_fn;
-					site.ic_argc = static_cast<uint32_t>(argc);
-					site.ic_native = false;
-				}
-			}
-		}
-		// Bound-method thunk at a stack call site: slice-enter while callee + args are
-		// still in place — the callee slot is the frame territory (destroying the thunk
-		// at pop, which pins receiver + dispatcher transitively until then).
-		if (!direct_fn && calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
-			const auto* bthunk = calleeVal.unchecked_as_function().target<script_callable_thunk>();
-			if (bthunk && bthunk->eng == engine_ &&
-			    bthunk->payload.kind == script_callable::kind_type::bound_method &&
-			    bthunk->payload.this_obj && bthunk->payload.bound_dispatch &&
-			    !parallel_worker_) {
-				const auto* mdispatch = bthunk->payload.bound_dispatch->as_function().target<script_method_dispatch>();
-				if (mdispatch && mdispatch->eng == engine_) {
-					auto resolved = mdispatch->cls->resolve_method_overload_ref(mdispatch->name_id,
-						stack_.data() + args_base, argc);
-					if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
-						script_value method_val = *bthunk->payload.bound_dispatch;
-						script_value receiver = *bthunk->payload.this_obj;
-						return enter_script_method_sliced(f, std::move(method_val), *mdispatch,
-						                                  *resolved.value(), &receiver, args_base - 1,
-						                                  args_base, argc, site);
-					}
-				}
-			}
-		}
-		if (direct_fn) {
-			// Stateless ref binding: the call site travels as an argument; bind_parameters
-			// resolves ref args against the caller frame/env directly (no metadata channel)
-			try {
-				return push_script_frame(f, std::move(stack_[args_base - 1]), *direct_fn,
-				                         stack_, args_base, argc, &site);
-			} catch (...) {
-				// pre-record throws leave callee+args on the stack; drop them like the
-				// pooled path already had (bind-time throws pop-core'd them already)
-				return call_threw(args_base - 1);
-			}
-		}
-	}
-
 	auto arguments = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &arguments};
 	const size_t base = stack_.size() - argc;
@@ -13521,18 +13427,8 @@ op_status vm_backend::guarded_native_call(Call&& call) {
 		}
 		stack_.push_back(std::move(result.value()));
 		return {};
-	} catch (const script_exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = e;
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
-	} catch (const std::exception& e) {
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
-		is_unwinding_ = true;
-		stack_.push_back(make_null());
-		return {};
+	} catch (...) {
+		return call_threw(SIZE_MAX);
 	}
 }
 
@@ -15532,22 +15428,9 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
-
-	if (auto ns_target = detail::resolve_namespace_store(*engine_, member, *symbolizer_)) {
-		script_value stored = make_null();
-		VM_TRY(store_namespace_cell(*ns_target, member, clone_for_assignment(value), &stored));
-		stack_.push_back(assignment_result_used(f) ? clone_for_assignment(stored) : std::move(stored));
-		return {};
-	}
-	auto cls = detail::resolve_static_store_class(member, *environment_, *symbolizer_, frame_access_context(f));
-	if (!cls) {
-		return raise_from(cls);
-	}
-	auto stored = detail::store_static_member(*cls.value(), member->member_id, value, [&] { return clone_for_assignment(value); });
-	if (!stored) {
-		return raise_from(stored);
-	}
-	stack_.push_back(assignment_result_used(f) ? clone_for_assignment(stored.value()) : std::move(stored.value()));   // a consumed static store is a copy of the stored value
+	script_value stored = make_null();
+	VM_TRY(store_static_target(f, member, value, &stored));
+	stack_.push_back(assignment_result_used(f) ? clone_for_assignment(stored) : std::move(stored));   // a consumed static store is a copy of the stored value
 	return {};
 }
 
@@ -22145,7 +22028,14 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 	stack_.pop_back();
 	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
-	auto result = binary_general(static_cast<token_type>(ins.a), left_raw.deref(), right_raw.deref());
+	const script_value& left = left_raw.deref();
+	const script_value& right = right_raw.deref();
+	const token_type op = static_cast<token_type>(ins.a);
+	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(left, right, op, left_raw)) {
+		if constexpr (Entry) { return entry_return_finish(*fp, std::move(left_raw), ins.c); }
+		else { return return_with_result(fp, std::move(left_raw), ins.c); }
+	}
+	auto result = binary_general(op, left, right);
 	if (!result) {
 		return raise_from(result);
 	}

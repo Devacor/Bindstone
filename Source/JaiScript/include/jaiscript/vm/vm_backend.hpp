@@ -1934,6 +1934,7 @@ namespace jai::vm {
         op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);
         op_status exec_decl_ref_value(frame& f, const vm_instruction& ins);
         op_status exec_binary(frame& f, const vm_instruction& ins);
+        bool stack_numeric_rows(const script_value& l, const script_value& r, token_type op, script_value& out);
         op_status exec_binary_fused(frame& f, const vm_instruction& ins);
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
         op_status exec_call_temp(frame& f, const vm_instruction& ins);   // a call's result into a compiler temp (op_call_temp)
@@ -2328,7 +2329,6 @@ namespace jai::vm {
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);
-        op_status parked_call_threw(size_t args_base);
         // the call paths' catch: the active exception becomes the unwinding state (out of line, no texts on the caller's
         // frame); truncate_to drops the stack first (SIZE_MAX keeps it)
         op_status call_threw(size_t truncate_to);

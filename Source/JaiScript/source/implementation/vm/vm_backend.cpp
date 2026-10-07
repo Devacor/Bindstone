@@ -8575,24 +8575,25 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_back_step(frame& f, size_t& ip, con
 // table, a map entry, a member scope) or any difference asks for the full resolution again
 bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok) {
 	cell_state& cs = *f.cells;
-	for (uint32_t k = 0; k < loop.sites.size(); ++k) {
-		if (k < loop.site_alias.size() && loop.site_alias[k]) continue;   // a site through an alias: cells_rebinds_hold names its element again
-		if (loop.sites[k] < f.code->typed_sites.size() && f.code->typed_sites[loop.sites[k]].cont_slot == chunk::k_iter_container) continue;   // a range head's container: the iteration state's, which no callee rebinds
-		if (f.code->code[loop.sites[k]].op == opcode::op_c_mload || f.code->code[loop.sites[k]].op == opcode::op_c_mstore) {
+	for (const uint32_t entry : loop.land_sites) {
+		const uint32_t k = entry & ~chunk::cell_loop::k_land_member_site;
+		const uint32_t cip = loop.sites[k];
+		if (entry & chunk::cell_loop::k_land_member_site) {
 			// a member site: the instance and its field resolved again (a callee may rebind the slot's instance or migrate its fields)
-			const vm_instruction& mi = f.code->code[loop.sites[k]];
+			const vm_instruction& mi = f.code->code[cip];
 			fused_operand lc; lc.slot = mi.c; lc.member_node = mi.b; lc.direct = true;
 			const script_array* member_pin = nullptr;
-			if (cells_member_container(f, lc, member_pin, loop.sites[k], loop.sites[k] - loop.copy_head) != cs.site_member[loop.sites[k] - loop.copy_head]) return false;
+			if (cells_member_container(f, lc, member_pin, cip, cip - loop.copy_head) != cs.site_member[cip - loop.copy_head]) return false;
 			continue;
 		}
 		const script_value* cp = cs.site_slot[k] != k_invalid_u32 ? frame_slot(f, cs.site_slot[k]) : env_ok ? cs.site_env[k] : nullptr;
 		if (!cp) return false;
 		if (cp->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*cp)) return false; cp = &cp->deref(); }
-		if (cp->raw_storage_index() != script_value::TYPEID_ARRAY || cp->unchecked_array_node() != cs.site_node[loop.sites[k] - loop.copy_head]) return false;
+		if (cp->raw_storage_index() != script_value::TYPEID_ARRAY || cp->unchecked_array_node() != cs.site_node[cip - loop.copy_head]) return false;
 	}
 	return true;
 }
+
 
 // the entry of the loop this frame entered last in this call, the environment and its epoch unchanged: each site reached the way its last
 // resolution reached it (the landing's hold check, the range head's container read again) names the same node, so the resolution stands; a site

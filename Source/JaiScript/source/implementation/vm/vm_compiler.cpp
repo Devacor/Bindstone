@@ -5098,6 +5098,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			const uint32_t read_ip = s.orig_ip != k_invalid_u32 ? s.orig_ip : code[cip].c;   // the general read's own cache slots, never the miss ip's
 			loop.site_env_cache[k] = s.fold_count ? read_ip * 3 + 2 : read_ip * 3;
 		}
+		for (uint32_t k = 0; k < loop.sites.size(); ++k) {
+			const uint32_t cip = loop.sites[k];
+			if ((k < loop.site_alias.size() && loop.site_alias[k]) || (cip < c.typed_sites.size() && c.typed_sites[cip].cont_slot == chunk::k_iter_container)) continue;
+			loop.land_sites.push_back(k | (code[cip].op == opcode::op_c_mload || code[cip].op == opcode::op_c_mstore ? chunk::cell_loop::k_land_member_site : 0u));
+		}
 		std::vector<std::pair<uint32_t, uint32_t>> exits;   // (general target, its exit's copy ip): a compare's edge out of the loop
 		auto exit_at = [&](uint32_t target) -> uint32_t {
 			for (const auto& x : exits) { if (x.first == target) return x.second; }

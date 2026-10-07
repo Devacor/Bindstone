@@ -464,6 +464,8 @@ namespace jai::vm {
             struct rebind { uint32_t copy_ip = 0, cell = 0, source_site = k_invalid_u32; std::vector<uint32_t> dependents; bool iter = false; uint32_t ref_decl = k_invalid_u32; };   // iter: a range-for's by-reference loop variable (the reference carries the range-for's element constraint); ref_decl: a class reference's declaration (its admission runs at each new binding, its constraint rides the flushed reference)
             std::vector<rebind> rebinds;
             std::vector<uint8_t> site_alias;   // per site: 1 = a site through an alias (its container the rebind's element; skipped by the entry and the hold check)
+            std::vector<uint32_t> land_sites;   // the sites a landing after a call checks again (no alias site, no range head), k_land_member_site marking a member site
+            static constexpr uint32_t k_land_member_site = 0x80000000u;
             std::vector<uint32_t> inline_sites;   // the inlined leaves inside the region (chunk::inline_sites indexes): their guards hold at the entry and after every effect point
             struct math_alias_site { uint32_t site; uint8_t fn; uint32_t cache_slot; };   // a stdlib alias the block evaluates as its kernel: the name binds the builtin at the entry and after every effect point
             std::vector<math_alias_site> math_alias_sites;

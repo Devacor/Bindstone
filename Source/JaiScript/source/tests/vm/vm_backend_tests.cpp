@@ -4103,6 +4103,20 @@ public:
 				log = log + "|" + to_string(keep(root)) + to_string(root != null);
 				var p = P(); bump(p); var sp = new P(); bump(sp);
 				log = log + "|" + to_string(p.k) + "," + to_string(sp.k);
+				class T { int x = 0; shared_ptr<T> left = null; shared_ptr<T> right = null; }
+				class U : T { int extra = 1; }
+				void put(shared_ptr<T>& slot, shared_ptr<T> v) { slot = v; }
+				void put_any(var& slot, var v) { slot = v; }
+				void clear(shared_ptr<T>& slot) { slot = null; }
+				shared_ptr<T> t = new T();
+				shared_ptr<T> c = new T(); c.x = 5;
+				put(t.left, c); put(t.right, t.left); clear(t.left);
+				log = log + "|" + to_string(t.left == null) + to_string(t.right.x) + type_of(t.right);
+				shared_ptr<U> u = new U(); u.x = 9;
+				put(t.left, u); put_any(t.right, null);
+				log = log + "|" + to_string(t.left.x) + type_of(t.left) + to_string(t.right == null);
+				try { put_any(t.left, P()); } catch (e) { log = log + "|" + e; }
+				try { put_any(t.left, new P()); } catch (e) { log = log + "|" + e; }
 				log;
 			)");
 			check_true(i1.find("Cannot") != std::string::npos, i1);

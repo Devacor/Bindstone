@@ -4117,6 +4117,13 @@ public:
 				log = log + "|" + to_string(t.left.x) + type_of(t.left) + to_string(t.right == null);
 				try { put_any(t.left, P()); } catch (e) { log = log + "|" + e; }
 				try { put_any(t.left, new P()); } catch (e) { log = log + "|" + e; }
+				class B2 { int a = 0; }
+				class D2 : B2 { int d = 1; }
+				function rc() -> string { B2 x = D2(); D2& dx = cast<D2&>(x); int& r = dx.d; int k = r; r = 3; k = k + r; x = B2(); string out = to_string(k);
+					try { int z = r; out = out + "read"; } catch (e) { out = out + "/" + e; }
+					try { r = 4; out = out + "write"; } catch (e) { out = out + "/" + e; }
+					return out; }
+				log = log + "|" + rc();
 				log;
 			)");
 			check_true(i1.find("Cannot") != std::string::npos, i1);

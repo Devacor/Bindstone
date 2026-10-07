@@ -13244,7 +13244,7 @@ static const script_value* silent_referent(const script_value& a) {
 		if (h->container_index >= h->container->size()) { return nullptr; }
 		v = &a.deref();
 	} else if (h->owner_instance) {
-		v = h->owner_instance->find_field_value(h->field_id);
+		v = h->field_cell();
 		if (!v) { return nullptr; }
 	} else { return nullptr; }
 	return v->raw_storage_index() == script_value::TYPEID_REFERENCE ? nullptr : v;

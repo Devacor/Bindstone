@@ -1806,8 +1806,10 @@ void vm_backend::exec_array(frame& f, const vm_instruction& ins) {
 	// assignment (a literal never holds a live reference into its source; deref through
 	// a temp so the owning holder outlives the copy); an existing object is copied, the
 	// literal holding its own value. (KEEP BYTE-PARALLEL with the interpreter array literal)
+	const uint64_t* taken = ins.c ? f.code->literal_taken.data() + (ins.c - 1) : nullptr;
 	for (size_t i = 0; i < n; ++i) {
-		const bool copy = stack_[base + i].is_reference() || is_lvalue_shaped_expr(literal->elements[i].get());
+		const bool copy = (stack_[base + i].is_reference() || is_lvalue_shaped_expr(literal->elements[i].get())) &&
+		                  !(taken && (taken[i / 64] >> (i % 64) & 1));
 		if (stack_[base + i].is_reference()) [[unlikely]] {
 			script_value derefed = stack_[base + i].deref();
 			stack_[base + i] = std::move(derefed);
@@ -1831,9 +1833,11 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 	// All-detach ruling (2026-07, #12): literal construction is a store boundary -
 	// bound primitives snapshot, and reference-wrapper reads normalize to VALUES like
 	// assignment, an existing object copies (see exec_array; KEEP BYTE-PARALLEL with the interpreter map literal)
+	const uint64_t* taken = ins.c ? f.code->literal_taken.data() + (ins.c - 1) : nullptr;
 	for (size_t i = 0; i < n * 2; ++i) {
 		const auto& entry = literal->entries[i / 2];
-		const bool copy = stack_[base + i].is_reference() || is_lvalue_shaped_expr((i % 2 == 0 ? entry.first : entry.second).get());
+		const bool copy = (stack_[base + i].is_reference() || is_lvalue_shaped_expr((i % 2 == 0 ? entry.first : entry.second).get())) &&
+		                  !(taken && (taken[i / 64] >> (i % 64) & 1));
 		if (stack_[base + i].is_reference()) [[unlikely]] {
 			script_value derefed = stack_[base + i].deref();
 			stack_[base + i] = std::move(derefed);

@@ -37,6 +37,25 @@ namespace detail {
         std::shared_ptr<class_definition> def;
         void operator()(class_instance* ptr) const noexcept;
     };
+    // allocate_shared's allocator for an instance: the control block's allocation carries the instance's slot table and
+    // cells after it (`extra` bytes, their address written to *out before the instance is constructed)
+    template <class T>
+    struct trailing_allocator {
+        using value_type = T;
+        std::byte** out = nullptr;
+        size_t extra = 0;
+        trailing_allocator(std::byte** o, size_t e) noexcept : out(o), extra(e) {}
+        template <class U> trailing_allocator(const trailing_allocator<U>& o) noexcept : out(o.out), extra(o.extra) {}
+        T* allocate(size_t n) {
+            const size_t head = (n * sizeof(T) + 15) & ~size_t{15};
+            auto* memory = static_cast<std::byte*>(::operator new(head + extra));
+            *out = memory + head;
+            return reinterpret_cast<T*>(memory);
+        }
+        void deallocate(T* p, size_t) noexcept { ::operator delete(p); }
+        template <class U> bool operator==(const trailing_allocator<U>&) const noexcept { return true; }
+        template <class U> bool operator!=(const trailing_allocator<U>&) const noexcept { return false; }
+    };
 }
 
 namespace detail {
@@ -72,6 +91,26 @@ public:
     // a name already in the engine's interned table (a class definition's cached view): no copy, no lookup
     class_instance(interned_name_t, std::string_view interned, engine* eng)
         : class_name_(interned), engine_(eng), invalid_value_(std::monostate{}, eng) {}
+    // The slot table and cells in the instance's own allocation (class_definition::allocate_instance): `slots` table
+    // entries, then `slots` cells; a slot the class gains later takes a heap table and heap cells
+    struct trailing_cells {
+        std::byte* memory = nullptr;
+        uint32_t slots = 0;
+    };
+    static size_t trailing_bytes(uint32_t slots) noexcept { return slots * (sizeof(field_cell) + sizeof(script_value)); }
+    class_instance(interned_name_t, std::string_view interned, engine* eng, const trailing_cells& trailing)
+        : class_instance(interned_name_t{}, interned, eng) {
+        if (trailing.memory && trailing.slots) {
+            flat_fields_.adopt_inline(reinterpret_cast<field_cell*>(trailing.memory), trailing.slots);
+            arena_ = reinterpret_cast<script_value*>(trailing.memory + trailing.slots * sizeof(field_cell));
+            arena_cells_ = trailing.slots;
+        }
+    }
+    // An instance placed in its own raw allocation (a destructor class's, allocate_instance) dies through this
+    static void free_allocation(class_instance* instance) noexcept {
+        instance->~class_instance();
+        ::operator delete(static_cast<void*>(instance));
+    }
 
     ~class_instance();
 
@@ -273,33 +312,85 @@ private:
     // check, NOT is_invalid(): a reference field derefs). Runtime-added fields and
     // pre-definition writes (deserialization) live in the lazily-built overflow map;
     // set_class_definition re-homes them into slots.
-    // One cell arena per instance (allocated when the definition attaches, sized to the
-    // class's slot count); slots the class gains afterwards (reload) get heap cells. Either
-    // way a pointee never moves - reclass/migration move the POINTERS - and the arena
-    // frees after every cell died (declared before flat_fields_ on purpose).
+    // One cell arena per instance: the instance allocation's trailing cells (allocate_instance), else a heap arena sized
+    // to the class's slot count when the definition attaches; slots the class gains afterwards (reload) get heap cells.
+    // Either way a pointee never moves - reclass/migration move the POINTERS - so field_slot_value(slot) stays valid
+    // until the instance dies or a reload/re-class re-seats its slots (the class pointer or the field-shape epoch moves),
+    // and the arena outlives every cell (declared before flat_fields_ on purpose).
     struct cell_deleter {
         bool heap = true;
         void operator()(script_value* p) const noexcept { if (heap) { delete p; } else { p->~script_value(); } }
     };
     using field_cell = std::unique_ptr<script_value, cell_deleter>;
+    // The slot table: the trailing table, or a heap table once the class gains slots past it
+    class field_table {
+    public:
+        field_table() = default;
+        field_table(const field_table&) = delete;
+        field_table& operator=(const field_table&) = delete;
+        ~field_table() {
+            clear();
+            if (heap_) { ::operator delete(static_cast<void*>(data_)); }
+        }
+        void adopt_inline(field_cell* buffer, uint32_t capacity) noexcept { data_ = buffer; cap_ = capacity; }
+        size_t size() const noexcept { return size_; }
+        bool empty() const noexcept { return size_ == 0; }
+        field_cell& operator[](size_t i) noexcept { return data_[i]; }
+        const field_cell& operator[](size_t i) const noexcept { return data_[i]; }
+        field_cell* begin() noexcept { return data_; }
+        field_cell* end() noexcept { return data_ + size_; }
+        const field_cell* begin() const noexcept { return data_; }
+        const field_cell* end() const noexcept { return data_ + size_; }
+        void resize(size_t n) {
+            if (n > cap_) { grow(n); }
+            for (size_t i = size_; i < n; ++i) { new (&data_[i]) field_cell(); }
+            while (size_ > n) { data_[--size_].~field_cell(); }
+            size_ = static_cast<uint32_t>(n);
+        }
+        void pop_back() noexcept { data_[--size_].~field_cell(); }
+        void clear() noexcept {
+            const uint32_t n = size_;
+            size_ = 0;
+            for (uint32_t i = 0; i < n; ++i) { data_[i].~field_cell(); }
+        }
+    private:
+        void grow(size_t n) {
+            const size_t cap = (std::max)(n, static_cast<size_t>(cap_) * 2);
+            auto* fresh = static_cast<field_cell*>(::operator new(cap * sizeof(field_cell)));
+            for (uint32_t i = 0; i < size_; ++i) {
+                new (&fresh[i]) field_cell(std::move(data_[i]));
+                data_[i].~field_cell();
+            }
+            if (heap_) { ::operator delete(static_cast<void*>(data_)); }
+            data_ = fresh;
+            cap_ = static_cast<uint32_t>(cap);
+            heap_ = true;
+        }
+        field_cell* data_ = nullptr;
+        uint32_t size_ = 0;
+        uint32_t cap_ = 0;
+        bool heap_ = false;
+    };
     std::unique_ptr<std::byte[]> cell_arena_;
+    script_value* arena_ = nullptr;
     uint32_t arena_cells_ = 0;
     uint32_t arena_used_ = 0;
     void reserve_cell_arena(size_t n) {
-        if (!cell_arena_ && n) {
+        if (!arena_ && n) {
             cell_arena_.reset(new std::byte[n * sizeof(script_value)]);
+            arena_ = reinterpret_cast<script_value*>(cell_arena_.get());
             arena_cells_ = static_cast<uint32_t>(n);
         }
     }
     field_cell make_cell(script_value&& v) {
         if (arena_used_ < arena_cells_) {
-            auto* p = reinterpret_cast<script_value*>(cell_arena_.get()) + arena_used_++;
+            auto* p = arena_ + arena_used_++;
             new (p) script_value(std::move(v));
             return field_cell(p, cell_deleter{false});
         }
         return field_cell(new script_value(std::move(v)), cell_deleter{true});
     }
-    std::vector<field_cell> flat_fields_;
+    field_table flat_fields_;
     std::unique_ptr<std::unordered_map<uint64_t, script_value>> overflow_fields_;
     // Store WITHOUT reference write-through (the old map's raw insert_or_assign shape:
     // copy_fields_from and lazy-default materialization replace a held reference value
@@ -1189,13 +1280,20 @@ public:
             dtor_memo_epoch_ = method_epoch_;
         }
 
+        class_instance::trailing_cells trailing{nullptr, field_slot_count()};
+        const size_t extra = class_instance::trailing_bytes(trailing.slots);
         if (has_script_dtor_) {
-            auto* raw_instance = new class_instance(class_instance::interned_name_t{}, interned_name(), engine_);
+            constexpr size_t head = (sizeof(class_instance) + 15) & ~size_t{15};
+            auto* memory = static_cast<std::byte*>(::operator new(head + extra));
+            trailing.memory = memory + head;
+            auto* raw_instance = new (memory) class_instance(class_instance::interned_name_t{}, interned_name(), engine_, trailing);
             raw_instance->note_destructor_armed();
             if (engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
             instance = std::shared_ptr<class_instance>(raw_instance, detail::instance_deleter{shared_from_this()});
         } else {
-            instance = std::make_shared<class_instance>(class_instance::interned_name_t{}, interned_name(), engine_);   // instance + control block, one allocation
+            // control block, instance, slot table and cells: one allocation
+            instance = std::allocate_shared<class_instance>(detail::trailing_allocator<class_instance>(&trailing.memory, extra),
+                                                            class_instance::interned_name_t{}, interned_name(), engine_, trailing);
         }
         return instance;
     }

@@ -207,7 +207,7 @@ namespace jai::vm {
         uint64_t profile_slice_gate_[4] = {};
         uint64_t profile_push_sections_[8] = {};
         uint64_t profile_push_prologue_ = 0;
-        uint64_t profile_typed_head_[6] = {};
+        uint64_t profile_typed_head_[3] = {};
         uint64_t profile_push_fused_lane_[3] = {};   // append lane, slice kernel, replay
         uint64_t profile_typed_decl_read_[2] = {};   // tried, hit
         uint64_t profile_typed_spec_[2] = {};        // speculative T_LOAD sites: hit, miss
@@ -1216,10 +1216,8 @@ namespace jai::vm {
         // Fused `return <ident>;` / `return <a op b>;` (stage 6): record-frame and
         // native-entry variants (the entry twins set return_value_ like op_return's
         // entry branch)
-        op_status exec_return_ident(frame*& fp, const vm_instruction& ins);
-        op_status exec_return_ident_entry(frame& f, const vm_instruction& ins);
-        op_status exec_return_binary(frame*& fp, const vm_instruction& ins);
-        op_status exec_return_binary_entry(frame& f, const vm_instruction& ins);
+        template <bool Entry> op_status exec_return_ident(frame*& fp, const vm_instruction& ins);   // Entry: the entry frame's return door
+        template <bool Entry> op_status exec_return_binary(frame*& fp, const vm_instruction& ins);
         op_status fall_off_script_frame(frame*& fp);
         // Return-site conversion (op_return_convert inside try regions) and the
         // native-entry / fiber completion door; both run convert_return_at_site
@@ -1479,8 +1477,6 @@ namespace jai::vm {
         checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound = -1);
 
         checked_result<script_value> binary_general(token_type op, const script_value& left, const script_value& right);
-        bool binary_fast_shape(token_type op, uint32_t shape, const script_value& left, const script_value& right,
-                               std::optional<checked_result<script_value>>& out);
         checked_result<script_value> handle_binary_op(token_type op, const script_value& left, const script_value& right);
         checked_result<script_value> handle_add(const script_value& left, const script_value& right);
         checked_result<script_value> handle_subtract(const script_value& left, const script_value& right);
@@ -1961,7 +1957,6 @@ namespace jai::vm {
         // tag guard per operand; false = not handled (guard miss, an error case, a dead
         // slot), the general kernel then runs and raises exactly as before.
         const script_value* direct_operand(frame& f, const fused_operand& operand) noexcept;
-        bool typed_cmp_jump_head(frame& f, const vm_instruction& ins, const fused_binary_proto& p) noexcept;
         template <typename Sink>
         bool typed_binary_head(frame& f, const fused_binary_proto& p, Sink& sink);
         op_status exec_binary_fused_decl(frame& f, const vm_instruction& ins);

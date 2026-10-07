@@ -119,7 +119,7 @@ namespace {
 	}
 
 	// Twin-parity zero-divisor check for cpp-bound operands: index 14 skips the raw-index
-	// gates of binary_fast_shape/exec_binary_fused, which would move a bound-zero divisor's
+	// gates of exec_binary_fused, which would move a bound-zero divisor's
 	// error from the fast-path surface onto the handlers' bare "Division by zero". Each shape
 	// passes the exact (op x type-pair) coverage of its own inline zero checks so bound
 	// operands keep the plain twin's error surface. Byte-parallel with interpreter.cpp's copy.
@@ -3117,189 +3117,6 @@ checked_result<script_value> vm_backend::binary_general(token_type op, const scr
 	return handle_binary_op(op, left, right);
 }
 
-bool vm_backend::binary_fast_shape(token_type op, uint32_t shape, const script_value& left, const script_value& right,
-                                   std::optional<checked_result<script_value>>& out) {
-	const size_t li = left.raw_storage_index();
-	const size_t ri = right.raw_storage_index();
-
-	if (shape == binary_shape_ident_ident) {
-		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-			switch (op) {
-			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '+'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '-'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '*'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::slash:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
-				{ script_int rr; if (!ints::try_div(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '/'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::percent:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
-				out.emplace(script_value(ints::mod(a, b), engine_)); return true;
-			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
-			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
-			case token_type::greater: out.emplace(script_value(a > b, engine_)); return true;
-			case token_type::greater_equal: out.emplace(script_value(a >= b, engine_)); return true;
-			case token_type::equal_equal: out.emplace(script_value(a == b, engine_)); return true;
-			case token_type::bang_equal: out.emplace(script_value(a != b, engine_)); return true;
-			default: return false;
-			}
-		}
-		if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-		    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-			script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
-			switch (op) {
-			case token_type::plus: out.emplace(script_value(a + b, engine_)); return true;
-			case token_type::minus: out.emplace(script_value(a - b, engine_)); return true;
-			case token_type::star: out.emplace(script_value(a * b, engine_)); return true;
-			case token_type::slash:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
-				out.emplace(script_value(a / b, engine_)); return true;
-			case token_type::percent:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
-				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
-			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
-			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
-			case token_type::greater: out.emplace(script_value(a > b, engine_)); return true;
-			case token_type::greater_equal: out.emplace(script_value(a >= b, engine_)); return true;
-			case token_type::equal_equal: out.emplace(script_value(a == b, engine_)); return true;
-			case token_type::bang_equal: out.emplace(script_value(a != b, engine_)); return true;
-			default: return false;
-			}
-		}
-		if (op == token_type::plus && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING &&
-		    !left.is_cpp_bound() && !right.is_cpp_bound()) {
-			// unchecked_as_string does NOT decode cpp_bound (unlike the int/float reads)
-			// engine::memory_cap chokepoint: deny the concat result before it exists
-			if (!limits_->memory_charge(sizeof(script_value) + left.unchecked_as_string().size() + right.unchecked_as_string().size())) [[unlikely]] {
-				out.emplace(checked_result<script_value>(detail::raise_memory_cap(*limits_)));
-				return true;
-			}
-			out.emplace(script_value(left.unchecked_as_string() + right.unchecked_as_string(), engine_));
-			return true;
-		}
-		// cpp-bound operands (index 14) skip the gates above: keep the zero-divisor
-		// error surface identical to this shape's plain fast path (twin parity)
-		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, true)) {
-				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
-				return true;
-			}
-		}
-		return false;
-	}
-
-	if (shape == binary_shape_ident_literal) {
-		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-			switch (op) {
-			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
-			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
-			case token_type::greater: out.emplace(script_value(a > b, engine_)); return true;
-			case token_type::greater_equal: out.emplace(script_value(a >= b, engine_)); return true;
-			case token_type::equal_equal: out.emplace(script_value(a == b, engine_)); return true;
-			case token_type::bang_equal: out.emplace(script_value(a != b, engine_)); return true;
-			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '+'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '-'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '*'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::slash:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
-				{ script_int rr; if (!ints::try_div(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '/'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::percent:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
-				out.emplace(script_value(ints::mod(a, b), engine_)); return true;
-			default: return false;
-			}
-		}
-		if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-		    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-			script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
-			switch (op) {
-			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
-			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
-			case token_type::greater: out.emplace(script_value(a > b, engine_)); return true;
-			case token_type::greater_equal: out.emplace(script_value(a >= b, engine_)); return true;
-			case token_type::plus: out.emplace(script_value(a + b, engine_)); return true;
-			case token_type::minus: out.emplace(script_value(a - b, engine_)); return true;
-			case token_type::star: out.emplace(script_value(a * b, engine_)); return true;
-			case token_type::slash:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
-				out.emplace(script_value(a / b, engine_)); return true;
-			case token_type::percent:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
-				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
-			default: return false;
-			}
-		}
-		// twin parity for bound operands: float / and % are covered inline in this shape
-		// (exec_binary_fused parity), so bound pairs keep the same error surface
-		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, true)) {
-				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
-				return true;
-			}
-		}
-		return false;
-	}
-
-	if (shape == binary_shape_literal_ident) {
-		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-			const script_int a = left.unchecked_as_int(), b = right.unchecked_as_int();
-			switch (op) {
-			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
-			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
-			case token_type::greater: out.emplace(script_value(a > b, engine_)); return true;
-			case token_type::greater_equal: out.emplace(script_value(a >= b, engine_)); return true;
-			case token_type::equal_equal: out.emplace(script_value(a == b, engine_)); return true;
-			case token_type::bang_equal: out.emplace(script_value(a != b, engine_)); return true;
-			case token_type::plus: { script_int rr; if (!ints::try_add(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '+'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::minus: { script_int rr; if (!ints::try_sub(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '-'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::star: { script_int rr; if (!ints::try_mul(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '*'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::slash:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
-				{ script_int rr; if (!ints::try_div(a, b, rr)) { out.emplace(vm_int_overflow_sv("Integer overflow in '/'")); return true; } out.emplace(script_value(rr, engine_)); return true; }
-			case token_type::percent:
-				if (b == 0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
-				out.emplace(script_value(ints::mod(a, b), engine_)); return true;
-			default: return false;
-			}
-		}
-		if ((li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) &&
-		    (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-			script_float a = li == script_value::TYPEID_INT ? static_cast<script_float>(left.unchecked_as_int()) : left.unchecked_as_float();
-			script_float b = ri == script_value::TYPEID_INT ? static_cast<script_float>(right.unchecked_as_int()) : right.unchecked_as_float();
-			switch (op) {
-			case token_type::less: out.emplace(script_value(a < b, engine_)); return true;
-			case token_type::less_equal: out.emplace(script_value(a <= b, engine_)); return true;
-			case token_type::greater: out.emplace(script_value(a > b, engine_)); return true;
-			case token_type::greater_equal: out.emplace(script_value(a >= b, engine_)); return true;
-			case token_type::plus: out.emplace(script_value(a + b, engine_)); return true;
-			case token_type::minus: out.emplace(script_value(a - b, engine_)); return true;
-			case token_type::star: out.emplace(script_value(a * b, engine_)); return true;
-			case token_type::slash:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::division_by_zero), "Division by zero")); return true; }
-				out.emplace(script_value(a / b, engine_)); return true;
-			case token_type::percent:
-				if (b == 0.0) { out.emplace(checked_result<script_value>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero")); return true; }
-				out.emplace(script_value(std::fmod(a, b), engine_)); return true;
-			default: return false;
-			}
-		}
-		// twin parity for bound operands: float / and % are covered inline in this shape
-		// (exec_binary_fused parity), so bound pairs keep the same error surface
-		if (li == script_value::TYPEID_CPP_BOUND || ri == script_value::TYPEID_CPP_BOUND) {
-			if (auto z = bound_fastpath_zero_divisor(op, left, right, true, true)) {
-				out.emplace(checked_result<script_value>(make_error_code(z->code), z->text));
-				return true;
-			}
-		}
-		return false;
-	}
-
-	return false;
-}
-
 checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound) {
 	const script_value& left = left_in.deref();
 	const script_value& right = right_in.deref();
@@ -5302,17 +5119,6 @@ op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
 	const script_value& right = right_raw.deref();
 	const token_type op = static_cast<token_type>(ins.a);
 
-	if (ins.b != binary_shape_none && !has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
-		std::optional<checked_result<script_value>> fast;
-		if (binary_fast_shape(op, ins.b, left, right, fast)) {
-			if (!*fast) {
-				return raise_from(*fast);
-			}
-			stack_.push_back(std::move(fast->value()));
-			return {};
-		}
-	}
-
 	auto result = binary_general(op, left, right);
 	if (!result) {
 		return raise_from(result);
@@ -5910,40 +5716,6 @@ bool vm_backend::typed_binary_head(frame& f, const fused_binary_proto& p, Sink& 
 	}
 }
 
-bool vm_backend::typed_cmp_jump_head(frame& f, const vm_instruction& ins, const fused_binary_proto& p) noexcept {
-	const script_value* lp = direct_operand(f, p.left);
-	const script_value* rp = direct_operand(f, p.right);
-	if (!lp || !rp) return false;
-	bool truthy;
-	if (p.typed_class == 1) {
-		if (lp->raw_storage_index() != script_value::TYPEID_INT || rp->raw_storage_index() != script_value::TYPEID_INT) return false;
-		const script_int a = lp->unchecked_as_int(), b = rp->unchecked_as_int();
-		switch (static_cast<token_type>(p.op)) {
-		case token_type::less: truthy = a < b; break;
-		case token_type::less_equal: truthy = a <= b; break;
-		case token_type::greater: truthy = a > b; break;
-		case token_type::greater_equal: truthy = a >= b; break;
-		case token_type::equal_equal: truthy = a == b; break;
-		case token_type::bang_equal: truthy = a != b; break;
-		default: return false;
-		}
-	} else {
-		if (lp->raw_storage_index() != script_value::TYPEID_FLOAT || rp->raw_storage_index() != script_value::TYPEID_FLOAT) return false;
-		const script_float a = lp->unchecked_as_float(), b = rp->unchecked_as_float();
-		switch (static_cast<token_type>(p.op)) {
-		case token_type::less: truthy = a < b; break;
-		case token_type::less_equal: truthy = a <= b; break;
-		case token_type::greater: truthy = a > b; break;
-		case token_type::greater_equal: truthy = a >= b; break;
-		case token_type::equal_equal: truthy = a == b; break;
-		case token_type::bang_equal: truthy = a != b; break;
-		default: return false;
-		}
-	}
-	f.ip = truthy ? f.ip + 1 : ins.a;
-	return true;
-}
-
 // The ONE fused-binary computation, sink-templated (flatstack stage 6): op_binary_fused
 // pushes; the dest-addressed variants land the result in a slot/decl with no push and
 // no second dispatch. One body, every sink - parity by construction.
@@ -5992,7 +5764,6 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 		if (!rp) return op_status::failed;
 	}
 
-	// Fast path: mirrors binary_fast_shape without materializing operand loads.
 	// Raw-capable sinks (slot-landing consumers) take scalar results with no value
 	// mint at all — every other sink gets the identical minted value it always did.
 	auto emit_int = [&](script_int v) {
@@ -6381,18 +6152,6 @@ JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const scr
 
 op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[ins.b];
-#ifdef JAISCRIPT_VM_PROFILE
-	if (p.typed_class == 0) { ++profile_typed_head_[5]; }
-#endif
-	if (p.typed_class != 0 && !has_custom_numeric_ops_ && typed_cmp_jump_head(f, ins, p)) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_typed_head_[3];
-#endif
-		return {};
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	if (p.typed_class != 0) { ++profile_typed_head_[4]; }
-#endif
 	const token_type op = static_cast<token_type>(p.op);
 
 	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool
@@ -7597,36 +7356,6 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 #endif
 			sink(script_value(node->values()[index]));
 			return {};
-		}
-	}
-	// Constant-string map READ (Dev ruling 2026-07-11): find on the raw constant
-	// bytes via the transparent comparator — no per-access key materialization.
-	// Plain read shape only; lvalue/write shapes replay (entry references and
-	// missing-key creation keep exec_index's one spelling). Mirrors exec_index's
-	// map-read branch: hit copies (engine stamped), miss sinks null.
-	if (left.raw_storage_index() == script_value::TYPEID_MAP &&
-	    p.index.const_index != k_invalid_u32 &&
-	    !(flags & (index_flag_lvalue_shape | index_flag_lvalue_write))) {
-		const script_value& itmpl = f.code->constants[p.index.const_index];
-		if (itmpl.raw_storage_index() == script_value::TYPEID_STRING) {
-			const auto& map_ptr = const_cast<script_value&>(left).get_map_storage();
-			if (map_ptr) {
-#ifdef JAISCRIPT_VM_PROFILE
-				++profile_index_read_paths_[4];
-#endif
-				auto it = map_ptr->find(map_string_key_probe{
-					*itmpl.get_storage().get<strong_ptr<script_string>>()});
-				if (it != map_ptr->end()) {
-					script_value val = it->second;
-					if (!val.has_valid_engine()) {
-						val.set_engine(engine_);
-					}
-					sink(std::move(val));
-				} else {
-					sink(make_null());
-				}
-				return {};
-			}
 		}
 	}
 	// String READ s[i]: exec_index's string branch for an in-bounds integer index (the char at that byte); a write, a non-int or
@@ -9139,9 +8868,6 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_args: return exec_c_args(f, ci);
 	case opcode::op_c_call: return exec_c_call(f, ci);
 	case opcode::op_c_land: return cells_land(f, loop, loop.calls[ci.a]);
-	case opcode::op_c_rebind: return exec_c_rebind(f, ci);
-	case opcode::op_c_mload: return exec_c_mload(f, ci);   // the member sites: off the hot switch (row 148.3; the row 148.2 cliff)
-	case opcode::op_c_mstore: return exec_c_mstore(f, ci);
 	case opcode::op_c_bail: cells_miss(f, loop, ci.a, 5); return {};   // a planned miss: an instruction the translation does not take, inside a conditional span; nothing observed first
 	case opcode::op_c_boundary: {
 		// a boundary operation: the dirty cells the statement may read go back, the block parks (its cells stay valid), and the general form runs
@@ -13155,7 +12881,6 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
-#ifndef JAISCRIPT_VM_PROFILE
 	pending_callee& top = pending_callees_.back();
 	if (top.fn) {
 		JAI_COARSE(coarse_push_, coarse_pushes_)
@@ -13164,7 +12889,6 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 		pending_callees_.pop_back();
 		return call_parked_script(f, ins, fn, std::move(pin));
 	}
-#endif
 	return exec_call_from_scratch_general(f, ins);
 }
 
@@ -13288,14 +13012,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 		cfs_probe_.opaque_name = std::string(symbolizer_->get_string(f.code->symbols[site.callee.symbol]));
 	}
 #endif
-
-	if (pc.fn) {
-#ifdef JAISCRIPT_VM_PROFILE
-		cfs_probe_.bucket = 0;
-		if (!cfs_probe_.opaque_name.empty()) { profile_cfs_inloop_names_[cfs_probe_.opaque_name]++; }
-#endif
-		return call_parked_script(f, ins, *pc.fn, std::move(pc.pin));
-	}
 
 	if (pc.method) {
 		// a sibling method parked by the probe's IC: entered as its bound method would be, else minted for the opaque path
@@ -16571,7 +16287,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 							                                  pin->resolved, nullptr, args_base - 1,
 							                                  args_base, argc, site);
 						}
-						// unpinned falls to the vector path below for the identical verdict
+						// unpinned falls to the vector path below for the wall error
 					} else if (cached_global_env_ && site.mic_cd && cd == site.mic_cd &&
 					           cd->method_epoch() == site.mic_epoch &&
 					           !mic_field_shadowed(site, *inst, member->member_id)) {
@@ -16726,61 +16442,15 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 		if (receiver_type == script_value::TYPEID_OBJECT ||
 		    receiver_type == script_value::TYPEID_SHARED_PTR) {
 			auto holder = objv.get_object_holder();
-			// Worker method wall → admission verdict (parallel-method-admission ruling):
-			// barrier-admitted methods dispatch on THIS worker's backend through pinned
-			// worker-private state (fresh dispatcher value, pre-resolved overload,
-			// pre-compiled chunk — no shared count or cache is ever touched); anything
-			// unpinned keeps the wall error. Trusted scripts still opt out entirely.
-			const detail::parallel_method_pin* worker_pin = nullptr;
+			// Worker method wall (parallel-method-admission ruling): an admitted method entered in the slice section above;
+			// anything unpinned keeps the wall error. Trusted scripts still opt out entirely.
 			if (parallel_worker_ && holder && holder->is_class_instance_wrapper && holder->data) [[unlikely]] {
 				auto* cd = static_cast<class_instance*>(holder->data.get())->get_class_definition();
-				worker_pin = parallel_method_pins_ && cd ? parallel_method_pins_->find(cd, member->member_id) : nullptr;
-				if (!worker_pin) {
+				if (!(parallel_method_pins_ && cd && parallel_method_pins_->find(cd, member->member_id))) {
 					return raise_(make_error_code(runtime_error_code::unsupported_operation),
 						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
 						"public methods on the element's own class touching only element, local, or "
 						"captured-read state)", member->member_id);
-				}
-			}
-			if (worker_pin) [[unlikely]] {
-				const detail::parallel_method_pin* pin = worker_pin;
-				script_value method_val = pin->method_value;   // pin-private control block
-				const auto* dispatch = method_val.as_function().target<script_method_dispatch>();
-#ifdef JAISCRIPT_VM_PROFILE
-				profile_call_method_paths_[4]++;
-#endif
-				return enter_script_method(f, std::move(method_val), *dispatch, pin->resolved,
-				                           std::move(objv), arguments, site);
-			}
-			// Monomorphic method IC hit (call_site in chunk.hpp): same receiver class at
-			// an unchanged method_epoch replays the cached ladder outcome. has_field is
-			// re-probed every hit (a runtime-added field shadows the method); non-static
-			// sites re-run single-overload resolution (typed params reject by arg type,
-			// and a decline falls to the full ladder for the identical error).
-			if (cached_global_env_ && site.mic_cd && holder && holder->is_class_instance_wrapper &&
-			    holder->data) {
-				auto* inst = static_cast<class_instance*>(holder->data.get());
-				if (inst->get_class_definition() == site.mic_cd &&
-				    site.mic_cd->method_epoch() == site.mic_epoch &&
-				    !mic_field_shadowed(site, *inst, member->member_id)) {
-					if (site.mic_static) {
-						script_value method_val = site.mic_method;
-#ifdef JAISCRIPT_VM_PROFILE
-						profile_call_method_paths_[0]++;
-#endif
-						return enter_script_method(f, std::move(method_val), *site.mic_dispatch,
-						                           site.mic_resolved, std::move(objv), arguments, site);
-					}
-					auto resolved = site.mic_dispatch->cls->resolve_method_overload(
-						site.mic_dispatch->name_id, arguments);
-					if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
-						script_value method_val = site.mic_method;
-#ifdef JAISCRIPT_VM_PROFILE
-						profile_call_method_paths_[1]++;
-#endif
-						return enter_script_method(f, std::move(method_val), *site.mic_dispatch,
-						                           resolved.value(), std::move(objv), arguments, site);
-					}
 				}
 			}
 			// Coroutine resume()/done() dispatch directly: the native branch mints a fresh
@@ -16923,39 +16593,12 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 				profile_call_method_paths_[6]++;
 				++profile_builtin_direct_names_[std::string(member->member)];
 #endif
-				// ARRAY push inline (95% of builtin-direct calls in array-heavy code):
-				// the builtin's body VERBATIM — same kernels, same error text, same
-				// memory-cap chokepoint — minus the pending-site arming and boundary
-				// armor (an append runs no user code). bi_array already proved the
-				// site is a registered array builtin; push's name id pins WHICH.
-				// member_id warms lazily (interp idiom) — main thread only: workers get
-				// pre-warmed ids from region setup and must never intern (frozen tables).
+				// member_id warms lazily (interp idiom) - main thread only: workers get pre-warmed ids from region setup and must
+				// never intern (frozen tables).
 				uint64_t direct_member_id = member->member_id;
 				if (direct_member_id == UINT64_MAX && !parallel_worker_) {
 					direct_member_id = symbolizer_->intern(member->member);
 					member->member_id = direct_member_id;
-				}
-				if (receiver_type == script_value::TYPEID_ARRAY &&
-				    direct_member_id == builtin_push_id_ && arguments.size() == 1) {
-#ifdef JAISCRIPT_VM_PROFILE
-					++profile_builtin_direct_names_["<push-inline>"];
-#endif
-					auto array_type_info = objv.get_type_info();
-					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
-					if (!vm_is_element_type_compatible(arguments[0], element_type, objv)) {
-						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", arguments[0].deref(), element_type));
-					}
-					auto converted_result = vm_convert_array_element(engine_, arguments[0], element_type);
-					if (!converted_result) { return raise_from(converted_result); }
-					script_value converted = std::move(converted_result.value());
-					const size_t bytes = sizeof(script_value) +
-						(converted.is_string() ? converted.unchecked_as_string().size() : 0);
-					if (!limits_->memory_charge(bytes)) [[unlikely]] {
-						return raise_from(detail::raise_memory_cap(*limits_));
-					}
-					objv.unchecked_get_array_storage()->push(std::move(converted));
-					stack_.push_back(make_null());
-					return {};
 				}
 				// MAP has inline: the builtin's body (one find on the dereferenced key)
 				if (receiver_type == script_value::TYPEID_MAP && direct_member_id == builtin_has_id_ && arguments.size() == 1) {
@@ -18557,51 +18200,17 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	}
 	// The body runs through the method door (the lazy environment when the chain is public, `this` in the record); the dispatcher
 	// is one per constructor declaration, kept by the backend and checked against the class and the definition environment
-	{
-		ctor_dispatch_entry& entry = ctor_dispatch_[matching_ctor.get()];
-		if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method) {
-			entry.method = script_value::make_function(script_method_dispatch{engine_, class_def, matching_ctor->name_id, definition_env}, engine_);
-			entry.cls = class_def.get();
-			entry.env = definition_env.get();
-		}
-		const auto* dispatch = entry.method->as_function().target<script_method_dispatch>();
-		script_value method = *entry.method;
-		op_status pushed;
-		try {
-			pushed = push_method_frame(f, std::move(method), *dispatch, matching_ctor, std::move(this_value), args, site);
-		} catch (...) {
-			return call_threw(SIZE_MAX);
-		}
-		if (pushed == op_status::failed) {
-			return pushed;
-		}
-		if (switch_to_) {
-			call_record& rec = *call_records_[call_records_top_ - 1];
-			rec.ctor_frame = true;
-			rec.ctor_result_stamp = result_stamp;
-		}
-		return {};
+	ctor_dispatch_entry& entry = ctor_dispatch_[matching_ctor.get()];
+	if (entry.cls != class_def.get() || entry.env != definition_env.get() || !entry.method) {
+		entry.method = script_value::make_function(script_method_dispatch{engine_, class_def, matching_ctor->name_id, definition_env}, engine_);
+		entry.cls = class_def.get();
+		entry.env = definition_env.get();
 	}
-	// Transient function object: push_script_frame copies/derives everything the frame
-	// needs (name into the record, chunk from the body-keyed cache, env installed during
-	// setup) and the parameter vector is the decl-owned shared instance - nothing points
-	// back into this local after the push returns.
-	// The closure env is a CARRIER: push_script_frame's eager setup copies its parent,
-	// this and access context into a pooled scope env and never chains through it, so
-	// it comes from the pool and goes back right after the push
-	script_defined_function ctor_func(matching_ctor->name, shared_parameters_for(matching_ctor.get()),
-	                                  matching_ctor->return_type, matching_ctor->body,
-	                                  acquire_method_scope_env(definition_env, this_value, class_def.get()),
-	                                  matching_ctor->local_count);
-	ctor_func.unit = matching_ctor->unit;
-	struct carrier_release {
-		vm_backend* vm;
-		std::shared_ptr<environment>& env;
-		~carrier_release() { if (env) { vm->release_scope_env(std::move(env)); } }
-	} carrier{this, ctor_func.closure_env};
+	const auto* dispatch = entry.method->as_function().target<script_method_dispatch>();
+	script_value method = *entry.method;
 	op_status pushed;
 	try {
-		pushed = push_script_frame(f, make_null(), ctor_func, args, 0, args.size(), nullptr);
+		pushed = push_method_frame(f, std::move(method), *dispatch, matching_ctor, std::move(this_value), args, site);
 	} catch (...) {
 		return call_threw(SIZE_MAX);
 	}
@@ -18609,7 +18218,9 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 		return pushed;
 	}
 	if (switch_to_) {
-		call_records_[call_records_top_ - 1]->ctor_result_stamp = result_stamp;
+		call_record& rec = *call_records_[call_records_top_ - 1];
+		rec.ctor_frame = true;
+		rec.ctor_result_stamp = result_stamp;
 	}
 	return {};
 }
@@ -20312,9 +19923,8 @@ void vm_backend::dump_opcode_profile() const {
 		(unsigned long long)profile_typed_spec_[0], (unsigned long long)profile_typed_spec_[1]);
 	fprintf(stderr, "[vm-profile] push_fused lanes: append %llu | kernel %llu | replay %llu\n",
 		(unsigned long long)profile_push_fused_lane_[0], (unsigned long long)profile_push_fused_lane_[1], (unsigned long long)profile_push_fused_lane_[2]);
-	fprintf(stderr, "[vm-profile] typed heads: binary hit %llu miss %llu unstamped %llu | cmp_jump hit %llu miss %llu unstamped %llu\n",
-		(unsigned long long)profile_typed_head_[0], (unsigned long long)profile_typed_head_[1], (unsigned long long)profile_typed_head_[2],
-		(unsigned long long)profile_typed_head_[3], (unsigned long long)profile_typed_head_[4], (unsigned long long)profile_typed_head_[5]);
+	fprintf(stderr, "[vm-profile] typed heads: binary hit %llu miss %llu unstamped %llu\n",
+		(unsigned long long)profile_typed_head_[0], (unsigned long long)profile_typed_head_[1], (unsigned long long)profile_typed_head_[2]);
 	if (profile_push_sections_[0] + profile_push_sections_[1]) {
 		const double n = double(profile_push_sections_[0] + profile_push_sections_[1]);
 		fprintf(stderr, "[vm-profile] push slice: prologue %.1f | typed %llu | hetero %llu (realloc %llu) | avg cyc: compat %.1f convert %.1f charge %.1f append %.1f tail %.1f\n",
@@ -21162,20 +20772,20 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// set script unwinding falls to the loop bottom exactly like op_binary would.
 			case opcode::op_return_ident: JAI_OP_LABEL(op_return_ident) {
 				if (call_records_top_ == records_base) {
-					VM_TRY_OP_SHARED(exec_return_ident_entry(f, ins));
+					VM_TRY_OP_SHARED(exec_return_ident<true>(fp, ins));
 					return {};
 				}
-				VM_TRY_OP_SHARED(exec_return_ident(fp, ins));
+				VM_TRY_OP_SHARED(exec_return_ident<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
 			case opcode::op_return_binary: JAI_OP_LABEL(op_return_binary) {
 				if (call_records_top_ == records_base) {
-					VM_TRY_OP_SHARED(exec_return_binary_entry(f, ins));
+					VM_TRY_OP_SHARED(exec_return_binary<true>(fp, ins));
 					if (is_unwinding_) [[unlikely]] { break; }
 					return {};
 				}
-				VM_TRY_OP_SHARED(exec_return_binary(fp, ins));
+				VM_TRY_OP_SHARED(exec_return_binary<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
 				continue;
 			}
@@ -22517,17 +22127,21 @@ JAI_NOINLINE op_status vm_backend::return_with_conversion(frame*& fp, script_val
 // fused_ident_value (same errors, same order - the fusion is adjacent, nothing is
 // reordered); the value takes ONE copy exactly like op_load's push did, then the
 // by-value materialization moves the own slot out or deep-copies another lvalue.
+template <bool Entry>
 op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	frame& f = *fp;
+	auto finish = [&](script_value v) -> op_status {
+		const uint32_t mode = (ins.c & load_flag_return_proven) ? 1u : 0u;
+		if constexpr (Entry) { return entry_return_finish(f, std::move(v), mode); }
+		else { return return_with_result(fp, std::move(v), mode); }
+	};
 	if (ins.a != k_invalid_u32 && !(ins.c & (load_flag_global_only | load_flag_type_ctor)) && f.locals && !f.top_level) {
 		if (script_value* local = frame_slot(f, ins.a)) {   // fused_ident_value's slot rung
 			const script_value& resolved = local->deref();
-			if (detail::return_value_plain(resolved)) {
-				return return_with_result(fp, script_value(resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
-			}
+			if (detail::return_value_plain(resolved)) { return finish(script_value(resolved)); }
 			script_value value(resolved);
 			materialize_return(f, value, detail::return_operand_ident, ins.a);
-			return return_with_result(fp, std::move(value), (ins.c & load_flag_return_proven) ? 1u : 0u);
+			return finish(std::move(value));
 		}
 	}
 	fused_operand operand;
@@ -22538,57 +22152,23 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
 	if (!resolved) return op_status::failed;
-	if (detail::return_value_plain(*resolved)) {
-		return return_with_result(fp, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
-	}
+	if (detail::return_value_plain(*resolved)) { return finish(script_value(*resolved)); }
 	script_value value(*resolved);
 	materialize_return(f, value, detail::return_operand_ident, ins.a);
-	return return_with_result(fp, std::move(value), (ins.c & load_flag_return_proven) ? 1u : 0u);
+	return finish(std::move(value));
 }
 
-op_status vm_backend::exec_return_ident_entry(frame& f, const vm_instruction& ins) {
-	fused_operand operand;
-	operand.slot = ins.a;
-	operand.symbol = ins.b;
-	operand.load_flags = ins.c;
-	operand.ident_node = f.code->ident_nodes.size() > f.ip ? f.code->ident_nodes[f.ip] : k_invalid_u32;
-	std::optional<script_value> scratch;
-	const script_value* resolved = fused_ident_value(f, operand, scratch, f.ip * 3);
-	if (!resolved) return op_status::failed;
-	if (detail::return_value_plain(*resolved)) {
-		return entry_return_finish(f, script_value(*resolved), (ins.c & load_flag_return_proven) ? 1u : 0u);
-	}
-	script_value value(*resolved);
-	materialize_return(f, value, detail::return_operand_ident, ins.a);
-	return entry_return_finish(f, std::move(value), (ins.c & load_flag_return_proven) ? 1u : 0u);
-}
-
-// Fused `return <a op b>;` (stage 6): computes exactly like exec_binary (same fast
-// shapes, same general tail incl. custom operator dispatch), then returns without the
-// push+pop round trip. A custom operator that THROWS leaves the result pushed and the
+// Fused `return <a op b>;` (stage 6): computes exactly like exec_binary's general tail (custom operator dispatch
+// included), then returns without the push+pop round trip. A custom operator that THROWS leaves the result pushed and the
 // ip parked here so the dispatch loop's unwind handling sees the same state op_binary
 // would have produced one op earlier (same statement, same trace line).
+template <bool Entry>
 op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) {
-	frame& f = *fp;
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
 	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
-	const script_value& left = left_raw.deref();
-	const script_value& right = right_raw.deref();
-	const token_type op = static_cast<token_type>(ins.a);
-
-	if (ins.b != binary_shape_none && !has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
-		std::optional<checked_result<script_value>> fast;
-		if (binary_fast_shape(op, ins.b, left, right, fast)) {
-			if (!*fast) {
-				return raise_from(*fast);
-			}
-			return return_with_result(fp, std::move(fast->value()), ins.c);
-		}
-	}
-
-	auto result = binary_general(op, left, right);
+	auto result = binary_general(static_cast<token_type>(ins.a), left_raw.deref(), right_raw.deref());
 	if (!result) {
 		return raise_from(result);
 	}
@@ -22598,37 +22178,8 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 		stack_.push_back(std::move(result.value()));
 		return {};
 	}
-	return return_with_result(fp, std::move(result.value()), ins.c);
-}
-
-op_status vm_backend::exec_return_binary_entry(frame& f, const vm_instruction& ins) {
-	script_value right_raw = std::move(stack_.back());
-	stack_.pop_back();
-	script_value left_raw = std::move(stack_.back());
-	stack_.pop_back();
-	const script_value& left = left_raw.deref();
-	const script_value& right = right_raw.deref();
-	const token_type op = static_cast<token_type>(ins.a);
-
-	if (ins.b != binary_shape_none && !has_custom_numeric_ops_ && is_numeric_binary_op(op)) {
-		std::optional<checked_result<script_value>> fast;
-		if (binary_fast_shape(op, ins.b, left, right, fast)) {
-			if (!*fast) {
-				return raise_from(*fast);
-			}
-			return entry_return_finish(f, std::move(fast->value()), ins.c);
-		}
-	}
-
-	auto result = binary_general(op, left, right);
-	if (!result) {
-		return raise_from(result);
-	}
-	if (is_unwinding_) [[unlikely]] {
-		stack_.push_back(std::move(result.value()));
-		return {};
-	}
-	return entry_return_finish(f, std::move(result.value()), ins.c);
+	if constexpr (Entry) { return entry_return_finish(*fp, std::move(result.value()), ins.c); }
+	else { return return_with_result(fp, std::move(result.value()), ins.c); }
 }
 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {

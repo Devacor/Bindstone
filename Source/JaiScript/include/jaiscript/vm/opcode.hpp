@@ -30,7 +30,7 @@ namespace jai::vm {
         op_decl_ref_value,  // a=node index (variable_decl); pops evaluated initializer
         op_destructure,     // a=proto index; pops source array
 
-        op_binary,          // a=token_type, b=operand shape (binary_shape_*); pops rhs,lhs, pushes result
+        op_binary,          // a=token_type, b=binary_shape_none; pops rhs,lhs, pushes result
         op_binary_fused,    // a=fused_binary_proto index, b=shape; resolves operands in place, pushes result
         op_index,           // a=flags(index_flag_*); pops index,container, pushes element/reference
         op_index_assign,    // pops reference,value; assigns through, pushes value
@@ -414,14 +414,12 @@ namespace jai::vm {
     inline constexpr uint32_t incdec_flag_no_result = 4;  // statement position: run() pops the result
     inline constexpr uint32_t incdec_flag_global_only = 8; // ::name target (global env only)
 
-    // op_binary b operand shapes (mirror the interpreter's AST-shape fast paths)
+    // operand shapes the compiler.s fusion tests classify (op_binary carries binary_shape_none)
     inline constexpr uint32_t binary_shape_none = 0;
     inline constexpr uint32_t binary_shape_ident_ident = 1;
     inline constexpr uint32_t binary_shape_ident_literal = 2;
     inline constexpr uint32_t binary_shape_literal_ident = 3;
     inline constexpr uint32_t binary_shape_subscript = 4;   // >=1 operand is a fusable a[i] read
-                                                            // (only op_binary_fused consumes it;
-                                                            // binary_fast_shape ignores unknown codes)
 
     // op_index a flags
     inline constexpr uint32_t index_flag_lvalue_shape = 1; // container expr was identifier/member/subscript

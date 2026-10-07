@@ -1,5 +1,61 @@
 # JaiScript Performance Report
 
+## Lua campaign: 2026-10-07
+
+The VM at the start of the general-case Lua campaign (A, `e429bbd6f`) against master after it (B, `7158ae124`), with Lua 5.5.1, LuaJIT 2.1 `-joff`, Lua 5.4.8 and Luau 0.741 beside them. MSVC 19.51 Release with LTCG (the Release BENCHMARKS configuration); Intel Core Ultra 9 285HX. Serial processes are pinned to P core 11, parallel ones to the eight P cores; A and B alternate within each round, the box idle (load under 15%) and the timing lock held, every timed run hash-checked. A DOOM A/A run on B read within 0.7% per round.
+
+### Whole programs
+
+Median of 9 interleaved rounds [range]; B/A is the ratio of the medians (the paired median agrees within 0.02 everywhere).
+
+| Program | Unit | A | B | B/A |
+|---|---|---:|---:|---:|
+| Gator Quest smoke, 2000 ticks, 2 bots | ms/tick | 2.492 [2.478-2.527] | 1.075 [1.072-1.089] | 0.43 |
+| Gator Quest smoke, 2000 ticks, 4 bots | ms/tick | 6.694 [6.661-6.757] | 2.340 [2.332-2.350] | 0.35 |
+| GLOOM, 1500 ticks, serial | ms/tick | 0.775 [0.770-0.782] | 0.724 [0.718-0.730] | 0.93 |
+| GLOOM, 1500 ticks, 8 workers | ms/tick | 0.691 [0.656-0.899] | 0.666 [0.599-0.967] | 0.96 |
+| JaiDOOM timedemo (3984 tics) | ms/tic | 1.630 [1.620-1.640] | 1.510 [1.510-1.540] | 0.93 |
+| OSSUARY (scene 15), serial | ms/frame | 159.2 [158.5-181.9] | 138.9 [138.3-143.0] | 0.87 |
+| OSSUARY (scene 15), 8 workers | ms/frame | 24.41 [23.41-26.28] | 21.02 [20.61-22.62] | 0.86 |
+
+Hashes on both sides: Gator Quest STATE_HASH 3218840367 (2 bots) and 4257627332 (4 bots), GLOOM frame hash 04b76d2ed8d9fe2e (1500 ticks, seed 666), JaiDOOM STATE_HASH 1746772898, OSSUARY scene hash 081952d04f07fb62. Gator Quest's figure is the in-script tick loop (`ran N ticks in X ms`, world generation excluded, `noroundtrip`); GLOOM's the measured ticks; OSSUARY's 40 frames after 5 warm-up frames (`--perf 40 --scene 15 --perf-warmup 5`).
+
+Gator Quest against the Lua port (`examples/gatorquest/lua`, the same simulation and STATE_HASH), same rounds and pinning:
+
+| Runtime | 2 bots, ms/tick | 4 bots, ms/tick | A / runtime (2, 4 bots) | B / runtime (2, 4 bots) |
+|---|---:|---:|---:|---:|
+| Lua 5.4.8 | 0.593 | 1.622 | 4.20, 4.13 | 1.81, 1.44 |
+| Luau 0.741 interpreter -O2 | 0.553 | 1.499 | 4.51, 4.47 | 1.94, 1.56 |
+
+### Kernel suite
+
+`bench/kernels` (dasProfile's protocol: each process runs a kernel as many times as fit 0.5 s and reports the per-run time). Median of 5 interleaved rounds, ms per run; `/L` is the ratio to Lua 5.5.1. A and B printed Lua 5.5.1's checksum on every kernel; LuaJIT's fib_loop (`nan`, its doubles overflow the integer sum) and float2string (351128, its number formatting) checksums differ from Lua's.
+
+| Kernel | Lua 5.5.1 | LuaJIT -joff | typed A | typed B | B/A | A/L | B/L | dyn A | dyn B | B/A | A/L | B/L |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| fib_recursive | 44.96 | 39.85 | 149.5 | 131.5 | 0.88 | 3.33 | 2.93 | 287.1 | 170.4 | 0.59 | 6.39 | 3.79 |
+| fib_loop | 39.60 | 24.76 | 74.73 | 54.75 | 0.73 | 1.89 | 1.38 | 129.5 | 131.8 | 1.02 | 3.27 | 3.33 |
+| primes | 52.72 | 34.34 | 85.96 | 81.07 | 0.94 | 1.63 | 1.54 | 126.4 | 117.4 | 0.93 | 2.40 | 2.23 |
+| queen | 1.184 | 0.821 | 5.917 | 4.703 | 0.79 | 5.00 | 3.97 | 7.003 | 5.771 | 0.82 | 5.91 | 4.87 |
+| mandelbrot | 65.51 | 28.26 | 2.483 | 2.320 | 0.93 | 0.04 | 0.04 | 3.417 | 3.297 | 0.96 | 0.05 | 0.05 |
+| nbodies | 37.82 | 20.54 | 167.2 | 109.7 | 0.66 | 4.42 | 2.90 | 451.5 | 274.9 | 0.61 | 11.94 | 7.27 |
+| spectral_norm | 53.52 | 30.74 | 74.92 | 62.69 | 0.84 | 1.40 | 1.17 | 78.84 | 82.37 | 1.04 | 1.47 | 1.54 |
+| particles | 46.07 | 20.73 | 239.4 | 265.0 | 1.11 | 5.20 | 5.75 | 250.5 | 258.0 | 1.03 | 5.44 | 5.60 |
+| sha256 | 58.43 | 4.671 | 8.900 | 8.016 | 0.90 | 0.15 | 0.14 | 17.49 | 16.25 | 0.93 | 0.30 | 0.28 |
+| tree | 28.39 | 17.46 | 334.9 | 239.6 | 0.72 | 11.80 | 8.44 | 346.8 | 256.4 | 0.74 | 12.21 | 9.03 |
+| sort | 48.22 | 37.71 | 281.1 | 82.50 | 0.29 | 5.83 | 1.71 | 285.2 | 85.41 | 0.30 | 5.91 | 1.77 |
+| dict | 37.30 | 10.52 | 197.9 | 161.0 | 0.81 | 5.31 | 4.32 | 188.8 | 154.3 | 0.82 | 5.06 | 4.14 |
+| exp | 19.60 | 9.736 | 52.39 | 22.33 | 0.43 | 2.67 | 1.14 | 54.52 | 28.89 | 0.53 | 2.78 | 1.47 |
+| string2float | 3.729 | 3.026 | 7.800 | 6.345 | 0.81 | 2.09 | 1.70 | 7.719 | 5.902 | 0.76 | 2.07 | 1.58 |
+| float2string | 16.27 | 4.062 | 8.721 | 6.547 | 0.75 | 0.54 | 0.40 | 8.903 | 6.462 | 0.73 | 0.55 | 0.40 |
+| interop | 10.61 | 22.58 | 70.98 | 47.22 | 0.67 | 6.69 | 4.45 | 72.32 | 47.42 | 0.66 | 6.82 | 4.47 |
+
+Geometric mean over the 16 kernels, typed: B/A 0.74, A/Lua 2.01, B/Lua 1.48.
+
+Geometric mean over the 16 kernels, dyn: B/A 0.75, A/Lua 2.56, B/Lua 1.92.
+
+particles varies by up to 15% between rounds on both sides (its typed B/A of 1.11 sits inside that spread); spectral_norm dyn (B/A 1.04) and fib_loop dyn (1.02) read slower in every round.
+
 ## Whole-program snapshot: 2026-09-09
 
 Runtime source `d6c9959b`; MSVC 19.51.36252 Release with LTCG;

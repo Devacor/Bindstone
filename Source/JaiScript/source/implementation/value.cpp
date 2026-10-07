@@ -5,6 +5,7 @@
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <atomic>
+#include <optional>
 #include <sstream>
 #include <thread>
 
@@ -583,6 +584,55 @@ void script_value::gather_shared_cells(const script_value* values, size_t count,
     }
 }
 
+// release_cell_cycles when no cell holds a function: no edges leave a cell, so a cell is garbage exactly when the list
+// holds every handle to it; the same verdicts, list removals and value releases as the general walk, without its graph
+bool script_value::release_plain_cells(std::vector<script_value>& cells, engine* eng) {
+    const size_t n = cells.size();
+    for (const script_value& cell : cells) {
+        const auto& holder = *cell.storage_.get_if<TYPEID_REFERENCE>();
+        if (holder->plain_cell() && holder->cell()->raw_storage_index() == TYPEID_FUNCTION) return false;
+    }
+    bool garbage[16] = {};   // per entry: its cell's verdict (a cell listed twice has one)
+    bool first[16] = {};
+    bool any = false;
+    for (size_t i = 0; i < n; ++i) {
+        const reference_holder* holder = cells[i].storage_.get_if<TYPEID_REFERENCE>()->get();
+        size_t at = i;
+        size_t held = 0;
+        for (size_t j = 0; j < n; ++j) {
+            if (cells[j].storage_.get_if<TYPEID_REFERENCE>()->get() == holder) {
+                if (j < at) { at = j; }
+                ++held;
+            }
+        }
+        first[i] = at == i;
+        garbage[i] = at == i ? cells[i].storage_.get_if<TYPEID_REFERENCE>()->use_count() == held : garbage[at];
+        any = any || garbage[i];
+    }
+    void*& slot = eng->cell_cycle_registry_slot();
+    if (any && slot) {
+        auto& deferred = static_cast<cell_cycle_registry*>(slot)->deferred;
+        for (size_t i = 0; i < n; ++i) {
+            if (!garbage[i]) continue;
+            const reference_holder* holder = cells[i].storage_.get_if<TYPEID_REFERENCE>()->get();
+            const size_t floor = deferred.size() > 8 ? deferred.size() - 8 : 0;
+            for (size_t k = deferred.size(); k-- > floor;) {
+                if (deferred[k].owner_identity() == holder) {
+                    deferred.erase(deferred.begin() + static_cast<std::ptrdiff_t>(k));
+                    break;
+                }
+            }
+        }
+    }
+    for (size_t i = 0; any && i < n; ++i) {
+        if (!garbage[i] || !first[i]) continue;
+        auto* holder = const_cast<reference_holder*>(cells[i].storage_.get_if<TYPEID_REFERENCE>()->get());
+        if (holder->plain_cell()) { script_value dying = std::move(*holder->cell()); }
+    }
+    cells.clear();
+    return true;
+}
+
 // Trial deletion over the cells, the function values a cell holds, their definitions and capture environments, and the
 // cells and functions those environments hold. A node referenced from outside that set (a count above its edges from
 // inside plus the handles in `cells`) is live, and so is everything it reaches; a cell left over is held only by the
@@ -590,16 +640,17 @@ void script_value::gather_shared_cells(const script_value* values, size_t count,
 void script_value::release_cell_cycles(std::vector<script_value>& cells, engine* eng) {
     if (cells.empty()) return;
     if (!eng || eng->parallel_region_active()) { cells.clear(); return; }
+    if (cells.size() <= 16 && release_plain_cells(cells, eng)) return;
     enum : uint8_t { node_cell, node_function, node_definition, node_environment };
     struct node { const void* key; size_t count; size_t internal; uint32_t held; uint32_t first_edge; uint32_t edge_count; uint8_t kind; bool live; };
     std::vector<node> nodes;
     nodes.reserve(cells.size() * 4);
     std::vector<uint32_t> edges;
-    std::unordered_map<const void*, uint32_t> index;   // past a few dozen nodes
+    std::optional<std::unordered_map<const void*, uint32_t>> index;   // past a few dozen nodes
     auto find = [&](const void* key) -> uint32_t {
-        if (!index.empty()) {
-            auto it = index.find(key);
-            return it == index.end() ? UINT32_MAX : it->second;
+        if (index) {
+            auto it = index->find(key);
+            return it == index->end() ? UINT32_MAX : it->second;
         }
         for (uint32_t i = 0; i < nodes.size(); ++i) {
             if (nodes[i].key == key) return i;
@@ -609,10 +660,11 @@ void script_value::release_cell_cycles(std::vector<script_value>& cells, engine*
     auto add = [&](const void* key, size_t count, uint8_t kind) -> uint32_t {
         const uint32_t id = static_cast<uint32_t>(nodes.size());
         nodes.push_back({key, count, 0, 0, 0, 0, kind, false});
-        if (!index.empty()) {
-            index.emplace(key, id);
+        if (index) {
+            index->emplace(key, id);
         } else if (nodes.size() > 32) {
-            for (uint32_t i = 0; i < nodes.size(); ++i) index.emplace(nodes[i].key, i);
+            index.emplace();
+            for (uint32_t i = 0; i < nodes.size(); ++i) index->emplace(nodes[i].key, i);
         }
         return id;
     };

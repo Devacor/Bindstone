@@ -188,7 +188,8 @@ public:
 
     script_value get_method(uint64_t id, bool throw_if_missing = true) const;
 
-    void set_class_definition(std::shared_ptr<class_definition> class_def);
+    void set_class_definition(const std::shared_ptr<class_definition>& class_def) { set_class_definition(class_def.get()); }
+    void set_class_definition(class_definition* class_def);
 
     // Re-class this instance in place (extend's re-derive, an assignment of another class): every field cell moves to the
     // new definition's slot for its id - cells never relocate, so captured field addresses
@@ -262,22 +263,6 @@ public:
 
     uint64_t get_cpp_object_field_id() const;
 
-    const script_value& get_cached_bound_method(uint64_t method_id) const {
-        auto it = bound_method_cache_.find(method_id);
-        if (it != bound_method_cache_.end()) {
-            return it->second;
-        }
-        return invalid_value_;
-    }
-
-    void cache_bound_method(uint64_t method_id, const script_value& bound_method) const {
-        bound_method_cache_[method_id] = bound_method;
-    }
-
-    bool has_cached_bound_method(uint64_t method_id) const {
-        return bound_method_cache_.find(method_id) != bound_method_cache_.end();
-    }
-
 private:
     std::string_view class_name_;   // the engine's interned text (empty for an instance built without an engine)
     // Tier-1 flat fields: slot-indexed per class_definition's append-only registry.
@@ -337,7 +322,6 @@ private:
     friend class class_definition;
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value invalid_value_;
-    mutable std::unordered_map<uint64_t, script_value> bound_method_cache_;
 
     static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
     bool fields_cascade() const noexcept {
@@ -1129,9 +1113,11 @@ public:
     virtual bool chain_literal_plan_ok() const { return true; }
     const std::vector<std::pair<uint32_t, script_value>>& instance_plan() const {
         const uint64_t want = chain_defaults_version() ^ (field_shape_epoch_ << 32) ^ (method_epoch_ << 48);
-        if (instance_plan_version_ == want && !instance_plan_.empty()) { return instance_plan_; }
+        if (instance_plan_version_ == want && (!instance_plan_.empty() || instance_plan_absent_)) { return instance_plan_; }
         instance_plan_.clear();
-        if (!chain_literal_plan_ok()) { instance_plan_version_ = 0; return instance_plan_; }
+        instance_plan_version_ = want;
+        instance_plan_absent_ = true;
+        if (!chain_literal_plan_ok()) { return instance_plan_; }
         std::unordered_map<uint64_t, script_value> merged;
         std::vector<const class_definition*> chain;
         std::function<void(const class_definition&)> walk = [&](const class_definition& cd) {
@@ -1156,7 +1142,8 @@ public:
                         case script_value::TYPEID_STRING: baked = script_value(lit->unchecked_as_string(), engine_); break;
                         case script_value::TYPEID_CHAR: baked = script_value(lit->unchecked_as_char(), engine_); break;
                         case script_value::TYPEID_BOOL: baked = script_value(lit->unchecked_as_bool(), engine_); break;
-                        default: instance_plan_.clear(); instance_plan_version_ = 0; return instance_plan_;   // not a scalar literal: the slow path
+                        case script_value::TYPEID_NULL: break;
+                        default: instance_plan_.clear(); return instance_plan_;   // not a scalar literal: the slow path
                     }
                     merged.insert_or_assign(id, std::move(baked));
                 } else {
@@ -1167,7 +1154,7 @@ public:
         instance_plan_.reserve(merged.size());
         for (const auto& [id, value] : merged) {
             const uint32_t slot = field_slot(id);
-            if (slot == k_no_field_slot) { instance_plan_.clear(); instance_plan_version_ = 0; return instance_plan_; }
+            if (slot == k_no_field_slot) { instance_plan_.clear(); return instance_plan_; }
             script_value stored = value;
             if (!value.is_null()) {
                 type_info_ptr declared;
@@ -1176,13 +1163,13 @@ public:
                 }
                 if (declared && declared->base_type != script_value_type::jai_any_type) {
                     if (auto converted = detail::field_store_convert_no_script(value, declared, engine_)) { stored = std::move(*converted); }
-                    else { instance_plan_.clear(); instance_plan_version_ = 0; return instance_plan_; }
+                    else { instance_plan_.clear(); return instance_plan_; }
                 }
             }
             instance_plan_.emplace_back(slot, std::move(stored));
         }
         std::sort(instance_plan_.begin(), instance_plan_.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-        instance_plan_version_ = want;
+        instance_plan_absent_ = instance_plan_.empty();
         return instance_plan_;
     }
     // An instance of this class, armed with the chain's script destructor when it declares one: every instance runs it,
@@ -1215,7 +1202,7 @@ public:
     std::shared_ptr<class_instance> create_instance() {
         std::shared_ptr<class_instance> instance = allocate_instance();
 
-        instance->set_class_definition(shared_from_this());
+        instance->set_class_definition(this);
 
         register_instance(std::weak_ptr<class_instance>(instance), instance.get());
 
@@ -2355,6 +2342,7 @@ private:
     // defaults_version_ it was built under (chain_defaults_version sums them).
     mutable std::vector<std::pair<uint32_t, script_value>> instance_plan_;
     mutable uint64_t instance_plan_version_ = 0;
+    mutable bool instance_plan_absent_ = false;   // the version's verdict was no plan (the slow construction path)
     mutable bool field_defaults_cache_valid_ = false;
     // Ids whose methods_ entry is the SYNTHESIZED field accessor (see user_accessor)
     std::unordered_set<uint64_t> auto_accessor_ids_;
@@ -2576,8 +2564,8 @@ inline void class_instance::rehome_overflow_fields() {
     }
 }
 
-inline void class_instance::set_class_definition(std::shared_ptr<class_definition> class_def) {
-    class_def_ = class_def.get();
+inline void class_instance::set_class_definition(class_definition* class_def) {
+    class_def_ = class_def;
     if (class_def_) { reserve_cell_arena(class_def_->field_slot_count()); }
     rehome_overflow_fields();
 }
@@ -2601,7 +2589,6 @@ inline void class_instance::reclass(const std::shared_ptr<class_definition>& cla
     flat_fields_.clear();
     class_def_ = class_def.get();
     class_name_ = class_def->interned_name();
-    bound_method_cache_.clear();
     flat_fields_.resize(class_def_->field_slot_count());
     for (auto& [id, cell] : cells) {
         const uint32_t slot = class_def_->field_slot(id);
@@ -3883,11 +3870,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
 }
 
 inline uint64_t class_instance::get_cpp_object_field_id() const {
-    if (cpp_object_field_id_ == 0 && class_def_) {
-        if (auto eng = class_def_->get_engine()) {
-            cpp_object_field_id_ = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
-        }
-    }
+    if (cpp_object_field_id_ == 0 && class_def_) { cpp_object_field_id_ = class_def_->get_cpp_object_field_id(); }
     return cpp_object_field_id_;
 }
 

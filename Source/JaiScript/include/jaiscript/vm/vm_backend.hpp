@@ -1206,6 +1206,7 @@ namespace jai::vm {
         // A sharing frame's cells (chunk::shares_cells), gathered before its locals die and checked after
         void gather_frame_shared_cells(const frame& f);
         void pop_script_frame_boxed_cells(call_record& rec);
+        std::vector<std::vector<script_value>> cell_lists_;   // reused gathered-cell lists (a nested frame exit takes its own)
         void note_boxed_slot(const script_value& storage);
         void kill_shared_cell_slot(script_value& slot);
         // A native entry frame's cells (shared by a lambda, or a slot boxed on demand), gathered before its window dies

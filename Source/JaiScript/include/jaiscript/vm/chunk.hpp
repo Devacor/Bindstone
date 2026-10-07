@@ -409,6 +409,9 @@ namespace jai::vm {
         std::vector<type_info*> slot_declared_refs;
         std::vector<uint8_t> slot_declared_kinds;
         std::vector<call_site> call_sites;
+        // op_array / op_map with c != 0: the bits from word c - 1 mark the operands copied when evaluated (copy_ahead_of),
+        // which the op takes as they are
+        std::vector<uint64_t> literal_taken;
         std::vector<function_proto> function_protos;
         std::vector<closure_proto> closure_protos;
         std::vector<destructure_proto> destructure_protos;

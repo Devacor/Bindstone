@@ -479,6 +479,24 @@ public:
             check_eq(std::string("D25true:"), got);
         });
 
+        test("a_literal_element_copied_before_a_later_call_is_copied_once", [this]() {
+            expect_log(R"(
+                class Box { Token t; }
+                function one() -> int { return 1; }
+                function f() -> void {
+                    var q = Box(); q.t = Token("q");
+                    LOG = LOG + "1";
+                    var arr = [q, Token("a")];
+                    LOG = LOG + "2";
+                    var m = {"k": q, "j": one()};
+                    LOG = LOG + "3";
+                    arr = [one(), q, one()];
+                    LOG = LOG + "4";
+                }
+                f(); LOG;
+            )", "q123qa4qqq");
+        });
+
         test("long_chains_release_without_native_recursion", [this]() {
             for (const char* drop : {"function f(int n) -> int { shared_ptr<Node> head = build(n); return head.x; } f(N);",
                                      "shared_ptr<Node> head = build(N); head = null;",

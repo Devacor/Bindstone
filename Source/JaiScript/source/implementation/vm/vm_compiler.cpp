@@ -3998,8 +3998,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::i32_: rk = kint; break;
 				case detail::math_fn::i32_add_: case detail::math_fn::i32_sub_: case detail::math_fn::i32_mul_: case detail::math_fn::i32_div_: case detail::math_fn::i32_neg_: rk = kint; break;
 				case detail::math_fn::abs_: rk = alias ? kflt : 0; break;
-				case detail::math_fn::floor_: case detail::math_fn::ceil_: case detail::math_fn::sqrt_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
-				case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians: case detail::math_fn::f32_: break;
+				case detail::math_fn::f32_: break;
 				case detail::math_fn::sign_: rk = kint; break;
 				default: if (!detail::math_scalar_unary(fn)) { refuse(chunk::cell_refusal_translation, ip); } break;
 				}
@@ -5499,7 +5498,7 @@ bool vm_compiler::compile_value_into_temp(const expression_ptr& e, uint8_t expec
 	return fusable_index_expr(e.get()) && compile_subscript_into_temp(e, expect, out);
 }
 
-// A call to math::itrunc, ifloor, floor, ceil, sqrt, abs, sin, cos, tan or a degree conversion with exactly one
+// A call to math::itrunc, ifloor, a narrowing row or a row of the scalar table (math_scalar_unary) with exactly one
 // argument: the shared kernel evaluates it (detail/math_intrinsics.hpp) and its result lands in a compiler temp,
 // where it is a direct operand of the binary around it (the checker classes the integer family int)
 detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
@@ -5513,10 +5512,7 @@ detail::math_fn vm_compiler::math_temp_operand(const expression* e) const {
 	if (call->callee->get_type() != node_type::member_expr) return detail::math_fn::none;
 	const detail::math_fn fn = detail::math_intrinsic_for_call(static_cast<const member_expr*>(call->callee.get()));
 	switch (fn) {
-	case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::floor_: case detail::math_fn::ceil_:
-	case detail::math_fn::sqrt_: case detail::math_fn::abs_: case detail::math_fn::sin_: case detail::math_fn::cos_: case detail::math_fn::tan_:
-	case detail::math_fn::radians_to_degrees: case detail::math_fn::degrees_to_radians:
-	case detail::math_fn::f32_: case detail::math_fn::i32_:
+	case detail::math_fn::itrunc: case detail::math_fn::ifloor: case detail::math_fn::f32_: case detail::math_fn::i32_:
 	case detail::math_fn::i32_add_: case detail::math_fn::i32_sub_: case detail::math_fn::i32_mul_: case detail::math_fn::i32_div_: case detail::math_fn::i32_neg_:
 		return fn;
 	default: return detail::math_scalar_unary(fn) ? fn : detail::math_fn::none;

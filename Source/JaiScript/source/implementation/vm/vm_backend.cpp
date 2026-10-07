@@ -5463,8 +5463,9 @@ op_status vm_backend::exec_math_temp(frame& f, const vm_instruction& ins) {
 			if (i >= INT32_MIN && i <= INT32_MAX) { typed_land_int(f, dst, i); return {}; }
 		}
 	}
-	if (detail::math_scalar_unary(fn) && (v->raw_storage_index() == script_value::TYPEID_FLOAT || v->raw_storage_index() == script_value::TYPEID_INT)) {
-		const detail::scalar_num r = detail::eval_scalar_unary(fn, v->raw_storage_index() == script_value::TYPEID_INT ? static_cast<script_float>(v->unchecked_as_int()) : v->unchecked_as_float());
+	detail::scalar_num r;
+	if (detail::math_scalar_unary(fn) && (v->raw_storage_index() == script_value::TYPEID_FLOAT || v->raw_storage_index() == script_value::TYPEID_INT) &&
+	    detail::eval_scalar_unary_num(fn, v->raw_storage_index() == script_value::TYPEID_INT ? detail::scalar_num{true, v->unchecked_as_int(), 0.0} : detail::scalar_num{false, 0, v->unchecked_as_float()}, r)) {
 		const uint32_t dst = ins.b | (k_typed_dst_temp << k_typed_dst_shift);
 		if (r.is_int) { typed_land_int(f, dst, r.i); } else { typed_land_float(f, dst, r.f); }
 		return {};
@@ -10115,10 +10116,9 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_mov(frame& f, size_t& ip, const vm_
 	return {};
 }
 
-// the pure one-argument math intrinsics on a value: the kernel's own rows (math_intrinsics.hpp): itrunc and ifloor
-// land an int through checked_float_to_integer (an int passes through), abs keeps the argument's kind (INT64_MIN
-// misses onto the kernel's overflow text), floor, ceil, sqrt, sin, cos, tan and the angle conversions land a float of
-// the promoted argument; any other kind or function is a miss
+// the pure one-argument math intrinsics on a value: itrunc and ifloor land an int through checked_float_to_integer (an int
+// passes through), the narrowing rows theirs, and the scalar table's rows (math_intrinsics.hpp eval_scalar_unary_num: abs keeps an
+// int, INT64_MIN misses onto the kernel's overflow text; a stdlib alias converts an int first); any other kind or function is a miss
 op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = *cr.loop;
@@ -10166,18 +10166,6 @@ op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cel
 		bits = static_cast<int64_t>(r.value());
 		break;
 	}
-	case detail::math_fn::abs_:
-		if (is_int) { if (xi == INT64_MIN) return miss(); kind = static_cast<uint8_t>(script_value::TYPEID_INT); bits = xi < 0 ? -xi : xi; }
-		else { bits = cell_bits_of_float(std::fabs(xd)); }
-		break;
-	case detail::math_fn::floor_: bits = cell_bits_of_float(std::floor(xd)); break;
-	case detail::math_fn::ceil_: bits = cell_bits_of_float(std::ceil(xd)); break;
-	case detail::math_fn::sqrt_: bits = cell_bits_of_float(std::sqrt(xd)); break;
-	case detail::math_fn::sin_: bits = cell_bits_of_float(std::sin(xd)); break;
-	case detail::math_fn::cos_: bits = cell_bits_of_float(std::cos(xd)); break;
-	case detail::math_fn::tan_: bits = cell_bits_of_float(std::tan(xd)); break;
-	case detail::math_fn::radians_to_degrees: bits = cell_bits_of_float(xd * (180.0 / 3.14159265358979323846)); break;
-	case detail::math_fn::degrees_to_radians: bits = cell_bits_of_float(xd * (3.14159265358979323846 / 180.0)); break;
 	case detail::math_fn::f32_:   // an int converts in one rounding (math_values.hpp to_f32), never through the double
 		bits = cell_bits_of_float(static_cast<script_float>(int_arg ? detail::math::to_f32(xi) : detail::math::to_f32(xd)));
 		break;
@@ -10199,8 +10187,8 @@ op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cel
 		bits = xi;
 		break;
 	default: {
-		if (!detail::math_scalar_unary(fn)) return miss();
-		const detail::scalar_num r = detail::eval_scalar_unary(fn, xd);
+		detail::scalar_num r;
+		if (!detail::math_scalar_unary(fn) || !detail::eval_scalar_unary_num(fn, is_int ? detail::scalar_num{true, xi, 0.0} : detail::scalar_num{false, 0, xd}, r)) return miss();
 		if (r.is_int) { kind = static_cast<uint8_t>(script_value::TYPEID_INT); bits = r.i; } else { bits = cell_bits_of_float(r.f); }
 		break;
 	}
@@ -11724,8 +11712,7 @@ op_status vm_backend::exec_math(frame& f, const vm_instruction& ins) {
 	detail::scalar_num a, b, r;
 	bool lane = false;
 	if (argc == 1 && detail::math_scalar_unary(fn) && number(stack_[base], a)) {
-		r = detail::eval_scalar_unary(fn, a.is_int ? static_cast<script_float>(a.i) : a.f);
-		lane = true;
+		lane = detail::eval_scalar_unary_num(fn, a, r);
 	} else if (argc == 2 && detail::math_scalar_pair(fn) && number(stack_[base], a) && number(stack_[base + 1], b)) {
 		lane = detail::eval_scalar_pair(fn, a, b, r);
 	}

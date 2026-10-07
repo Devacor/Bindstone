@@ -280,7 +280,7 @@ namespace jai::detail {
         default: return false;
         }
     }
-    inline scalar_num eval_scalar_unary(math_fn fn, script_float x) noexcept {
+    JAI_FORCEINLINE scalar_num eval_scalar_unary(math_fn fn, script_float x) noexcept {
         scalar_num r;
         switch (fn) {
         case math_fn::abs_: r.f = std::fabs(x); break;
@@ -313,7 +313,7 @@ namespace jai::detail {
     }
     // a math_scalar_unary row on a number: abs keeps an int an int (false for INT64_MIN: the kernel raises its overflow text), every
     // other row reads the number as a double
-    inline bool eval_scalar_unary_num(math_fn fn, const scalar_num& a, scalar_num& out) noexcept {
+    JAI_FORCEINLINE bool eval_scalar_unary_num(math_fn fn, const scalar_num& a, scalar_num& out) noexcept {
         if (fn == math_fn::abs_ && a.is_int) {
             if (a.i == INT64_MIN) return false;
             out.is_int = true;

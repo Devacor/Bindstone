@@ -573,6 +573,85 @@ public:
             row("string src = \"v\"; map<string,string> m = {\"k\": src}; m[\"k\"].to_upper(); to_json(m) + src",
                 "{\"k\":\"V\"}v", "a map value copied from a variable detaches on write");
         });
+
+        // The map's contract (Dev's map-order ruling): iteration and serialization see key order, never insertion order; an
+        // iteration continues after its key when the map changes under it (a callee's stores and erases included); a reference
+        // to a value survives the table's growth; keys of different kinds stay distinct; == and JSON follow key order
+        test("map_contract_battery", [this, both_mode]() {
+            const char* src = R"JAI(
+string log = "";
+map<var, int> m = {};
+for (int i = 0; i < 2000; ++i) { m[(i * 7919) % 2000] = i; }
+for (int i = 0; i < 2000; i += 2) { m.erase(i); }
+for (int i = 3000; i > 2000; i -= 3) { m[i] = 1; }
+int prev = -1; bool sorted = true; int n = 0;
+for (auto [k, v] : m) { if (k <= prev) { sorted = false; } prev = k; n += 1; }
+log += to_string(sorted) + " " + to_string(n) + " " + to_string(m.size());
+var mixed = {};
+mixed["b"] = 1; mixed[3] = 2; mixed["a"] = 3; mixed[1] = 4; mixed[2.5] = 5; mixed[true] = 6; mixed['c'] = 7;
+string order = "";
+for (auto [k, v] : mixed) { order += to_string(k) + ":" + to_string(v) + ","; }
+log += " | " + order;
+var e = {};
+for (int i = 0; i < 10; ++i) { e[i] = i; }
+string seen = "";
+for (auto [k, v] : e) { seen += to_string(k); if (k == 3) { e.erase(4); e.erase(3); e[11] = 0; } }
+log += " | " + seen;
+map<string, int> refs = {};
+refs["k"] = 1;
+auto& r = refs["k"];
+for (int i = 0; i < 3000; ++i) { refs["x" + to_string(i)] = i; }
+r = 42;
+log += " | " + to_string(refs["k"]) + " " + to_string(refs.size());
+var u = {};
+u["ab"] = 1;
+u[utf8_string("ab")] = 2;
+log += " | " + to_string(u.size());
+var f = {};
+f[0.0] = 1; f[-0.0] = 2; f[math::NAN_VALUE] = 3; f[-math::NAN_VALUE] = 4; f[1] = 5; f[1.0] = 6;
+string fs = "";
+for (auto [k, v] : f) { fs += to_string(v) + ","; }
+log += " | " + to_string(f.size()) + " " + fs;
+var a = {"z": 1, "y": 2, "x": [1, 2]};
+var b = {};
+b["x"] = [1, 2]; b["z"] = 1; b["y"] = 2;
+log += " | " + to_string(a == b) + " " + to_json(a) + " " + to_json(from_json(to_json(b)));
+var c = {};
+for (int i = 0; i < 50; ++i) { c[i] = i; }
+int keys_seen = 0;
+void grow(var& target, int at) { for (int j = 100; j < 400; ++j) { target[j] = j; } target.erase(at + 1); }
+for (auto [k, v] : c) { keys_seen += 1; if (k == 10) { grow(c, 10); } }
+log += " | " + to_string(keys_seen) + " " + to_string(c.size());
+var d = {};
+for (int i = 0; i < 20; ++i) { d[i] = i; }
+int calls = 0;
+d.filter([&](var k, var v) -> bool { calls += 1; if (k == 5) { d[500] = 1; d.erase(6); } return k % 2 == 0; });
+string ds = "";
+for (auto [k, v] : d) { ds += to_string(k) + ","; }
+log += " | " + to_string(calls) + " " + ds;
+log;
+)JAI";
+            auto [i_out, v_out] = both_mode(src, check_mode::strict);
+            check_eq(std::string("true 1334 1334 | 1:4,3:2,2.5:5,a:3,b:1,c:7,true:6, | 01235678911 | 42 3001 | 2 | 5 5,4,2,6,3, | "
+                                 "true {\"x\":[1,2],\"y\":2,\"z\":1} {\"x\":[1,2],\"y\":2,\"z\":1} | 349 349 | 19 0,2,4,8,10,12,14,16,18,500,"), i_out, "interpreter");
+            check_eq(i_out, v_out, "backend parity");
+        });
+
+        test("map_field_survives_hot_reload", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                jai::stdlib::register_all(e);
+                e->execute("class Inv { map<string, int> items = {}; }\nvar inv = Inv();\n"
+                           "for (int i = 0; i < 300; ++i) { inv.items[\"k\" + to_string(i)] = i; }");
+                e->execute("class Inv { map<string, int> items = {}; int extra = 7; }");
+                const std::string got = e->execute(
+                    "string first = \"\"; for (auto [k, v] : inv.items) { if (first == \"\") { first = k; } }\n"
+                    "inv.items[\"k5\"] = 50; inv.items.erase(\"k6\");\n"
+                    "to_string(inv.items.size()) + \" \" + to_string(inv.items[\"k42\"]) + \" \" + to_string(inv.items[\"k5\"]) + \" \" + first + \" \" + to_string(inv.extra);").to_string();
+                check_eq(std::string("299 42 50 k0 7"), got, use_vm ? "vm" : "interpreter");
+            }
+        });
     }
 };
 

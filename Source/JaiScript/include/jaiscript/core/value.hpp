@@ -297,7 +297,7 @@ namespace detail { struct argument_capture_storage; }
                                                            engine* eng, type_info_ptr element_type);
         // Instance-pinned reference to a class field: deref/assign-through re-resolve the
         // field node by id (never a cached address), so hot reload cannot dangle it.
-        static script_value make_field_reference(const std::shared_ptr<class_instance>& owner, uint64_t field_id,
+        static script_value make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type);
         // A reference minted through an element of `root` (a chain rooted at arr[i]: nested
         // field, nested element) also counts in root->live_elem_refs, so a parallel fork over

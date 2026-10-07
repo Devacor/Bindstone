@@ -3850,6 +3850,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(mp.value.slot, 0, false, 0, nullptr, ip); op.b = mp.value.slot; slot_read(op, mp.value.slot);
 				} else { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.container = mp.base; op.member = mp.node;
+			} else if (st.op == opcode::op_kill_slot && st.a < k_typed_slot_mask && find_cell(st.a) >= 0 && cells[find_cell(st.a)].defined && !cells[find_cell(st.a)].string_borrow) {
+				// a body local's scope exit: inside the block its cell holds a scalar, an alias or nothing (an instance never lands in a cell), so
+				// no destructor runs and the next declaration lands it again; the block keeps the cell, the general form kills the slot
+				op.kind = ir::skip;
 			} else if (st.op == opcode::op_size_temp && st.a < k_typed_slot_mask && st.b < c.call_sites.size()) {
 				// the size of an array held in a frame slot or the environment: a site whose node the entry resolves, read live (a push inside the
 				// body grows it); an environment receiver's site carries the general instruction's ip (its lookup's cache slot) and its call site

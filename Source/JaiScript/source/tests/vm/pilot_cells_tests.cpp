@@ -6512,6 +6512,49 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("var_locals_whose_scope_ends_each_iteration_keep_the_loop_a_block", [this]() {
+			// `var` body locals die at the body's closing brace (KILL_SLOT: a var may own a destructor); a cell holds only scalars, so the
+			// block keeps them and the general form kills them; an iteration that stores an instance with a destructor into such a var runs
+			// its destructor at the same point as the interpreter, nested loops and a continue included
+			const std::string defs = R"(
+				string LOG = "";
+				class D { int n = 0; D(int v) { n = v; } ~D() { LOG = LOG + "d" + to_string(n); } }
+				function sum(var& xs, var n) {
+					var s = 0.0;
+					for (var i = 0; i < n; ++i) {
+						var a = xs[i] * 2.0;
+						for (var j = i + 1; j < n; ++j) { var& y = xs[j]; var d = a - y; var q = d * d; if (q > 50.0) { continue; } s = s + q; }
+						var b = a + 1;
+						s = s + b;
+					}
+					return s;
+				}
+				function mixed(var n) {
+					var t = 0;
+					for (var i = 0; i < n; ++i) { var v = i * 3; if (i % 4 == 2) { v = D(i); LOG = LOG + "m"; } else { t = t + v; } LOG = LOG + "."; }
+					return t;
+				}
+				var XS = [1.5, 2.0, -3.25, 4.0, 0.5, 6.0];
+			)";
+			const std::string src = std::string(defs) + R"(
+				to_string(sum(XS, 6)) + " " + to_string(mixed(11)) + " " + LOG;
+			)";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos && oracle.find("d2") != std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "var locals killed per iteration");
+			both(src, oracle, "var locals killed per iteration, proofs off", false);
+			const std::string l = listing_run(src);
+			const size_t fb = l.find("== sum ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("-- open loop") == std::string::npos && fl.find("boundaries") == std::string::npos, "sum's loops are blocks with no boundary: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("a_graft_reads_a_read_only_scalar_parameter_from_the_argument", [this]() {
 			// a scalar value parameter the body never writes, bound to a private local no other argument writes, is the local itself inside the
 			// graft; a parameter the body writes, one another argument increments or binds by reference, and a converting one keep their copy

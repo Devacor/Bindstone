@@ -548,6 +548,16 @@ namespace jai::vm {
             // site first resolves, cleared at every entry (another loop's site may sit at the same offset)
             struct prefix_slot { const class_definition* cd = nullptr; uint64_t epoch = 0; uint32_t slot = UINT32_MAX; };
             std::vector<prefix_slot> site_prefix;
+            // per rebind of the running loop: the field slots its member sites found for the last element's class and method epoch (and each
+            // prefix's class and slot), so the next element of the same class reads its fields through the slots directly
+            struct rebind_memo {
+                const chunk* code = nullptr; uint32_t copy_ip = UINT32_MAX;
+                const class_definition* cd = nullptr; uint64_t epoch = 0;
+                uint8_t prefix_count = 0;
+                const class_definition* prefix_cd[4] = {}; uint64_t prefix_epoch[4] = {}; uint32_t prefix_slot[4] = {};
+                std::vector<uint32_t> slot; std::vector<uint8_t> prefix_of;   // per dependent: the field slot, and its prefix (0xFF: the element itself)
+            };
+            std::vector<rebind_memo> rebind_memos;
             // how each site's container is reached (recorded by the resolution): its frame slot, or its environment binding; a landing
             // after a call re-checks the node's identity through that path instead of resolving again. An environment cell's binding
             // and the environment and epoch at entry: while both hold, the bindings are re-read directly (the lookup cache's own rule)
@@ -2123,7 +2133,7 @@ namespace jai::vm {
         op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
         const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site, size_t off = SIZE_MAX);
         class_instance* cells_member_prefix(frame& f, class_instance* inst, const member_expr* expr, size_t off);   // a nested member site's prefix instance (`p.pos` of `p.pos.x`); inst itself for a direct site; nullptr = the general form
-        const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe, bool prefixed = false);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
+        const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe, bool prefixed = false, uint32_t* slot_out = nullptr);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
         bool cells_sites_reenter(frame& f, const chunk::cell_loop& loop);   // a re-entry in the same call: every site still names the node its last resolution found
         bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again

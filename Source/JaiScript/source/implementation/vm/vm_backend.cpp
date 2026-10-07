@@ -3665,7 +3665,14 @@ JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction
 	script_value* slot = frame_slot(f, ins.b);
 	if (!slot || slot->raw_storage_index() != script_value::TYPEID_REFERENCE || slot_declared_kind(f, ins.b) != 0 || detail::ref_declared_kind(*slot) != 0) return false;
 	const auto* holder = slot->get_reference_holder();
-	if (!holder || !holder->plain_cell() || holder->container_element_type) return false;
+	if (!holder || holder->container_element_type) return false;
+	if (!holder->plain_cell()) {
+		// a field of an instance with no declared type (a var field): the reference store's unconstrained write-through
+		if (!holder->owner_instance || holder->property || holder->has_cell) return false;
+		detail::ref_write_through(*slot, clone_for_assignment(value));
+		if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+		return true;
+	}
 	script_value& storage = slot->deref();
 	const type_info* tag = storage.type_info_raw();
 	if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND || !tag || !detail::var_slot(tag)) return false;

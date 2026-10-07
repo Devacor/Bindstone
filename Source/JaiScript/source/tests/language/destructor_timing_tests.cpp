@@ -478,6 +478,120 @@ public:
             )").as_string();
             check_eq(std::string("D25true:"), got);
         });
+
+        test("long_chains_release_without_native_recursion", [this]() {
+            for (const char* drop : {"function f(int n) -> int { shared_ptr<Node> head = build(n); return head.x; } f(N);",
+                                     "shared_ptr<Node> head = build(N); head = null;",
+                                     "var v = build(N); v = 0;",
+                                     "shared_ptr<Holder> t = null; for (int i = 0; i < N; i++) { shared_ptr<Holder> h = new Holder(); h.items = [t, {\"k\": i}]; t = h; } t = null;",
+                                     "shared_ptr<Holder> t = null; for (int i = 0; i < N; i++) { shared_ptr<Holder> h = new Holder(); h.items = {\"n\": t}; t = h; } t = null;"}) {
+                for (int n : {10000, 100000}) {
+                    auto eng = make_engine();
+                    jai::stdlib::register_all(eng);
+                    eng->execution_budget(0);
+                    std::string got;
+                    try {
+                        got = eng->execute("int N = " + std::to_string(n) + R"(;
+                            class Node { int x = 0; shared_ptr<Node> next = null; }
+                            class Holder { var items = null; }
+                            function build(int n) -> shared_ptr<Node> {
+                                shared_ptr<Node> head = null;
+                                for (int i = 0; i < n; i++) { shared_ptr<Node> c = new Node(); c.x = i; c.next = head; head = c; }
+                                return head;
+                            }
+                        )" + std::string(drop) + " \"ok\";").as_string();
+                    } catch (const std::exception& e) {
+                        got = e.what();
+                    }
+                    check_eq(std::string("ok"), got, std::string(drop) + " n=" + std::to_string(n));
+                }
+            }
+        });
+
+        test("nested_containers_release_without_native_recursion", [this]() {
+            auto eng = make_engine();
+            jai::script_value nested = jai::script_value::make_array(nullptr, eng.get());
+            for (int i = 0; i < 1000000; ++i) {
+                jai::script_value outer = jai::script_value::make_array(nullptr, eng.get());
+                outer.get_array_storage()->values().push_back(jai::script_value(static_cast<jai::script_int>(i), eng.get()));
+                outer.get_array_storage()->values().push_back(std::move(nested));
+                nested = std::move(outer);
+            }
+            nested = jai::script_value(std::monostate{}, eng.get());
+            jai::script_value maps = jai::script_value::make_map(nullptr, nullptr, eng.get());
+            for (int i = 0; i < 1000000; ++i) {
+                jai::script_value outer = jai::script_value::make_map(nullptr, nullptr, eng.get());
+                outer.get_map_storage()->insert_or_assign(jai::script_value("next", eng.get()), std::move(maps));
+                maps = std::move(outer);
+            }
+            maps = jai::script_value(std::monostate{}, eng.get());
+            check(true);
+        });
+
+        test("a_long_chain_at_teardown_releases_without_native_recursion", [this]() {
+            for (const char* program : {"shared_ptr<Node> head = build(100000);",
+                                        "class Tail { ~Tail() {} } shared_ptr<Node> head = build(100000); Tail t;"}) {
+                auto eng = make_engine();
+                eng->execution_budget(0);
+                eng->execute(std::string(R"(
+                    class Node { int x = 0; shared_ptr<Node> next = null; }
+                    function build(int n) -> shared_ptr<Node> {
+                        shared_ptr<Node> head = null;
+                        for (int i = 0; i < n; i++) { shared_ptr<Node> c = new Node(); c.x = i; c.next = head; head = c; }
+                        return head;
+                    }
+                )") + program);
+                eng.reset();
+                check(true);
+            }
+        });
+
+        // The release stack keeps C++ order exactly: every limit, the stack always (0) to never in practice, logs alike
+        test("the_release_stack_keeps_destruction_order", [this]() {
+            const std::string shapes = R"(
+                class Tag { string n = ""; Tag() {} Tag(string s) { n = s; } ~Tag() { LOG = LOG + n; } }
+                class Base { string id = ""; ~Base() { LOG = LOG + "b" + id; } }
+                class Link : Base { Tag first; shared_ptr<Link> next = null; Tag last; ~Link() { LOG = LOG + "<" + id; } }
+                class Plain { Tag t; shared_ptr<Link> link = null; var bag = null; }
+                class Dropper { shared_ptr<Dropper> other = null; string id = ""; ~Dropper() { LOG = LOG + "d" + id; other = null; LOG = LOG + "/" + id; } }
+                function chain(int n) -> shared_ptr<Link> {
+                    shared_ptr<Link> head = null;
+                    for (int i = 0; i < n; i++) {
+                        shared_ptr<Link> c = new Link();
+                        c.id = to_string(i); c.first = Tag("f" + to_string(i)); c.last = Tag("l" + to_string(i)); c.next = head; head = c;
+                    }
+                    return head;
+                }
+                function run() -> void {
+                    { shared_ptr<Link> h = chain(12); }
+                    LOG = LOG + "|";
+                    { var p = Plain(); p.t = Tag("pt"); p.link = chain(3); p.bag = [Tag("x"), chain(2), {"k": chain(2), "j": Tag("y")}, [[Tag("z")]]]; }
+                    LOG = LOG + "|";
+                    { var arr = []; for (int i = 0; i < 6; i++) { var q = Plain(); q.t = Tag("q" + to_string(i)); q.bag = arr; arr = [q, Tag("a" + to_string(i))]; } }
+                    LOG = LOG + "|";
+                    { shared_ptr<Dropper> d = null; for (int i = 0; i < 5; i++) { shared_ptr<Dropper> e = new Dropper(); e.id = to_string(i); e.other = d; d = e; } }
+                }
+                run(); LOG;
+            )";
+            std::string oracle;
+            for (uint32_t limit : {1000000u, 0u, 1u, 2u, 5u}) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(eng);
+                eng->release_recursion_limit(limit);
+                std::string got;
+                try {
+                    got = eng->execute("string LOG = \"\";" + shapes).as_string();
+                } catch (const std::exception& e) {
+                    got = std::string("threw: ") + e.what();
+                }
+                if (oracle.empty()) {
+                    oracle = got;
+                    check(oracle.find("threw") == std::string::npos && oracle.size() > 100, oracle);
+                } else {
+                    check_eq(oracle, got, "limit " + std::to_string(limit));
+                }
+            }
+        });
     }
 
     static constexpr const char* k_family = R"(

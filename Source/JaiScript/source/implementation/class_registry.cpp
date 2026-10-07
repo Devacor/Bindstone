@@ -1,8 +1,10 @@
 #include "jaiscript/core/class_registry.hpp"
 #include "jaiscript/core/dynamic_binder.hpp"
 #include "jaiscript/core/engine.hpp"
+#include "jaiscript/detail/release_machine.hpp"
 #include <stdexcept>
 #include <set>
+#include <algorithm>
 
 namespace jai {
 
@@ -110,7 +112,8 @@ bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_d
     return runs;
 }
 
-void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const {
+void class_definition::expand_destroy_level(class_instance* instance, const class_definition* level, const class_definition* kept,
+                                            std::vector<detail::release_action>& actions) const {
     if (!level || (kept && (kept == level || kept->derives_from(level)))) { return; }
     if (engine_) {
         const uint64_t id = level->destructor_id(*engine_);
@@ -126,17 +129,174 @@ void class_definition::destroy_levels(class_instance* instance, const class_defi
             }
         }
     }
-    const class_definition* layout = instance->get_class_definition() ? instance->get_class_definition() : this;
-    std::vector<uint64_t> own;
-    level->for_each_own_field_id([&](uint64_t field) { own.push_back(field); });
-    for (auto field = own.rbegin(); field != own.rend(); ++field) {
-        const uint32_t slot = layout->field_slot(*field);
-        if (slot != k_no_field_slot) { instance->release_field_slot(slot); }
+    for (const auto& parent : level->parent_classes_) {
+        if (parent) { actions.push_back({parent.get(), 0}); }
     }
-    for (auto parent = level->parent_classes_.rbegin(); parent != level->parent_classes_.rend(); ++parent) {
-        destroy_levels(instance, parent->get(), kept);
+    level->for_each_own_field_id([&](uint64_t field) { actions.push_back({nullptr, field}); });
+}
+
+script_value class_definition::take_field_for_destroy(class_instance* instance, uint64_t field) const {
+    const class_definition* layout = instance->get_class_definition() ? instance->get_class_definition() : this;
+    const uint32_t slot = layout->field_slot(field);
+    return slot != k_no_field_slot ? instance->take_field_slot(slot) : script_value(std::monostate{}, engine_);
+}
+
+void class_definition::destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const {
+    if (!level) { return; }
+    detail::release_sync sync(engine_);
+    std::vector<detail::release_action> actions{{level, 0}};
+    while (!actions.empty()) {
+        const detail::release_action action = actions.back();
+        actions.pop_back();
+        if (action.level) {
+            expand_destroy_level(instance, action.level, kept, actions);
+        } else {
+            script_value dying = take_field_for_destroy(instance, action.field);
+        }
     }
 }
+
+void class_instance::release_fields() noexcept {
+    engine* eng = class_def_->get_engine();
+    detail::release_machine* m = eng ? eng->release_machine_here() : nullptr;
+    if (!m) { return; }
+    if (!m->deferring && m->depth < m->depth_limit) {
+        ++m->depth;
+        while (!flat_fields_.empty()) { flat_fields_.pop_back(); }
+        overflow_fields_.reset();
+        --m->depth;
+        return;
+    }
+    const bool driver = !m->deferring;
+    const size_t mark = m->stack.size();
+    for (size_t slot = flat_fields_.size(); slot-- > 0;) {
+        auto& cell = flat_fields_[slot];
+        if (cell && cell->release_cascades()) { m->stack.push_back({std::move(*cell), detail::release_machine::k_no_frame}); }
+    }
+    if (overflow_fields_) {
+        for (auto& [id, value] : *overflow_fields_) {
+            if (value.release_cascades()) { m->stack.push_back({std::move(value), detail::release_machine::k_no_frame}); }
+        }
+    }
+    if (driver) {
+        std::reverse(m->stack.begin() + static_cast<ptrdiff_t>(mark), m->stack.end());
+        detail::release_drive(*eng, *m, mark);
+    }
+}
+
+namespace detail {
+
+void instance_deleter::operator()(class_instance* ptr) const noexcept {
+    if (!ptr) { return; }
+    engine* eng = def->get_engine();
+    release_machine* m = eng ? eng->release_machine_here() : nullptr;
+    const bool run_chain = !ptr->construction_pending();
+    if (m && (m->deferring || m->depth >= m->depth_limit)) {
+        release_instance_frame(*eng, *m, ptr, def, run_chain);
+        return;
+    }
+    if (m) { ++m->depth; }
+    if (run_chain) {
+        const class_definition* now = ptr->get_class_definition();   // a re-classed instance dies as its class now
+        if (!now) { now = def.get(); }
+        now->destroy_chain(ptr, now);
+    }
+    delete ptr;
+    if (m) { --m->depth; }
+}
+
+namespace {
+template <typename F>
+void release_step(release_machine& m, F&& drop) {
+    const size_t mark = m.stack.size();
+    const bool deferring = m.deferring;
+    const size_t step_mark = m.step_mark;
+    m.deferring = true;
+    m.step_mark = mark;
+    drop();
+    m.deferring = deferring;
+    m.step_mark = step_mark;
+    if (m.stack.size() - mark > 1) { std::reverse(m.stack.begin() + static_cast<ptrdiff_t>(mark), m.stack.end()); }
+}
+}
+
+void release_instance_frame(engine& eng, release_machine& m, class_instance* instance, std::shared_ptr<class_definition> owner,
+                            bool run_chain) {
+    const bool driver = !m.deferring;
+    const size_t mark = m.stack.size();
+    uint32_t index;
+    if (!m.free_frames.empty()) {
+        index = m.free_frames.back();
+        m.free_frames.pop_back();
+    } else {
+        index = static_cast<uint32_t>(m.frames.size());
+        m.frames.emplace_back();
+    }
+    release_frame& frame = m.frames[index];
+    const class_definition* now = instance->get_class_definition();
+    frame.instance = instance;
+    frame.owner = std::move(owner);
+    frame.root = now ? now : frame.owner.get();
+    frame.kept = nullptr;
+    frame.actions.clear();
+    if (run_chain) { frame.actions.push_back({frame.root, 0}); }
+    frame.delete_at_end = true;
+    m.stack.push_back({script_value(std::monostate{}, &eng), index});
+    if (driver) { release_drive(eng, m, mark); }
+}
+
+void release_drive(engine& eng, release_machine& m, size_t mark) {
+    std::vector<release_action> expanded;
+    while (m.stack.size() > mark) {
+        const uint32_t index = m.stack.back().frame;
+        if (index == release_machine::k_no_frame) {
+            script_value dying = std::move(m.stack.back().value);
+            m.stack.pop_back();
+            release_step(m, [&] { script_value gone = std::move(dying); });
+            continue;
+        }
+        release_frame& frame = m.frames[index];
+        class_instance* instance = frame.instance;
+        if (frame.actions.empty()) {
+            m.stack.pop_back();
+            const bool del = frame.delete_at_end;
+            std::shared_ptr<class_definition> owner = std::move(frame.owner);
+            frame.instance = nullptr;
+            m.free_frames.push_back(index);
+            if (del) { release_step(m, [&] { delete instance; }); }
+            continue;
+        }
+        const release_action action = frame.actions.back();
+        frame.actions.pop_back();
+        const class_definition* root = frame.root;
+        if (action.level) {
+            const class_definition* kept = frame.kept;
+            expanded.clear();
+            root->expand_destroy_level(instance, action.level, kept, expanded);   // the body may grow the frames: re-index after
+            auto& actions = m.frames[index].actions;
+            actions.insert(actions.end(), expanded.begin(), expanded.end());
+        } else {
+            script_value dying = root->take_field_for_destroy(instance, action.field);
+            if (dying.release_cascades()) { release_step(m, [&] { script_value gone = std::move(dying); }); }
+        }
+    }
+}
+
+release_sync::release_sync(engine* eng) noexcept {
+    release_machine* m = eng ? &eng->release_machine() : nullptr;
+    if (!m || !m->deferring) { return; }
+    m_ = m;
+    const size_t step_mark = m->step_mark;
+    if (m->stack.size() - step_mark > 1) { std::reverse(m->stack.begin() + static_cast<ptrdiff_t>(step_mark), m->stack.end()); }
+    m->deferring = false;
+    release_drive(*eng, *m, step_mark);
+}
+
+release_sync::~release_sync() {
+    if (m_) { m_->deferring = true; }
+}
+
+} // namespace detail
 
 bool slot_may_own_destructor(engine& eng, const type_info_ptr& t) {
     bool any = false;

@@ -1,6 +1,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
+#include <jaiscript/detail/release_machine.hpp>
 #include <jaiscript/detail/enum_value.hpp>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/stdlib/containers.hpp>
@@ -13606,6 +13607,7 @@ void interpreter::apply_field_initializers(const std::shared_ptr<class_instance>
 }
 
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
+    detail::release_sync release_first(engine_);
     // A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
     // destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with vm_backend::execute_callable)
     struct unwind_park {

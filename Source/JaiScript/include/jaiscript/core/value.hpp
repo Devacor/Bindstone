@@ -442,6 +442,12 @@ namespace detail { struct argument_capture_storage; }
         // PURE index read: bound primitives report TYPEID_CPP_BOUND (14), never their semantic type
         inline size_t raw_storage_index() const noexcept { return storage_.index(); }
 
+        // Dropping this value can destroy other values or run code (the last handle to a node that owns some): the
+        // release stack's test (detail/release_machine.hpp); a leaf (string, math vector, scalar buffer) never does
+        bool release_cascades() const noexcept;
+        // The node this value can flatten into a container's release (the last handle to an array<var> or a map)
+        bool release_flattens() const noexcept;
+
 #ifdef JAISCRIPT_DIAG_XTHREAD_RC
         // Canary build: tag this value's string block single-thread (AST literals) so a
         // cross-thread refcount touch aborts AT the racing site
@@ -2751,7 +2757,17 @@ namespace detail { struct argument_capture_storage; }
     inline script_array::script_array(script_array&&) noexcept = default;
     inline script_array& script_array::operator=(const script_array&) = default;
     inline script_array& script_array::operator=(script_array&&) noexcept = default;
-    inline script_array::~script_array() = default;
+    namespace detail {
+        // A container's elements die depth first through nested arrays and maps without native recursion (script_map.hpp)
+        inline void release_values_flattened(std::vector<script_value>& values) noexcept;
+    }
+    inline script_array::~script_array() {
+        if (kind_ == kind_t::hetero) {
+            for (const auto& v : values_) {
+                if (v.release_flattens()) { detail::release_values_flattened(values_); break; }
+            }
+        }
+    }
 
     inline size_t script_array::size() const noexcept {
         switch (kind_) {
@@ -3164,6 +3180,35 @@ namespace detail { struct argument_capture_storage; }
     }
 
     inline checked_result<script_value> host_writeback_function::operator()(const std::vector<script_value>& args) const { return fn(args); }
+
+    inline bool script_value::release_cascades() const noexcept {
+        switch (storage_.index()) {
+            case TYPEID_ARRAY: {
+                const auto& a = storage_.get<TYPEID_ARRAY>();
+                return a.unique() && (a->kind() == script_array::kind_t::hetero || a->kind() == script_array::kind_t::obj);
+            }
+            case TYPEID_OBJECT: {
+                const auto& h = storage_.get<TYPEID_OBJECT>();
+                return h.unique() && (h->data ? h->data.use_count() == 1 : h->keep_alive != nullptr);
+            }
+            case TYPEID_MAP: return storage_.get<TYPEID_MAP>().unique();
+            case TYPEID_FUNCTION: return storage_.get<TYPEID_FUNCTION>().unique();
+            case TYPEID_REFERENCE: return storage_.get<TYPEID_REFERENCE>().unique();
+            case TYPEID_SHARED_PTR: return storage_.get<TYPEID_SHARED_PTR>().unique();
+            default: return false;
+        }
+    }
+
+    inline bool script_value::release_flattens() const noexcept {
+        switch (storage_.index()) {
+            case TYPEID_ARRAY: {
+                const auto& a = storage_.get<TYPEID_ARRAY>();
+                return a.unique() && a->kind() == script_array::kind_t::hetero;
+            }
+            case TYPEID_MAP: return storage_.get<TYPEID_MAP>().unique();
+            default: return false;
+        }
+    }
 
 } // namespace jai
 

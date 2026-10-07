@@ -630,8 +630,8 @@ struct call_frame {
         // from return_type on first call; mutable like backend_body_cache (workers hold
         // private function copies, so lazy fills never cross threads).
         mutable uint8_t backend_return_conv = 0;
-        mutable uint8_t backend_lean_bind = 0;   // 1: every parameter a by-value primitive slot in order (a matching argument is its own slot), 2: not
-        mutable uint8_t backend_frame_plan = 0;   // the vm's frame shape: 1 general, 2 plain (no closure, no frame env, lean bind, an identity return class, no cell blocks)
+        mutable uint8_t backend_lean_bind = 0;   // 1: every parameter a by-value primitive or string slot in order (a matching argument is its own slot), 2: not
+        mutable uint8_t backend_frame_plan = 0;   // the vm's frame shape: 1 general, 2 plain over a lean bind, 3 plain with T& parameters (no frame env; a closure not a method's)
 
         // Precomputed so ref-free call sites can skip the per-call arg-metadata build
         bool has_reference_parameters = false;

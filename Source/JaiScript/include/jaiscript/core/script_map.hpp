@@ -3,15 +3,16 @@
 #ifndef __JAISCRIPT_CORE_SCRIPT_MAP_HPP__
 #define __JAISCRIPT_CORE_SCRIPT_MAP_HPP__
 
-// script_map: the map behind TYPEID_MAP. Lookup is hashed (keys are equal exactly when script_value::operator<=> calls them
-// equivalent: type rank, then payload; floats by bits, heavy values by identity); key order exists only where it is observed -
+// script_map: the map behind TYPEID_MAP. Lookup is hashed through an open-addressing index (keys are equal exactly when
+// script_value::operator<=> calls them equivalent: type rank, then payload; floats by bits, heavy values by identity); key order exists only where it is observed -
 // iteration and everything built on it (serialization, keys()/values(), structural equality) - through a key-sorted view of the
 // entries built on the first iteration after a change. Entries never move: a reference or pointer to a key or value stays valid
 // until that entry is erased. An iteration iterator carries its key, so after the map changes under it (the body of a range-for
 // inserting or erasing) it continues with the next greater key, as a std::map iterator walks; a find() iterator carries none
 // (concurrent readers of a borrowed map only find). Included at the end of value.hpp, where script_value is complete.
 
-#include <unordered_map>
+#include <bit>
+#include <tuple>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -56,7 +57,6 @@ namespace jai {
     };
 
     class script_map {
-        using table_t = std::unordered_map<script_value, script_value, script_value_hash, script_value_key_eq>;
     public:
         using key_type = script_value;
         using mapped_type = script_value;
@@ -64,20 +64,121 @@ namespace jai {
         using size_type = size_t;
         using difference_type = ptrdiff_t;
         using key_compare = script_value_map_less;
-        using node_type = table_t::node_type;
 
     private:
-        table_t table_;
+        // An entry lives in its own allocation until it is erased (references and pointers into it stay valid); the index is
+        // open addressing over {hash, entry}: a probe compares the cached hash before it touches an entry
+        struct entry {
+            value_type kv;
+            size_t hash;
+            template <typename K, typename... V>
+            entry(size_t h, K&& k, V&&... v) : kv(std::piecewise_construct, std::forward_as_tuple(std::forward<K>(k)), std::forward_as_tuple(std::forward<V>(v)...)), hash(h) {}
+        };
+        struct slot { size_t hash; entry* e; };
+        static constexpr size_t min_capacity = 8;
+
+        std::vector<slot> slots_;                   // empty, or a power of two
+        size_t size_ = 0;
+        unsigned shift_ = 64;                       // 64 - log2(capacity): the home slot is the top bits of hash * golden ratio
         uint64_t gen_ = 1;                          // moves on every insert, erase or clear
         mutable std::vector<value_type*> order_;    // the entries by key, valid while order_gen_ == gen_
         mutable uint64_t order_gen_ = 0;
 
         void changed() noexcept { ++gen_; }
+        size_t home(size_t h) const noexcept { return static_cast<size_t>((static_cast<uint64_t>(h) * 0x9E3779B97F4A7C15ull) >> shift_); }
+        size_t mask() const noexcept { return slots_.size() - 1; }
+
+        template <typename K>
+        entry* find_entry(const K& key) const {
+            if (size_ == 0) return nullptr;
+            const size_t h = script_value_hash{}(key);
+            for (size_t i = home(h);; i = (i + 1) & mask()) {
+                const slot& s = slots_[i];
+                if (!s.e) return nullptr;
+                if (s.hash == h && script_value_key_eq{}(s.e->kv.first, key)) return s.e;
+            }
+        }
+        void place(entry* e) noexcept {
+            size_t i = home(e->hash);
+            while (slots_[i].e) { i = (i + 1) & mask(); }
+            slots_[i] = slot{e->hash, e};
+        }
+        void grow_for(size_t count) {
+            if (count * 8 <= slots_.size() * 7) return;
+            size_t cap = slots_.empty() ? min_capacity : slots_.size() * 2;
+            while (count * 8 > cap * 7) { cap *= 2; }
+            std::vector<slot> old(cap, slot{0, nullptr});
+            old.swap(slots_);
+            shift_ = 64u - static_cast<unsigned>(std::countr_zero(cap));
+            for (const slot& s : old) { if (s.e) place(s.e); }
+        }
+        // the entry for key, inserted (made by make(hash, key)) when absent
+        template <typename K, typename Make>
+        std::pair<entry*, bool> find_or_insert(K&& key, Make&& make) {
+            const size_t h = script_value_hash{}(key);
+            if (size_ != 0) {
+                for (size_t i = home(h);; i = (i + 1) & mask()) {
+                    const slot& s = slots_[i];
+                    if (!s.e) break;
+                    if (s.hash == h && script_value_key_eq{}(s.e->kv.first, key)) return {s.e, false};
+                }
+            }
+            grow_for(size_ + 1);
+            entry* e = make(h, std::forward<K>(key));
+            place(e);
+            ++size_;
+            changed();
+            return {e, true};
+        }
+        // the index without key's entry (backward shift: no tombstones); the entry, still allocated, or null
+        entry* unlink(const script_value& key) {
+            if (size_ == 0) return nullptr;
+            const size_t h = script_value_hash{}(key);
+            size_t i = home(h);
+            for (;; i = (i + 1) & mask()) {
+                const slot& s = slots_[i];
+                if (!s.e) return nullptr;
+                if (s.hash == h && script_value_key_eq{}(s.e->kv.first, key)) break;
+            }
+            entry* gone = slots_[i].e;
+            for (size_t j = i;;) {
+                j = (j + 1) & mask();
+                if (!slots_[j].e) break;
+                const size_t k = home(slots_[j].hash);
+                if ((j > i && (k <= i || k > j)) || (j < i && k <= i && k > j)) { slots_[i] = slots_[j]; i = j; }
+            }
+            slots_[i] = slot{0, nullptr};
+            --size_;
+            changed();
+            return gone;
+        }
+        // every entry, detached from the index: the map is empty and consistent before any value dies
+        std::vector<entry*> detach_all() noexcept {
+            std::vector<entry*> out;
+            out.reserve(size_);
+            for (slot& s : slots_) { if (s.e) { out.push_back(s.e); s = slot{0, nullptr}; } }
+            size_ = 0;
+            return out;
+        }
+        void copy_from(const script_map& o) {
+            grow_for(o.size_);
+            for (const slot& s : o.slots_) {
+                if (!s.e) continue;
+                place(new entry(s.hash, s.e->kv.first, s.e->kv.second));
+                ++size_;
+            }
+        }
+        void take_from(script_map& o) noexcept {
+            slots_ = std::move(o.slots_); o.slots_.clear();
+            size_ = o.size_; o.size_ = 0;
+            shift_ = o.shift_; o.shift_ = 64;
+        }
+
         void build_order() const {
             if (order_gen_ == gen_) return;
             order_.clear();
-            order_.reserve(table_.size());
-            for (auto& e : const_cast<table_t&>(table_)) { order_.push_back(&e); }
+            order_.reserve(size_);
+            for (const slot& s : slots_) { if (s.e) order_.push_back(&s.e->kv); }
             std::sort(order_.begin(), order_.end(), [](const value_type* a, const value_type* b) { return script_value_map_less{}(a->first, b->first); });
             order_gen_ = gen_;
         }
@@ -104,9 +205,8 @@ namespace jai {
             // an iteration iterator after the map changed: its own entry if the key is still there, else the next greater key
             void revalidate() const {
                 if (!key_ || !m_ || gen_ == m_->gen_) return;
-                auto f = m_->table_.find(*key_);
-                if (f != m_->table_.end()) {
-                    node_ = const_cast<script_map::value_type*>(&*f); index_ = npos; gen_ = m_->gen_;
+                if (entry* f = m_->find_entry(*key_)) {
+                    node_ = &f->kv; index_ = npos; gen_ = m_->gen_;
                 } else {
                     const_cast<basic_iterator*>(this)->seat(m_->index_after(*key_));
                 }
@@ -156,24 +256,36 @@ namespace jai {
         using const_iterator = basic_iterator<true>;
 
         script_map() = default;
-        script_map(const script_map& o) : table_(o.table_) {}
-        script_map(script_map&& o) noexcept : table_(std::move(o.table_)) { o.changed(); }
+        script_map(const script_map& o) { copy_from(o); }
+        script_map(script_map&& o) noexcept { take_from(o); o.changed(); }
         script_map& operator=(const script_map& o) {
-            if (this != &o) { table_ = o.table_; changed(); }
+            if (this != &o) {
+                script_map fresh(o);
+                std::vector<entry*> dying = detach_all();
+                take_from(fresh);
+                changed();
+                for (entry* e : dying) { delete e; }
+            }
             return *this;
         }
         script_map& operator=(script_map&& o) noexcept {
-            if (this != &o) { table_ = std::move(o.table_); changed(); o.changed(); }
+            if (this != &o) {
+                std::vector<entry*> dying = detach_all();
+                take_from(o);
+                changed(); o.changed();
+                for (entry* e : dying) { delete e; }
+            }
             return *this;
         }
         inline ~script_map();
-        // Every entry onto `work` (back = next to die) in the order the table destroys them: entry by entry, value then key
+        // Every entry onto `work` (back = next to die) in the order clear() destroys them: entry by entry, value then key
         void hand_off_entries(std::vector<script_value>& work) noexcept {
             const size_t base = work.size();
-            while (!table_.empty()) {
-                auto nh = table_.extract(table_.begin());
-                work.push_back(std::move(nh.mapped()));
-                work.push_back(std::move(nh.key()));
+            std::vector<entry*> dying = detach_all();
+            for (entry* e : dying) {
+                work.push_back(std::move(e->kv.second));
+                work.push_back(std::move(const_cast<script_value&>(e->kv.first)));
+                delete e;
             }
             changed();
             order_.clear();
@@ -181,9 +293,13 @@ namespace jai {
         }
 
         void prepare_order() const { build_order(); }   // the order view built now (ahead of concurrent readers)
-        size_type size() const noexcept { return table_.size(); }
-        bool empty() const noexcept { return table_.empty(); }
-        void clear() noexcept { table_.clear(); changed(); }
+        size_type size() const noexcept { return size_; }
+        bool empty() const noexcept { return size_ == 0; }
+        void clear() noexcept {
+            std::vector<entry*> dying = detach_all();
+            changed();
+            for (entry* e : dying) { delete e; }
+        }
 
         iterator begin() { build_order(); iterator it(this, nullptr, npos, gen_, false); it.seat(0); return it; }
         const_iterator begin() const { build_order(); const_iterator it(this, nullptr, npos, gen_, false); it.seat(0); return it; }
@@ -193,72 +309,61 @@ namespace jai {
         const_iterator cend() const noexcept { return const_iterator(); }
 
         iterator find(const script_value& k) {
-            auto it = table_.find(k);
-            return it == table_.end() ? end() : iterator(this, &*it, npos, gen_, false);
+            entry* e = find_entry(k);
+            return e ? iterator(this, &e->kv, npos, gen_, false) : end();
         }
         const_iterator find(const script_value& k) const {
-            auto it = table_.find(k);
-            return it == table_.end() ? end() : const_iterator(this, const_cast<value_type*>(&*it), npos, gen_, false);
+            entry* e = find_entry(k);
+            return e ? const_iterator(this, &e->kv, npos, gen_, false) : end();
         }
         iterator find(const map_string_key_probe& p) {
-            auto it = table_.find(p);
-            return it == table_.end() ? end() : iterator(this, &*it, npos, gen_, false);
+            entry* e = find_entry(p);
+            return e ? iterator(this, &e->kv, npos, gen_, false) : end();
         }
         const_iterator find(const map_string_key_probe& p) const {
-            auto it = table_.find(p);
-            return it == table_.end() ? end() : const_iterator(this, const_cast<value_type*>(&*it), npos, gen_, false);
+            entry* e = find_entry(p);
+            return e ? const_iterator(this, &e->kv, npos, gen_, false) : end();
         }
-        size_type count(const script_value& k) const { return table_.count(k); }
-        bool contains(const script_value& k) const { return table_.find(k) != table_.end(); }
+        size_type count(const script_value& k) const { return find_entry(k) ? 1 : 0; }
+        bool contains(const script_value& k) const { return find_entry(k) != nullptr; }
 
         script_value& operator[](const script_value& k) {
-            auto [it, inserted] = table_.try_emplace(k);
-            if (inserted) changed();
-            return it->second;
+            return find_or_insert(k, [](size_t h, const script_value& key) { return new entry(h, key); }).first->kv.second;
         }
         script_value& operator[](script_value&& k) {
-            auto [it, inserted] = table_.try_emplace(std::move(k));
-            if (inserted) changed();
-            return it->second;
+            return find_or_insert(std::move(k), [](size_t h, script_value&& key) { return new entry(h, std::move(key)); }).first->kv.second;
         }
         script_value& at(const script_value& k) {
-            auto it = table_.find(k);
-            if (it == table_.end()) throw std::out_of_range("script_map::at");
-            return it->second;
+            entry* e = find_entry(k);
+            if (!e) throw std::out_of_range("script_map::at");
+            return e->kv.second;
         }
         const script_value& at(const script_value& k) const {
-            auto it = table_.find(k);
-            if (it == table_.end()) throw std::out_of_range("script_map::at");
-            return it->second;
+            entry* e = find_entry(k);
+            if (!e) throw std::out_of_range("script_map::at");
+            return e->kv.second;
         }
 
         template <typename K, typename V>
         std::pair<iterator, bool> emplace(K&& k, V&& v) {
-            auto [it, inserted] = table_.emplace(std::forward<K>(k), std::forward<V>(v));
-            if (inserted) changed();
-            return {iterator(this, &*it, npos, gen_, false), inserted};
+            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { return new entry(h, std::move(key), std::forward<V>(v)); });
+            return {iterator(this, &e->kv, npos, gen_, false), inserted};
         }
         template <typename K, typename V>
         std::pair<iterator, bool> insert_or_assign(K&& k, V&& v) {
-            auto [it, inserted] = table_.insert_or_assign(std::forward<K>(k), std::forward<V>(v));
-            if (inserted) changed();
-            return {iterator(this, &*it, npos, gen_, false), inserted};
+            bool fresh = false;
+            auto [e, inserted] = find_or_insert(script_value(std::forward<K>(k)), [&](size_t h, script_value&& key) { fresh = true; return new entry(h, std::move(key), std::forward<V>(v)); });
+            if (!fresh) { e->kv.second = std::forward<V>(v); }
+            return {iterator(this, &e->kv, npos, gen_, false), inserted};
         }
-        std::pair<iterator, bool> insert(const value_type& v) {
-            auto [it, inserted] = table_.insert(v);
-            if (inserted) changed();
-            return {iterator(this, &*it, npos, gen_, false), inserted};
-        }
-        std::pair<iterator, bool> insert(value_type&& v) {
-            auto [it, inserted] = table_.insert(std::move(v));
-            if (inserted) changed();
-            return {iterator(this, &*it, npos, gen_, false), inserted};
-        }
+        std::pair<iterator, bool> insert(const value_type& v) { return emplace(v.first, v.second); }
+        std::pair<iterator, bool> insert(value_type&& v) { return emplace(v.first, std::move(v.second)); }
 
         size_type erase(const script_value& k) {
-            const size_type n = table_.erase(k);
-            if (n) changed();
-            return n;
+            entry* gone = unlink(k);
+            if (!gone) return 0;
+            delete gone;
+            return 1;
         }
         // the entry after `pos` in key order
         iterator erase(const_iterator pos) {
@@ -266,23 +371,13 @@ namespace jai {
             iterator next(this, pos.node_, pos.index_, pos.gen_, false);
             next.key_ = pos.key_;
             ++next;   // seated (and keyed) before the erase: its node stays valid
-            table_.erase(pos.node_->first);
-            changed();
+            erase(pos.node_->first);
             return next;
         }
         iterator erase(iterator pos) { return erase(const_iterator(pos)); }
-
-        node_type extract(const_iterator pos) {
-            pos.revalidate();
-            node_type nh = table_.extract(pos.node_->first);
-            changed();
-            return nh;
-        }
-        iterator insert(const_iterator, node_type&& nh) {
-            auto r = table_.insert(std::move(nh));
-            changed();
-            return r.position == table_.end() ? end() : iterator(this, &*r.position, npos, gen_, false);
-        }
+        // the key at pos, writable for a store of an equal value (same hash, equality and order): a parallel region's
+        // admission detaches a shared key string in place
+        script_value& equal_key_storage(const_iterator pos) { pos.revalidate(); return const_cast<script_value&>(pos.node_->first); }
     };
 
     namespace detail {
@@ -312,14 +407,15 @@ namespace jai {
     }
 
     inline script_map::~script_map() {
-        for (const auto& e : table_) {
-            if (e.second.release_flattens() || e.first.release_flattens()) {
+        for (const slot& sl : slots_) {
+            if (sl.e && (sl.e->kv.second.release_flattens() || sl.e->kv.first.release_flattens())) {
                 std::vector<script_value> work;
                 hand_off_entries(work);
                 detail::release_work(work);
                 return;
             }
         }
+        clear();
     }
 
 } // namespace jai

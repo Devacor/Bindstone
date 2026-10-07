@@ -6356,6 +6356,29 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		test("the_trig_root_rounding_abs_and_angle_rows_are_one_table", [this]() {
+			// sin cos tan sqrt floor ceil abs and the angle conversions over int and float arguments, outside a loop (a compiler temp), as a
+			// statement-level call (op_math), inside a block and through a host alias: abs keeps an int an int, abs(INT64_MIN) raises
+			// the kernel's text, a non-number raises the kernel's text
+			const std::string defs =
+				"float one(var x) { return math::sin(x) + math::cos(x) * 2.0 + math::tan(x) - math::sqrt(math::abs(x)) + math::floor(x) * 3.0 + math::ceil(x) + math::radians_to_degrees(x) + math::degrees_to_radians(x); }\n"
+				"string kinds(var x) { return type_of(math::abs(x)) + \",\" + type_of(math::floor(x)) + \",\" + type_of(math::sqrt(x)) + \",\" + type_of(host_radians(x)); }\n"
+				"float loop(int n) { float s = 0.0; for (int i = -n; i <= n; ++i) { s += math::sin(i * 0.1) + math::abs(i) + math::floor(i * 0.3) + math::ceil(i * 0.7) + math::sqrt(i * i) + math::cos(i) + math::tan(i * 0.01) + math::degrees_to_radians(i); } return s; }\n"
+				"string bad(var x) { string out = \"\"; try { math::abs(x); } catch (e) { out = e; } return out; }\n";
+			const std::string src = defs + "to_string(one(3)) + \" \" + to_string(one(-2.75)) + \" \" + to_string(one(0)) + \" \" + kinds(-7) + \" \" + kinds(-7.5) + \" \" + to_string(math::abs(-9))"
+				" + \" \" + to_string(loop(200)) + \" \" + bad(-9223372036854775807 - 1) + \" \" + bad(\"x\") + \" \" + to_string(host_radians(-4)) + \" \" + to_string(host_radians(2.5));";
+			const std::string oracle = run_on(false, src);
+			check_true(oracle.find("throw") == std::string::npos && oracle.find("int,float,float,float") != std::string::npos, "the interpreter's answer: " + oracle);
+			both(src, oracle, "one scalar table");
+			both(src, oracle, "one scalar table, proofs off", false);
+			if (!engine::miss_injection_available()) { return; }
+			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
+				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em); register_host_math_fixture(*em);
+				std::string got;
+				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(oracle, got, "a miss at every " + std::to_string(every));
+			}
+		});
 		test("enum_arguments_and_guarded_element_members_in_ternary_arms_keep_the_loop_a_block", [this]() {
 			// Gator Quest's status_tick: an enum value by name as a call's argument (`fx(Fx.fire, m)`), a ternary whose arms read members of
 			// elements of two global tables (the second through a guarded index, its temp slot reused by the other arm), a true-sense compare

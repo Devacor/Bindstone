@@ -267,10 +267,12 @@ namespace jai::detail {
         default: return false;
         }
     }
-    // the one-argument rows of the scalar library a compiler temp carries (and a cell block runs): a number in (an int converts), a
-    // float out (sign an int)
+    // the one-argument rows of the scalar library the general form and a cell block run: a number in (an int converts), a float out
+    // (sign an int; abs keeps an int an int through eval_scalar_unary_num)
     inline bool math_scalar_unary(math_fn fn) noexcept {
         switch (fn) {
+        case math_fn::abs_: case math_fn::floor_: case math_fn::ceil_: case math_fn::sqrt_: case math_fn::sin_: case math_fn::cos_: case math_fn::tan_:
+        case math_fn::radians_to_degrees: case math_fn::degrees_to_radians:
         case math_fn::trunc_: case math_fn::cbrt_: case math_fn::exp_: case math_fn::exp2_: case math_fn::log_: case math_fn::log2_: case math_fn::log10_:
         case math_fn::asin_: case math_fn::acos_public_: case math_fn::atan_: case math_fn::sinh_: case math_fn::cosh_: case math_fn::tanh_:
         case math_fn::saturate_: case math_fn::sign_:
@@ -281,6 +283,15 @@ namespace jai::detail {
     inline scalar_num eval_scalar_unary(math_fn fn, script_float x) noexcept {
         scalar_num r;
         switch (fn) {
+        case math_fn::abs_: r.f = std::fabs(x); break;
+        case math_fn::floor_: r.f = std::floor(x); break;
+        case math_fn::ceil_: r.f = std::ceil(x); break;
+        case math_fn::sqrt_: r.f = std::sqrt(x); break;
+        case math_fn::sin_: r.f = std::sin(x); break;
+        case math_fn::cos_: r.f = std::cos(x); break;
+        case math_fn::tan_: r.f = std::tan(x); break;
+        case math_fn::radians_to_degrees: r.f = x * (180.0 / 3.14159265358979323846); break;
+        case math_fn::degrees_to_radians: r.f = x * (3.14159265358979323846 / 180.0); break;
         case math_fn::trunc_: r.f = std::trunc(x); break;
         case math_fn::cbrt_: r.f = std::cbrt(x); break;
         case math_fn::exp_: r.f = std::exp(x); break;
@@ -300,6 +311,18 @@ namespace jai::detail {
         }
         return r;
     }
+    // a math_scalar_unary row on a number: abs keeps an int an int (false for INT64_MIN: the kernel raises its overflow text), every
+    // other row reads the number as a double
+    inline bool eval_scalar_unary_num(math_fn fn, const scalar_num& a, scalar_num& out) noexcept {
+        if (fn == math_fn::abs_ && a.is_int) {
+            if (a.i == INT64_MIN) return false;
+            out.is_int = true;
+            out.i = a.i < 0 ? -a.i : a.i;
+            return true;
+        }
+        out = eval_scalar_unary(fn, a.d());
+        return true;
+    }
     inline bool math_alias_kernel(math_fn fn) noexcept {
         switch (fn) {
         case math_fn::floor_: case math_fn::ceil_: case math_fn::sqrt_: case math_fn::sin_: case math_fn::cos_: case math_fn::tan_:
@@ -308,19 +331,7 @@ namespace jai::detail {
         default: return false;
         }
     }
-    inline script_float eval_math_alias(math_fn fn, script_float x) noexcept {
-        switch (fn) {
-        case math_fn::abs_: return std::fabs(x);
-        case math_fn::floor_: return std::floor(x);
-        case math_fn::ceil_: return std::ceil(x);
-        case math_fn::sqrt_: return std::sqrt(x);
-        case math_fn::sin_: return std::sin(x);
-        case math_fn::cos_: return std::cos(x);
-        case math_fn::tan_: return std::tan(x);
-        case math_fn::radians_to_degrees: return x * (180.0 / 3.14159265358979323846);
-        default: return x * (3.14159265358979323846 / 180.0);
-        }
-    }
+    inline script_float eval_math_alias(math_fn fn, script_float x) noexcept { return eval_scalar_unary(fn, x).f; }   // the stdlib alias: an int argument converts first
 
     // The eased mix/unmix formulas (verbatim from the stdlib registrations), one definition for the scalar rows and the
     // vector rows

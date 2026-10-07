@@ -1934,7 +1934,7 @@ namespace jai::vm {
         op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);
         op_status exec_decl_ref_value(frame& f, const vm_instruction& ins);
         op_status exec_binary(frame& f, const vm_instruction& ins);
-        bool stack_numeric_rows(const script_value& l, const script_value& r, token_type op, script_value& out);
+        bool stack_numeric_rows(script_value& l, const script_value& r, token_type op);
         op_status exec_binary_fused(frame& f, const vm_instruction& ins);
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
         op_status exec_call_temp(frame& f, const vm_instruction& ins);   // a call's result into a compiler temp (op_call_temp)

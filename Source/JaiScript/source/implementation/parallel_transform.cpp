@@ -2934,9 +2934,9 @@ namespace {
 				return normalize_element_inplace(v, eng, reach, unreferenced_array, nullptr, types);
 			}
 			// A shared KEY string (a literal every map built from the same source holds)
-			// detaches in place through the node handle: same bytes, so the ordering the
-			// comparator sees is unchanged and the map's values stay where they are. A
-			// structured key detaches the map wholesale, then the values re-walk.
+			// detaches in place: same bytes, so the key's hash, equality and order are
+			// unchanged and the map's values stay where they are. A structured key detaches
+			// the map wholesale, then the values re-walk.
 			bool structured_key = false;
 			for (auto it = handle->begin(); it != handle->end();) {
 				const size_t ki = it->first.raw_storage_index();
@@ -2946,14 +2946,9 @@ namespace {
 				}
 				if (ki == script_value::TYPEID_STRING &&
 				    const_cast<script_value&>(it->first).unchecked_get_string_storage().use_count() > 1) {
-					auto next = std::next(it);
-					auto entry = handle->extract(it);
-					auto& key_handle = entry.key().unchecked_get_string_storage();
+					auto& key_handle = handle->equal_key_storage(it).unchecked_get_string_storage();
 					eng.execution_limits().memory_charge_deferred(key_handle->size() + sizeof(script_string));
 					key_handle = make_strong<script_string>(*key_handle);
-					handle->insert(next, std::move(entry));
-					it = next;
-					continue;
 				}
 				++it;
 			}

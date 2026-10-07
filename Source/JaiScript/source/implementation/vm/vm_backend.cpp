@@ -13111,28 +13111,34 @@ static const script_value* silent_referent(const script_value& a) {
 	return v->raw_storage_index() == script_value::TYPEID_REFERENCE ? nullptr : v;
 }
 
-// binds_in_place over a stack slice, where a reference argument read silently whose referent its slot takes in place becomes the
-// referent's copy (the general binding's clone of it); false changes nothing
-static bool binds_slice_in_place(const script_defined_function& function, script_value* args, size_t argc) {
-	if ((function.backend_lean_bind ? function.backend_lean_bind : lean_bind_of(function)) != 1) { return false; }
-	const auto& ps = function.parameters();
-	if (argc != ps.size()) { return false; }
-	bool references = false;
-	for (size_t i = 0; i < argc; ++i) {
+// the slice from the first reference argument on: each a reference read silently whose referent its slot takes in place, or an argument
+// its slot takes; true replaces each reference by its referent's copy (the general binding's clone of it), false changes nothing
+static JAI_NOINLINE bool bind_slice_references(const std::vector<parameter>& ps, script_value* args, size_t argc, size_t first) {
+	for (size_t i = first; i < argc; ++i) {
 		if (args[i].raw_storage_index() == script_value::TYPEID_REFERENCE) {
 			const script_value* v = silent_referent(args[i]);
 			if (!v || !lean_slot_takes(ps[i], *v)) { return false; }
-			references = true;
 		} else if (!lean_slot_takes(ps[i], args[i])) {
 			return false;
 		}
 	}
-	if (references) [[unlikely]] {
-		for (size_t i = 0; i < argc; ++i) {
-			if (args[i].raw_storage_index() == script_value::TYPEID_REFERENCE) {
-				script_value v(*silent_referent(args[i]));
-				args[i] = std::move(v);
-			}
+	for (size_t i = first; i < argc; ++i) {
+		if (args[i].raw_storage_index() == script_value::TYPEID_REFERENCE) {
+			script_value v(*silent_referent(args[i]));
+			args[i] = std::move(v);
+		}
+	}
+	return true;
+}
+
+// binds_in_place over a stack slice, a reference argument read silently binding its referent's copy
+static JAI_FORCEINLINE bool binds_slice_in_place(const script_defined_function& function, script_value* args, size_t argc) {
+	if ((function.backend_lean_bind ? function.backend_lean_bind : lean_bind_of(function)) != 1) { return false; }
+	const auto& ps = function.parameters();
+	if (argc != ps.size()) { return false; }
+	for (size_t i = 0; i < argc; ++i) {
+		if (!lean_slot_takes(ps[i], args[i])) {
+			return args[i].raw_storage_index() == script_value::TYPEID_REFERENCE && bind_slice_references(ps, args, argc, i);
 		}
 	}
 	return true;

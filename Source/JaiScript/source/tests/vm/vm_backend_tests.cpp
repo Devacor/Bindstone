@@ -4080,6 +4080,35 @@ public:
 			check_eq(i1, v1, "plain frame argument rows parity");
 		});
 
+		test("handle_and_field_reference_argument_parity", [this, run_both_backends_stdlib]() {
+			// handles and nulls into var parameters (shared, never copied), var& parameters bound to fields of handles, stores through
+			// them (a declared field converts, a var field takes anything), a captured parameter, a by-value instance still copies
+			auto [i1, v1] = run_both_backends_stdlib(R"(
+				class N { var v = 0; var left = null; var right = null; int count = 0; float w = 0.5; }
+				class P { int k = 1; }
+				string log = "";
+				void touch(var n, var other) { if (n != null) { n.v = n.v + 1; } if (other == null) { log = log + "n"; } }
+				void link(var parent, var& slot, var child) { slot = child; parent.count = parent.count + 1; }
+				void set_both(var& a, var& b, var x) { a = x; b = x; }
+				function keep(var n) { var f = [&]() { n = null; }; f(); return n == null; }
+				void bump(var p) { p.k = p.k + 10; }
+				var root = new N();
+				var kid = new N();
+				touch(root, null); touch(root, kid); touch(null, null);
+				link(root, root.left, kid); link(root, root.right, new N()); link(kid, kid.left, null);
+				log = log + "|" + to_string(root.v) + to_string(root.count) + to_string(root.left.v) + to_string(root.right != null) + to_string(kid.left == null);
+				set_both(root.left.v, root.right.v, 7); set_both(root.count, root.w, 3);
+				log = log + "|" + to_string(kid.v) + to_string(root.right.v) + to_string(root.count) + "," + to_string(root.w) + "," + type_of(root.w);
+				try { set_both(root.count, root.v, "s"); } catch (e) { log = log + "|" + e; }
+				log = log + "|" + to_string(keep(root)) + to_string(root != null);
+				var p = P(); bump(p); var sp = new P(); bump(sp);
+				log = log + "|" + to_string(p.k) + "," + to_string(sp.k);
+				log;
+			)");
+			check_true(i1.find("Cannot") != std::string::npos, i1);
+			check_eq(i1, v1, "handle and field reference argument parity");
+		});
+
 		test("host_function_direct_entry_parity", [this]() {
 			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
 			// throw, a callback into script, a re-registration while it runs, a closed loop calling it

@@ -637,6 +637,30 @@ log;
             check_eq(i_out, v_out, "backend parity");
         });
 
+        // string keys around the eight-byte short form: lengths 0..9, embedded NULs, a string and a utf8_string of the same
+        // bytes, a key read as a member, a built key equal to a stored one, an erase
+        test("map_short_string_keys", [this, both_mode]() {
+            const char* src = R"JAI(
+var m = {};
+array<string> ks = ["", "a", "ab", "abcdefg", "abcdefgh", "abcdefghi", "abcdefgh!", "a\x00", "a\x00b", "hp"];
+for (int i = 0; i < ks.size(); ++i) { m[ks[i]] = i; }
+m[utf8_string("ab")] = 100;
+m[utf8_string("abcdefgh")] = 101;
+string out = to_string(m.size());
+for (int i = 0; i < ks.size(); ++i) { out += " " + to_string(m[ks[i]]); }
+out += " " + to_string(m[utf8_string("ab")]) + " " + to_string(m[utf8_string("abcdefgh")]) + " " + to_string(m.hp);
+string copy = "abcdefg";
+copy += "h";
+out += " " + to_string(m[copy]) + " " + to_string(m.has("abcdefgh\x00")) + " " + to_string(m.has("a"));
+m.erase("abcdefgh");
+out += " " + to_string(m.has("abcdefgh")) + " " + to_string(m[utf8_string("abcdefgh")]);
+out;
+)JAI";
+            auto [i_out, v_out] = both_mode(src, check_mode::strict);
+            check_eq(std::string("12 0 1 2 3 4 5 6 7 8 9 100 101 9 4 false true false 101"), i_out, "interpreter");
+            check_eq(i_out, v_out, "backend parity");
+        });
+
         test("map_field_survives_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

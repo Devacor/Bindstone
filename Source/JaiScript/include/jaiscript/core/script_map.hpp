@@ -12,6 +12,8 @@
 // (concurrent readers of a borrowed map only find). Included at the end of value.hpp, where script_value is complete.
 
 #include <bit>
+#include <cstring>
+#include <string_view>
 #include <tuple>
 #include <optional>
 #include <stdexcept>
@@ -68,12 +70,33 @@ namespace jai {
     private:
         // An entry lives in its own allocation until it is erased (references and pointers into it stay valid); the index is
         // open addressing over {hash, entry}: a probe compares the cached hash before it touches an entry
+        // A string key of at most eight bytes keeps them beside the hash: a probe settles it without reaching the key's text
+        static constexpr uint32_t no_short = UINT32_MAX;
+        struct short_key { uint64_t text = 0; uint32_t len = no_short; };
+        static short_key short_of(std::string_view t) noexcept {
+            short_key k;
+            if (t.size() <= 8) { std::memcpy(&k.text, t.data(), t.size()); k.len = static_cast<uint32_t>(t.size()); }
+            return k;
+        }
+        static short_key short_of(const script_value& v) noexcept {
+            return v.raw_storage_index() == script_value::TYPEID_STRING ? short_of(std::string_view(v.unchecked_as_string())) : short_key{};
+        }
+        static short_key short_of(const map_string_key_probe& p) noexcept { return short_of(p.text); }
         struct entry {
-            value_type kv;
             size_t hash;
+            short_key brief;
+            value_type kv;
             template <typename K, typename... V>
-            entry(size_t h, K&& k, V&&... v) : kv(std::piecewise_construct, std::forward_as_tuple(std::forward<K>(k)), std::forward_as_tuple(std::forward<V>(v)...)), hash(h) {}
+            entry(size_t h, K&& k, V&&... v) : hash(h), kv(std::piecewise_construct, std::forward_as_tuple(std::forward<K>(k)), std::forward_as_tuple(std::forward<V>(v)...)) {
+                brief = short_of(kv.first);
+            }
         };
+        // the probe's key test: two short string keys by their bytes, anything else by the key equality
+        template <typename K>
+        static bool same_key(const entry* e, const short_key& b, const K& key) {
+            if (b.len != no_short && e->brief.len != no_short) { return b.len == e->brief.len && b.text == e->brief.text; }
+            return script_value_key_eq{}(e->kv.first, key);
+        }
         struct slot { size_t hash; entry* e; };
         static constexpr size_t min_capacity = 8;
 
@@ -92,10 +115,11 @@ namespace jai {
         entry* find_entry(const K& key) const {
             if (size_ == 0) return nullptr;
             const size_t h = script_value_hash{}(key);
+            const short_key b = short_of(key);
             for (size_t i = home(h);; i = (i + 1) & mask()) {
                 const slot& s = slots_[i];
                 if (!s.e) return nullptr;
-                if (s.hash == h && script_value_key_eq{}(s.e->kv.first, key)) return s.e;
+                if (s.hash == h && same_key(s.e, b, key)) return s.e;
             }
         }
         void place(entry* e) noexcept {
@@ -117,10 +141,11 @@ namespace jai {
         std::pair<entry*, bool> find_or_insert(K&& key, Make&& make) {
             const size_t h = script_value_hash{}(key);
             if (size_ != 0) {
+                const short_key b = short_of(key);
                 for (size_t i = home(h);; i = (i + 1) & mask()) {
                     const slot& s = slots_[i];
                     if (!s.e) break;
-                    if (s.hash == h && script_value_key_eq{}(s.e->kv.first, key)) return {s.e, false};
+                    if (s.hash == h && same_key(s.e, b, key)) return {s.e, false};
                 }
             }
             grow_for(size_ + 1);

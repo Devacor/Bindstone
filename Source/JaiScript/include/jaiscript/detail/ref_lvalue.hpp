@@ -197,7 +197,7 @@ namespace jai::detail {
 				continue;
 			}
 			if (holder->owner_instance) {
-				const script_value* field_value = holder->owner_instance->find_field_value(holder->field_id);
+				const script_value* field_value = holder->field_cell();
 				if (!field_value) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference to a removed field");
 				}
@@ -648,7 +648,7 @@ namespace jai::detail {
 		const class_definition* owner = holder.owner_instance ? holder.owner_instance->get_class_definition() : nullptr;
 		if (holder.owner_instance && holder.container_element_type &&
 		    holder.container_element_type->base_type == script_value_type::jai_object_type) {
-			if (const script_value* current = holder.owner_instance->find_field_value(holder.field_id)) {
+			if (const script_value* current = holder.field_cell()) {
 				if (auto assigned = user_assign_operator(*current, value, eng, holder.container_element_type.get())) {
 					if (!*assigned) { return assigned->error_value(); }
 					return *current;

@@ -28,6 +28,7 @@ namespace jai {
     class environment;
     class engine;
     class class_instance;
+    class class_definition;
     
     // Forward declaration for conversion registry helper
     namespace conversions {
@@ -2054,6 +2055,13 @@ namespace detail { struct argument_capture_storage; }
             // dangling).
             std::shared_ptr<class_instance> owner_instance;
             uint64_t field_id = UINT64_MAX;
+            // the field's slot as the owner's class assigned it (a slot never moves within a class; a re-class changes the class, a
+            // reload bumps its field-shape epoch): field_cell() reads the slot while both match, else finds the field by id and
+            // remembers its slot (never from a parallel worker)
+            mutable const class_definition* field_class = nullptr;
+            mutable uint64_t field_class_epoch = 0;
+            mutable uint32_t field_slot = UINT32_MAX;
+            script_value* field_cell() const;   // value.cpp: the field's live cell, null when the field is gone
             // The array this reference was minted THROUGH (chain rooted at arr[i]; null when
             // not): counted in its live_elem_refs like a direct element reference.
             strong_ptr<script_array> elem_root;

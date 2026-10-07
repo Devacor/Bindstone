@@ -359,9 +359,30 @@ script_value* script_value::reference_holder::resolve_target() {
         return container_index < container->size() ? &container->values()[container_index] : nullptr;
     }
     if (owner_instance) {
-        return owner_instance->find_field_value(field_id);
+        return field_cell();
     }
     return nullptr;   // CPP-MEMBER / PROPERTY (no addressable cell); else unreachable: every factory sets a mode
+}
+
+script_value* script_value::reference_holder::field_cell() const {
+    class_instance* inst = owner_instance.get();
+    const class_definition* cd = inst->get_class_definition();
+    if (cd && cd == field_class && cd->field_shape_epoch() == field_class_epoch) {
+        return inst->field_slot_value(field_slot);
+    }
+    script_value* found = inst->find_field_value(field_id);
+    if (found && cd) {
+        engine* eng = inst->get_engine();
+        if (!eng || !eng->parallel_region_active()) {
+            const uint32_t slot = cd->field_slot(field_id);
+            if (slot != class_definition::k_no_field_slot) {
+                field_class = cd;
+                field_class_epoch = cd->field_shape_epoch();
+                field_slot = slot;
+            }
+        }
+    }
+    return found;
 }
 
 // Per-engine free-list of reference_holder control blocks: a mint is a pop +
@@ -1826,7 +1847,7 @@ const script_value& script_value::deref_slow() const {
         if (refHolder->owner_instance) {
             // Field reference: re-resolve by id (no lazy default insert - the pinned
             // instance IS the lifetime)
-            const script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            const script_value* field_value = refHolder->field_cell();
             if (!field_value) {
                 throw runtime_error("Reference to a removed field");
             }
@@ -1881,7 +1902,7 @@ script_value& script_value::deref_slow() {
             return refHolder->container->values()[refHolder->container_index].deref();
         }
         if (refHolder->owner_instance) {
-            script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            script_value* field_value = refHolder->field_cell();
             if (!field_value) {
                 throw runtime_error("Reference to a removed field");
             }
@@ -1946,7 +1967,7 @@ void script_value::assign_through(const script_value& value) {
             return;
         }
         if (refHolder->owner_instance) {
-            script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            script_value* field_value = refHolder->field_cell();
             if (!field_value) {
                 throw runtime_error("Reference to a removed field");
             }
@@ -2059,7 +2080,7 @@ void script_value::assign_through(script_value&& value) {
             return;
         }
         if (refHolder->owner_instance) {
-            script_value* field_value = refHolder->owner_instance->find_field_value(refHolder->field_id);
+            script_value* field_value = refHolder->field_cell();
             if (!field_value) {
                 throw runtime_error("Reference to a removed field");
             }

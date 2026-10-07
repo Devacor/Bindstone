@@ -4038,6 +4038,48 @@ public:
 			check_eq(i1, v1, "opaque callee parity");
 		});
 
+		test("plain_frame_argument_rows_parity", [this, run_both_backends_stdlib]() {
+			// string parameters, element/field/cell reference arguments into by-value slots, closures and nested functions, a
+			// callee that writes its copies, a block-scope caller, a parallel body calling a plain function
+			auto [i1, v1] = run_both_backends_stdlib(R"(
+				string log = "";
+				int bump(int v) { v += 1; return v; }
+				float half(float x) { return x / 2; }
+				string tag(string a, var b, int n) { a += "!"; b += "?"; return a + b + to_string(n); }
+				int pick(var a, var b) { return a > b ? 1 : 2; }
+				int clamp_at(int v, int& hi) { if (v > hi) { hi = v; } return hi; }
+				class Cell { int n = 4; float w = 2.5; string t = "f"; }
+				array<int> xs = [10, 20, 30];
+				array<float> fs = [1.5, 2.5];
+				var vs = [7, "s", 2.0];
+				var c = Cell();
+				int total = 0;
+				for (int i = 0; i < 3; ++i) { total += bump(xs[i]); }
+				log = log + to_string(total) + ":" + to_string(xs[0]) + to_string(xs[2]) + "|" + to_string(half(fs[1])) + "," + to_string(half(c.w)) + "," + to_string(bump(c.n)) + "," + to_string(c.n);
+				string s = "base";
+				log = log + "|" + tag(s, s, 1) + "," + s + "," + tag(c.t, vs[1], vs[0]) + "," + c.t + "," + to_string(vs[0]) + vs[1];
+				int x = 5; int& rx = x;
+				log = log + "|" + to_string(bump(rx)) + "," + to_string(x) + "," + to_string(pick(vs[0], xs[0])) + "," + to_string(pick("b", "a"));
+				int hi = 0;
+				for (int i = 0; i < 3; ++i) { clamp_at(xs[i], hi); }
+				log = log + "|" + to_string(hi);
+				int k = 3;
+				var add = [k](int v) { return v + k; };
+				var acc = [&](int v) { total += v; return total; };
+				function outer(int v) { int inner(int w) { return w * 2; } return inner(v) + 1; }
+				for (int i = 0; i < 3; ++i) { add(i); acc(xs[i]); }
+				log = log + "|" + to_string(add(xs[2])) + "," + to_string(total) + "," + to_string(outer(4));
+				{ int blk = 2; log = log + "|" + to_string(bump(blk)) + "," + to_string(add(blk)); }
+				var bad = "no"; try { bump(bad); } catch (e) { log = log + "|" + e; }
+				array<int> ps = [1, 2, 3, 4, 5, 6, 7, 8];
+				parallel_for (auto& p : ps) { p = bump(p) * 2; }
+				log = log + "|" + to_string(ps[0]) + "," + to_string(ps[7]);
+				log;
+			)");
+			check_eq(std::string("63:1030|1.25,1.25,5,4|base!base?1,base,f!s?7,f,7s|6,5,2,1|30|33,123,9|3,5|Cannot pass string to parameter 'v' of 'bump' (declared int)|4,18"), i1, "interp: plain frame argument rows");
+			check_eq(i1, v1, "plain frame argument rows parity");
+		});
+
 		test("host_function_direct_entry_parity", [this]() {
 			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
 			// throw, a callback into script, a re-registration while it runs, a closed loop calling it

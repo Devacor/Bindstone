@@ -46,6 +46,7 @@ namespace jai {
     struct import_site;
     namespace vm { class vm_backend; struct coverage_tables; }
     namespace debug { class controller; class transport; }
+    namespace detail { struct release_machine; }
     struct script_namespace_data;
 
     // engine::vm_coverage_summary: the report's class totals as numbers, for a harness that aggregates many runs
@@ -1088,6 +1089,12 @@ namespace jai {
         // destruction-order work (a frame's reverse release) costs nothing in programs without one
         bool destructors_armed() const;
         void note_destructors_armed();
+        // The release stack (detail/release_machine.hpp); _here is null while a parallel region runs (workers release natively)
+        detail::release_machine& release_machine();
+        detail::release_machine* release_machine_here();
+        // Native destruction levels before a dying object's members move to the release stack (default 64; 0: always)
+        void release_recursion_limit(uint32_t levels);
+        uint32_t release_recursion_limit() const;
         uint64_t local_alias_binds() const;
         void note_local_alias_bind();
         void local_alias(bool on);

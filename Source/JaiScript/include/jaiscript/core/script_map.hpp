@@ -166,6 +166,19 @@ namespace jai {
             if (this != &o) { table_ = std::move(o.table_); changed(); o.changed(); }
             return *this;
         }
+        inline ~script_map();
+        // Every entry onto `work` (back = next to die) in the order the table destroys them: entry by entry, value then key
+        void hand_off_entries(std::vector<script_value>& work) noexcept {
+            const size_t base = work.size();
+            while (!table_.empty()) {
+                auto nh = table_.extract(table_.begin());
+                work.push_back(std::move(nh.mapped()));
+                work.push_back(std::move(nh.key()));
+            }
+            changed();
+            order_.clear();
+            std::reverse(work.begin() + static_cast<ptrdiff_t>(base), work.end());
+        }
 
         void prepare_order() const { build_order(); }   // the order view built now (ahead of concurrent readers)
         size_type size() const noexcept { return table_.size(); }
@@ -271,6 +284,43 @@ namespace jai {
             return r.position == table_.end() ? end() : iterator(this, &*r.position, npos, gen_, false);
         }
     };
+
+    namespace detail {
+        // work: values to destroy, back first; a nested last-handle array<var> or map hands its elements on instead of
+        // destroying them inside its own destructor, so nesting costs no native depth and the order is unchanged
+        inline void release_work(std::vector<script_value>& work) noexcept {
+            while (!work.empty()) {
+                script_value v = std::move(work.back());
+                work.pop_back();
+                if (!v.release_flattens()) { continue; }
+                if (v.raw_storage_index() == script_value::TYPEID_ARRAY) {
+                    auto& vals = v.unchecked_get_array_storage()->values();
+                    for (size_t i = vals.size(); i-- > 0;) { work.push_back(std::move(vals[i])); }
+                    vals.clear();
+                } else {
+                    v.unchecked_get_map_storage()->hand_off_entries(work);
+                }
+            }
+        }
+        inline void release_values_flattened(std::vector<script_value>& values) noexcept {
+            std::vector<script_value> work;
+            work.reserve(values.size());
+            for (size_t i = values.size(); i-- > 0;) { work.push_back(std::move(values[i])); }
+            values.clear();
+            release_work(work);
+        }
+    }
+
+    inline script_map::~script_map() {
+        for (const auto& e : table_) {
+            if (e.second.release_flattens() || e.first.release_flattens()) {
+                std::vector<script_value> work;
+                hand_off_entries(work);
+                detail::release_work(work);
+                return;
+            }
+        }
+    }
 
 } // namespace jai
 

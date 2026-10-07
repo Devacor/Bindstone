@@ -27,6 +27,17 @@ namespace jai {
 class function_decl;
 class environment;
 class class_definition;
+class class_instance;
+
+namespace detail {
+    struct release_action;
+    // The allocation's deleter for a class whose chain declares a destructor: the chain runs, then the instance dies
+    // (natively, or as a release-stack frame past the native depth)
+    struct instance_deleter {
+        std::shared_ptr<class_definition> def;
+        void operator()(class_instance* ptr) const noexcept;
+    };
+}
 
 namespace detail {
     // Typed-slot conversion table (defined below class_definition): the ONE table for every
@@ -137,11 +148,10 @@ public:
     // Slot fast path (vm site ICs, tier-1 stage B): present-cell lookup by a
     // pre-resolved slot — no hash; absent (null cell / raw-invalid) returns null so
     // the caller falls back to the resolve ladder (chain defaults, errors).
-    // Destroy one field's value in place (a dying instance's member destruction); the cell stays, holding null
-    void release_field_slot(uint32_t slot) {
-        if (slot < flat_fields_.size() && flat_fields_[slot]) {
-            script_value dying = std::move(*flat_fields_[slot]);
-        }
+    // One field's value taken out of its cell for a dying instance's member destruction; the cell stays, holding null
+    script_value take_field_slot(uint32_t slot) {
+        if (slot < flat_fields_.size() && flat_fields_[slot]) { return std::move(*flat_fields_[slot]); }
+        return script_value(std::monostate{}, engine_);
     }
 
     script_value* field_slot_value(uint32_t slot) {
@@ -330,6 +340,14 @@ private:
     mutable std::unordered_map<uint64_t, script_value> bound_method_cache_;
 
     static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
+    bool fields_cascade() const noexcept {
+        for (const auto& cell : flat_fields_) {
+            if (cell && cell->release_cascades()) { return true; }
+        }
+        return overflow_fields_ && !overflow_fields_->empty();
+    }
+    // The dying instance's members past the native depth go to the release stack (class_registry.cpp)
+    void release_fields() noexcept;
 };
 
 class class_definition : public std::enable_shared_from_this<class_definition> {
@@ -789,6 +807,11 @@ public:
     void destroy_chain(class_instance* instance, const class_definition* level) const { destroy_levels(instance, level, nullptr); }
     // destroy_chain for the levels `kept` does not share (a re-class drops them): kept and its bases stay alive
     void destroy_levels(class_instance* instance, const class_definition* level, const class_definition* kept) const;
+    // destroy_levels one level at a time (the release stack's frames run the same actions): `level`'s body, then its own
+    // fields and its bases onto `actions` (back = next)
+    void expand_destroy_level(class_instance* instance, const class_definition* level, const class_definition* kept,
+                              std::vector<detail::release_action>& actions) const;
+    script_value take_field_for_destroy(class_instance* instance, uint64_t field) const;
     // The same question for a declared type (null, var and unknown kinds can hold anything)
     bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
 
@@ -1181,18 +1204,8 @@ public:
         if (has_script_dtor_) {
             auto* raw_instance = new class_instance(class_instance::interned_name_t{}, interned_name(), engine_);
             raw_instance->note_destructor_armed();
-            auto class_def = shared_from_this();
             if (engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
-
-            instance = std::shared_ptr<class_instance>(raw_instance, [class_def](class_instance* ptr) {
-                if (!ptr) { return; }
-                if (!ptr->construction_pending()) {
-                    const class_definition* now = ptr->get_class_definition();   // a re-classed instance dies as its class now
-                    if (!now) { now = class_def.get(); }
-                    now->destroy_chain(ptr, now);
-                }
-                delete ptr;
-            });
+            instance = std::shared_ptr<class_instance>(raw_instance, detail::instance_deleter{shared_from_this()});
         } else {
             instance = std::make_shared<class_instance>(class_instance::interned_name_t{}, interned_name(), engine_);   // instance + control block, one allocation
         }
@@ -4068,6 +4081,7 @@ inline class_instance::~class_instance() {
     if (late_destructor_ && class_def_ && !construction_pending_) { class_def_->destroy_chain(this, class_def_); }
     if (class_def_) {
         class_def_->unregister_instance(this);
+        if (fields_cascade()) { release_fields(); }
     }
     while (!flat_fields_.empty()) { flat_fields_.pop_back(); }   // members die in reverse declaration order (C++)
 }

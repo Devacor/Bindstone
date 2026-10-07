@@ -1,6 +1,7 @@
 #include <jaiscript/detail/structural_ordering.hpp>
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
+#include <jaiscript/detail/release_machine.hpp>
 #include <charconv>
 #include <jaiscript/vm/vm_backend.hpp>
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
@@ -21117,6 +21118,7 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 }
 
 checked_result<script_value> vm_backend::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
+	detail::release_sync release_first(engine_);
 	// A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
 	// destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with interpreter::execute_callable)
 	struct unwind_park {

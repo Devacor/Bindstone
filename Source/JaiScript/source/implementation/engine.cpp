@@ -21,6 +21,7 @@
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/arg_capture.hpp>
 #include <jaiscript/detail/math_component_store.hpp>
+#include <jaiscript/detail/release_machine.hpp>
 #ifdef JAISCRIPT_VM_COVERAGE
 #include <jaiscript/vm/coverage.hpp>
 #include <mutex>
@@ -373,6 +374,8 @@ struct engine::implementation {
             }
         }
     } ref_holder_pool_;
+    // Outlives every value-owning member below: their releases at teardown can still run on it
+    detail::release_machine release_;
 
     // Unified conversion registry (replaces both type_conversions and custom_conversions)
     std::shared_ptr<conversions::conversion_registry> conversions;
@@ -2032,6 +2035,9 @@ engine::~engine() {
         }
         impl->tearing_down = true;
         impl->backend.reset();
+        // Without a destructor nothing a value releases runs script: program-scope values die while their classes still
+        // reach the engine, so a long chain releases on the release stack
+        if (!impl->destructors_armed_ && impl->global_environment_) { impl->global_environment_->clear_values(); }
         // Definitions a host or a captured environment keeps alive past this point must not
         // consult the engine from an instance destructor (registry_lock reads it)
         for (auto& [name, def] : impl->classes) { if (def) { def->detach_for_teardown(); } }
@@ -4011,6 +4017,16 @@ void engine::parameter_alias(bool on) {
 bool engine::parameter_alias() const {
     return impl->parameter_alias_;
 }
+
+detail::release_machine& engine::release_machine() { return impl->release_; }
+
+detail::release_machine* engine::release_machine_here() {
+    return impl->parallel_ && impl->parallel_->active_region ? nullptr : &impl->release_;
+}
+
+void engine::release_recursion_limit(uint32_t levels) { impl->release_.depth_limit = levels; }
+
+uint32_t engine::release_recursion_limit() const { return impl->release_.depth_limit; }
 
 bool engine::destructors_armed() const {
     return impl->destructors_armed_;

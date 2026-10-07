@@ -201,7 +201,7 @@ void instance_deleter::operator()(class_instance* ptr) const noexcept {
         if (!now) { now = def.get(); }
         now->destroy_chain(ptr, now);
     }
-    delete ptr;
+    class_instance::free_allocation(ptr);
     if (m) { --m->depth; }
 }
 
@@ -263,7 +263,7 @@ void release_drive(engine& eng, release_machine& m, size_t mark) {
             std::shared_ptr<class_definition> owner = std::move(frame.owner);
             frame.instance = nullptr;
             m.free_frames.push_back(index);
-            if (del) { release_step(m, [&] { delete instance; }); }
+            if (del) { release_step(m, [&] { class_instance::free_allocation(instance); }); }
             continue;
         }
         const release_action action = frame.actions.back();

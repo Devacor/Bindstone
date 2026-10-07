@@ -6274,6 +6274,16 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 		}
 		return nullptr;
 	}
+	// the lookup cache's armed head, where no member scope of the frame can take the name: env_lookup_cached's answer without its calls
+	if (cached_global_env_ && cache_slot < f.code->env_lookup_cache.size() && (!f.locals || f.top_level || (f.locals->scope_state != 0 && !frame_scope_active(f)))) {
+		const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
+		if (e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_env_resolve_[6];
+#endif
+			return e.fast_ptr;
+		}
+	}
 	return fused_cmp_operand_env(f, operand, cache_slot);
 }
 // out of line: the member scope and lookup machinery keep their frame (and its stack cookie) off the slot and constant reads

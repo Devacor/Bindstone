@@ -370,16 +370,16 @@ script_value* script_value::reference_holder::field_cell() const {
     if (cd && cd == field_class && cd->field_shape_epoch() == field_class_epoch) {
         return inst->field_slot_value(field_slot);
     }
-    script_value* found = inst->find_field_value(field_id);
-    if (found && cd) {
+    // find_field_value's ladder with the slot kept: a slot field's cell (present or gone), else the overflow fields
+    const uint32_t slot = cd ? cd->field_slot(field_id) : class_definition::k_no_field_slot;
+    if (slot == class_definition::k_no_field_slot) { return inst->find_field_value(field_id); }
+    script_value* found = inst->field_slot_value(slot);
+    if (found) {
         engine* eng = inst->get_engine();
         if (!eng || !eng->parallel_region_active()) {
-            const uint32_t slot = cd->field_slot(field_id);
-            if (slot != class_definition::k_no_field_slot) {
-                field_class = cd;
-                field_class_epoch = cd->field_shape_epoch();
-                field_slot = slot;
-            }
+            field_class = cd;
+            field_class_epoch = cd->field_shape_epoch();
+            field_slot = slot;
         }
     }
     return found;
@@ -1139,10 +1139,18 @@ script_value script_value::make_field_reference(std::shared_ptr<class_instance> 
 }
 
 script_value script_value::make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
-                                                engine* eng, type_info_ptr field_type, const script_value& field_value) {
+                                                engine* eng, type_info_ptr field_type, const script_value& field_value,
+                                                uint32_t field_slot) {
     script_value v(std::monostate{}, eng);
     v.type_info_ = eng->get_type_info_reference(field_value.get_type_info());
     auto ref = acquire_reference_holder(eng);
+    if (field_slot != UINT32_MAX && !eng->parallel_region_active()) {
+        if (const class_definition* cd = owner->get_class_definition()) {
+            ref->field_class = cd;
+            ref->field_class_epoch = cd->field_shape_epoch();
+            ref->field_slot = field_slot;
+        }
+    }
     owner->note_field_ref_minted();
     ref->owner_instance = std::move(owner);          // pins the instance for the reference's lifetime
     ref->field_id = field_id;

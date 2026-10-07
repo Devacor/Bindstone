@@ -1,6 +1,13 @@
 # Fast references (design study)
 
-Status: design. Nothing here is built except the field-slot memory in layer 1. Dev decides what to build.
+Status (Dev, 2026-10-07):
+
+- **Built:** layer 1's field-slot memory.
+- **Next:** layer 2 (non-atomic pins for script owners), designed against the one-allocation instance (an intrusive count on
+  the combined allocation); then layer 2b (split pool counter); then layer 1's array-element generation. Map entries
+  follow lever C's node-stable table.
+- **Rejected:** layer 3.
+- **Parked as research:** layer 4.
 
 A reference (`var& r = o.f`, a `T&` parameter, `for (auto& x : xs)`, `auto& e = m[k]`) is a `script_value` whose storage is a
 `strong_ptr<reference_holder>`. The holder pins what it names and finds the target again on every touch. The six holder
@@ -164,5 +171,5 @@ caller's frame provably outlives the callee and index addressing removes the rea
 | 3 (inline references) | about −9% at best | small | — | — | high | large | value layout |
 | 4 (pin-free non-escaping) | up to −15% | small | — | — | high | large | checker escape and lifetime analysis |
 
-Recommended order: layer 2 together with lever A, then layer 2b, then the element generation of layer 1. Layer 3 is not
-worth its risk. Layer 4 is a later study, starting with frame-local targets.
+Order: layer 2 on the one-allocation instance, then layer 2b, then layer 1's element generation, then its map-entry
+form. Layer 3 is not built. Layer 4 is a later study, starting with frame-local targets.

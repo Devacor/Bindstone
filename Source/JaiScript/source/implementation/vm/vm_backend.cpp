@@ -21931,6 +21931,10 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 void vm_backend::pop_script_frame_boxed_cells(call_record& rec) {
 	rec.locals.boxed_cells = false;
 	std::vector<script_value> cells;
+	if (!cell_lists_.empty()) {
+		cells = std::move(cell_lists_.back());
+		cell_lists_.pop_back();
+	}
 	if (rec.f.window_backed) {
 		const size_t end = std::min(stack_.size(), static_cast<size_t>(rec.f.window_base) + rec.f.window_live);
 		if (end > rec.f.window_base) { script_value::gather_shared_cells(&stack_[rec.f.window_base], end - rec.f.window_base, cells); }
@@ -21939,6 +21943,8 @@ void vm_backend::pop_script_frame_boxed_cells(call_record& rec) {
 	}
 	pop_script_frame_core(rec);
 	script_value::release_cell_cycles(cells, engine_);
+	cells.clear();
+	if (cell_lists_.size() < 8) { cell_lists_.push_back(std::move(cells)); }
 }
 
 // The record whose slots hold `storage` (a slot just boxed on demand) checks its cells at its exit; a frame whose chunk

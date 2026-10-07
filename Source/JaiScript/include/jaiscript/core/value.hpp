@@ -315,6 +315,7 @@ namespace detail { struct argument_capture_storage; }
         // list swept as it grows) and at engine teardown (release_deferred_cell_cycles).
         static void gather_shared_cells(const script_value* values, size_t count, std::vector<script_value>& out);
         static void release_cell_cycles(std::vector<script_value>& cells, engine* eng);
+        static bool release_plain_cells(std::vector<script_value>& cells, engine* eng);
         static void release_deferred_cell_cycles(engine* eng);
         // Map-entry reference: pins the owning map (strong) and re-resolves find(key) on
         // every deref/assign-through - an erased entry errors instead of dangling, and a

@@ -8148,7 +8148,7 @@ class_instance* vm_backend::cells_member_prefix(frame& f, class_instance* inst, 
 // a member site's field of an instance (an alias's element at each rebind): the read-side probe answers the class's slot once per
 // class per site (a subclass element re-probes, a call between reads re-probes: a reload may have moved the fields), the field's
 // value dereferenced; a field that is not an int, a float or a bool is the general form's
-const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe, bool prefixed) {
+const script_value* vm_backend::cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe, bool prefixed, uint32_t* slot_out) {
 	cell_state& cs = *f.cells;
 	auto* expr = static_cast<member_expr*>(f.code->nodes[member_node].get());
 	if (!prefixed) { inst = cells_member_prefix(f, inst, expr, off); }
@@ -8176,6 +8176,7 @@ const script_value* vm_backend::cells_member_field(frame& f, class_instance* ins
 	const script_value* fv = &v->deref();
 	const size_t fk = fv->raw_storage_index();
 	if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return nullptr;
+	if (slot_out) { *slot_out = slot; }
 	return fv;
 }
 
@@ -8411,45 +8412,101 @@ bool vm_backend::cells_rebind_apply(frame& f, const chunk::cell_loop& loop, cons
 		if (!actual || (actual->get_name() != referent->type_name &&
 			!detail::class_derives_from(engine_, actual->get_type_id(), referent->id))) { return false; }
 	}
+	const size_t ri = static_cast<size_t>(&rb - loop.rebinds.data());
+	if (cs.rebind_memos.size() <= ri) { cs.rebind_memos.resize(ri + 1); }
+	cell_state::rebind_memo& memo = cs.rebind_memos[ri];
+	class_definition* inst_cd = inst ? inst->get_class_definition() : nullptr;
+	if (inst_cd && !reprobe && memo.cd == inst_cd && memo.code == f.code && memo.copy_ip == rb.copy_ip && memo.epoch == inst_cd->method_epoch()) {
+		// an element of the class the last one had: its fields through the slots that element's sites found
+		class_instance* holders[4] = {};
+		bool same = true;
+		for (uint8_t p = 0; p < memo.prefix_count && same; ++p) {
+			const script_value* pv = inst->field_slot_value(memo.prefix_slot[p]);
+			class_instance* h = nullptr;
+			if (pv && pv->raw_storage_index() == script_value::TYPEID_OBJECT) {
+				const auto& holder = pv->unchecked_object_handle();
+				if (holder && holder->is_class_instance_wrapper && holder->data) { h = static_cast<class_instance*>(holder->data.get()); }
+			}
+			const class_definition* hcd = h ? h->get_class_definition() : nullptr;
+			same = hcd && hcd == memo.prefix_cd[p] && hcd->method_epoch() == memo.prefix_epoch[p];
+			holders[p] = h;
+		}
+		const size_t n = rb.dependents.size();
+		for (size_t k = 0; k < n && same; ++k) {
+			class_instance* h = memo.prefix_of[k] == 0xFF ? inst : holders[memo.prefix_of[k]];
+			script_value* v = h->field_slot_value(memo.slot[k]);
+			if (!v) { same = false; break; }
+			const script_value* fv = &v->deref();
+			const size_t fk = fv->raw_storage_index();
+			if (fk != script_value::TYPEID_INT && fk != script_value::TYPEID_FLOAT && fk != script_value::TYPEID_BOOL) return false;
+			cs.site_member[loop.sites[rb.dependents[k]] - loop.copy_head] = fv;
+		}
+		if (same) {
+			cs.kind[rb.cell] = static_cast<uint8_t>(script_value::TYPEID_REFERENCE); cs.payload[rb.cell] = static_cast<int64_t>(index); cs.dirty.set(rb.cell);
+			return true;
+		}
+	}
+	memo.cd = nullptr;
+	bool memo_ok = inst_cd != nullptr;
+	memo.slot.resize(rb.dependents.size()); memo.prefix_of.resize(rb.dependents.size()); memo.prefix_count = 0;
 	// the alias's member sites over one element: a field (`pos.x` read and stored) or a prefix (`pos` of `pos.x`, `pos.y`) several sites name is
 	// resolved once per binding (no user code runs between them)
-	struct field_seen { uint64_t prefix_id; uint64_t member_id; const script_value* fv; };
+	struct field_seen { uint64_t prefix_id; uint64_t member_id; const script_value* fv; uint32_t slot; uint8_t prefix; };
 	field_seen seen[8];
 	uint32_t seen_count = 0;
-	std::pair<uint64_t, class_instance*> prefixes[4];
+	struct prefix_seen { uint64_t id; class_instance* holder; uint8_t index; };
+	prefix_seen prefixes[4];
 	uint32_t prefix_count = 0;
-	for (const uint32_t d : rb.dependents) {
-		const uint32_t cip = loop.sites[d];
+	for (size_t k = 0; k < rb.dependents.size(); ++k) {
+		const uint32_t cip = loop.sites[rb.dependents[k]];
 		if (f.code->code[cip].op == opcode::op_c_mload || f.code->code[cip].op == opcode::op_c_mstore) {
 			if (!inst) return false;
 			const auto* expr = static_cast<const member_expr*>(f.code->nodes[f.code->code[cip].b].get());
 			const uint64_t prefix_id = expr->object && expr->object->get_type() == node_type::member_expr ? static_cast<const member_expr*>(expr->object.get())->member_id : UINT64_MAX;
 			const script_value* fv = nullptr;
-			for (uint32_t s = 0; s < seen_count && !fv; ++s) { if (seen[s].prefix_id == prefix_id && seen[s].member_id == expr->member_id) { fv = seen[s].fv; } }
+			uint32_t slot = UINT32_MAX;
+			uint8_t prefix = 0xFF;
+			for (uint32_t s = 0; s < seen_count && !fv; ++s) { if (seen[s].prefix_id == prefix_id && seen[s].member_id == expr->member_id) { fv = seen[s].fv; slot = seen[s].slot; prefix = seen[s].prefix; } }
 			if (!fv) {
 				class_instance* holder = inst;
 				if (prefix_id != UINT64_MAX) {
 					holder = nullptr;
-					for (uint32_t s = 0; s < prefix_count && !holder; ++s) { if (prefixes[s].first == prefix_id) { holder = prefixes[s].second; } }
+					for (uint32_t s = 0; s < prefix_count && !holder; ++s) { if (prefixes[s].id == prefix_id) { holder = prefixes[s].holder; prefix = prefixes[s].index; } }
 					if (!holder) {
 						holder = cells_member_prefix(f, inst, expr, cip - loop.copy_head);
 						if (!holder) return false;
-						if (prefix_count < 4) { prefixes[prefix_count++] = { prefix_id, holder }; }
+						const class_definition* hcd = holder->get_class_definition();
+						if (prefix_count < 4 && hcd) {
+							prefix = static_cast<uint8_t>(prefix_count);
+							memo.prefix_cd[prefix_count] = hcd;
+							memo.prefix_epoch[prefix_count] = hcd->method_epoch();
+							memo.prefix_slot[prefix_count] = cs.site_prefix[cip - loop.copy_head].slot;
+							prefixes[prefix_count++] = prefix_seen{ prefix_id, holder, prefix };
+						} else {
+							memo_ok = false;
+						}
 					}
 				}
-				fv = cells_member_field(f, holder, f.code->code[cip].b, cip, cip - loop.copy_head, reprobe, true);
+				fv = cells_member_field(f, holder, f.code->code[cip].b, cip, cip - loop.copy_head, reprobe, true, &slot);
 				if (!fv) return false;
-				if (seen_count < 8) { seen[seen_count++] = field_seen{ prefix_id, expr->member_id, fv }; }
+				if (seen_count < 8) { seen[seen_count++] = field_seen{ prefix_id, expr->member_id, fv, slot, prefix }; }
 			}
+			memo.slot[k] = slot; memo.prefix_of[k] = prefix;
 			cs.site_member[cip - loop.copy_head] = fv;
 		} else {
 			if (!node) return false;
+			memo_ok = false;
 			cs.site_node[cip - loop.copy_head] = node;
 		}
+	}
+	if (memo_ok) {
+		memo.prefix_count = static_cast<uint8_t>(prefix_count);
+		memo.code = f.code; memo.copy_ip = rb.copy_ip; memo.epoch = inst_cd->method_epoch(); memo.cd = inst_cd;
 	}
 	cs.kind[rb.cell] = static_cast<uint8_t>(script_value::TYPEID_REFERENCE); cs.payload[rb.cell] = static_cast<int64_t>(index); cs.dirty.set(rb.cell);
 	return true;
 }
+
 // after a call: every alias live at the landing names its source table's element again (a callee may have replaced the element; the
 // general form's reference reads the table on every use)
 bool vm_backend::cells_rebinds_hold(frame& f, const chunk::cell_loop& loop) {

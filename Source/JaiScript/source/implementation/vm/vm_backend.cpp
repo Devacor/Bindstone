@@ -3663,9 +3663,27 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 
 JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction& ins, script_value& value) {
 	script_value* slot = frame_slot(f, ins.b);
-	if (!slot || slot->raw_storage_index() != script_value::TYPEID_REFERENCE || slot_declared_kind(f, ins.b) != 0 || detail::ref_declared_kind(*slot) != 0) return false;
+	if (!slot || slot->raw_storage_index() != script_value::TYPEID_REFERENCE) return false;
 	const auto* holder = slot->get_reference_holder();
-	if (!holder || holder->container_element_type) return false;
+	if (!holder) return false;
+	const uint8_t static_kind = slot_declared_kind(f, ins.b);
+	if (holder->container_element_type) {
+		// a field declared shared_ptr<T> taking null or a handle tagged T: the reference store's declared step and the field store's
+		// handle head are each the identity, the stored handle shared and stamped T
+		const type_info* ft = holder->container_element_type.get();
+		const size_t vi = value.raw_storage_index();
+		if (!holder->owner_instance || holder->property || holder->has_cell || ft->base_type != script_value_type::jai_shared_ptr_type ||
+		    ft->dynamic_pointee || !(vi == script_value::TYPEID_NULL || (vi == script_value::TYPEID_OBJECT && value.type_info_raw() == ft))) return false;
+		type_info* declared = static_kind ? slot_declared_ref(f, ins.b) : detail::ref_declared_type(*slot);
+		const uint8_t kind = static_kind ? static_kind : detail::ref_declared_kind(*slot);
+		if (kind && kind != vi && !detail::ref_storage_enforces(*slot, declared) && !detail::ref_identity_handle_store(*slot, declared, value)) return false;
+		script_value v(value);
+		v.set_type_info(holder->container_element_type);
+		detail::ref_write_through(*slot, std::move(v));
+		if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
+		return true;
+	}
+	if (static_kind != 0 || detail::ref_declared_kind(*slot) != 0) return false;
 	if (!holder->plain_cell()) {
 		// a field of an instance with no declared type (a var field): the reference store's unconstrained write-through
 		if (!holder->owner_instance || holder->property || holder->has_cell) return false;

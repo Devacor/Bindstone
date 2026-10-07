@@ -4002,6 +4002,42 @@ public:
 			check_eq(i1, v1, "builtin callback parity");
 		});
 
+		test("opaque_callee_call_parity", [this, run_both_backends_stdlib]() {
+			// a callee that is not a name (an element, a call result, a conditional): exact arity, defaults, an arity miss, a
+			// closure, a host function, a bound method, a callable object, a reference parameter, a throw, a non-callable
+			auto [i1, v1] = run_both_backends_stdlib(R"(
+				string log = "";
+				int twice(int x) { return x * 2; }
+				int defs(int a, int b = 10) { return a + b; }
+				void bump(int& x) { x += 1; }
+				int boom(int x) { if (x > 1) { throw "boom " + to_string(x); } return x; }
+				function make_adder(int k) { return [k](int x) { return x + k; }; }
+				function counter() { int n = 0; return [&n]() { n += 1; return n; }; }
+				class Healer { int hp = 1; int heal(int by) { hp += by; return hp; } }
+				class Adder { int k = 0; Adder(int v) { k = v; } int operator()(int x) { return x + k; } }
+				var fs = [twice, defs, bump, boom, to_string];
+				log = log + to_string(fs[0](21)) + "," + to_string(fs[1](1)) + "," + to_string(fs[1](1, 2));
+				try { fs[0](1, 2, 3); } catch (e) { log = log + "|" + e; }
+				log = log + "|" + to_string(make_adder(3)(4));
+				var c = counter(); c(); log = log + "," + to_string(c());
+				log = log + "|" + fs[4](5);
+				var h = Healer();
+				var bound = [reflect::bind(h, "heal")];
+				bound[0](4); log = log + "|" + to_string(bound[0](5)) + "," + to_string(h.hp);
+				var objs = [Adder(2)];
+				log = log + "|" + to_string(objs[0](5));
+				int v = 1; fs[2](v); fs[2](v); log = log + "|" + to_string(v);
+				for (int i = 0; i < 3; ++i) { try { log = log + "," + to_string(fs[3](i)); } catch (e) { log = log + "," + e; } }
+				bool pick = true;
+				log = log + "|" + to_string((pick ? fs[0] : fs[1])(8));
+				var n = [5];
+				try { n[0](1); } catch (e) { log = log + "|" + e; }
+				log;
+			)");
+			check_true(i1.find("boom 2") != std::string::npos, i1);
+			check_eq(i1, v1, "opaque callee parity");
+		});
+
 		test("host_function_direct_entry_parity", [this]() {
 			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
 			// throw, a callback into script, a re-registration while it runs, a closed loop calling it

@@ -171,6 +171,38 @@ public:
 				check_eq(oracle, run(backend_type::vm, proofs));
 			}
 		});
+		// `return a op b` over every numeric row, the declining rows (overflow, a zero divisor) and the non-numeric operands
+		test("return_binary_rows_match_the_interpreter", [this]() {
+			const std::string script =
+				"function id(var v) { return v; }\n"
+				"int ti(int v) { return v; }\n"
+				"function r(var a, var b, int k) {\n"
+				"    if (k == 0) { return id(a) + id(b); } if (k == 1) { return id(a) - id(b); } if (k == 2) { return id(a) * id(b); } if (k == 3) { return id(a) / id(b); }\n"
+				"    if (k == 4) { return id(a) % id(b); } if (k == 5) { return id(a) < id(b); } if (k == 6) { return id(a) <= id(b); } if (k == 7) { return id(a) > id(b); }\n"
+				"    if (k == 8) { return id(a) >= id(b); } if (k == 9) { return id(a) == id(b); } return id(a) != id(b);\n"
+				"}\n"
+				"int typed(int a, int b) { return ti(a) * ti(b); }\n"
+				"float mixed(int a, float b) { return id(a) / id(b); }\n"
+				"function row(var a, var b) { var out = \"\"; for (int k = 0; k < 11; ++k) { try { out += to_string(r(a, b, k)) + \",\"; } catch (e) { out += \"[\" + e + \"],\"; } } return out; }\n"
+				"var out = row(7, 3) + \"|\" + row(2.5, 4) + \"|\" + row(9, 0) + \"|\" + row(1.0, 0.0) + \"|\" + row(-7, 2.0) + \"|\" + row(\"a\", \"b\");\n"
+				"out += \"|\" + row(9223372036854775807, 2) + \"|\" + to_string(typed(6, 7)) + \",\" + to_string(mixed(1, 4.0));\n"
+				"try { typed(4611686018427387904, 4); } catch (e) { out += \",\" + e; }\n"
+				"bool lt(var x, var y) { return id(x) < id(y); }\n"
+				"var xs = [3, 1.5, 2, -4]; xs.sort(lt); out += \",\" + to_string(xs);\n"
+				"out;\n";
+			auto run = [&](backend_type type, bool proofs) {
+				auto eng = engine::make();
+				eng->set_backend(type);
+				eng->type_proofs(proofs);
+				jai::stdlib::register_all(*eng);
+				return eng->execute(script).as_string();
+			};
+			const std::string oracle = run(backend_type::interpreter, true);
+			check_true(oracle.find("[") != std::string::npos, oracle);
+			for (bool proofs : {true, false}) {
+				check_eq(oracle, run(backend_type::vm, proofs));
+			}
+		});
 		// a numeric operator registered while a dynamic op's frame runs is consulted by its next execution
 		test("dynamic_slot_operand_ops_see_an_operator_registered_mid_function", [this]() {
 			for (bool proofs : {true, false}) {

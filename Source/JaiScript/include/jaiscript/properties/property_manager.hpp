@@ -506,13 +506,6 @@ namespace jai {
 	template<typename T>
 	using get_base_types_t = typename get_base_types<T>::type;
 
-	// Legacy alias for compatibility
-	template<typename Derived, typename... Bases>
-	using typed_property_owner = property_owner<Derived, Bases...>;
-
-	template<typename T>
-	inline constexpr bool has_typed_property_owner_v = has_property_owner_v<T>;
-
 } // namespace jai
 
 // Implicit polymorphic registration rides in with the registry definition (same pattern

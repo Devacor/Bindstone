@@ -34,7 +34,7 @@ public:
     bool is_cpp_class(const std::string& name);
     
     // Class instantiation
-    std::shared_ptr<script_class_instance> create_script_instance(
+    std::shared_ptr<class_instance> create_script_instance(
         const std::string& class_name,
         const std::vector<script_value>& args
     );
@@ -60,7 +60,7 @@ public:
     // Helper methods
     bool check_inheritance_chain(const std::string& derived, const std::string& base);
     void apply_default_field_values(
-        std::shared_ptr<script_class_instance> instance,
+        std::shared_ptr<class_instance> instance,
         std::shared_ptr<script_class_definition> class_def
     );
 };

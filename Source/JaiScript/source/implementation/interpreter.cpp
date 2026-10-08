@@ -40,7 +40,6 @@
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/debug/controller.hpp>     // step-debugger statement hook
 #include <stdexcept>
-#include <sstream>
 #include <cmath>
 #include <iostream>
 #include <unordered_map>
@@ -50,7 +49,6 @@
 #include <jaiscript/detail/string_methods_more.hpp>
 #include <jaiscript/detail/utf8_methods.hpp>
 #include <jaiscript/detail/binary_data.hpp>
-#include <fstream>
 
 namespace jai {
 
@@ -3947,7 +3945,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             // writes hit the runtime write wall inside it. No element reference is ever
             // minted into a borrowed container.
             auto elem = detail::parallel_borrow_subscript_read(left, right, engine_, want_lvalue_write);
-            if (!elem) { return checked_result<void>(elem.error(), elem.static_message()); }
+            if (!elem) { return checked_result<void>(elem.error(), elem.message()); }
             push_value(std::move(elem).value());
             return {};
         }
@@ -14153,7 +14151,7 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
 
     // Create 'this' value using the class_def's registered name and type_id
     // This ensures we use the exact name/id that was registered (e.g., with namespace)
-    // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
+    // Note: is_class_instance_wrapper=true because instance is a class_instance object 
     auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
     std::vector<script_value> captured;
@@ -14222,7 +14220,7 @@ checked_result<script_value> interpreter::construct_default_instance(std::shared
 
     // Create 'this' value for field initializer evaluation
     // Use class_def's registered name and type_id to handle namespaces correctly
-    // Note: is_class_instance_wrapper=true because instance is a class_instance object (script_class_instance inherits from class_instance)
+    // Note: is_class_instance_wrapper=true because instance is a class_instance object 
     auto this_value = script_value::make_class_object(*class_def, instance, engine_);
 
     // Find the root (global) environment with cycle detection
@@ -15047,7 +15045,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             {
                 const script_value& derefed = arg.deref();
                 if (param.type && param.type->base_type == script_value_type::jai_object_type &&
-                    derefed.storage_type() == script_value_type::jai_object_type &&
+                    derefed.current_type() == script_value_type::jai_object_type &&
                     derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
                     // Read-only parameter elision: a proven parameter shares the argument's handle
                     // (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
@@ -15405,7 +15403,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         case verdict::handle_target: {
             // shared_ptr<T> / weak_ptr<T> parameters and returns (outside the table): a same-kind
             // payload, a matching or derived handle binds as-is
-            if (derefed_arg.storage_type() == target_base_type) {
+            if (derefed_arg.current_type() == target_base_type) {
                 return arg;
             }
             auto source_type_info = derefed_arg.get_type_info();

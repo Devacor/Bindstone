@@ -481,7 +481,7 @@ bool class_registry::is_cpp_class(const std::string& name) {
     return cpp_classes_.find(name) != cpp_classes_.end();
 }
 
-std::shared_ptr<script_class_instance> class_registry::create_script_instance(
+std::shared_ptr<class_instance> class_registry::create_script_instance(
     const std::string& class_name,
     const std::vector<script_value>& args
 ) {
@@ -582,7 +582,7 @@ bool class_registry::check_inheritance_chain(const std::string& derived, const s
 }
 
 void class_registry::apply_default_field_values(
-    std::shared_ptr<script_class_instance> instance,
+    std::shared_ptr<class_instance> instance,
     std::shared_ptr<script_class_definition> class_def
 ) {
     // The create_instance() method already applies default field values

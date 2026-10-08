@@ -15,7 +15,6 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <algorithm>
-#include <array>
 #include <cassert>
 #include <functional>
 

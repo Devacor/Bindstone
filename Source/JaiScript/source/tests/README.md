@@ -109,7 +109,6 @@ gdb ./isolated_parser_tests
 ### 5. **Auto-Registration**
 - Tests auto-register with `FOUNDRY_REGISTER` macro
 - No need to manually update test lists
-- `JAI_ISOLATED_TEST` flag creates standalone executable
 
 ## Migration Status
 

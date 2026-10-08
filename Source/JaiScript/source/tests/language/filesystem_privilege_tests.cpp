@@ -162,7 +162,7 @@ public:
             filesystem_enabled(*eng, false);
             auto result = resolve_include_path(spelling, eng.get());
             check_false(bool(result));
-            if (!result) { check_eq(denied(), std::string(result.static_message())); }
+            if (!result) { check_eq(denied(), std::string(result.message())); }
         });
 
         test("warm_file_import_and_bytecode_apis_cannot_bypass", [this]() {

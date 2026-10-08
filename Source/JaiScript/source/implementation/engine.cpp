@@ -4531,13 +4531,13 @@ void engine::app_directory_resolvers(std::function<std::string(const std::string
 
 std::string engine::app_data_dir(const std::string& app) const {
     auto allowed = require_privilege(privilege::filesystem);
-    if (!allowed) { throw runtime_error(std::string(allowed.static_message())); }
+    if (!allowed) { throw runtime_error(std::string(allowed.message())); }
     return impl->app_data_resolver ? impl->app_data_resolver(app) : default_app_data_dir(app);
 }
 
 std::string engine::app_cache_dir(const std::string& app) const {
     auto allowed = require_privilege(privilege::filesystem);
-    if (!allowed) { throw runtime_error(std::string(allowed.static_message())); }
+    if (!allowed) { throw runtime_error(std::string(allowed.message())); }
     return impl->app_cache_resolver ? impl->app_cache_resolver(app) : default_app_cache_dir(app);
 }
 

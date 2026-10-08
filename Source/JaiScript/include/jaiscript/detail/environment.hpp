@@ -51,7 +51,6 @@ namespace jai {
             : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::standard),
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
-            validate_parent_chain(parent);
             bump_env_epoch();
         }
 
@@ -60,7 +59,6 @@ namespace jai {
             : parent_(parent), symbolizer_(symbolizer), kind_(env_kind::method),
               this_object_(std::move(this_obj)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)) {
-            validate_parent_chain(parent);
             bump_env_epoch();
         }
 
@@ -71,7 +69,6 @@ namespace jai {
               this_object_(std::monostate{}, static_cast<engine*>(nullptr)),
               bound_method_storage_(std::monostate{}, static_cast<engine*>(nullptr)),
               access_context_(class_def.get()) {
-            validate_parent_chain(parent);
             bump_env_epoch();
         }
 
@@ -308,9 +305,8 @@ namespace jai {
         // Get parent environment (needed for method_environment handling)
         std::shared_ptr<environment> get_parent() const { return parent_; }
 
-        // Set parent environment with validation (use this instead of directly setting parent_)
+        // Set parent environment (use this instead of directly setting parent_)
         void set_parent(std::shared_ptr<environment> new_parent) {
-            validate_parent_chain(new_parent);
             parent_ = new_parent;
             bump_env_epoch();
         }
@@ -324,10 +320,6 @@ namespace jai {
         const std::deque<script_value>& own_values() const noexcept { return local_storage_; }
 
     protected:
-        void validate_parent_chain(std::shared_ptr<environment> /*new_parent*/) const {
-            // Intentionally empty - enable JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES for cycle detection
-        }
-
         // Invalidate the vm's env-lookup inline caches (defined in environment.cpp:
         // symbolizer is forward-declared here)
         void bump_env_epoch() noexcept;

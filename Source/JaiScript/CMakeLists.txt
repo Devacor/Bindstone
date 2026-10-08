@@ -34,7 +34,6 @@ option(JAISCRIPT_BUILD_TESTS "Build JaiScript test suite" ${JAISCRIPT_IS_TOP_LEV
 option(JAISCRIPT_INSTALL "Generate the install rules and the JaiScript CMake package" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_LTCG "Whole-program optimization for MSVC Release builds (/GL, /LTCG)" ${JAISCRIPT_IS_TOP_LEVEL})
 option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)
-option(JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES "Enable debugging environment cycles" OFF)
 option(JAISCRIPT_NATIVE_ARCH "Tune Release builds for this machine's CPU (-march=native; non-portable binaries)" OFF)
 option(JAISCRIPT_ENABLE_LTO "Enable link-time optimization for GCC/Clang Release builds" OFF)
 option(JAISCRIPT_VM_COVERAGE "Diagnostic build: the vm counts every instruction where it runs and why (engine::vm_coverage_report, jaiscript --coverage)" OFF)

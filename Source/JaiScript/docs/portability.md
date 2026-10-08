@@ -40,8 +40,7 @@ Call-depth caps are engine-owned: interpreter 256 and VM 250000 by default.
 `eng->max_call_depth(jai::backend_type::interpreter, depth)` and the equivalent VM
 setter accept `[1, INT_MAX]` between executions; the one-argument overload reads
 the configured cap. Setters reject an executing engine or active parallel region,
-and parallel workers snapshot both settings at region entry. An explicitly supplied
-legacy `JAI_MAX_CALL_DEPTH` build macro seeds both defaults. Raising either cap does
+and parallel workers snapshot both settings at region entry. Raising either cap does
 not disable Windows headroom checks. VM self tail calls that reuse a frame run in
 constant space without increasing call depth; the execution budget still applies.
 

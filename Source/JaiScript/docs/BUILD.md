@@ -98,7 +98,6 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
 | `JAISCRIPT_LTCG` | top-level | Whole-program optimization for MSVC Release (`/GL`, `/LTCG`). The measured performance numbers use it. OFF as a subproject: a `/GL` library would turn every consumer's Release link into a whole-program link (about a minute per edit instead of seconds) |
-| `JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` | OFF | Inert; nothing in the runtime reads it |
 | `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | Measurement only: `/GS-` on `vm_backend.cpp` (MSVC). Never ship with it |
 | `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |
 | `GLOOM_PORT_LUA`, `GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `GLOOM_PORT_LUA55`, `GLOOM_PORT_LUAJIT`, `JAIDOOM_PORT_LUA`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL` | OFF | The comparison ports of the examples (see Comparison benchmarks) |

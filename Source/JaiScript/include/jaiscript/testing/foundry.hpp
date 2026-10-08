@@ -408,30 +408,6 @@ void check_le(const T& value, const U& threshold, const std::string& message = "
     }
 }
 
-// Conditional isolated test support
-// When JAI_ISOLATED_TEST is defined, this creates a main() function
-// Otherwise, it does nothing, allowing the test to be part of a suite
-#ifdef JAI_ISOLATED_TEST
-    #define CONDITIONAL_ISOLATED_TEST(test_class) \
-        int main(int argc, char** argv) { \
-            std::cout << "Running isolated test: " #test_class "\n"; \
-            std::cout << "=====================================\n"; \
-            test_class test_instance; \
-            auto result = test_instance.quench("", true); \
-            std::cout << "=====================================\n"; \
-            return result.failed > 0 ? 1 : 0; \
-        }
-#else
-    #define CONDITIONAL_ISOLATED_TEST(test_class) \
-        /* No-op when not building in isolation */
-#endif
-
-// Convenience macro to register a test suite
-#define REGISTER_FOUNDRY_TESTS(suite_class) \
-    std::unique_ptr<::jai::foundry::suite> create_##suite_class() { \
-        return std::make_unique<suite_class>(); \
-    }
-
 } // namespace jai::foundry
 
 // Include auto-registration functionality

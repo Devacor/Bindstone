@@ -259,9 +259,6 @@ private:
     mutable bool literal_memo_ = false;
 };
 
-// For backward compatibility during migration
-using script_class_instance = class_instance;
-
 // Instance-method dispatcher body (declared in execution_backend.hpp). Resolves the
 // overload against the live class every call (hot reload) and executes through the
 // current backend; args[0] is the 'this' receiver.

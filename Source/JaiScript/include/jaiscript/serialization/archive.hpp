@@ -58,8 +58,6 @@ template<typename T>
 inline constexpr bool is_load = std::is_base_of_v<archive_base, std::decay_t<T>> &&
     requires { typename std::decay_t<T>::is_reader_tag; };
 
-#define JAI_ONLY_ARCHIVE std::enable_if_t<::jai::serialization::jai_archive<Archive>, int> = 0
-#define JAI_TEMPLATE template <class Archive, JAI_ONLY_ARCHIVE>
 
 class json_archive_writer;
 class json_archive_reader;

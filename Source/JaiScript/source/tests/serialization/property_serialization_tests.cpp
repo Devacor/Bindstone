@@ -1592,7 +1592,7 @@ public:
             // Debug: Check what type loaded is
             auto loaded_val = eng->get_variable("loaded");
             std::cerr << "[TEST] loaded type = " << static_cast<int>(loaded_val.type()) << std::endl;
-            std::cerr << "[TEST] loaded storage type = " << static_cast<int>(loaded_val.storage_type()) << std::endl;
+            std::cerr << "[TEST] loaded storage type = " << static_cast<int>(loaded_val.current_type()) << std::endl;
             if (loaded_val.type() == script_value_type::jai_object_type || loaded_val.type() == script_value_type::jai_shared_ptr_type) {
                 auto obj_holder = loaded_val.get_object_holder();
                 if (obj_holder && obj_holder->data) {

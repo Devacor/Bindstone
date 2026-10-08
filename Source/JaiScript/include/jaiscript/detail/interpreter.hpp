@@ -3,24 +3,6 @@
 #ifndef __JAISCRIPT_DETAIL_INTERPRETER_HPP__
 #define __JAISCRIPT_DETAIL_INTERPRETER_HPP__
 
-// ============================================================
-// Configurable limits - define these before including to override
-// ============================================================
-
-// Call-depth configuration and its shared error producer live in execution_limits.hpp.
-// Hosts configure each backend through engine::max_call_depth.
-
-// Portable force-inline (MSVC and clang-cl accept __forceinline; GCC/Clang need the attribute)
-#ifndef JAI_FORCEINLINE
-#if defined(_MSC_VER)
-#define JAI_FORCEINLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
-#define JAI_FORCEINLINE inline __attribute__((always_inline))
-#else
-#define JAI_FORCEINLINE inline
-#endif
-#endif
-
 // NOTE: the compile-time integer-overflow policy (kCheckedOverflow and the
 // jai::ints helpers) lives in <jaiscript/detail/integer_ops.hpp>, which the
 // engine .cpp files include directly. It is intentionally kept out of this
@@ -46,8 +28,6 @@
 #include <unordered_set>
 #include <memory>
 #include <vector>
-#include <deque>
-#include <iostream>
 #include <system_error>
 #include <optional>
 #include <chrono>

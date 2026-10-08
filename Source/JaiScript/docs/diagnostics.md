@@ -311,8 +311,7 @@ Default caps are 256 active calls for the interpreter and 250000 for the VM. The
 `engine::max_call_depth(backend_type, depth)` sets either cap between executions;
 `engine::max_call_depth(backend_type) const` reads it. Values must be in
 `[1, INT_MAX]`. Each engine owns its settings, and parallel workers snapshot them
-at region entry. An explicitly supplied legacy `JAI_MAX_CALL_DEPTH` build macro
-seeds both defaults; the host can still override either one. Raising a call-depth
+at region entry. Raising a call-depth
 cap does not disable the independent Windows native-stack guard. VM self tail
 calls that reuse a frame consume no additional depth; the execution budget still
 applies.

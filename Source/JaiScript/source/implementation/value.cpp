@@ -6,7 +6,6 @@
 #include <jaiscript/detail/math_values.hpp>
 #include <atomic>
 #include <optional>
-#include <sstream>
 #include <thread>
 #ifdef JAISCRIPT_VM_COVERAGE
 #include <jaiscript/detail/copy_census.hpp>

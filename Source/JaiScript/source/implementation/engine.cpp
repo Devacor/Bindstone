@@ -3231,6 +3231,7 @@ std::vector<std::string> engine::registered_class_names() const {
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(const std::string& name) const {
+    JAI_CENSUS(class_by_name);
     // First check C++ classes
     auto it = impl->classes.find(name);
     if (it != impl->classes.end()) {
@@ -3247,6 +3248,7 @@ std::shared_ptr<class_definition> engine::get_class_definition(const std::string
 }
 
 std::shared_ptr<class_definition> engine::get_class_definition(uint64_t type_id) const {
+    JAI_CENSUS(class_by_id);
     // First check C++ classes by type_id
     auto it = impl->classesByTypeId.find(type_id);
     if (it != impl->classesByTypeId.end()) {
@@ -3898,6 +3900,7 @@ type_info* engine::get_type_info_function(type_info* return_type, const std::vec
 }
 
 type_info* engine::get_type_info(const type_info& temp) {
+    JAI_CENSUS(type_info_intern);
     // Build composite key from temp's fields
     uint64_t param1_id = 0, param2_id = 0;
 
@@ -3956,6 +3959,7 @@ type_info* engine::get_type_info_by_id(uint64_t type_id) {
 }
 
 type_info* engine::get_type_info_by_name(const std::string& canonical_name) {
+    JAI_CENSUS(type_info_by_name);
     // Intern the name to get the ID, then do ID-based lookup
     uint64_t type_id = impl->string_symbolizer_.intern(canonical_name);
     return get_type_info_by_id(type_id);

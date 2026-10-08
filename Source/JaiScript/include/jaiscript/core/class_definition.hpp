@@ -936,6 +936,7 @@ public:
     }
 
     script_value get_method(uint64_t id, bool throw_if_missing = true) const {
+        JAI_CENSUS(get_method);
         auto it = methods_.find(id);
         if (it != methods_.end()) {
             return it->second;
@@ -1284,6 +1285,9 @@ public:
     uint32_t field_slot(uint64_t id) const {
         ensure_field_slots();
         const size_t n = slot_to_field_.size();
+#ifdef JAISCRIPT_VM_COVERAGE
+        census::hit(n > 16 ? census::site::field_slot_hash : census::site::field_slot_scan, static_cast<uint32_t>(n));
+#endif
         if (n <= 16) {   // a scan of a small class's slots beats hashing the id (slot_to_field_ is the map's inverse)
             for (size_t i = 0; i < n; ++i) {
                 if (slot_to_field_[i] == id) return static_cast<uint32_t>(i);
@@ -2810,7 +2814,19 @@ inline bool weak_slot_takes_shared(const script_value& value, const type_info_pt
     return actual_def && actual_def->is_subtype_of(expected_class);
 }
 
+#ifdef JAISCRIPT_VM_COVERAGE
+inline checked_result<slot_conversion> convert_for_typed_slot_core_uncounted(const script_value& value_in, const type_info_ptr& target_type, engine* eng);
+// the copy census's twin: the table's outcome at its caller (flags: the verdict + 1; 0x80 a failure; 0x40 an untyped target)
 inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_value& value_in, const type_info_ptr& target_type, engine* eng) {
+    auto result = convert_for_typed_slot_core_uncounted(value_in, target_type, eng);
+    const uint32_t untyped = (!target_type || target_type->base_type == script_value_type::jai_any_type) ? 0x40u : 0u;
+    census::hit(census::site::typed_slot_convert, (result ? static_cast<uint32_t>(result.value().v) + 1 : 0x80u) | untyped);
+    return result;
+}
+inline checked_result<slot_conversion> convert_for_typed_slot_core_uncounted(const script_value& value_in, const type_info_ptr& target_type, engine* eng) {
+#else
+inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_value& value_in, const type_info_ptr& target_type, engine* eng) {
+#endif
     using verdict = slot_conversion::verdict;
     if (!target_type || target_type->base_type == script_value_type::jai_any_type) {
         return slot_conversion::of(verdict::identity);
@@ -3515,6 +3531,11 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     if (source_def != slot_class && !source_def->derives_from(slot_class)) { return std::nullopt; }
     if (!slot_class->is_script_class() || slot_class->find_cpp_base_class()) { return std::nullopt; }   // a host object keeps its replace
     if (source == instance) { return checked_result<void>(); }   // self-assignment
+#ifdef JAISCRIPT_VM_COVERAGE
+    census::copy_scope census_scope(census::site::copy_assign, nullptr, source_holder.get(),
+        (source_holder.use_count() == 2 && source_holder->data.use_count() == 1) ? census::k_src_unique : 0u);
+    census::add_weight(source_def->field_slot_count());
+#endif
     if (source_def == def) { return implicit_copy_assign(instance, def, source, eng); }
     if (source_def->find_cpp_base_class() || (names_class(bound) && !chain_class_named(source_def, bound->type_name))) { return std::nullopt; }
     return reclass_assign(const_cast<script_value&>(current), *holder, slot_class, source, source_def, eng);
@@ -3879,6 +3900,9 @@ inline std::shared_ptr<class_instance> class_instance::deep_copy() const {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
     auto new_instance = class_def_ ? class_def_->allocate_instance() : std::make_shared<class_instance>(interned_name_t{}, class_name_, engine_);
+#ifdef JAISCRIPT_VM_COVERAGE
+    census::add_weight(flat_fields_.size());
+#endif
 
     uint64_t cpp_obj_id = get_cpp_object_field_id();
     if (class_def_ && !overflow_fields_) {

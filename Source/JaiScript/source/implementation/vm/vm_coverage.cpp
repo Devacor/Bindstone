@@ -505,6 +505,14 @@ void coverage_tables::reset() {
 	cell_dispatches = 0;
 }
 
+namespace {
+	// the copy census's position: the instruction about to run, its row and source line
+	void census_position(opcode op, const coverage_chunk& row, size_t ip) {
+		const char* file = ip < row.file.size() && row.file[ip] < row.files.size() ? row.files[row.file[ip]].c_str() : "";
+		census::set_position(static_cast<uint8_t>(op), &row, static_cast<uint32_t>(ip), row.name.c_str(), file, ip < row.line.size() ? row.line[ip] : 0);
+	}
+}
+
 coverage_chunk& vm_backend::coverage_row(const chunk& c) {
 	coverage_tables& t = *coverage_;
 	if (t.last == &c && t.last_row->identity == static_cast<const void*>(c.code.data()) && t.last_row->size == c.code.size()) return *t.last_row;
@@ -516,6 +524,7 @@ void vm_backend::coverage_general(frame& f) {
 	if (f.ip >= row.general.size()) return;
 	++row.general[f.ip];
 	const opcode op = f.code->code[f.ip].op;
+	census_position(op, row, f.ip);
 	switch (family_of(op)) {
 	case fam::member: case fam::method: case fam::builtin: case fam::arith: case fam::compare: case fam::string:
 		coverage_observe(f, f.code->code[f.ip], row);
@@ -529,6 +538,7 @@ void vm_backend::coverage_cell(const frame& f, size_t ip, opcode op) {
 	++coverage_->cell_dispatches;
 	if (ip >= row.cells.size()) return;
 	++row.cells[ip];
+	census_position(op, row, ip);
 	if (pair_first_falls(op) && ip + 1 < row.cells.size()) { ++row.cells[ip + 1]; }
 }
 
@@ -975,5 +985,476 @@ std::string coverage_report(const std::vector<std::shared_ptr<coverage_tables>>&
 }
 
 } // namespace jai::vm
+
+// ===== The copy and front-loading census (detail/copy_census.hpp) =====
+// Per-thread tables (registered once, never freed), merged and written at exit to JAI_COPY_CENSUS=<file> (a report) and
+// <file>.tsv (one row per site, flags, opcode and caller address). Caller addresses are symbolized with their inline chains.
+
+#include <jaiscript/detail/copy_census.hpp>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <mutex>
+#include <tuple>
+#include <unordered_map>
+#include <vector>
+#if defined(_MSC_VER)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <dbghelp.h>
+#include <intrin.h>
+#pragma comment(lib, "dbghelp.lib")
+#define JAI_CENSUS_NOINLINE __declspec(noinline)
+#else
+#define JAI_CENSUS_NOINLINE __attribute__((noinline))
+#endif
+
+namespace jai::census {
+
+namespace {
+	constexpr size_t k_sites = static_cast<size_t>(site::count);
+	const char* const k_site_ids[] = {
+#define JAI_CENSUS_ID(id, group, text) #id,
+		JAI_CENSUS_SITES(JAI_CENSUS_ID)
+#undef JAI_CENSUS_ID
+	};
+	const char* const k_site_groups[] = {
+#define JAI_CENSUS_GROUP(id, group, text) group,
+		JAI_CENSUS_SITES(JAI_CENSUS_GROUP)
+#undef JAI_CENSUS_GROUP
+	};
+	const char* const k_site_texts[] = {
+#define JAI_CENSUS_TEXT(id, group, text) text,
+		JAI_CENSUS_SITES(JAI_CENSUS_TEXT)
+#undef JAI_CENSUS_TEXT
+	};
+	constexpr uint16_t k_no_op = 0xFFFF;
+
+	inline uint64_t mix64(uint64_t x) noexcept { x ^= x >> 33; x *= 0xff51afd7ed558ccdull; x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ull; x ^= x >> 33; return x; }
+
+	struct ra_key {
+		const void* ra; uint32_t flags; uint16_t s; uint16_t op;
+		bool operator==(const ra_key&) const = default;
+	};
+	struct ra_hash { size_t operator()(const ra_key& k) const noexcept { return static_cast<size_t>(mix64(reinterpret_cast<uintptr_t>(k.ra) ^ (uint64_t(k.flags) << 24) ^ (uint64_t(k.s) << 56) ^ (uint64_t(k.op) << 40))); } };
+	struct stats { uint64_t n = 0, weight = 0, unique = 0, src_watched = 0, src_same = 0, src_soon = 0, dst_watched = 0, dst_same = 0, dst_soon = 0; };
+
+	struct line_key {
+		const void* row; uint32_t ip; uint32_t flags; uint16_t s;
+		bool operator==(const line_key&) const = default;
+	};
+	struct line_hash { size_t operator()(const line_key& k) const noexcept { return static_cast<size_t>(mix64(reinterpret_cast<uintptr_t>(k.row) ^ (uint64_t(k.ip) << 20) ^ (uint64_t(k.flags) << 40) ^ (uint64_t(k.s) << 58))); } };
+	struct line_stats { uint64_t n = 0, weight = 0; std::string where; };
+
+	struct watch { stats* st; uint64_t instr; bool dst; };
+
+	struct thread_tables {
+		std::unordered_map<ra_key, stats, ra_hash> by_ra;
+		std::unordered_map<line_key, line_stats, line_hash> by_line;
+		std::unordered_map<std::string, uint64_t> by_name;
+		std::unordered_map<const void*, watch> watched;
+		uint64_t instr = 0;
+		uint16_t op = k_no_op;
+		const void* row = nullptr;
+		uint32_t ip = 0;
+		const char* name = "";
+		const char* file = "";
+		uint32_t line = 0;
+		int depth = 0;
+		uint64_t weight = 0;
+	};
+
+	// a deep copy's caller stack: the event's address is a token naming the interned stack (the symbolizer prints its frames)
+	constexpr size_t k_stack_frames = 6;
+	struct stack_rec { const void* f[k_stack_frames] = {}; };
+	struct stack_hash { size_t operator()(const stack_rec& s) const noexcept { uint64_t x = 0; for (const void* p : s.f) x = mix64(x ^ reinterpret_cast<uintptr_t>(p)); return static_cast<size_t>(x); } };
+	struct stack_eq { bool operator()(const stack_rec& a, const stack_rec& b) const noexcept { return std::memcmp(a.f, b.f, sizeof a.f) == 0; } };
+
+	struct registry { std::mutex m; std::vector<thread_tables*> all; std::unordered_map<const void*, const stack_rec*> stacks; };
+	registry& reg() { static registry* r = new registry; return *r; }   // never destroyed: hooks run during teardown
+
+	const void* stack_token(unsigned skip) {
+		stack_rec s;
+#if defined(_MSC_VER)
+		RtlCaptureStackBackTrace(skip + 1, static_cast<DWORD>(k_stack_frames), const_cast<void**>(s.f), nullptr);
+#endif
+		thread_local std::unordered_map<stack_rec, const stack_rec*, stack_hash, stack_eq>* tokens = nullptr;
+		if (!tokens) tokens = new std::unordered_map<stack_rec, const stack_rec*, stack_hash, stack_eq>;
+		auto it = tokens->find(s);
+		if (it != tokens->end()) return it->second;
+		const stack_rec* kept = new stack_rec(s);
+		tokens->emplace(s, kept);
+		std::lock_guard<std::mutex> lock(reg().m);
+		reg().stacks.emplace(kept, kept);
+		return kept;
+	}
+
+	thread_tables& tt() {
+		thread_local thread_tables* t = nullptr;
+		if (!t) [[unlikely]] {
+			t = new thread_tables;
+			std::lock_guard<std::mutex> lock(reg().m);
+			reg().all.push_back(t);
+		}
+		return *t;
+	}
+
+	stats& record(thread_tables& t, site s, const void* where, uint32_t flags, uint64_t weight) {
+		stats& st = t.by_ra[ra_key{where, flags, static_cast<uint16_t>(s), t.op}];
+		++st.n;
+		st.weight += weight;
+		line_stats& ls = t.by_line[line_key{t.row, t.ip, flags, static_cast<uint16_t>(s)}];
+		if (ls.n == 0) {
+			if (!t.row) { ls.where = "(no vm position)"; }
+			else {
+				std::string file = t.file ? t.file : "";
+				const size_t slash = file.find_last_of("/\\");
+				if (slash != std::string::npos) file = file.substr(slash + 1);
+				ls.where = std::string(t.name && *t.name ? t.name : "<top>") + " @ " + file + ":" + std::to_string(t.line);
+			}
+		}
+		++ls.n;
+		ls.weight += weight;
+		return st;
+	}
+}
+
+// a lookup or an elision records its caller stack (its hooks sit in small functions the vm calls from many places); the
+// refcount hooks keep the one address
+JAI_CENSUS_NOINLINE void hit(site s, uint32_t flags) noexcept {
+	const bool stack = s != site::rc_add && s != site::value_copy_ctor && s != site::value_copy_assign;
+	record(tt(), s, stack ? stack_token(1) : JAI_CENSUS_RA(), flags, 1);
+}
+JAI_CENSUS_NOINLINE void hit_at(site s, const void* where, uint32_t flags) noexcept { record(tt(), s, where, flags, 1); }
+JAI_CENSUS_NOINLINE void hit_named(site s, const char* name, size_t name_size, uint32_t flags) noexcept {
+	thread_tables& t = tt();
+	record(t, s, stack_token(1), flags, 1);
+	std::string key = std::to_string(static_cast<unsigned>(s)) + "\t" + std::to_string(flags) + "\t" + std::string(name ? name : "", name ? name_size : 0);
+	++t.by_name[key];
+}
+JAI_CENSUS_NOINLINE void rc_add() noexcept { record(tt(), site::rc_add, JAI_CENSUS_RA(), 0, 1); }
+
+void set_position(uint8_t op, const void* row, uint32_t ip, const char* name, const char* file, uint32_t line) noexcept {
+	thread_tables& t = tt();
+	++t.instr;
+	t.op = op; t.row = row; t.ip = ip; t.name = name; t.file = file; t.line = line;
+}
+
+void add_weight(uint64_t n) noexcept { tt().weight += n; }
+
+JAI_CENSUS_NOINLINE copy_scope::copy_scope(site s_, const void* where_, const void* src_, uint32_t flags_) noexcept
+	: s(s_), where(where_ ? where_ : JAI_CENSUS_RA()), src(src_), flags(flags_), outer(false) {
+	thread_tables& t = tt();
+	outer = t.depth == 0;
+	++t.depth;
+	if (outer) { t.weight = 0; where = stack_token(1); } else { ++t.weight; }
+}
+
+void copy_scope::finish(const void* dst) noexcept { dst_ = dst; }
+
+copy_scope::~copy_scope() {
+	thread_tables& t = tt();
+	--t.depth;
+	if (!outer) return;
+	stats& st = record(t, s, where, flags, t.weight + 1);
+	if (flags & k_src_unique) ++st.unique;
+	if (src) { ++st.src_watched; t.watched[src] = watch{&st, t.instr, false}; }
+	if (dst_ && dst_ != src) { ++st.dst_watched; t.watched[dst_] = watch{&st, t.instr, true}; }
+}
+
+void node_freed(const void* node) noexcept {
+	thread_tables& t = tt();
+	if (t.watched.empty()) return;
+	auto it = t.watched.find(node);
+	if (it == t.watched.end()) return;
+	const uint64_t d = t.instr - it->second.instr;
+	stats& st = *it->second.st;
+	if (it->second.dst) { if (d == 0) ++st.dst_same; else if (d <= 8) ++st.dst_soon; }
+	else { if (d == 0) ++st.src_same; else if (d <= 8) ++st.src_soon; }
+	t.watched.erase(it);
+}
+
+namespace {
+	const char* raw_index_name(uint32_t i) {
+		static const char* const names[] = { "null", "int", "float", "string", "char", "bool", "array", "map", "object", "function", "reference",
+			"shared_ptr", "weak_ptr", "invalid", "cpp_bound", "parallel_borrow", "utf8_string", "vec2", "ivec2", "vec3", "ivec3", "vec4", "color" };
+		return i < sizeof(names) / sizeof(names[0]) ? names[i] : "?";
+	}
+	std::string flags_text(site s, uint32_t f) {
+		switch (s) {
+		case site::deep_clone: case site::copy_assign: case site::string_detach: {
+			static const char* const kinds[] = { "other", "array<Class>", "typed array", "array<var>", "map", "instance", "cpp object", "shared_ptr deep", "reference", "string" };
+			const uint32_t k = (f >> 4) & 0xF;
+			std::string out = s == site::deep_clone ? (k < 10 ? kinds[k] : "?") : "";
+			if (f & k_src_unique) out += out.empty() ? "src unique" : ", src unique";
+			return out.empty() ? "-" : out;
+		}
+		case site::param_clone: case site::decl_clone: {
+			static const char* const why[] = { "?", "no alias fn (lambda/method/unproven callee)", "ref escaping", "alias disallowed (kind)", "read-only proof refused",
+				"no alias home (not a candidate)", "local alias refused" };
+			static const char* const elide[] = { "", "args not on stack", "argument is a reference", "argument shared (not unique)", "converted (other node)" };
+			const uint32_t w = f & 0xFF, e = (f >> 8) & 0xF;
+			std::string out = w < 7 ? why[w] : "?";
+			if (e && e < 5) out += std::string("; elide: ") + elide[e];
+			return out;
+		}
+		case site::value_copy_ctor: case site::value_copy_assign: case site::map_key_hash:
+			return f == 0x80 ? "string probe" : raw_index_name(f);
+		case site::typed_slot_convert: {
+			static const char* const verdicts[] = { "identity", "identity_exact", "converted", "reject", "reject_class", "container_mismatch", "handle_target", "needs_ctor", "needs_to_x", "needs_to_bool" };
+			std::string out = (f & 0x80) ? "failed" : ((f & 0x3F) >= 1 && (f & 0x3F) <= 10 ? verdicts[(f & 0x3F) - 1] : "?");
+			if (f & 0x40) out += " (untyped target)";
+			return out;
+		}
+		case site::compile_chunk: {
+			static const char* const forms[] = { "?", "program", "callable", "standalone expression", "standalone declaration" };
+			return f < 5 ? forms[f] : "?";
+		}
+		case site::field_slot_scan: case site::field_slot_hash: return std::to_string(f) + " slots";
+		case site::move_hit: {
+			static const char* const hits[] = { "?", "return: own slot moves (NRVO)", "return: temporary handed out", "parameter: read-only alias", "parameter: prvalue elided",
+				"local: read-only alias", "take_for_assignment: moved", "element store: instance moved", "store: prvalue moved" };
+			return f < 9 ? hits[f] : "?";
+		}
+		default: return f ? std::to_string(f) : "-";
+		}
+	}
+	std::string op_text(uint16_t op) {
+		if (op == k_no_op) return "(host)";
+		return std::string(vm::opcode_name(static_cast<vm::opcode>(op)));
+	}
+	std::string tidy(std::string n) {
+		for (const char* strip : { "`anonymous namespace'::", "jai::vm::", "jai::detail::", "jai::census::", "jai::", "class ", "struct " }) {
+			for (size_t p; (p = n.find(strip)) != std::string::npos;) n.erase(p, std::strlen(strip));
+		}
+		if (n.size() > 110) n = n.substr(0, 107) + "...";
+		return n;
+	}
+
+#if defined(_MSC_VER)
+	struct symbolizer {
+		HANDLE proc = GetCurrentProcess();
+		bool ok = false;
+		std::unordered_map<const void*, std::string> cache;
+		symbolizer() {
+			SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES);
+			ok = SymInitialize(proc, nullptr, TRUE) != FALSE;
+		}
+		~symbolizer() { if (ok) SymCleanup(proc); }
+		static std::string base(const char* path) {
+			std::string f = path ? path : "";
+			const size_t slash = f.find_last_of("/\\");
+			return slash == std::string::npos ? f : f.substr(slash + 1);
+		}
+		// a stack token: its frames, innermost first, joined by " < " (the counting wrapper's own frame left out)
+		const std::string& operator()(const void* ra) {
+			auto it = cache.find(ra);
+			if (it != cache.end()) return it->second;
+			std::string out;
+			auto st = reg().stacks.find(ra);
+			if (st != reg().stacks.end()) {
+				for (const void* f : st->second->f) {
+					if (!f) break;
+					const std::string& text = frame(f);
+					if (text.rfind("script_value::clone ", 0) == 0 || text.rfind("script_value::clone(", 0) == 0 || text == "script_value::clone") continue;
+					out += out.empty() ? text : " < " + text;
+				}
+				return cache.emplace(ra, std::move(out)).first->second;
+			}
+			out = frame(ra);
+			return cache.emplace(ra, std::move(out)).first->second;
+		}
+		std::unordered_map<const void*, std::string> frames_cache;
+		// the call's chain, outermost function first: "fn [file:line] > inlined [file:line] > ..."
+		const std::string& frame(const void* ra) {
+			auto it = frames_cache.find(ra);
+			if (it != frames_cache.end()) return it->second;
+			std::string out;
+			if (!ok || !ra) { out = "?"; }
+			else {
+				const DWORD64 a = reinterpret_cast<DWORD64>(ra) - 1;   // a return address: step back into the call
+				alignas(SYMBOL_INFO) char buf[sizeof(SYMBOL_INFO) + 1024];
+				SYMBOL_INFO* sym = reinterpret_cast<SYMBOL_INFO*>(buf);
+				std::vector<std::string> frames;   // innermost first
+				{
+					sym->SizeOfStruct = sizeof(SYMBOL_INFO); sym->MaxNameLen = 1000;
+					DWORD64 first = 0;
+					SymFromAddr(proc, a, &first, sym);   // loads the module's symbols (deferred loads) before the inline queries
+				}
+				const DWORD inlines = SymAddrIncludeInlineTrace(proc, a);
+				DWORD ctx = 0, idx = 0;
+				if (inlines && SymQueryInlineTrace(proc, a, 0, a, a, &ctx, &idx)) {
+					for (DWORD i = 0; i < inlines; ++i) {
+						std::memset(buf, 0, sizeof buf);
+						sym->SizeOfStruct = sizeof(SYMBOL_INFO); sym->MaxNameLen = 1000;
+						DWORD64 disp = 0;
+						std::string fr = SymFromInlineContext(proc, a, ctx + i, &disp, sym) ? tidy(sym->Name) : "?";
+						IMAGEHLP_LINE64 line{}; line.SizeOfStruct = sizeof(line); DWORD ld = 0;
+						if (SymGetLineFromInlineContext(proc, a, ctx + i, 0, &ld, &line)) fr += " [" + base(line.FileName) + ":" + std::to_string(line.LineNumber) + "]";
+						frames.push_back(fr);
+					}
+				}
+				std::memset(buf, 0, sizeof buf);
+				sym->SizeOfStruct = sizeof(SYMBOL_INFO); sym->MaxNameLen = 1000;
+				DWORD64 disp = 0;
+				std::string outer = SymFromAddr(proc, a, &disp, sym) ? tidy(sym->Name) : "?";
+				if (inlines == 0) {
+					IMAGEHLP_LINE64 line{}; line.SizeOfStruct = sizeof(line); DWORD ld = 0;
+					if (SymGetLineFromAddr64(proc, a, &ld, &line)) outer += " [" + base(line.FileName) + ":" + std::to_string(line.LineNumber) + "]";
+				}
+				out = outer;
+				for (auto f = frames.rbegin(); f != frames.rend(); ++f) out += " > " + *f;
+			}
+			return frames_cache.emplace(ra, std::move(out)).first->second;
+		}
+	};
+#else
+	struct symbolizer {
+		std::unordered_map<const void*, std::string> cache;
+		const std::string& operator()(const void* ra) {
+			auto it = cache.find(ra);
+			if (it != cache.end()) return it->second;
+			char b[32]; std::snprintf(b, sizeof b, "%p", ra);
+			return cache.emplace(ra, b).first->second;
+		}
+	};
+#endif
+
+	std::string pct(uint64_t a, uint64_t b) {
+		char buf[32];
+		std::snprintf(buf, sizeof buf, "%5.1f%%", b ? 100.0 * static_cast<double>(a) / static_cast<double>(b) : 0.0);
+		return buf;
+	}
+
+	void write_census(const char* path) {
+		std::vector<thread_tables*> all;
+		{ std::lock_guard<std::mutex> lock(reg().m); all = reg().all; }
+		std::unordered_map<ra_key, stats, ra_hash> by_ra;
+		std::map<std::tuple<uint16_t, uint32_t, std::string>, line_stats> by_line;
+		std::map<std::string, uint64_t> by_name;
+		uint64_t instr = 0;
+		for (thread_tables* t : all) {
+			instr += t->instr;
+			for (const auto& [k, v] : t->by_ra) {
+				stats& d = by_ra[k];
+				d.n += v.n; d.weight += v.weight; d.unique += v.unique; d.src_watched += v.src_watched; d.src_same += v.src_same; d.src_soon += v.src_soon;
+				d.dst_watched += v.dst_watched; d.dst_same += v.dst_same; d.dst_soon += v.dst_soon;
+			}
+			for (const auto& [k, v] : t->by_line) {
+				line_stats& d = by_line[{k.s, k.flags, v.where}];
+				d.n += v.n; d.weight += v.weight;
+			}
+			for (const auto& [k, v] : t->by_name) by_name[k] += v;
+		}
+		symbolizer sym;
+		std::ofstream tsv(std::string(path) + ".tsv", std::ios::binary | std::ios::trunc);
+		tsv << "site\tgroup\tflags\top\tcaller\tn\tweight\tunique\tsrc_watched\tsrc_same\tsrc_soon\tdst_watched\tdst_same\tdst_soon\n";
+		for (const auto& [k, v] : by_ra) {
+			tsv << k_site_ids[k.s] << "\t" << k_site_groups[k.s] << "\t" << flags_text(static_cast<site>(k.s), k.flags) << "\t" << op_text(k.op) << "\t" << sym(k.ra) << "\t"
+			    << v.n << "\t" << v.weight << "\t" << v.unique << "\t" << v.src_watched << "\t" << v.src_same << "\t" << v.src_soon << "\t"
+			    << v.dst_watched << "\t" << v.dst_same << "\t" << v.dst_soon << "\n";
+		}
+		std::ofstream lines(std::string(path) + ".lines.tsv", std::ios::binary | std::ios::trunc);
+		lines << "site\tflags\twhere\tn\tweight\n";
+		for (const auto& [k, v] : by_line) {
+			lines << k_site_ids[std::get<0>(k)] << "\t" << flags_text(static_cast<site>(std::get<0>(k)), std::get<1>(k)) << "\t" << std::get<2>(k) << "\t" << v.n << "\t" << v.weight << "\n";
+		}
+		std::ofstream names(std::string(path) + ".names.tsv", std::ios::binary | std::ios::trunc);
+		names << "site\tflags\tname\tn\n";
+		for (const auto& [k, v] : by_name) {
+			const size_t a = k.find('\t'), b = k.find('\t', a + 1);
+			const unsigned s = static_cast<unsigned>(std::stoul(k.substr(0, a)));
+			const uint32_t f = static_cast<uint32_t>(std::stoul(k.substr(a + 1, b - a - 1)));
+			names << k_site_ids[s] << "\t" << flags_text(static_cast<site>(s), f) << "\t" << k.substr(b + 1) << "\t" << v << "\n";
+		}
+
+		std::ofstream o(path, std::ios::binary | std::ios::trunc);
+		o << "copy and front-loading census: " << all.size() << " threads, " << instr << " vm instructions counted\n";
+		uint64_t site_n[k_sites] = {}, site_w[k_sites] = {};
+		for (const auto& [k, v] : by_ra) { site_n[k.s] += v.n; site_w[k.s] += v.weight; }
+		o << "\n== sites (events | weight | per 1k instructions)\n";
+		for (size_t s = 0; s < k_sites; ++s) {
+			if (!site_n[s]) continue;
+			char b[64]; std::snprintf(b, sizeof b, "%.3f", instr ? 1000.0 * static_cast<double>(site_n[s]) / static_cast<double>(instr) : 0.0);
+			o << k_site_ids[s] << " | " << k_site_groups[s] << " | " << site_n[s] << " | " << site_w[s] << " | " << b << " | " << k_site_texts[s] << "\n";
+		}
+		for (size_t s = 0; s < k_sites; ++s) {
+			if (!site_n[s]) continue;
+			o << "\n== " << k_site_ids[s] << " (" << k_site_texts[s] << "): " << site_n[s] << " events, weight " << site_w[s] << "\n";
+			std::map<uint32_t, std::pair<uint64_t, uint64_t>> per_flags;
+			std::map<uint16_t, uint64_t> per_op;
+			std::unordered_map<const void*, stats> per_ra;
+			std::unordered_map<const void*, std::map<uint16_t, uint64_t>> ra_ops;
+			for (const auto& [k, v] : by_ra) {
+				if (k.s != s) continue;
+				per_flags[k.flags].first += v.n; per_flags[k.flags].second += v.weight;
+				per_op[k.op] += v.n;
+				stats& d = per_ra[k.ra];
+				d.n += v.n; d.weight += v.weight; d.unique += v.unique; d.src_watched += v.src_watched; d.src_same += v.src_same; d.src_soon += v.src_soon;
+				d.dst_watched += v.dst_watched; d.dst_same += v.dst_same; d.dst_soon += v.dst_soon;
+				ra_ops[k.ra][k.op] += v.n;
+			}
+			o << "-- by flags (events | weight | flags)\n";
+			for (const auto& [f, nw] : per_flags) o << "  " << nw.first << " | " << nw.second << " | " << flags_text(static_cast<site>(s), f) << "\n";
+			o << "-- by opcode (events | share | op)\n";
+			{
+				std::vector<std::pair<uint64_t, uint16_t>> v;
+				for (const auto& [op, n] : per_op) v.emplace_back(n, op);
+				std::sort(v.rbegin(), v.rend());
+				for (size_t i = 0; i < v.size() && i < 15; ++i) o << "  " << v[i].first << " | " << pct(v[i].first, site_n[s]) << " | " << op_text(v[i].second) << "\n";
+			}
+			o << "-- by caller (events | share | weight | src unique | src dies same instr | src dies <=8 | copy dies same instr | copy dies <=8 | top ops | chain)\n";
+			{
+				std::vector<std::pair<uint64_t, const void*>> v;
+				for (const auto& [ra, d] : per_ra) v.emplace_back(d.n, ra);
+				std::sort(v.rbegin(), v.rend());
+				for (size_t i = 0; i < v.size() && i < 40; ++i) {
+					const stats& d = per_ra[v[i].second];
+					std::vector<std::pair<uint64_t, uint16_t>> ops;
+					for (const auto& [op, n] : ra_ops[v[i].second]) ops.emplace_back(n, op);
+					std::sort(ops.rbegin(), ops.rend());
+					std::string top;
+					for (size_t j = 0; j < ops.size() && j < 3; ++j) top += (j ? ", " : "") + op_text(ops[j].second) + " " + pct(ops[j].first, d.n);
+					o << "  " << d.n << " | " << pct(d.n, site_n[s]) << " | " << d.weight << " | " << pct(d.unique, d.n) << " | " << pct(d.src_same, d.src_watched) << " | "
+					  << pct(d.src_soon, d.src_watched) << " | " << pct(d.dst_same, d.dst_watched) << " | " << pct(d.dst_soon, d.dst_watched) << " | " << top << " | " << sym(v[i].second) << "\n";
+				}
+			}
+			o << "-- by script line (events | weight | flags | where)\n";
+			{
+				std::vector<std::tuple<uint64_t, uint64_t, uint32_t, std::string>> v;
+				for (const auto& [k, d] : by_line) { if (std::get<0>(k) == s) v.emplace_back(d.n, d.weight, std::get<1>(k), std::get<2>(k)); }
+				std::sort(v.rbegin(), v.rend());
+				for (size_t i = 0; i < v.size() && i < 25; ++i) o << "  " << std::get<0>(v[i]) << " | " << std::get<1>(v[i]) << " | " << flags_text(static_cast<site>(s), std::get<2>(v[i])) << " | " << std::get<3>(v[i]) << "\n";
+			}
+			std::vector<std::pair<uint64_t, std::string>> named;
+			const std::string prefix = std::to_string(s) + "\t";
+			for (const auto& [k, n] : by_name) {
+				if (k.compare(0, prefix.size(), prefix) != 0) continue;
+				const size_t a = k.find('\t'), b = k.find('\t', a + 1);
+				named.emplace_back(n, k.substr(b + 1) + "  (" + flags_text(static_cast<site>(s), static_cast<uint32_t>(std::stoul(k.substr(a + 1, b - a - 1)))) + ")");
+			}
+			if (!named.empty()) {
+				std::sort(named.rbegin(), named.rend());
+				o << "-- by name (events | name (reason))\n";
+				for (size_t i = 0; i < named.size() && i < 25; ++i) o << "  " << named[i].first << " | " << named[i].second << "\n";
+			}
+		}
+	}
+
+	struct census_writer {
+		~census_writer() {
+			const char* path = std::getenv("JAI_COPY_CENSUS");
+			if (path && *path) write_census(path);
+		}
+	};
+	census_writer the_census_writer;
+}
+
+} // namespace jai::census
 
 #endif // JAISCRIPT_VM_COVERAGE

@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstdint>
 #include <jaiscript/jaiscript_fwd.hpp>
+#include <jaiscript/detail/copy_census.hpp>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -46,6 +47,7 @@ namespace jai {
 		// Marked const because interning doesn't change observable state - it just ensures
 		// a string has an ID. Uses mutable internal storage.
 		[[nodiscard]] id_type intern(std::string_view sv) const noexcept {
+			JAI_CENSUS(sym_intern);
 			if (auto it = index_.find(sv); it != index_.end())
 				return it->second;
 
@@ -70,6 +72,7 @@ namespace jai {
 		// Intern and return both the ID and the interned string_view in one call.
 		// Avoids needing a separate get_string() lookup.
 		[[nodiscard]] std::pair<id_type, std::string_view> intern_with_view(std::string_view sv) const noexcept {
+			JAI_CENSUS(sym_intern);
 			if (auto it = index_.find(sv); it != index_.end())
 				return { it->second, ids_[it->second] };
 
@@ -89,6 +92,7 @@ namespace jai {
 		// Read-only lookup (no allocation). Returns nullopt for an unknown name.
 		// Unlike intern(), a query never inserts, including on a miss while frozen.
 		[[nodiscard]] std::optional<id_type> find(std::string_view sv) const noexcept {
+			JAI_CENSUS(sym_find);
 			if (auto it = index_.find(sv); it != index_.end()) {
 				return it->second;
 			}
@@ -97,6 +101,7 @@ namespace jai {
 
 		// Fast path for known IDs (no allocation). Returns empty view if OOB; a parked id reads its parked text.
 		[[nodiscard]] inline std::string_view get_string(id_type id) const noexcept {
+			JAI_CENSUS(sym_get_string);
 			if (id < ids_.size()) [[likely]] { return ids_[id]; }
 			return (id & k_parked_bit) ? parked_text(id) : std::string_view{};
 		}

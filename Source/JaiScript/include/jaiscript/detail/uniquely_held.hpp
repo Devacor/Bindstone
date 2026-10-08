@@ -26,7 +26,7 @@ namespace jai::detail {
     // A replacing store's value: a prvalue (uniquely held) moves in and is the stored object, anything else is the
     // assignment copy
     inline script_value take_for_assignment(script_value& value) {
-        if (uniquely_held(value)) { return std::move(value); }
+        if (uniquely_held(value)) { JAI_CENSUS_F(move_hit, 6); return std::move(value); }
         return clone_for_assignment(value);
     }
 

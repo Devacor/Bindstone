@@ -8,6 +8,12 @@
 #include <optional>
 #include <sstream>
 #include <thread>
+#ifdef JAISCRIPT_VM_COVERAGE
+#include <jaiscript/detail/copy_census.hpp>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+#endif
 
 namespace jai {
 
@@ -1283,17 +1289,33 @@ script_value script_value::make_function(script_function&& func, engine* eng) {
     return v;
 }
 
+#ifdef JAISCRIPT_VM_COVERAGE
+namespace {
+    // the raw indexes whose copy touches a refcount
+    inline bool census_refcounted(size_t idx) noexcept {
+        return idx != script_value::TYPEID_NULL && idx != script_value::TYPEID_INT && idx != script_value::TYPEID_FLOAT &&
+               idx != script_value::TYPEID_CHAR && idx != script_value::TYPEID_BOOL && idx != script_value::TYPEID_INVALID;
+    }
+}
+#endif
+
 script_value::script_value(const script_value& other)
     : type_info_(other.type_info_),
       engine_(other.engine_),
       storage_(other.storage_) {
     // The variant copy bumps the (immutable) binding box refcount, so copies of bound values remain aliases
     // NOTE: Raw engine* is much faster to copy than weak_ptr (no atomic ops)
+#ifdef JAISCRIPT_VM_COVERAGE
+    if (census_refcounted(other.raw_storage_index())) { census::hit_at(census::site::value_copy_ctor, JAI_CENSUS_RA(), static_cast<uint32_t>(other.raw_storage_index())); }
+#endif
 }
 
 // NOTE: Intentionally shallow; the interpreter handles cloning based on JaiScript value/reference semantics.
 script_value& script_value::operator=(const script_value& other) {
     if (this != &other) {
+#ifdef JAISCRIPT_VM_COVERAGE
+        if (census_refcounted(other.raw_storage_index())) { census::hit_at(census::site::value_copy_assign, JAI_CENSUS_RA(), static_cast<uint32_t>(other.raw_storage_index())); }
+#endif
         type_info_ = other.type_info_;
         engine_ = other.engine_;
         storage_ = other.storage_;
@@ -1301,7 +1323,51 @@ script_value& script_value::operator=(const script_value& other) {
     return *this;
 }
 
+#ifdef JAISCRIPT_VM_COVERAGE
+// The counting clone: the outermost call is one deep-copy event at its caller, with the source's node, whether it was
+// uniquely held (uniquely_held's test) and the copied kind; the copy's node is timed to its death
 script_value script_value::clone() const {
+    const script_value& src = *this;   // a reference is not dereferenced here: a property read would run its getter twice
+    const void* node = nullptr;
+    bool unique = false;
+    census::copied_kind kind = census::copied_kind::other;
+    switch (src.raw_storage_index()) {
+        case TYPEID_ARRAY: {
+            const auto& a = src.unchecked_get_array_storage();
+            node = a.get(); unique = a.use_count() == 1;
+            kind = a->kind() == script_array::kind_t::obj ? census::copied_kind::array_obj : a->is_typed() ? census::copied_kind::array_typed : census::copied_kind::array_values;
+            break;
+        }
+        case TYPEID_MAP: { const auto& m = src.unchecked_get_map_storage(); node = m.get(); unique = m.use_count() == 1; kind = census::copied_kind::map; break; }
+        case TYPEID_OBJECT: {
+            const auto& h = src.unchecked_object_handle();
+            node = h.get();
+            unique = h && h.use_count() == 1 && h->data && h->data.use_count() == 1;
+            const bool shared = src.type_info_ && src.type_info_->base_type == script_value_type::jai_shared_ptr_type;
+            kind = shared ? census::copied_kind::shared_deep : (h && h->is_class_instance_wrapper) ? census::copied_kind::instance : census::copied_kind::cpp_object;
+            break;
+        }
+        case TYPEID_STRING: kind = census::copied_kind::string; break;
+        default: break;
+    }
+    if (raw_storage_index() == TYPEID_REFERENCE) { kind = census::copied_kind::reference; }
+    census::copy_scope scope(census::site::deep_clone, JAI_CENSUS_RA(), node, (unique ? census::k_src_unique : 0u) | census::kind_flag(kind));
+    script_value result = clone_uncounted();
+    const void* made = nullptr;
+    switch (result.raw_storage_index()) {
+        case TYPEID_ARRAY: made = result.unchecked_get_array_storage().get(); census::add_weight(result.unchecked_get_array_storage()->size()); break;
+        case TYPEID_MAP: made = result.unchecked_get_map_storage().get(); census::add_weight(2 * result.unchecked_get_map_storage()->size()); break;
+        case TYPEID_OBJECT: made = result.unchecked_object_handle().get(); break;
+        default: break;
+    }
+    scope.finish(made != node ? made : nullptr);
+    return result;
+}
+
+script_value script_value::clone_uncounted() const {
+#else
+script_value script_value::clone() const {
+#endif
     if (!engine_) {
         throw runtime_error("Cannot clone script_value: missing engine pointer");
     }
@@ -1515,6 +1581,10 @@ script_value script_value::clone() const {
 // literal) is never written through this gate.
 script_string& script_value::unshare_string_node() {
     auto& node = *storage_.get_if<TYPEID_STRING>();
+#ifdef JAISCRIPT_VM_COVERAGE
+    census::copy_scope census_scope(census::site::string_detach, JAI_CENSUS_RA(), node.get(), 0);
+    census::add_weight(node->size());
+#endif
     if (engine_) {
         engine_->execution_limits().memory_charge_deferred(node->size() + sizeof(script_string));
     }

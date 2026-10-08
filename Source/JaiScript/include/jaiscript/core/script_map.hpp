@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <iterator>
 #include <utility>
+#include <jaiscript/detail/copy_census.hpp>
 
 namespace jai {
 
@@ -35,11 +36,12 @@ namespace jai {
         using is_transparent = void;
         size_t operator()(const script_value& v) const noexcept {
             const size_t k = v.raw_storage_index();   // the two common key kinds inline, the rows map_key_hash gives them
+            JAI_CENSUS_F(map_key_hash, k);
             if (k == script_value::TYPEID_INT) return map_key_mix(script_value_type::jai_int_type, static_cast<uint64_t>(v.unchecked_as_int()));
             if (k == script_value::TYPEID_STRING) return script_value::map_string_key_hash(v.unchecked_as_string());
             return v.map_key_hash();
         }
-        size_t operator()(const map_string_key_probe& p) const noexcept { return script_value::map_string_key_hash(p.text); }
+        size_t operator()(const map_string_key_probe& p) const noexcept { JAI_CENSUS_F(map_key_hash, 0x80); return script_value::map_string_key_hash(p.text); }
     };
 
     struct script_value_key_eq {

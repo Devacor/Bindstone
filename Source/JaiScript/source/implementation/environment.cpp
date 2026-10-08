@@ -69,16 +69,19 @@ checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion p
 } // namespace detail
 
 void environment::define(const std::string& name, const script_value& value) {
+    JAI_CENSUS(env_get_name);
     uint64_t id = symbolizer_->intern(name);
     define(id, value);
 }
 
 void environment::define(const std::string& name, script_value&& value) {
+    JAI_CENSUS(env_get_name);
     uint64_t id = symbolizer_->intern(name);
     define(id, std::move(value));
 }
 
 void environment::define(uint64_t id, const script_value& value) {
+    JAI_CENSUS(env_define_id);
     // Check if we're redefining a local variable (shadowing parent is ok)
     if (local_ids_.count(id) > 0) {
         // Redefining local variable - update in place via flat_lookup_
@@ -102,6 +105,7 @@ void environment::define(uint64_t id, const script_value& value) {
 }
 
 void environment::define(uint64_t id, script_value&& value) {
+    JAI_CENSUS(env_define_id);
     // Check if we're redefining a local variable (shadowing parent is ok)
     if (local_ids_.count(id) > 0) {
         // Redefining local variable - update in place via flat_lookup_
@@ -135,6 +139,7 @@ void environment::bump_env_epoch() noexcept {
 }
 
 script_value* environment::vm_storage_lookup(uint64_t id, bool& cacheable) {
+    JAI_CENSUS(env_vm_lookup);
     cacheable = false;
     // Byte-parallel with the get_ref/get_value_ptr prefix: 'this' special-case first
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
@@ -184,12 +189,14 @@ JAI_NOINLINE std::pair<std::string_view, uint64_t> environment::unknown_name_err
 }
 
 checked_result<script_value> environment::get(const std::string& name) const {
+    JAI_CENSUS(env_get_name);
     if (const auto id = symbolizer_->find(name)) { return get(*id); }
     const auto [text, parked] = unknown_name_error(name);
     return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<script_value> environment::get(uint64_t id) const {
+    JAI_CENSUS(env_get_id);
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return this_object_;
@@ -345,10 +352,12 @@ std::string_view environment::undefined_text(uint64_t id, std::string_view other
 }
 
 bool environment::define_variable(uint64_t id, const script_value& value) {
+    JAI_CENSUS(env_define_id);
     return define_variable(id, script_value(value));
 }
 
 bool environment::define_variable(uint64_t id, script_value&& value) {
+    JAI_CENSUS(env_define_id);
     if (parent_) {
         define(id, std::move(value));
         return true;
@@ -461,18 +470,21 @@ script_value* environment::shadowed_cell(uint64_t id) const {
 }
 
 checked_result<void> environment::assign(const std::string& name, const script_value& value) {
+    JAI_CENSUS(env_get_name);
     if (const auto id = symbolizer_->find(name)) { return assign(*id, value); }
     const auto [text, parked] = unknown_name_error(name);
     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(const std::string& name) const {
+    JAI_CENSUS(env_get_name);
     if (const auto id = symbolizer_->find(name)) { return get_ref(*id); }
     const auto [text, parked] = unknown_name_error(name);
     return checked_result<std::reference_wrapper<const script_value>>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<std::reference_wrapper<const script_value>> environment::get_ref(uint64_t id) const {
+    JAI_CENSUS(env_get_ref_id);
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return std::cref(this_object_);
@@ -546,12 +558,14 @@ checked_result<std::reference_wrapper<const script_value>> environment::get_ref(
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(const std::string& name) {
+    JAI_CENSUS(env_get_name);
     if (const auto id = symbolizer_->find(name)) { return get_ref(*id); }
     const auto [text, parked] = unknown_name_error(name);
     return checked_result<std::reference_wrapper<script_value>>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64_t id) {
+    JAI_CENSUS(env_get_ref_id);
     // For method environments, handle 'this' specially (note: this is non-const so we return mutable ref)
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return std::ref(this_object_);
@@ -622,12 +636,14 @@ checked_result<std::reference_wrapper<script_value>> environment::get_ref(uint64
 }
 
 checked_result<void> environment::assign(const std::string& name, script_value&& value) {
+    JAI_CENSUS(env_get_name);
     if (const auto id = symbolizer_->find(name)) { return assign(*id, std::move(value)); }
     const auto [text, parked] = unknown_name_error(name);
     return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), text, parked);
 }
 
 checked_result<void> environment::assign(uint64_t id, const script_value& value) {
+    JAI_CENSUS(env_assign_id);
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { *cell = value; return {}; }
     }
@@ -703,6 +719,7 @@ checked_result<void> environment::assign(uint64_t id, const script_value& value)
 }
 
 checked_result<void> environment::assign(uint64_t id, script_value&& value) {
+    JAI_CENSUS(env_assign_id);
     if (symbolizer_->shadow_count() != 0) [[unlikely]] {
         if (script_value* cell = shadowed_cell(id)) { *cell = std::move(value); return {}; }
     }
@@ -776,11 +793,13 @@ checked_result<void> environment::assign(uint64_t id, script_value&& value) {
 }
 
 bool environment::contains(const std::string& name) const {
+    JAI_CENSUS(env_get_name);
     const auto id = symbolizer_->find(name);
     return id && contains(*id);
 }
 
 bool environment::contains(uint64_t id) const {
+    JAI_CENSUS(env_contains);
     // Check cache first (O(1))
     if (flat_lookup_.find(id) != flat_lookup_.end()) {
         return true;
@@ -855,6 +874,7 @@ void environment::clear_parent_cache() {
 }
 
 void environment::reset(std::shared_ptr<environment> new_parent) {
+    JAI_CENSUS(env_reset);
     // Clear all local values first
     clear_values();
 
@@ -883,6 +903,7 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
 }
 
 void environment::reset_as_method(std::shared_ptr<environment> parent, script_value this_obj) {
+    JAI_CENSUS(env_reset);
     // Clear all local values first
     clear_values();
 
@@ -909,6 +930,7 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
 }
 
 void environment::reset_as_static_method(std::shared_ptr<environment> parent, std::shared_ptr<class_definition> class_def) {
+    JAI_CENSUS(env_reset);
     // Clear all local values first
     clear_values();
 
@@ -954,6 +976,7 @@ std::unordered_map<std::string_view, script_value> environment::get_all_variable
 }
 
 script_value* environment::get_value_ptr(uint64_t id) {
+    JAI_CENSUS(env_value_ptr);
     // For method environments, handle 'this' specially
     if (kind_ == env_kind::method && id == symbolizer_->get_this_id()) {
         return &this_object_;

@@ -369,14 +369,6 @@ namespace detail { struct argument_capture_storage; }
         // The engine tag a bound box of that semantic index carries (int/float/bool/string)
         static type_info_ptr cpp_bound_type_info(engine* eng, uint8_t semantic_index);
         
-        // Template factory methods removed - use engine->make_object instead
-        // This ensures proper type name registration
-    public:
-        
-        // Engine-aware object creation through registered class system
-        template<typename T, typename... Args>
-        static script_value make_registered_object(class engine* eng, Args&&... args);
-        
         // Type information
         type_info_ptr get_type_info() const { return type_info_; }
         // Borrowed view of the stamp for hot guards: no handle copy. Valid while this value is

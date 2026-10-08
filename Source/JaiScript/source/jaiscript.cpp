@@ -4,7 +4,6 @@
 
 #include "../include/jaiscript/jaiscript.hpp"
 
-#include "implementation/types.cpp"
 #include "implementation/type_info.cpp"
 #include "implementation/value.cpp"
 #include "implementation/environment.cpp"

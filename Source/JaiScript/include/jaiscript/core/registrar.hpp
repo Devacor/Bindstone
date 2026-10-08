@@ -14,20 +14,7 @@
 
 #include <jaiscript/detail/static_type_name.hpp>
 
-// C++20 features detection
-#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
-#define JAI_HAS_CONCEPTS 1
 #include <concepts>
-#else
-#define JAI_HAS_CONCEPTS 0
-#endif
-
-#if defined(__cpp_nontype_template_args) && __cpp_nontype_template_args >= 201911L
-#define JAI_HAS_NTTP_STRING 1
-#include "fixed_string.hpp"
-#else
-#define JAI_HAS_NTTP_STRING 0
-#endif
 
 namespace jai {
 
@@ -175,23 +162,19 @@ private:
 // jai::registrar - Type registration for JaiScript engine
 // ============================================================================
 //
-// C++20 Usage (with NTTP string literals):
-//   static jai::registrar<Player, "Player"> _player;
-//   static jai::registrar<Player, "Player", Services> _player([](auto& builder, const Services& ctx) { ... });
-//
-// C++17 Usage (runtime name):
-//   static jai::registrar<Player, MV::Services> _player("Player", [](auto& builder, const Services& ctx) { ... });
+// Usage (a HostContext is whatever the host hands every configure function; void for none):
+//   static jai::registrar<Player, HostContext> _player("Player", [](auto& builder, const HostContext& ctx) { ... });
 //
 // Auto-named (the script name and serialization $type are derived from the C++ type, so
 // you don't repeat the class name as a string — works for non-template classes):
-//   static jai::registrar<Player, MV::Services> _player;                                  // name = "Player"
-//   static jai::registrar<Player, MV::Services> _player([](auto& builder, const Services& ctx) { ... });
+//   static jai::registrar<Player, HostContext> _player;                                   // name = "Player"
+//   static jai::registrar<Player, HostContext> _player([](auto& builder, const HostContext& ctx) { ... });
 // Template instantiations have no portable derived name and must pass one explicitly
 // (e.g. Point<int> -> "Pointi"); omitting it is a compile error directing you here.
 //
 // At engine initialization:
 //   jai::bind_registrar(engine);                     // No context
-//   jai::bind_registrar<Services>(engine, services); // With context
+//   jai::bind_registrar<HostContext>(engine, ctx);   // With context
 
 // Shared by the auto-named registrar constructors: the ONE naming ladder (self-owned
 // jai_type_name pin, else the bare C++ type name — also the serialization $type, so the

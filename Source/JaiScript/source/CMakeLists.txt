@@ -20,7 +20,6 @@ set(JAISCRIPT_SOURCES
     implementation/schema_binding.cpp
     implementation/type_checker.cpp
     implementation/type_info.cpp
-    implementation/types.cpp
     implementation/value.cpp
     implementation/vm/chunk_manifest.cpp
     implementation/vm/disassembler.cpp

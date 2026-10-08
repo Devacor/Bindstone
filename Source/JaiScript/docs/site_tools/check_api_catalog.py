@@ -34,7 +34,6 @@ def main():
 	for relative,owner,pattern in [
 		('include/jaiscript/stdlib/reflection.hpp','reflect',r'add\("([^"\n]+)"'),
 		('include/jaiscript/stdlib/strings.hpp','string',r'(?:sign|def)\("([^"\n]+)"'),
-		('include/jaiscript/stdlib/math.hpp','global',r'add_function\("([^"\n]+)"'),
 		('include/jaiscript/stdlib/json.hpp','global',r'add_(?:variadic_)?function\("([^"\n]+)"'),
 		('tools/jaiscript/fetch.hpp','Download',r'\.method\("([^"\n]+)"'),
 	]:

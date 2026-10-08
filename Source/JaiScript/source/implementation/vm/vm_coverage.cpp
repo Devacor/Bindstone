@@ -100,7 +100,7 @@ namespace {
 		case opcode::op_throw: case opcode::op_yield:
 			return fam::scope;
 		case opcode::op_func_decl: case opcode::op_class_decl: case opcode::op_namespace_decl: case opcode::op_enum_decl: case opcode::op_extern_decl:
-		case opcode::op_include: case opcode::op_import: case opcode::op_parallel_for: case opcode::op_error:
+		case opcode::op_include: case opcode::op_import: case opcode::op_parallel_for: case opcode::op_error: case opcode::op_const_guard:
 			return fam::decl;
 		case opcode::op_c_arith: case opcode::op_c_arith_p: case opcode::op_c_arith_any: case opcode::op_c_arith2: case opcode::op_c_arith_load: case opcode::op_c_arith_jump:
 		case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:

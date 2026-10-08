@@ -3707,6 +3707,7 @@ public:
 			// DIFFERENT return type: the per-function conversion class must re-derive
 			// on the new function object, and the site's cached callee must miss)
 			auto [i1, v1] = run_both_backends(R"(
+				[[warn_mode]]
 				function f(auto n) -> int { return n + 1; }
 				var a = 0;
 				for (var i = 0; i < 3; i += 1) { a = f(a); }

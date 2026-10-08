@@ -1355,6 +1355,14 @@ checked_result<expression_ptr> parser::primary() {
     if (arrow_function_ahead()) {
         return arrow_function_expression();
     }
+    if (check(token_type::identifier) && peek().lexeme == "const_cast" && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less) {
+        report_foreign(detail::foreign_word::const_cast_call, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    if (check(token_type::const_keyword)) {
+        report_foreign(detail::foreign_word::const_misplaced, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     if (check(token_type::function_keyword) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::star) {
         report_foreign(detail::foreign_word::generator_function, peek());
         return make_error_code(parse_error_code::unexpected_token);
@@ -1826,6 +1834,10 @@ checked_result<expression_ptr> parser::primary() {
 
 // Type parsing
 checked_result<type_info_ptr> parser::parse_type() {
+    if (check(token_type::const_keyword)) {   // array<const int>, cast<const T&>: const qualifies a declaration (docs/const.md)
+        report_foreign(detail::foreign_word::const_type_argument, peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
     // Handle auto - type inference (nullptr = infer from initializer, or uninitialized)
     if (match(token_type::auto_keyword)) {
         return type_info_ptr(nullptr);
@@ -1889,6 +1901,10 @@ checked_result<type_info_ptr> parser::parse_type() {
 
     if (match(token_type::weak_ptr_keyword)) {
         JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'weak_ptr'"));
+        if (check(token_type::const_keyword)) {
+            report_foreign(detail::foreign_word::pointer_to_const, peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
         consume_greater_in_generic("Expected '>' after weak_ptr type");
         return store_type_info(type_info::make_weak_ptr(*symbolizer_, pointee_type));
@@ -1896,6 +1912,10 @@ checked_result<type_info_ptr> parser::parse_type() {
 
     if (match(token_type::shared_ptr_keyword)) {
         JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'shared_ptr'"));
+        if (check(token_type::const_keyword)) {
+            report_foreign(detail::foreign_word::pointer_to_const, peek());
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         // Dev ruling (2026-07): a dynamic pointee adds nothing over plain var (which
         // already holds and rebinds any shared_ptr) - reject with the teaching pair
         if (check(token_type::var_keyword)) {
@@ -2813,6 +2833,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
         return std::make_shared<statement_decl>(stmt->location, stmt);
     }
     if (foreign_word_at_statement()) { return make_error_code(parse_error_code::unexpected_token); }
+    if (check(token_type::const_keyword)) { return const_declaration(); }
 
     if (match(token_type::nocopy_keyword)) {
         const token at = previous();
@@ -3164,11 +3185,11 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 
     if (!check(token_type::right_paren)) {
         do {
-            if (check(token_type::const_keyword)) {
-                report_foreign(detail::foreign_word::const_parameter, peek());
+            const bool is_const = match(token_type::const_keyword);
+            if (is_const && check(token_type::const_keyword)) {
+                report_error("'const' appears once in a declaration", peek());
                 return make_error_code(parse_error_code::unexpected_token);
             }
-            bool is_const = false;
 
             type_info_ptr type = nullptr;
             std::string name;
@@ -3281,6 +3302,7 @@ checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_
     JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' for lambda parameters"));
     JAISCRIPT_TRY_ASSIGN(lambda->parameters, parse_parameter_list());
     JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parameters"));
+    if (const_method_suffix()) { return make_error_code(parse_error_code::unexpected_token); }
 
     // Parse return type if specified
     if (match(token_type::arrow)) {
@@ -3827,6 +3849,7 @@ checked_result<statement_ptr> parser::for_statement() {
                 auto half = std::make_shared<member_expr>(names[i].location, hidden_identifier(pair_id, pair_name, names[i].location), half_view, half_id, false);
                 auto binding = std::make_shared<variable_decl>(names[i].location, binding_type, names[i].lexeme,
                                                                get_symbol_id(names[i]), half);
+                binding->is_const = is_const;
                 if (in_function_scope()) { binding->slot_index = allocate_slot(binding->name_id); }
                 bindings.push_back(std::move(binding));
             }
@@ -3880,6 +3903,8 @@ traditional_for:
     // Init — the loop variable's slot stops resolving after the loop closes
     block_scope_guard loop_var_scope(*this);
     declaration_ptr init = nullptr;
+    const token init_const_at = peek();
+    const bool init_const = match(token_type::const_keyword);
     // An identifier starts a declaration only when a type spelling is followed by a name (C++: whatever can be a
     // declaration is one); `i = 0`, `o[0] = 1`, `j += 1` are expression initializers
     bool identifier_declares = false;
@@ -3919,19 +3944,26 @@ traditional_for:
         JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected variable name", "variable"));
 
         expression_ptr initializer = nullptr;
-        if (match(token_type::equal)) {
+        const bool spelled_initializer = match(token_type::equal);
+        if (spelled_initializer) {
             JAISCRIPT_TRY_ASSIGN(initializer, expression());
         } else {
             initializer = default_initializer(type, name.location);
         }
 
         auto var_init = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
+        var_init->default_initialized = init_const && !spelled_initializer;
         if (in_function_scope() && var_init->name_id != UINT64_MAX) {
             var_init->slot_index = allocate_slot(var_init->name_id);
         }
+        if (init_const && !finish_const(var_init, init_const_at, false)) { return make_error_code(parse_error_code::unexpected_token); }
         init = var_init;
         // Note: NOT consuming semicolon here - the for loop will handle it
     } else {
+        if (init_const) {
+            report_foreign(detail::foreign_word::const_misplaced, init_const_at);
+            return make_error_code(parse_error_code::unexpected_token);
+        }
         JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
         init = std::make_shared<expression_decl>(expr->location, std::move(expr));
     }
@@ -4122,12 +4154,53 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
             continue;
         }
 
+        // const T NAME = e; (also static const / const static): a class-level constant (docs/const.md)
+        bool member_const = false;
+        bool const_static = false;
+        const token const_at = peek();
+        if (check(token_type::static_keyword) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::const_keyword) {
+            advance();
+            const_static = true;
+        }
+        if (match(token_type::const_keyword)) {
+            member_const = true;
+            if (match(token_type::static_keyword)) { const_static = true; }
+            if (untyped_declaration_ahead()) {   // const NAME = e;: const auto
+                token name = advance();
+                expression_ptr init;
+                if (match(token_type::equal)) {
+                    auto init_result = expression();
+                    if (!init_result) {
+                        synchronize_class_member(class_open_index);
+                        continue;
+                    }
+                    init = std::move(init_result.value());
+                }
+                if (!consume(token_type::semicolon, "Expected ';' after field declaration")) {
+                    synchronize_class_member(class_open_index);
+                    continue;
+                }
+                auto var_decl = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
+                var_decl->default_initialized = !init;
+                var_decl->is_static = true;
+                if (!finish_const(var_decl, const_at, true)) {
+                    synchronize_class_member(class_open_index);
+                    continue;
+                }
+                classDecl->members.push_back({visibility, var_decl});
+                continue;
+            }
+        } else if (const_static) {
+            current_--;
+            const_static = false;
+        }
+
         // Coroutine methods: `coroutine` prefixes every method spelling, in any order with
         // static/override (`static coroutine` reads as `coroutine static`); the whole run
         // is consumed here so each branch below sees the plain head. Ctors/dtors/fields
         // reject at the tail.
         bool member_is_coroutine = false;
-        bool leading_static = false;
+        bool leading_static = const_static;
         bool leading_override = false;
         if (coroutine_modifier_run()) {
             in_coroutine_ = true;
@@ -4226,6 +4299,10 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                             synchronize_class_member(class_open_index);
                             continue;
                         }
+                        if (const_method_suffix()) {
+                            synchronize_class_member(class_open_index);
+                            continue;
+                        }
 
                         if (match(token_type::arrow)) {
                             if (check(token_type::left_brace)) {
@@ -4318,9 +4395,11 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                             synchronize_class_member(class_open_index);
                             continue;
                         }
+                        const bool spelled_init = init != nullptr;
                         if (!init) { init = default_initializer(type, name.location); }
                         auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                         var_decl->is_static = is_static;
+                        var_decl->default_initialized = member_const && !spelled_init;   // a class constant needs its initializer (finish_const)
                         member = var_decl;
                     }
                 } else {
@@ -4485,6 +4564,10 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                         synchronize_class_member(class_open_index);
                         continue;
                     }
+                    if (const_method_suffix()) {
+                        synchronize_class_member(class_open_index);
+                        continue;
+                    }
 
                     // Handle trailing return type
                     if (match(token_type::arrow)) {
@@ -4583,9 +4666,11 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                         synchronize_class_member(class_open_index);
                         continue;
                     }
+                    const bool spelled_init = init != nullptr;
                     if (!init) { init = default_initializer(type, name.location); }
                     auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);
                     var_decl->is_static = is_static;
+                    var_decl->default_initialized = member_const && !spelled_init;   // a class constant needs its initializer (finish_const)
                     var_decl->function_spelling = function_spelling;
                     member = var_decl;
                 }
@@ -4617,6 +4702,13 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 continue;
             }
             func_member->is_coroutine = true;
+        }
+        if (member_const) {
+            if (!finish_const(member, const_at, true)) {
+                synchronize_class_member(class_open_index);
+                continue;
+            }
+            static_cast<variable_decl*>(member.get())->is_static = true;
         }
         classDecl->members.push_back({visibility, member});
     }
@@ -4706,7 +4798,8 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
 
         const token member_start = peek();
         const bool inline_member = match(token_type::inline_keyword);
-        bool nested_nocopy = match(token_type::nocopy_keyword);
+        const bool const_member = match(token_type::const_keyword);
+        bool nested_nocopy = !const_member && match(token_type::nocopy_keyword);
         if (nested_nocopy || match(token_type::class_keyword)) {
             if (nested_nocopy) { JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'")); }
             auto class_result = class_declaration(nested_nocopy);
@@ -4719,7 +4812,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 namespace_class_names_.insert(full_namespace_name + "::" + std::string(cls->name));
             }
             match(token_type::semicolon);  // Consume optional semicolon after class
-        } else if (!inline_member && match(token_type::coroutine_keyword)) {
+        } else if (!inline_member && !const_member && match(token_type::coroutine_keyword)) {
             // a coroutine member: the program-scope spellings (docs/grammar.md: a namespace body is declaration*)
             const bool was_in_coroutine = in_coroutine_;
             in_coroutine_ = true;
@@ -4751,7 +4844,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             // Function or variable declaration
             const bool function_spelling = check(token_type::function_keyword);
             type_info_ptr type;
-            if (!(inline_member && untyped_declaration_ahead())) {
+            if (!((inline_member || const_member) && untyped_declaration_ahead())) {
                 auto type_result = parse_type();
                 if (!type_result) {
                     synchronize();
@@ -4786,6 +4879,10 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
 
                 auto close_paren_result = consume(token_type::right_paren, "Expected ')' after parameters");
                 if (!close_paren_result) {
+                    synchronize();
+                    continue;
+                }
+                if (const_method_suffix()) {
                     synchronize();
                     continue;
                 }
@@ -4858,9 +4955,11 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                     continue;
                 }
 
+                const bool had_init = init != nullptr;
                 if (!init && !reference_member) { init = default_initializer(type, member_name.location); }
                 auto var_decl = std::make_shared<variable_decl>(member_name.location, type, member_name.lexeme, get_symbol_id(member_name), init);
                 var_decl->function_spelling = function_spelling;
+                var_decl->default_initialized = const_member && !had_init;
                 member_decl = var_decl;
             }
         }
@@ -4872,6 +4971,9 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 continue;
             }
             var_decl->is_inline = true;
+        }
+        if (const_member && member_decl && !finish_const(member_decl, member_start, false)) {
+            continue;
         }
 
         if (member_decl) {
@@ -5052,7 +5154,8 @@ checked_result<declaration_ptr> parser::extern_declaration() {
     source_location loc = previous().location;
     type_info_ptr type;
     bool is_function = false;
-    if (match(token_type::function_keyword)) {
+    const bool is_const = match(token_type::const_keyword);
+    if (!is_const && match(token_type::function_keyword)) {
         is_function = true;
     } else if (!(check(token_type::identifier) && current_ + 1 < stream_->size() &&
                  (*stream_)[current_ + 1].type == token_type::semicolon)) {
@@ -5061,7 +5164,9 @@ checked_result<declaration_ptr> parser::extern_declaration() {
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected name after 'extern'"));
     JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after extern declaration"));
     auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
-    return std::make_shared<extern_decl>(loc, type, is_function, name_view, name_id);
+    auto decl = std::make_shared<extern_decl>(loc, type, is_function, name_view, name_id);
+    decl->is_const = is_const;
+    return decl;
 }
 
 bool parser::untyped_declaration_ahead() const {
@@ -5078,6 +5183,7 @@ checked_result<declaration_ptr> parser::inline_variable_declaration() {
         return make_error_code(parse_error_code::unexpected_token);
     }
     std::shared_ptr<variable_decl> decl;
+    const bool is_const = match(token_type::const_keyword);
     if (untyped_declaration_ahead()) {
         token name = advance();
         expression_ptr init;
@@ -5094,7 +5200,69 @@ checked_result<declaration_ptr> parser::inline_variable_declaration() {
         return make_error_code(parse_error_code::unexpected_token);
     }
     decl->is_inline = true;
+    if (is_const && !finish_const(decl, at, false)) { return make_error_code(parse_error_code::unexpected_token); }
     return declaration_ptr(decl);
+}
+
+checked_result<declaration_ptr> parser::const_declaration() {
+    const token at = advance();
+    if (check(token_type::const_keyword)) {
+        report_error("'const' appears once in a declaration", peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    }
+    declaration_ptr decl;
+    if (untyped_declaration_ahead()) {
+        // const x = e;: the JavaScript spelling of const auto x = e (docs/const.md)
+        token name = advance();
+        expression_ptr init;
+        if (match(token_type::equal)) { JAISCRIPT_TRY_ASSIGN(init, expression()); }
+        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
+        auto var = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
+        var->default_initialized = !init;
+        if (in_function_scope() && var->name_id != UINT64_MAX) { var->slot_index = allocate_slot(var->name_id); }
+        decl = var;
+    } else if (check(token_type::inline_keyword) || check(token_type::extern_keyword) || check(token_type::static_keyword)) {
+        report_error("write '" + std::string(peek().lexeme) + " const', not 'const " + std::string(peek().lexeme) + "'", peek());
+        return make_error_code(parse_error_code::unexpected_token);
+    } else {
+        JAISCRIPT_TRY_ASSIGN(decl, declaration_body());
+    }
+    if (!finish_const(decl, at, false)) { return make_error_code(parse_error_code::unexpected_token); }
+    return decl;
+}
+
+// Marks a const declaration and holds it to its initializer; false (an error reported) for anything that is not a variable
+bool parser::finish_const(const declaration_ptr& decl, const token& at, bool class_constant) {
+    if (!decl) { return false; }
+    if (decl->get_type() == node_type::function_decl) {
+        report_foreign(detail::foreign_word::const_return, at);
+        return false;
+    }
+    if (decl->get_type() == node_type::destructuring_decl) {
+        static_cast<destructuring_decl*>(decl.get())->is_const = true;
+        return true;
+    }
+    if (decl->get_type() != node_type::variable_decl) {
+        report_foreign(detail::foreign_word::const_misplaced, at);
+        return false;
+    }
+    auto* var = static_cast<variable_decl*>(decl.get());
+    const bool reference = var->type && var->type->base_type == script_value_type::jai_reference_type;
+    const bool class_default = var->type && var->type->base_type == script_value_type::jai_object_type && !var->type->type_name.empty();
+    const bool missing = reference ? !var->initializer : (var->default_initialized || !var->initializer);
+    if (missing && (class_constant || reference || !class_default)) {
+        const std::string spelled = var->type ? var->type->canonical_name() : std::string("auto");
+        report_error("const '" + std::string(var->name) + "' needs an initializer: const " + spelled + " " + std::string(var->name) + " = value;", at);
+        return false;
+    }
+    var->is_const = true;
+    return true;
+}
+
+bool parser::const_method_suffix() {
+    if (!check(token_type::const_keyword)) { return false; }
+    report_foreign(detail::foreign_word::const_method, peek());
+    return true;
 }
 
 // [[warn_mode]] / [[strict_mode]] at a statement position, optional trailing ';'. none when
@@ -5184,6 +5352,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after function name"));
     JAISCRIPT_TRY_ASSIGN(func->parameters, parse_parameter_list());
     JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parameters"));
+    if (const_method_suffix()) { return make_error_code(parse_error_code::unexpected_token); }
 
     // Handle trailing return type
     if (match(token_type::arrow)) {
@@ -5592,12 +5761,18 @@ void parser::report_foreign(detail::foreign_word w, const token& at) {
 
 bool parser::foreign_word_at_statement() {
     const token& t = peek();
-    if (t.type == token_type::const_keyword) {
-        report_foreign(detail::foreign_word::const_declaration, t);
-        return true;
-    }
     if (t.type != token_type::identifier || current_ + 1 >= stream_->size()) return false;
     const token& next = (*stream_)[current_ + 1];
+    const bool declaration_follows = next.type == token_type::identifier || is_type_keyword_token(next.type) || next.type == token_type::const_keyword ||
+                                     next.type == token_type::static_keyword;
+    if (t.lexeme == "constexpr" && declaration_follows) {
+        report_foreign(detail::foreign_word::constexpr_declaration, t);
+        return true;
+    }
+    if (t.lexeme == "mutable" && declaration_follows) {
+        report_foreign(detail::foreign_word::mutable_field, t);
+        return true;
+    }
     if (t.lexeme == "delete" && (next.type == token_type::identifier || next.type == token_type::this_keyword || next.type == token_type::left_bracket)) {
         report_foreign(detail::foreign_word::delete_statement, t);
         return true;

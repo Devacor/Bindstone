@@ -1,5 +1,6 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/vm/region_ir.hpp>   // the region IR: the operation set, the verifier, the listing, the liveness
+#include <jaiscript/detail/const_rules.hpp>   // const guards (docs/const.md)
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/body_walker.hpp>
@@ -1100,6 +1101,7 @@ void vm_compiler::drop_debug_span(const ast_node* node) {
 
 void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top_level) {
 	current_stmt_ = decl.get();
+	if (decl->get_type() == node_type::variable_decl) { emit_const_guard(decl); }
 	switch (decl->get_type()) {
 	case node_type::variable_decl:
 		compile_variable_decl(std::static_pointer_cast<variable_decl>(decl));
@@ -1185,6 +1187,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 
 void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 	current_stmt_ = stmt.get();
+	if (stmt->get_type() == node_type::return_stmt || stmt->get_type() == node_type::range_for_stmt) { emit_const_guard(stmt); }
 	switch (stmt->get_type()) {
 	case node_type::expression_stmt: {
 		const auto& e = static_cast<expression_stmt*>(stmt.get())->expression;
@@ -1589,6 +1592,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 // runtime types don't cooperate the SAME loop runs its generic cond/update bytecode.
 bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	if (!stmt->initializer || !stmt->condition || !stmt->update) return false;
+	if (detail::const_site_of(stmt->update.get()) || detail::const_site_of(stmt->initializer.get())) return false;
 
 	// Initializer: variable_decl with an int-literal initializer
 	if (stmt->initializer->get_type() != node_type::variable_decl) return false;
@@ -2057,6 +2061,7 @@ void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* ass
 }
 
 bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
+	if (detail::const_site_of(expr.get())) return false;   // compile_expression emits its guard first
 	if (expr->get_type() == node_type::assignment_expr) {
 		auto* assign = static_cast<assignment_expr*>(expr.get());
 		if (assign->target->get_type() == node_type::identifier_expr) {
@@ -2290,7 +2295,20 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 	return false;
 }
 
+// a node the checker stamped with a const verdict (docs/const.md): it raises its text, or the run time walks its path, before any
+// of it runs (KEEP BYTE-PARALLEL with interpreter::const_guard_at)
+void vm_compiler::emit_const_guard(const std::shared_ptr<ast_node>& node) {
+	const const_site* site = detail::const_site_of(node.get());
+	if (!site) return;
+	if (site->verdict == const_raises) {
+		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::type_mismatch), add_message(site->text ? *site->text : std::string("Cannot assign to a const: it is read-only")), k_invalid_u32);
+	} else {
+		emit(opcode::op_const_guard, add_node(node));
+	}
+}
+
 void vm_compiler::compile_expression(const expression_ptr& expr, bool as_statement) {
+	emit_const_guard(expr);
 	switch (expr->get_type()) {
 	case node_type::literal_expr:
 		emit(opcode::op_const, add_constant(static_cast<literal_expr*>(expr.get())->value));

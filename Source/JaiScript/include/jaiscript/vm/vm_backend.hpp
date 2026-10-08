@@ -2389,6 +2389,7 @@ namespace jai::vm {
         op_status exec_ref_return_bind(frame& f, const vm_instruction& ins);
         op_status exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
         op_status exec_ref_target_store(frame& f, const vm_instruction& ins);
+        op_status exec_const_guard(frame& f, const vm_instruction& ins);
         op_status non_lvalue_target(const expression* target);
         op_status exec_cast(frame& f, const vm_instruction& ins);
 

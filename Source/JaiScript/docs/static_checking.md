@@ -269,6 +269,20 @@ code) - is the error `Cannot access private member 'secret' of class 'Wallet'`, 
 text, and the member's field proof is withheld. A `var` receiver stays lenient and raises the
 same text when it runs.
 
+**Const** (docs/const.md) — a `const` declaration, a `const T&` / `const T` parameter, a const loop variable or structured
+binding, a class constant, an `extern const`, and a reference that deduces const (`auto&` over a const, a range-for `auto&`
+over a const's elements) are const names. A write is a store, a compound store or `++`/`--` whose path from a const name
+crosses no handle (a declared `shared_ptr` / `weak_ptr` step ends the const), a call of a method that certainly writes its
+receiver (`detail/const_rules.hpp` `receiver_write_analysis`: a field store, a mutating builtin on a field, a writing call on
+the receiver, every override the checker sees), a mutating builtin on a string, array or map, a `T&` / `var&` / `shared_ptr<T>`
+binding, `cast<T&>` / `cast<shared_ptr<T>>`, a `-> T&` return, and a const passed to a reference parameter its callee writes
+through (a `const T&` parameter takes it). Each is an error with the run time's text, lowercase (docs/diagnostics.md
+"Const"); a path through a `var` or an untyped field is no error and the run time decides it. The walk stamps the verdict on
+the node in every mode, so the backends raise what the checker would report. The constness of another unit's global comes
+from the program table or from the engine's marked cell. Program-scope functions defined twice in one unit, and methods,
+constructors or namespace functions defined twice with one parameter list (const ignored), are errors; a function another
+unit defined is the warning `'f' redefines the function defined in <file>:4`.
+
 **Map keys** — the pair variable of a range-for over a statically known map (`map<K,V> m`,
 an `auto` map literal; a `var` map is dynamic) carries a read-only `first` - C++
 `pair<const K, V>` - by value and by reference alike (`auto& kv` aliases the value AND the key;

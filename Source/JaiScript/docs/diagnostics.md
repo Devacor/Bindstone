@@ -403,8 +403,14 @@ Each is recognized only in that position, so a script using one of these words a
 
 | written | where | text |
 |---|---|---|
-| `const int x = 5;`, `const x = 5;` | statement or member start | `JaiScript has no 'const': declare the variable with its type or auto (a reference parameter the function never writes through is already const)` |
-| `f(const T& x)` | parameter list | `JaiScript has no 'const': a reference parameter the function never writes through is already const, so write T& name` |
+| `int size() const { }`, `[]() const { }` | after a parameter list | `JaiScript has no const methods: a method that writes no field already works on a const object` |
+| `const int f() { }` | a const declaration that is a function | `JaiScript has no const return types: return by value (the caller gets a copy) or by T&` |
+| `array<const int>`, `cast<const T&>(x)` | inside a type | `const qualifies a declaration, not a type: write const array<int> xs` |
+| `shared_ptr<const T>`, `weak_ptr<const T>` | a handle's argument | `JaiScript has no pointer to const: const shared_ptr<T> keeps the handle from rebinding, and the object stays writable` |
+| `const_cast<T&>(x)` | expression start | `JaiScript has no 'const_cast': a const stays const; copy it (auto x = c) for a writable value` |
+| `constexpr int N = 4;` | statement or member start, before a type or name | `JaiScript has no 'constexpr': a const whose initializer is a constant expression is folded at compile time: const int N = 4;` |
+| `mutable int cache;` | statement or member start, before a type or name | `JaiScript has no 'mutable' fields: every field of a const object is read-only; keep state that must change behind a shared_ptr field` |
+| `const` anywhere else (`x = const 5`) | expression start, an initializer | `'const' starts a declaration: const int x = 5;` |
 | `virtual void f()` | statement or member start, before a type or name | `JaiScript has no 'virtual': every method dispatches dynamically; mark the subclass's method 'override'` |
 | `delete x;` | statement start, before a name, `this` or `[` | `JaiScript has no 'delete': an object is freed when its last owner lets go; set the handle to null to release it` |
 | `new int[5]` | after `new T` | `'new' makes one shared object (new T(args)); an array is a value: array<T> a = [];` |
@@ -419,6 +425,32 @@ Each is recognized only in that position, so a script using one of these words a
 | `[...a, 3]`, `f(...args)` | an expression | `JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one` |
 
 `let` is not on the list: it is a synonym of `var` (Dev ruling 2026-10-01).
+
+## Const (family B, `type_mismatch`; kernel `detail/const_rules.hpp`, docs/const.md)
+
+A write through a const (docs/const.md 2.2-3) is a load error under strict, a warning under warn, and under warn and off
+the node raises its run-time text when it is reached, before any of it runs. The checker's walk stamps the verdict in every
+mode (the proof pass), so both backends raise the same text at the same node. A path through a `var` is decided when it runs:
+its values are walked without running code, and a write that crosses a handle runs.
+
+| case | run time | load (strict error, warn warning) |
+|---|---|---|
+| store, compound store or `++`/`--` of the const itself (a local, a parameter, a global, a namespace const, a class constant) | `Cannot assign to 'MAX': it is read-only` (family B's text) | `cannot assign to const 'MAX'` (`'C::K'`, `'cfg::W'` for scoped ones) |
+| a store through a const | `Cannot assign to 'p.x': it is read-only ('p' is const)` | `cannot assign to 'p.x': 'p' is const` |
+| a method that writes its receiver, called on a const | `Cannot call 'bump' on 'c': 'c' is const and 'bump' writes its receiver (line 5)` | the same, lowercase |
+| a mutating builtin on a const string, array or map | `Cannot call 'push' on 'xs': 'xs' is const and 'push' changes it` | the same, lowercase |
+| a `T&` / `var&` declaration bound to a const | `Cannot bind 'r' (declared int&) to const 'a'; declare it const int& or auto&` | the same, lowercase |
+| a typed reference loop variable over a const's elements | `Cannot bind 'x' (declared int&) to an element of const 'xs'; declare it const int& or auto&` | the same, lowercase |
+| a const passed to a reference parameter its callee writes through | `Cannot pass const 'a' to parameter 'x' of 'inc': 'inc' writes through it (line 1)` | `'inc' writes through parameter 'x' (line 1); 'a' is const` |
+| `cast<T&>` of a const | `Cannot cast const 'a' to int&: cast<int>(a) copies it` | the same, lowercase |
+| `cast<shared_ptr<T>>` of a const, or a const instance stored into a `shared_ptr<T>` | `Cannot share const 'p' as shared_ptr<P>; copy it into a variable first` | the same, lowercase |
+| a const returned from a `-> T&` function | `Cannot return const 'a' from 'f' by reference (declared -> int&); return it by value` | the same, lowercase |
+| a const without an initializer | - | parse error: `const 'x' needs an initializer: const int x = value;` |
+| `engine::add_global` / `add_global_ref` over a const | `Cannot assign to 'LIMIT': it is read-only` (thrown to the host) | - |
+
+The general redefinition rule (docs/const.md 4.3) reports two definitions of one signature in one unit as `'m' is already
+defined with parameters (int&) at 4:5` (a program-scope function: `'f' is already defined at 4:5`), and a function another
+unit already defined as the warning `'f' redefines the function defined in <file>:4`.
 
 ## Array helpers, `??=` and structured bindings
 

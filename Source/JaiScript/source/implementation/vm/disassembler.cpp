@@ -207,6 +207,9 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_return_binary:
 				out << " op=" << ins.a << " shape=" << ins.b;
 				break;
+			case opcode::op_const_guard:
+				out << " node=" << ins.a;
+				break;
 			case opcode::op_error:
 				out << " code=" << ins.a;
 				if (ins.b != k_invalid_u32 && ins.b < ch.messages.size()) {

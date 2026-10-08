@@ -187,6 +187,7 @@ namespace jai::vm {
                             // kernel); pushes the cast result
 
         op_error,           // a=runtime_error_code, b=message index (k_invalid_u32 = none), c=symbol index
+        op_const_guard,     // a=node index: a node whose const verdict the run time decides (detail::const_guard; docs/const.md)
         op_return_convert,  // a=return_stmt::static_return_proof: in-region `return` (a try/catch is
                             // open) converts the stack top against the frame's declared return
                             // type HERE, inside this frame's try records; the op_return after the
@@ -565,6 +566,7 @@ namespace jai::vm {
             case opcode::op_probe_member: return "PROBE_MEMBER";
             case opcode::op_cast: return "CAST";
             case opcode::op_error: return "ERROR";
+            case opcode::op_const_guard: return "CONST_GUARD";
             case opcode::op_parallel_for: return "PARALLEL_FOR";
             case opcode::op_binary_fused_decl: return "BINARY_FUSED_DECL";
             case opcode::op_index_fused: return "INDEX_FUSED";

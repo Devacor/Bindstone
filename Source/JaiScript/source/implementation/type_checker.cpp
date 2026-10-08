@@ -26,6 +26,7 @@
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
+#include <jaiscript/detail/const_rules.hpp>
 #include <jaiscript/detail/lvalue_shape.hpp>
 #include <cctype>
 #include <jaiscript/detail/return_flow.hpp>
@@ -298,10 +299,10 @@ public:
 
     check_report run() {
         collect_top_level();
-        warn_duplicate_top_level_functions();
         scopes_.emplace_back();
         {
             mode_guard unit(mode_stack_, leading_mode(decls_), /*scoped=*/true);
+            warn_duplicate_top_level_functions();   // under the unit's [[warn_mode]] / [[strict_mode]]
             for (const auto& d : decls_) {
                 walk_decl(d.get());
             }
@@ -441,6 +442,7 @@ private:
         size_t line = 0, column = 0;
         const lambda_expr* lambda = nullptr;   // a frame-slot local declared with a lambda literal (its calls' graft declaration)
         const enum_decl* enum_def = nullptr;   // an enum declared in a function or block: local to that scope
+        bool is_const = false;            // const T x / const T& p / a const reference (auto& over a const) (docs/const.md)
     };
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
     std::vector<size_t> namespace_scopes_;   // indices into scopes_ that are namespace bodies (their enums are the namespace's)
@@ -687,6 +689,9 @@ private:
                     break;
                 case node_type::variable_decl:
                     global_var_names_.insert(static_cast<const variable_decl*>(d.get())->name);
+                    if (!collecting_namespace_ && static_cast<const variable_decl*>(d.get())->is_const) {
+                        top_consts_[static_cast<const variable_decl*>(d.get())->name] = static_cast<const variable_decl*>(d.get());
+                    }
                     break;
                 case node_type::extern_decl:
                     global_var_names_.insert(static_cast<const extern_decl*>(d.get())->name);
@@ -714,7 +719,10 @@ private:
                     for (size_t pos = n->name.find("::"); pos != std::string_view::npos; pos = n->name.find("::", pos + 2)) {
                         namespaces_.insert(n->name.substr(0, pos));
                     }
+                    const bool was_namespace = collecting_namespace_;
+                    collecting_namespace_ = true;
                     collect_scope_decls(n->declarations);   // flattened: lenient by design
+                    collecting_namespace_ = was_namespace;
                     break;
                 }
                 default:
@@ -805,24 +813,89 @@ private:
         return fields != own_fields || statics != def->get_static_field_names().size();
     }
 
-    // Duplicate same-name TOP-LEVEL function definitions inside ONE textual parse
-    // unit: the later definition silently replaces the earlier at execution (top
-    // level does not overload), so surface it — warning severity always (Dev
-    // ruling 2026-07). Include/import composition stays silent by construction:
-    // included files parse and check as their own units at execution time, and
-    // this scan never crosses into namespace/class members (those overload
-    // legitimately with their own runtime collision rules).
-    void warn_duplicate_top_level_functions() {
-        std::unordered_map<std::string_view, const function_decl*> first_seen;
-        for (const auto& d : decls_) {
-            if (!d || d->get_type() != node_type::function_decl) { continue; }
-            auto* fn = static_cast<const function_decl*>(d.get());
-            auto [it, inserted] = first_seen.emplace(fn->name, fn);
-            if (!inserted) {
+    // The general redefinition rule (Dev ruling 2026-10-07, docs/const.md 4.3): two definitions of one signature in the same unit
+    // are an error - program-scope functions by name (they do not overload), methods, constructors and namespace functions by
+    // their parameter types; const is not part of a signature. A definition from another unit is a redefinition, the hot-reload
+    // path: it replaces the earlier one, and the checker warns when it sees the earlier definition.
+    static std::string parameter_signature(const function_decl* fn) {
+        std::string out = "(";
+        for (size_t i = 0; i < fn->parameters.size(); ++i) {
+            const parameter& p = fn->parameters[i];
+            if (i) { out += ", "; }
+            out += p.type ? p.type->canonical_name() : std::string("auto");
+            if (p.is_reference && (!p.type || p.type->base_type != script_value_type::jai_reference_type)) { out += "&"; }
+        }
+        return out + ")";
+    }
+
+    // by_name: program-scope functions, which do not overload - a second definition of another signature replaces the first
+    // (a warning), one of the same signature is the redefinition error. An `override` declaration replaces on purpose; a
+    // static and an instance method live in separate tables.
+    void report_redefinitions(const std::vector<const function_decl*>& fns, bool by_name) {
+        std::unordered_map<std::string, const function_decl*> first_seen;
+        std::unordered_map<std::string_view, const function_decl*> first_name;
+        for (const function_decl* fn : fns) {
+            const std::string sig = parameter_signature(fn);
+            const std::string key = std::string(fn->name) + (fn->is_static ? "#static" : "") + sig;
+            auto [it, inserted] = first_seen.emplace(key, fn);
+            if (!inserted && !fn->is_override) {
+                diag(diag_level::error, fn->location,
+                     "'" + std::string(fn->name) + "' is already defined" + (by_name ? std::string() : " with parameters " + sig) + " at " +
+                     std::to_string(it->second->location.line) + ":" + std::to_string(it->second->location.column),
+                     it->second->location.line, it->second->location.column);
+                continue;
+            }
+            if (!by_name) { continue; }
+            auto [nit, fresh] = first_name.emplace(fn->name, fn);
+            if (!fresh && inserted) {
                 diag(diag_level::warning, fn->location,
                      "duplicate definition of function '" + std::string(fn->name) +
                      "' replaces the earlier one (top-level functions do not overload)",
-                     it->second->location.line, it->second->location.column);
+                     nit->second->location.line, nit->second->location.column);
+            }
+        }
+    }
+
+    void report_namespace_redefinitions(const namespace_decl* n) {
+        std::vector<const function_decl*> fns;
+        for (const auto& d : n->declarations) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(d.get())); }
+            else if (d->get_type() == node_type::namespace_decl) { report_namespace_redefinitions(static_cast<const namespace_decl*>(d.get())); }
+            else if (d->get_type() == node_type::class_decl) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
+        }
+        report_redefinitions(fns, /*by_name=*/false);
+    }
+
+    void report_class_redefinitions(const class_decl* cd) {
+        std::vector<const function_decl*> fns;
+        for (const auto& m : cd->members) {
+            if (m.declaration && m.declaration->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(m.declaration.get())); }
+        }
+        report_redefinitions(fns, /*by_name=*/false);
+    }
+
+    void warn_duplicate_top_level_functions() {
+        std::vector<const function_decl*> fns;
+        for (const auto& d : decls_) {
+            if (!d) { continue; }
+            if (d->get_type() == node_type::function_decl) { fns.push_back(static_cast<const function_decl*>(d.get())); }
+            else if (d->get_type() == node_type::class_decl) { report_class_redefinitions(static_cast<const class_decl*>(d.get())); }
+            else if (d->get_type() == node_type::namespace_decl) { report_namespace_redefinitions(static_cast<const namespace_decl*>(d.get())); }
+        }
+        report_redefinitions(fns, /*by_name=*/true);
+        if (!program_functions_) { return; }
+        std::unordered_set<std::string_view> warned;
+        for (const function_decl* fn : fns) {
+            if (!warned.insert(fn->name).second) { continue; }
+            auto pit = program_functions_->find(std::string(fn->name));
+            if (pit == program_functions_->end()) { continue; }
+            for (const auto& [unit, decls] : pit->second) {
+                const function_decl* other = decls.empty() ? nullptr : decls.front().get();
+                if (!other || other->location.filename == fn->location.filename) { continue; }
+                diag(diag_level::warning, fn->location, "'" + std::string(fn->name) + "' redefines the function defined in " +
+                     other->location.filename + ":" + std::to_string(other->location.line));
+                break;
             }
         }
     }
@@ -1317,8 +1390,373 @@ private:
         return false;
     }
 
+    // -------------------------------------------------------------- const (docs/const.md)
+
+    std::unordered_map<std::string_view, const variable_decl*> top_consts_;   // this unit's program-scope consts (a use may precede the declaration)
+    bool collecting_namespace_ = false;
+
+    struct const_hit {
+        uint8_t verdict = const_none;   // const_raises: a write through the const, every step typed; const_runtime: through an untyped step
+        std::string root;               // the const's name
+        size_t line = 0, column = 0;    // its declaration
+        // the path's last value (a call's receiver): its type when typed
+        const type_info* final_ti = nullptr;
+        std::string final_cls;
+        bool final_known = false;
+        bool final_library = false;   // a string, array or map: the builtin library's methods
+    };
+
+    static const type_info* const_referent(const type_info* t) {
+        if (t && t->base_type == script_value_type::jai_reference_type) { return t->type_params.empty() ? nullptr : t->type_params[0].get(); }
+        return t;
+    }
+
+    // the const program-scope declaration another unit of the program makes (one unit, once)
+    const variable_decl* program_const_global(const std::string& name) {
+        if (!program_globals_) { return nullptr; }
+        auto it = program_globals_->find(name);
+        if (it == program_globals_->end() || it->second.size() != 1 || it->second.begin()->second.size() != 1) { return nullptr; }
+        const variable_decl* g = it->second.begin()->second.front().get();
+        return g && g->is_const ? g : nullptr;
+    }
+
+    // Where a write lands, by C++'s top-level rule: through a const name and no handle, a write to the const (docs/const.md 2.2)
+    const_hit const_path(const expression* e, bool value_too = false) {
+        const_hit none;
+        if (!e) { return none; }
+        if (e->get_type() == node_type::ternary_expr) {   // a conditional of lvalues is const when either arm is (C++)
+            auto* t = static_cast<const ternary_expr*>(e);
+            const_hit a = const_path(t->then_expression.get(), value_too), b = const_path(t->else_expression.get(), value_too);
+            if (a.verdict == const_raises) { return a; }
+            if (b.verdict == const_raises) { return b; }
+            return a.verdict ? a : b;
+        }
+        std::vector<const expression*> steps;
+        const expression* base = e;
+        while (base) {
+            const node_type k = base->get_type();
+            if (k == node_type::member_expr && !static_cast<const member_expr*>(base)->is_static) {
+                steps.push_back(base);
+                base = static_cast<const member_expr*>(base)->object.get();
+            } else if (k == node_type::binary_expr && static_cast<const binary_expr*>(base)->op.type == token_type::left_bracket) {
+                steps.push_back(base);
+                base = static_cast<const binary_expr*>(base)->left.get();
+            } else if (k == node_type::cast_expr && static_cast<const cast_expr*>(base)->implicit_ref) {
+                base = static_cast<const cast_expr*>(base)->operand.get();
+            } else if (k == node_type::ternary_expr) {
+                return const_path(base, true).verdict ? const_hit{const_runtime, const_path(base, true).root} : none;
+            } else {
+                break;
+            }
+        }
+        if (!base) { return none; }
+        const_hit hit;
+        const type_info* cur = nullptr;
+        std::string cur_cls;
+        bool known = false, handle = false, is_const = false, library = false;
+        auto from_type = [&](const type_info* t) {
+            t = const_referent(t);
+            cur = t;
+            known = t && t->base_type != script_value_type::jai_any_type;
+            handle = const_handle_type(t);
+            library = t && (t->base_type == script_value_type::jai_array_type || t->base_type == script_value_type::jai_map_type ||
+                            t->base_type == script_value_type::jai_string_type || t->base_type == script_value_type::jai_utf8_string_type);
+            if (t && t->base_type == script_value_type::jai_object_type) { cur_cls = t->type_name; }
+        };
+        if (base->get_type() == node_type::identifier_expr) {
+            auto* id = static_cast<const identifier_expr*>(base);
+            hit.root = std::string(id->name);
+            if (var_entry* v = find_named(id)) {
+                is_const = v->is_const;
+                hit.line = v->line; hit.column = v->column;
+                from_type(v->declared ? v->declared : v->type.ti);
+                if (!v->declared && !v->type.ti && !v->dynamic) {
+                    known = !v->type.is_unknown();
+                    if (v->type.kind == ctype::object_k) { cur_cls = std::string(v->type.cls); }
+                    library = v->type.kind == ctype::array_k || v->type.kind == ctype::map_k || v->type.kind == ctype::string_k || v->type.kind == ctype::utf8_k;
+                }
+                if (v->is_handle) { handle = true; known = true; }
+                if (v->dynamic && !v->is_reference) { known = false; }
+                if (v->map_pair) { known = true; handle = false; }   // a range-for pair is a value: its halves are the pair's
+            } else if (class_ctx_ && !id->global_qualified && lookup_member(class_ctx_name_, id->name, false).found) {
+                member_hit h = lookup_member(class_ctx_name_, id->name, false);
+                if (global_tier_name(id->name) || !h.field) { return none; }
+                is_const = h.field->is_const;
+                if (!h.foreign) { hit.line = h.field->location.line; hit.column = h.field->location.column; }
+                from_type(h.field->type.get());
+            } else if (auto tc = top_consts_.find(id->name); tc != top_consts_.end() && !id->global_qualified) {
+                is_const = true;
+                hit.line = tc->second->location.line; hit.column = tc->second->location.column;
+                from_type(tc->second->type.get());
+            } else if (const variable_decl* g = program_const_global(std::string(id->name))) {
+                is_const = true;
+                from_type(g->type.get());
+            } else if (eng_.is_const_global(std::string(id->name))) {
+                is_const = true;
+                known = false;
+            } else {
+                return none;
+            }
+        } else if (base->get_type() == node_type::member_expr) {   // C::s, ns::x
+            auto* m = static_cast<const member_expr*>(base);
+            hit.root = detail::const_spelled(m);
+            std::string qualified;
+            if (const variable_decl* nv = namespace_variable(m, &qualified)) {
+                is_const = nv->is_const;
+                hit.line = nv->location.line; hit.column = nv->location.column;
+                from_type(nv->type.get());
+            } else if (m->object && m->object->get_type() == node_type::identifier_expr) {
+                const std::string_view cls = static_cast<const identifier_expr*>(m->object.get())->name;
+                member_hit h = lookup_member(cls, m->member, true);
+                if (h.found && h.field) {
+                    is_const = h.field->is_const;
+                    if (!h.foreign) { hit.line = h.field->location.line; hit.column = h.field->location.column; }
+                    from_type(h.field->type.get());
+                } else if (auto def = engine_class(cls); def && def->is_const_static(eng_.symbolize(m->member))) {
+                    is_const = true;
+                    known = false;
+                }
+            }
+        } else {
+            return none;
+        }
+        // a class constant reached through an instance (`obj.MAX = 1`, `this.MAX`) is the constant itself
+        if (!is_const && !steps.empty() && steps.front()->get_type() == node_type::member_expr && !value_too) {
+            auto* last = static_cast<const member_expr*>(steps.front());
+            std::string owner;
+            if (last->object && last->object->get_type() == node_type::this_expr && class_ctx_) { owner = std::string(class_ctx_name_); }
+            else if (steps.size() == 1) { owner = cur_cls; }
+            if (!owner.empty()) {
+                member_hit h = lookup_member(owner, last->member, false);
+                if (h.found && h.field && h.field->is_static && h.field->is_const) {
+                    hit.root = std::string(last->member);
+                    hit.verdict = const_raises;
+                    if (!h.foreign) { hit.line = h.field->location.line; hit.column = h.field->location.column; }
+                    return hit;
+                }
+            }
+        }
+        if (!is_const) {
+            if (!steps.empty() && steps.front()->get_type() == node_type::member_expr && base->get_type() == node_type::this_expr && !value_too) {
+                auto* last = static_cast<const member_expr*>(steps.front());
+                if (steps.size() == 1 && class_ctx_) {
+                    member_hit h = lookup_member(class_ctx_name_, last->member, false);
+                    if (h.found && h.field && h.field->is_static && h.field->is_const) {
+                        hit.root = std::string(last->member);
+                        hit.verdict = const_raises;
+                        return hit;
+                    }
+                }
+            }
+            return none;
+        }
+        if (steps.empty() && !value_too) { hit.verdict = const_raises; return hit; }   // the const itself
+        uint8_t verdict = const_raises;
+        for (size_t i = steps.size(); i-- > 0;) {
+            const bool last = i == 0 && !value_too;
+            if (known && handle) { return none; }
+            if (!known) { verdict = const_runtime; break; }
+            if (last) { break; }
+            const expression* step = steps[i];
+            if (step->get_type() == node_type::member_expr) {
+                auto* m = static_cast<const member_expr*>(step);
+                const std::string owner = cur_cls;
+                cur = nullptr; cur_cls.clear(); known = false; handle = false; library = false;
+                if (owner.empty()) { continue; }
+                member_hit h = lookup_member(owner, m->member, false);
+                if (h.found && h.field) {
+                    if (h.field->is_static && h.field->is_const) { hit.root = std::string(m->member); hit.verdict = const_raises; return hit; }
+                    from_type(h.field->type.get());
+                }
+            } else {
+                const type_info* el = nullptr;
+                if (cur && cur->base_type == script_value_type::jai_array_type) { el = cur->element_type().get(); }
+                else if (cur && cur->base_type == script_value_type::jai_map_type) { el = cur->value_type().get(); }
+                else if (cur && (cur->base_type == script_value_type::jai_string_type || cur->base_type == script_value_type::jai_utf8_string_type)) {
+                    cur = nullptr; cur_cls.clear(); known = true; handle = false; library = false;   // a character: no further step
+                    continue;
+                }
+                cur = nullptr; cur_cls.clear(); known = false; handle = false; library = false;
+                from_type(el);
+            }
+        }
+        if (value_too && verdict == const_raises) {
+            if (known && handle) { return none; }
+            if (!known) { verdict = const_runtime; }
+        }
+        hit.verdict = verdict;
+        hit.final_ti = cur;
+        hit.final_cls = cur_cls;
+        hit.final_known = known;
+        hit.final_library = library;
+        return hit;
+    }
+
+    void stamp_const(const_site& site, uint8_t verdict, const std::function<std::string()>& text) {
+        if (verdict == const_none) {
+            if (site.verdict != const_none) { site = const_site{}; }
+            return;
+        }
+        site.verdict = verdict;
+        site.text = std::make_shared<const std::string>(text());
+        site.text_id = eng_.symbolize(*site.text);   // the run time raises "{0}" with it: the text outlives every error object
+    }
+
+    // a store, a compound store or ++/-- through `target`
+    void check_const_store(const_site& site, const expression* target, const source_location& at) {
+        const const_hit h = const_path(target);
+        stamp_const(site, h.verdict, [&] { return detail::const_store_text(target, h.root); });
+        if (h.verdict == const_raises) { diag(diag_level::error, at, detail::const_store_diagnostic(target, h.root), h.line, h.column); }
+    }
+
+    // the checker's receiver-writes view: this unit's and the program's classes, then the engine's
+    detail::receiver_view checker_receiver_view() {
+        detail::receiver_view v;
+        v.field_type = [this](std::string_view cls, std::string_view field, bool& is_field) -> const type_info* {
+            member_hit h = lookup_member(cls, field, false);
+            is_field = h.found && !h.methods;
+            return h.field ? h.field->type.get() : nullptr;
+        };
+        v.methods = [this](std::string_view cls, std::string_view name, std::vector<const function_decl*>& out) -> bool {
+            member_hit h = lookup_member(cls, name, false);
+            if (!h.found) { return h.certain && !h.unresolved; }
+            if (!h.methods) { return false; }
+            for (const auto* f : *h.methods) { out.push_back(f); }
+            return true;
+        };
+        v.functions = [this](const identifier_expr& id, std::vector<ref_write_callee>& out) {
+            if (auto it = functions_.find(id.name); it != functions_.end()) {
+                if (it->second.size() != 1) { return false; }
+                out.push_back(ref_write_callee_of(it->second.front()));
+                return true;
+            }
+            return resolve_global_ref_write_callee(eng_, id, out);
+        };
+        return v;
+    }
+
+    // a method call on a const-rooted receiver: an error when the method writes its receiver (docs/const.md 3.3)
+    void check_const_call(call_expr* c) {
+        if (!c->callee || c->callee->get_type() != node_type::member_expr) { stamp_const(c->const_check, const_none, {}); return; }
+        auto* m = static_cast<member_expr*>(c->callee.get());
+        if (m->is_static) { stamp_const(c->const_check, const_none, {}); return; }
+        const const_hit h = const_path(m->object.get(), /*value_too=*/true);
+        if (!h.verdict) { stamp_const(c->const_check, const_none, {}); return; }
+        uint8_t verdict = h.verdict;
+        bool builtin = false;
+        size_t line = 0;
+        if (h.final_known && h.final_library) {
+            builtin = true;
+            if (ref_write_reading_method(m->member)) { verdict = const_none; }
+        } else if (h.final_known && !h.final_cls.empty()) {
+            detail::receiver_write_analysis analysis(checker_receiver_view());
+            detail::receiver_write w = analysis.analyze_methods(h.final_cls, m->member);
+            if (!w.writes) {
+                // an override in a derived class may write (a by-value slot can hold a subclass): the run time decides then
+                bool any = false;
+                for (const auto* f : overrides_of(h.final_cls, m->member)) {
+                    if (analysis.analyze(f, h.final_cls).writes) { any = true; }
+                }
+                verdict = any ? const_runtime : const_none;
+            } else {
+                line = w.line;
+                if (!w.certain) { verdict = const_runtime; }
+            }
+        } else if (h.final_known) {
+            verdict = const_none;   // a primitive, a math value: its methods return values
+        } else {
+            verdict = const_runtime;
+        }
+        stamp_const(c->const_check, verdict, [&] { return detail::const_call_text(m->object.get(), h.root, m->member, builtin, line); });
+        if (verdict == const_raises) {
+            diag(diag_level::error, c->location, detail::const_lowercase(detail::const_call_text(m->object.get(), h.root, m->member, builtin, line)), h.line, h.column);
+        }
+    }
+
+    // a T& / var& / shared_ptr<T> declaration bound to a const (an auto& or a const T& takes it as a const reference)
+    void check_const_bind(variable_decl* decl, var_entry& entry) {
+        if (decl->is_const) { entry.is_const = true; stamp_const(decl->const_check, const_none, {}); return; }
+        if (!decl->initializer || !decl->type) { stamp_const(decl->const_check, const_none, {}); return; }
+        const bool reference = decl->type->base_type == script_value_type::jai_reference_type;
+        const bool handle = handle_type(decl->type.get());
+        if (!reference && !handle) { stamp_const(decl->const_check, const_none, {}); return; }
+        const const_hit h = const_path(decl->initializer.get(), /*value_too=*/handle);
+        if (!h.verdict) { stamp_const(decl->const_check, const_none, {}); return; }
+        const type_info* referent = reference ? const_referent(decl->type.get()) : nullptr;
+        if (reference && !referent) {   // auto& deduces const T& (C++)
+            entry.is_const = h.verdict == const_raises;
+            stamp_const(decl->const_check, const_none, {});
+            return;
+        }
+        if (handle && h.final_known && h.final_cls.empty()) { stamp_const(decl->const_check, const_none, {}); return; }
+        const std::string declared = decl->type->canonical_name();
+        auto text = [&] {
+            return reference ? detail::const_bind_text(decl->name, declared, decl->initializer.get(), h.root, false)
+                             : detail::const_share_text(decl->initializer.get(), h.root, declared);
+        };
+        stamp_const(decl->const_check, h.verdict, text);
+        if (h.verdict == const_raises) { diag(diag_level::error, decl->location, detail::const_lowercase(text()), h.line, h.column); }
+    }
+
+    // cast<T&>(c) and cast<shared_ptr<T>>(c) name the const as writable (no const_cast)
+    void check_const_cast(cast_expr* c) {
+        if (c->implicit_ref || !(c->by_reference || handle_type(c->target.get()))) { stamp_const(c->const_check, const_none, {}); return; }
+        const const_hit h = const_path(c->operand.get(), handle_type(c->target.get()));
+        if (!h.verdict || (handle_type(c->target.get()) && h.final_known && h.final_cls.empty())) { stamp_const(c->const_check, const_none, {}); return; }
+        const std::string target = c->target ? c->target->canonical_name() + (c->by_reference && c->target->base_type != script_value_type::jai_reference_type ? "&" : "") : std::string("T&");
+        auto text = [&] { return handle_type(c->target.get()) ? detail::const_share_text(c->operand.get(), h.root, target) : detail::const_cast_text(c->operand.get(), h.root, target); };
+        stamp_const(c->const_check, h.verdict, text);
+        if (h.verdict == const_raises) { diag(diag_level::error, c->location, detail::const_lowercase(text()), h.line, h.column); }
+    }
+
+    // a const returned by reference
+    void check_const_return(return_stmt* r) {
+        if (!r->value || fn_stack_.empty()) { stamp_const(r->const_check, const_none, {}); return; }
+        const fn_ctx& fn = fn_stack_.back();
+        const bool by_reference = r->binds_reference || (fn.ret && fn.ret->base_type == script_value_type::jai_reference_type);
+        if (!by_reference) { stamp_const(r->const_check, const_none, {}); return; }
+        const const_hit h = const_path(r->value.get());
+        const std::string declared = fn.ret ? fn.ret->canonical_name() : std::string("auto&");
+        auto text = [&] { return detail::const_return_text(r->value.get(), h.root, fn.name, declared); };
+        stamp_const(r->const_check, h.verdict, text);
+        if (h.verdict == const_raises) { diag(diag_level::error, r->location, detail::const_lowercase(text()), h.line, h.column); }
+    }
+
+    // a const passed to a reference parameter the callee writes through (a const T& parameter takes it)
+    void check_const_arguments(call_expr* c, const std::vector<const function_decl*>* ov, std::string_view ov_class, bool free_callee,
+                               const std::vector<ctype>& args) {
+        if (c->const_check.verdict != const_none || !ov) { return; }
+        for (size_t i = 0; i < c->arguments.size() && i < args.size(); ++i) {
+            const const_hit h = const_path(c->arguments[i].get());
+            if (h.verdict != const_raises) { continue; }
+            std::vector<const function_decl*> by_ref;
+            bool all_ref = false;
+            for (const auto* fn : *ov) {
+                if (!script_fn_viable(fn, args, !free_callee && arity_rivals(*ov, args.size()))) { continue; }
+                all_ref = !fn->is_coroutine && i < fn->parameters.size() && fn->parameters[i].is_reference && !fn->parameters[i].is_const;
+                if (!all_ref) { break; }
+                by_ref.push_back(fn);
+            }
+            if (!all_ref || by_ref.empty()) { continue; }
+            if (!ov_class.empty()) {
+                for (const auto* fn : overrides_of(ov_class, by_ref.front()->name)) { by_ref.push_back(fn); }
+            }
+            for (const auto* fn : by_ref) {
+                if (i >= fn->parameters.size() || !fn->parameters[i].is_reference || fn->parameters[i].is_const || fn->is_coroutine) { continue; }
+                const ref_param_write w = ref_writes(fn, i);
+                if (!w.writes) { continue; }
+                const std::string text = detail::const_argument_text(c->arguments[i].get(), h.root, fn->parameters[i].name, fn->name, w.line);
+                stamp_const(c->const_check, const_raises, [&] { return text; });
+                diag(diag_level::error, c->arguments[i]->location, "'" + std::string(fn->name) + "' writes through parameter '" + fn->parameters[i].name +
+                     "' (line " + std::to_string(w.line) + "); '" + h.root + "' is const", h.line, h.column);
+                return;
+            }
+        }
+    }
+
     // ++/-- on a bare identifier (member targets desugar to += 1 and take the assignment rule)
     void check_incdec_target(unary_expr* u) {
+        check_const_store(u->const_check, u->operand.get(), u->location);
         if (!class_ctx_ || u->operand->get_type() != node_type::identifier_expr) { return; }
         auto* id = static_cast<identifier_expr*>(u->operand.get());
         if (find_local(id->name)) { return; }
@@ -3006,6 +3444,7 @@ private:
 					return operand_t;
 				}
 				ctype operand_t = infer(c->operand.get());
+				check_const_cast(c);
 				ctype t = ctype_from_type_info(c->target.get());
 				if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_globals_.count(std::string(t.cls))) {
 					diag(diag_level::error, c->location, "unknown type in cast: '" + std::string(t.cls) + "'");
@@ -3243,6 +3682,8 @@ private:
             auto it = functions_.find(static_cast<identifier_expr*>(c->callee.get())->name);
             free_callee = it != functions_.end() && ov == &it->second;
         }
+        check_const_call(c);
+        check_const_arguments(c, ov, ov_class, free_callee, args);
         // a free function another unit of the program declares (one unit, once): the inliner's decl and the argument proofs; the
         // unit's own diagnostics keep their view (ov stays the unit's)
         std::vector<const function_decl*> program_ov;
@@ -3336,7 +3777,7 @@ private:
                     for (const auto* fn : overrides_of(ov_class, by_ref.front()->name)) { by_ref.push_back(fn); }
                 }
                 for (const auto* fn : by_ref) {
-                    if (i >= fn->parameters.size() || !fn->parameters[i].is_reference || fn->is_coroutine) { continue; }
+                    if (i >= fn->parameters.size() || !fn->parameters[i].is_reference || fn->parameters[i].is_const || fn->is_coroutine) { continue; }
                     const ref_param_write w = ref_writes(fn, i);
                     if (w.writes) {
                         diag(diag_level::error, c->arguments[i]->location, "'" + std::string(fn->name) + "' writes through parameter '" +
@@ -3538,6 +3979,7 @@ private:
 
     ctype infer_assignment(assignment_expr* a) {
         uint8_t store_proof = proof_none;
+        check_const_store(a->const_check, a->target.get(), a->location);
         ctype t = infer_assignment_impl(a, store_proof);
         stamp(a->static_store_proof, store_proof, proof_none);
         if (store_proof != proof_none && stamping()) { ++counts_.stores; }
@@ -3894,8 +4336,22 @@ private:
                     diag(diag_level::error, f->location, "cannot bind '" + ctype_name(elem) + "' to '" + std::string(f->variable_name) +
                          "' declared '" + f->element_type->canonical_name() + "&'");
                 }
+                // over the elements of a const: auto& binds const references (C++ deduction), T& / var& are errors
+                bool loop_const = f->is_const;
+                {
+                    const const_hit h = f->is_reference && !f->is_const ? const_path(f->container.get(), /*value_too=*/true) : const_hit{};
+                    const bool typed_ref = f->is_reference && !f->auto_spelled && f->element_type && f->variable_name != "entry#";
+                    if (h.verdict && !typed_ref) { loop_const = loop_const || h.verdict == const_raises; }
+                    const uint8_t verdict = typed_ref ? h.verdict : uint8_t(const_none);
+                    const std::string declared = f->element_type ? f->element_type->canonical_name() + "&" : std::string("var&");
+                    stamp_const(f->const_check, verdict, [&] { return detail::const_bind_text(f->variable_name, declared, f->container.get(), h.root, true); });
+                    if (verdict == const_raises) {
+                        diag(diag_level::error, f->location, detail::const_lowercase(detail::const_bind_text(f->variable_name, declared, f->container.get(), h.root, true)), h.line, h.column);
+                    }
+                }
                 scopes_.emplace_back();
                 var_entry entry;
+                entry.is_const = loop_const;
                 entry.type = ctype_from_type_info(f->element_type.get());
                 entry.dynamic = !f->element_type || f->element_type->base_type == script_value_type::jai_any_type ||
                                 f->is_reference;
@@ -3917,6 +4373,7 @@ private:
                 infer(f->container.get());
                 scopes_.emplace_back();
                 var_entry entry;
+                entry.is_const = f->loop_param.is_const;
                 entry.type = ctype_from_type_info(f->loop_param.type.get());
                 entry.dynamic = true;   // by-ref element: dynamic like ref range-for
                 entry.is_reference = f->loop_param.is_reference;
@@ -3928,6 +4385,7 @@ private:
                 scopes_.back().emplace(std::string_view(f->loop_param.name), std::move(entry));
                 for (const auto& extra : f->extra_params) {
                     var_entry more;
+                    more.is_const = extra.is_const;
                     more.type = ctype_from_type_info(extra.type.get());
                     more.dynamic = !extra.type || extra.type->base_type == script_value_type::jai_any_type || extra.is_reference;
                     more.is_reference = extra.is_reference;
@@ -3991,6 +4449,7 @@ private:
     void check_return(return_stmt* r) {
         uint8_t proof = proof_none;
         check_return_impl(r, proof);
+        check_const_return(r);
         stamp(r->static_return_proof, proof, proof_none);
         if (proof != proof_none && stamping()) { ++counts_.returns; }
     }
@@ -4095,6 +4554,8 @@ private:
                 for (const auto& [name, _] : dd->names) {
                     var_entry entry;
                     entry.dynamic = true;
+                    entry.is_const = dd->is_const;
+                    entry.line = dd->location.line; entry.column = dd->location.column;
                     warn_shadow("local", name, dd->location);
                     scopes_.back().emplace(name, std::move(entry));
                 }
@@ -4105,6 +4566,7 @@ private:
                 var_entry entry;
                 entry.line = x->location.line;
                 entry.column = x->location.column;
+                entry.is_const = x->is_const;
                 if (x->is_function) {
                     entry.type = ctype::make(ctype::function_k);
                     entry.dynamic = true;
@@ -4237,6 +4699,7 @@ private:
 				entry.is_handle = true;
 				entry.display = "shared_ptr<" + ctype_name(init) + ">";
 			}
+			check_const_bind(decl, entry);
 			warn_shadow("local", decl->name, decl->location);
 			scopes_.back().emplace(decl->name, std::move(entry));
 			stamp(decl->static_init_proof, proof_none, proof_none);
@@ -4319,6 +4782,7 @@ private:
 		if (has_init && decl->slot_index != SIZE_MAX && decl->initializer->get_type() == node_type::lambda_expr && !is_reference_decl) {
 			entry.lambda = static_cast<const lambda_expr*>(decl->initializer.get());
 		}
+		check_const_bind(decl, entry);
 		warn_shadow("local", decl->name, decl->location);
 		scopes_.back().emplace(decl->name, std::move(entry));
 	}
@@ -4379,6 +4843,7 @@ private:
             entry.display = p.type ? p.type->canonical_name() : "auto";
             entry.line = fn_loc.line;
             entry.column = fn_loc.column;
+            entry.is_const = p.is_const;
             scopes_.back().emplace(std::string_view(p.name), std::move(entry));
         }
     }

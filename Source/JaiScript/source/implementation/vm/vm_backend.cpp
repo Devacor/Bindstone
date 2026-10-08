@@ -39,6 +39,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp>
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (interp parity)
+#include <jaiscript/detail/const_rules.hpp>   // const guards (interp parity)
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (interp parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the interpreter)
@@ -2187,6 +2188,8 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 		frame_slot_set(f, slot_index, std::move(value));
 	} else if (!environment_->define_variable(name_id, std::move(value))) [[unlikely]] {
 		return raise_from(detail::inline_redefinition(*symbolizer_, name_id, decl));
+	} else if (decl && environment_->is_program_scope()) {
+		engine_->mark_const_cell(environment_->get_env_var_ptr(name_id), decl->is_const);   // interp parity: visit_variable_decl
 	}
 	return {};
 }
@@ -12601,6 +12604,16 @@ bool vm_backend::math_alias_holds(frame& f, const chunk::cell_loop::math_alias_s
 	return v && v->raw_storage_index() == script_value::TYPEID_FUNCTION && &v->unchecked_as_function() == math_alias_rows_[ms.fn].identity;
 }
 
+// a node the checker stamped const_runtime (docs/const.md): KEEP BYTE-PARALLEL with interpreter::const_guard_at
+op_status vm_backend::exec_const_guard(frame& f, const vm_instruction& ins) {
+	const ast_node* node = f.code->nodes[ins.a].get();
+	const const_site* site = detail::const_site_of(node);
+	if (!site) { return op_status::ok; }
+	auto guarded = detail::const_guard(node, *site, caller_view(&f), environment_.get(), engine_, symbolizer_);
+	if (!guarded) { return raise_from(guarded); }
+	return op_status::ok;
+}
+
 // the program-scope names a graft's argument proofs read still hold the kinds the checker proved them (their declaring unit may have run
 // again with another type): re-checked once per definition epoch; a name that resolves to anything else keeps the call
 bool vm_backend::inline_globals_hold(const chunk::inline_site& site) {
@@ -17442,7 +17455,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 					reflect_field_order_static.push_back(field_id);
 				}
 				// A reload preserves a static's runtime value; only NEW statics run their initializer
-				bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id);
+				bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (docs/const.md)
 
 				if (initializer_ast && !preserve_existing) {
 					auto init_result = eval_expression(initializer_ast, nullptr);
@@ -17474,6 +17487,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 				if (field_id != 0 && !preserve_existing) {
 					class_def->add_static_field(field_id, default_val);
 				}
+				if (field_id != 0) { class_def->mark_const_static(field_id, var_decl->is_const); }
 			} else {
 				if (field_id != 0) {
 					reflect_field_order_instance.push_back(field_id);
@@ -19544,6 +19558,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_ref_return_bind: return exec_ref_return_bind(f, ins);
 		case opcode::op_ref_return_lvalue: return exec_ref_return_lvalue(f, ins);
 		case opcode::op_ref_target_store: return exec_ref_target_store(f, ins);
+		case opcode::op_const_guard: return exec_const_guard(f, ins);
 		case opcode::op_index_store: return exec_index_store(f, ins);
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
 		case opcode::op_math: return exec_math(f, ins);
@@ -20959,6 +20974,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_return_convert:
 			case opcode::op_capture_arg:
 			case opcode::op_take_temp:
+			case opcode::op_const_guard:
 				VM_TRY_OP(exec_extended(f, ins));
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or

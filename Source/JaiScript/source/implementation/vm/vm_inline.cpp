@@ -5,6 +5,7 @@
 // to the caller's variable, the body with every return a store into the result and a jump to the join; behind the join's jump the
 // fallback, the real call declared into the same temp), and the statement runs once with the call and the spilled operands
 // replaced by their temps. The caller's AST is never changed: the interpreter walks it, and the fallback compiles it.
+#include <jaiscript/detail/const_rules.hpp>
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -833,6 +834,7 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 // intrinsic is no call. A node the graft's clone cannot hold ends the scan.
 void call_events(const expression_ptr& e, std::vector<std::shared_ptr<call_expr>>& out, bool& unsupported) {
 	if (!e || unsupported) return;
+	if (detail::const_site_of(e.get())) { unsupported = true; return; }   // a const guard runs where the node is reached (docs/const.md)
 	switch (e->get_type()) {
 	case node_type::literal_expr: case node_type::identifier_expr: return;
 	case node_type::binary_expr: { auto* b = static_cast<const binary_expr*>(e.get()); call_events(b->left, out, unsupported); call_events(b->right, out, unsupported); return; }
@@ -952,6 +954,7 @@ bool vm_compiler::graft_may_destroy(const function_decl* fn) const {
 const char* vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame) const {
 	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
 	if (!fn || !fn->body) return "a callee without a body";
+	if (call->const_check) return "a call a const rule guards";
 	if (fn->is_coroutine || fn->is_static) return "a coroutine or a static callee";
 	if (callable_.coroutine_body && body_has_loop(fn->body.get())) return "a loop the coroutine's frame would run without its block";
 	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";

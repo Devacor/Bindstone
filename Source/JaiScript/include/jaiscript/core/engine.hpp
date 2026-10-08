@@ -923,6 +923,11 @@ namespace jai {
         // Variable access
         script_value get_variable(const std::string& name) const;
         bool has_variable(const std::string& name) const;
+        // const program-scope and namespace cells (docs/const.md): marked by their declaration, consulted by the checker and the
+        // host's writes (add_global / add_global_ref refuse a const)
+        void mark_const_cell(const script_value* cell, bool is_const);
+        bool const_cell(const script_value* cell) const;
+        bool is_const_global(const std::string& name) const;
         bool has_function(const std::string& name) const;
         bool is_type_name(const std::string& name) const;
         

@@ -8,8 +8,14 @@ namespace jai::detail {
 // a generic parse error (docs/diagnostics.md "Foreign keywords"). Each is recognized only where it would otherwise fail
 // to parse, so a script that uses one of these words as a name keeps working.
 enum class foreign_word : unsigned char {
-	const_declaration,
-	const_parameter,
+	const_method,
+	const_return,
+	const_type_argument,
+	pointer_to_const,
+	const_cast_call,
+	constexpr_declaration,
+	mutable_field,
+	const_misplaced,
 	virtual_method,
 	delete_statement,
 	new_array,
@@ -26,10 +32,22 @@ enum class foreign_word : unsigned char {
 
 inline constexpr std::string_view foreign_word_text(foreign_word w) noexcept {
 	switch (w) {
-		case foreign_word::const_declaration:
-			return "JaiScript has no 'const': declare the variable with its type or auto (a reference parameter the function never writes through is already const)";
-		case foreign_word::const_parameter:
-			return "JaiScript has no 'const': a reference parameter the function never writes through is already const, so write T& name";
+		case foreign_word::const_method:
+			return "JaiScript has no const methods: a method that writes no field already works on a const object";
+		case foreign_word::const_return:
+			return "JaiScript has no const return types: return by value (the caller gets a copy) or by T&";
+		case foreign_word::const_type_argument:
+			return "const qualifies a declaration, not a type: write const array<int> xs";
+		case foreign_word::pointer_to_const:
+			return "JaiScript has no pointer to const: const shared_ptr<T> keeps the handle from rebinding, and the object stays writable";
+		case foreign_word::const_cast_call:
+			return "JaiScript has no 'const_cast': a const stays const; copy it (auto x = c) for a writable value";
+		case foreign_word::constexpr_declaration:
+			return "JaiScript has no 'constexpr': a const whose initializer is a constant expression is folded at compile time: const int N = 4;";
+		case foreign_word::mutable_field:
+			return "JaiScript has no 'mutable' fields: every field of a const object is read-only; keep state that must change behind a shared_ptr field";
+		case foreign_word::const_misplaced:
+			return "'const' starts a declaration: const int x = 5;";
 		case foreign_word::virtual_method:
 			return "JaiScript has no 'virtual': every method dispatches dynamically; mark the subclass's method 'override'";
 		case foreign_word::delete_statement:

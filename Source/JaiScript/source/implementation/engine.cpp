@@ -1565,6 +1565,7 @@ struct engine::implementation {
     // cache initialized to epoch 0 always misses its first query.
     uint64_t class_definition_epoch_ = 1;
     uint64_t definition_epoch_ = 1;
+    std::unordered_set<const script_value*> const_cells_;
     // Shadowing units (environment::define_variable): a file by its lexically normal path, a
     // literal by its content, numbered at first execution; 0 is the host
     std::unordered_map<std::string, uint32_t> unit_index_;
@@ -3057,6 +3058,7 @@ size_t engine::jaibite_cache_write_failures() const {
 }
 
 void engine::add_global(const std::string& name, script_value value, bool is_serializable) {
+    if (is_const_global(name)) { throw runtime_error("Cannot assign to '" + name + "': it is read-only"); }   // docs/const.md
     ++impl->check_surface_epoch_;   // the static checker can see globals
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
@@ -3314,6 +3316,21 @@ script_value engine::get_variable(const std::string& name) const {
 bool engine::has_variable(const std::string& name) const {
     // Delegate to backend to ensure consistency
     return backend()->has_variable(name);
+}
+
+void engine::mark_const_cell(const script_value* cell, bool is_const) {
+    if (!cell) { return; }
+    if (is_const) { impl->const_cells_.insert(cell); } else { impl->const_cells_.erase(cell); }
+}
+
+bool engine::const_cell(const script_value* cell) const {
+    return cell && !impl->const_cells_.empty() && impl->const_cells_.count(cell) != 0;
+}
+
+bool engine::is_const_global(const std::string& name) const {
+    if (impl->const_cells_.empty()) { return false; }
+    auto env = get_global_environment();
+    return env && const_cell(env->get_value_ptr(symbolize(name)));
 }
 
 bool engine::has_function(const std::string& name) const {

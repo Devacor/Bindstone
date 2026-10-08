@@ -524,9 +524,13 @@ public:
             using detail::foreign_word_text;
             struct sample { const char* source; foreign_word word; };
             const sample samples[] = {
-                {"const int x = 5;", foreign_word::const_declaration},
-                {"const x = 5;", foreign_word::const_declaration},
-                {"function f(const int& x) { return x; }", foreign_word::const_parameter},
+                {"class A { int size() const { return 1; } }", foreign_word::const_method},
+                {"const int f() { return 1; }", foreign_word::const_return},
+                {"array<const int> a = [];", foreign_word::const_type_argument},
+                {"shared_ptr<const int> p;", foreign_word::pointer_to_const},
+                {"var x = 1; var y = const_cast<int&>(x);", foreign_word::const_cast_call},
+                {"constexpr int N = 4;", foreign_word::constexpr_declaration},
+                {"class A { mutable int cache = 0; }", foreign_word::mutable_field},
                 {"class A { virtual void f() { } }", foreign_word::virtual_method},
                 {"var x = 1; delete x;", foreign_word::delete_statement},
                 {"var a = new int[5];", foreign_word::new_array},

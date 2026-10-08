@@ -943,9 +943,12 @@ public:
 
         test("class_typed_return_first_redefinition_last_wins", [this]() {
             auto engine = make_engine();
-            auto r = engine->execute(R"(
+            // one signature defined twice in one unit is an error (docs/const.md 4.3); another unit's definition replaces it
+            engine->execute(R"(
                 class P { int x = 1; }
                 P mk() { return P(); }
+            )");
+            auto r = engine->execute(R"(
                 P mk() { var p = P(); p.x = 2; return p; }
                 mk().x;
             )");
@@ -1177,8 +1180,18 @@ public:
             auto engine = make_engine();
             engine->static_checking(jai::check_mode::strict);
             check_eq(int64_t(2), engine->execute(
-                "function f(a) { return 1; } function f(a) { return 2; } f(0);").as_int());
+                "function f(a) { return 1; } function f(a, b) { return 2; } f(0, 0);").as_int());
             check_eq(size_t(1), duplicate_warnings(*engine));
+        });
+
+        test("same_signature_twice_in_one_unit_is_an_error", [&, this]() {
+            // the general redefinition rule (Dev ruling 2026-10-07, docs/const.md 4.3)
+            auto engine = make_engine();
+            std::string err;
+            try { engine->execute("function f(a) { return 1; } function f(a) { return 2; } f(0);"); } catch (const std::exception& ex) { err = ex.what(); }
+            check_true(err.find("'f' is already defined at 1:10") != std::string::npos, err);
+            engine->execute("function g(a) { return 1; }");
+            check_eq(int64_t(2), engine->execute("function g(a) { return 2; } g(0);").as_int());   // another unit: a redefinition
         });
 
         // ---- anonymous function expressions: `function (params) {...}` ----

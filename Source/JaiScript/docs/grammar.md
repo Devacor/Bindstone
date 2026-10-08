@@ -218,6 +218,10 @@ operatorName = "operator" ("=" | "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" |
                           | "[]" | "()" | "<" | ">" | "<=" | ">=" | "==" | "!=" | "<=>")
 
 fieldDeclaration = "static"? type IDENTIFIER ("=" expression)? ";"
+                 | classConstant
+
+// a class-level constant (docs/const.md): static, one value for every instance, initialized where it is declared
+classConstant = ("const" "static"? | "static" "const") (type IDENTIFIER | IDENTIFIER) "=" expression ";"
 
 // Function declarations. `type` is ANY type — builtin, container, or a user class
 // name (`Point mk() {...}` works at top level, in namespaces, and in classes).
@@ -237,7 +241,7 @@ parameterList = parameter ("," parameter)*
 // static and instance methods, constructors (incl. this()/super() delegation),
 // and namespace overloads (a callable with N params, K defaulted, accepts N-K..N
 // arguments; within a resolution tier the candidate using fewest defaults wins).
-parameter = type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creature& c
+parameter = "const"? type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creature& c, const T& p (docs/const.md)
           | IDENTIFIER ("=" expression)?               // untyped -> auto: foo(x), foo(x = 3)
           | type ":" IDENTIFIER ("=" expression)?      // typed shorthand: int: n (no '&' form)
           | ":" IDENTIFIER ("=" expression)?           // auto shorthand: :x (like `auto x`)
@@ -245,11 +249,12 @@ parameter = type "&"? IDENTIFIER ("=" expression)?     // classic:  int x, Creat
 // Variable declarations (reference declarations alias the initializer's storage).
 // `function name = expr;` / `function name;` declares a callable-or-null variable;
 // also legal as a class field and in namespaces.
-variableDeclaration = type "&"? IDENTIFIER ("=" expression)? ";"
+variableDeclaration = "const" (type "&"? IDENTIFIER | IDENTIFIER) ("=" expression)? ";"   // const: set once (docs/const.md); an initializer is required
+                    | type "&"? IDENTIFIER ("=" expression)? ";"
                     | type IDENTIFIER "{" argumentList? "}" ";"      // brace construction
                     | "function" IDENTIFIER ("=" expression)? ";"    // function-typed variable
 
-destructuringDeclaration = ("auto" | "var") "[" IDENTIFIER ("," IDENTIFIER)* "]" "=" expression ";"
+destructuringDeclaration = "const"? ("auto" | "var") "[" IDENTIFIER ("," IDENTIFIER)* "]" "=" expression ";"
 
 // Namespaces (nested C++17 style supported)
 namespaceDeclaration = "namespace" NAME ("::" NAME)* "{" declaration* "}"
@@ -267,13 +272,13 @@ importDirective  = "#"? "import"  (STRING_LITERAL | "<" path ">" | "(" expressio
 // unknown signature (calls unchecked); bare: var. Both backends define nothing; the name
 // resolves when used, and a use while nothing defines it raises "'x' is declared extern but
 // never defined (an 'inline' declaration creates it)".
-externDeclaration = "extern" ("function" | type)? IDENTIFIER ";"
+externDeclaration = "extern" ("function" | "const"? type)? IDENTIFIER ";"
 
 // inline variables (program scope and namespace bodies only): one variable shared by every unit
 // that declares it; the first to run creates it (initializer, else the type's default), every
 // later one adopts it and runs no initializer; mixing inline and plain declarations of the name
 // across units raises in either order. Bare: var. Never a reference.
-inlineDeclaration = "inline" (variableDeclaration | IDENTIFIER ("=" expression)? ";")
+inlineDeclaration = "inline" "const"? (variableDeclaration | IDENTIFIER ("=" expression)? ";")
 
 // check-mode attributes (static checker only; both backends run them as nothing). Before a
 // statement: covers that statement's own subtree (a nested function/lambda body keeps the

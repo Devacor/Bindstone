@@ -39,7 +39,7 @@ namespace jai::detail {
     //   v4: literal JSON-style map keys ({1: "a"}, float/char/bool too; parser map-literal
     //       detection - previously-rejected inputs only, but the contract says always bump)
     // v5: identifier_expr carries global_qualified (the ::name escape hatch)
-    inline constexpr uint32_t k_jaibite_version = 40;   // 40: `function` parses as the callable-or-null slot type (type_info::make_callable), so a sibling that kept it untyped re-parses; 39: consistent namespaces, byte-character results, typed transforms and builtin ordering invalidate prior hints/checks; 38: known builtin method arities invalidate prior checked-clean bites; reserved preview 37 is not reused; 36: hot_reload_migrate at a unit's top level is the unit's reload hook, off the program (2026-10-01), so a sibling that defined it as a function re-parses; 35: the JavaScript/C# additions (2026-10-01): ?? and ??= read as tokens of their own, => arrow functions, do-while, let, structured range-for bindings and optional chains that skip their rest desugar at parse time, so a sibling parsed before them re-parses; 34: a host template name is no longer a token of its own (token_type::user_template_type removed, so every later token value moved) and its arguments spell canonically (Box<array<int>>, double as float; 2026-10-01); 33: an anonymous function(...) expression parses as a [&] lambda (Dev ruling 2026-10-01), so a sibling that recorded it capture-free re-parses; 32: exhaustive capture lists (a parse error for an unlisted enclosing local, a named capture's own scope entry) and the strict required-return and reference-admission checks (2026-09-30), so a sibling parsed or checked clean before them re-parses; 31: the header carries the identity of the source the bite was parsed from (2026-09-30), so a sibling describes exactly one source text; 30: C++ lvalue targets (a conditional of lvalues, `(a = b) = c`, `++x = v`) read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference; 2026-09-30); 29: the checker holds a shared_ptr<T> namespace variable store to R-q6 (2026-09-30), so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`, 2026-09-30); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types (2026-09-28), so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force; 2026-09-28); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
+    inline constexpr uint32_t k_jaibite_version = 41;   // 41: const declarations and parameters (docs/const.md): variable_decl::is_const and destructuring_decl::is_const, and a const range-for or parameter is no longer ignored; 40: `function` parses as the callable-or-null slot type (type_info::make_callable), so a sibling that kept it untyped re-parses; 39: consistent namespaces, byte-character results, typed transforms and builtin ordering invalidate prior hints/checks; 38: known builtin method arities invalidate prior checked-clean bites; reserved preview 37 is not reused; 36: hot_reload_migrate at a unit's top level is the unit's reload hook, off the program (2026-10-01), so a sibling that defined it as a function re-parses; 35: the JavaScript/C# additions (2026-10-01): ?? and ??= read as tokens of their own, => arrow functions, do-while, let, structured range-for bindings and optional chains that skip their rest desugar at parse time, so a sibling parsed before them re-parses; 34: a host template name is no longer a token of its own (token_type::user_template_type removed, so every later token value moved) and its arguments spell canonically (Box<array<int>>, double as float; 2026-10-01); 33: an anonymous function(...) expression parses as a [&] lambda (Dev ruling 2026-10-01), so a sibling that recorded it capture-free re-parses; 32: exhaustive capture lists (a parse error for an unlisted enclosing local, a named capture's own scope entry) and the strict required-return and reference-admission checks (2026-09-30), so a sibling parsed or checked clean before them re-parses; 31: the header carries the identity of the source the bite was parsed from (2026-09-30), so a sibling describes exactly one source text; 30: C++ lvalue targets (a conditional of lvalues, `(a = b) = c`, `++x = v`) read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference; 2026-09-30); 29: the checker holds a shared_ptr<T> namespace variable store to R-q6 (2026-09-30), so a bite checked clean before it re-checks; 28: variable_decl::is_inline (`inline T x;`, 2026-09-30); 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types (2026-09-28), so a sibling that parsed a math declaration as an expression re-parses; 26: import(...) is an expression (import_expr: paths, a group, jai::force; 2026-09-28); 24: array<uint8> / array<int8> read uint8 / int8 as one-byte element types (2026-09-28), so a sibling that parsed them as classes re-parses; 23: a lambda capture carries its init-capture expression (2026-09-27); 22: variable_decl::default_initialized (a program-scope declaration without an initializer keeps its value on a same-unit re-run, 2026-09-27); 21: a typed declaration without an initializer default-initializes (2026-09-26), so a sibling parsed before it re-parses; 20: a template string joins no empty parts (2026-09-26); 19: utf8_string reads as a type (2026-09-25), so a sibling that parsed it as a class re-parses; 18: a literal include inside a function body splices at parse time (2026-09-12), so a sibling written before it re-parses; 17: a negated numeric literal is a literal (2026-09-11); 16: parallel_for frame captures; 15: variable_decl::function_spelling; 14: own-file location marker; 13: parallel_for zip (extra loop variables + arrays); 12: try_stmt catch var symbol + slot (11: statement::check_mode_attr, 10: extern_decl, 9: cast_expr)
     // Header flags (u32; readers ignore unknown bits, so no version bump needed):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -499,6 +499,7 @@ namespace jai::detail {
                     flag(d->function_spelling);
                     flag(d->default_initialized);
                     flag(d->is_inline);
+                    flag(d->is_const);
                     slot(d->slot_index);
                     break;
                 }
@@ -587,6 +588,7 @@ namespace jai::detail {
                     str(d->name);
                     symbol(d->name_id, UINT64_MAX);
                     flag(d->is_function);
+                    flag(d->is_const);
                     type(d->type);
                     break;
                 }
@@ -607,6 +609,7 @@ namespace jai::detail {
                     for (const auto& [nm, id] : d->names) { str(nm); symbol(id, UINT64_MAX); }
                     varint(d->slot_indices.size());
                     for (size_t s : d->slot_indices) slot(s);
+                    flag(d->is_const);
                     node(d->initializer.get());
                     break;
                 }
@@ -1342,6 +1345,7 @@ namespace jai::detail {
                     d->function_spelling = flag();
                     d->default_initialized = flag();
                     d->is_inline = flag();
+                    d->is_const = flag();
                     d->slot_index = slot_val();
                     track_slot(d->slot_index, nid, false, true);
                     result = d;
@@ -1457,8 +1461,11 @@ namespace jai::detail {
                     std::string_view name = view();
                     uint64_t nid = symbol(UINT64_MAX);
                     bool is_function = flag();
+                    bool is_const = flag();
                     type_info_ptr t = type();
-                    result = std::make_shared<extern_decl>(loc, t, is_function, name, nid);
+                    auto d = std::make_shared<extern_decl>(loc, t, is_function, name, nid);
+                    d->is_const = is_const;
+                    result = d;
                     break;
                 }
                 case node_type::enum_decl: {
@@ -1494,7 +1501,9 @@ namespace jai::detail {
 					std::vector<size_t> slots;
 					slots.reserve(size_t(ns));
 					for (uint64_t i = 0; i < ns; ++i) slots.push_back(slot_val());
+					const bool is_const = flag();
 					auto d = std::make_shared<destructuring_decl>(loc, expr_req());
+					d->is_const = is_const;
 					d->names = std::move(names);
 					d->slot_indices = std::move(slots);
 					for (size_t i = 0; i < d->slot_indices.size(); ++i) {

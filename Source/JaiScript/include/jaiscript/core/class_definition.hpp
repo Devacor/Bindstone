@@ -1022,6 +1022,17 @@ public:
         return static_fields_.find(id) != static_fields_.end();
     }
 
+    // a class constant (`const T s = e;` in the body, docs/const.md): marked when the class is defined; the chain answers
+    void mark_const_static(uint64_t id, bool is_const) {
+        if (is_const) { const_statics_.insert(id); } else { const_statics_.erase(id); }
+    }
+    bool is_const_static(uint64_t id) const {
+        if (const_statics_.count(id)) { return true; }
+        if (static_fields_.find(id) != static_fields_.end()) { return false; }
+        for (const auto& parent : parent_classes_) { if (parent && parent->is_const_static(id)) { return true; } }
+        return false;
+    }
+
     bool has_static_field(uint64_t id) const {
         return static_field_values_.find(id) != static_field_values_.end();
     }
@@ -2428,6 +2439,7 @@ private:
 
     std::unordered_map<uint64_t, script_value> static_methods_;
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> static_method_overloads_;
+    std::unordered_set<uint64_t> const_statics_;
     std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;
     std::unordered_map<uint64_t, script_value> field_defaults_;
     std::unordered_map<uint64_t, type_info_ptr> field_declared_types_;
@@ -3832,6 +3844,9 @@ inline std::optional<checked_result<void>> element_copy_assign(const script_valu
 }
 
 inline checked_result<script_value> class_definition::enforce_static_write(uint64_t id, script_value value) const {
+    if (!const_statics_.empty() && is_const_static(id)) [[unlikely]] {   // a class constant (docs/const.md)
+        return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Cannot assign to '{0}': it is read-only", id);
+    }
     auto it = static_declared_types_.find(id);
     if (it == static_declared_types_.end()) {
         return std::move(value);

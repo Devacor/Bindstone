@@ -93,6 +93,17 @@ namespace jai {
         extern_decl,      // extern [type | function] name; - a name defined outside the program
     };
 
+    // The checker's const verdict at a write or a binding (docs/const.md), stamped by every walk: const_raises makes the node
+    // raise `text` (an assignment after its right side runs, everything else when reached); const_runtime leaves the decision
+    // to the run time (a path through a var: detail/const_rules.hpp)
+    inline constexpr uint8_t const_none = 0, const_raises = 1, const_runtime = 2;
+    struct const_site {
+        uint8_t verdict = const_none;
+        std::shared_ptr<const std::string> text;
+        uint64_t text_id = 0;   // the text interned at stamp time
+        explicit operator bool() const noexcept { return verdict != const_none; }
+    };
+
     // parameter information for functions and lambdas
     struct parameter {
         type_info_ptr type;
@@ -297,6 +308,7 @@ namespace jai {
         token op;
         expression_ptr operand;
         bool is_postfix;
+        mutable const_site const_check;   // ++/-- of a const name
 
         unary_expr(const source_location& loc, const token& o, expression_ptr expr, bool postfix = false)
             : expression(loc, node_type::unary_expr), op(o), operand(expr), is_postfix(postfix) {}
@@ -331,6 +343,7 @@ namespace jai {
         // In an assignment target (`(a = b) = c`, `++x = v`) the parser makes the inner assignment yield the reference it
         // stored through (its target is then an implicit cast<&>), the C++ lvalue an assignment is
         bool yields_reference = false;
+        mutable const_site const_check;
 
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
             : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}    };
@@ -389,6 +402,8 @@ namespace jai {
         mutable uint8_t builtin_receiver_open = 0;   // unproven, yet no class: the receiver may be a string, array or map (the vm picks the builtin by its kind)
         std::vector<uint8_t> arg_captures;   // per argument, the capture its value needs before a later argument runs (detail::arg_capture_kind); empty = none
         mutable method_site_cache sibling_cache;   // interpreter: a bare call of a method of this frame's receiver
+        // a method that writes its receiver called on a const, or a const passed to a writing reference parameter
+        mutable const_site const_check;
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}    };
@@ -620,6 +635,7 @@ namespace jai {
         // target): no type verdict, and a value that is no reference is no lvalue
         bool implicit_ref = false;
         expression_ptr operand;
+        mutable const_site const_check;   // cast<T&>(c) / cast<shared_ptr<T>>(c) of a const
 
         cast_expr(const source_location& loc, type_info_ptr t, bool by_ref, expression_ptr e)
             : expression(loc, node_type::cast_expr), target(std::move(t)), by_reference(by_ref), operand(std::move(e)) {}    };
@@ -705,6 +721,7 @@ namespace jai {
         // The checker saw the container's elements already hold the declared type: the binding converts nothing (a cell head
         // may land the element as it is)
         bool element_conversion_free = false;
+        mutable const_site const_check;   // T& / var& over the elements of a const
         expression_ptr container;      // The container to iterate over
         statement_ptr body;            // Loop body
 
@@ -765,6 +782,7 @@ namespace jai {
         // the VM's graft: a return that jumps to the inlined body's join (synthesized by the compiler, never parsed or serialized)
         bool inline_exit = false;
         mutable uint8_t static_return_proof = proof_none;
+        mutable const_site const_check;   // a const returned by reference
         // Interpreter memo of detail::classify_return_operand (by-value return
         // materialization); derived at first visit, never serialized
         mutable uint8_t return_operand_class = 0;
@@ -865,6 +883,9 @@ namespace jai {
         // adopted and its initializer never runs, else the declaration creates it (environment::share; a plain declaration
         // of the name then raises, detail::inline_redefinition)
         bool is_inline = false;
+        // `const T x = e;` (docs/const.md): set once by its initializer, then only read; in a class body a class-level constant
+        bool is_const = false;
+        mutable const_site const_check;   // T& / var& / shared_ptr<T> bound to a const
         // Declared `auto` (Dev ruling 2026-09-27): the unit's first proof pass types the slot by its initializer's
         // STATIC type, once - a known type keeps auto (the runtime locks to the value, which has that type), a var
         // or unknown static type makes `type` the var marker; the spelling stays auto for re-checks and .jaibite
@@ -1114,6 +1135,7 @@ namespace jai {
         // Parser escape analysis, per name (empty = no name escapes)
         std::vector<bool> ref_escaping;
         expression_ptr initializer;
+        bool is_const = false;   // const auto [a, b] = e;
 
         destructuring_decl(const source_location& loc, expression_ptr init)
             : declaration(loc, node_type::destructuring_decl), initializer(std::move(init)) {}
@@ -1126,6 +1148,7 @@ namespace jai {
     public:
         type_info_ptr type;   // null for `extern name;` (var) and the function form
         bool is_function;     // extern function name; - a callable of unknown signature
+        bool is_const = false;   // extern const T name;: this unit never writes it
         std::string_view name;
         uint64_t name_id;
 

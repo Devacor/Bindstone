@@ -4440,6 +4440,7 @@ bool resolve_global_ref_write_callee(engine& eng, const identifier_expr& id, std
 }
 
 bool ref_parameter_takes_temporary(engine& eng, const std::vector<parameter>& params, const statement* body, size_t i, bool may_prove) {
+	if (i < params.size() && params[i].is_reference && params[i].is_const) { return true; }   // const T& (docs/const.md)
 	if (i >= params.size() || !params[i].is_reference || !body) { return false; }
 	const parameter& p = params[i];
 	const uint64_t epoch = eng.definition_epoch();

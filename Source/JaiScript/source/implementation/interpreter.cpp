@@ -21,6 +21,7 @@
 #include <jaiscript/detail/import_paths.hpp>
 #include <jaiscript/detail/capture_ladder.hpp> // shared capture-source ladder (vm parity)
 #include <jaiscript/detail/cast_kernel.hpp>   // cast<T>/cast<T&>/cast<shared_ptr<T>> kernel (vm parity)
+#include <jaiscript/detail/const_rules.hpp>   // const guards (vm parity)
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
@@ -4206,6 +4207,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 }
 template<bool Replaying>
 checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const replay_point* rs) {
+    if (expr->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(expr, expr->const_check)); }
     // Fast path for literal unary operations
     if (expr->operand->get_type() == node_type::literal_expr) {
         auto* literal = static_cast<literal_expr*>(expr->operand.get());
@@ -4565,6 +4567,12 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     return {};
 }
 
+// a node the checker stamped with a const verdict (docs/const.md): KEEP BYTE-PARALLEL with the vm's op_error / op_const_guard
+checked_result<void> interpreter::const_guard_at(const ast_node* node, const const_site& site) {
+    return detail::const_guard(node, site, detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()},
+                               environment_.get(), engine_, string_symbolizer_);
+}
+
 checked_result<void> interpreter::non_lvalue_target(const expression* target) {
     return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "{0}",
                                 string_symbolizer_->intern(detail::non_lvalue_target_text(target)));
@@ -4572,6 +4580,7 @@ checked_result<void> interpreter::non_lvalue_target(const expression* target) {
 
 template<bool Replaying>
 checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr, const replay_point* rs) {
+    if (expr->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(expr, expr->const_check)); }
     // Non-lvalue targets fail before ANY evaluation (the vm rejects them at compile time)
     const node_type target_kind = expr->target->get_type();
     const bool through_reference = target_kind != node_type::identifier_expr && target_kind != node_type::member_expr &&
@@ -6755,6 +6764,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
 
 template<bool Replaying>
 checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
+    if (decl->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(decl, decl->const_check)); }
     // a same-unit re-run of a program-scope declaration written without an initializer keeps the variable, an inline
     // declaration adopts the variable it finds (the vm's op_decl_keep)
     if ((decl->default_initialized || decl->is_inline) && decl->slot_index == SIZE_MAX) [[unlikely]] {
@@ -6800,6 +6810,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // Global variable or no slot assigned - use environment
             if (!environment_->define_variable(decl->name_id, std::move(value))) [[unlikely]] { return detail::inline_redefinition(*string_symbolizer_, decl->name_id, decl); }
             if (decl->is_inline) [[unlikely]] { environment_->share(decl->name_id); }
+            if (environment_->is_program_scope()) { engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), decl->is_const); }
         }
         return {};
     };
@@ -7629,6 +7640,7 @@ bool lone_overload_signature(class_definition& cls, uint64_t name_id, size_t arg
 // Placeholder implementations for remaining visitors
 template<bool Replaying>
 checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const replay_point* rs) {
+    if (expr->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(expr, expr->const_check)); }
     // math:: language intrinsics (detail/math_intrinsics.hpp): evaluate args, one
     // shared-kernel call - no namespace lookup, no call machinery (KEEP BYTE-PARALLEL
     // with vm_backend::exec_math; parity by the shared kernel).
@@ -10183,6 +10195,7 @@ checked_result<void> interpreter::visit_super_expr(super_expr* expr) {
 // convert through the assignment table. KEEP BYTE-PARALLEL with vm_backend::exec_cast.
 template<bool Replaying>
 checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const replay_point* rs) {
+    if (expr->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(expr, expr->const_check)); }
     script_value operand;
     switch (detail::cast_operand_mode_of(expr)) {
         case detail::cast_operand_mode::identifier: {
@@ -10590,7 +10603,8 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     // support yield/resume since it uses native C++ loop counters that can't be saved.
     // The slow path handles yield correctly via continuation points.
     //
-    if (stmt->initializer && stmt->condition && stmt->update && !active_coroutine_) {
+    if (stmt->initializer && stmt->condition && stmt->update && !active_coroutine_ &&
+        !detail::const_site_of(stmt->update.get()) && !detail::const_site_of(stmt->initializer.get())) {
         auto* init_var = stmt->initializer->get_type() == node_type::variable_decl
             ? static_cast<variable_decl*>(stmt->initializer.get()) : nullptr;
         auto* cond_binary = stmt->condition->get_type() == node_type::binary_expr
@@ -11251,6 +11265,7 @@ checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stm
 // A by-value loop variable dies with its iteration: the next element's binding replaces it, the last one dies here (KEEP
 // BYTE-PARALLEL with vm_compiler::compile_range_for)
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
+    if (stmt->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(stmt, stmt->const_check)); }
     auto result = run_range_for_stmt(stmt);
     if (!hasYieldRequest_ && !stmt->is_reference && stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty() && engine_->destructors_armed()) {
         const type_info* t = stmt->element_type.get();
@@ -11758,6 +11773,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
 
 template<bool Replaying>
 checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
+    if (stmt->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(stmt, stmt->const_check)); }
     std::optional<script_value> out;
     if (stmt->value) {
         if (stmt->binds_reference) {
@@ -12721,7 +12737,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 }
                 // A reload preserves a static's runtime value (statics are state, not code);
                 // only a static that is NEW in this definition runs its initializer.
-                bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id);
+                bool preserve_existing = is_redefinition && field_id != 0 && class_def->has_static_field(field_id) && !var_decl->is_const;   // a class constant has no state to keep (docs/const.md)
 
                 // Static fields must be evaluated immediately (they're shared across all instances)
                 if (initializer_ast && !preserve_existing) {
@@ -12757,6 +12773,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
                 if (field_id != 0 && !preserve_existing) {
                     class_def->add_static_field(field_id, default_val);
                 }
+                if (field_id != 0) { class_def->mark_const_static(field_id, var_decl->is_const); }
             } else {
                 // Instance field - store initializer AST for evaluation at construction time
                 if (field_id != 0) {
@@ -14526,7 +14543,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     }
     // a string& takes a writable temporary (lambdas too); another T& takes one only when a declared function never writes
     // through it (detail/ref_param_writes.hpp)
-    if (evaluated_arg && (detail::is_string_reference_temporary(param, *evaluated_arg) ||
+    if (evaluated_arg && (detail::is_string_reference_temporary(param, *evaluated_arg) || param.is_const ||
         (callee && callee->name != "<lambda>" &&
             detail::ref_parameter_takes_temporary(*engine_, callee->parameters(), callee->body.get(), param_index, !parallel_worker_)))) {
         call_stack_[frame_index].set_local(param.slot_index, detail::make_reference_argument_temporary(param, *evaluated_arg, engine_));
@@ -14927,7 +14944,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 } else if (arg_type == script_value_type::jai_object_type ||
                     arg_type == script_value_type::jai_shared_ptr_type) {
                     call_stack_[frame_index].set_local(param.slot_index, script_value(arg));
-                } else if (detail::is_string_reference_temporary(param, arg) ||
+                } else if (detail::is_string_reference_temporary(param, arg) || param.is_const ||
                            (function.name != "<lambda>" &&
                             detail::ref_parameter_takes_temporary(*engine_, function.parameters(), function.body.get(), i, !parallel_worker_))) {
                     call_stack_[frame_index].set_local(param.slot_index, detail::make_reference_argument_temporary(param, arg, engine_));

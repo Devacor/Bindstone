@@ -21573,8 +21573,11 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 			if (!payload.this_obj) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Method payload without 'this' receiver");
 			}
-			auto method_env = acquire_method_scope_env(payload.definition_env, *payload.this_obj, payload.cls.get());
-			method_env->define(this_id_, *payload.this_obj);
+			if (!payload.ast->is_coroutine) {
+				const method_entry entry{&payload.definition_env, &*payload.this_obj, payload.cls.get()};
+				return call_script_function(method_function_for(payload.ast), args, nullptr, nullptr, nullptr, &entry);
+			}
+			auto method_env = acquire_method_scope_env(payload.definition_env, *payload.this_obj, payload.cls.get());   // a method env answers `this` itself
 			auto result = execute_method_ast(payload.ast, method_env, args);
 			release_scope_env(std::move(method_env));
 			return result;
@@ -22668,8 +22671,24 @@ void vm_backend::pop_records_to(size_t records_base, frame*& fp) {
 	}
 }
 
+const script_defined_function& vm_backend::method_function_for(const std::shared_ptr<function_decl>& ast) {
+	method_function_entry& entry = method_functions_[ast.get()];
+	if (!entry.fn) {
+		entry.pin = ast;
+		entry.fn = std::make_unique<script_defined_function>(ast->name, shared_parameters_for(ast.get()), ast->return_type, ast->body,
+		                                                     nullptr, ast->local_count);
+		entry.fn->unit = ast->unit;
+	}
+	return *entry.fn;
+}
+
 void vm_backend::setup_callee_env(const script_defined_function& function, call_frame& locals,
-                                  const std::shared_ptr<environment>& prev_env) {
+                                  const std::shared_ptr<environment>& prev_env, const method_entry* method) {
+	if (method) {
+		locals.set_this(*method->this_obj);
+		environment_ = acquire_method_scope_env(*method->parent, *method->this_obj, method->access);
+		return;
+	}
 	if (function.closure_env) {
 		if (function.closure_env->is_method_env()) {
 			auto this_obj = function.closure_env->get_this_object();
@@ -23420,7 +23439,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 }
 
 checked_result<script_value> vm_backend::call_script_function(const script_defined_function& function, const std::vector<script_value>& args,
-                                                              const call_site* site, frame* caller_frame, chunk* caller_code) {
+                                                              const call_site* site, frame* caller_frame, chunk* caller_code,
+                                                              const method_entry* method) {
 	// Opaque entry (bound methods, constructors, function values): the arming invoke
 	// left the call-site context pending - consume it exactly once, when this call is the site's
 	if (!site && detail::same_arguments(pending_site_ctx_.arguments, args)) {
@@ -23461,11 +23481,23 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	}
 
 	call_frame locals;   // frame-kind metadata only (this/static/closure_env/name); slots live in the window
+	struct this_box_return {   // the `this` box goes back to the pool; its value dies where the frame's would
+		vm_backend* vm; call_frame& frame;
+		~this_box_return() {
+			if (!frame.this_object_ptr) { return; }
+			{ script_value dying = std::move(*frame.this_object_ptr); }
+			if (vm->this_box_pool_.size() < 32) { vm->this_box_pool_.push_back(std::move(frame.this_object_ptr)); }
+		}
+	} this_box{this, locals};
+	if (!this_box_pool_.empty() && (method || (function.closure_env && function.closure_env->is_method_env()))) {
+		locals.this_object_ptr = std::move(this_box_pool_.back());
+		this_box_pool_.pop_back();
+	}
 	locals.function_name = function.name;
 
 	auto previousEnv = environment_;
 
-	setup_callee_env(function, locals, previousEnv);
+	setup_callee_env(function, locals, previousEnv, method);
 
 	bool previousHasReturn = has_return_value_;
 	std::optional<script_value> previousReturn = std::move(return_value_);

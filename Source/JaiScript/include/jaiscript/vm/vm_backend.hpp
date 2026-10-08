@@ -1267,14 +1267,25 @@ namespace jai::vm {
         // The call path's one compare is against the depth gate: past it the cap raises, or the frames' storage is charged to
         // the memory allowance (its text when over) and the gate moves k_frame_charge_levels deeper
         std::optional<error_propagator> pass_depth_gate();
+        // A method body entered through the opaque door: the frame's method scope comes from these, not a carrier env
+        struct method_entry {
+            const std::shared_ptr<environment>* parent = nullptr;
+            const script_value* this_obj = nullptr;
+            class_definition* access = nullptr;
+        };
         checked_result<script_value> call_script_function(const script_defined_function& function,
                                                           const std::vector<script_value>& args,
                                                           const call_site* site = nullptr,
                                                           frame* caller_frame = nullptr,
-                                                          chunk* caller_code = nullptr);
+                                                          chunk* caller_code = nullptr,
+                                                          const method_entry* method = nullptr);
         // Shared between call_script_function and the in-loop call path (single source of truth)
         void setup_callee_env(const script_defined_function& function, call_frame& locals,
-                              const std::shared_ptr<environment>& prev_env);
+                              const std::shared_ptr<environment>& prev_env, const method_entry* method = nullptr);
+        // The opaque door's method body as a function value, one per declaration (its body chunk cached on it)
+        struct method_function_entry { std::shared_ptr<function_decl> pin; std::unique_ptr<script_defined_function> fn; };
+        std::unordered_map<const function_decl*, method_function_entry> method_functions_;
+        const script_defined_function& method_function_for(const std::shared_ptr<function_decl>& ast);
         template <class ArgsT>
         op_status bind_parameters(const std::vector<parameter>& parameters,
                                              const ArgsT& args,
@@ -1408,6 +1419,7 @@ namespace jai::vm {
         // environment pool). release only recycles unshared scopes, so anything captured
         // (closure env, coroutine snapshot, reference source) keeps its identity.
         std::vector<std::shared_ptr<environment>> scope_env_pool_;
+        std::vector<std::unique_ptr<script_value>> this_box_pool_;   // call_script_function frames' `this` boxes, reused
         std::shared_ptr<environment> acquire_scope_env(std::shared_ptr<environment> parent);
         std::shared_ptr<environment> acquire_block_env(std::shared_ptr<environment> parent);   // a { } / loop / catch scope
         std::shared_ptr<environment> acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx = nullptr);

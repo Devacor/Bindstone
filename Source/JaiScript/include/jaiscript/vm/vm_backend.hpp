@@ -1156,6 +1156,10 @@ namespace jai::vm {
         // std::vector<script_value> passed as (vec, 0, vec.size()).
         bool args_are_stack(const value_stack& a) const noexcept { return &a == &stack_; }
         static constexpr bool args_are_stack(const std::vector<script_value>&) noexcept { return false; }
+        // A constructor's argument list the construction owns (enter_constructor_in_loop): its prvalues bind as the stack's do
+        std::vector<script_value>* owned_args_ = nullptr;
+        std::vector<script_value>* owned_args(const value_stack&) const noexcept { return nullptr; }
+        std::vector<script_value>* owned_args(const std::vector<script_value>& a) const noexcept { return &a == owned_args_ ? owned_args_ : nullptr; }
         template <class ArgsT>
         op_status push_script_frame(frame& caller, script_value&& callee,
                                                const script_defined_function& function,

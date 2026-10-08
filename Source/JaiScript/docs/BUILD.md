@@ -95,7 +95,6 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | Compiles the DAP-over-TCP debug listener. Turn it OFF for shipping or mobile builds and no socket code is compiled in at all |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Adds the performance suites to `jaiscript_tests` (see below) |
-| `JAISCRIPT_ENABLE_PROFILING` | OFF | Profiler-friendly codegen and link flags |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
 | `JAISCRIPT_LTCG` | top-level | Whole-program optimization for MSVC Release (`/GL`, `/LTCG`). The measured performance numbers use it. OFF as a subproject: a `/GL` library would turn every consumer's Release link into a whole-program link (about a minute per edit instead of seconds) |

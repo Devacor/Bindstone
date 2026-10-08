@@ -95,18 +95,6 @@ if(MSVC)
         /bigobj            # Allow more sections in object files (needed for heavy template usage)
     )
 
-    # Profiling support for MSVC
-    if(JAISCRIPT_ENABLE_PROFILING)
-        target_compile_options(jaiscript PRIVATE
-            /Zi             # Generate debug info for profiler
-            /Oi             # Enable intrinsic functions (better profiling)
-        )
-        target_link_options(jaiscript PRIVATE
-            /PROFILE        # Enable profiling
-            /DEBUG:FULL     # Full debug info
-        )
-    endif()
-
     # RelWithDebInfo is best for profiling - optimized but with debug symbols
     if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
         target_compile_options(jaiscript PRIVATE

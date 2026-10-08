@@ -72,9 +72,6 @@ endif()
 
 file(GLOB_RECURSE TEST_SOURCES ${TEST_SOURCES_GLOB})
 
-# Exclude standalone profiler from test suite (it has its own main)
-list(FILTER TEST_SOURCES EXCLUDE REGEX "bst_profiler\\.cpp$")
-
 # Create test executable
 add_executable(jaiscript_tests
     main_test_runner.cpp
@@ -210,30 +207,6 @@ target_precompile_headers(jaiscript_tests PRIVATE
 enable_testing()
 add_test(NAME FoundryTests COMMAND jaiscript_tests)
 
-# ============================================
-# Standalone BST Profiler Target
-# ============================================
-# A minimal executable for profiling C++ FFI performance with Visual Studio Profiler
-# Usage: Run bst_profiler.exe [iterations] with VS Performance Profiler
-if(JAISCRIPT_ENABLE_BENCHMARKS)
-    add_executable(bst_profiler
-        performance/bst_profiler.cpp
-    )
-    target_link_libraries(bst_profiler PRIVATE jaiscript)
-    target_include_directories(bst_profiler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-    if(MSVC)
-        target_compile_options(bst_profiler PRIVATE
-            /W3 /EHsc /permissive-
-        )
-        set_property(TARGET bst_profiler PROPERTY
-            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-        )
-    endif()
-
-    message(STATUS "JaiScript: BST Profiler target enabled (bst_profiler)")
-endif()
-
 # Optional: Add filtered test targets
 add_test(NAME LanguageTests COMMAND jaiscript_tests "Language")
 add_test(NAME SemanticsTests COMMAND jaiscript_tests "semantics")
@@ -248,41 +221,8 @@ add_test(NAME SignalTests COMMAND jaiscript_tests "Signal")
 add_test(NAME ObservableTests COMMAND jaiscript_tests "Observable")
 add_test(NAME TemplateBinder COMMAND jaiscript_tests "Template Binder")
 
-# Create a separate executable target for static method tests only
-# This appears in VS dropdown for easy debugging
-add_executable(static_method_tests
-    main_test_runner.cpp
-    language/static_method_tests.cpp
-    language/static_field_tests.cpp
-)
-
-target_link_libraries(static_method_tests PRIVATE jaiscript)
-target_include_directories(static_method_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-if(MSVC)
-    target_compile_options(static_method_tests PRIVATE /W3 /EHsc /permissive- /bigobj)
-    set_property(TARGET static_method_tests PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
-endif()
-
-# Create a test executable for string static methods proof-of-concept
-add_executable(test_string_static_method
-    test_string_static_method.cpp
-)
-
-target_link_libraries(test_string_static_method PRIVATE jaiscript)
-target_include_directories(test_string_static_method PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-if(MSVC)
-    target_compile_options(test_string_static_method PRIVATE /W3 /EHsc /permissive- /bigobj)
-    set_property(TARGET test_string_static_method PROPERTY
-        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
-    )
-endif()
-
-# Enable profiling support for test executables when needed
-if(MSVC AND (JAISCRIPT_ENABLE_PROFILING OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
+# RelWithDebInfo test executables are profiler-friendly
+if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     target_compile_options(jaiscript_tests PRIVATE /Zi /Oi)
     target_link_options(jaiscript_tests PRIVATE /PROFILE /DEBUG:FULL)
 endif()

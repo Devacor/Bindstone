@@ -44,7 +44,7 @@ oracle-&gt;execute(script).as_int();                       // 5050 — same answ
 <h2 id="set-backend-must-happen-before-the-first-execute"><code>set_backend</code> must happen before the first execute<a class="hlink" href="#set-backend-must-happen-before-the-first-execute" aria-label="link">&#8203;</a></h2>
 <p>Once any script has run, defined functions and classes have captured the executing backend, so switching is refused with a thrown <code>jai::runtime_error</code>:</p>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">set_backend after execute() is unsupported: defined functions and classes capture the executing backend</code></pre></div>
-<p>There is also <code>set_backend(std::unique_ptr&lt;execution_backend&gt;)</code> for injecting a custom backend; <code>backend_type::auto_select</code> names the default and selects the VM. The engine never switches backends implicitly.</p>
+<p><code>backend_type::auto_select</code> names the default and selects the VM. The engine never switches backends implicitly.</p>
 <div class="callout"><p><strong>From the command line, the backend is a flag.</strong> The standalone runner starts on the <em>VM</em>, as an engine does:</p>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">--backend=vm|interp   execution backend (default vm; interp = tree-walking interpreter)
 --check=strict|warn|off   static checker mode (default strict)

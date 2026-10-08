@@ -73,8 +73,7 @@ namespace jai {
     enum class backend_type {
         interpreter,    // Tree-walking interpreter (the reference oracle)
         vm,             // Bytecode virtual machine (the default)
-        auto_select,    // The engine's default: set_backend stores vm
-        custom          // Externally supplied via set_backend(std::unique_ptr<execution_backend>)
+        auto_select     // The engine's default: set_backend stores vm
     };
 
     // Extended type info for overload resolution - stores base type + optional C++ type for objects
@@ -890,7 +889,6 @@ namespace jai {
 
         // Backend configuration
         void set_backend(backend_type type);
-        void set_backend(std::unique_ptr<execution_backend> backend);
         backend_type get_backend_type() const;
         std::string get_backend_name() const;
         execution_backend* get_execution_backend() const;

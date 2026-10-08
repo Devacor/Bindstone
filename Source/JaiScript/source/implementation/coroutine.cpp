@@ -5,13 +5,6 @@
 
 namespace jai {
 
-checked_result<script_value> execution_backend::resume_coroutine(coroutine_handle& handle) {
-    handle.set_status(coroutine_handle::status::failed);
-    return checked_result<script_value>(
-        make_error_code(runtime_error_code::evaluation_failed),
-        "Coroutines are not supported by this backend");
-}
-
 coroutine_handle::coroutine_handle(engine* eng)
     : engine_(eng)
     , yield_value_(std::monostate{}, eng)

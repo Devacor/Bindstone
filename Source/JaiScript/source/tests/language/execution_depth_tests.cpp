@@ -219,7 +219,7 @@ public:
 				check_throws([&]() { configure(*eng, eng->get_backend_type(), invalid); });
 				check_eq(size_t(12), configured(*eng, eng->get_backend_type()));
 			}
-			check_throws([&]() { configure(*eng, backend_type::custom, 12); });
+			check_throws([&]() { configure(*eng, backend_type::auto_select, 12); });
 		});
 
 		test("cap_error_text_is_identical_with_distinct_caps", [this]() {

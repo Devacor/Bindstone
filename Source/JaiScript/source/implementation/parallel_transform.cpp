@@ -3743,9 +3743,6 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	const std::chrono::nanoseconds budget =
 		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
 	const backend_type engine_backend = eng.get_backend_type();
-	if (engine_backend == backend_type::custom) {
-		return usage("custom execution backends are not supported");
-	}
 	const bool use_vm = engine_backend == backend_type::vm;
 	state.faults.checkpoint("region.pool_storage");
 	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);

@@ -90,7 +90,7 @@ namespace {
 		case opcode::op_fused_cmp_jump: case opcode::op_jump: case opcode::op_jump_if_false: case opcode::op_jump_if_true:
 		case opcode::op_d_jlt: case opcode::op_d_jle: case opcode::op_d_jgt: case opcode::op_d_jge: case opcode::op_d_jeq: case opcode::op_d_jne:
 			return fam::compare;
-		case opcode::op_const: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup: case opcode::op_load:
+		case opcode::op_const: case opcode::op_const_folded: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_pop: case opcode::op_dup: case opcode::op_load:
 		case opcode::op_store: case opcode::op_decl_var: case opcode::op_decl_ref_ident: case opcode::op_decl_ref_value: case opcode::op_decl_keep:
 		case opcode::op_decl_share: case opcode::op_ref_target_store:
 			return fam::move;

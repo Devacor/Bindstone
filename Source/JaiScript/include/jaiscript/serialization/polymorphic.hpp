@@ -319,9 +319,6 @@ private:
                     // (weak_ptr / shared_ptr pointing back into this object) resolve.
                     concrete_ar.register_deserialized_shared(id, ptr);
                     concrete_ar(*ptr);
-                    if constexpr (requires { ptr->initialize(); }) {
-                        ptr->initialize();
-                    }
                     return std::static_pointer_cast<void>(ptr);
                 });
             };

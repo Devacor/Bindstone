@@ -702,6 +702,7 @@ void vm_backend::prepare_for_execution() {
 	if (!is_executing()) {
 		instance_scope_saved_.clear();
 		pending_instance_env_.reset();
+		retired_callees_.clear();
 	}
 	sync_debug_hook();   // execute-entry debug sync (attach/detach/breakpoint edits)
 	arm_execution_deadline();
@@ -9274,7 +9275,6 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
 	pending_callee& pc = pending_callees_.emplace_back();
 	pc.fn = site.ic_fn;
-	pc.pin = site.ic_pin;
 	pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 }
 // a raw call: the arguments instruction of a raw site whose probe found a raw callee. When every argument's kind is its parameter's, the callee's
@@ -9330,7 +9330,6 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 			return true;
 		}
 	}
-	strong_ptr<script_function> pin = site.ic_pin;
 	if (call_records_top_ == call_records_.size()) { call_records_.push_back(std::make_unique<call_record>()); }
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
@@ -9338,7 +9337,6 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 	rec.return_type = fn.return_type;
 	if (fn.backend_return_conv == 0) { fn.backend_return_conv = static_cast<uint8_t>(classify_return_conv(fn.return_type)); }
 	rec.return_conv_class = fn.backend_return_conv;
-	rec.direct_pin = std::move(pin);
 	rec.try_base = try_records_.size();
 	rec.iter_base = iter_states_.size();
 	rec.cfor_base = cfor_states_.size();
@@ -12744,7 +12742,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 			    e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity) {
 				pending_callee& pc = pending_callees_.emplace_back();
 				pc.fn = site.ic_fn;
-				pc.pin = site.ic_pin;
+				if (!site.ic_fn) { pc.pin = site.ic_pin; }   // a host callee is called through its pin; a script callee borrows the site's
 				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 				return {};
 			}
@@ -12838,7 +12836,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 	    &calleeVal.unchecked_as_function() == site.ic_identity &&
 	    (site.ic_native || argc == site.ic_argc)) {
 		pc.fn = site.ic_fn;
-		pc.pin = site.ic_pin;
+		if (!site.ic_fn) { pc.pin = site.ic_pin; }
 	} else {
 		bool parked_direct = false;
 		if (calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
@@ -12850,6 +12848,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 				parked_direct = true;
 				if (cached_global_env_ && !thunk->payload.fn->closure_env) {
+					retire_site_callee(site);
 					site.ic_pin = pc.pin;
 					site.ic_identity = &calleeVal.unchecked_as_function();
 					site.ic_fn = pc.fn;
@@ -12862,6 +12861,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 				pc.pin = *calleeVal.get_storage().get_if<script_value::TYPEID_FUNCTION>();
 				parked_direct = true;
 				if (cached_global_env_) {
+					retire_site_callee(site);
 					site.ic_pin = pc.pin;
 					site.ic_identity = &calleeVal.unchecked_as_function();
 					site.ic_fn = nullptr;
@@ -21291,6 +21291,19 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 // ============================================================
 // Execution entry points
 // ============================================================
+
+// A call that hit a site's cache borrows the site's pin of its script callee (no count per call). A refill would drop that pin while
+// such a call is parked or running: the function then moves to the retired list, which the next outermost entry empties
+JAI_NOINLINE void vm_backend::retire_site_callee(const call_site& site) {
+	if (!site.ic_pin || !site.ic_fn) { return; }
+	const chunk* body = static_cast<const chunk*>(site.ic_fn->backend_body_cache.get());
+	bool borrowed = false;
+	for (size_t i = 0; !borrowed && i < call_records_top_; ++i) { borrowed = !call_records_[i]->direct_pin && call_records_[i]->f.code == body; }
+	for (size_t i = 0; !borrowed && i < pending_callees_.size(); ++i) { borrowed = pending_callees_[i].fn == site.ic_fn && !pending_callees_[i].pin; }
+	if (!borrowed) { return; }
+	for (const auto& r : retired_callees_) { if (r.get() == site.ic_pin.get()) { return; } }
+	retired_callees_.push_back(site.ic_pin);
+}
 
 void vm_backend::release_site_pins() noexcept {
 	auto release = [](const std::shared_ptr<chunk>& code) {

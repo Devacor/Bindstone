@@ -8677,9 +8677,13 @@ const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_lo
 	if (er.member_node == k_invalid_u32 || !v) return v;
 	const script_value& base = v->deref();
 	if (base.raw_storage_index() != script_value::TYPEID_MAP || er.member_node >= f.code->nodes.size()) return nullptr;
+	// an enum's map is const (docs/const.md 11): while the name holds the same map node, the entry found last time answers
+	const strong_ptr<script_map>& node = base.unchecked_get_map_storage();
+	if (er.enum_map && er.enum_map == node && !parallel_worker_) { return er.enum_entry; }
 	const script_map& map = base.as_map();
 	auto it = map.find(map_string_key_probe{ static_cast<const member_expr*>(f.code->nodes[er.member_node].get())->member });
 	if (it == map.end() || it->second.raw_storage_index() != script_value::TYPEID_INT) return nullptr;
+	if (!parallel_worker_ && engine_->const_cell(v)) { er.enum_map = node; er.enum_entry = &it->second; }
 	return &it->second;
 }
 // the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
@@ -15351,7 +15355,17 @@ std::optional<script_value> vm_backend::folded_static_value(const member_expr* e
 		return std::nullopt;
 	}
 	auto def = engine_->get_class_definition(name);
-	if (!def) { return std::nullopt; }
+	if (!def) {
+		// E::v of a program-scope enum: the value its const map holds (an enum declared in a function or a block is the scope's, never folded)
+		if (expr->object->get_type() != node_type::identifier_expr || !engine_->is_enum_name(name_id)) { return std::nullopt; }
+		const script_value* cell = engine_->get_global_environment()->get_value_ptr(name_id);
+		if (!cell || !engine_->const_cell(cell) || environment_->get_value_ptr(name_id) != cell) { return std::nullopt; }
+		const script_value& base = cell->deref();
+		if (base.raw_storage_index() != script_value::TYPEID_MAP) { return std::nullopt; }
+		auto it = base.as_map().find(map_string_key_probe{ expr->member });
+		if (it == base.as_map().end() || it->second.raw_storage_index() != script_value::TYPEID_INT) { return std::nullopt; }
+		return it->second;
+	}
 	if (!def->static_method_in_chain(expr->member_id).is_null() || !def->is_const_static(expr->member_id)) { return std::nullopt; }
 	if (const script_value* value = def->find_static_field_in_chain(expr->member_id)) {
 		const script_value& v = value->deref();
@@ -17326,7 +17340,11 @@ op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 
 	environment_->define(decl->name_id, std::move(enum_map));
 	engine_->note_enum_name(decl->name_id);
-	revalidate_folds();
+	const bool program_scope = environment_->is_program_scope();
+	if (program_scope) {
+		engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), true);   // interp parity: visit_enum_decl
+		revalidate_folds();   // a local enum folds nothing (its map is the scope's), so its every run checks no site
+	}
 	return {};
 }
 

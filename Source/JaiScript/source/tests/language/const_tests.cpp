@@ -302,6 +302,27 @@ public:
             check_eq(script_int(4), e->execute("w();").as_int());
         });
 
+        // ------------------------------------------------------------------ enums (docs/const.md 11)
+        test("an_enum_name_is_a_const_map", [this]() {
+            check_true(contains(run("enum Dir { n, e } Dir = 5;").error, "cannot assign to const 'Dir'"));
+            check_true(contains(run("enum Dir { n, e } Dir[\"s\"] = 2;").error, "'Dir' is const"));
+            const auto r = run("enum Dir { n, e } int d = Dir::e; d = Dir::n; print(d, \" \", Dir.e, \" \", Dir.size());");
+            check_eq(std::string(""), r.error);
+            check_eq(std::string("0 1 2\n"), r.output);
+        });
+
+        test("a_redefined_enum_reaches_every_use", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            e->execute("enum Fx { fire, poison } int p() { return Fx::poison; } int q() { int t = 0; for (int i = 0; i < 3; i++) { t += Fx.poison; } return t; }");
+            check_eq(script_int(1), e->execute("p();").as_int());
+            check_eq(script_int(1), e->execute("p();").as_int());
+            check_eq(script_int(3), e->execute("q();").as_int());
+            e->execute("enum Fx { poison, fire }");
+            check_eq(script_int(0), e->execute("p();").as_int());
+            check_eq(script_int(0), e->execute("q();").as_int());
+        });
+
         test("namespace_constants", [this]() {
             check_eq(std::string("3\n"), run("namespace cfg { const int W = 3; } print(cfg::W);").output);
             CHECK_ERROR("namespace cfg { const int W = 3; } cfg::W = 4;", "cannot assign to const 'cfg::W'");

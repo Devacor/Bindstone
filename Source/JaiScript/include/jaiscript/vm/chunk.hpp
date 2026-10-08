@@ -501,7 +501,8 @@ namespace jai::vm {
             cell_mask env_mask;       // every environment cell: the ones a body writes are flushed ahead of a call and at every exit
             std::vector<uint32_t> sites;   // the load and store sites' copy ips: the entry resolves their containers, a landing after a call checks them
             // member_node: an enum's value read by name (`Ai.summon`): the environment value is the enum's map, the cell its entry for the member
-            struct env_operand_ref { fused_operand operand; uint32_t cache_slot; uint32_t member_node = 0xFFFFFFFFu; };
+            // an enum member (member_node): the enum's const map last seen and its entry, pinned (vm_backend::env_operand_value)
+            struct env_operand_ref { fused_operand operand; uint32_t cache_slot; uint32_t member_node = 0xFFFFFFFFu; mutable strong_ptr<script_map> enum_map; mutable const script_value* enum_entry = nullptr; };
             std::vector<env_operand_ref> env_operands;
             // a call inside the block: the probe, the pushes, the call and the landing are four copy instructions over one
             // descriptor. An argument is a cell (boxed at the call; a slot's cell is flushed first so a by-reference parameter

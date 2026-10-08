@@ -3757,14 +3757,16 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("an_enums_values_read_by_name_run_in_blocks", [this]() {
 			// `Fac.monster` (an enum value read by name) lands in a temp through an environment cell for the member, read at entry and after every
-			// call; both backends, proofs off, the middle end off and miss injection
+			// call; both backends, proofs off, the middle end off and miss injection. An enum's map is const (docs/const.md 11), so the call in
+			// with_poke writes a global
 			const std::string prelude =
 				"enum Fac { player, npc, monster, guard }\n"
+				"int POKED = 0;\n"
 				"array<int> FACS = [0, 2, 3, 2, 1, 2, 0, 3];\n"
 				"int count_mon(int k) { int n = 0; for (int i = 0; i < k; ++i) { int f = FACS[i % 8]; if (f == Fac.monster || f == Fac.guard) { n = n + 1; } if (f != Fac.player) { n = n + 100; } } return n; }\n"
 				"int helper(int i) { string why = \"z\"; return i % 3; }\n"
 				"int with_calls(int k) { int n = 0; for (int i = 0; i < k; ++i) { int f = FACS[i % 8]; if (helper(i) == 1) { n = n + 1000; } if (f == Fac.monster) { n = n + 1; } } return n; }\n"
-				"void poke(int i) { string why = \"q\"; if (i == 10) { Fac[\"monster\"] = 3; } }\n"
+				"void poke(int i) { string why = \"q\"; if (i == 10) { POKED = 3; } }\n"
 				"int with_poke(int k) { int n = 0; for (int i = 0; i < k; ++i) { int f = FACS[i % 8]; poke(i); if (f == Fac.monster) { n = n + 1; } } return n; }\n";
 			const std::string body = "to_string(count_mon(40)) + \"|\" + to_string(with_calls(40)) + \"|\" + to_string(with_poke(40)) + \"|\" + to_string(count_mon(40));";
 			both(prelude + body, "", "enum values read by name");

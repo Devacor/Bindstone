@@ -1956,15 +1956,6 @@ uint8_t engine::overload_dispatch::argument_binding(size_t i, size_t argc) const
     return bits ? bits : static_cast<uint8_t>(detail::arg_binding::opaque);
 }
 
-checked_result<script_value> execution_backend::host_reference_argument(const std::vector<script_value>&, size_t, size_t, host_slot& slot) {
-    slot = {};
-    return script_value(std::monostate{}, nullptr);
-}
-
-checked_result<void> execution_backend::host_slot_store(const host_slot&, script_value&) {
-    return {};
-}
-
 namespace detail {
 
 host_reference host_reference_argument(engine* eng, const std::vector<script_value>& args, size_t index, size_t offset) {
@@ -3417,28 +3408,10 @@ void engine::set_backend(backend_type type) {
     if (impl->has_executed_) {
         throw runtime_error("set_backend after execute() is unsupported: defined functions and classes capture the executing backend");
     }
-    if (type == backend_type::custom) {
-        throw runtime_error("backend_type::custom requires set_backend(std::unique_ptr<execution_backend>)");
-    }
-
     impl->current_backend_type = type;
 
     // Constructed lazily by engine::backend() with the new type
     impl->backend.reset();
-}
-
-void engine::set_backend(std::unique_ptr<execution_backend> backend) {
-    if (!backend) {
-        throw runtime_error("set_backend requires a non-null backend");
-    }
-    if (impl->has_executed_) {
-        throw runtime_error("set_backend after execute() is unsupported: defined functions and classes capture the executing backend");
-    }
-
-    impl->backend = std::move(backend);
-    impl->current_backend_type = backend_type::custom;
-
-    wire_backend();
 }
 
 backend_type engine::get_backend_type() const {

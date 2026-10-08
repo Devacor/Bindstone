@@ -128,39 +128,31 @@ public:
 
 	// Cold library bridge: sorting uses the backend's ordinary < expression semantics.
 	// Primitive buffers bypass this only while the backend's < has no global override.
-	virtual checked_result<bool> language_less(const script_value&, const script_value&) {
-		return checked_result<bool>(make_error_code(runtime_error_code::type_mismatch), "Invalid operands for < operator");
-	}
-	virtual bool native_less_available() const { return false; }
-	virtual checked_result<script_value> array_transform(uint64_t, script_value&, const std::vector<script_value>&) {
-		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), "Array namespace transforms are unavailable on this backend");
-	}
-	virtual checked_result<script_value> map_transform(uint64_t, script_value&, const std::vector<script_value>&) {
-		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), "Map namespace transforms are unavailable on this backend");
-	}
+	virtual checked_result<bool> language_less(const script_value&, const script_value&) = 0;
+	virtual bool native_less_available() const = 0;
+	virtual checked_result<script_value> array_transform(uint64_t, script_value&, const std::vector<script_value>&) = 0;
+	virtual checked_result<script_value> map_transform(uint64_t, script_value&, const std::vector<script_value>&) = 0;
 
     // Parallel workers: barrier-provisioned class-method pins for the active region
     // (null outside regions and on engine backends). A worker method wall consults it —
     // a hit dispatches on worker-private state, a miss is an admission verdict.
-    virtual void set_parallel_method_pins(const detail::parallel_method_pin_table*) {}
+    virtual void set_parallel_method_pins(const detail::parallel_method_pin_table*) = 0;
 
-    // Debugger hook: engine::debugger() wires the controller here. Default no-op, so the
-    // vm backend inherits it unchanged until phase 5 adds its statement-boundary hook.
-    virtual void set_debug_controller(debug::controller*) {}
+    // Debugger hook: engine::debugger() wires the controller here.
+    virtual void set_debug_controller(debug::controller*) = 0;
     // Diagnostic builds (JAISCRIPT_VM_PROFILE): zero the per-opcode and per-script-function
     // tables so a warm-up phase drops out of the report; a no-op everywhere else
     virtual void profile_reset() {}
     virtual cell_counters cells_counters() const { return {}; }
 
     // Innermost active environment during execution — the debugger enumerates in-scope
-    // locals from it while parked. Default null (vm until phase 5); the interpreter
-    // returns its live scope.
-    virtual std::shared_ptr<environment> get_current_environment() const { return nullptr; }
+    // locals from it while parked.
+    virtual std::shared_ptr<environment> get_current_environment() const = 0;
 
     // Named slot-based locals of the current (innermost) call frame — params + reached body
     // locals, which the environment's flat map does not hold. The debugger prefers this for
-    // the Locals view. Default empty (vm until phase 5; interpreter reconstructs from the frame).
-    virtual std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const { return {}; }
+    // the Locals view.
+    virtual std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const = 0;
 
     // Core execution
     virtual script_value execute(const std::vector<declaration_ptr>& declarations) = 0;
@@ -174,10 +166,8 @@ public:
     }
 
     // Textual execution (include): the declarations run in the backend's CURRENT environment under the running
-    // unit, as if written at the include site (docs/global_shadowing.md); the default runs them as a program
-    virtual script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) {
-        return execute(declarations, compiled_slot);
-    }
+    // unit, as if written at the include site (docs/global_shadowing.md)
+    virtual script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) = 0;
 
     virtual void prepare_for_execution() = 0;
 
@@ -206,13 +196,12 @@ public:
     virtual void set_execution_budget(std::chrono::nanoseconds) = 0;
     virtual void set_has_custom_numeric_ops(bool value) = 0;
     // ANY user binary-operator / "[]" override registered: transient subscript reads fall
-    // back to the reference mint (see detail/transient_read.hpp). Non-pure so custom
-    // backends (which have no such fast path) are unaffected.
-    virtual void set_has_custom_binary_ops(bool) {}
+    // back to the reference mint (see detail/transient_read.hpp).
+    virtual void set_has_custom_binary_ops(bool) = 0;
     // Engine-owned flat operator dispatch table (detail/operator_table.hpp): backends
     // resolve global operator overrides through it instead of probing environments.
-    // Outlives the backend; non-pure so custom backends are unaffected.
-    virtual void set_operator_table(const detail::engine_operator_table*) {}
+    // Outlives the backend.
+    virtual void set_operator_table(const detail::engine_operator_table*) = 0;
     virtual void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) = 0;
     virtual void set_engine_reference(engine* engine_ref) = 0;
     
@@ -223,55 +212,54 @@ public:
     // Caller's access context at builtin-call time (reflect::set/invoke enforcement:
     // a builtin invocation does not push a script frame, so the backend's current
     // environment belongs to the caller). Null = top-level / free-function context.
-    virtual const class_definition* current_access_context() const { return nullptr; }
+    virtual const class_definition* current_access_context() const = 0;
 
     // True while a script is running on this backend (live frames / a top-level
     // execute in flight). The host-boundary discriminator: a stored-callable
     // invocation at is_executing()==false is a fresh host entry (same rule as the
     // backends' host-level resume detection), so an uncaught script throw converts
     // to a thrown script_exception there instead of staying a latched flag.
-    virtual bool is_executing() const { return false; }
+    virtual bool is_executing() const = 0;
     // The unit of the running code (docs/global_shadowing.md), derived from the executing frame: a function's own
     // stamp, the run's at top level. The symbolizer's ambient stamp is written only while a name has versions;
     // sync_unit re-aligns it with the executing frame after a nested run.
-    virtual unit_stamp current_unit() const { return unit_stamp{}; }
-    virtual void sync_unit() {}
+    virtual unit_stamp current_unit() const = 0;
+    virtual void sync_unit() = 0;
 
     // A nested run (an include or import started by the running code) that ends unwinding parks its failure here before
     // the engine turns it into a C++ exception; the include/import op that started it takes it back into the outer run
-    virtual void park_nested_failure() {}
+    virtual void park_nested_failure() = 0;
 
-    // Stack trace captured at the last unwind (empty if the backend doesn't track one)
-    virtual std::vector<stack_frame> last_stack_trace() const { return {}; }
-    virtual std::string format_stack_trace() const { return {}; }
+    // Stack trace captured at the last unwind
+    virtual std::vector<stack_frame> last_stack_trace() const = 0;
+    virtual std::string format_stack_trace() const = 0;
 
     // The file stamped on the innermost executing statement (empty when no frame names one)
-    virtual std::string current_source_file() const { return {}; }
+    virtual std::string current_source_file() const = 0;
 
     // Shelve/restore the in-flight call's argument metadata around an external (C++)
     // invocation of a script function (see engine::external_call_guard)
-    virtual void push_external_call_scope() {}
-    virtual void pop_external_call_scope() {}
+    virtual void push_external_call_scope() = 0;
+    virtual void pop_external_call_scope() = 0;
     // A host callable's non-const T& argument: the reference a script T& parameter would bind for argument `index` of the
     // call in flight (docs/reference_model.md), or a non-reference when the argument names no lvalue or no script site
     // made this call; for an unboxed frame-slot local its value, with `slot` naming it for host_slot_store.
     // args is what the callable received, `offset` leading entries (a receiver) ahead of the arguments.
     virtual checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                                 host_slot& slot);
+                                                                 host_slot& slot) = 0;
     // The store back into a local host_reference_argument named by its slot (the variable's own table)
-    virtual checked_result<void> host_slot_store(const host_slot& slot, script_value& value);
+    virtual checked_result<void> host_slot_store(const host_slot& slot, script_value& value) = 0;
     // A host calling a script function while no script runs: the deadline arms from the current budget and the entry's
     // limits reset, as at a top-level execute or resume
-    virtual void begin_host_call() {}
+    virtual void begin_host_call() = 0;
 
-    // Coroutine resume; default body (coroutine.cpp) fails the handle with
-    // "Coroutines are not supported by this backend"
-    virtual checked_result<script_value> resume_coroutine(coroutine_handle& handle);
+    // Coroutine resume
+    virtual checked_result<script_value> resume_coroutine(coroutine_handle& handle) = 0;
 
-    // Optional: Get backend name for debugging/logging
+    // Backend name for debugging/logging
     virtual std::string get_backend_name() const = 0;
     // A value's text as string + value spells it: a class's own to_string() when it declares one
-    virtual checked_result<std::string> text_of(const script_value& v) { return v.to_string(); }
+    virtual checked_result<std::string> text_of(const script_value& v) = 0;
 };
 
 using execution_backend_ptr = std::unique_ptr<execution_backend>;

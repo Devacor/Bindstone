@@ -27,7 +27,6 @@ eng->set_backend(jai::backend_type::interpreter);  // BEFORE the first execute; 
 ```
 
 `auto_select` names the default: `set_backend` stores `vm`.
-Injected custom backends report `backend_type::custom`.
 
 ## Debugging tools
 

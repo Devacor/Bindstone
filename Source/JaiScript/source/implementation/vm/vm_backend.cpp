@@ -12912,11 +12912,11 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 
 // the argument on top takes its value now, as the callee resolved ahead of the arguments binds it (KEEP BYTE-PARALLEL with the
 // interpreter's capture_call_argument sites)
-void vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
+op_status vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 	const size_t k = ins.b;
 	const size_t below = stack_.size() >= k + 2 ? stack_.size() - k - 2 : SIZE_MAX;
 	detail::arg_binding b = detail::arg_binding::opaque;
-	switch (ins.c >> 2) {
+	switch ((ins.c >> 2) & 7) {
 		case capture_form_probe:
 			if (!pending_callees_.empty()) {
 				const pending_callee& pc = pending_callees_.back();
@@ -12946,7 +12946,19 @@ void vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 		}
 		default: break;
 	}
-	detail::capture_argument(stack_.back(), static_cast<uint8_t>(ins.c & 3), b);
+	// a reference parameter binds the argument's place now (Dev ruling 2026-10-08; KEEP BYTE-PARALLEL with detail::capture_call_argument)
+	const uint8_t kind = static_cast<uint8_t>(ins.c & 3);
+	if (const uint32_t place = ins.c >> capture_place_shift; place != 0 && detail::binds_reference(b)) {
+		script_value minted = make_null();
+		bool bound = false;
+		VM_TRY(bind_place_reference(static_cast<const expression*>(f.code->nodes[place - 1].get()), &f, environment_, minted, bound));
+		if (bound) {
+			detail::hold_minted_reference(stack_.back(), b, std::move(minted));
+			return {};
+		}
+	}
+	if (detail::capture_candidate(stack_.back(), kind)) { detail::capture_argument(stack_.back(), kind, b); }
+	return {};
 }
 
 // Callee-first probe for member callees (the op_probe_callee ruling extended to
@@ -13411,6 +13423,18 @@ static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_val
 	case script_value::TYPEID_NULL: case script_value::TYPEID_OBJECT: return bt == script_value_type::jai_any_type && shares_as_argument(a);
 	default: return false;
 	}
+}
+
+// a T& parameter after `from` whose argument names a place evaluation decides, its reference not yet bound
+template <class At>
+static bool later_place_argument(const std::vector<parameter>& parameters, const call_site* site, const chunk* caller_code, size_t from, size_t argc, At&& at) {
+	if (!site || !caller_code) { return false; }
+	for (size_t j = from; j < argc && j < parameters.size() && j < site->arg_lvalue_nodes.size(); ++j) {
+		const uint32_t node = site->arg_lvalue_nodes[j];
+		if (parameters[j].is_reference && node != k_invalid_u32 && !detail::early_bound_reference(at(j)) &&
+		    detail::transient_read_marker::place_lvalue_argument(static_cast<const expression*>(caller_code->nodes[node].get()))) { return true; }
+	}
+	return false;
 }
 
 // every parameter takes its argument in place
@@ -19717,7 +19741,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 		case opcode::op_capture_arg:
-			if (detail::capture_candidate(stack_.back(), static_cast<uint8_t>(ins.c & 3))) { capture_arg(f, ins); }
+			if ((ins.c >> capture_place_shift) != 0 || detail::capture_candidate(stack_.back(), static_cast<uint8_t>(ins.c & 3))) { return capture_arg(f, ins); }
 			return {};
 		default: return {};
 	}
@@ -22960,54 +22984,10 @@ op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame
 		}
 	}
 
-	// Field/subscript/chain lvalue argument: resolve through the shared
-	// helper into an owner-pinned reference (Tier 1)
 	const uint32_t lvalue_node = i < site.arg_lvalue_nodes.size() ? site.arg_lvalue_nodes[i] : k_invalid_u32;
-	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter)
-	if (lvalue_node != k_invalid_u32 && caller_code && caller_env &&
-	    caller_code->nodes[lvalue_node]->get_type() == node_type::member_expr &&
-	    static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get())->is_static) {
-		const class_definition* access = caller_frame ? frame_access_context(*caller_frame) : caller_env->find_access_context();
-		if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(caller_code->nodes[lvalue_node].get()),
-		                                             *caller_env, *symbolizer_, access)) {
-			if (!*cell) { return raise_from(*cell); }
-			return reference_to_storage(*cell->value(), out, bound);
-		}
-	}
-	if (lvalue_node != k_invalid_u32 && caller_code &&
-	    detail::is_ref_bindable_lvalue(static_cast<const expression*>(caller_code->nodes[lvalue_node].get()))) {
-		if (caller_frame) {
-			// the kernel resolves in the CALLER's member scope (environment_
-			// already points at the callee's chain mid-push)
-			ensure_frame_member_scope(*caller_frame, caller_env.get());
-		}
-		auto resolved = detail::resolve_ref_lvalue(
-			static_cast<const expression*>(caller_code->nodes[lvalue_node].get()),
-			caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
-		if (resolved) {
-			out = std::move(resolved.value());
-			bound = true;
-			return {};
-		}
-		// The kernel's generic non-lvalue verdict falls through to Tier 2
-		// (identifier-keyed map entries classify Tier 1 but only evaluation
-		// can resolve them); access enforcement and other specific errors
-		// propagate. (KEEP BYTE-PARALLEL with bind_reference_parameter)
-		if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
-			return raise_from(resolved);
-		}
-	}
 	if (lvalue_node != k_invalid_u32 && caller_code) {
-		// A math component (f(v.x)) binds a COMPONENT reference over the vector's storage
-		auto part = component_reference(caller_frame, static_cast<const expression*>(caller_code->nodes[lvalue_node].get()), caller_env);
-		if (!part) {
-			return raise_from(part);
-		}
-		if (part.value().is_reference()) {
-			out = std::move(part.value());
-			bound = true;
-			return {};
-		}
+		VM_TRY(bind_place_reference(static_cast<const expression*>(caller_code->nodes[lvalue_node].get()), caller_frame, caller_env, out, bound));
+		if (bound) { return {}; }
 	}
 
 	if (symbol_id != UINT64_MAX && caller_env) {
@@ -23096,6 +23076,70 @@ op_status vm_backend::bind_site_reference(size_t i, const call_site& site, frame
 	return {};
 }
 
+// A place argument (a static, a field/subscript/chain lvalue, a math component) as the reference a T& binds; bound=false: the
+// argument names none of those. KEEP BYTE-PARALLEL with interpreter::bind_site_reference.
+op_status vm_backend::bind_place_reference(const expression* place, frame* caller_frame, const std::shared_ptr<environment>& caller_env,
+                                           script_value& out, bool& bound) {
+	// C::s and ns::x are lvalues: the reference binds their storage (KEEP BYTE-PARALLEL with the interpreter)
+	if (caller_env && place->get_type() == node_type::member_expr && static_cast<const member_expr*>(place)->is_static) {
+		const class_definition* access = caller_frame ? frame_access_context(*caller_frame) : caller_env->find_access_context();
+		if (auto cell = detail::static_member_lvalue(*engine_, static_cast<const member_expr*>(place), *caller_env, *symbolizer_, access)) {
+			if (!*cell) { return raise_from(*cell); }
+			return reference_to_storage(*cell->value(), out, bound);
+		}
+	}
+	// Field/subscript/chain lvalue argument: resolve through the shared helper into an owner-pinned reference (Tier 1)
+	if (detail::is_ref_bindable_lvalue(place)) {
+		if (caller_frame) {
+			// the kernel resolves in the CALLER's member scope (environment_
+			// already points at the callee's chain mid-push)
+			ensure_frame_member_scope(*caller_frame, caller_env.get());
+		}
+		auto resolved = detail::resolve_ref_lvalue(place, caller_view(caller_frame), caller_env.get(), engine_, symbolizer_);
+		if (resolved) {
+			out = std::move(resolved.value());
+			bound = true;
+			return {};
+		}
+		// The kernel's generic non-lvalue verdict falls through to Tier 2
+		// (identifier-keyed map entries classify Tier 1 but only evaluation
+		// can resolve them); access enforcement and other specific errors
+		// propagate. (KEEP BYTE-PARALLEL with bind_reference_parameter)
+		if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
+			return raise_from(resolved);
+		}
+	}
+	// A math component (f(v.x)) binds a COMPONENT reference over the vector's storage
+	auto part = component_reference(caller_frame, place, caller_env);
+	if (!part) {
+		return raise_from(part);
+	}
+	if (part.value().is_reference()) {
+		out = std::move(part.value());
+		bound = true;
+	}
+	return {};
+}
+
+// a conversion that may run code binds after the arguments after it were evaluated, and nothing ran between: the T& parameters
+// among them bind their places now, as their evaluation would have (KEEP BYTE-PARALLEL with interpreter::bind_later_places)
+op_status vm_backend::bind_later_places(const std::vector<parameter>& parameters, std::vector<script_value>* held, size_t args_base, size_t from, size_t argc, const call_site* site,
+                                        frame* caller_frame, chunk* caller_code, const std::shared_ptr<environment>& caller_env, unit_stamp caller_unit) {
+	if (!site || !caller_code) { return {}; }
+	for (size_t j = from; j < argc && j < parameters.size() && j < site->arg_lvalue_nodes.size(); ++j) {
+		const uint32_t node = site->arg_lvalue_nodes[j];
+		if (!parameters[j].is_reference || node == k_invalid_u32 || detail::early_bound_reference(held ? (*held)[j] : stack_[args_base + j]) ||
+		    !detail::transient_read_marker::place_lvalue_argument(static_cast<const expression*>(caller_code->nodes[node].get()))) { continue; }
+		unit_sync_scope unitSync{ this };
+		enter_unit(caller_unit);
+		script_value minted = make_null();
+		bool bound = false;
+		VM_TRY(bind_place_reference(static_cast<const expression*>(caller_code->nodes[node].get()), caller_frame, caller_env, minted, bound));
+		if (bound) { detail::hold_minted_reference(held ? (*held)[j] : stack_[args_base + j], detail::arg_binding::reference, std::move(minted)); }   // read after the resolution, which may run code
+	}
+	return {};
+}
+
 checked_result<void> vm_backend::host_slot_store(const host_slot& slot, script_value& value) {
 	script_value* storage = frame_slot(*const_cast<frame*>(static_cast<const frame*>(slot.frame)), slot.slot);
 	if (!storage) {
@@ -23139,6 +23183,9 @@ checked_result<script_value> vm_backend::host_reference_argument(const std::vect
 	const script_value& passed = (*ctx.arguments)[index];
 	if (ctx.arguments != &args && !detail::same_argument(passed, args[index + offset])) {
 		return make_null();
+	}
+	if (const script_value* early = detail::early_bound_reference(passed)) {
+		return *early;
 	}
 	script_value site_ref = make_null();
 	bool bound = false;
@@ -23228,12 +23275,20 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		// conversions can reallocate between iterations
 		const auto& arg = args[args_base + i];
 		if (detail::deferred_argument(arg)) [[unlikely]] {
-			// Only a mixed-mode overload reaches this path. Resolve all remaining staged arguments once;
+			if (param.is_reference) {
+				if (const script_value* early = detail::early_bound_reference(arg)) {   // the argument's evaluation bound it
+					frame_slot_set(callee, param.slot_index, script_value(*early));
+					continue;
+				}
+			}
+			// A mixed-mode overload, or a later reference the evaluation bound. Resolve all remaining staged arguments once;
 			// the vector keeps their sources alive and bypasses the ordinary stack/window in-place elision.
 			std::vector<script_value> selected;
 			selected.reserve(argc);
 			for (size_t j = 0; j < argc; ++j) {
-				selected.push_back(detail::argument_for_binding(args[args_base + j], detail::parameters_binding(parameters, j)));
+				const script_value& staged = args[args_base + j];
+				selected.push_back(j < parameters.size() && parameters[j].is_reference && detail::early_bound_reference(staged)
+				                   ? staged : detail::argument_for_binding(staged, detail::parameters_binding(parameters, j)));
 			}
 			return bind_parameters(parameters, selected, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, later_taken);
 		}
@@ -23406,7 +23461,8 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				                ? script_value(arg_shield.deref()) : script_value(arg_shield);
 			} else {
 				if (!later_taken && i + 1 < argc && detail::binding_may_run_code(arg_shield, param.type.get()) &&
-				    detail::later_capture_candidate(i + 1, argc, [&](size_t j) -> const script_value& { return args[args_base + j]; })) [[unlikely]] {
+				    (detail::later_capture_candidate(i + 1, argc, [&](size_t j) -> const script_value& { return args[args_base + j]; }) ||
+				     later_place_argument(parameters, site, caller_code, i + 1, argc, [&](size_t j) -> const script_value& { return args[args_base + j]; }))) [[unlikely]] {
 					// the arguments after this conversion were taken before the binding began: captured ahead of it, in place on the
 					// stack; a vector source resumes this parameter's bind over a captured copy
 					later_taken = true;
@@ -23417,11 +23473,13 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 						for (size_t j = i + 1; j < argc; ++j) {
 							detail::capture_argument(held[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
 						}
+						VM_TRY(bind_later_places(parameters, &held, 0, i + 1, argc, site, caller_frame, caller_code, caller_env, caller_unit));
 						return bind_parameters(parameters, held, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, true, callee_body);
 					}
 					for (size_t j = i + 1; j < argc; ++j) {
 						detail::capture_argument(stack_[args_base + j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
 					}
+					VM_TRY(bind_later_places(parameters, nullptr, args_base, i + 1, argc, site, caller_frame, caller_code, caller_env, caller_unit));
 				}
 				auto converted_result = try_convert_for_parameter(arg_shield, param.type,
 					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, param.is_reference});

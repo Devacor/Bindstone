@@ -964,8 +964,8 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0) || (any_type(rt) && untyped_result_kind(call, fn, frame) != script_value_type::jai_null_type))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
 	if (detail::requires_return_value(rt) && !detail::has_complete_return(*fn)) return "a callee with an incomplete required return";
-	std::vector<uint8_t> captures;   // the arguments a later argument may write (detail/arg_capture.hpp): a value argument among them binds through the call
-	if (std::any_of(fn->parameters.begin(), fn->parameters.end(), value_param)) { detail::transient_read_marker::stamp_arg_captures(call->arguments, captures); }
+	std::vector<uint8_t> captures;   // the arguments a later argument may write (detail/arg_capture.hpp): a value argument or an element among them binds through the call
+	detail::transient_read_marker::stamp_arg_captures(call->arguments, captures);
 	for (size_t i = 0; i < fn->parameters.size(); ++i) {
 		const parameter& p = fn->parameters[i];
 		const expression* a = call->arguments[i].get();
@@ -1001,6 +1001,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 				if (id->global_qualified || !id->names_value_decl || id->slot_index == SIZE_MAX || callable_.escaping.count(static_cast<uint32_t>(id->slot_index))) return "a reference argument that may not be an lvalue";
 				const auto declared = callable_.slot_types.find(static_cast<uint32_t>(id->slot_index));
 				if (declared == callable_.slot_types.end() || !declared->second || declared->second->is_reference() || declared->second->base_type != script_value_type::jai_array_type) return "a reference argument that may not be an lvalue";
+				if (i < captures.size() && captures[i] != 0) return "an element a later argument may move";   // the call binds it where it is evaluated
 				continue;
 			}
 			return "a reference argument that is not a name or an element";
@@ -1527,7 +1528,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 				detail::transient_read_marker::stamp_arg_captures(pc->arguments, captures);
 				for (; staged < prefix->second; ++staged) {
 					compile_expression(pc->arguments[staged]);
-					emit_arg_capture(captures, staged, pc->arguments[staged].get(), probe, capture_form_probe);
+					emit_arg_capture(captures, staged, pc->arguments[staged], probe, capture_form_probe);
 					const uint32_t slot = static_cast<uint32_t>(temp_next_++);
 					if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 					emit(opcode::op_call_temp, slot);

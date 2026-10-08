@@ -112,6 +112,7 @@ namespace {
 		for (const auto& ins : body.code) {
 			switch (ins.op) {
 			case opcode::op_const:
+			case opcode::op_const_folded:
 			case opcode::op_null:
 			case opcode::op_true:
 			case opcode::op_false:
@@ -327,6 +328,7 @@ namespace {
 		for (const auto& ins : body.code) {
 			switch (ins.op) {
 			case opcode::op_const:
+			case opcode::op_const_folded:
 			case opcode::op_null:
 			case opcode::op_true:
 			case opcode::op_false:

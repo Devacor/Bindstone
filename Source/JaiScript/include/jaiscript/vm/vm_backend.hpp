@@ -24,6 +24,7 @@
 #include <new>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace jai {
@@ -2390,6 +2391,22 @@ namespace jai::vm {
         op_status exec_ref_return_lvalue(frame& f, const vm_instruction& ins);
         op_status exec_ref_target_store(frame& f, const vm_instruction& ins);
         op_status exec_const_guard(frame& f, const vm_instruction& ins);
+        // scoped const folding (docs/const.md section 10)
+        struct fold_site {
+            chunk* code = nullptr;
+            std::shared_ptr<chunk> pin;   // a chunk the cache does not hold
+            uint32_t ip = 0;
+            uint32_t const_index = 0;
+            vm_instruction orig{opcode::op_halt, 0, 0, 0};
+            const member_expr* expr = nullptr;
+        };
+        std::vector<fold_site> fold_sites_;
+        std::unordered_set<const chunk*> body_chunks_;   // chunk_for_body's chunks: pinned by the cache for the backend's lifetime
+        std::optional<script_value> folded_static_value(const member_expr* expr);
+        void fold_static_read(frame& f, const vm_instruction& ins, const member_expr* expr, const script_value& out);
+    public:
+        void revalidate_folds();
+    private:
         op_status non_lvalue_target(const expression* target);
         op_status exec_cast(frame& f, const vm_instruction& ins);
 

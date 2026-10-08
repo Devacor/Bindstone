@@ -15305,8 +15305,94 @@ op_status vm_backend::exec_get_static(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value out = make_null();
 	VM_TRY(static_member_value(f, expr, out));
+	fold_static_read(f, ins, expr, out);
 	stack_.push_back(std::move(out));
 	return {};
+}
+
+// Compile-time folding of a scoped const read (docs/const.md section 10): the first execution of `C::K`, `ns::x` or `E::v` that
+// reads a const resolves it through the general path above, then the instruction becomes a constant. A fold site remembers the
+// read it replaced; when a declaration that could change a folded const runs again (a class, a namespace, an enum), every site
+// is checked against its const's current value: the same value keeps the constant, another value patches it, a member that is
+// no longer a const (or no longer there) rewrites the site back to its general read. A running frame sees the change at its next
+// instruction, as the interpreter, which reads the const every time, does.
+std::optional<script_value> vm_backend::folded_static_value(const member_expr* expr) {
+	if (!expr || !expr->object || expr->member_id == UINT64_MAX) { return std::nullopt; }
+	auto foldable = [](const script_value& v) {
+		const size_t idx = v.raw_storage_index();
+		return idx == script_value::TYPEID_INT || idx == script_value::TYPEID_FLOAT || idx == script_value::TYPEID_BOOL || idx == script_value::TYPEID_CHAR;
+	};
+	std::string name;
+	if (expr->object->get_type() == node_type::identifier_expr) {
+		name = std::string(static_cast<const identifier_expr*>(expr->object.get())->name);
+	} else {
+		std::function<std::string(const expression*)> path = [&](const expression* e) -> std::string {
+			if (e->get_type() == node_type::identifier_expr) { return std::string(static_cast<const identifier_expr*>(e)->name); }
+			if (e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->is_static) {
+				const std::string head = path(static_cast<const member_expr*>(e)->object.get());
+				return head.empty() ? head : head + "::" + std::string(static_cast<const member_expr*>(e)->member);
+			}
+			return {};
+		};
+		name = path(expr->object.get());
+	}
+	if (name.empty() || symbolizer_->frozen()) { return std::nullopt; }
+	const uint64_t name_id = symbolizer_->intern(name);
+	auto& namespaces = engine_->script_namespaces();
+	if (auto ns_it = namespaces.find(name_id); ns_it != namespaces.end() && ns_it->second) {
+		const auto& ns_data = ns_it->second;
+		if (ns_data->functions.count(expr->member_id)) { return std::nullopt; }
+		if (ns_data->scope) {
+			if (const script_value* cell = ns_data->scope->get_own_value_ptr(expr->member_id); cell && engine_->const_cell(cell)) {
+				const script_value& v = cell->deref();
+				if (foldable(v)) { return v; }
+			}
+		}
+		return std::nullopt;
+	}
+	auto def = engine_->get_class_definition(name);
+	if (!def) { return std::nullopt; }
+	if (!def->static_method_in_chain(expr->member_id).is_null() || !def->is_const_static(expr->member_id)) { return std::nullopt; }
+	if (const script_value* value = def->find_static_field_in_chain(expr->member_id)) {
+		const script_value& v = value->deref();
+		if (foldable(v)) { return v; }
+	}
+	return std::nullopt;
+}
+
+void vm_backend::fold_static_read(frame& f, const vm_instruction& ins, const member_expr* expr, const script_value& out) {
+	if (parallel_worker_ || debug_hook_ || (engine_ && engine_->parallel_region_active()) || !f.code) { return; }
+	if (!f.pin && !body_chunks_.count(f.code)) { return; }   // a chunk whose lifetime the fold can hold
+	if (f.ip >= f.code->code.size() || f.code->code[f.ip].op != opcode::op_get_static || f.code->code[f.ip].a != ins.a) { return; }
+	const std::optional<script_value> folded = folded_static_value(expr);
+	if (!folded) { return; }
+	const script_value& v = out.deref();
+	if (v.raw_storage_index() != folded->raw_storage_index() || !(v == *folded)) { return; }   // the general read named another member
+	fold_site site;
+	site.code = f.code;
+	site.pin = f.pin;
+	site.ip = static_cast<uint32_t>(f.ip);
+	site.orig = ins;
+	site.expr = expr;
+	site.const_index = static_cast<uint32_t>(f.code->constants.size());
+	f.code->constants.push_back(script_value(*folded));
+	fold_sites_.push_back(std::move(site));
+	f.code->code[f.ip] = vm_instruction{opcode::op_const_folded, fold_sites_.back().const_index, static_cast<uint32_t>(fold_sites_.size() - 1), 0};
+}
+
+// a declaration that may change a folded const ran (a class, a namespace, an enum): every fold site checks its const again
+void vm_backend::revalidate_folds() {
+	if (fold_sites_.empty()) { return; }
+	for (auto& site : fold_sites_) {
+		if (!site.code || site.code->code[site.ip].op != opcode::op_const_folded) { continue; }
+		const std::optional<script_value> now = folded_static_value(site.expr);
+		if (!now) {
+			site.code->code[site.ip] = site.orig;   // no longer a foldable const: the general read again
+			continue;
+		}
+		script_value& k = site.code->constants[site.const_index];
+		if (k.raw_storage_index() != now->raw_storage_index() || !(k == *now)) { k = script_value(*now); }
+	}
 }
 
 op_status vm_backend::assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value) {
@@ -17240,6 +17326,7 @@ op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 
 	environment_->define(decl->name_id, std::move(enum_map));
 	engine_->note_enum_name(decl->name_id);
+	revalidate_folds();
 	return {};
 }
 
@@ -17259,6 +17346,7 @@ op_status vm_backend::exec_class_decl(frame& f, const vm_instruction& ins) {
 	// Class machinery throws (override validation, field-init failures); the interpreter
 	// converts those to unwinding at its statement boundary - do the same here
 	try {
+		struct revalidate_after { vm_backend* vm; ~revalidate_after() { vm->revalidate_folds(); } } after{this};
 		return exec_class_decl_node(decl);
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
@@ -17728,6 +17816,7 @@ op_status vm_backend::exec_class_decl_node(class_decl* decl) {
 op_status vm_backend::exec_namespace_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<namespace_decl*>(f.code->nodes[ins.a].get());
 	try {
+		struct revalidate_after { vm_backend* vm; ~revalidate_after() { vm->revalidate_folds(); } } after{this};
 		return exec_namespace_decl_node(decl);
 	} catch (const script_exception& e) {
 		active_exception_value_ = script_value(std::string(e.what()), engine_);
@@ -20680,6 +20769,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				continue;
 
 			case opcode::op_const: JAI_OP_LABEL(op_const) push_constant(*f.code, ins.a); JAI_NEXT_OP();
+			case opcode::op_const_folded: push_constant(*f.code, ins.a); break;
 
 			case opcode::op_null: stack_.push_back(make_null()); break;
 			case opcode::op_true: stack_.push_back(script_value(true, engine_)); break;
@@ -21419,6 +21509,7 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	auto compiled = compiler_.compile_callable(name, params, body, local_count);
 	note_compiled(*compiled);
 	chunk_cache_.emplace(key, chunk_cache_entry{compiled, body});
+	body_chunks_.insert(compiled.get());
 	return compiled;
 }
 

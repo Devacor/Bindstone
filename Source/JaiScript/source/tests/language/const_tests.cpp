@@ -262,6 +262,46 @@ public:
             check_true(contains(err, "Cannot assign to 'LIMIT': it is read-only"), err);
         });
 
+        // ------------------------------------------------------------------ folding and hot reload (docs/const.md 10)
+        test("a_redefined_class_constant_reaches_every_use", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            e->execute("class C { const int K = 1; } int readk() { return C::K; }");
+            check_eq(script_int(1), e->execute("readk();").as_int());
+            check_eq(script_int(1), e->execute("readk();").as_int());
+            e->execute("class C { const int K = 2; }");
+            check_eq(script_int(2), e->execute("readk();").as_int());
+            e->execute("class C { static int K = 3; }");   // no longer a const: a mutable static keeps its value, the read is general again
+            check_eq(script_int(2), e->execute("readk();").as_int());
+            e->execute("C::K = 5;");
+            check_eq(script_int(5), e->execute("readk();").as_int());
+        });
+
+        test("a_running_frame_sees_the_new_value", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            engine* raw = e.get();
+            e->add_function("redefine", [raw](script_int k) {
+                raw->execute("class C { const int K = " + std::to_string(k) + "; }");
+                return k;
+            });
+            e->execute(R"JS(
+                class C { const int K = 1; }
+                int run() { int t = 0; for (int i = 0; i < 4; i++) { t += C::K; if (i == 1) { redefine(10); } } return t; }
+            )JS");
+            check_eq(script_int(22), e->execute("run();").as_int());
+        });
+
+        test("a_reopened_namespace_constant", [this]() {
+            auto e = make_engine();
+            stdlib::register_all(*e);
+            e->execute("namespace cfg { const int W = 3; } int w() { return cfg::W; }");
+            check_eq(script_int(3), e->execute("w();").as_int());
+            check_eq(script_int(3), e->execute("w();").as_int());
+            e->execute("namespace cfg { const int W = 4; }");
+            check_eq(script_int(4), e->execute("w();").as_int());
+        });
+
         test("namespace_constants", [this]() {
             check_eq(std::string("3\n"), run("namespace cfg { const int W = 3; } print(cfg::W);").output);
             CHECK_ERROR("namespace cfg { const int W = 3; } cfg::W = 4;", "cannot assign to const 'cfg::W'");

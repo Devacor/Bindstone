@@ -3,7 +3,7 @@
 #include <jaiscript/properties/property_schema.hpp>
 #include <cstddef>
 
-// Helper macros for removing parentheses (matches MV_PROPERTY behavior)
+// Helper macros for removing parentheses
 #define JAI_EXPAND(x) x
 #define JAI_REMOVE_PARENS_IMPL(...) __VA_ARGS__
 #define JAI_REMOVE_PARENS(x) JAI_EXPAND(JAI_REMOVE_PARENS_IMPL x)
@@ -21,7 +21,6 @@
 //   JAI_PROPERTY((std::vector<int>), scores);
 //
 // Note: Types MUST be wrapped in parentheses to handle commas in template types.
-// This matches MV_PROPERTY behavior for easier migration.
 //
 // The macro automatically registers properties to:
 // 1. Per-instance property_manager (for runtime access)

@@ -480,7 +480,7 @@ public:
         test("import_resolves_from_the_importing_file_then_include_paths_then_cwd", [this]() {
             // One ladder for import/include, the checker's closure gather and resolve_path: the
             // importing file's folder first (a module imports its sibling by bare name), the
-            // include paths next (Bindstone's `Assets` rung), the working directory last.
+            // include paths next (a host's `Assets` rung), the working directory last.
             namespace fs = std::filesystem;
             fs::path dir = jai::foundry::test_temp_directory() / "jai_ladder";
             fs::path inc = jai::foundry::test_temp_directory() / "jai_ladder_inc";

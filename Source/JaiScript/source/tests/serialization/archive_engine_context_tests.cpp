@@ -21,7 +21,7 @@ namespace jai::foundry::tests {
 
 struct unrelated_archive_context {};
 
-// The MV Clickable shape: a property_owner whose JAI_SIGNAL_PROPERTY persists owned text receivers.
+// A clickable widget shape: a property_owner whose JAI_SIGNAL_PROPERTY persists owned text receivers.
 class context_receiver_owner : public property_owner<context_receiver_owner> {
 public:
     typedef void PingSignature(int);

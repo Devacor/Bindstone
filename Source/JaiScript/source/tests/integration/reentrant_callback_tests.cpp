@@ -44,7 +44,7 @@ inline std::string stack_moving_source() {
 	return s + "if (n <= 0) { return l47; } return stack_deep(n - 1) + l0 - n; }";
 }
 
-// MV::Script::eval shape: a converted callback runs a nested execute() while the outer execute() is live.
+// A host eval shape: a converted callback runs a nested execute() while the outer execute() is live.
 class reentrant_callback_tests : public suite {
 public:
 	reentrant_callback_tests() : suite("Reentrant Callbacks") {}
@@ -341,7 +341,7 @@ public:
 			check_eq((int64_t)7, marked, "captured by-reference parameter is still the live object");
 		});
 
-		// MV::Script::eval shape: a global 'self' exists when the hook is created and is nulled afterwards; the hook's own
+		// A host eval shape: a global 'self' exists when the hook is created and is nulled afterwards; the hook's own
 		// var& parameter shadows it and the inner [self] capture must bind the parameter, not the (later null) global.
 		test("captured_parameter_shadowing_a_nulled_global_binds_the_parameter", [this]() {
 			auto eng = make_engine();

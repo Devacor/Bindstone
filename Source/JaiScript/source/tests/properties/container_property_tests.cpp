@@ -281,7 +281,7 @@ public:
 
 FOUNDRY_REGISTER(jai::foundry::tests::property_reflection_tests)
 
-// Pins the closure-vs-global semantics the Workbench ScriptPanel pattern depends on:
+// Pins the closure-vs-global semantics an editor script-panel pattern depends on:
 // files run on a SHARED engine with add_global("panel", ...) re-injected per file, and
 // script lambdas stored into std::function hooks fire long after execution.
 class hook_holder {

@@ -33,7 +33,7 @@ namespace jai::detail {
         distance, distance_squared,
         radians_to_degrees, degrees_to_radians,
         random_, random_range, random_seed,
-        // Bindstone-style interpolation family (formula-identical to the stdlib
+        // Interpolation family (formula-identical to the stdlib
         // registrations they supersede; lerp and mix are the same formula)
         lerp_, mix_, unmix_,
         mix_in_, mix_out_, mix_in_out_, mix_out_in_,
@@ -188,14 +188,13 @@ namespace jai::detail {
         }
     }
 
-    // Engine-owned deterministic RNG (zero statics). Modeled on MV::Random
-    // (generalUtility.h) with two deliberate divergences: (1) the raw engine is
+    // Engine-owned deterministic RNG (zero statics). Two deliberate choices: (1) the raw engine is
     // std::mt19937_64 - its sequence IS exactly specified by the standard, so seeds
     // reproduce cross-platform - but the int/float MAPPINGS are ours, because
     // std::uniform_*_distribution algorithms are implementation-defined and would
     // break STATE_HASH/differential-fuzz determinism across toolchains; (2) the
     // default seed is FIXED (unseeded engines are deterministic, matching the test
-    // regime) where MV defaults to random_device - games seed via math::random_seed.
+    // regime) rather than random_device - games seed via math::random_seed.
     struct math_rng_state {
         std::mt19937_64 generator{0x9E3779B97F4A7C15ull};
 

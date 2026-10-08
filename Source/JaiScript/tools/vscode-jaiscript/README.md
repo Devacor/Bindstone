@@ -1,7 +1,6 @@
 # JaiScript for VS Code
 
-Language support for [JaiScript](../../), the embedded scripting language used by the
-MutedVision engine / Bindstone.
+Language support for [JaiScript](../../), an embedded scripting language for C++ hosts.
 
 ## What it does
 

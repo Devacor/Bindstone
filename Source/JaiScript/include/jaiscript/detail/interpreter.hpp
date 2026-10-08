@@ -7,7 +7,7 @@
 // jai::ints helpers) lives in <jaiscript/detail/integer_ops.hpp>, which the
 // engine .cpp files include directly. It is intentionally kept out of this
 // widely-included header so its <intrin.h> dependency does not bloat consumer
-// (Bindstone) translation units.
+// translation units.
 
 #include "ast.hpp"
 #include "null_member_diagnostic.hpp"

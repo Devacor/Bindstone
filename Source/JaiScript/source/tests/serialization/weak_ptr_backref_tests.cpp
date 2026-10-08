@@ -1,5 +1,5 @@
 // Reproduction test for weak_ptr back-reference resolution through a
-// polymorphic shared_ptr load path. Mirrors the Bindstone scenario:
+// polymorphic shared_ptr load path. Mirrors a scene-graph host:
 //   Node (property_owner, load_and_construct)
 //     -> vector<shared_ptr<Component>>  (polymorphic, $type-tagged)
 //          -> Component has weak_ptr<Node> owner  (back-reference to parent)

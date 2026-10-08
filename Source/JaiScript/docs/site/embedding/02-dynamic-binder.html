@@ -174,9 +174,9 @@ engine you hand it:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto eng = jai::engine::make();
 jai::stdlib::register_all(*eng);   // formatted print, containers, math, json
 jai::bind_registrar(*eng);         // every jai::registrar in the binary, one call</code></pre></div>
-<p>This is the shape a real engine uses: scene classes register through registrars with a services context
-as the second type argument (<code>jai::registrar&lt;Building, Services&gt;</code>) so bindings can reach
-engine services.</p>
+<p>A host whose bindings need its own services passes a context type as the second type argument
+(<code>jai::registrar&lt;Monster, HostContext&gt;</code>); each configure function then receives the context
+<code>jai::bind_registrar&lt;HostContext&gt;(*eng, ctx)</code> hands it.</p>
 
 <h2 id="three-doors">Three doors, each an explicit opt-in<a class="hlink" href="#three-doors" aria-label="link">&#8203;</a></h2>
 <p>The pieces above are a deliberate layering. A type's visibility widens only when you ask:</p>

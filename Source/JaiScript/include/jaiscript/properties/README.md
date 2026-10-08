@@ -1,6 +1,6 @@
 # JaiScript Properties System
 
-A generic, reflection-enabled property system with built-in serialization support, migrated from Bindstone's MV::Property system.
+A generic, reflection-enabled property system with built-in serialization support.
 
 ## Features
 
@@ -340,18 +340,10 @@ source_obj.property_mgr.clone_to_target(dest_obj.property_mgr);
 - **property_manager**: Reflection registry, owns property references
 - **property_owner**: Base class providing `property_mgr` member
 
-## Migration from MV::Property
-
-The JaiScript property system is designed for easy migration from Bindstone:
+## Declaring properties
 
 ```cpp
-// Before (Bindstone)
-class MyClass : public MV::PropertyOwner {
-    MV_PROPERTY((int), health, 100);
-    MV_PROPERTY((std::string), name);
-};
-
-// After (JaiScript) - use CRTP pattern
+// CRTP: pass the derived type as the first template argument
 class MyClass : public jai::property_owner<MyClass> {
     JAI_PROPERTY((int), health, 100);
     JAI_PROPERTY((std::string), name);
@@ -363,13 +355,9 @@ class Derived : public jai::property_owner<Derived, MyClass> {
 };
 ```
 
-Key differences:
-- `property_owner<T>` uses CRTP pattern (pass derived type as template arg)
-- `property_owner` instead of `PropertyOwner` (snake_case)
-- `property_mgr` instead of `propertyManager`
-- All methods use snake_case: `serialize_enabled()`, `allow_save()`
-- Uses JaiScript archives instead of Cereal
-- Inheritance is tracked via template args for auto-binding to JaiScript
+- `property_owner<T>` uses CRTP (the derived type is the first template argument)
+- Bases follow it as template arguments; they drive auto-binding and serialization
+- Properties serialize through the JaiScript archives
 
 ## Naming Conventions
 
@@ -378,4 +366,3 @@ All JaiScript code uses **snake_case**:
 - Methods: `serialize_enabled()`, `allow_save()`, `clone_to_target()`
 - Members: `property_mgr`, `m_value`, `m_allow_serialization`
 
-This differs from Bindstone's PascalCase but follows JaiScript conventions.

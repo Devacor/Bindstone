@@ -244,7 +244,7 @@ void print_usage() {
 		"  key_down from auto-repeat; there are no key-up events. Networking: NetChannel\n"
 		"  (new NetChannel(); listen(port)/connect(host,port)/send(bytes)/pump()/close();\n"
 		"  signals on_packet(bytes)/on_connect()/on_disconnect(reason) fire during pump();\n"
-		"  4-byte big-endian length framing, MV-compatible) and NetServer (N clients on one\n"
+		"  4-byte big-endian length framing) and NetServer (N clients on one\n"
 		"  port: listen/send(id,bytes)/broadcast/pump/kick/client_count; per-client signals\n"
 		"  on_client_connect(id)/on_client_packet(id,bytes)/on_client_disconnect(id,reason)),\n"
 		"  net_host_name() and net_local_addresses() (this machine's IPv4 addresses).\n"
@@ -632,10 +632,8 @@ void register_console_game_io(jai::engine& eng) {
 }
 
 // -------------------------------------------------------------- networking ---
-// A generic length-framed TCP channel for scripts, shaped like Bindstone's
-// network layer: MV's 4-byte big-endian header + content framing on the wire
-// (a jaiscript peer can talk to an MV::Client/Server), and Clickable's
-// property_owner + JAI_SIGNAL_PROPERTY pattern on the API. No threads: the
+// A generic length-framed TCP channel for scripts: a 4-byte big-endian header + content
+// framing on the wire, and the property_owner + JAI_SIGNAL_PROPERTY pattern on the API. No threads: the
 // channel owns non-blocking sockets and a script-called pump() drains them,
 // firing signals inside the script's own call stack. Protocol semantics
 // (actions, lockstep, handshakes) live entirely in script.
@@ -863,7 +861,7 @@ private:
 	bool announce_connect_ = false;
 };
 
-// The MV::Server shape for scripts: persistent listener, N framed connections,
+// The server shape for scripts: persistent listener, N framed connections,
 // per-client signals, broadcast. Same wire format as net_channel; same no-thread
 // pump contract. Client ids are stable, never reused within a server's lifetime.
 class net_server : public jai::property_owner<net_server> {
@@ -1236,7 +1234,7 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 // Exclusive-bind probe: the connector's listener sets SO_REUSEADDR, which on Windows lets a
-// second bind on a taken port "succeed" — probe without it (same pattern as the Bindstone hosts).
+// second bind on a taken port "succeed" — probe without it (the pattern embedding hosts use).
 bool debug_port_free(int port) {
 #ifdef _WIN32
 	static const bool wsa_ready = [] { WSADATA wsa; return ::WSAStartup(MAKEWORD(2, 2), &wsa) == 0; }();
@@ -1261,7 +1259,7 @@ bool debug_port_free(int port) {
 	return available;
 }
 
-// Base 52477 keeps clear of the Bindstone processes (52472/3/4) while staying in the family;
+// Base 52477 keeps clear of 52472-52474, which embedding hosts commonly take;
 // +10 steps like they do. Returns the bound port, 0 if nothing bound.
 int attach_debugger(jai::engine& eng, int requested_port) {
 	int base = requested_port > 0 ? requested_port : jai::debug::default_port + 5;

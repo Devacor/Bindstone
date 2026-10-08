@@ -261,7 +261,7 @@ public:
 		});
 
 		test("script_objects_outliving_their_engine_destroy_safely", [this]() {
-			// A host that keeps a script value past engine teardown (Bindstone's login page: a
+			// A host that keeps a script value past engine teardown (a UI page: a
 			// signal receiver capturing a script object, destroyed after the engine) must be
 			// able to drop it: the instance's destructor used to reach into its destroyed
 			// class definition to unregister itself (Astra's -loginshot 0xC0000005 in

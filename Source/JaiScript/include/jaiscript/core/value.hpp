@@ -435,8 +435,7 @@ namespace detail { struct argument_capture_storage; }
             return current_type();
         }
 
-        // type() - Legacy alias, returns defined_type() for backward compatibility
-        // Prefer using current_type() or defined_type() for clarity
+        // type() is defined_type()
         script_value_type type() const { return defined_type(); }
 
         // storage_type() - Legacy alias for current_type()
@@ -2536,16 +2535,16 @@ namespace detail { struct argument_capture_storage; }
         }
 
         // Safe access to reference holder for reference types
-        // Use storage_type() because references may have type_info with different base_type
+        // current_type(): a reference's type_info may name a different base_type
         reference_holder* get_reference_holder() {
-            if (storage_type() == script_value_type::jai_reference_type) {
+            if (current_type() == script_value_type::jai_reference_type) {
                 return storage_.get<strong_ptr<reference_holder>>().get();
             }
             return nullptr;
         }
 
         const reference_holder* get_reference_holder() const {
-            if (storage_type() == script_value_type::jai_reference_type) {
+            if (current_type() == script_value_type::jai_reference_type) {
                 return storage_.get<strong_ptr<reference_holder>>().get();
             }
             return nullptr;

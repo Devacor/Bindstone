@@ -35,11 +35,6 @@
           "type": "BOOL"
         },
         {
-          "name": "JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES",
-          "value": "True",
-          "type": "BOOL"
-        },
-        {
           "name": "JAISCRIPT_BUILD_TESTS",
           "value": "True",
           "type": "BOOL"
@@ -68,11 +63,6 @@
       "ctestCommandArgs": "",
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "variables": [
-        {
-          "name": "JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES",
-          "value": "false",
-          "type": "BOOL"
-        }
       ]
     }
   ]

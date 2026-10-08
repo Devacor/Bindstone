@@ -72,11 +72,6 @@ target_include_directories(jaiscript
 # C++20 requirement
 target_compile_features(jaiscript PUBLIC cxx_std_20)
 
-# Enable environment cycle detection (always on for debugging circular parent chains)
-target_compile_definitions(jaiscript PRIVATE
-    JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
-)
-
 # Optional DAP-over-TCP debugger transport (jai::debug::debug_connector). On for desktop
 # dev/editor builds; turn OFF for shipping/mobile so no socket code is compiled in. The
 # connector's TU is empty when this is off (constructing one is then a link error by design).

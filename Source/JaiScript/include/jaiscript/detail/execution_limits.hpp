@@ -16,15 +16,9 @@ namespace jai::detail {
 	// backend caches a pointer to it, so reentrant executes share the outer run's
 	// allowance. Instance state only - never static (zero-statics/multi-engine rule).
 	struct execution_limits {
-		// Per-engine configuration, not process-wide mutable state. An explicitly
-		// supplied legacy build macro seeds both defaults; hosts can override either.
-#ifdef JAI_MAX_CALL_DEPTH
-		int interpreter_call_depth_limit = JAI_MAX_CALL_DEPTH;
-		int vm_call_depth_limit = JAI_MAX_CALL_DEPTH;
-#else
+		// Per-engine configuration, not process-wide mutable state; hosts can override either.
 		int interpreter_call_depth_limit = 256;
 		int vm_call_depth_limit = 250000;   // a backstop: the memory cap and the execution budget bound a recursion first
-#endif
 		// The vm's call path compares the depth against this gate: the cap, or the next frame-storage charge below it
 		int vm_depth_gate = 0;
 		size_t vm_frame_bytes = 0;   // frame storage charged to memory_used this execute

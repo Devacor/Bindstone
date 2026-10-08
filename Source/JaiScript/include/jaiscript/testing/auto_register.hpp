@@ -52,20 +52,8 @@ public:
 #define FOUNDRY_CONCAT_IMPL(a, b) a##b
 #define FOUNDRY_CONCAT(a, b) FOUNDRY_CONCAT_IMPL(a, b)
 
-// Unified macro that:
-// 1. Auto-registers the test suite with the main runner (when not isolated)
-// 2. Provides isolated test capability when compiled standalone
-// 3. Works with any fully-qualified test class name
-// 4. Avoids .o file conflicts by conditionally compiling registration
-#ifdef JAI_ISOLATED_TEST
-    // When building isolated, don't register with the global registry
-    #define FOUNDRY_REGISTER(TestClass) \
-        CONDITIONAL_ISOLATED_TEST(TestClass)
-#else
-    // When building the full suite, register but don't create main()
-    #define FOUNDRY_REGISTER(TestClass)                                       \
-    namespace {                                                                \
-        static ::jai::foundry::suite_registrar<TestClass> FOUNDRY_CONCAT(_registrar_, __LINE__)(#TestClass); \
-    }                                                                          \
-    CONDITIONAL_ISOLATED_TEST(TestClass)
-#endif
+// Registers the suite with the main runner
+#define FOUNDRY_REGISTER(TestClass)                                       \
+namespace {                                                                \
+    static ::jai::foundry::suite_registrar<TestClass> FOUNDRY_CONCAT(_registrar_, __LINE__)(#TestClass); \
+}

@@ -81,11 +81,9 @@ add_executable(jaiscript_tests
 # Link against JaiScript library
 target_link_libraries(jaiscript_tests PRIVATE jaiscript)
 
-# Enable environment cycle detection for tests (always on for debugging)
 # JAISCRIPT_TESTS_SOURCE_ROOT: the JaiScript folder, so corpus tests find examples/ from any working directory
 get_filename_component(JAISCRIPT_TESTS_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 target_compile_definitions(jaiscript_tests PRIVATE
-    JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES
     JAISCRIPT_TESTS_SOURCE_ROOT="${JAISCRIPT_TESTS_SOURCE_ROOT}"
 )
 
@@ -173,8 +171,8 @@ endif()
 # Platform-specific settings
 if(MSVC)
     target_compile_options(jaiscript_tests PRIVATE /W3)
-    # JAI_MAX_CALL_DEPTH (10000) recursion frames exceed the 1 MB default stack in
-    # Debug; a larger stack lets the catchable depth-limit error actually fire.
+    # Deep recursion exceeds the 1 MB default stack in Debug; a larger stack lets the
+    # catchable depth-limit error actually fire.
     target_link_options(jaiscript_tests PRIVATE /STACK:134217728)
     # The Debug PDB passes MSVC's 4 GB limit at the default 4 KB page size (LNK1140); 8 KB pages raise it to 8 GB
     target_link_options(jaiscript_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/PDBPAGESIZE:8192>)
@@ -184,7 +182,7 @@ else()
         -Wextra
     )
     if(WIN32)
-        # Same 128 MB stack the MSVC branch sets: JAI_MAX_CALL_DEPTH recursion frames
+        # Same 128 MB stack the MSVC branch sets: deep recursion
         # and the parser depth budget exceed the 1 MB default under Clang/GCC Debug
         # frame sizes too (LINKER: translates per driver - lld-link takes /STACK,
         # MinGW ld takes --stack)

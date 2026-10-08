@@ -450,7 +450,7 @@ public:
 				countdown(100000);
 			)";
 			auto e = vm_engine();
-			check_eq((int64_t)0, e->execute(src).as_int());   // 10x past JAI_MAX_CALL_DEPTH
+			check_eq((int64_t)0, e->execute(src).as_int());   // far past the interpreter's default depth cap
 			auto ie = interp_engine();
 			check_throws([&]() { ie->execute(src); }, "interpreter keeps the depth limit");
 		});

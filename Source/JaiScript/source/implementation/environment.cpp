@@ -878,9 +878,6 @@ void environment::reset(std::shared_ptr<environment> new_parent) {
     // Clear all local values first
     clear_values();
 
-    // Validate the parent chain before setting (debug mode only)
-    validate_parent_chain(new_parent);
-
     // Only clear cache if parent actually changed
     // If same parent, cached pointers to parent chain remain valid
     // This is critical for recursive functions - avoids re-walking parent chain
@@ -907,9 +904,6 @@ void environment::reset_as_method(std::shared_ptr<environment> parent, script_va
     // Clear all local values first
     clear_values();
 
-    // Validate the parent chain before setting (debug mode only)
-    validate_parent_chain(parent);
-
     // Only clear cache if parent actually changed
     if (parent_.get() != parent.get()) {
         flat_lookup_.clear();
@@ -933,9 +927,6 @@ void environment::reset_as_static_method(std::shared_ptr<environment> parent, st
     JAI_CENSUS(env_reset);
     // Clear all local values first
     clear_values();
-
-    // Validate the parent chain before setting (debug mode only)
-    validate_parent_chain(parent);
 
     // Only clear cache if parent actually changed
     if (parent_.get() != parent.get()) {

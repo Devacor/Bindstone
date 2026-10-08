@@ -3,6 +3,7 @@
 #ifndef __JAISCRIPT_CORE_STRONG_PTR_HPP__
 #define __JAISCRIPT_CORE_STRONG_PTR_HPP__
 
+#include <jaiscript/jaiscript_fwd.hpp>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -17,17 +18,6 @@
 #ifdef JAISCRIPT_DIAG_XTHREAD_RC
 #include <cstdlib>
 #include <thread>
-#endif
-
-#if defined(_MSC_VER)
-#define JAI_SP_FORCEINLINE __forceinline
-#define JAI_SP_NOINLINE __declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-#define JAI_SP_FORCEINLINE inline __attribute__((always_inline))
-#define JAI_SP_NOINLINE __attribute__((noinline))
-#else
-#define JAI_SP_FORCEINLINE inline
-#define JAI_SP_NOINLINE
 #endif
 
 #ifdef JAISCRIPT_VM_COVERAGE
@@ -218,7 +208,7 @@ public:
     /// Deleted: use make_strong<T>() instead (enforces combined allocation)
     strong_ptr(T*) = delete;
 
-    JAI_SP_FORCEINLINE strong_ptr(const strong_ptr& other) noexcept
+    JAI_FORCEINLINE strong_ptr(const strong_ptr& other) noexcept
         : ptr_(other.ptr_) {
         if (ptr_) {
             cb()->add_strong();
@@ -226,14 +216,14 @@ public:
         }
     }
 
-    JAI_SP_FORCEINLINE strong_ptr(strong_ptr&& other) noexcept
+    JAI_FORCEINLINE strong_ptr(strong_ptr&& other) noexcept
         : ptr_(other.ptr_) {
         other.ptr_ = nullptr;
     }
 
     // ===== Destructor =====
 
-    JAI_SP_FORCEINLINE ~strong_ptr() {
+    JAI_FORCEINLINE ~strong_ptr() {
         // CRITICAL: Save to a local before any operations that might
         // trigger re-entrant destruction via variant storage reuse.
         auto* local_ptr = ptr_;
@@ -250,7 +240,7 @@ public:
 
     // ===== Assignment =====
 
-    JAI_SP_FORCEINLINE strong_ptr& operator=(const strong_ptr& other) noexcept {
+    JAI_FORCEINLINE strong_ptr& operator=(const strong_ptr& other) noexcept {
         if (this != &other) {
             strong_ptr tmp(other);
             swap(tmp);
@@ -258,7 +248,7 @@ public:
         return *this;
     }
 
-    JAI_SP_FORCEINLINE strong_ptr& operator=(strong_ptr&& other) noexcept {
+    JAI_FORCEINLINE strong_ptr& operator=(strong_ptr&& other) noexcept {
         if (this != &other) {
             strong_ptr tmp(std::move(other));
             swap(tmp);
@@ -316,7 +306,7 @@ private:
 
     // The last strong reference: the object dies, then the strong family's collective weak reference
     // (memory is freed when every weaker_ptr is gone too)
-    JAI_SP_NOINLINE static void destroy_last(T* local_ptr) noexcept {
+    JAI_NOINLINE static void destroy_last(T* local_ptr) noexcept {
         auto* local_cb = detail::cb_from_object(local_ptr);
         JAI_SP_CENSUS_FREED(local_ptr);
         local_ptr->~T();

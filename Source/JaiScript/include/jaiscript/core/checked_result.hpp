@@ -163,16 +163,9 @@ public:
         return symbol_id2_;
     }
 
-    // Legacy compatibility - returns static message (no allocation)
+    // The static error message (no allocation)
     [[nodiscard]] std::string_view message() const noexcept {
         return static_msg_;
-    }
-
-    // Monadic operations for convenience
-
-    // Propagate error to caller (useful pattern)
-    [[nodiscard]] checked_result<T> propagate() && {
-        return std::move(*this);
     }
 
     // Get error as propagator for clean cross-type error propagation
@@ -284,14 +277,9 @@ public:
         return symbol_id2_;
     }
 
-    // Legacy compatibility
+    // The static error message (no allocation)
     [[nodiscard]] std::string_view message() const noexcept {
         return static_msg_;
-    }
-
-    // Propagate error to caller
-    [[nodiscard]] checked_result<T&> propagate() && {
-        return std::move(*this);
     }
 
     // Get error as propagator for clean cross-type error propagation
@@ -366,14 +354,9 @@ public:
         return symbol_id2_;
     }
 
-    // Legacy compatibility
+    // The static error message (no allocation)
     [[nodiscard]] inline std::string_view message() const noexcept {
         return static_msg_;
-    }
-
-    // Propagate error to caller
-    [[nodiscard]] checked_result<void> propagate() && noexcept {
-        return std::move(*this);
     }
 
     // Get error as propagator for clean cross-type error propagation

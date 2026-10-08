@@ -692,6 +692,18 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         const script_array* node = self.unchecked_array_node();
         engine* eng = ctx.get_engine();
+        if (node->kind() == script_array::kind_t::str) {   // a string buffer's texts read where they are: no element is boxed
+            const auto& strs = node->strs();
+            size_t total = strs.size() > 1 ? sep.size() * (strs.size() - 1) : 0;
+            for (const auto& h : strs) { total += h->size(); }
+            std::string result;
+            result.reserve(total);
+            for (size_t i = 0; i < strs.size(); ++i) {
+                if (i) { result += sep; }
+                result += *strs[i];
+            }
+            return ctx.make_value(std::move(result));
+        }
         // one buffer: string elements by their length, everything else by a short estimate;
         // hetero elements read in place, typed kinds box once per element
         size_t total = node->size() > 1 ? sep.size() * (node->size() - 1) : 0;

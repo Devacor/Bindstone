@@ -412,13 +412,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_cpp_vector.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_cpp_vector_registration.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\bound_map.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\builtin_methods.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\checked_result.hpp">
@@ -446,9 +440,6 @@
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine_impl.hpp">
-      <Filter>jaiscript\core</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine_make_object.hpp">
       <Filter>jaiscript\core</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\execution_backend.hpp">
@@ -512,9 +503,6 @@
       <Filter>jaiscript\stdlib</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\json.hpp">
-      <Filter>jaiscript\stdlib</Filter>
-    </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\math.hpp">
       <Filter>jaiscript\stdlib</Filter>
     </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\stdlib\stdlib.hpp">

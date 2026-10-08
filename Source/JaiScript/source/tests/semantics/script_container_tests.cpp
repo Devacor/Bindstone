@@ -3,7 +3,6 @@
 #include <jaiscript/core/bound_array.hpp>
 #include <jaiscript/core/bound_map.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <jaiscript/core/engine_make_object.hpp>
 #include <chrono>
 
 using namespace jai;

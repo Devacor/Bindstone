@@ -4,7 +4,6 @@
 #include "json.hpp"
 #include "io.hpp"
 #include "containers.hpp"
-#include "math.hpp"
 #include "strings.hpp"
 #include "reflection.hpp"
 #include "time.hpp"
@@ -19,7 +18,6 @@ namespace stdlib {
         register_json_functions(eng_ref);
         register_io_functions(eng_ref);
         register_container_types(eng_ref);
-        register_math_functions(eng_ref);
         register_string_functions(eng_ref);
         register_reflection_functions(eng_ref);   // the reflect:: capability — separately
                                                   // composable for hosts that grant stdlib
@@ -39,8 +37,6 @@ namespace stdlib {
     inline void register_io_functions(engine* e) { register_io_functions(*e); }
     inline void register_container_types(const std::shared_ptr<engine>& e) { register_container_types(*e); }
     inline void register_container_types(engine* e) { register_container_types(*e); }
-    inline void register_math_functions(const std::shared_ptr<engine>& e) { register_math_functions(*e); }
-    inline void register_math_functions(engine* e) { register_math_functions(*e); }
     inline void register_string_functions(const std::shared_ptr<engine>& e) { register_string_functions(*e); }
     inline void register_string_functions(engine* e) { register_string_functions(*e); }
 

@@ -1,8 +1,7 @@
 # const (design)
 
-Status: **design, ruled** (Dev ruling 2026-10-07: a narrow `const`, for parameters, variable declarations and
-expressiveness; Dev's decisions on the open questions are folded in and listed in section 14). Implementation in
-progress.
+Status: **ruled, implemented** (Dev ruling 2026-10-07: a narrow `const`, for parameters, variable declarations and
+expressiveness; Dev's decisions on the open questions are listed in section 14). Section 9.3 lists what is not enforced yet.
 
 `const` marks a binding that is set once and then only read. The rules are C++'s, cut down to the declaration:
 
@@ -13,7 +12,7 @@ progress.
 - A const holding a value is deeply read-only: nothing reached from it by value can be written through it.
 - A const holding a handle (`shared_ptr<T>`, `weak_ptr<T>`) can't be rebound, and its pointee stays writable.
 - `const` is not part of a signature and never affects overload resolution.
-- A program-scope or namespace const is folded into compiled code, so its uses look up nothing. Hot reload stays
+- A scoped const read (`C::K`, `ns::x`, `E::v`) is folded into the VM's code, so it looks up nothing. Hot reload stays
   correct: a re-run that changes the value reaches every use on both backends.
 
 ## 1. Grammar
@@ -132,8 +131,8 @@ Each of these makes a writable name for storage rooted at a const:
 
 A method call on a const-rooted receiver is an error exactly when the method writes its receiver:
 
-- **Script methods.** The receiver-writes verdict reuses the same kernel with `this` (and the bare fields of the chain)
-  as the root. A method writes its receiver when its body does any of these:
+- **Script methods.** The receiver-writes verdict (`detail::receiver_write_analysis`) takes `this` and the bare fields
+  of the chain as the root. A method writes its receiver when its body does any of these:
   - stores to a field (any spelling, without crossing a handle);
   - calls a method on `this` that writes its receiver (transitively; recursion is assumed read-only until a write is
     found);
@@ -145,17 +144,14 @@ A method call on a const-rooted receiver is an error exactly when the method wri
   Writing statics or globals is not a receiver write. Returning a field by `T&` is not one either: the call result is a
   step of the path (2.2), so `c.at(i) = 5` is an error at the store, while `x = c.at(i)` reads.
 
-  The verdict is cached on the `function_decl` against `engine::definition_epoch()`, the way the parameter verdict is.
-  At run time the method actually dispatched decides. The checker reports an error only when it is certain: the
+  At run time (a `const_runtime` site) the class of the receiver that is actually there decides. The checker reports an error only when it is certain: the
   receiver's class is exact (a by-value const) or every override it can see writes.
 - **Builtin methods** on strings, arrays and maps. Mutators are writes, and the registry's reading methods
   (`ref_write_reading_method`) are not. Dot transforms that have a copying namespace twin say so in the error
   (`array::filter(xs, f)` returns a filtered copy). A builtin whose callback takes the element by `T&` (`for_each`,
-  `find`, ...) binds a const element: a callback that writes through that parameter is a write. To decide it, lambdas
-  get the parameter verdict that declared functions already have.
-- **Host methods.** The binder already knows the C++ signature: a `&T::f` whose type is a `const` member function,
-  or a bound lambda whose first parameter is `const T&` or `T` by value, does not write. Anything else does. This fact
-  comes from the signature, so a host has nothing to tag. A host property's setter is a write.
+  `find`, ...) is a reading builtin; a callback that writes through that parameter is not caught yet (9.3).
+- **Host methods** run: the binder could tell a `const` member function from its signature, which it does not record
+  yet (9.3). A host property's setter is a store, and a store through a const raises.
 - Constructors and destructors of a const object run normally.
 
 ### 3.4 Not writes
@@ -189,11 +185,11 @@ is a later performance change and is not part of these semantics.
 overload viability or scoring (`core/overload_resolution.hpp` is unchanged), and declarations that differ only by
 `const` follow the general redefinition rule (Dev ruling 2026-10-07), with nothing special for `const`:
 
-- Two definitions of one signature in the same unit are a load error: two methods or two constructors of one class
-  with the same parameter types, two namespace functions with the same parameter types, two program-scope functions of
-  one name (program-scope functions do not overload, so the name is the signature):
+- Two definitions of one signature in the same unit are a load error: two methods (or two static methods, or two
+  constructors) of one class, two namespace functions, or two program-scope functions with the same parameter types:
   `'m' is already defined with parameters (int&) at 4:5` (`'f' is already defined at 4:5` for a program-scope
-  function).
+  function). A declaration marked `override` replaces on purpose. Program-scope functions do not overload, so two of one
+  name and different parameters keep the existing warning: the later replaces the earlier.
 - A definition from another unit (another module, another execute block) is a redefinition, the hot-reload path: it
   replaces the earlier one, and the checker warns when it sees the earlier definition
   (`'f' redefines the function defined in <file>:4`). A same-unit re-run replaces its own definitions and warns about
@@ -322,10 +318,9 @@ re-initializes const declarations as part of the replay, which is not a store.
 
 ### 7.8 `reflect::`
 
-- `reflect::fields(x)` rows gain `const` (bool), true for a class constant.
-- `reflect::set(x, "f", v)` raises `Cannot assign to 'f': it is read-only` when `f` is a class constant, or when `x` is
-  a const-rooted value.
-- `reflect::bind(c, "m")` on a const receiver raises when `m` writes its receiver.
+- `reflect::set(x, "f", v)` raises `Cannot assign to 'f': it is read-only` when `f` is a class constant.
+- `reflect::fields(x)` rows carry no `const` key yet, and `reflect::set` on a const-rooted value and `reflect::bind` of a
+  writing method on a const run (9.3).
 - `reflect::get` reads.
 
 ### 7.9 Serialization
@@ -337,265 +332,171 @@ re-initializes const declarations as part of the replay, which is not a store.
 
 ### 7.10 Debugger, checker tooling and the LSP
 
-- **DAP.** The locals view marks const variables. `setVariable` on a const local, global or class constant is refused
-  with the read-only text.
-- **Checker observer.** `check_expression_type` gains a const flag for a const-rooted expression.
-- **LSP** (`tools/lsp`):
-  - hover shows `const int MAX = 10`;
-  - semantic tokens add the standard `readonly` modifier to const names;
-  - diagnostics carry the section 8 texts.
+The language server reports the section 8 diagnostics through the checker. Hover, a `readonly` semantic-token modifier
+and the debugger's refusal of `setVariable` on a const are not done (9.3).
 
 ### 7.11 jaibite
 
-Version 41. New fields:
-
-- `variable_decl::is_const` and `destructuring_decl::is_const`;
-- the parser's const stamps (9.2): `identifier_expr::names_const` and the raising node;
-- `variable_decl::folded_value` (10.1).
-
-`parameter::is_const` and `range_for_stmt::is_const` are already serialized, but their meaning changes, so a sibling
-written before this version re-parses. A const loop that wrote through its variable is an error now.
+Version 41: `variable_decl::is_const`, `destructuring_decl::is_const` and `extern_decl::is_const` are serialized. The
+const verdicts are not: every load runs the checker's walk, which stamps them. `parameter::is_const` and
+`range_for_stmt::is_const` were serialized before and ignored; now they mean const, so a sibling written before version
+41 re-parses.
 
 ## 8. Diagnostics
 
-Every runtime error is `type_mismatch`, in the read-only family (docs/diagnostics.md family B). The checker reports the
-same fact at load, lowercase, with the declaration as the related location (`(declared at 3:1)`). Warn mode reports it
-as a warning, and the run-time text then applies when the write runs.
+Every run-time error is `type_mismatch`, in the read-only family (docs/diagnostics.md family B, section "Const"). The
+checker reports the same fact at load, lowercase, with the declaration as the related location (`(declared at 3:1)`); warn
+mode reports it as a warning. A stamped node raises its text when it is reached, before any part of it runs (the right side
+of an assignment included), so the error is the same whichever operand would have failed first.
 
 | case | run time | checker |
 |---|---|---|
-| store to the const itself (`=`, `op=`, `++`/`--`): local, parameter, global, namespace, class constant | `Cannot assign to 'MAX': it is read-only` (the existing text, verbatim) | `cannot assign to const 'MAX'` |
+| store, compound store or `++`/`--` of the const itself: a local, a parameter, a global, a namespace const, a class constant | `Cannot assign to 'MAX': it is read-only` (the existing text) | `cannot assign to const 'MAX'` (`'C::K'`, `'cfg::W'` when scoped) |
 | store through a const (2.2) | `Cannot assign to 'c.hp': it is read-only ('c' is const)` (the target spelled by `detail/lvalue_shape.hpp`) | `cannot assign to 'c.hp': 'c' is const` |
-| method that writes its receiver | `Cannot call 'move' on 'p': 'p' is const and 'move' writes its receiver (line 12)` | `cannot call 'move' on 'p': 'p' is const and 'move' writes its receiver (line 12)` |
-| mutating builtin | `Cannot call 'push' on 'xs': 'xs' is const and 'push' changes it` (a dot transform adds `(array::filter(xs, f) returns a copy)`) | same, lowercase |
-| mutable reference to a const | `Cannot bind 'r' (declared int&) to const 'c'; declare it const int& or auto&` (`an element of const 'xs'` for a loop variable) | same, lowercase |
-| writing `T&` argument | `Cannot pass const 'n' to parameter 'x' of 'inc': 'inc' writes through it (line 12)` | `'inc' writes through parameter 'x' (line 12); 'n' is const` (the existing literal text's shape) |
-| host `T&` argument | `Cannot pass const 'n' to parameter 1 of 'swap': it takes int&` | same, lowercase, when the host signature is known |
-| `cast<T&>` / `cast<shared_ptr<T>>` | `Cannot cast const 'c' to int&: cast<int>(c) copies it` | same, lowercase |
-| sharing a const instance | `Cannot share const 'c' as shared_ptr<Foo>; copy it into a variable first` | same, lowercase |
-| reference return | `Cannot return const 'MAX' from 'f' by reference (declared -> int&); return it by value` | same, lowercase |
-| two definitions of one signature in one unit (4.3) | none | `'m' is already defined with parameters (int&) at 4:5`, `'f' is already defined at 4:5` |
-| a redefinition from another unit (4.3) | none | warning: `'f' redefines the function defined in <file>:4` |
-| inline const mismatch (6.3) | `'X' is declared inline const in <file>; declare every definition 'inline const' to share it` | same, at the declaration |
-| missing initializer (1.2) | parse error: `const 'x' needs an initializer: const int x = 0;` | - |
+| method that writes its receiver | `Cannot call 'move' on 'p': 'p' is const and 'move' writes its receiver (line 12)` | the same, lowercase |
+| mutating builtin | `Cannot call 'push' on 'xs': 'xs' is const and 'push' changes it` | the same, lowercase |
+| a `T&` / `var&` declaration over a const | `Cannot bind 'r' (declared int&) to const 'c'; declare it const int& or auto&` | the same, lowercase |
+| a typed reference loop variable over a const's elements | `Cannot bind 'x' (declared int&) to an element of const 'xs'; declare it const int& or auto&` | the same, lowercase |
+| a const into a reference parameter its callee writes through | `Cannot pass const 'n' to parameter 'x' of 'inc': 'inc' writes through it (line 12)` | `'inc' writes through parameter 'x' (line 12); 'n' is const` |
+| `cast<T&>` of a const | `Cannot cast const 'c' to int&: cast<int>(c) copies it` | the same, lowercase |
+| `cast<shared_ptr<T>>` of a const, a const stored into a `shared_ptr<T>` | `Cannot share const 'c' as shared_ptr<Foo>; copy it into a variable first` | the same, lowercase |
+| a const returned by reference | `Cannot return const 'MAX' from 'f' by reference (declared -> int&); return it by value` | the same, lowercase |
+| two definitions of one signature in one unit (4.3) | none | `'m' is already defined with parameters (int&) at 4:5`; a program-scope function: `'f' is already defined at 4:5` |
+| a function another unit defined (4.3) | none | warning: `'f' redefines the function defined in <file>:4` |
+| missing initializer (1.2) | parse error: `const 'x' needs an initializer: const int x = value;` | - |
+| the host writing a const (6.3) | `engine::add_global` throws `Cannot assign to 'MAX': it is read-only` | - |
 
-Every text except the first is new and goes into docs/diagnostics.md as a "Const" section of family B. The texts
-take symbol ids, so they intern nothing on the error path. A parallel worker gets the slot-less form of each text.
+The texts are built by `detail/const_rules.hpp` at check time and carried on the node; nothing is interned on the error
+path.
 
 ## 9. Enforcement
 
-### 9.1 Load time
+### 9.1 Load time and the stamps
 
-The checker generalizes its `const_key` marker (the read-only map key of a range-for pair, docs/static_checking.md
-"Map keys") into a const marker on every const binding. Each const-rooted expression carries it, and so do copies of a
-pair and conditionals over it. The marker reuses that marker's two rule families, mutation and alias, under the
-section 3 definition. Map keys keep their own texts. The receiver-writes verdict and the parameter verdict run in the same walk. Under the false-positive contract only certain errors are reported. A `var` path or an
-unseen class stays lenient, and the run time decides it.
+The checker (`type_checker.cpp`, the `const_path` analysis beside the `const_key` marker of map keys) walks every write and
+binding site. A const name is a const declaration or parameter, a const loop variable or structured binding, a class
+constant, an `extern const`, a reference that deduces const (`auto&` over a const, a range-for `auto&` over a const's
+elements), a program-scope const another unit declares (from the program table, or from the engine's marked cell once that
+unit ran), and an enum's name (section 11). Each site gets a verdict on its node (`const_site` on the assignment, unary,
+call, cast, declaration, return and range-for nodes):
+
+- `const_raises`: every step of the path is typed and none is a handle. Strict reports the error; the node raises.
+- `const_runtime`: a step is untyped (a `var`, an untyped field, a method whose writes the checker cannot type). Nothing is
+  reported; the run time decides.
+- none: no const is reached, or a handle ends it.
+
+The walk runs in every check mode, the stamp pass included, so the verdict is on the node under strict, warn and off alike
+and the backends never depend on the diagnostics.
 
 ### 9.2 Run time
 
-Constness is static wherever the parser can see the name, so most enforcement costs nothing at run time:
+- **Stamped nodes.** The interpreter tests the node's verdict where it visits the node (`interpreter::const_guard_at`); the
+  VM compiles `const_raises` into `op_error` with the text and `const_runtime` into `op_const_guard` ahead of the node
+  (`vm_compiler::emit_const_guard`). Code without a const pays nothing: the interpreter tests one byte per assignment,
+  unary, call, cast, declaration, return and range-for visit, the VM emits nothing. Grafting and hoisting step aside for a
+  guarded call, and the counted-for fast paths for a guarded initializer or update.
+- **`const_runtime`** walks the path's values without running code (`detail::const_path_crosses_handle`): the root's
+  storage, then each field and each element by a literal or a variable index. A handle on the way lets the write run; none
+  raises. A call additionally asks whether the dispatched class's method writes its receiver (`receiver_write_analysis`
+  over the engine's class definitions).
+- **Program-scope and namespace cells** carry a const mark (`engine::mark_const_cell`, set by both backends' declaration of
+  the cell); the checker of a later unit reads it, and `engine::add_global` refuses a marked cell.
+- **Class constants** carry a mark on their class (`class_definition::mark_const_static`); `enforce_static_write`, which
+  every static store path runs, raises for them.
+- **`const T&` parameters** take a temporary on both backends (`ref_parameter_takes_temporary`, and the interpreter's
+  binders for lambdas).
 
-- **Slot-resident bindings** (function locals, parameters, loop and catch variables, captures, a coroutine's frame).
-  The parser resolves the name, so it knows every write site. A certain violation becomes a raising node
-  (`const_violation_expr`): it evaluates what C++17 evaluates (the right side, then the target's receiver and index,
-  per docs/diagnostics.md "Order of errors in an assignment") and raises. Some sites can only be decided when they run:
-  - a `var` path whose handle crossing is unknown;
-  - a method call that needs the dispatched method's verdict;
-  - a `T&` argument whose callee resolves at the call.
+### 9.3 Gaps
 
-  Those sites carry a flag. The interpreter tests it, and the VM compiles it into a guard instruction emitted only at
-  those sites. Code that names no const pays nothing, and no store lane changes.
-- **Environment-resident bindings** (program scope, namespaces, top-level blocks, class statics). Code the parser
-  can't see reaches them by name: other units, runtime includes, the host, `reflect::`. So the cell carries a const
-  mark (a side table on the root environment and on namespace scopes, never a bit in the value). It is checked
-  wherever writable access to a cell is handed out:
-  - the full store paths (`store_popped_value_full`, the interpreter's assign);
-  - the store-cell caches (`env_store_cell` refuses to cache a const cell, so the cached lane never sees one);
-  - reference minting and `host_reference_argument`;
-  - `environment::assign`, `add_global` and static stores.
+Known places where a write through a const runs without an error:
 
-  Same-unit uses the parser can resolve are also rewritten as above.
-- **Class constants** are statics with the const mark on their static cell: every static store path (`C::s = v`, a bare
-  or `this.` store in a method, `reflect::set`) checks the mark where it resolves the static, and no store cache admits
-  a marked static.
-- **References.** A reference minted at run time over a const cell, a class constant or a const reference is minted in a
-  const holder mode. That mode fails the reference fast lanes' admission (as a property reference does), so its stores
-  reach the general path, and the general path raises. Minting from a const reference yields a const reference. A
-  reference variable whose initializer the parser can't prove writable has its receiver-call sites flagged, as above.
-  References the parser knows are const don't need the mode, because their stores are already rewritten.
-
-The VM needs a new instruction (or a flag on an existing one) for a const declaration whose cell must be marked,
-alongside `op_decl_keep` / `op_decl_share`. The interpreter marks the cell in `visit_variable_decl`.
+- **Host methods.** A call of a host (C++) method on a const value runs whatever the method does: the binder does not yet
+  record which methods are `const` member functions.
+- **Paths the run time can only walk by running code**: a step through a property getter, a computed index (`c[i + 1].x`)
+  or a call result. The checker reports such a path when it can type it; otherwise the write runs.
+- **A write checked before its const existed.** A unit checked before the unit that declares the const ran (no literal
+  import or include connects them) sees no const; the write is caught when that unit is checked again.
+- **Callbacks**: a builtin's callback that writes through its `T&` element parameter (`xs.for_each((int& x) => x = 1)`
+  over a const `xs`) writes the element.
+- **`reflect::`**: `reflect::fields` rows have no `const` key yet; `reflect::set` raises only for a class constant, and
+  `reflect::bind` of a writing method on a const runs.
+- **Tooling**: the debugger's `setVariable` does not refuse a const, and the language server has no const hover or
+  `readonly` semantic token yet.
 
 ## 10. Compile-time folding
 
 ### 10.1 What folds
 
-The VM folds a read of a program-scope, namespace or static const whose current value is a scalar (int, float, bool,
-char) or a string. A folded read compiles to a constant-table entry instead of an environment lookup or a cache probe.
-As a constant, it becomes a literal operand for typed lowering, compare-jumps and cell blocks, and its type is known
-to the type proofs.
+The VM folds scoped const reads: `C::K` of a class constant, `ns::x` of a namespace const, and `E::v` of a program-scope
+enum (section 11), when the value is an int, a float, a bool or a char. The first execution of the read resolves it through
+the general path, and when the member is a const the instruction becomes `op_const_folded`, a push of a constant the chunk
+holds. Later executions read the constant.
 
-There are two sources of the value:
+Bare-name reads of program-scope consts are not folded: their loads already go through the environment lookup cache, and a
+typed block resolves them once at its entry. The interpreter folds nothing and is the oracle.
 
-- **An initialized const cell, any initializer.** A const's value changes only by re-initialization, which is the
-  invalidation point (10.3). So the compiler folds the value the cell holds at the moment it compiles the chunk.
-  Chunks compile lazily, at a function's first call, so a function called after the constants module has run folds
-  its constants.
-- **A constant expression in the code's own unit.** The defining unit's top-level code compiles before its own const
-  declarations run. For it, the parser computes `variable_decl::folded_value` when the initializer is a constant
-  expression:
-  - literals;
-  - unary and binary builtin operators over them (the parser's `try_constant_fold` kernel, which already refuses
-    overflow and zero division so the runtime raises);
-  - the conversion of the declared type (`const float F = 1;` is 1.0);
-  - parentheses, and a ternary with a constant condition;
-  - earlier same-unit folded consts, and same-unit enum values.
+### 10.2 Invalidation (hot reload)
 
-  Top-level code folds such a const only at uses textually after its declaration, which always run after it. A
-  function body compiled before the declaration runs doesn't fold it, because the interpreter would find it undefined
-  (or holding its previous run's value).
+Each folded site is remembered with the read it replaced. Every declaration that can change a folded const (a class
+definition, a namespace body, a program-scope enum) runs the check over the sites:
 
-Aggregates (`const array<int> T = [...]`) are const but not folded. The lookup they still pay is the existing one.
+- the same value: the constant stays;
+- another value: the constant is patched in place, so every frame, a running one included, reads the new value at its next
+  instruction;
+- the member is no longer a const, or no longer foldable: the site is rewritten in place back to its general read.
 
-### 10.2 Resolution across units
+Nothing waits for a restart, and both backends observe the same value at every instruction. Folding is skipped in a
+parallel region, under the debugger and for a chunk whose lifetime the backend cannot hold.
 
-A folded read resolves the name exactly as the read would (docs/global_shadowing.md), at compile time, for the
-code's unit:
+### 10.3 Cost
 
-- its own unit's cell;
-- else the newest cell declared no later than the code's compile stamp (for a function, the run that declared it).
-
-Bindings that rule makes stable fold. A name that resolves only through the forward-reference rung (no cell declared
-before the code) doesn't fold, because a later declaration can still change what it reads. A bare name inside a method
-folds only when the class chain is fully visible and declares no member of that name (locals, then members, then
-globals). `::MAX` and `ns::MAX` always fold.
-
-### 10.3 Invalidation (hot reload)
-
-Folding is invisible: a use always sees the value its const's cell holds now. The interpreter doesn't fold, so it is
-the oracle, and both backends observe identical values at every instruction.
-
-Each const cell keeps a record: its value, its kind, and its dependents (a chunk and a constant index for each folded
-read, and the instructions lowered from it). The re-initialization that a re-run performs is the one event that can
-change a const's value, and it compares the new value with the old:
-
-- **Same kind and same value** (the usual module re-run): nothing happens.
-- **Same kind, new value:** the engine rewrites each dependent's constant-table entry in place. Every chunk sees the
-  new value at its next instruction, including frames that are running and old lambdas from earlier runs. A constant
-  derived from the const at compile time (a folded `MAX * 2`) records the expression it came from and is recomputed by
-  the same kernel.
-- **New kind** (`const auto X = 5` edited to `5.5`): the constants are rewritten, and each typed instruction or
-  cell-block entry that assumed the old kind is rewritten in place to the general instruction it was lowered from.
-  `chunk::typed_sites` already records those originals for the guard fallback. The chunk is also retired from the
-  chunk cache, so the next entry compiles it again (retired chunks stay pinned, the cache's invariant).
-- **The const stops being const** (a re-run drops `const`), or its cell stops being the one the code resolves: each
-  folded read is rewritten in place to the general load it replaced, and the chunk is retired. The compiler records
-  that load beside each folded site, as typed sites record their fallbacks. This requires a folded constant to enter
-  a fused or typed instruction only where that instruction's general form has a one-instruction equivalent that reads
-  the global. Where it doesn't, the compiler doesn't fold. The edit applies live, like every hot-reload change (Dev
-  ruling 2026-10-07: development never needs a restart of JaiScript to resolve a problem).
-
-Re-initialization runs inside a unit's run: an import, an `execute_file`, a hook string. Every live VM frame is then
-stopped at a call or an import, so the in-place rewrites complete before any of them resumes. A unit can't run inside a
-cell block (closed typed loops call nothing) or inside a parallel region. Shadowing never invalidates anything: code
-compiled before a new declaration keeps its binding, which is the existing rule.
-
-### 10.4 Cost
-
-- Folded reads cost nothing.
-- A dependent record costs one entry per folded site.
-- A re-run whose consts are unchanged pays one comparison per const.
-- Patching costs one store per dependent.
-- Code that reads no const is unchanged.
+A folded read costs a constant push. A declaration that may change a const pays one check per folded site. Code that reads
+no scoped const is unchanged.
 
 ## 11. Enums
 
-Today an `enum E { a, b }` declaration defines `E` as a mutable `map<string, int>` variable. `E::v` reads it through
-`detail::enum_scoped_value`, which builds a string key and hashes it on every read. The copy census found 3.2M of
-these per Gator Quest run, re-hashed on every cell-block entry, because Gator Quest declares its enums in one module
-(`gq_enums.jai`) and reads them everywhere. C++ enumerators are constants, and so are JaiScript's (Dev ruling 2026-10-07):
+An `enum E { a, b }` declaration defines `E` as a `map<string, int>`. C++ enumerators are constants, and so are
+JaiScript's (Dev ruling 2026-10-07):
 
+- The enum's name is a const: `E = 5`, `E["c"] = 2` and `E.erase("a")` are errors (the checker knows the enum by its
+  declaration; both backends mark a program-scope enum's cell), and `E.size()`, iteration, `E::v` and `E.v` read.
 - A variable that holds an enum value (`int d = Dir::n;`, a field, a parameter) is an ordinary variable.
-- The enum's name binds a const cell: `E = 5`, `E["c"] = 2` and `E.erase("a")` become errors, and `E.size()`, iteration
-  and `E::v` keep working.
-- `E::v` and `E.v` fold exactly like a const int (section 10). The folded read's dependency is on `E`'s cell, and a
-  re-run that reorders or adds values patches every dependent, so the 3.2M lookups go to zero on the VM.
-- An enum declared in a function or a block stays local (docs/global_shadowing.md). Its values are fixed by the text,
-  so the parser folds them at the uses it resolves.
-- A missing value (`E::zzz`) doesn't fold and raises `No value 'zzz' in enum 'E'` as today. The checker already reports
-  it.
+- `E::v` of a program-scope enum folds like a class constant (section 10): the VM's first execution turns the read into a
+  constant, and an enum declaration that runs again patches every folded value or rewrites the read back.
+- A cell block reads an enum member it holds (`Fx.fire` as an operand) at its entry. The entry finds the member's map
+  entry once per enum map and keeps it while the enum's name holds the same map: the map is const, so the same node
+  holds the same entries. This removes the per-entry string hash the copy census measured (3.2M lookups per Gator Quest
+  run).
+- An enum declared in a function or a block stays local (docs/global_shadowing.md) and is never folded.
+- A missing value (`E::zzz`) raises `No value 'zzz' in enum 'E'` as before; the checker reports it.
 
-Making the enum map const is a behavior change for a script that edits an enum's map. No script in the repository
-does.
+## 12. What changed where
 
-## 12. What changes where
-
-- **Lexer:** nothing (`const` is already a keyword).
-- **Parser:**
-  - `const` at the 1.1 positions; `variable_decl::is_const`, `destructuring_decl::is_const`;
-  - the initializer rule;
-  - the foreign words of 1.3;
-  - per-slot constness in the function scope tables;
-  - `identifier_expr::names_const`;
-  - `const_violation_expr` rewrites and the flagged sites (9.2);
-  - `folded_value` (10.1);
-  - same-unit enum folding.
-- **Checker** (`type_checker.cpp`):
-  - the const marker (generalizing `const_key`);
-  - the receiver-writes verdict;
-  - the redefinition rule (4.3);
-  - the inline mismatch;
-  - the observer flag.
-- **`detail/ref_param_writes.hpp`:** a const name and `this` as roots; the lambda parameter verdict; receiver-writes
-  verdicts cached on `function_decl`.
-- **Environment:** the cell const mark (root and namespace scopes) and the checks at the writable-access entry points;
-  `inline_declare` agreement.
-- **class_definition:** the const mark on static cells; store-cache admission; class-constant re-initialization on
-  redefinition.
-- **value / reference_holder:** the const holder mode, with the fast-lane admission refusing it.
-- **dynamic_binder:** const-method facts from member function pointer types and first-parameter types.
-- **Interpreter:** marking the cell at the declaration; the raising node; the flagged-site tests. No folding.
-- **VM:**
-  - the declaration op for const cells;
-  - the raising node and guard instructions;
-  - compile-time folding;
-  - the const records and dependents;
-  - in-place patching and rewriting (10.3);
-  - adding any new opcode to the env safe-lists and the debugger's locals walk (CLAUDE.md, typed instruction set).
-- **stdlib:**
-  - `reflect::fields` / `set` / `bind`;
-  - the registry's mutator classification for builtin calls on const receivers;
-  - the element-callback rule.
-- **Engine:** `add_global` / `add_global_ref` refusal; jaibite 41.
-- **Debugger:** the locals const marker; `setVariable` refusal.
-- **LSP:** hover, the `readonly` semantic modifier.
-- **Docs:**
-  - this note, which becomes the reference;
-  - docs/diagnostics.md (the Const section; the Foreign keywords table);
-  - docs/grammar.md;
-  - docs/static_checking.md;
-  - docs/global_shadowing.md (constness per cell, folding across units);
-  - the guide: a `const` section in chapter 3 (value semantics), and a mention in chapter 13 (strict checking).
+- **Parser:** `const` at the 1.1 positions, the initializer rule, the foreign words of 1.3 (`detail/foreign_keyword.hpp`).
+- **AST:** `variable_decl::is_const`, `destructuring_decl::is_const`, `extern_decl::is_const`, and a `const_site` verdict on
+  the assignment, unary, call, cast, declaration, return and range-for nodes; jaibite 41.
+- **Checker** (`type_checker.cpp`): `const_path` and the const sites, the receiver-writes verdict, the redefinition rule
+  (4.3).
+- **`detail/const_rules.hpp`:** the texts, `receiver_write_analysis`, the run-time path walk and `const_guard`.
+- **Engine:** the const cell mark, `add_global` refusal.
+- **class_definition:** the class-constant mark, `enforce_static_write` refusal, re-initialization on redefinition.
+- **Interpreter:** the guard at the stamped nodes, the cell mark, `const T&` temporaries for lambdas.
+- **VM:** `op_const_guard`, `op_error` for a certain violation, folding (`op_const_folded`, `vm_backend::fold_site`,
+  `revalidate_folds`), the enum entry memo on a cell block's environment operand.
+- **Docs:** this note, docs/diagnostics.md ("Const" and the foreign keywords), docs/grammar.md, docs/static_checking.md,
+  the guide (chapter 3) and the bridges.
 
 ## 13. Tests and gates
 
-- A dedicated Foundry suite (`Const`) that runs on both backends with the interpreter as the oracle. It covers:
-  - each 1.1 position;
-  - each 2.2 row;
-  - each section 3 write, in its static form (load error) and its dynamic form (`var` paths, other units, `reflect::`,
-    warn and off modes raising the run-time text);
-  - class constants;
-  - section 7's interactions;
-  - folding with hot reload: a value change, a kind change and constness removal, each with a live frame in a loop
-    around an `import`, plus old lambdas, shadowing units and the forward-reference rung;
-  - proofs on and off giving identical results.
-- A fuzz generator extension for const declarations and writes; fuzz 3000 with 0 divergences.
-- Debug suites on both backends.
-- Release game hashes: GLOOM 7fecc09815bb64e0 / 3580805725, demoreel 006d304a70772e5f, crawler 3849293868, Gator Quest
-  3218840367, JaiDOOM 1746772898.
-- `verify_site.py` for the guide section.
+- The Foundry suite `Const` (`source/tests/language/const_tests.cpp`) runs on both backends with the interpreter as the
+  oracle: declarations and the JavaScript spelling, the initializer rule, deep writes through values and the handle rule,
+  `const var` decided at run time, references, casts and returns, parameters, the redefinition rule, range-for and
+  structured bindings, captures, class constants, other units and the host, namespaces, folding with hot reload (a
+  value change, constness removal, a running frame) and enums.
+- The foreign-keyword samples in `Bridge Additions`.
+- Gates: the Debug suites on both backends, the Release game hashes (GLOOM 7fecc09815bb64e0 / 3580805725, demoreel
+  006d304a70772e5f, crawler 3849293868, Gator Quest 3218840367, JaiDOOM 1746772898), fuzz 3000 with no divergence, and
+  `verify_site.py` for the guide. The fuzz generator does not write const declarations yet.
 
 ## 14. Decisions (Dev, 2026-10-07)
 
@@ -605,9 +506,10 @@ does.
 3. Enum member values are compile-time constants and fold; variables holding enum values stay ordinary variables.
 4. A re-run that switches a name between const and plain applies live: folded code is patched or rewritten to the
    general load in place. Hot reload never requires a restart (standing rule).
-5. Declarations that differ only by `const` follow the general redefinition rule: two definitions in the same unit are
-   an error, a definition from another unit is a redefinition with a warning, uniformly for methods, constructors and
-   functions.
+5. Declarations that differ only by `const` follow the general redefinition rule: two definitions of one signature in
+   the same unit are an error, a definition from another unit is a redefinition with a warning, uniformly for methods,
+   constructors and functions. Program-scope functions of one name and different signatures keep the existing
+   replacement warning (they do not overload); an `override` declaration replaces on purpose.
 6. `const Foo f;` default-constructs a class; every other type needs an initializer.
 7. Captures follow C++ exactly: a copy of a const is const, a reference to a const is a const reference, an
    init-capture deduces by `auto`. JaiScript lambdas behave as C++ `mutable` lambdas (an existing difference, kept).

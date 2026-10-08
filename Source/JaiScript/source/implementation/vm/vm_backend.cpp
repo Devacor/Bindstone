@@ -3703,6 +3703,25 @@ op_status vm_backend::store_popped_value(frame& f, const vm_instruction& ins, sc
 	return st;
 }
 
+// the value a store through a reference writes: the popped value itself when the store yields no result and its copy is the value
+// (a scalar, a string, null, a shared handle), else clone_for_assignment's copy
+static JAI_FORCEINLINE script_value taken_for_reference_store(script_value& value, uint32_t store_flags) {
+	if (store_flags & store_flag_no_result) {
+		switch (value.raw_storage_index()) {
+		case script_value::TYPEID_NULL: case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_STRING:
+		case script_value::TYPEID_CHAR: case script_value::TYPEID_BOOL:
+			return std::move(value);
+		case script_value::TYPEID_REFERENCE: break;
+		default: {
+			const auto t = value.get_type_info();
+			if (t && t->base_type == script_value_type::jai_shared_ptr_type) { return std::move(value); }
+			break;
+		}
+		}
+	}
+	return clone_for_assignment(value);
+}
+
 JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction& ins, script_value& value) {
 	script_value* slot = frame_slot(f, ins.b);
 	if (!slot || slot->raw_storage_index() != script_value::TYPEID_REFERENCE) return false;
@@ -3719,7 +3738,7 @@ JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction
 		type_info* declared = static_kind ? slot_declared_ref(f, ins.b) : detail::ref_declared_type(*slot);
 		const uint8_t kind = static_kind ? static_kind : detail::ref_declared_kind(*slot);
 		if (kind && kind != vi && !detail::ref_storage_enforces(*slot, declared) && !detail::ref_identity_handle_store(*slot, declared, value)) return false;
-		script_value v(value);
+		script_value v = (ins.c & store_flag_no_result) ? std::move(value) : script_value(value);
 		v.set_type_info(holder->container_element_type);
 		detail::ref_write_through(*slot, std::move(v));
 		if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
@@ -3729,14 +3748,14 @@ JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction
 	if (!holder->plain_cell()) {
 		// a field of an instance with no declared type (a var field): the reference store's unconstrained write-through
 		if (!holder->owner_instance || holder->property || holder->has_cell) return false;
-		detail::ref_write_through(*slot, clone_for_assignment(value));
+		detail::ref_write_through(*slot, taken_for_reference_store(value, ins.c));
 		if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
 		return true;
 	}
 	script_value& storage = slot->deref();
 	const type_info* tag = storage.type_info_raw();
 	if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND || !tag || !detail::var_slot(tag)) return false;
-	script_value v = clone_for_assignment(value);
+	script_value v = taken_for_reference_store(value, ins.c);
 	if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { detail::var_stamp(v, storage.get_type_info(), engine_); }
 	storage = std::move(v);
 	if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }

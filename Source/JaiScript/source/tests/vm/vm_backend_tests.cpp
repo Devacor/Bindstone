@@ -4317,6 +4317,51 @@ public:
 			check_eq(i2, v2, "reference to global parity");
 		});
 
+		test("reference_alias_store_value_parity", [this, run_both_backends_stdlib]() {
+			// stores through `var&` aliases (a local cell, a var field, a shared_ptr field) in statement and expression position: a
+			// string, a shared handle and a by-value instance land as copies, the source keeps its value, handles share, and a
+			// replaced handle's object dies at the store
+			auto [i2, v2] = run_both_backends_stdlib(R"(
+				string log = "";
+				class P { var n = 0; ~P() { log = log + "~" + to_string(n); } }
+				class V { var n = 0; }
+				class Box { var item = null; shared_ptr<P> held = null; }
+				void put(var& r, var v) { r = v; }
+				void run() {
+					var cell = 0;
+					var& r = cell;
+					string s = "ab";
+					r = s; s = s + "c";
+					log = log + cell + s;
+					var p1 = new P(); p1.n = 1;
+					r = p1; p1.n = 2;
+					log = log + "|" + to_string(cell.n);
+					r = new P();
+					log = log + "|";
+					r = null;
+					var cell2 = 0;
+					var& r2 = cell2;
+					V v; v.n = 3;
+					r2 = v; v.n = 4;
+					log = log + to_string(cell2.n);
+					var res = (r2 = "x");
+					log = log + "|" + res + cell2;
+					Box b;
+					var& it = b.item;
+					it = "y"; put(it, p1); p1.n = 5;
+					log = log + "|" + to_string(b.item.n);
+					auto& h = b.held;
+					h = p1; var other = new P(); other.n = 9; h = other; other = null;
+					log = log + "|" + to_string(b.held.n);
+					var got = (h = null);
+					log = log + "|" + to_string(got == null);
+				}
+				run();
+				log;
+			)");
+			check_eq(std::string("ababc|2|~03|xx|5|9~9|true~5"), i2, "interp: reference alias stores");
+			check_eq(i2, v2, "reference alias store parity");
+		});
 		test("host_function_direct_entry_parity", [this]() {
 			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
 			// throw, a callback into script, a re-registration while it runs, a closed loop calling it

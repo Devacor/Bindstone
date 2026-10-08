@@ -12461,7 +12461,9 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		if (!targetPtr) { if (auto b = bind_bare_cpp_property_ref(f, target_sym)) { minted.emplace(std::move(*b)); } }
 	}
 	if (!targetPtr && !minted && !global_only) {
-		targetPtr = environment_->get_value_ptr(target_sym);
+		// the site's lookup cache (its first role) answers a global the way a LOAD of the name does; a miss walks
+		targetPtr = env_lookup_cached(f, f.ip * 3, target_sym);
+		if (!targetPtr) { targetPtr = environment_->get_value_ptr(target_sym); }
 	}
 	if (!targetPtr && !minted && !global_only && !method_frame) {
 		// a hybrid's bare C++ property reached through an env-bound this (a closure body): the last resort

@@ -4292,6 +4292,31 @@ public:
 			check_eq(out[0], out[1], "join parity");
 		});
 
+		test("reference_to_global_declaration_parity", [this, run_both_backends_stdlib]() {
+			// `var& x = G` inside functions, loops, a lambda and a method: the reference names the global's cell every time, across
+			// stores of other kinds, a block local of the same name and a method frame's own field
+			auto [i2, v2] = run_both_backends_stdlib(R"(
+				var G = 1;
+				array<int> BUF = [0, 0, 0];
+				string log = "";
+				void bump() { for (int i = 0; i < 4; ++i) { var& x = G; x = x + 1; } }
+				void fill() { for (int i = 0; i < 3; ++i) { auto& b = BUF; b[i] = b[i] + i * 10; } }
+				function shadow() { var G = 100; var& x = G; x = x + 1; return G; }
+				class H { var G = 7; int touch() { var& x = G; x = x + 1; return G; } }
+				var lam = []() { var& x = G; x = x + 3; return x; };
+				bump(); fill(); fill();
+				log = log + to_string(G) + "," + to_string(BUF[0]) + to_string(BUF[1]) + to_string(BUF[2]);
+				G = 2.5; bump();
+				log = log + "|" + to_string(G) + "," + to_string(lam()) + "," + to_string(shadow()) + "," + to_string(G);
+				var h = H(); log = log + "|" + to_string(h.touch()) + to_string(h.touch()) + "," + to_string(G);
+				G = 10; for (int i = 0; i < 2; ++i) { { var G = 50; var& y = G; y = y + 1; } var& z = G; z = z + 1; }
+				log = log + "|" + to_string(G);
+				log;
+			)");
+			check_eq(std::string("5,02040|6.5,9.5,101,9.5|89,9.5|12"), i2, "interp: reference to global");
+			check_eq(i2, v2, "reference to global parity");
+		});
+
 		test("host_function_direct_entry_parity", [this]() {
 			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
 			// throw, a callback into script, a re-registration while it runs, a closed loop calling it

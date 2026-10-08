@@ -125,6 +125,10 @@ namespace stdlib {
             std::string sep;
             if (a.size() == 2) { if (!a[1]->is_text()) return type_error("string::join separator must be a string"); sep = a[1]->unchecked_text(); }
             std::string out; bool first = true, bad = false, utf8 = a.size() == 2 && a[1]->is_utf8_string();
+            if (const script_array* node = a[0]->unchecked_array_node(); node->kind() == script_array::kind_t::str) {   // the texts where they are
+                for (const auto& h : node->strs()) { if (!first) out += sep; out += *h; first = false; }
+                return utf8 ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
+            }
             a[0]->unchecked_array_node()->for_each(e, [&](const script_value& el) {
                 const script_value& v = el.deref();
                 if (!v.is_text()) { bad = true; return; }

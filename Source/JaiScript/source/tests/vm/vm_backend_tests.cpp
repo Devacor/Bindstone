@@ -4180,6 +4180,32 @@ public:
 			check_eq(i1, v1, "handle and field reference argument parity");
 		});
 
+		test("join_reads_a_string_buffer_in_place", [this]() {
+			std::string out[2];
+			int idx = 0;
+			for (bool use_vm : {false, true}) {
+				auto e = jai::engine::make();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				stdlib::register_all(*e);
+				try {
+					out[idx] = e->execute(R"(
+						array<string> a = ["x", "", "yz"];
+						array<string> none = [];
+						array<string> one = ["solo"];
+						array<var> mixed = ["p", 1, 2.5, true];
+						string r = a.join("-") + "|" + a.join() + "|" + none.join(",") + "|" + one.join(",") + "|" + mixed.join("/");
+						r += "|" + string::join(a, "+") + "|" + string::join(one) + "|" + type_of(string::join(a, utf8_string("~")));
+						a[1] = "mid";
+						r += "|" + a.join(", ");
+						r
+					)").to_string();
+				} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+				++idx;
+			}
+			check_eq(std::string("x--yz|xyz||solo|p/1/2.5/true|x++yz|solo|utf8_string|x, mid, yz"), out[0], "interp: join over string buffers");
+			check_eq(out[0], out[1], "join parity");
+		});
+
 		test("host_function_direct_entry_parity", [this]() {
 			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
 			// throw, a callback into script, a re-registration while it runs, a closed loop calling it

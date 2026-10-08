@@ -653,7 +653,16 @@ definition and host registration):
   parameter that the callee writes (`w(p.x)`, `detail/ref_param_writes.hpp`) mutates it;
 - program-scope member chains are read in place when every step is a declared field with no
   user accessor (`AFFIXES[i].code`); a mutating method on one, a writing reference argument
-  rooted in program state and a by-reference loop over it refuse the proof;
+  rooted in program state and a by-reference loop over it refuse the proof. A `var` global
+  roots no such chain: its value's typed twin is not its type, and the next store may change it;
+- a store or declaration of class type `T` (`T d = ITEMS[i]`, `T x = c.pack[i]` over `C& c`,
+  `T y = local.f`) converts nothing when its source's static class is `T` - the value is `T` or a
+  subclass, which a `T` slot takes without running code. The static class comes from a name (the
+  root, a local's declared type, a reference's declared target) or a member/subscript chain whose
+  every step is declared (a field's or an element's declared type, never `var` or `auto`) from such
+  a name or from a global whose type is fixed for its life: a typed container, or a class no other
+  class derives from (a global of a subclassed class may be re-classed by a store). Any other source
+  may run a converting constructor or `operator=` and escapes the root;
 - script destructors, per type (`class_definition::value_tree_runs_destructor`: the chain or a
   subclass declares one, or a by-value field's type can hold such an instance; handles share
   and never count; cached against the definition epoch): the parameter's type may not run one
@@ -667,7 +676,11 @@ A proven parameter binds the argument by handle (`script_value(derefed)` instead
 table alike - an identity conversion shares, a converting one is already a fresh value.
 The argument side gates it too: script class instances that are not `nocopy` (a nocopy
 by-value pass keeps raising whatever the callee does), arrays and maps; host objects keep
-the clone. Only plain functions are candidates in v1 (methods and coroutines bind through
+the clone. A call the VM grafts binds each by-value parameter by the call's own exits
+(`vm_backend::bind_graft_parameter`): the callee its guard admitted, resolved again at the bind, gives
+the read-only alias, and a prvalue argument (its private temp released) moves in as
+`bind_parameters`'s C++17 elision moves a stack argument; both count and behave as the call does.
+Only plain functions are candidates in v1 (methods and coroutines bind through
 other paths); parallel workers never prove (interning, global lookups) - the barrier proves
 the live function and restamps every worker copy per region entry. Kill switch
 `engine::parameter_alias(false)`; gates `parameter_alias_differential_gate` (generator

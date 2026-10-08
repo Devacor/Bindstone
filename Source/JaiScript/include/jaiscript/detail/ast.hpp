@@ -901,6 +901,11 @@ namespace jai {
         static constexpr uint8_t site_declaration = 0, site_parameter = 1, site_return = 2;
         uint8_t site_kind = site_declaration;
         std::string_view site_owner;
+        // a graft's by-value parameter (site_parameter): its inline site, its parameter index and the private temp its argument
+        // was evaluated into, so the bind takes the call's read-only alias and prvalue elision (vm bind_graft_parameter)
+        uint32_t graft_site = UINT32_MAX;
+        uint32_t graft_param = UINT32_MAX;
+        size_t graft_temp_slot = SIZE_MAX;
 
         static uint8_t classify_decl_fast(const type_info_ptr& t) {
             if (!t) {

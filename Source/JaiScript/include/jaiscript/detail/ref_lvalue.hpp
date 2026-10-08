@@ -620,12 +620,6 @@ namespace jai::detail {
 	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02; same symbol as container_enforce.hpp)
 	bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
 
-	// Element refs run the direct subscript store's kernel: the same store into the same typed
-	// array passes or fails with one text whether spelled a[i] = v or written through a bound ref
-	inline bool ref_element_constraint_compatible(const script_value& element, type_info_ptr element_type, engine* eng = nullptr) {
-		return container_element_compatible(element, element_type, eng);
-	}
-
 	inline checked_result<script_value> ref_convert_for_element(engine* eng, const script_value& element, type_info_ptr element_type) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 		auto actual_type_info = actual_element.get_type_info();
@@ -936,7 +930,7 @@ namespace jai::detail {
 			return {};
 		}
 		if (auto in_place = element_copy_assign(refLocal.deref(), value, constraint, eng)) { return *in_place; }   // a class element keeps its object
-		if (!ref_element_constraint_compatible(value, constraint, eng)) {
+		if (!container_element_compatible(value, constraint, eng)) {
 			return ref_element_error(symbolizer, value, constraint);
 		}
 		auto converted = ref_convert_for_element(eng, value, constraint);
@@ -1047,7 +1041,7 @@ namespace jai::detail {
 			if (!*in_place) { return in_place->error_value(); }
 			return resultValue;
 		}
-		if (!ref_element_constraint_compatible(resultValue, constraint, eng)) {
+		if (!container_element_compatible(resultValue, constraint, eng)) {
 			return ref_element_error(symbolizer, resultValue, constraint).error_value();
 		}
 		auto converted = ref_convert_for_element(eng, resultValue, constraint);

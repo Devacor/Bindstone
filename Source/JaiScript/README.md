@@ -157,7 +157,6 @@ Release pass.
 | `JAISCRIPT_INSTALL` | top-level | Install rules and the `find_package(JaiScript)` package |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | The DAP-over-TCP debug listener; turn it off for shipping builds |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Performance suites inside `jaiscript_tests` |
-| `JAISCRIPT_ENABLE_PROFILING` | OFF | Profiler-friendly codegen and link flags |
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native`; faster, non-portable binaries |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
 | `JAISCRIPT_LTCG` | top-level | `/GL` + `/LTCG` for MSVC Release builds (OFF as a subproject, so a consumer's Release link stays incremental) |

@@ -1526,7 +1526,7 @@ namespace jai::vm {
         // Everything before the ctor body (overload resolve, instance, init_env + binds,
         // initializer chains, field inits); success value = the new instance ('this');
         // captured_out = the arguments taken ahead of that code, when it runs any (the body binds them)
-        checked_result<script_value> construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
+        checked_result<script_value> construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
                                                         const std::shared_ptr<environment>& definition_env,
                                                         const std::vector<script_value>& args,
                                                         std::shared_ptr<function_decl>& matching_ctor_out,
@@ -1550,8 +1550,13 @@ namespace jai::vm {
                                             const std::shared_ptr<environment>& definition_env,
                                             const std::vector<script_value>& args,
                                             type_info* result_stamp, const call_site* site);
-        checked_result<script_value> construct_default_instance(std::shared_ptr<script_class_definition> class_def,
+        checked_result<script_value> construct_default_instance(const std::shared_ptr<script_class_definition>& class_def,
                                                                 const std::vector<script_value>& args);
+        // The script class a constructor thunk builds, cast once per call site; null for anything else
+        const std::shared_ptr<script_class_definition>* site_script_class(const call_site* site, const script_callable_thunk* thunk);
+        // op_new's class name resolved now: the cell, and the constructor's thunk read once per value at the site
+        script_value* new_class_cell(frame& f, const vm_instruction& ins, const type_info& cls);
+        const script_callable_thunk* new_constructor_thunk(const call_site& site, const script_value& ctor);
         void stamp_literal_field_initializers(const std::shared_ptr<class_instance>& instance,
                                               const std::shared_ptr<script_class_definition>& class_def,
                                               bool skip_parent_recursion);

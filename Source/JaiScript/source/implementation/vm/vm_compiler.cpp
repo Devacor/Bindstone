@@ -5123,6 +5123,42 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if ((k < loop.site_alias.size() && loop.site_alias[k]) || (cip < c.typed_sites.size() && c.typed_sites[cip].cont_slot == chunk::k_iter_container)) continue;
 			loop.land_sites.push_back(k | (code[cip].op == opcode::op_c_mload || code[cip].op == opcode::op_c_mstore ? chunk::cell_loop::k_land_member_site : 0u));
 		}
+		if (!loop.calls.empty()) {
+			// a landing re-checks what the block can reach from it before the next landing (that landing checks the rest): the sites on those
+			// paths and the inlined leaves whose spans they enter
+			const region_cfg flow = control_flow(region);
+			const size_t n_ops = region.ops.size();
+			std::vector<uint8_t> reached(n_ops + 2);
+			std::vector<size_t> work;
+			auto reached_ip = [&](uint32_t ip) { return ip < region.first || ip - region.first >= n_ops || reached[ip - region.first] != 0; };   // outside the graph: checked
+			for (size_t call = 0; call < loop.calls.size(); ++call) {
+				size_t land = n_ops;
+				for (size_t n = 0; n < n_ops; ++n) { if (region.ops[n].kind == ir::land && region.ops[n].a == call) { land = n; break; } }
+				if (land == n_ops) continue;
+				std::fill(reached.begin(), reached.end(), uint8_t{0});
+				work.assign(1, land);
+				while (!work.empty()) {
+					const size_t n = work.back(); work.pop_back();
+					for (const size_t s : flow.succ[n]) {
+						if (s == flow.exit_node || reached[s] || (s < n_ops && region.ops[s].kind == ir::land)) continue;
+						reached[s] = 1;
+						work.push_back(s);
+					}
+				}
+				chunk::cell_loop::cell_call& cc = loop.calls[call];
+				cc.narrowed = true;
+				for (const uint32_t entry : loop.land_sites) {
+					const uint32_t cip = loop.sites[entry & ~chunk::cell_loop::k_land_member_site];
+					if (cip < loop.copy_head || cip - loop.copy_head >= loop.origin.size() || reached_ip(loop.origin[cip - loop.copy_head])) { cc.land_sites.push_back(entry); }
+				}
+				for (const uint32_t si : loop.inline_sites) {
+					const chunk::inline_site& is = c.inline_sites[si];
+					bool on_path = is.guard_ip < region.first || is.join_ip > region.back || is.join_ip < is.guard_ip;
+					for (uint32_t ip = is.guard_ip; !on_path && ip <= is.join_ip; ++ip) { on_path = reached[ip - region.first] != 0; }
+					if (on_path) { cc.inline_sites.push_back(si); }
+				}
+			}
+		}
 		std::vector<std::pair<uint32_t, uint32_t>> exits;   // (general target, its exit's copy ip): a compare's edge out of the loop
 		auto exit_at = [&](uint32_t target) -> uint32_t {
 			for (const auto& x : exits) { if (x.first == target) return x.second; }

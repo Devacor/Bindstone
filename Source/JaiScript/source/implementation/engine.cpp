@@ -3387,24 +3387,6 @@ void engine::wire_backend() {
         return it != impl->classes.end() ? it->second : nullptr;
     });
 
-    const uint64_t subscript_id = symbolize("[]");
-    impl->backend->set_subscript_resolver([this, subscript_id](const std::vector<script_value>& args) -> checked_result<script_value> {
-        auto it = impl->overloadedFunctions.find("[]");
-        if (it == impl->overloadedFunctions.end()) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-                "No custom subscript operator registered");
-        }
-
-        script_value bestMatch = it->second.findBestMatch(args);
-        if (bestMatch.is_null()) {
-            return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
-                subscript_id, args.data(), args.size(), this);
-        }
-
-        const script_function& func = bestMatch.as_function();
-        return func(args);
-    });
-
     impl->backend->set_has_custom_numeric_ops(impl->custom_numeric_ops_flag_ ||
                                               impl->overloadedFunctions.count("+") > 0 ||
                                               impl->overloadedFunctions.count("-") > 0 ||

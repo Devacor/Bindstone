@@ -196,14 +196,11 @@ public:
     virtual script_value get_variable(const std::string& name) const = 0;
     virtual bool has_variable(const std::string& name) const = 0;
     
-    // Scope management (for instance variables)
-    virtual void push_scope() = 0;
-    virtual void pop_scope() = 0;
     virtual void define_variable(const std::string& name, const script_value& value) = 0;
     // Instance-variable scope for execute(script, locals): rooted at the global env so a
     // reentrant run adopts it instead of bare global (receivers fired mid-script see their args)
-    virtual void push_instance_scope() { push_scope(); }
-    virtual void pop_instance_scope() { pop_scope(); }
+    virtual void push_instance_scope() = 0;
+    virtual void pop_instance_scope() = 0;
     
     // Configuration
     virtual void set_execution_budget(std::chrono::nanoseconds) = 0;
@@ -216,7 +213,6 @@ public:
     // resolve global operator overrides through it instead of probing environments.
     // Outlives the backend; non-pure so custom backends are unaffected.
     virtual void set_operator_table(const detail::engine_operator_table*) {}
-    virtual void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) = 0;
     virtual void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) = 0;
     virtual void set_engine_reference(engine* engine_ref) = 0;
     

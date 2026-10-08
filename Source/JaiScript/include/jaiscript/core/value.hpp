@@ -438,9 +438,6 @@ namespace detail { struct argument_capture_storage; }
         // type() is defined_type()
         script_value_type type() const { return defined_type(); }
 
-        // storage_type() - Legacy alias for current_type()
-        script_value_type storage_type() const { return current_type(); }
-
         // Ultra-fast raw storage index - no pointer chasing, single integer read
         // Use this in hot paths like is_truthy() to avoid type_info_ pointer dereference
         // PURE index read: bound primitives report TYPEID_CPP_BOUND (14), never their semantic type

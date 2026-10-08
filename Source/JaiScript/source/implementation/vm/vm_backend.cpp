@@ -93,8 +93,6 @@ namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; 
 #include <cassert>
 #include <cmath>
 #include <cstring>
-#include <fstream>
-#include <sstream>
 #include <system_error>
 #include <unordered_set>
 
@@ -762,10 +760,6 @@ void vm_backend::prepare_for_execution() {
 	while (environment_ && environment_->get_parent()) {
 		environment_ = environment_->get_parent();
 	}
-}
-
-void vm_backend::push_scope() {
-	environment_ = std::make_shared<environment>(environment_, symbolizer_);
 }
 
 void vm_backend::pop_scope() {
@@ -3434,7 +3428,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 		case verdict::handle_target: {
 			// shared_ptr<T> / weak_ptr<T> parameters and returns (outside the table): a same-kind
 			// payload, a matching or derived handle binds as-is
-			if (derefed_arg.storage_type() == target_base_type) {
+			if (derefed_arg.current_type() == target_base_type) {
 				return arg;
 			}
 			auto source_type_info = derefed_arg.get_type_info();
@@ -6708,7 +6702,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 			}
 		}
 		auto elem = detail::parallel_borrow_subscript_read(left, right, engine_, lvalue_write);
-		if (!elem) { return raise_(elem.error(), elem.static_message()); }
+		if (!elem) { return raise_(elem.error(), elem.message()); }
 		stack_.push_back(std::move(elem).value());
 		return {};
 	}
@@ -12032,7 +12026,7 @@ op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) 
 	}
 	{
 		const script_value& derefed = arg.deref();
-		if (t && t->base_type == script_value_type::jai_object_type && derefed.storage_type() == script_value_type::jai_object_type &&
+		if (t && t->base_type == script_value_type::jai_object_type && derefed.current_type() == script_value_type::jai_object_type &&
 		    derefed.get_type_info().get() == t.get() && !t->type_name.empty()) {
 			if (graft_parameter_alias(f, decl, derefed)) {
 				JAI_CENSUS_F(move_hit, 9);
@@ -23434,7 +23428,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			{
 				const script_value& derefed = arg_shield.deref();
 				if (param.type && param.type->base_type == script_value_type::jai_object_type &&
-				    derefed.storage_type() == script_value_type::jai_object_type &&
+				    derefed.current_type() == script_value_type::jai_object_type &&
 				    derefed.get_type_info().get() == param.type.get() && !param.type->type_name.empty()) {
 					// Read-only parameter elision: a proven parameter shares the argument's handle
 					// (KEEP BYTE-PARALLEL with interpreter::call_function)

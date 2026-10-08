@@ -61,15 +61,6 @@ public:
         return interpreter_->has_variable(name);
     }
     
-    // Scope management
-    void push_scope() override {
-        interpreter_->push_scope();
-    }
-    
-    void pop_scope() override {
-        interpreter_->pop_scope();
-    }
-    
     void define_variable(const std::string& name, const script_value& value) override {
         interpreter_->define_variable(name, value);
     }
@@ -96,10 +87,6 @@ public:
 
     void set_operator_table(const detail::engine_operator_table* table) override {
         interpreter_->set_operator_table(table);
-    }
-    
-    void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) override {
-        interpreter_->set_subscript_resolver(resolver);
     }
     
     void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) override {

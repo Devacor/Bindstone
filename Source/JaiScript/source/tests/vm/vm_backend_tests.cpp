@@ -4169,6 +4169,11 @@ public:
 					try { r = 4; out = out + "write"; } catch (e) { out = out + "/" + e; }
 					return out; }
 				log = log + "|" + rc();
+				class Pinned { var v = 1; int id = 0; ~Pinned() { log = log + "~" + to_string(id); } }
+				function pin_outlives() { var n = new Pinned(); n.id = 1; var& r = n.v; n = null; log = log + "a"; r = 5; log = log + to_string(r); return 0; }
+				void set_v(var& slot, var x) { slot = x; }
+				function pin_param() { var n = new Pinned(); n.id = 2; var m = n; n = null; set_v(m.v, 9); var k = m.v; m = null; log = log + "b" + to_string(k); return 0; }
+				pin_outlives(); log = log + "|"; pin_param(); log = log + "|";
 				log;
 			)");
 			check_true(i1.find("Cannot") != std::string::npos, i1);

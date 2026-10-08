@@ -487,8 +487,7 @@ namespace jai::detail {
 					if (tag && tag->base_type != script_value_type::jai_any_type && tag->base_type != script_value_type::jai_null_type) {
 						constraint = tag;
 					}
-					const auto& data = cur.peek_object_holder()->data;
-					return rooted(script_value::make_field_reference(std::shared_ptr<class_instance>(data, plain), member_id, eng, std::move(constraint), *field_value, slot));
+					return rooted(script_value::make_field_reference(cur.unchecked_object_handle(), plain, member_id, eng, std::move(constraint), *field_value, slot));
 				}
 				// Binder .property() members bind on every receiver kind (a same-named
 				// script field shadows: getter_id 0 keeps the FIELD path below); a
@@ -546,6 +545,13 @@ namespace jai::detail {
 					if (tag && tag->base_type != script_value_type::jai_any_type &&
 					    tag->base_type != script_value_type::jai_null_type) {
 						constraint = tag;
+					}
+					// the receiver's own holder pins a script instance it owns (a script instance's holder is never re-pointed to a layer); a
+					// layer reached through a C++ object keeps its shared pin
+					if (cur.raw_storage_index() == script_value::TYPEID_OBJECT && cur.unchecked_object_handle() && instance->get_class_definition() &&
+					    instance->get_class_definition()->is_script_class() &&
+					    cur.unchecked_object_handle()->data.get() == static_cast<void*>(instance.get())) {
+						return rooted(script_value::make_field_reference(cur.unchecked_object_handle(), instance.get(), member_id, eng, std::move(constraint), *field_value));
 					}
 					return rooted(script_value::make_field_reference(instance, member_id, eng, std::move(constraint), *field_value));
 				}

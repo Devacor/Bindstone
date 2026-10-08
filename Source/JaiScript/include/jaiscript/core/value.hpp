@@ -309,6 +309,10 @@ namespace detail { struct argument_capture_storage; }
         static script_value make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type, const script_value& field_value,
                                                  uint32_t field_slot = UINT32_MAX);
+        // the same pinned by the holder that owns the instance (holder->data is the instance)
+        static script_value make_field_reference(const strong_ptr<object_holder>& owner_pin, class_instance* owner, uint64_t field_id,
+                                                 engine* eng, type_info_ptr field_type, const script_value& field_value,
+                                                 uint32_t field_slot = UINT32_MAX);
         // A reference minted through an element of `root` (a chain rooted at arr[i]: nested
         // field, nested element) also counts in root->live_elem_refs, so a parallel fork over
         // `root` can prove its elements reference-free without touching one (value.cpp).
@@ -2059,7 +2063,11 @@ namespace detail { struct argument_capture_storage; }
             // re-resolves the field node by id on every deref/assign-through, so it
             // survives hot-reload field migration (a removed field errors instead of
             // dangling).
-            std::shared_ptr<class_instance> owner_instance;
+            // The instance is pinned by the script value's holder that owns it (a non-atomic count), or, for an instance no such holder
+            // owns (a script layer reached through a C++ object), by its shared ownership
+            class_instance* owner_instance = nullptr;
+            strong_ptr<object_holder> owner_pin;
+            std::shared_ptr<class_instance> owner_shared;
             uint64_t field_id = UINT64_MAX;
             // the field's slot as the owner's class assigned it (a slot never moves within a class; a re-class changes the class, a
             // reload bumps its field-shape epoch): field_cell() reads the slot while both match, else finds the field by id and
@@ -2448,6 +2456,8 @@ namespace detail { struct argument_capture_storage; }
                       "storage must keep the variant's exact 16-byte layout");
 
         storage storage_;
+        static strong_ptr<reference_holder> mint_field_holder(class_instance* owner, uint64_t field_id, engine* eng, type_info_ptr field_type,
+                                                              uint32_t field_slot, strong_ptr<reference_holder> ref);
 
     public:
         // Method to set engine pointer after construction

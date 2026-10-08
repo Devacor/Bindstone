@@ -371,7 +371,7 @@ script_value* script_value::reference_holder::resolve_target() {
 }
 
 script_value* script_value::reference_holder::field_cell() const {
-    class_instance* inst = owner_instance.get();
+    class_instance* inst = owner_instance;
     const class_definition* cd = inst->get_class_definition();
     if (cd && cd == field_class && cd->field_shape_epoch() == field_class_epoch) {
         return inst->field_slot_value(field_slot);
@@ -1144,12 +1144,9 @@ script_value script_value::make_field_reference(std::shared_ptr<class_instance> 
     return make_field_reference(std::move(owner), field_id, eng, std::move(field_type), *field_value);
 }
 
-script_value script_value::make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
-                                                engine* eng, type_info_ptr field_type, const script_value& field_value,
-                                                uint32_t field_slot) {
-    script_value v(std::monostate{}, eng);
-    v.type_info_ = eng->get_type_info_reference(field_value.get_type_info());
-    auto ref = acquire_reference_holder(eng);
+// the field reference's common mint over a pinned owner
+strong_ptr<script_value::reference_holder> script_value::mint_field_holder(class_instance* owner, uint64_t field_id, engine* eng, type_info_ptr field_type,
+                                                                           uint32_t field_slot, strong_ptr<reference_holder> ref) {
     if (field_slot != UINT32_MAX && !eng->parallel_region_active()) {
         if (const class_definition* cd = owner->get_class_definition()) {
             ref->field_class = cd;
@@ -1158,10 +1155,31 @@ script_value script_value::make_field_reference(std::shared_ptr<class_instance> 
         }
     }
     owner->note_field_ref_minted();
-    ref->owner_instance = std::move(owner);          // pins the instance for the reference's lifetime
+    ref->owner_instance = owner;
     ref->field_id = field_id;
     ref->container_element_type = std::move(field_type);
-    v.storage_ = ref;
+    return ref;
+}
+
+script_value script_value::make_field_reference(std::shared_ptr<class_instance> owner, uint64_t field_id,
+                                                engine* eng, type_info_ptr field_type, const script_value& field_value,
+                                                uint32_t field_slot) {
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(field_value.get_type_info());
+    auto ref = mint_field_holder(owner.get(), field_id, eng, std::move(field_type), field_slot, acquire_reference_holder(eng));
+    ref->owner_shared = std::move(owner);          // pins the instance for the reference's lifetime
+    v.storage_ = std::move(ref);
+    return v;
+}
+
+script_value script_value::make_field_reference(const strong_ptr<object_holder>& owner_pin, class_instance* owner, uint64_t field_id,
+                                                engine* eng, type_info_ptr field_type, const script_value& field_value,
+                                                uint32_t field_slot) {
+    script_value v(std::monostate{}, eng);
+    v.type_info_ = eng->get_type_info_reference(field_value.get_type_info());
+    auto ref = mint_field_holder(owner, field_id, eng, std::move(field_type), field_slot, acquire_reference_holder(eng));
+    ref->owner_pin = owner_pin;          // the holder's data owns the instance: pins it for the reference's lifetime
+    v.storage_ = std::move(ref);
     return v;
 }
 

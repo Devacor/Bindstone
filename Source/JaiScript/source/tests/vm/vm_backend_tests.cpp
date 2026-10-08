@@ -4180,6 +4180,92 @@ public:
 			check_eq(i1, v1, "handle and field reference argument parity");
 		});
 
+		test("a_callee_replaced_while_its_cached_calls_run_stays_alive", [this]() {
+			// a cached call borrows its site's pin of the callee. The module defining the callee re-runs in the middle of the callee's
+			// own recursion (its old program is released), the site refills with the new definition, and the old frames finish on the
+			// old body; then a definition in another unit replaces it again (both backends)
+			const auto dir = jai::foundry::test_temp_directory();
+			int tick = 0;
+			auto write_module = [&](const std::string& body) {
+				const auto path = dir / "callee_mod.jai";
+				{ std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+				std::error_code ec;
+				std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+			};
+			const std::string old_body =
+				"function work(int n) -> int {\n"
+				"    if (n == 3) { swap_module(); import(\"callee_mod.jai\", jai::force); }\n"
+				"    if (n == 0) { return 0; }\n"
+				"    string pad = \"frame\" + to_string(n);\n"
+				"    int below = run(n - 1);\n"
+				"    return below + n * 10 + pad.size();\n"
+				"}\n";
+			std::string out[2];
+			int idx = 0;
+			for (bool use_vm : {false, true}) {
+				write_module(old_body);
+				auto e = make_engine();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				stdlib::register_all(*e);
+				e->add_include_path(dir.string());
+				e->add_function("swap_module", [&]() { write_module("function work(int n) -> int { return 1000 + n; }\n"); });
+				try {
+					out[idx] = e->execute(R"(
+						int run(int n) { return work(n); }
+						import "callee_mod.jai";
+						int warm = run(0) + run(1) + run(2);
+						int first = run(6);
+						int second = run(2);
+						function work(int n) -> int { return n < 1 ? 7 : run(n - 1) + 1; }
+						int third = run(4);
+						to_string(warm) + " " + to_string(first) + " " + to_string(second) + " " + to_string(third)
+					)").to_string();
+				} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+				++idx;
+			}
+			check_eq(std::string("58 1206 1002 11"), out[0], "interp: a module re-run during a cached recursion");
+			check_eq(out[0], out[1], "callee replacement parity");
+		});
+
+		test("a_callee_whose_program_is_gone_outlives_its_cached_calls", [this]() {
+			// the callee's only owners are its call site's pin and its running (borrowed) frames: it was defined by an execute()
+			// whose program the cache has since evicted, a redefinition took its name, and the site refills while it runs. Its
+			// frames then raise past the host, whose stack trace names the old frames (both backends; an ASAN build reports any
+			// stale read)
+			std::string out[2];
+			int idx = 0;
+			for (bool use_vm : {false, true}) {
+				auto e = make_engine();
+				if (use_vm) { e->set_backend(jai::backend_type::vm); }
+				stdlib::register_all(*e);
+				jai::engine* raw = e.get();
+				e->add_function("replace_work", [raw]() {
+					raw->execute(std::string("function work(int n) -> int { return 1000 + n; }"));
+					for (int i = 0; i < 100; ++i) { raw->execute("int churn_" + std::to_string(i) + " = " + std::to_string(i) + ";"); }
+				});
+				try {
+					e->execute(std::string("extern function work;\nint run(int n) { return work(n); }"));
+					e->execute(std::string(
+						"function work(int n) -> int {\n"
+						"    if (n == 0) { return 0; }\n"
+						"    string pad = \"old\" + to_string(n);\n"
+						"    if (n == 3) { replace_work(); int fresh = run(2); throw pad + \":\" + to_string(fresh); }\n"
+						"    return run(n - 1) + pad.size();\n"
+						"}\n"));
+					const std::string warm = e->execute(std::string("to_string(run(1) + run(2))")).to_string();
+					std::string thrown;
+					try { e->execute(std::string("run(6);")); } catch (const std::exception& ex) { thrown = ex.what(); }
+					size_t old_frames = 0;
+					for (const auto& fr : e->get_execution_backend()->last_stack_trace()) { if (fr.function == "work") { ++old_frames; } }
+					out[idx] = warm + " " + std::to_string(thrown.find("old3:1002") != std::string::npos) + " " + std::to_string(old_frames) + " " +
+					           e->execute(std::string("to_string(run(3))")).to_string();
+				} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+				++idx;
+			}
+			check_eq(std::string("12 1 4 1003"), out[0], "interp: the throw and the four old frames of the trace (6, 5, 4, 3) by name");
+			check_eq(out[0], out[1], "parity");
+		});
+
 		test("join_reads_a_string_buffer_in_place", [this]() {
 			std::string out[2];
 			int idx = 0;

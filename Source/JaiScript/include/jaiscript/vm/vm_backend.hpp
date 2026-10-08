@@ -282,6 +282,7 @@ namespace jai::vm {
         // A call site pins the callee it cached (ABA): a recursive function's own body pins the function, function -> body
         // chunk -> site -> function; the backend drops every pin as it dies so the engine's functions die with the engine
         void release_site_pins() noexcept;
+        void retire_site_callee(const call_site& site);
 
         script_value execute(const std::vector<declaration_ptr>& declarations) override;
         script_value execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;
@@ -2456,6 +2457,7 @@ namespace jai::vm {
         uint64_t raw_epoch_ = 1;
         cell_counters cells_counters_{};   // entries, boundaries, resumes, misses (engine::cells_counters)
         void raw_epoch_advance() { raw_epoch_ += 2; }
+        std::vector<strong_ptr<script_function>> retired_callees_;   // site callees replaced while a borrowed call of theirs was live
         std::vector<std::unique_ptr<callback_session>> callback_sessions_;   // by nesting depth: frames_ holds &f while a call runs
         size_t callback_depth_ = 0;
     };

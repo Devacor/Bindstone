@@ -193,3 +193,47 @@ Code comments and doc examples that name `MV::`, Bindstone, MutedVision or Workb
 | `prepared_callback`, `debug::transport`, `check_observer`, `receiver_owner::handle_base` | Header decoupling, a documented extension point, two implementations, type erasure |
 | Every public runtime engine knob (`type_proofs`, `aggregate_lowering`, `ir_passes`, `parameter_alias`, `local_alias`, `memory_cap`, ...) | Each has at least one caller in tests, tools or examples |
 | `signal::shared_receiver_type` and `receiver<T>::shared_type` | Both spellings used (~23 Bindstone uses) and documented |
+
+## 8. Design note R7: a dedicated native slot instead of the `_cpp_object` field
+
+**Today.** The C++ object behind an instance (a bound class's instance, or a script class that derives a bound class)
+is a field named `_cpp_object` (`class_constants::CPP_OBJECT_FIELD`, `engine.hpp:37`), interned per engine and stored
+in the instance's field storage: the overflow map unless the class assigned it a slot. About 130 sites name it. The
+name needs its own guards:
+
+- writes: `set_field(cpp_object_field_id, make_cpp_object(...))` at about 15 sites (the binder's constructor thunks,
+  `engine::make_object`, `engine::extend` / re-class / archive load, both backends' `super()` paths copying it from
+  the C++ instance into the derived one); `field_store` notices the id and records the script layer
+  (`class_instance::note_script_layer_owner`);
+- reads: `get_cpp_object`, `get_cpp_object_as<T>`, `has_cpp_object`, `cpp_object_pointer`, `cpp_object_pointer_at(slot)`
+  (member resolution), `engine_lock_instance_cpp_object`, `engine_extract_instance_cpp_object`;
+- exceptions for the name: `has_user_overflow_fields` skips it, hot reload keeps it when it drops undeclared fields,
+  copying a value that holds it shares instead of cloning (`class_definition.hpp:3676`), the JSON writer skips it by
+  name (`json_archive.hpp:339`), and the checker reserves it (`type_checker.cpp:795`, and the collision guards at
+  `class_definition.hpp:115-119`).
+
+**Proposal.** `class_instance` holds the native object in a member of its own, `strong_ptr<object_holder> native_`
+(8 bytes; the holder already carries the owning `shared_ptr<void>` or the non-owning bound pointer). One setter,
+`set_native(script_value)`, replaces the `set_field(cpp_object_field_id, ...)` sites and calls
+`note_script_layer_owner`; the readers read the member. The reserved name, its interned id, the overflow and reload
+exceptions, the JSON writer's skip and the checker's reservation go. `cpp_object_pointer_at(slot)` becomes a member
+read with no slot.
+
+**Saved data stays readable.** No archive writes the field today: the JSON writer skips it by name, and hybrids write
+`$type` / `$script` / `$val`, with the C++ payload in `$val`. The binary writer's field loop gets the same audit before
+the change; if any path ever wrote a `_cpp_object` key, the reader maps that one key to `set_native` (one line), so a
+file written by today's build loads into the new layout. Proof: golden JSON and binary hybrid archives written by
+master before the change load identically after it (new Foundry tests), plus Bindstone's `-verifyassets` over every
+scene and `.bindsnap`.
+
+**Observable behavior.** Any script-visible spelling of the field must stay identical or be ruled: today a script
+can name `_cpp_object` only where the checker does not reject it, and reflection's field listing must be checked for
+it before the change. If a listing shows it today, the change either keeps a synthetic entry or needs Dev's ruling.
+
+**Cost.** Pure script instances carry 8 more bytes (one allocation per instance today, so no extra allocation);
+native-backed instances lose an overflow-map node. Member resolution on a native-backed receiver loses a slot lookup.
+Expected perf-neutral or better; it gets the A/B like R1/R2.
+
+**Gates.** Suites on both backends (Debug and Release), the hybrid serialization suites, golden archives,
+`-verifyassets`, game hashes, fuzz, the MutedVision and client builds (Bindstone's script layer reads
+`get_cpp_object_as`).

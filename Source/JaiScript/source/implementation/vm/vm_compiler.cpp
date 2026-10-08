@@ -778,6 +778,7 @@ uint32_t vm_compiler::binary_shape(binary_expr* expr) {
 static bool loop_free_body(const ast_node* n);
 
 std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaration_ptr>& declarations) {
+	JAI_CENSUS_F(compile_chunk, 1);
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
 	chunk_->pinned_decls = declarations;
@@ -804,6 +805,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
                                                      const std::vector<parameter>& parameters,
                                                      const std::shared_ptr<block_stmt>& body,
                                                      size_t local_count) {
+	JAI_CENSUS_F(compile_chunk, 2);
 	open_loops_.clear();
 	loop_marks_.clear();
 	auto first = compile_callable_once(name, parameters, body, local_count);
@@ -1016,6 +1018,7 @@ bool vm_compiler::raw_signature(const function_decl* fn) {
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expression_ptr& expr) {
+	JAI_CENSUS_F(compile_chunk, 3);
 	auto saved_chunk = chunk_;
 	auto saved_stmt = current_stmt_;
 	auto saved_callable = std::move(callable_);
@@ -1047,6 +1050,7 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declaration_ptr& decl) {
+	JAI_CENSUS_F(compile_chunk, 4);
 	auto saved_chunk = chunk_;
 	auto saved_stmt = current_stmt_;
 	auto saved_callable = std::move(callable_);

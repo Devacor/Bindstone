@@ -8,6 +8,7 @@
 #include "conversion_registry.hpp"
 #include "runtime_errors.hpp"
 #include "strong_ptr.hpp"
+#include <jaiscript/detail/copy_census.hpp>
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <variant>
 #include <tuple>
@@ -204,6 +205,9 @@ namespace detail { struct argument_capture_storage; }
         
         // Explicit deep copy method
         script_value clone() const;
+#ifdef JAISCRIPT_VM_COVERAGE
+        script_value clone_uncounted() const;   // the copy census's clone() is a counting wrapper (detail/copy_census.hpp)
+#endif
 
         // Element clone: plain scalars and strings clone as their shallow copy (clone()'s
         // default case for these raw indexes IS the copy constructor - the same gate
@@ -2659,6 +2663,7 @@ namespace detail { struct argument_capture_storage; }
 
         // Safe class_instance extraction from object_holder
         std::shared_ptr<class_instance> get_class_instance() {
+            JAI_CENSUS(holder_inspect);
             auto holder = get_object_holder();
             if (holder && holder->is_class_instance_wrapper) {
                 return std::static_pointer_cast<class_instance>(holder->data);

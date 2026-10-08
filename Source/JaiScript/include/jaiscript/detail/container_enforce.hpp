@@ -390,6 +390,7 @@ namespace jai::detail {
 			if (!tag || tag->base_type == script_value_type::jai_any_type) {
 				if (auto own = object_element_own_tag(element, eng)) { element.set_type_info(std::move(own)); }
 			}
+			JAI_CENSUS_F(move_hit, 7);
 			return std::move(element);
 		}
 		return convert_container_element(eng, element, element_type);
@@ -845,6 +846,7 @@ namespace jai::detail {
 
 	template <class Symbolizer>
 	checked_result<void> validate_container_homogeneous(const script_value& container, const arity_count_symbols& counts, const Symbolizer& symbols) {
+		JAI_CENSUS(container_validate);
 		if (container.is_array()) {
 			if (container.unchecked_array_node()->is_typed()) { return {}; }
 			return homogeneous_entries<false>(container.as_array(), counts, symbols);

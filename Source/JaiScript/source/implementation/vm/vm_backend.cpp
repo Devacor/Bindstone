@@ -3847,6 +3847,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				}
 			}
 			if (detail::uniquely_held(value)) {   // a prvalue is the stored object
+				JAI_CENSUS_F(move_hit, 8);
 				*storage = std::move(value);
 				stack_.push_back(result_used() ? clone_for_assignment(*storage) : script_value(*storage));
 				return {};
@@ -12143,8 +12144,14 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 		// object itself (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
 		if (lvalue_init || reference_init) {
 			if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !parallel_worker_ && !engine_->parallel_region_active())) {
+				JAI_CENSUS_F(move_hit, 5);
 				if (!parallel_worker_) { engine_->note_local_alias_bind(); }
 			} else {
+#ifdef JAISCRIPT_VM_COVERAGE
+				if (value.is_object() || value.is_array() || value.is_map()) {
+					census::hit_named(census::site::decl_clone, decl->name.data(), decl->name.size(), decl->alias_home ? census::k_local_alias_refused : census::k_no_alias_home);
+				}
+#endif
 				value = clone_for_assignment(value);
 			}
 		}
@@ -22060,10 +22067,14 @@ void vm_backend::materialize_return(frame& f, script_value& result, uint32_t ope
 	if (detail::return_value_plain(result) || f.top_level || operand_class == detail::return_operand_unclassified) return;
 	if (operand_class == detail::return_operand_ident && own_slot != k_invalid_u32 && f.locals) {
 		if (script_value* payload = detail::return_own_slot_payload(frame_slot(f, own_slot), result)) {
+			JAI_CENSUS_F(move_hit, 1);
 			*payload = make_null();
 			return;
 		}
 	}
+#ifdef JAISCRIPT_VM_COVERAGE
+	if (operand_class == detail::return_operand_temporary && !result.is_reference()) { census::hit(census::site::move_hit, 2); }
+#endif
 	detail::materialize_return_value(result, operand_class != detail::return_operand_temporary);
 }
 
@@ -22908,6 +22919,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			// A prvalue argument (the stack's only holder of its aggregate) is the parameter itself: C++17 guaranteed elision
 			const bool elide = args_are_stack(args) && !arg.is_reference() && detail::uniquely_held(arg);
 			auto bind_elided = [&]() {
+				JAI_CENSUS_F(move_hit, 4);
 				if (in_place && param.slot_index == i && !param.ref_escaping) { return; }
 				script_value moved = std::move(stack_[args_base + i]);
 				frame_slot_set(callee, param.slot_index, boxed_param(std::move(moved)));
@@ -22929,11 +22941,17 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					// Read-only parameter elision: a proven parameter shares the argument's handle
 					// (KEEP BYTE-PARALLEL with interpreter::call_function)
 					if (alias_fn && !param.ref_escaping && detail::parameter_alias_allows(derefed) && detail::readonly_parameter_alias(*engine_, *alias_fn, i, !parallel_worker_)) {
+						JAI_CENSUS_F(move_hit, 3);
 						if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
 						frame_slot_set(callee, param.slot_index, script_value(derefed));
 						continue;
 					}
 					if (elide) { bind_elided(); continue; }
+#ifdef JAISCRIPT_VM_COVERAGE
+					census::hit_named(census::site::param_clone, body_chunk.function_name.data(), body_chunk.function_name.size(),
+						(!alias_fn ? census::k_no_alias_fn : param.ref_escaping ? census::k_ref_escaping : !detail::parameter_alias_allows(derefed) ? census::k_alias_disallowed : census::k_alias_unproven) |
+						(!args_are_stack(args) ? census::k_elide_not_stack : arg.is_reference() ? census::k_elide_reference : census::k_elide_shared));
+#endif
 					frame_slot_set(callee, param.slot_index, boxed_param(derefed.clone()));
 					continue;
 				}
@@ -22996,11 +23014,19 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			} else {
 				const bool heavy = shared_probe.is_object() || shared_probe.is_array() || shared_probe.is_map();
 				if (heavy && alias_fn && !param.ref_escaping && detail::parameter_alias_allows(shared_probe) && detail::readonly_parameter_alias(*engine_, *alias_fn, i, !parallel_worker_)) {
+					JAI_CENSUS_F(move_hit, 3);
 					if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
 					frame_slot_set(callee, param.slot_index, script_value(shared_probe));
 					continue;
 				}
 				if (elide && detail::same_heavy_node(shared_probe, arg_shield)) { bind_elided(); continue; }
+#ifdef JAISCRIPT_VM_COVERAGE
+				if (heavy) {
+					census::hit_named(census::site::param_clone, body_chunk.function_name.data(), body_chunk.function_name.size(),
+						(!alias_fn ? census::k_no_alias_fn : param.ref_escaping ? census::k_ref_escaping : !detail::parameter_alias_allows(shared_probe) ? census::k_alias_disallowed : census::k_alias_unproven) |
+						(elide ? census::k_elide_other_node : !args_are_stack(args) ? census::k_elide_not_stack : arg.is_reference() ? census::k_elide_reference : census::k_elide_shared));
+				}
+#endif
 				frame_slot_set(callee, param.slot_index, boxed_param(converted_arg.clone()));
 			}
 		}

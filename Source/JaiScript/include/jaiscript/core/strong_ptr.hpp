@@ -30,6 +30,16 @@
 #define JAI_SP_NOINLINE
 #endif
 
+#ifdef JAISCRIPT_VM_COVERAGE
+// the copy census (detail/copy_census.hpp): every strong copy, and every node's death
+namespace jai::census { void rc_add() noexcept; void node_freed(const void* node) noexcept; }
+#define JAI_SP_CENSUS_ADD() ::jai::census::rc_add()
+#define JAI_SP_CENSUS_FREED(p) ::jai::census::node_freed(p)
+#else
+#define JAI_SP_CENSUS_ADD() ((void)0)
+#define JAI_SP_CENSUS_FREED(p) ((void)0)
+#endif
+
 namespace jai {
 
 template<typename T> class strong_ptr;
@@ -212,6 +222,7 @@ public:
         : ptr_(other.ptr_) {
         if (ptr_) {
             cb()->add_strong();
+            JAI_SP_CENSUS_ADD();
         }
     }
 
@@ -307,6 +318,7 @@ private:
     // (memory is freed when every weaker_ptr is gone too)
     JAI_SP_NOINLINE static void destroy_last(T* local_ptr) noexcept {
         auto* local_cb = detail::cb_from_object(local_ptr);
+        JAI_SP_CENSUS_FREED(local_ptr);
         local_ptr->~T();
         if (local_cb->release_weak()) {
             local_cb->dealloc_fn(local_cb);

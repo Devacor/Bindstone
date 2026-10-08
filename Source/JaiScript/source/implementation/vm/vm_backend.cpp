@@ -8824,7 +8824,29 @@ next_frame:
 		case opcode::op_c_arith_p: st = exec_c_arith(f, ip, ci, regs, false); break;
 		case opcode::op_c_cmp_p: st = exec_c_cmp(f, ip, ci, regs, false); break;
 		case opcode::op_c_jcmp_p: st = exec_c_jcmp(f, ip, ci, regs, false); break;
-		case opcode::op_c_load: st = exec_c_load(f, ip, ci, regs, false); break;
+		case opcode::op_c_load: {
+			// the common row inline here only (the paired forms call exec_c_load): an int or float buffer, one int index cell in bounds,
+			// landing the buffer's own kind; the rest is exec_c_load's
+			const chunk::typed_site& site = f.code->typed_sites[ip];
+			const uint32_t o = site.operands[0];
+			const script_array* node = cs.site_node[ip - loop.copy_head];
+			if (node && site.fold_count == 0 && !(o & k_typed_const_bit) && hot.kinds[o] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
+				const uint64_t at = static_cast<uint64_t>(hot.payload[o]);
+				const uint8_t expect = site.decl_expect;
+				if (node->kind() == script_array::kind_t::i64 && at < node->ints().size() && (expect == static_cast<uint8_t>(script_value::TYPEID_INT) || expect == 0xFF)) {
+					JAI_CELLS_COUNT(7);
+					hot.payload[ci.a] = node->ints()[at]; hot.kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_INT); hot.dirty->set(ci.a);
+					++ip; JAI_CELL_NEXT;
+				}
+				if (node->kind() == script_array::kind_t::f64 && at < node->floats().size() && (expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) || expect == 0xFF)) {
+					JAI_CELLS_COUNT(7);
+					hot.payload[ci.a] = cell_bits_of_float(node->floats()[at]); hot.kinds[ci.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); hot.dirty->set(ci.a);
+					++ip; JAI_CELL_NEXT;
+				}
+			}
+			st = exec_c_load(f, ip, ci, regs, false);
+			break;
+		}
 		case opcode::op_c_load_any: st = exec_c_load(f, ip, ci, regs, true); break;
 		case opcode::op_c_index_store: f.ip = ip; st = exec_c_index_store(f, ci, regs); ip = f.ip; break;
 		case opcode::op_c_back: st = exec_c_back(f, ip, ci, regs); break;
@@ -10368,31 +10390,7 @@ op_status vm_backend::exec_c_math(frame& f, const vm_instruction& ins, const cel
 // T_LOAD's fast path landing raw: the container through the original site, every guard kept
 // adopted: the destination's kind is decided at run time (a var, an inferred auto or an unproven local), so the landing
 // runs the declared-type rule on a kind change; a pinned or compiler-value destination lands in place unconditionally
-// the common row inline: an int or float buffer, one int index cell in bounds, landing the buffer's own kind into a cell whose kind it
-// fixes; folds, constants, conversions, var buffers, bytes, strings, adopted cells and misses are exec_c_load_general's
 JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool adopted) {
-	const chunk::typed_site& site = f.code->typed_sites[ip];
-	const uint32_t o = site.operands[0];
-	const script_array* node = f.cells->site_node[ip - cr.loop->copy_head];
-	if (!adopted && node && site.fold_count == 0 && !(o & k_typed_const_bit) && cr.kinds[o] == static_cast<uint8_t>(script_value::TYPEID_INT)) {
-		const uint64_t at = static_cast<uint64_t>(cr.payload[o]);
-		const uint8_t expect = site.decl_expect;
-		if (node->kind() == script_array::kind_t::i64 && at < node->ints().size() && (expect == static_cast<uint8_t>(script_value::TYPEID_INT) || expect == 0xFF)) {
-			JAI_CELLS_COUNT(7);
-			cr.payload[ins.a] = node->ints()[at]; cr.kinds[ins.a] = static_cast<uint8_t>(script_value::TYPEID_INT); cr.dirty->set(ins.a);
-			++ip;
-			return {};
-		}
-		if (node->kind() == script_array::kind_t::f64 && at < node->floats().size() && (expect == static_cast<uint8_t>(script_value::TYPEID_FLOAT) || expect == 0xFF)) {
-			JAI_CELLS_COUNT(7);
-			cr.payload[ins.a] = cell_bits_of_float(node->floats()[at]); cr.kinds[ins.a] = static_cast<uint8_t>(script_value::TYPEID_FLOAT); cr.dirty->set(ins.a);
-			++ip;
-			return {};
-		}
-	}
-	return exec_c_load_general(f, ip, ins, cr, adopted);
-}
-JAI_NOINLINE op_status vm_backend::exec_c_load_general(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool adopted) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = *cr.loop;
@@ -10415,7 +10413,8 @@ JAI_NOINLINE op_status vm_backend::exec_c_load_general(frame& f, size_t& ip, con
 			ok = read_int(site.operands[k + 1], r) && typed_int_index_row(static_cast<token_type>(site.fold_ops[k]), index, r, index);
 		}
 	}
-	if (!ok || index < 0 || static_cast<size_t>(index) >= node->size()) { cells_miss_ip(f, ip, loop, original_ip, 2); return {}; }
+	const size_t node_size = node->kind() == script_array::kind_t::i64 ? node->ints().size() : node->kind() == script_array::kind_t::f64 ? node->floats().size() : node->size();   // the buffers' own sizes inline, here only
+	if (!ok || index < 0 || static_cast<size_t>(index) >= node_size) { cells_miss_ip(f, ip, loop, original_ip, 2); return {}; }
 	const size_t at = static_cast<size_t>(index);
 	uint8_t expect = site.decl_expect;
 	int64_t bits;

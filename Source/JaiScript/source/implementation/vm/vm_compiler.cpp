@@ -7543,6 +7543,10 @@ void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
 		compile_expression(expr->arguments[k]);
 		emit_arg_capture(captures, k, expr->arguments[k].get(), node, capture_form_new);
 	}
+	if (expr->type && (base == script_value_type::jai_shared_ptr_type || base == script_value_type::jai_object_type)) {
+		const type_info* cls = base == script_value_type::jai_shared_ptr_type ? expr->type->element_type().get() : expr->type.get();
+		if (cls) { site.new_symbol = symbolizer_->intern(cls->type_name); }
+	}
 	chunk_->call_sites.push_back(std::move(site));
 	emit(opcode::op_new, node, static_cast<uint32_t>(expr->arguments.size()), static_cast<uint32_t>(chunk_->call_sites.size()));
 }

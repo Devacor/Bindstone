@@ -13811,9 +13811,11 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::constructor &&
 	    !parallel_worker_) {
-		auto script_cls = thunk->payload.cls && thunk->payload.cls->is_script_class()
-			? std::static_pointer_cast<script_class_definition>(thunk->payload.cls)
-			: std::shared_ptr<script_class_definition>();
+		const std::shared_ptr<script_class_definition> no_class;
+		const std::shared_ptr<script_class_definition>* cached = cached_global_env_ ? site_script_class(&site, thunk) : nullptr;
+		const std::shared_ptr<script_class_definition> cast = cached || !thunk->payload.cls || !thunk->payload.cls->is_script_class()
+			? no_class : std::static_pointer_cast<script_class_definition>(thunk->payload.cls);
+		const std::shared_ptr<script_class_definition>& script_cls = cached ? *cached : cast;
 		if (script_cls) {
 			if (script_cls->get_constructor_asts().empty()) {
 				auto result = construct_default_instance(script_cls, arguments);
@@ -16973,10 +16975,30 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				stack_.push_back(make_null());
 				return {};
 			}
-			script_value* ctor_cell = environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
+			const bool memo = cached_global_env_ && !parallel_worker_;
+			script_value* ctor_cell = memo ? new_class_cell(f, ins, *inner_type) : environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
 			if (!ctor_cell || !ctor_cell->is_function()) {
 				return raise_(make_error_code(runtime_error_code::undefined_variable),
 					"No constructor found for class '{0}'", inner_type->id);
+			}
+			if (memo) {
+				const call_site& site = f.code->call_sites[ins.c - 1];
+				const script_callable_thunk* thunk = new_constructor_thunk(site, ctor_cell->deref());
+				if (thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::constructor) {
+					const auto* cls = site_script_class(&site, thunk);
+					if (cls && (*cls)->get_constructor_asts().empty()) {
+						auto result = construct_default_instance(*cls, args);
+						if (!result) {
+							return raise_from(result);
+						}
+						script_value value = std::move(result.value());
+						if (value.type() == script_value_type::jai_object_type) {
+							value.set_type_info(expr->type);
+						}
+						stack_.push_back(std::move(value));
+						return {};
+					}
+				}
 			}
 			script_value constructorFunc = ctor_cell->deref();
 			const script_function& func = constructorFunc.as_function();
@@ -16996,10 +17018,34 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			return raise_(make_error_code(runtime_error_code::type_mismatch),
 				"shared_ptr requires a type parameter when called with arguments");
 		}
-		script_value* ctor_cell = environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
+		const bool memo = cached_global_env_ && !parallel_worker_;
+		script_value* ctor_cell = memo ? new_class_cell(f, ins, *inner_type) : environment_->get_value_ptr(symbolizer_->intern(inner_type->type_name));
 		if (!ctor_cell || !ctor_cell->is_function()) {
 			return raise_(make_error_code(runtime_error_code::undefined_variable),
 				"No constructor found for class '{0}'", inner_type->id);
+		}
+		if (memo) {
+			const call_site& site = f.code->call_sites[ins.c - 1];
+			const script_callable_thunk* thunk = new_constructor_thunk(site, ctor_cell->deref());
+			if (thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::constructor) {
+				if (const auto* cls = site_script_class(&site, thunk)) {
+					if ((*cls)->get_constructor_asts().empty()) {
+						auto result = construct_default_instance(*cls, args);
+						if (!result) {
+							return raise_from(result);
+						}
+						script_value value = std::move(result.value());
+						if (value.type() == script_value_type::jai_object_type) {
+							value.set_type_info(expr->type);
+						}
+						stack_.push_back(std::move(value));
+						return {};
+					}
+					if (thunk->payload.definition_env) {
+						return enter_constructor_in_loop(f, *cls, thunk->payload.definition_env, args, expr->type.get(), &site);
+					}
+				}
+			}
 		}
 		script_value constructorFunc = ctor_cell->deref();
 		const script_function& func = constructorFunc.as_function();
@@ -17057,6 +17103,28 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 
+	if (cached_global_env_ && !parallel_worker_ && expr->type->base_type == script_value_type::jai_object_type) {
+		script_value* ctor_cell = new_class_cell(f, ins, *expr->type);
+		if (ctor_cell && ctor_cell->is_function()) {
+			const call_site& site = f.code->call_sites[ins.c - 1];
+			const script_callable_thunk* thunk = new_constructor_thunk(site, ctor_cell->deref());
+			if (thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::constructor) {
+				if (const auto* cls = site_script_class(&site, thunk)) {
+					if ((*cls)->get_constructor_asts().empty()) {
+						auto result = construct_default_instance(*cls, args);
+						if (!result) {
+							return raise_from(result);
+						}
+						stack_.push_back(std::move(result.value()));
+						return {};
+					}
+					if (thunk->payload.definition_env) {
+						return enter_constructor_in_loop(f, *cls, thunk->payload.definition_env, args, nullptr, &site);
+					}
+				}
+			}
+		}
+	}
 	std::string className = expr->type->type_name;
 	auto ctor_result = environment_->get(className);
 	if (ctor_result && ctor_result.value().is_function()) {
@@ -18261,7 +18329,7 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 	return this_value;
 }
 
-checked_result<script_value> vm_backend::construct_instance_pre_body(std::shared_ptr<script_class_definition> class_def,
+checked_result<script_value> vm_backend::construct_instance_pre_body(const std::shared_ptr<script_class_definition>& class_def,
                                                             const std::shared_ptr<environment>& definition_env,
                                                             const std::vector<script_value>& args,
                                                             std::shared_ptr<function_decl>& matching_ctor_out,
@@ -18414,7 +18482,34 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	return {};
 }
 
-checked_result<script_value> vm_backend::construct_default_instance(std::shared_ptr<script_class_definition> class_def,
+const std::shared_ptr<script_class_definition>* vm_backend::site_script_class(const call_site* site, const script_callable_thunk* thunk) {
+	const class_definition* cls = thunk->payload.cls.get();
+	if (!cls || !cls->is_script_class()) { return nullptr; }
+	if (site->ctor_cls_key != cls) {
+		site->ctor_cls = std::static_pointer_cast<script_class_definition>(thunk->payload.cls);
+		site->ctor_cls_key = cls;
+	}
+	return &site->ctor_cls;
+}
+
+script_value* vm_backend::new_class_cell(frame& f, const vm_instruction& ins, const type_info& cls) {
+	const call_site& site = f.code->call_sites[ins.c - 1];
+	const uint64_t symbol = site.new_symbol != UINT64_MAX ? site.new_symbol : symbolizer_->intern(cls.type_name);
+	script_value* cell = env_lookup_cached(f, f.ip * 3, symbol);
+	return cell ? cell : environment_->get_value_ptr(symbol);
+}
+
+const script_callable_thunk* vm_backend::new_constructor_thunk(const call_site& site, const script_value& ctor) {
+	const script_function* identity = &ctor.unchecked_as_function();
+	if (identity != site.ctor_identity) {
+		site.ctor_pin = *ctor.get_storage().get_if<script_value::TYPEID_FUNCTION>();
+		site.ctor_identity = identity;
+		site.ctor_thunk = identity->target<script_callable_thunk>();
+	}
+	return static_cast<const script_callable_thunk*>(site.ctor_thunk);
+}
+
+checked_result<script_value> vm_backend::construct_default_instance(const std::shared_ptr<script_class_definition>& class_def,
                                                                     const std::vector<script_value>& args) {
 	// arguments to a class without a constructor: a copy, or aggregate initialization (KEEP BYTE-PARALLEL with the interpreter)
 	detail::aggregate_plan aggregate;
@@ -21052,6 +21147,11 @@ void vm_backend::release_site_pins() noexcept {
 			site.ic_pin = {};
 			site.ic_identity = nullptr;
 			site.ic_fn = nullptr;
+			site.ctor_pin = {};
+			site.ctor_identity = nullptr;
+			site.ctor_thunk = nullptr;
+			site.ctor_cls.reset();
+			site.ctor_cls_key = nullptr;
 			site.mic_method = script_value(std::monostate{}, nullptr);
 			site.mic_resolved.reset();
 			site.mic_dispatch = nullptr;

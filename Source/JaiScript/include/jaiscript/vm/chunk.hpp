@@ -14,6 +14,7 @@
 
 namespace jai {
     class class_definition;
+    class script_class_definition;
     struct script_method_dispatch;
 }
 
@@ -167,6 +168,16 @@ namespace jai::vm {
         mutable uint32_t nat_cpp_slot = UINT32_MAX;
         mutable bool nat_field_free = false;
         std::vector<uint32_t> staged_argument_slots;   // immutable owned temps released if this call is abandoned before invocation
+        // op_new: the class name's symbol, interned when the site compiles
+        uint64_t new_symbol = UINT64_MAX;
+        // Constructor memo (op_new, class-name calls): the constructor value's thunk read once per value identity (a
+        // redefinition mints a new value; the pin keeps a cached identity from being recycled) and its script class
+        // cast once per class (definitions are engine-lifetime pinned). Same cached_global_env_ gate as the caches above.
+        mutable const script_function* ctor_identity = nullptr;
+        mutable strong_ptr<script_function> ctor_pin;
+        mutable const void* ctor_thunk = nullptr;
+        mutable const class_definition* ctor_cls_key = nullptr;
+        mutable std::shared_ptr<script_class_definition> ctor_cls;
     };
 
     struct function_proto {

@@ -97,12 +97,6 @@ std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng
     return result;
 }
 
-template<typename T>
-[[deprecated("Use engine-aware version convert_vector_to_script_array(vec, engine) instead")]]
-script_value convert_vector_to_script_array(const std::vector<T>& vec) {
-    throw std::runtime_error("Non-engine-aware vector conversion is no longer supported. Use convert_vector_to_script_array(vec, engine) instead.");
-}
-
 // Implementation in engine_impl.hpp to avoid circular dependencies
 template<typename T>
 script_value convert_vector_to_script_array(const std::vector<T>& vec, engine* eng);

@@ -72,51 +72,6 @@ inline script_value conversion_registry::convert_to_script(const T& value) const
     throw_unregistered_conversion("No conversion registered for type: ", typeid(T).name());
 }
 
-template<typename T>
-inline void conversion_registry::register_vector_conversion() {
-    register_conversion<std::vector<T>>(
-        [this](const script_value& v) -> std::vector<T> {
-            return convert_script_array_to_vector<T>(v);
-        },
-        [this](const std::vector<T>& vec) -> script_value {
-            return convert_vector_to_script_array<T>(vec);
-        }
-    );
-}
-
-template<typename K, typename V>
-inline void conversion_registry::register_map_conversion() {
-    register_conversion<std::map<K, V>>(
-        [this](const script_value& v) -> std::map<K, V> {
-            return convert_script_map_to_stdmap<K, V>(v);
-        },
-        [this](const std::map<K, V>& map) -> script_value {
-            return convert_stdmap_to_script_map<K, V>(map);
-        }
-    );
-}
-
-// Helper functions for container conversions
-template<typename T>
-inline std::vector<T> conversion_registry::convert_script_array_to_vector(const script_value& v) const {
-    return convert_script_array_to_vector<T>(v);
-}
-
-template<typename T>
-inline script_value conversion_registry::convert_vector_to_script_array(const std::vector<T>& vec) const {
-    return conversions::convert_vector_to_script_array<T>(vec);
-}
-
-template<typename K, typename V>
-inline std::map<K, V> conversion_registry::convert_script_map_to_stdmap(const script_value& v) const {
-    return convert_script_map_to_stdmap<K, V>(v);
-}
-
-template<typename K, typename V>
-inline script_value conversion_registry::convert_stdmap_to_script_map(const std::map<K, V>& map) const {
-    return convert_stdmap_to_script_map<K, V>(map);
-}
-
 // Template implementations for conversion_manager methods
 
 template<typename T>

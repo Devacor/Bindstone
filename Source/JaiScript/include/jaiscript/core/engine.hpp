@@ -173,16 +173,6 @@ namespace jai {
             return eng;
         }
 
-        // Helper methods for getting engine references
-        // Use these when you need to pass engine references to systems that need weak_ptr or shared_ptr
-        std::weak_ptr<engine> get_weak_engine() {
-            return weak_from_this();
-        }
-
-        std::shared_ptr<engine> get_shared_engine() {
-            return shared_from_this();
-        }
-
 		// Address-stable: values, bindings and backends retain this engine's address.
 		// Transfer ownership by moving shared_ptr<engine>, never the engine itself.
 		engine(const engine&) = delete;
@@ -709,9 +699,7 @@ namespace jai {
                 }
             }
             
-            // Wrap the function to handle type conversion for return values
-            script_function wrappedFunc = wrapFunctionForTypeConversion<return_type>(std::move(boundFunc));
-            wrappedFunc = guard_function(std::move(wrappedFunc), std::move(required));
+            script_function wrappedFunc = guard_function(std::move(boundFunc), std::move(required));
             if constexpr (constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value; writeback != 0) {
                 wrappedFunc = host_writeback_function{ std::move(wrappedFunc), writeback };
             }
@@ -721,7 +709,7 @@ namespace jai {
             // Auto-detect numeric operator overrides and set flag
             if (arity == 2 && isNumericOperator(name)) {
                 if (hasNumericOperands(paramTypes)) {
-                    setHasCustomNumericOps(true);
+                    set_has_custom_numeric_operators(true);
                 }
             }
 
@@ -761,8 +749,6 @@ namespace jai {
             return isNumericType(paramTypes[0].base_type) && isNumericType(paramTypes[1].base_type);
         }
         
-        void setHasCustomNumericOps(bool value);
-
         template <typename R>
         static constexpr script_value_type host_result_kind() {
             using D = std::decay_t<R>;
@@ -799,7 +785,6 @@ namespace jai {
         template<typename T>
         void add_class(const std::string& name, std::shared_ptr<class_definition> classDef) {
             add_class_impl(name, classDef);
-            register_type_name_impl(typeid(T).name(), name);
             register_class_by_type(std::type_index(typeid(T)), classDef);
         }
         
@@ -885,40 +870,6 @@ namespace jai {
             std::function<T(const script_value&)> from_func,
             std::function<script_value(const T&)> to_func
         );
-        
-        // Type conversion registration
-        // Register a conversion between JaiScript types with a cost for overload resolution
-        // Lower costs are preferred (0 = exact match, 1 = promotion, 2 = standard conversion, etc.)
-        void register_type_conversion(script_value_type from, script_value_type to, int cost, 
-                                   std::function<script_value(const script_value&)> converter);
-        
-        // Template version for C++ type safety using std::is_convertible
-        template<typename From, typename To>
-        void register_type_conversion(int cost = -1) {
-            static_assert(std::is_convertible_v<From, To>, 
-                         "Types must be convertible according to C++ rules");
-            
-            script_value_type fromType = mapCppTypeToValueType<From>();
-            script_value_type toType = mapCppTypeToValueType<To>();
-            
-            // Auto-determine cost if not specified
-            if (cost < 0) {
-                if constexpr (std::is_same_v<From, To>) {
-                    cost = 0; // Exact match
-                } else if constexpr (std::is_integral_v<From> && std::is_floating_point_v<To>) {
-                    cost = 1; // Promotion
-                } else if constexpr (std::is_floating_point_v<From> && std::is_integral_v<To>) {
-                    cost = 2; // Standard conversion (may lose precision)
-                } else {
-                    cost = 3; // User-defined conversion
-                }
-            }
-            
-            register_type_conversion(fromType, toType, cost, 
-                [](const script_value& v) { 
-                    return script_value(static_cast<To>(v.as<From>())); 
-                });
-        }
 
         // Variable access
         script_value get_variable(const std::string& name) const;
@@ -937,12 +888,6 @@ namespace jai {
         // Performance optimization
         void set_has_custom_numeric_operators(bool value);
 
-        // Get registered type name from typeid
-        std::string get_registered_type_name(const std::string& typeIdName) const;
-        
-        // Convert a registered type to value
-        script_value convert_to_value(const std::type_info& type, const void* obj) const;
-        
         // Backend configuration
         void set_backend(backend_type type);
         void set_backend(std::unique_ptr<execution_backend> backend);
@@ -976,24 +921,6 @@ namespace jai {
             return jai::format_error(result, *get_symbolizer());
         }
 
-        // Register C++ type converters for custom types
-        template<typename T>
-        void register_type_converter(const std::string& type_name) {
-            // Register a converter that creates a script_value from this type
-            engine* eng = this;
-            auto type_id = get_symbolizer()->intern(type_name);
-            auto toValue = [type_name, type_id, eng](const T& obj) -> script_value {
-                auto sharedObj = std::make_shared<T>(obj);
-                return script_value::make_cpp_object(type_name, type_id, std::static_pointer_cast<void>(sharedObj), eng);
-            };
-            
-            // Store this converter (implementation will handle the storage)
-            register_type_converter_impl(typeid(T), 
-                [toValue](const void* obj) -> script_value {
-                    return toValue(*static_cast<const T*>(obj));
-                });
-        }
-        
         // Get class definition by type index
         std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const;
         
@@ -1384,8 +1311,6 @@ namespace jai {
         void initialize_engine_reference();
         void wire_backend();
         void add_class_impl(const std::string& name, std::shared_ptr<class_definition> classDef);
-        void register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName);
-        void register_type_converter_impl(const std::type_info& type, std::function<script_value(const void*)> converter);
         void register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef);
 
         // Records a base link whose base class has not registered yet (registrar order is
@@ -1401,60 +1326,6 @@ namespace jai {
         // Allow the vm backend the same access (include/import call execute_source)
         friend class vm::vm_backend;
         
-        // Helper to wrap functions with type conversion
-        template<typename ReturnType>
-        script_function wrapFunctionForTypeConversion(script_function func) {
-            // For user-defined types, type conversion is handled by function binder
-            // We just return the function as-is since value_converter in function_binder
-            // already handles the conversion properly
-            return func;
-        }
-        
-        // Helper to extract parameter types from a function signature
-        template<typename Func>
-        std::vector<script_value_type> extractParameterTypes() {
-            using traits = detail::function_traits<std::decay_t<Func>>;
-            return extractParameterTypesImpl<typename traits::argument_types>(std::make_index_sequence<traits::arity>{});
-        }
-        
-        template<typename ArgsTuple, size_t... Is>
-        std::vector<script_value_type> extractParameterTypesImpl(std::index_sequence<Is...>) {
-            return {mapCppTypeToValueType<std::tuple_element_t<Is, ArgsTuple>>()...};
-        }
-        
-        // Map C++ types to JaiScript ValueType
-        template<typename T>
-        static constexpr script_value_type mapCppTypeToValueType() {
-            using decay_t = std::decay_t<T>;
-            
-            if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> || 
-                          std::is_same_v<decay_t, script_int>) {
-                return script_value_type::jai_int_type;
-            } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> || 
-                                 std::is_same_v<decay_t, script_float>) {
-                return script_value_type::jai_float_type;
-            } else if constexpr (std::is_same_v<decay_t, bool> || std::is_same_v<decay_t, script_bool>) {
-                return script_value_type::jai_bool_type;
-            } else if constexpr (std::is_same_v<decay_t, char> || std::is_same_v<decay_t, script_char>) {
-                return script_value_type::jai_char_type;
-            } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
-                return script_value_type::jai_string_type;
-            } else if constexpr (is_specialization_v<decay_t, std::vector>) {
-                return script_value_type::jai_array_type;
-            } else if constexpr (is_specialization_v<decay_t, bound_array>) {
-                // bound_array is a zero-copy wrapper for arrays
-                return script_value_type::jai_array_type;
-            } else if constexpr (is_script_map_like_v<decay_t>) {
-                return script_value_type::jai_map_type;
-            } else if constexpr (is_specialization_v<decay_t, bound_map>) {
-                // bound_map is a zero-copy wrapper for maps
-                return script_value_type::jai_map_type;
-            } else {
-                // For unknown types, return Object (could be improved)
-                return script_value_type::jai_object_type;
-            }
-        }
-
         template<typename Func>
         std::vector<param_type_info> extract_parameter_types_with_info() {
             using traits = detail::function_traits<std::decay_t<Func>>;

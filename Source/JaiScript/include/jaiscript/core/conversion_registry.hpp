@@ -105,31 +105,6 @@ public:
     // Try to convert using custom conversions (type-erased version for internal use)
     bool try_custom_conversion(const script_value& v, const std::type_info& target_type, script_value& out) const;
     
-    // === Container Conversions ===
-    
-    // Register standard vector conversion
-    template<typename T>
-    void register_vector_conversion();
-    
-    // Register standard map conversion
-    template<typename K, typename V>
-    void register_map_conversion();
-    
-    // Standard library conversions
-    void register_standard_conversions();
-    
-    // === C++ Type Converters (for void* to script_value conversions) ===
-    
-    // Register a C++ type converter (type_id -> converter function)
-    void register_cpp_type_converter(type_id tid, 
-                                    std::function<script_value(const void*)> converter);
-    
-    // Get a C++ type converter by type_id
-    std::function<script_value(const void*)> get_cpp_type_converter(type_id tid) const;
-    
-    // Convert from void* using registered C++ type converter
-    script_value convert_cpp_type_from_void(type_id tid, const void* obj) const;
-    
     // === Custom Object Extractor (replaces static extractor in script_value) ===
     
     // Type for custom extractor function
@@ -154,18 +129,6 @@ public:
     }
     
 private:
-    // Helper functions for container conversions
-    template<typename T>
-    std::vector<T> convert_script_array_to_vector(const script_value& v) const;
-    
-    template<typename T>
-    script_value convert_vector_to_script_array(const std::vector<T>& vec) const;
-    
-    template<typename K, typename V>
-    std::map<K, V> convert_script_map_to_stdmap(const script_value& v) const;
-    
-    template<typename K, typename V>
-    script_value convert_stdmap_to_script_map(const std::map<K, V>& map) const;
     // Built-in type conversions
     std::vector<BuiltinConversion> builtin_conversions_;
     
@@ -176,23 +139,14 @@ private:
     
     // Custom object extractor
     extractor_func custom_extractor_;
-    
-    // C++ type converters (for void* to script_value conversions)
-    std::unordered_map<type_id, std::function<script_value(const void*)>, type_id_hash> cpp_type_converters_;
 };
 
 // Forward declarations for helper functions - implementations in conversion_registry_impl.hpp
 template<typename T>
 std::vector<T> convert_script_array_to_vector(const script_value& v, engine* eng);
 
-template<typename T>
-script_value convert_vector_to_script_array(const std::vector<T>& vec);
-
 template<typename K, typename V>
 std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng);
-
-template<typename K, typename V>
-script_value convert_stdmap_to_script_map(const std::map<K, V>& stdmap);
 
 } // namespace conversions
 

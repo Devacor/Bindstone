@@ -382,7 +382,6 @@ namespace jai {
 
         // Internal helpers for kind-specific lookups
         // These check this_object_ fields (for method kind) or class_def_ static fields (for static_method kind)
-        script_value* get_this_field_ptr(uint64_t id);
         script_value* get_static_field_ptr(uint64_t id);
     };
 

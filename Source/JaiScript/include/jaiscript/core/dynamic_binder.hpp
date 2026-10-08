@@ -1525,33 +1525,6 @@ private:
         return detail::script_value_from_cpp(value, eng);
     }
 
-    // Helper to convert script_value to C++ type
-    // For primitive types, uses direct accessor methods.
-    // For custom types, delegates to value_converter which handles registered classes.
-    template<typename ValueT>
-    static ValueT script_value_to_cpp(const script_value& val, engine* eng = nullptr) {
-        if constexpr (std::is_same_v<ValueT, int> || std::is_same_v<ValueT, int32_t>) {
-            return static_cast<ValueT>(val.as_int());
-        } else if constexpr (std::is_same_v<ValueT, int64_t>) {
-            return val.as_int();
-        } else if constexpr (std::is_same_v<ValueT, uint64_t> || std::is_same_v<ValueT, uint32_t> ||
-                            std::is_same_v<ValueT, uint16_t> || std::is_same_v<ValueT, uint8_t> ||
-                            std::is_same_v<ValueT, int16_t> || std::is_same_v<ValueT, int8_t>) {
-            return static_cast<ValueT>(val.as_int());
-        } else if constexpr (std::is_same_v<ValueT, float>) {
-            return static_cast<float>(val.as_float());
-        } else if constexpr (std::is_same_v<ValueT, double>) {
-            return val.as_float();
-        } else if constexpr (std::is_same_v<ValueT, bool>) {
-            return val.as_bool();
-        } else if constexpr (std::is_same_v<ValueT, std::string>) {
-            return val.as_string();
-        } else {
-            // For custom types, use value_converter which handles registered classes
-            return detail::value_converter<ValueT>::from(val, eng);
-        }
-    }
-
 public:
 
     // Finalize registration
@@ -1663,26 +1636,6 @@ public:
         // Register converters for copyable types only (used for value conversions requiring copy)
         // Non-copyable types like property_owner classes must use shared_ptr conversions instead
         if constexpr (!std::is_abstract_v<T> && std::is_copy_constructible_v<T>) {
-            // Register a C++ type converter that creates class_instance objects
-            engine_.register_type_converter_impl(typeid(T),
-                [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const void* obj) -> script_value {
-                    // Create a class_instance using the class definition
-                    // This properly initializes all fields with their defaults
-                    auto instance = class_def->create_instance();
-
-                    // Create a shared_ptr to the C++ object (by copying)
-                    auto cpp_obj = std::make_shared<T>(*static_cast<const T*>(obj));
-
-                    // Store the C++ object in the class_instance
-                    uint64_t cpp_object_field_id = engine_ptr->symbolize(class_constants::CPP_OBJECT_FIELD);
-                    instance->set_field(cpp_object_field_id, script_value::make_cpp_object(class_name,
-                        class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
-
-                    // Return the class_instance wrapped in a value
-                    return script_value::make_object(class_name,
-                        std::static_pointer_cast<void>(instance), engine_ptr);
-                });
-
             // Also register with conversion registry for container conversions
             auto custom_conv = engine_.get_conversion_registry();
             if (custom_conv && !custom_conv->template has_conversion<T>()) {

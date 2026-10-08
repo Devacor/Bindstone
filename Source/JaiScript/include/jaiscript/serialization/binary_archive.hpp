@@ -716,11 +716,6 @@ public:
         return false;
     }
 
-    size_t get_object_property_count() const {
-        if (object_stack_.empty()) return 0;
-        return object_stack_.back().property_order.size();
-    }
-
     const std::vector<std::string>& get_object_property_names() const {
         if (object_stack_.empty()) {
             static const std::vector<std::string> empty;

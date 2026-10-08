@@ -71,15 +71,4 @@ public:
 // exit destroys (both backends).
 bool slot_may_own_destructor(engine& eng, const type_info_ptr& t);
 
-// Factory functions for creating script class instances
-template<typename... Args>
-std::shared_ptr<script_class_instance> make_shared_script_class(
-    engine& eng,
-    const std::string& class_name,
-    Args&&... args
-) {
-    std::vector<script_value> script_args = {script_value(std::forward<Args>(args))...};
-    return eng.get_class_registry().create_script_instance(class_name, script_args);
-}
-
 } // namespace jai

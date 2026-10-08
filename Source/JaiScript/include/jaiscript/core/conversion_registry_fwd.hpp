@@ -36,13 +36,6 @@ struct type_id {
     }
 };
 
-// Hash function for type_id to use in unordered_map
-struct type_id_hash {
-    std::size_t operator()(const type_id& tid) const {
-        return std::hash<std::type_index>()(tid.index);
-    }
-};
-
 } // namespace conversions
 
 } // namespace jai

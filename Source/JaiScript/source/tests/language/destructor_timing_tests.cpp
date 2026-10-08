@@ -497,6 +497,22 @@ public:
             )", "q123qa4qqq");
         });
 
+        test("push_takes_a_temporary_only_where_no_destructor_sees_it", [this]() {
+            expect_log(R"(
+                class Plain { int v = 0; array<int> xs; }
+                class Holder { Token t; Holder(string n) { t = Token(n); } }
+                function make(int v) -> Plain { Plain p; p.v = v; return p; }
+                function f() -> string {
+                    array<Plain> a; Plain p; p.v = 3; a.push(p); p.v = 4; a.push(make(7)); a[1].xs.push(5);
+                    var b = []; b.push(make(8)); b[0].v = 9;
+                    array<Holder> h; h.push(Holder("h"));
+                    LOG = LOG + "|";
+                    return to_string(a[0].v) + to_string(p.v) + to_string(a[1].v) + to_string(a[1].xs.size()) + to_string(b[0].v);
+                }
+                LOG = LOG + f() + LOG; LOG;
+            )", "34719hh|h");
+        });
+
         test("long_chains_release_without_native_recursion", [this]() {
             for (const char* drop : {"function f(int n) -> int { shared_ptr<Node> head = build(n); return head.x; } f(N);",
                                      "shared_ptr<Node> head = build(N); head = null;",

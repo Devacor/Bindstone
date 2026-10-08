@@ -721,24 +721,6 @@ void register_all_standard_conversions(std::shared_ptr<conversion_registry> regi
     register_bound_map_conversions(registry);
 }
 
-void conversion_registry::register_cpp_type_converter(type_id tid, 
-                                                     std::function<script_value(const void*)> converter) {
-    cpp_type_converters_[tid] = converter;
-}
-
-std::function<script_value(const void*)> conversion_registry::get_cpp_type_converter(type_id tid) const {
-    auto it = cpp_type_converters_.find(tid);
-    return (it != cpp_type_converters_.end()) ? it->second : nullptr;
-}
-
-script_value conversion_registry::convert_cpp_type_from_void(type_id tid, const void* obj) const {
-    auto it = cpp_type_converters_.find(tid);
-    if (it != cpp_type_converters_.end()) {
-        return it->second(obj);
-    }
-    throw std::runtime_error("No C++ type converter registered for type_id");
-}
-
 } // namespace conversions
 
 template void conversions::conversion_manager::add_custom_conversion<int>(

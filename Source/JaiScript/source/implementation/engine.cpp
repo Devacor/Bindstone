@@ -618,7 +618,6 @@ struct engine::implementation {
     uint64_t post_load_id_ = 0;
 
     // Type name registry for custom classes (maps typeid name to user-friendly name)
-    std::unordered_map<std::string, std::string> typeNameRegistry;
 
     // Composite key for type interning - avoids string construction on lookup
     struct type_key {
@@ -3269,11 +3268,6 @@ std::shared_ptr<class_definition> engine::get_class_definition(uint64_t type_id)
     return nullptr;
 }
 
-void engine::register_type_conversion(script_value_type from, script_value_type to, int cost, 
-                                  std::function<script_value(const script_value&)> converter) {
-    impl->conversions->register_builtin_conversion(from, to, cost, converter);
-}
-
 script_value engine::get_variable(const std::string& name) const {
     // Use backend to properly handle references
     try {
@@ -3357,43 +3351,6 @@ bool engine::is_type_name(const std::string& name) const {
 
 std::shared_ptr<environment> engine::get_global_environment() const {
     return impl->global_environment_;
-}
-
-void engine::register_type_name_impl(const std::string& typeIdName, const std::string& friendlyName) {
-    impl->typeNameRegistry[typeIdName] = friendlyName;
-}
-
-std::string engine::get_registered_type_name(const std::string& typeIdName) const {
-    auto it = impl->typeNameRegistry.find(typeIdName);
-    if (it != impl->typeNameRegistry.end()) {
-        return it->second;
-    }
-    // If not registered, try simple demangling for common cases
-    std::string type_name = typeIdName;
-    size_t pos = 0;
-    while (pos < type_name.length() && std::isdigit(type_name[pos])) {
-        pos++;
-    }
-    if (pos > 0 && pos < type_name.length()) {
-        type_name = type_name.substr(pos);
-    }
-    return type_name;
-}
-
-void engine::register_type_converter_impl(const std::type_info& type, std::function<script_value(const void*)> converter) {
-    // Register with the conversion registry using type_id
-    auto registry = impl->conversions;
-    if (registry) {
-        registry->register_cpp_type_converter(conversions::type_id::of_type(type), converter);
-    }
-}
-
-script_value engine::convert_to_value(const std::type_info& type, const void* obj) const {
-    auto registry = impl->conversions;
-    if (registry) {
-        return registry->convert_cpp_type_from_void(conversions::type_id::of_type(type), obj);
-    }
-    throw runtime_error("No converter registered for type: " + std::string(type.name()));
 }
 
 void engine::set_has_custom_numeric_operators(bool value) {
@@ -3541,19 +3498,6 @@ void engine::note_enum_name(uint64_t name_id) {
 bool engine::is_enum_name(uint64_t name_id) const {
     return impl->enum_names_.count(name_id) != 0;
 }
-
-void engine::setHasCustomNumericOps(bool value) {
-    // Set the flag on the backend (which might be interpreter or VM)
-    impl->custom_numeric_ops_flag_ = value;
-    if (value) {
-        impl->latch_custom_binary_ops();   // numeric overrides imply the mint gate
-    }
-    if (impl->backend) {
-        impl->backend->set_has_custom_numeric_ops(value);
-    }
-}
-
-// Removed duplicate - already defined at line 748
 
 
 void engine::register_class_by_type(std::type_index type, std::shared_ptr<class_definition> classDef) {

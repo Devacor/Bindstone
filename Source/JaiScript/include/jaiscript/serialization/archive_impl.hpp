@@ -743,12 +743,6 @@ private:
     }
 
 public:
-    // Made public for use by smart pointer serialization in property_serialization.hpp
-    template<typename T>
-    void write_custom(const T& value) {
-        write_value(value);
-    }
-
     // Pushes ObjectBody context so operator() doesn't wrap again
     template<typename T>
     void serialize_object_content(const T& value) {
@@ -787,7 +781,6 @@ protected:
     std::map<std::type_index, void*> user_contexts_;
 
     std::map<std::string, script_value> preread_properties_;
-    bool has_preread_properties_ = false;
 
     int current_depth_ = 0;
 
@@ -1322,20 +1315,16 @@ public:
 protected:
     void set_preread_properties(std::map<std::string, script_value> props) {
         preread_properties_ = std::move(props);
-        has_preread_properties_ = true;
     }
 
     void clear_preread_properties() {
         preread_properties_.clear();
-        has_preread_properties_ = false;
     }
 
     const script_value* get_preread_property(const std::string& name) const {
         auto it = preread_properties_.find(name);
         return it != preread_properties_.end() ? &it->second : nullptr;
     }
-
-    bool has_preread_properties() const { return has_preread_properties_; }
 
 private:
     template<typename T>
@@ -1508,10 +1497,6 @@ public:
     const class_metadata* get_class_metadata(const std::string& class_name) const {
         auto it = classes_.find(class_name);
         return it != classes_.end() ? &it->second : nullptr;
-    }
-
-    bool has_class(const std::string& class_name) const {
-        return classes_.find(class_name) != classes_.end();
     }
 
 private:

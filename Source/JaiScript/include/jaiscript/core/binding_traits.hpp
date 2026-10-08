@@ -80,9 +80,6 @@ struct function_param_checker<R(C::*)(Args...) const> {
 
 // Permissive mode - allow with warnings
 template<typename Func>
-struct should_reject_binding : std::false_type {};
-
-template<typename Func>
 inline void check_binding_validity(const std::string& name) {
     if constexpr (function_param_checker<std::decay_t<Func>>::has_rejected_refs) {
         // Could log warning here in the future
@@ -93,11 +90,6 @@ inline void check_binding_validity(const std::string& name) {
 #else
 
 // Strict mode (default) - reject at compile time
-template<typename Func>
-struct should_reject_binding : std::bool_constant<
-    function_param_checker<std::decay_t<Func>>::has_rejected_refs
-> {};
-
 template<typename Func>
 inline void check_binding_validity(const std::string& name) {
     static_assert(!function_param_checker<std::decay_t<Func>>::has_rejected_refs,
@@ -122,33 +114,6 @@ inline void check_binding_validity(const std::string& name) {
 }
 
 #endif
-
-// ============ Type Name Extraction for Better Error Messages ============
-
-template<typename T>
-struct type_name {
-    static constexpr const char* value = "unknown";
-};
-
-template<typename T>
-struct type_name<std::vector<T>&> {
-    static constexpr const char* value = "std::vector<T>&";
-};
-
-template<typename T>
-struct type_name<const std::vector<T>&> {
-    static constexpr const char* value = "const std::vector<T>&";
-};
-
-template<typename K, typename V>
-struct type_name<std::map<K, V>&> {
-    static constexpr const char* value = "std::map<K,V>&";
-};
-
-template<typename K, typename V>
-struct type_name<const std::map<K, V>&> {
-    static constexpr const char* value = "const std::map<K,V>&";
-};
 
 } // namespace binding_traits
 } // namespace jai

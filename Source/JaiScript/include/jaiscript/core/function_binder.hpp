@@ -728,34 +728,6 @@ class engine;
         struct function_traits<T&&> : function_traits<T> {};
         
         
-        // Helper to unpack arguments and call function
-        template<typename Func, typename Tuple, size_t... Is>
-        auto call_with_tuple(Func&& f, const Tuple& t, std::index_sequence<Is...>) {
-            return f(std::get<Is>(t)...);
-        }
-        
-        // Convert vector of Values to tuple of C++ types
-        template<typename... Args, size_t... Is>
-        std::tuple<Args...> values_to_tuple(const std::vector<script_value>& values, std::index_sequence<Is...>, engine* eng) {
-            return std::make_tuple(value_converter<Args>::from(values[Is], eng)...);
-        }
-        
-        // Helper function to call a function with converted arguments
-        template<typename Func, typename ArgsTuple, size_t... Is>
-        auto call_with_converted_args(Func&& func, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
-            using traits = function_traits<std::decay_t<Func>>;
-            using return_type = typename traits::return_type;
-            
-            if constexpr (std::is_void_v<return_type>) {
-                // Void function
-                func(value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
-                return value_converter<void>::to(eng);
-            } else {
-                // Non-void function
-                auto result = func(value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
-                return value_converter<return_type>::to(result, eng);
-            }
-        }
         
     } // namespace detail
     
@@ -1035,11 +1007,6 @@ class engine;
             }
         }
         
-        // Process individual arguments
-        template<typename T>
-        static T process_argument(const script_value& arg, size_t index, engine* eng) {
-            return detail::value_converter<T>::from(arg, eng);
-        }
     };
     
     // Helper function to create a binder

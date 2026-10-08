@@ -170,8 +170,6 @@ namespace jai {
             }
         }
         bool has_continuations() const { return !continuations_.empty(); }
-        // A catch inside the coroutine: any frame still parked belongs to the aborted replay
-        void clear_continuations() { continuations_.clear(); }
 
     private:
         std::vector<continuation_point> continuations_;
@@ -360,12 +358,6 @@ namespace jai {
             }
         }
 
-        // Helper to create namespace-related objects with both type_name and type_id for fast comparison
-        template<typename T>
-        script_value make_namespace_object(uint64_t type_id, const char* type_name, std::shared_ptr<T> data) const {
-            return script_value::make_object(type_name, type_id, std::static_pointer_cast<void>(data), engine_);
-        }
-
         // Execute a list of declarations and return the last value
         script_value execute(const std::vector<declaration_ptr>& declarations, bool textual = false);   // textual: an include, run where it is written
         // the unit of the running code, derived from the executing call frame (docs/global_shadowing.md), and the
@@ -373,28 +365,8 @@ namespace jai {
         unit_stamp running_unit() const noexcept { return current_unit(); }
         void sync_unit() noexcept { if (!parallel_worker_ && string_symbolizer_->shadow_count() != 0) { string_symbolizer_->set_current_unit(current_unit()); } }
         
-        // Execute with typed return value (throws if no return statement or type doesn't match)
-        template<typename T>
-        T execute(const std::vector<declaration_ptr>& declarations) {
-            execute(declarations);  // Execute the script
-            
-            // Require a return statement when requesting typed result
-            if (!hasReturnValue_) {
-                throw runtime_error("Script must have a return statement when requesting typed result");
-            }
-            
-            // Try to convert the return value to the requested type
-            return returnValue_.value().as<T>();
-        }
-        
         // Execute a single expression and return its value
         script_value evaluate(expression_ptr expr);
-        
-        // Return value access (for global scope return statements)
-        bool has_return_value() const { return hasReturnValue_; }
-        script_value get_return_value() const {
-            return returnValue_.value_or(make_value());
-        }
         
         // Variable access methods
         script_value get_variable(const std::string& name) const;
@@ -598,9 +570,6 @@ namespace jai {
             }
         }
 
-        // Get current environment as shared_ptr (needed for make_reference calls)
-        std::shared_ptr<environment> get_environment_shared() const { return environment_; }
-        
         // Execute a method AST with a given environment
         checked_result<script_value> execute_method_ast(std::shared_ptr<function_decl> ast,
                                       std::shared_ptr<environment> method_env,
@@ -1347,17 +1316,6 @@ namespace jai {
             }
         }
         
-        inline checked_result<script_value> to_numeric(const script_value& value) {
-            if (value.is_int()) {
-                return make_value(static_cast<script_float>(value.unchecked_as_int()));
-            } else if (value.is_float()) {
-                return value;
-            } else if (value.is_bool()) {
-                return make_value(value.unchecked_as_bool() ? 1.0 : 0.0);
-            } else {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "Cannot convert to numeric value");
-            }
-        }
         
         // Coroutine helper - creates a script_value wrapping a coroutine_handle.
         // Static (friend access to script_value) so coroutine-factory thunks need no interpreter.

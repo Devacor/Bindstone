@@ -428,20 +428,6 @@ private:
 };
 
 class class_definition : public std::enable_shared_from_this<class_definition> {
-protected:
-    template<size_t ExpectedArgs>
-    static void validate_method_args(const std::vector<script_value>& args,
-                                    const std::string& method_name) {
-        if (args.empty()) {
-            throw runtime_error("Method '" + method_name + "' called without 'this' object");
-        }
-        if (args.size() != ExpectedArgs + 1) {
-            throw runtime_error("Method '" + method_name + "' expects " +
-                              std::to_string(ExpectedArgs) +
-                              " arguments, got " + std::to_string(args.size() - 1));
-        }
-    }
-
 public:
     enum class_type { cpp_class, script_class, vm_class };
 
@@ -490,10 +476,8 @@ public:
         }
     }
 
-    class_type get_class_type() const { return class_type_; }
     bool is_script_class() const { return class_type_ == script_class; }
     bool is_cpp_class() const { return class_type_ == cpp_class; }
-    bool is_vm_class() const { return class_type_ == vm_class; }
 
     bool has_property_getters() const { return has_property_getters_; }
 
@@ -1195,17 +1179,6 @@ public:
         return names;
     }
 
-    std::vector<std::string_view> get_static_method_names() const {
-        std::vector<std::string_view> names;
-        names.reserve(static_methods_.size());
-        if (auto eng = engine_) {
-            for (const auto& [method_id, _] : static_methods_) {
-                names.push_back(eng->get_symbolizer()->get_string(method_id));
-            }
-        }
-        return names;
-    }
-
     uint64_t chain_defaults_version() const {
         uint64_t v = defaults_version_;
         for (const auto& parent : parent_classes_) { if (parent) { v += parent->chain_defaults_version() * 1315423911u; } }
@@ -1686,10 +1659,6 @@ public:
         return 0;
     }
 
-    bool has_property_setter(uint64_t field_id) const {
-        return property_setter_ids_.find(field_id) != property_setter_ids_.end();
-    }
-
     // Member-pointer property whose type the cpp_bound box decodes: the address a
     // by-reference binding aims its box at (docs/reference_model.md CPP-MEMBER). Encoded
     // exactly as script_value::cpp_bound_encoding / make_cpp_bound.
@@ -1742,8 +1711,6 @@ public:
         }
     }
     uint64_t get_type_id() const { return type_id_; }
-
-    void set_type_id(uint64_t type_id) { type_id_ = type_id; }
 
     // Auto-registration lifecycle: base_class<B>() registers an unregistered
     // property_owner base under its C++ identity so the chain edge always exists;
@@ -1960,9 +1927,6 @@ public:
 
         return false;
     }
-
-    void set_default_access(access_level access) { default_access_ = access; }
-    access_level get_default_access() const { return default_access_; }
 
     // === Script member access enforcement (public:/private:/protected: labels) ===
     // nonpublic_members_ holds ONLY the private/protected member ids THIS class declares
@@ -2454,7 +2418,6 @@ private:
     mutable bool may_define_to_bool_ = true;
 
     class_type class_type_;
-    access_level default_access_ = access_level::public_access;
     std::unordered_map<uint64_t, access_level> nonpublic_members_;
     bool chain_has_nonpublic_ = false;
 
@@ -2553,10 +2516,6 @@ private:
         }
     }
 };
-
-inline std::shared_ptr<class_definition> make_script_class_definition(const std::string& class_name, engine* eng) {
-    return std::make_shared<class_definition>(class_name, class_definition::script_class, eng);
-}
 
 // Out-of-line class_instance implementations (need class_definition to be complete)
 

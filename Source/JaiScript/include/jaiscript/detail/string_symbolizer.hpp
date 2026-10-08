@@ -207,15 +207,6 @@ namespace jai {
 			return { id, view };
 		}
 
-		// Optional: batch intern to amortize rehashes.
-		template <class Range>
-		void intern_many(const Range& r) {
-			// Heuristic: avoid frequent rehash; grow to near final size.
-			index_.reserve(index_.size() + size_hint(r));
-			ids_.reserve(ids_.size() + size_hint(r));
-			for (std::string_view s : r) (void)intern(s);
-		}
-
 	private:
 		JAI_NOINLINE std::string_view parked_text(id_type id) const noexcept {
 			const id_type seq = id & ~k_parked_bit;
@@ -256,12 +247,6 @@ namespace jai {
 		mutable std::unordered_map<id_type, id_type> setter_cache_;
 		mutable std::unordered_map<id_type, id_type> class_var_cache_;
 
-		// Tiny helper to allow generic ranges without forcing size()
-		template <class Range>
-		static size_t size_hint(const Range& r) {
-			if constexpr (requires { r.size(); }) return r.size();
-			return 0;
-		}
 	};
 
 } // namespace jai

@@ -270,7 +270,6 @@ namespace detail { struct argument_capture_storage; }
         // and the region's result path materialize them via the silent deep clone, so no
         // borrow survives the join. `source` must be a (deref'd) array or map.
         static script_value make_parallel_borrow(const script_value& source, engine* eng);
-        bool is_parallel_borrow() const noexcept { return raw_storage_index() == TYPEID_PARALLEL_BORROW; }
         // Viewed container accessors (nullptr when the borrow is of the other kind).
         // Arrays hand back the NODE (its address is the identity; kind dispatch in stage 2).
         const script_array* parallel_borrow_array() const noexcept;
@@ -374,7 +373,6 @@ namespace detail { struct argument_capture_storage; }
         // Borrowed view of the stamp for hot guards: no handle copy. Valid while this value is
         // (type_info objects are engine-owned and outlive every value of that engine)
         type_info* type_info_raw() const noexcept { return type_info_.get(); }
-        bool has_type_tag() const noexcept { return static_cast<bool>(type_info_); }
 
         // Get interned type ID for error messages (falls back to enum value if type_info not set)
         uint64_t type_id() const {
@@ -642,16 +640,6 @@ namespace detail { struct argument_capture_storage; }
             return type_info_ && type_info_->base_type == script_value_type::jai_weak_ptr_type;
         }
 
-        // Check if this type has reference semantics (shared ownership by default)
-        bool has_reference_semantics() const {
-            const auto t = deref().type();
-            return t == script_value_type::jai_object_type ||
-                   t == script_value_type::jai_shared_ptr_type ||
-                   t == script_value_type::jai_array_type ||
-                   t == script_value_type::jai_map_type ||
-                   t == script_value_type::jai_function_type;
-        }
-
         // script_value extraction (inlined for performance)
         // These throwing versions delegate to checked_* versions for consistency
         inline script_int as_int() const {
@@ -786,12 +774,6 @@ namespace detail { struct argument_capture_storage; }
             return *node;
         }
         script_string& unshare_string_node();   // value.cpp: the fresh node, memory-cap charged deferred
-        template <typename M> M vec_payload() const noexcept {
-            static_assert(sizeof(M) <= sizeof(script_vec_node::words) && std::is_trivially_copyable_v<M>);
-            M out;
-            std::memcpy(&out, unchecked_vec_node().words, sizeof(M));
-            return out;
-        }
         void unshare_vec_node();
 
         inline script_char unchecked_as_char() const noexcept {
@@ -2080,7 +2062,6 @@ namespace detail { struct argument_capture_storage; }
             std::unique_ptr<property_binding> property;
             // a reference whose dereference cannot raise: the owned cell, no container, field, map key or property behind it
             bool plain_cell() const noexcept { return has_cell && !container && !container_map && !owner_instance && !property; }
-            bool cpp_member_ref() const noexcept { return property && property->live_member; }
             bool property_ref() const noexcept { return property && !property->live_member; }
             const script_value& materialize_property(engine* eng);                       // throws on a failed getter
             checked_result<script_value> read_property(engine* eng, bool bind_point) const;   // checked twin
@@ -2455,9 +2436,6 @@ namespace detail { struct argument_capture_storage; }
         // Method to set engine pointer after construction
         void set_engine(engine* eng) { engine_ = eng; }
 
-        // Clear engine pointer (called when engine is destroyed to prevent dangling pointers)
-        void clear_engine() { engine_ = nullptr; }
-
         // Access raw storage for AST literals (bypasses type checking)
         const storage& get_storage() const { return storage_; }
 
@@ -2472,12 +2450,6 @@ namespace detail { struct argument_capture_storage; }
         // never sees the write); tag, engine and stamp stay untouched
         const script_vec_node& unchecked_vec_node() const noexcept { return *storage_.vec_node(); }
         script_value_type unchecked_vec_kind() const noexcept { return current_type(); }
-        vec2 unchecked_as_vec2() const noexcept { return vec_payload<vec2>(); }
-        vec3 unchecked_as_vec3() const noexcept { return vec_payload<vec3>(); }
-        vec4 unchecked_as_vec4() const noexcept { return vec_payload<vec4>(); }
-        ivec2 unchecked_as_ivec2() const noexcept { return vec_payload<ivec2>(); }
-        ivec3 unchecked_as_ivec3() const noexcept { return vec_payload<ivec3>(); }
-        color unchecked_as_color() const noexcept { return vec_payload<color>(); }
         void unchecked_set_vec_word(size_t i, uint32_t bits) {
             strong_ptr<script_vec_node>& node = storage_.vec_node();
             if (!node.unique()) [[unlikely]] { unshare_vec_node(); }
@@ -2637,18 +2609,6 @@ namespace detail { struct argument_capture_storage; }
             return holder && holder->container ? holder->container_index : SIZE_MAX;
         }
 
-        // Check if array/map has unique ownership (for COW optimization)
-        bool is_unique_reference() const {
-            if (type() == script_value_type::jai_array_type) {
-                const auto& ptr = storage_.get<strong_ptr<script_array>>();
-                return ptr.use_count() == 1;
-            } else if (type() == script_value_type::jai_map_type) {
-                const auto& ptr = storage_.get<strong_ptr<script_map>>();
-                return ptr.use_count() == 1;
-            }
-            return false;
-        }
-
         // Safe weak_ptr access
         jai::weaker_ptr<object_holder> get_weak_ptr() const {
             if (type() == script_value_type::jai_weak_ptr_type) {
@@ -2674,34 +2634,6 @@ namespace detail { struct argument_capture_storage; }
         }
         
         
-        // Direct weak_ptr assignment for interpreter use
-        void set_weak_ptr(const jai::weaker_ptr<object_holder>& weak) {
-            if (type() == script_value_type::jai_weak_ptr_type) {
-                storage_ = weak;
-            } else {
-                throw runtime_error("Cannot set weak_ptr on non-weak_ptr script_value");
-            }
-        }
-
-        // Direct shared_ptr assignment for interpreter use
-        void set_shared_ptr(const std::shared_ptr<script_value>& shared) {
-            if (type() == script_value_type::jai_shared_ptr_type) {
-                storage_ = make_strong<shared_value_holder>(shared);
-            } else {
-                throw runtime_error("Cannot set shared_ptr on non-shared_ptr script_value");
-            }
-        }
-
-        // Get the wrapped value from a shared_ptr
-        script_value get_shared_ptr_value() const {
-            if (type() == script_value_type::jai_shared_ptr_type) {
-                auto holder = storage_.get<strong_ptr<shared_value_holder>>();
-                if (holder && holder->inner) {
-                    return *holder->inner;
-                }
-            }
-            throw runtime_error("Cannot get wrapped value from non-shared_ptr script_value");
-        }
         
         // Create an empty weak_ptr value
         static script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type, engine* eng);

@@ -33,7 +33,8 @@ namespace jai {
     class case_stmt;
     class default_stmt;
     class fallthrough_stmt;
-    
+    class block_stmt;
+
     using switch_stmt_ptr = std::shared_ptr<switch_stmt>;
     using case_stmt_ptr = std::shared_ptr<case_stmt>;
     using default_stmt_ptr = std::shared_ptr<default_stmt>;
@@ -127,58 +128,6 @@ namespace jai {
 
         parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)
             : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX), slot_index(SIZE_MAX) {}
-    };
-    
-    // Visitor pattern for AST traversal
-    class ast_visitor {
-    public:
-        virtual ~ast_visitor() = default;
-        // expression visitors
-        virtual checked_result<void> visit_literal_expr(class literal_expr* expr) = 0;
-        virtual checked_result<void> visit_identifier_expr(class identifier_expr* expr) = 0;
-        virtual checked_result<void> visit_binary_expr(class binary_expr* expr) = 0;
-        virtual checked_result<void> visit_unary_expr(class unary_expr* expr) = 0;
-        virtual checked_result<void> visit_assignment_expr(class assignment_expr* expr) = 0;
-        virtual checked_result<void> visit_call_expr(class call_expr* expr) = 0;
-        virtual checked_result<void> visit_member_expr(class member_expr* expr) = 0;
-        virtual checked_result<void> visit_lambda_expr(class lambda_expr* expr) = 0;
-        virtual checked_result<void> visit_new_expr(class new_expr* expr) = 0;
-        virtual checked_result<void> visit_ternary_expr(class ternary_expr* expr) = 0;
-        virtual checked_result<void> visit_array_literal_expr(class array_literal_expr* expr) = 0;
-        virtual checked_result<void> visit_map_literal_expr(class map_literal_expr* expr) = 0;
-        virtual checked_result<void> visit_this_expr(class this_expr* expr) = 0;
-        virtual checked_result<void> visit_super_expr(class super_expr* expr) = 0;
-        virtual checked_result<void> visit_throw_expr(class throw_expr* expr) = 0;
-        virtual checked_result<void> visit_cast_expr(class cast_expr* expr) = 0;
-
-        // statement visitors
-        virtual checked_result<void> visit_expression_stmt(class expression_stmt* stmt) = 0;
-        virtual checked_result<void> visit_block_stmt(class block_stmt* stmt) = 0;
-        virtual checked_result<void> visit_if_stmt(class if_stmt* stmt) = 0;
-        virtual checked_result<void> visit_while_stmt(class while_stmt* stmt) = 0;
-        virtual checked_result<void> visit_for_stmt(class for_stmt* stmt) = 0;
-        virtual checked_result<void> visit_range_for_stmt(class range_for_stmt* stmt) = 0;
-        virtual checked_result<void> visit_return_stmt(class return_stmt* stmt) = 0;
-        virtual checked_result<void> visit_break_stmt(class break_stmt* stmt) = 0;
-        virtual checked_result<void> visit_continue_stmt(class continue_stmt* stmt) = 0;
-        virtual checked_result<void> visit_try_stmt(class try_stmt* stmt) = 0;
-        virtual checked_result<void> visit_switch_stmt(class switch_stmt* stmt) = 0;
-        virtual checked_result<void> visit_case_stmt(class case_stmt* stmt) = 0;
-        virtual checked_result<void> visit_default_stmt(class default_stmt* stmt) = 0;
-        virtual checked_result<void> visit_fallthrough_stmt(class fallthrough_stmt* stmt) = 0;
-        virtual checked_result<void> visit_parallel_for_stmt(class parallel_for_stmt* stmt) = 0;
-
-        // declaration visitors
-        virtual checked_result<void> visit_variable_decl(class variable_decl* decl) = 0;
-        virtual checked_result<void> visit_function_decl(class function_decl* decl) = 0;
-        virtual checked_result<void> visit_class_decl(class class_decl* decl) = 0;
-        virtual checked_result<void> visit_namespace_decl(class namespace_decl* decl) = 0;
-        virtual checked_result<void> visit_expression_decl(class expression_decl* decl) = 0;
-        virtual checked_result<void> visit_include_decl(class include_decl* decl) = 0;
-        virtual checked_result<void> visit_import_decl(class import_decl* decl) = 0;
-        virtual checked_result<void> visit_enum_decl(class enum_decl* decl) = 0;
-        virtual checked_result<void> visit_destructuring_decl(class destructuring_decl* decl) = 0;
-        virtual checked_result<void> visit_extern_decl(class extern_decl* decl) = 0;
     };
     
     // Base AST node

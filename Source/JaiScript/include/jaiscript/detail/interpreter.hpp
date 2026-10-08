@@ -156,7 +156,7 @@ namespace jai {
     };
 
     // The interpreter implements the visitor pattern to execute the AST
-    class interpreter : public ast_visitor, public std::enable_shared_from_this<interpreter> {
+    class interpreter : public std::enable_shared_from_this<interpreter> {
     public:
 		checked_result<bool> language_less(const script_value& a_left, const script_value& a_right);
 		checked_result<script_value> array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args);
@@ -376,22 +376,22 @@ namespace jai {
         checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args);
 
         // expression visitors
-        checked_result<void> visit_literal_expr(literal_expr* expr) override;
-        checked_result<void> visit_identifier_expr(identifier_expr* expr) override;
-        checked_result<void> visit_binary_expr(binary_expr* expr) override;
-        checked_result<void> visit_unary_expr(unary_expr* expr) override;
-        checked_result<void> visit_assignment_expr(assignment_expr* expr) override;
-        checked_result<void> visit_call_expr(call_expr* expr) override;
-        checked_result<void> visit_member_expr(member_expr* expr) override;
-        checked_result<void> visit_lambda_expr(lambda_expr* expr) override;
-        checked_result<void> visit_new_expr(new_expr* expr) override;
-        checked_result<void> visit_ternary_expr(ternary_expr* expr) override;
-        checked_result<void> visit_array_literal_expr(array_literal_expr* expr) override;
-        checked_result<void> visit_map_literal_expr(map_literal_expr* expr) override;
-        checked_result<void> visit_this_expr(this_expr* expr) override;
-        checked_result<void> visit_super_expr(super_expr* expr) override;
-        checked_result<void> visit_throw_expr(throw_expr* expr) override;
-        checked_result<void> visit_cast_expr(cast_expr* expr) override;
+        checked_result<void> visit_literal_expr(literal_expr* expr);
+        checked_result<void> visit_identifier_expr(identifier_expr* expr);
+        checked_result<void> visit_binary_expr(binary_expr* expr);
+        checked_result<void> visit_unary_expr(unary_expr* expr);
+        checked_result<void> visit_assignment_expr(assignment_expr* expr);
+        checked_result<void> visit_call_expr(call_expr* expr);
+        checked_result<void> visit_member_expr(member_expr* expr);
+        checked_result<void> visit_lambda_expr(lambda_expr* expr);
+        checked_result<void> visit_new_expr(new_expr* expr);
+        checked_result<void> visit_ternary_expr(ternary_expr* expr);
+        checked_result<void> visit_array_literal_expr(array_literal_expr* expr);
+        checked_result<void> visit_map_literal_expr(map_literal_expr* expr);
+        checked_result<void> visit_this_expr(this_expr* expr);
+        checked_result<void> visit_super_expr(super_expr* expr);
+        checked_result<void> visit_throw_expr(throw_expr* expr);
+        checked_result<void> visit_cast_expr(cast_expr* expr);
         checked_result<void> visit_yield_expr(yield_expr* expr);
 
         // Coroutine expression replay: a yield unwinds as the coroutine_suspended signal,
@@ -462,12 +462,12 @@ namespace jai {
         }
 
         // statement visitors
-        checked_result<void> visit_expression_stmt(expression_stmt* stmt) override;
-        checked_result<void> visit_block_stmt(block_stmt* stmt) override;
-        checked_result<void> visit_if_stmt(if_stmt* stmt) override;
-        checked_result<void> visit_while_stmt(while_stmt* stmt) override;
-        checked_result<void> visit_for_stmt(for_stmt* stmt) override;
-        checked_result<void> visit_range_for_stmt(range_for_stmt* stmt) override;
+        checked_result<void> visit_expression_stmt(expression_stmt* stmt);
+        checked_result<void> visit_block_stmt(block_stmt* stmt);
+        checked_result<void> visit_if_stmt(if_stmt* stmt);
+        checked_result<void> visit_while_stmt(while_stmt* stmt);
+        checked_result<void> visit_for_stmt(for_stmt* stmt);
+        checked_result<void> visit_range_for_stmt(range_for_stmt* stmt);
         checked_result<void> run_for_stmt(for_stmt* stmt);
         checked_result<void> run_range_for_stmt(range_for_stmt* stmt);
         // Scope exits destroy the frame-slot locals that may own a script destructor, last declared first (the vm's
@@ -477,32 +477,32 @@ namespace jai {
             if (call_stack_.empty() || !engine_->destructors_armed()) { return; }
             for (auto decl = decls.rbegin(); decl != decls.rend(); ++decl) { kill_scope_slot(decl->get()); }
         }
-        checked_result<void> visit_parallel_for_stmt(parallel_for_stmt* stmt) override;
-        checked_result<void> visit_return_stmt(return_stmt* stmt) override;
-        checked_result<void> visit_break_stmt(break_stmt* stmt) override;
-        checked_result<void> visit_continue_stmt(continue_stmt* stmt) override;
-        checked_result<void> visit_try_stmt(try_stmt* stmt) override;
-        checked_result<void> visit_switch_stmt(switch_stmt* stmt) override;
-        checked_result<void> visit_case_stmt(case_stmt* stmt) override;
-        checked_result<void> visit_default_stmt(default_stmt* stmt) override;
-        checked_result<void> visit_fallthrough_stmt(fallthrough_stmt* stmt) override;
+        checked_result<void> visit_parallel_for_stmt(parallel_for_stmt* stmt);
+        checked_result<void> visit_return_stmt(return_stmt* stmt);
+        checked_result<void> visit_break_stmt(break_stmt* stmt);
+        checked_result<void> visit_continue_stmt(continue_stmt* stmt);
+        checked_result<void> visit_try_stmt(try_stmt* stmt);
+        checked_result<void> visit_switch_stmt(switch_stmt* stmt);
+        checked_result<void> visit_case_stmt(case_stmt* stmt);
+        checked_result<void> visit_default_stmt(default_stmt* stmt);
+        checked_result<void> visit_fallthrough_stmt(fallthrough_stmt* stmt);
 
         // declaration visitors
-        checked_result<void> visit_variable_decl(variable_decl* decl) override;
-        checked_result<void> visit_function_decl(function_decl* decl) override;
-        checked_result<void> visit_class_decl(class_decl* decl) override;
-        checked_result<void> visit_namespace_decl(namespace_decl* decl) override;
-        checked_result<void> visit_expression_decl(expression_decl* decl) override;
-        checked_result<void> visit_include_decl(include_decl* decl) override;
+        checked_result<void> visit_variable_decl(variable_decl* decl);
+        checked_result<void> visit_function_decl(function_decl* decl);
+        checked_result<void> visit_class_decl(class_decl* decl);
+        checked_result<void> visit_namespace_decl(namespace_decl* decl);
+        checked_result<void> visit_expression_decl(expression_decl* decl);
+        checked_result<void> visit_include_decl(include_decl* decl);
         checked_result<void> visit_include_expr(include_expr* expr);
         checked_result<void> visit_import_expr(import_expr* expr);
         checked_result<void> import_step(import_site& site, const std::vector<std::string>* literal, const std::string* single,
                                          const std::vector<expression_ptr>& computed, bool force, bool yields);
         checked_result<void> include_into_value_stack(expression* path_expr_node, const std::string& literal_path);
-        checked_result<void> visit_import_decl(import_decl* decl) override;
-        checked_result<void> visit_enum_decl(enum_decl* decl) override;
-        checked_result<void> visit_destructuring_decl(destructuring_decl* decl) override;
-        checked_result<void> visit_extern_decl(extern_decl* decl) override;
+        checked_result<void> visit_import_decl(import_decl* decl);
+        checked_result<void> visit_enum_decl(enum_decl* decl);
+        checked_result<void> visit_destructuring_decl(destructuring_decl* decl);
+        checked_result<void> visit_extern_decl(extern_decl* decl);
         
         // Performance optimization flags
         void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }

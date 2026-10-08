@@ -178,6 +178,29 @@ namespace {
 		return detail::convert_container_element(eng, element, element_type);
 	}
 
+	// `dest = src` between typed arrays of one scalar kind and one tag: a destination node nothing else holds takes the
+	// source's elements into its own buffer (vector assignment reuses the capacity) - the copy the store owes, charged as
+	// the copy is, without a new node
+	bool vm_assign_buffer_in_place(script_value& dest, const script_value& src, detail::execution_limits& limits) {
+		const script_value& s = src.deref();
+		if (dest.raw_storage_index() != script_value::TYPEID_ARRAY || s.raw_storage_index() != script_value::TYPEID_ARRAY ||
+		    dest.get_type_info().get() != s.get_type_info().get()) {
+			return false;
+		}
+		strong_ptr<script_array>& dn = dest.unchecked_get_array_storage();
+		const strong_ptr<script_array>& sn = s.unchecked_get_array_storage();
+		if (!dn || !sn || dn.get() == sn.get() || dn.use_count() != 1 || dn->kind() != sn->kind() || dn->live_elem_refs) { return false; }
+		switch (dn->kind()) {
+			case script_array::kind_t::i64: case script_array::kind_t::f64: case script_array::kind_t::b8: case script_array::kind_t::c8:
+			case script_array::kind_t::u8: case script_array::kind_t::i8: break;
+			default:
+				if (!script_array::is_vec_kind(dn->kind())) { return false; }
+		}
+		limits.memory_charge_deferred(sizeof(script_int) * (sn->size() + 1));
+		dn->assign_buffer(*sn);
+		return true;
+	}
+
 	// push's element (C++ moves a temporary into push_back): a prvalue instance moves in when its copy's extra death and
 	// its copy are unobservable - no destructor in its value tree, a copyable script class, no C++ object; else the copy
 	checked_result<script_value> vm_convert_pushed_element(engine* eng, script_value& element, type_info_ptr element_type) {
@@ -3866,7 +3889,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				stack_.push_back(result_used() ? clone_for_assignment(*storage) : script_value(*storage));
 				return {};
 			}
-			*storage = clone_for_assignment(value);
+			if (!vm_assign_buffer_in_place(*storage, value, *limits_)) { *storage = clone_for_assignment(value); }
 			stack_.push_back(std::move(value));
 			return {};
 		}
@@ -18435,6 +18458,11 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	std::vector<script_value> captured;
 	auto pre = construct_instance_pre_body(class_def, definition_env, call_args, matching_ctor, captured);
 	const std::vector<script_value>& args = captured.empty() ? call_args : captured;
+	struct owned_scope {
+		vm_backend* vm; std::vector<script_value>* saved;
+		~owned_scope() { vm->owned_args_ = saved; }
+	} owned{this, owned_args_};
+	if (!captured.empty()) { owned_args_ = &captured; }
 	if (!pre) {
 		return raise_from(pre);
 	}
@@ -23132,12 +23160,14 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					continue;
 				}
 			}
-			// A prvalue argument (the stack's only holder of its aggregate) is the parameter itself: C++17 guaranteed elision
-			const bool elide = args_are_stack(args) && !arg.is_reference() && detail::uniquely_held(arg);
+			// A prvalue argument (the stack's or an owned argument list's only holder of its aggregate) is the parameter itself:
+			// C++17 guaranteed elision
+			std::vector<script_value>* const owned = owned_args(args);
+			const bool elide = (args_are_stack(args) || owned) && !arg.is_reference() && detail::uniquely_held(arg);
 			auto bind_elided = [&]() {
 				JAI_CENSUS_F(move_hit, 4);
 				if (in_place && param.slot_index == i && !param.ref_escaping) { return; }
-				script_value moved = std::move(stack_[args_base + i]);
+				script_value moved = owned ? std::move((*owned)[args_base + i]) : std::move(stack_[args_base + i]);
 				frame_slot_set(callee, param.slot_index, boxed_param(std::move(moved)));
 			};
 			// Shallow copy shields the conversion: it can reenter script (conversion

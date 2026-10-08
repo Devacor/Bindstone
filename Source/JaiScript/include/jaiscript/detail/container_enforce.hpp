@@ -382,7 +382,8 @@ namespace jai::detail {
 	}
 
 	// A replacing element store: a prvalue class instance (uniquely held) moves in and is the stored object, carrying its
-	// class as the object row's copy would; anything else takes the converting copy
+	// class as the object row's copy would; a prvalue array or map the element boundary leaves as it is moves in as the
+	// handle the boundary hands back (the copy's node would hold the same elements); anything else takes the converting copy
 	inline checked_result<script_value> convert_container_element_taking(engine* eng, script_value& element, const type_info_ptr& element_type) {
 		if (element_type && element_type->base_type == script_value_type::jai_object_type &&
 		    element.raw_storage_index() == script_value::TYPEID_OBJECT && uniquely_held(element)) {
@@ -392,6 +393,15 @@ namespace jai::detail {
 			}
 			JAI_CENSUS_F(move_hit, 7);
 			return std::move(element);
+		}
+		if (element_type && (element_type->base_type == script_value_type::jai_array_type || element_type->base_type == script_value_type::jai_map_type) &&
+		    element.type() == element_type->base_type && uniquely_held(element)) {
+			auto inner = enforce_container_boundary(element, element_type, eng);
+			if (!inner.error && inner.value) {
+				script_value taken = std::move(*inner.value);
+				element = script_value(std::monostate{}, eng);
+				return taken;
+			}
 		}
 		return convert_container_element(eng, element, element_type);
 	}

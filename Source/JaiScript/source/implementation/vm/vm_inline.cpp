@@ -1647,6 +1647,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			auto d = std::make_shared<variable_decl>(call->location, p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), copy_identifier(value_temp[i].get(), a->location, ctx));
 			d->slot_index = base + p.slot_index;
 			d->site_kind = variable_decl::site_parameter; d->site_owner = fn->name;
+			d->graft_site = site_index; d->graft_param = static_cast<uint32_t>(i); d->graft_temp_slot = value_temp[i]->slot_index;
 			d->decl_fast_flags = 0;   // the declaration binds by the parameter's lane (exec_decl_var), never a declaration's fast store
 			ctx.pins.push_back(d);
 			deferred.push_back(d);

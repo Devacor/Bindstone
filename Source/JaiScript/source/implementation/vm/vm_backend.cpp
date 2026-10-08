@@ -11866,14 +11866,52 @@ JAI_NOINLINE op_status vm_backend::exec_math_kernel(size_t base, size_t argc, de
 // a graft's by-value parameter (vm_inline.cpp) binds as the call binds it: the exact class copies, anything else converts by the
 // parameter's table and text, a handle shares, a value copies, and the slot keeps the bound value's own tag
 // (KEEP BYTE-PARALLEL with bind_parameters's by-value lane)
+// The read-only alias a call of the graft's callee would take for this parameter: the callee the guard admitted, resolved again
+// (a plain function whose body is the graft's), and its proof (KEEP BYTE-PARALLEL with bind_parameters's alias exits)
+bool vm_backend::graft_parameter_alias(frame& f, const variable_decl* decl, const script_value& value) {
+	if (decl->graft_site >= f.code->inline_sites.size()) return false;
+	const chunk::inline_site& site = f.code->inline_sites[decl->graft_site];
+	if (site.method) return false;
+	const script_value* v = fused_cmp_operand(f, site.callee, static_cast<size_t>(site.guard_ip) * 3);
+	if (!v) return false;
+	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
+	if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
+	const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
+	if (!thunk || thunk->eng != engine_ || thunk->payload.kind != script_callable::kind_type::function || !thunk->payload.fn ||
+	    thunk->payload.fn->body.get() != site.body) return false;
+	const script_defined_function& fn = *thunk->payload.fn;
+	if (decl->graft_param >= fn.parameters().size()) return false;
+	const parameter& param = fn.parameters()[decl->graft_param];
+	return !param.ref_escaping && detail::parameter_alias_allows(value) && detail::readonly_parameter_alias(*engine_, fn, decl->graft_param, !parallel_worker_);
+}
+
 op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) {
 	script_value arg = std::move(stack_.back());
 	stack_.pop_back();
 	const type_info_ptr& t = decl->type;
+	// the call's prvalue elision: the argument's private temp (dead after this bind) lets go, so an aggregate only the popped value
+	// holds is the parameter itself (bind_parameters's `elide` over a stack argument)
+	bool elide = false;
+	if (decl->graft_temp_slot != SIZE_MAX && !arg.is_reference()) {
+		const size_t ai = arg.raw_storage_index();
+		if (ai == script_value::TYPEID_OBJECT || ai == script_value::TYPEID_ARRAY || ai == script_value::TYPEID_MAP) {
+			if (script_value* temp = frame_slot(f, decl->graft_temp_slot); temp && detail::same_heavy_node(*temp, arg)) { *temp = make_null(); }
+			elide = detail::uniquely_held(arg);
+		}
+	}
 	{
 		const script_value& derefed = arg.deref();
 		if (t && t->base_type == script_value_type::jai_object_type && derefed.storage_type() == script_value_type::jai_object_type &&
 		    derefed.get_type_info().get() == t.get() && !t->type_name.empty()) {
+			if (graft_parameter_alias(f, decl, derefed)) {
+				JAI_CENSUS_F(move_hit, 9);
+				if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
+				return define_decl_value(f, decl, script_value(derefed));
+			}
+			if (elide) {
+				JAI_CENSUS_F(move_hit, 10);
+				return define_decl_value(f, decl, std::move(arg));
+			}
 			return define_decl_value(f, decl, derefed.clone());
 		}
 	}
@@ -11887,6 +11925,17 @@ op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) 
 	                          (shared_probe.get_type_info() && shared_probe.get_type_info()->base_type == script_value_type::jai_shared_ptr_type);
 	if (should_share) {
 		return define_decl_value(f, decl, script_value(shared_probe));
+	}
+	if (shared_probe.is_object() || shared_probe.is_array() || shared_probe.is_map()) {
+		if (graft_parameter_alias(f, decl, shared_probe)) {
+			JAI_CENSUS_F(move_hit, 9);
+			if (!parallel_worker_) { engine_->note_parameter_alias_bind(); }
+			return define_decl_value(f, decl, script_value(shared_probe));
+		}
+		if (elide && detail::same_heavy_node(shared_probe, arg)) {
+			JAI_CENSUS_F(move_hit, 10);
+			return define_decl_value(f, decl, std::move(arg));
+		}
 	}
 	return define_decl_value(f, decl, converted.clone());
 }

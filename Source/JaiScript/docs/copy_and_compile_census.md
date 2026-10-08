@@ -285,6 +285,22 @@ candidates).
 - (c) Extending the proof to constructors (a by-value constructor parameter that the body only stores into a field and reads) is a
   separate design: the store into a field is an escape by today's rules. Finding 7's move is the cheaper route there.
 
+**Status: closed for (a) and (b).** `static_class` types chains of declared steps from any root (`docs/parallel_design.md` §15), and
+`bind_graft_parameter` takes the call's alias and elision. Re-measured [measured], every hash unchanged:
+
+| Measure | Before | After |
+|---|---:|---:|
+| GQ4 deep copies | 133,546 | 19,993 |
+| GQ4 copied values | 1.29M | 154k |
+| GQ4 graft parameter aliases | 0 | 110,979 |
+| GQ4 instance copies at `bind_graft_parameter` | 111,097 | 118 |
+| GQ2 deep copies | 65,652 | 10,887 |
+| the `item_stat` probe (`p2`) deep copies | 7,627 | 1,217 |
+
+The remaining `Item` copies are declarations from a chain under a reference local (`Item it = c.pack[i]`, 4,454), which the local
+alias refuses by design: the source is not in a by-value tree. Passing the proven parameter on whole (`item_score(it)` calls
+`item_stat(it, c)`) still escapes it; a callee's own read-only by-value parameter could take it transitively, which is a further rule.
+
 ### 5. A reference to a global is resolved on every execution
 
 **Evidence [measured].** DOOM: 2,456,931 `environment::get_value_ptr` calls at `DECL_REF_IDENT`. They are `draw_seg`'s

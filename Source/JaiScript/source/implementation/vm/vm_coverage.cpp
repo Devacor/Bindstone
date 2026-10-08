@@ -1218,8 +1218,9 @@ namespace {
 		case site::field_slot_scan: case site::field_slot_hash: return std::to_string(f) + " slots";
 		case site::move_hit: {
 			static const char* const hits[] = { "?", "return: own slot moves (NRVO)", "return: temporary handed out", "parameter: read-only alias", "parameter: prvalue elided",
-				"local: read-only alias", "take_for_assignment: moved", "element store: instance moved", "store: prvalue moved" };
-			return f < 9 ? hits[f] : "?";
+				"local: read-only alias", "take_for_assignment: moved", "element store: instance moved", "store: prvalue moved",
+				"graft parameter: read-only alias", "graft parameter: prvalue elided" };
+			return f < 11 ? hits[f] : "?";
 		}
 		default: return f ? std::to_string(f) : "-";
 		}

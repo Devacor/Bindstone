@@ -1942,6 +1942,7 @@ namespace jai::vm {
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
         op_status exec_decl_var_full(frame& f, const vm_instruction& ins);
         op_status bind_graft_parameter(frame& f, const variable_decl* decl);   // a graft's by-value parameter: bind_parameters's by-value lane over the popped argument
+        bool graft_parameter_alias(frame& f, const variable_decl* decl, const script_value& value);   // the read-only alias the call would take
         op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);
         op_status exec_decl_ref_value(frame& f, const vm_instruction& ins);
         op_status exec_binary(frame& f, const vm_instruction& ins);

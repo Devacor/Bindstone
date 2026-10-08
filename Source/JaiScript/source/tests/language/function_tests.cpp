@@ -735,6 +735,95 @@ public:
             check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds(), "no write-channel parameter is elided");
         });
 
+        // A class declaration in the callee takes its value from a chain of declared steps (a typed global's element, a local's
+        // field, a reference parameter's element) without running code, so it no longer refuses the parameter's proof; a call the
+        // vm grafts binds by the same verdict and counts the same binds
+        test("readonly_parameter_alias_declared_chains_and_grafts", [this]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class Def { int atk = 3; array<int> codes = [1, 2, 3]; Def() {} }
+                class Item { int base = 0; int pmag = 1; Item() {} }
+                class Bag { array<Item> items = []; Def def = Def(); Bag() {} }
+                array<Def> DEFS = [Def(), Def()];
+                Bag BAG = Bag();
+                int from_global(Item it) { Def d = DEFS[it.base]; int s = 0; for (int k = 0; k < d.codes.size(); ++k) { s += d.codes[k]; } return s + d.atk + it.pmag; }
+                int from_local(Item it) { Bag b = BAG; Item first = b.items[0]; Def d = b.def; return first.pmag + d.atk + it.pmag; }
+                int from_reference(Item it, Bag& b) { Item first = b.items[1]; return first.pmag * 10 + it.pmag; }
+                int grafts() {
+                    int s = 0;
+                    for (int i = 0; i < 4; i++) { s += from_global(BAG.items[i % 2]) + from_local(BAG.items[0]) + from_reference(BAG.items[1], BAG); }
+                    return s;
+                }
+                BAG.items.push(Item()); BAG.items.push(Item());
+                BAG.items[1].base = 1; BAG.items[1].pmag = 2;
+                int direct = from_global(BAG.items[0]) + from_local(BAG.items[1]) + from_reference(BAG.items[0], BAG);
+                int looped = grafts();
+                return [direct, looped, BAG.items[0].pmag, BAG.items[1].pmag, DEFS[0].atk];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)(10 + 6 + 21), v[0].as_int());
+            check_eq((int64_t)(2 * 10 + 2 * 11 + 4 * 5 + 4 * 22), v[1].as_int());
+            check_eq((int64_t)1, v[2].as_int());
+            check_eq((int64_t)2, v[3].as_int());
+            check_eq((int64_t)3, v[4].as_int());
+            check_eq((int64_t)15, (int64_t)eng->parameter_alias_binds(), "three proven parameters per call, called directly and from a loop");
+        });
+
+        test("readonly_parameter_alias_declared_chains_refuse_open_types", [this]() {
+            // a var global can hold another class next (its typed twin is not its type), and a class with a subclass
+            // gives a global no fixed class: a declaration from either may run a converting constructor, which here writes the
+            // caller's argument; the parameter keeps its copy
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class Item { int pmag = 1; Item() {} }
+                class Base { int v = 1; Base() {} }
+                class Kid : Base { Kid() {} }
+                Item ITEM = Item();
+                class Conv { int v = 2; Conv() {} Conv(Base b) { ITEM.pmag = 99; v = b.v; } }
+                array<Conv> CONVS = [Conv()];
+                array<Base> BASES = [Base()];
+                var PICK = CONVS;
+                Base SOLO = Base();
+                int reads_var(Item it) { Conv c = PICK[0]; return c.v * 100 + it.pmag; }
+                int reads_solo(Item it) { Base b = SOLO; return b.v * 100 + it.pmag; }
+                int a = reads_var(ITEM);
+                PICK = BASES;
+                int b = reads_var(ITEM);
+                int pm = ITEM.pmag; ITEM.pmag = 1;
+                int c = reads_solo(ITEM);
+                return [a, b, pm, c];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)201, v[0].as_int());
+            check_eq((int64_t)101, v[1].as_int(), "the converting constructor's write never reaches the copied parameter");
+            check_eq((int64_t)99, v[2].as_int());
+            check_eq((int64_t)101, v[3].as_int());
+            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds(), "an open source type refuses the proof");
+        });
+
+        test("graft_parameter_binds_take_the_calls_elisions", [this]() {
+            // a prvalue argument of a grafted call moves into the parameter; a mutating callee keeps the copy semantics
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            auto r = eng->execute(R"(
+                class Item { int pmag = 1; array<int> tags = [1]; Item() {} }
+                Item G = Item();
+                Item make(int p) { Item it; it.pmag = p; return it; }
+                int bump(Item it) { it.pmag = it.pmag + 10; it.tags.push(2); return it.pmag * 10 + it.tags.size(); }
+                int peek(Item it) { return it.pmag; }
+                int run() { int s = 0; for (int i = 0; i < 3; i++) { s += bump(make(i)) + bump(G) + peek(make(i)) + peek(G); } return s; }
+                int s = run();
+                return [s, G.pmag, G.tags.size()];
+            )");
+            const auto& v = r.as_array();
+            check_eq((int64_t)((102 + 112 + 122) + 3 * 112 + (0 + 1 + 2) + 3 * 1), v[0].as_int());
+            check_eq((int64_t)1, v[1].as_int());
+            check_eq((int64_t)1, v[2].as_int());
+            check_eq((int64_t)6, (int64_t)eng->parameter_alias_binds(), "peek's two parameters per iteration");
+        });
+
         // The destructor gate is per type: an elision is refused when the elided value's tree can hold an instance whose chain
         // declares a script destructor, or when such an instance can die while the elided value lives
         test("alias_destructor_gate_is_per_type", [this]() {

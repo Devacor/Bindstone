@@ -489,7 +489,7 @@ namespace {
 		std::unordered_map<uint64_t, size_t> capture_index;   // name id -> adm.captures slot
 		// A local's declared type; primitive: it can never hold a class instance (a primitive or string type, or an auto
 		// slot the runtime locks to a primitive initializer), so dispatching on it runs no user code
-		struct local_info { type_info_ptr type; bool primitive = false; bool reference = false; bool param = false; };
+		struct local_info { type_info_ptr type; bool primitive = false; bool reference = false; bool param = false; type_info_ptr referent; };   // referent: a reference's declared target type
 		std::vector<std::unordered_map<uint64_t, local_info>> scopes;   // current function's scopes
 		bool failed = false;
 		// parallel_for bodies (in-place root mode): the element may bind by reference and
@@ -586,40 +586,67 @@ namespace {
 				return false;
 			}
 		}
+		// A reference's target type (a parameter's type may carry the reference or name its target)
+		static type_info_ptr referent_type(const type_info_ptr& t) {
+			return t && t->is_reference() ? t->element_type() : t;
+		}
+		// A type that fixes what its slot holds: no var, no auto, no dynamic twin of a var slot
+		static bool declared_type(const type_info_ptr& t) {
+			return t && t->base_type != script_value_type::jai_any_type && t->base_type != script_value_type::jai_null_type &&
+			       !t->dynamic_slot && t->type_name != "auto";
+		}
+		bool class_has_subclass(const std::string& name) {
+			auto cls = eng.get_class_registry().find_script_class(name);
+			if (!cls) { return true; }
+			for (const auto& entry : eng.get_class_registry().script_classes_) {
+				const class_definition* other = entry.second.get();
+				if (other && other != cls.get() && other->derives_from(cls.get())) { return true; }
+			}
+			return false;
+		}
 		// Static type of a member/subscript chain rooted at the proof root, a declared local or a typed global (null =
-		// unknown or a step that can run user code: a user accessor, a field no class declares)
-		type_info_ptr proof_chain_type(const expression* e) {
+		// unknown or a step that can run user code: a user accessor, a field no class declares). declared: the type every
+		// value the chain can name has, for a conversion judged ahead of time - a reference's declared target, and a global
+		// only where its stamp is fixed for its life (a container's element types; a class with no subclass)
+		type_info_ptr proof_chain_type(const expression* e, bool declared = false) {
 			if (!e) { return nullptr; }
 			if (e->get_type() == node_type::identifier_expr) {
 				auto* n = static_cast<const identifier_expr*>(e);
 				if (is_element_symbol(n->symbol_id)) { return root_type; }
 				if (!n->global_qualified) {
-					if (const local_info* l = local(n->symbol_id)) { return l->type; }
+					if (const local_info* l = local(n->symbol_id)) {
+						if (!declared) { return l->type; }
+						const type_info_ptr t = l->reference ? l->referent : l->type;
+						return declared_type(t) ? t : nullptr;
+					}
 					if (self_field(n->symbol_id)) { return nullptr; }
 				}
 				auto global = eng.get_global_environment()->get(n->symbol_id);
 				if (!global) { return nullptr; }
 				type_info_ptr t = global.value().get_type_info();
-				return (t && t->base_type != script_value_type::jai_any_type) ? t : nullptr;
+				if (!t || t->base_type == script_value_type::jai_any_type || t->dynamic_slot) { return nullptr; }   // a var global holds anything next
+				if (declared && (!declared_type(t) || (class_type(t) && class_has_subclass(t->type_name)))) { return nullptr; }
+				return t;
 			}
 			if (e->get_type() == node_type::member_expr) {
 				auto* m = const_cast<member_expr*>(static_cast<const member_expr*>(e));
-				type_info_ptr base = proof_chain_type(m->object.get());
+				type_info_ptr base = proof_chain_type(m->object.get(), declared);
 				if (!base || base->base_type != script_value_type::jai_object_type || base->type_name.empty()) { return nullptr; }
 				auto cls = eng.get_class_registry().find_script_class(std::string(base->type_name));
 				if (!cls) { return nullptr; }
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }
 				if (read_runs_accessor(cls.get(), m->member_id)) { return nullptr; }
 				if (!cls->find_field_declaring_class(m->member_id)) { return nullptr; }
-				return cls->get_field_declared_type(m->member_id);
+				const type_info_ptr field = cls->get_field_declared_type(m->member_id);
+				return declared && !declared_type(field) ? nullptr : field;
 			}
 			if (e->get_type() == node_type::binary_expr) {
 				auto* b = static_cast<const binary_expr*>(e);
 				if (b->op.type != token_type::left_bracket) { return nullptr; }
-				type_info_ptr base = proof_chain_type(b->left.get());
+				type_info_ptr base = proof_chain_type(b->left.get(), declared);
 				if (!base) { return nullptr; }
-				if (base->base_type == script_value_type::jai_array_type) { return base->element_type(); }
-				if (base->base_type == script_value_type::jai_map_type) { return base->value_type(); }
+				if (base->base_type == script_value_type::jai_array_type) { const type_info_ptr t = base->element_type(); return declared && !declared_type(t) ? nullptr : t; }
+				if (base->base_type == script_value_type::jai_map_type) { const type_info_ptr t = base->value_type(); return declared && !declared_type(t) ? nullptr : t; }
 				if (base->base_type == script_value_type::jai_string_type) { return base; }   // a char: no identity, stands in as its string type
 				return nullptr;
 			}
@@ -681,16 +708,22 @@ namespace {
 		static bool class_type(const type_info_ptr& t) {
 			return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty();
 		}
+		// The class every value of e is (that class or a subclass, which a slot of the class takes without running code), or
+		// empty: a name, a reference, or a member/subscript chain from any root with declared steps
 		std::string_view static_class(const expression_ptr& e) {
 			type_info_ptr t;
 			if (e && e->get_type() == node_type::identifier_expr) {
 				auto* n = static_cast<const identifier_expr*>(e.get());
 				if (is_element_symbol(n->symbol_id)) { t = root_type; }
-				else if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id)) { t = l->type; }
+				else if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id)) { t = l->reference ? l->referent : l->type; }
+				else { t = proof_chain_type(e.get(), true); }
 			} else if (e && chain_root_is_element(e)) {
 				t = proof_chain_type(e.get());
+			} else if (e && (e->get_type() == node_type::member_expr ||
+			                 (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e.get())->op.type == token_type::left_bracket))) {
+				t = proof_chain_type(e.get(), true);
 			}
-			return class_type(t) ? std::string_view(t->type_name) : std::string_view();
+			return class_type(t) && declared_type(t) ? std::string_view(t->type_name) : std::string_view();
 		}
 		static bool primitive_result_method(std::string_view name) {
 			static constexpr std::string_view k_primitive[] = {
@@ -1244,6 +1277,7 @@ namespace {
 				local_info info = typed_local(p.type);
 				info.reference = p.is_reference;
 				info.param = true;
+				if (p.is_reference) { info.referent = referent_type(p.type); }
 				declare(p.symbol_id, info);
 				if (!p.is_reference && !is_element_symbol(p.symbol_id)) { note_death(p.type); }   // the parameter's copy dies with the call
 				if (param_mode != root_param::none) {
@@ -1488,7 +1522,7 @@ namespace {
 				if (proof_mode) {
 					const bool reference = n->type.get() && n->type->is_reference();
 					if (!reference && conversion_may_run_code(n->type, n->initializer)) { root_escaped = true; }
-					if (reference) { info = {}; info.reference = true; }
+					if (reference) { info = {}; info.reference = true; info.referent = referent_type(n->type); }
 					else if (!n->type && n->initializer && !maybe_object(n->initializer)) { info.primitive = true; }   // auto locks to its primitive initializer
 					if (!reference && !info.primitive) { note_death(n->type); }   // the local dies with its block
 				}
@@ -1890,7 +1924,7 @@ namespace {
 		void declare_decl(variable_decl& d) {
 			if (d.name_id == UINT64_MAX) { d.name_id = sym.intern(d.name); }
 			local_info info = admission_builder::typed_local(d.type);
-			if (d.type && d.type->is_reference()) { info = {}; info.reference = true; }
+			if (d.type && d.type->is_reference()) { info = {}; info.reference = true; info.referent = admission_builder::referent_type(d.type); }
 			else if (!d.type && d.initializer && d.initializer->get_type() == node_type::literal_expr &&
 			         !static_cast<const literal_expr*>(d.initializer.get())->value.is_null()) { info.primitive = true; }
 			declare(d.name_id, info);

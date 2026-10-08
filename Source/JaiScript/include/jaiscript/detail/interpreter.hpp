@@ -156,12 +156,12 @@ namespace jai {
     };
 
     // The interpreter implements the visitor pattern to execute the AST
-    class interpreter : public std::enable_shared_from_this<interpreter> {
+    class interpreter final : public execution_backend {
     public:
-		checked_result<bool> language_less(const script_value& a_left, const script_value& a_right);
-		checked_result<script_value> array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args);
-		checked_result<script_value> map_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args);
-		bool native_less_available() const {
+		checked_result<bool> language_less(const script_value& a_left, const script_value& a_right) override;
+		checked_result<script_value> array_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override;
+		checked_result<script_value> map_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override;
+		bool native_less_available() const override {
 			return !operator_table_ || !operator_table_->entry(detail::op_slot::less);
 		}
 
@@ -182,13 +182,13 @@ namespace jai {
         void add_global(const std::string& name, const script_value& value);
         
         // Prepare interpreter for a new execution (clears transient state)
-        void prepare_for_execution();
+        void prepare_for_execution() override;
 
         // ===== Execution budget (engine::execution_budget) =====
         // A top-level execute()/resume() that runs past the armed deadline raises a
         // catchable runtime error. Ticked at loop back-edges and call entry; the clock
         // is only sampled every 1024 ticks so the hot path pays one increment+branch.
-        void execution_budget(std::chrono::nanoseconds budget) {
+        void set_execution_budget(std::chrono::nanoseconds budget) override {
             execution_budget_ = budget;
             if (budget.count() <= 0) { budget_active_ = false; }
         }
@@ -209,19 +209,19 @@ namespace jai {
         // Scope management for local variables
         void push_scope();
         void pop_scope();
-        void push_instance_scope();
-        void pop_instance_scope();
+        void push_instance_scope() override;
+        void pop_instance_scope() override;
         
         // Define a variable in the current scope
-        void define_variable(const std::string& name, const script_value& value);
+        void define_variable(const std::string& name, const script_value& value) override;
         
         // Set class lookup callback (for finding C++ classes)
-        void set_class_lookup_callback(class_lookup_callback callback) {
+        void set_class_lookup_callback(class_lookup_callback callback) override {
             class_lookup_callback_ = std::move(callback);
         }
         
         // Set engine pointer for script_value creation
-        void set_engine_reference(engine* eng) {
+        void set_engine_reference(engine* eng) override {
             engine_ = eng;
 
             // Initialize cached common values to avoid repeated allocations
@@ -241,7 +241,7 @@ namespace jai {
         // Wire (or clear) the step-debugger. The statement hook itself tests only the
         // plain cached gate debug_hook_, refreshed from this atomic at the debug sync
         // points (sync_debug_hook): execute entry and the 1024-tick budget sample.
-        void set_debug_controller(debug::controller* c) {
+        void set_debug_controller(debug::controller* c) override {
             debugger_.store(c, std::memory_order_release);
         }
 
@@ -339,41 +339,44 @@ namespace jai {
         }
 
         // Execute a list of declarations and return the last value
-        script_value execute(const std::vector<declaration_ptr>& declarations, bool textual = false);   // textual: an include, run where it is written
+        script_value execute(const std::vector<declaration_ptr>& declarations) override { return execute(declarations, false); }
+        script_value execute(const std::vector<declaration_ptr>& declarations, bool textual);   // textual: an include, run where it is written
+        using execution_backend::execute;
+        script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>&) override { return execute(declarations, true); }
+        std::string get_backend_name() const override { return "interpreter"; }
         // the unit of the running code, derived from the executing call frame (docs/global_shadowing.md), and the
         // re-alignment of the symbolizer's ambient with it (a store only while a name has versions)
-        unit_stamp running_unit() const noexcept { return current_unit(); }
-        void sync_unit() noexcept { if (!parallel_worker_ && string_symbolizer_->shadow_count() != 0) { string_symbolizer_->set_current_unit(current_unit()); } }
+        void sync_unit() noexcept override { if (!parallel_worker_ && string_symbolizer_->shadow_count() != 0) { string_symbolizer_->set_current_unit(current_unit()); } }
         
         // Execute a single expression and return its value
         script_value evaluate(expression_ptr expr);
         
         // Variable access methods
-        script_value get_variable(const std::string& name) const;
-        bool has_variable(const std::string& name) const;
+        script_value get_variable(const std::string& name) const override;
+        bool has_variable(const std::string& name) const override;
         std::unordered_map<std::string_view, script_value> get_all_variables() const;
         
         // Exception handling methods
-        bool is_unwinding() const { return is_unwinding_; }
-        const script_exception& get_current_exception() const { return current_exception_.value(); }
+        bool is_unwinding() const override { return is_unwinding_; }
+        const script_exception& get_current_exception() const override { return current_exception_.value(); }
 
         // Host-boundary discriminator (same rule as resume_coroutine's host-level
         // detection): false only when no execute is in flight (counted - nested
         // executes decrement without clearing the outer run) and no frames are live
-        bool is_executing() const { return execute_depth_ != 0 || current_call_depth_ != 0; }
+        bool is_executing() const override { return execute_depth_ != 0 || current_call_depth_ != 0; }
 
-        const std::vector<stack_trace_entry>& last_stack_trace() const { return captured_trace_; }
-        std::string format_stack_trace() const;
-        std::string current_source_file() const;
-        void park_nested_failure();
+        std::vector<stack_frame> last_stack_trace() const override { return captured_trace_; }
+        std::string format_stack_trace() const override;
+        std::string current_source_file() const override;
+        void park_nested_failure() override;
 
         // Resume a suspended (or start a created) coroutine on this interpreter.
         // Reached via execution_backend::resume_coroutine; the handle's opaque
         // backend_state holds the interpreter_coroutine_state.
-        checked_result<script_value> resume_coroutine(coroutine_handle& handle);
+        checked_result<script_value> resume_coroutine(coroutine_handle& handle) override;
 
         // Execute a script-defined callable payload (reached via execution_backend::execute_callable)
-        checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args);
+        checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override;
 
         // expression visitors
         checked_result<void> visit_literal_expr(literal_expr* expr);
@@ -505,23 +508,23 @@ namespace jai {
         checked_result<void> visit_extern_decl(extern_decl* decl);
         
         // Performance optimization flags
-        void set_has_custom_numeric_ops(bool value) { has_custom_numeric_ops_ = value; }
+        void set_has_custom_numeric_ops(bool value) override { has_custom_numeric_ops_ = value; }
         bool has_custom_numeric_ops() const { return has_custom_numeric_ops_; }
-        void set_has_custom_binary_ops(bool value) { has_custom_binary_ops_ = value; }
-        void set_operator_table(const detail::engine_operator_table* table) { operator_table_ = table; }
+        void set_has_custom_binary_ops(bool value) override { has_custom_binary_ops_ = value; }
+        void set_operator_table(const detail::engine_operator_table* table) override { operator_table_ = table; }
         
         // Accessors for script class support
-        std::shared_ptr<environment> get_current_environment() const { return environment_; }
+        std::shared_ptr<environment> get_current_environment() const override { return environment_; }
 
         // Caller context for builtins (reflect::set/invoke enforcement): a builtin call
         // pushes no script frame, so the live environment chain answers for the caller
-        const class_definition* current_access_context() const {
+        const class_definition* current_access_context() const override {
             return environment_ ? environment_->find_access_context() : nullptr;
         }
 
         // Debugger: named slot-locals (params + reached body decls) of the current call frame,
         // reconstructed from the frame's function AST. Empty at global scope / for foreign frames.
-        std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const;
+        std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const override;
 
         // Get the global (root) environment from the engine directly
         // Previously walked up the parent chain, but that can diverge when closures/methods
@@ -533,17 +536,17 @@ namespace jai {
         // External (C++) invocations of script functions must not see the pending
         // call-site context of whatever script call is in flight - reference params
         // would bind its variables. A one-pointer shelf replaces the old metadata stack.
-        void begin_host_call();
-        void push_external_call_scope() {
+        void begin_host_call() override;
+        void push_external_call_scope() override {
             // A host-level callback (no script in flight) is its own budgeted entry
             if (execute_depth_ == 0 && call_stack_.empty()) { arm_execution_deadline(); }
             external_ctx_stack_.push_back(pending_call_ctx_);
             pending_call_ctx_ = nullptr;
         }
         checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
-                                                             host_slot& slot);
-        checked_result<void> host_slot_store(const host_slot& slot, script_value& value);
-        void pop_external_call_scope() {
+                                                             host_slot& slot) override;
+        checked_result<void> host_slot_store(const host_slot& slot, script_value& value) override;
+        void pop_external_call_scope() override {
             if (!external_ctx_stack_.empty()) {
                 pending_call_ctx_ = external_ctx_stack_.back();
                 external_ctx_stack_.pop_back();
@@ -563,9 +566,9 @@ namespace jai {
                                         std::shared_ptr<environment> init_env,
                                         bool skip_parent_recursion = false,
                                         const detail::aggregate_plan* aggregate = nullptr);
-        // interpreter_backend forwards execution_backend::apply_field_initializers here
+        // execution_backend::apply_field_initializers
         void apply_field_initializers(const std::shared_ptr<class_instance>& instance,
-                                      const std::shared_ptr<class_definition>& class_def);
+                                      const std::shared_ptr<class_definition>& class_def) override;
 
         // Parameter binding semantics
         enum class parameter_semantics {
@@ -1372,7 +1375,7 @@ namespace jai {
         }
         
     public:
-        checked_result<std::string> text_of(const script_value& v) { return value_to_string_with_method(v.deref()); }
+        checked_result<std::string> text_of(const script_value& v) override { return value_to_string_with_method(v.deref()); }
 
         // Parallel worker setup (parallel_transform v0): pins this instance to a worker
         // context built at the region barrier - root environment (parent = nullptr, the
@@ -1407,7 +1410,7 @@ namespace jai {
             hasReturnValue_ = false;
             pending_call_ctx_ = nullptr;
             external_ctx_stack_.clear();
-            execution_budget(budget);
+            set_execution_budget(budget);
             parallel_worker_ = true;
             arm_execution_deadline();
         }
@@ -1423,7 +1426,7 @@ namespace jai {
         void enter_unit(unit_stamp unit) noexcept { if (!parallel_worker_ && string_symbolizer_->shadow_count() != 0) { string_symbolizer_->set_current_unit(unit); } }
         // derived: a scoped override at its depth (a class's field initializers, a coroutine's replay), else the top call
         // frame's function, else the ambient (top-level code: the run's stamp execute_parsed installed)
-        unit_stamp current_unit() const noexcept {
+        unit_stamp current_unit() const noexcept override {
             if (unit_override_ && call_stack_.size() <= unit_override_depth_) return *unit_override_;
             if (!call_stack_.empty() && call_stack_.back().function) return call_stack_.back().function->unit;
             return is_executing() ? run_unit_ : string_symbolizer_->current_unit();   // top-level code: the run's stamp
@@ -1441,11 +1444,10 @@ namespace jai {
         };
         struct unit_sync_scope { interpreter* in; ~unit_sync_scope() { in->sync_unit(); } };   // the frame below's unit again when this scope ends
         size_t structural_equality_depth_ = 0;   // memberwise == recursion guard (detail/structural_equality.hpp)
-        // Barrier-provisioned method pins for the active region (worker instances only;
-        // interpreter_backend forwards the execution_backend virtual here)
+        // Barrier-provisioned method pins for the active region (worker instances only)
         const detail::parallel_method_pin_table* parallel_method_pins_ = nullptr;
 
-        void set_parallel_method_pins(const detail::parallel_method_pin_table* pins) {
+        void set_parallel_method_pins(const detail::parallel_method_pin_table* pins) override {
             parallel_method_pins_ = pins;
         }
 

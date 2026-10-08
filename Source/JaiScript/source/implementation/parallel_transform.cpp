@@ -33,7 +33,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
-#include <jaiscript/detail/interpreter_backend.hpp>
+#include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/lexer.hpp>
@@ -85,7 +85,7 @@ namespace jai::detail {
 		execution_limits limits;
 		std::unique_ptr<execution_backend> backend;
 		vm::vm_backend* vm = nullptr;                     // set when the engine backend is the vm
-		interpreter_backend* interp = nullptr;            // set otherwise
+		interpreter* interp = nullptr;            // set otherwise
 		script_callable fn_payload;
 		// parallel_for: the per-worker chunk-loop wrapper (k_parallel_chunk_source bound to this
 		// worker's root_env) and the cursor holder its advance intrinsic re-points
@@ -2175,7 +2175,7 @@ namespace {
 		if (slot.vm) {
 			slot.vm->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
 		} else {
-			slot.interp->get_interpreter()->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(),
+			slot.interp->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(),
 			                                                          &slot.limits, budget);
 		}
 		for (const auto& [name_id, name] : slot.host_functions) {
@@ -2552,9 +2552,9 @@ namespace {
 			ctx->vm = backend.get();
 			ctx->backend = std::move(backend);
 		} else {
-			auto backend = std::make_unique<interpreter_backend>(eng.get_symbolizer(), ctx->root_env);
+			auto backend = std::make_unique<interpreter>(eng.get_symbolizer(), ctx->root_env);
 			backend->set_engine_reference(&eng);
-			backend->get_interpreter()->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(),
+			backend->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(),
 			                                                      &ctx->limits, budget);
 			ctx->interp = backend.get();
 			ctx->backend = std::move(backend);

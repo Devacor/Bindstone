@@ -2053,7 +2053,7 @@ execution_backend* engine::backend() const {
         if (impl->current_backend_type == backend_type::vm) {
             impl->backend = create_vm_backend();
         } else {
-            impl->backend = std::make_unique<interpreter_backend>(&impl->string_symbolizer_, impl->global_environment_);
+            impl->backend = std::make_unique<interpreter>(&impl->string_symbolizer_, impl->global_environment_);
         }
         self->wire_backend();
     }

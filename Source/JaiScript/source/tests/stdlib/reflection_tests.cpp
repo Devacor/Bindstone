@@ -288,6 +288,16 @@ public:
             ).as_int(), (int64_t)7);
         });
 
+        test("instances_answer_in_creation_order", [this]() {
+            auto eng = make_reflective_engine();
+            eng->execute("class Ordered { int n = 0; Ordered() {} Ordered(int v) { n = v; } }");
+            eng->execute("var keep = []; for (int i = 0; i < 8; ++i) { keep.push(new Ordered(i)); }");
+            eng->execute("keep.erase(1); keep.erase(4); var late = new Ordered(9);");
+            check_eq(std::string("0,2,3,4,6,7,9,"), eng->execute(
+                "var s = \"\"; for (auto t : reflect::instances(\"Ordered\")) { s = s + to_string(t.n) + \",\"; } s"
+            ).as<std::string>());
+        });
+
         test("get_set_invoke_read_write_like_direct_syntax", [this]() {
             auto eng = make_reflective_engine();
             eng->execute(R"(

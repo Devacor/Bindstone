@@ -406,10 +406,12 @@ private:
     bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
     uint32_t live_field_refs_ = 0;
     std::unique_ptr<std::vector<std::pair<uint64_t, field_cell>>> retired_cells_;
-    // Index in class_def_->instances_ (SIZE_MAX = not registered there): the destructor
-    // swap-removes in O(1) instead of scanning and locking the whole list. Atomic because a
-    // swap-remove re-points it under the registry lock while its dying owner reads it unlocked.
-    std::atomic<size_t> registry_slot_{SIZE_MAX};
+    // The class's registry is a list through its instances in creation order (class_definition::register_instance): linking
+    // and unlinking touch the instance and its two neighbours, under the region lock while a region runs. registered_ is read
+    // unlocked by its own dying owner, hence atomic.
+    class_instance* registry_prev_ = nullptr;
+    class_instance* registry_next_ = nullptr;
+    std::atomic<bool> registered_{false};
     friend class class_definition;
     mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value invalid_value_;
@@ -450,13 +452,14 @@ public:
     // engine teardown does it for every definition still alive, since a captured environment
     // can keep one alive past the engine.
     void detach_for_teardown() noexcept {
-        for (auto& entry : instances_) {
-            if (auto live = entry.weak.lock()) {
-                live->class_def_ = nullptr;
-                live->registry_slot_.store(SIZE_MAX, std::memory_order_relaxed);
-            }
+        for (class_instance* i = registry_head_; i;) {
+            class_instance* next = i->registry_next_;
+            i->class_def_ = nullptr;
+            i->registry_prev_ = i->registry_next_ = nullptr;
+            i->registered_.store(false, std::memory_order_relaxed);
+            i = next;
         }
-        instances_.clear();
+        registry_head_ = registry_tail_ = nullptr;
         engine_ = nullptr;
     }
     virtual ~class_definition() { detach_for_teardown(); }
@@ -1753,10 +1756,16 @@ public:
         type_id_ = type_id;
     }
     bool has_live_instances() const {
-        for (const auto& entry : instances_) {
-            if (!entry.weak.expired()) { return true; }
+        for (const class_instance* i = registry_head_; i; i = i->registry_next_) {
+            if (!i->weak_from_this().expired()) { return true; }
         }
         return false;
+    }
+    // The registered instances in creation order, weakly (a walk that can run script takes this snapshot first)
+    std::vector<std::weak_ptr<class_instance>> registered_instances() const {
+        std::vector<std::weak_ptr<class_instance>> out;
+        for (class_instance* i = registry_head_; i; i = i->registry_next_) { out.push_back(i->weak_from_this()); }
+        return out;
     }
 
     // Reflection surface (docs/reflection.md): dynamic_binder marks host-backed classes;
@@ -1864,11 +1873,11 @@ public:
     void set_field_order(std::vector<uint64_t> order) { field_order_ = std::move(order); }
     const std::vector<uint64_t>& field_order() const { return field_order_; }
 
+    // Creation order (the registry is a list in creation order; reflect::instances answers in it)
     std::vector<std::shared_ptr<class_instance>> live_instances() const {
         std::vector<std::shared_ptr<class_instance>> live;
-        live.reserve(instances_.size());
-        for (const auto& entry : instances_) {
-            if (auto locked = entry.weak.lock()) { live.push_back(std::move(locked)); }
+        for (class_instance* i = registry_head_; i; i = i->registry_next_) {
+            if (auto locked = i->weak_from_this().lock()) { live.push_back(std::move(locked)); }
         }
         return live;
     }
@@ -2179,8 +2188,8 @@ public:
         // longer matches the new non-null default means the type changed. migrate_fields then
         // resets exactly those fields.
         if (!fields_changed) {
-            for (const auto& entry : instances_) {
-                auto instance = entry.weak.lock();
+            for (const auto& weak : registered_instances()) {
+                auto instance = weak.lock();
                 if (!instance) continue;
                 for (const auto& [id, new_default] : new_field_defaults) {
                     if (new_default.is_null() || !instance->has_field_value(id)) continue;
@@ -2224,13 +2233,11 @@ public:
         store_field_defaults(new_field_defaults, engine_ref);
 
         // Migrate against a SNAPSHOT of the current instances. A hot_reload_migrate hook can
-        // construct new same-class instances, which register into instances_ mid-migration;
+        // construct new same-class instances, which register mid-migration;
         // iterating the live vector would migrate those too (re-invoking the hook) and loop
         // unboundedly. Snapshotted instances built against the new definition need no
         // migration, so skipping them is also correct.
-        std::vector<std::weak_ptr<class_instance>> to_migrate;
-        to_migrate.reserve(instances_.size());
-        for (const auto& entry : instances_) { to_migrate.push_back(entry.weak); }
+        std::vector<std::weak_ptr<class_instance>> to_migrate = registered_instances();
         for (auto& weak_instance : to_migrate) {
             auto instance = weak_instance.lock();
             if (!instance) {
@@ -2269,13 +2276,6 @@ public:
                 (void)e;
             }
         }
-        // Drop dead weak refs; keep live ones plus any registered during migration.
-        instances_.erase(
-            std::remove_if(instances_.begin(), instances_.end(),
-                [](const registry_entry& e) { return e.weak.expired(); }),
-            instances_.end());
-        reindex_instances();
-
         method_metadata_.clear();
 
         // Propagate to derived classes (their inherited fields changed), snapshotting for the
@@ -2302,8 +2302,8 @@ public:
         // type changed against its new non-null default — so a base reload that retypes an
         // inherited field resets it on derived instances, while a base field still carrying a
         // null placeholder (never reloaded) leaves derived runtime data untouched.
-        for (auto& entry : instances_) {
-            if (auto instance = entry.weak.lock()) {
+        for (const auto& weak : registered_instances()) {
+            if (auto instance = weak.lock()) {
                 instance->migrate_fields(dummy_old_fields, all_fields);
                 if (engine_) { engine_->count_hot_reload_field_migration(); }
             }
@@ -2340,54 +2340,31 @@ public:
     // The join (main thread, region over: the plain unlocked path): a worker's surviving instance
     void register_instance_after_region(std::weak_ptr<class_instance> instance,
                                         const detail::fault_injection* faults = nullptr, class_instance* live_hint = nullptr) {
-        const size_t index = instances_.size();
-        if (faults) { faults->checkpoint("registry.instance_append", index); }
+        if (faults) { faults->checkpoint("registry.instance_append", registry_count_); }
         class_instance* live = live_hint;
         if (!live) {
             if (auto owner = instance.lock()) { live = owner.get(); }   // the caller owns it
         }
-        instances_.push_back({std::move(instance), live});
-        // Publish the index only after the vector owns the entry. A failed append
-        // must leave the instance unregistered, not pointing at a later survivor.
-        if (live) { live->registry_slot_.store(index, std::memory_order_relaxed); }
+        if (!live || live->registered_.load(std::memory_order_relaxed)) { return; }
+        live->registry_prev_ = registry_tail_;
+        live->registry_next_ = nullptr;
+        if (registry_tail_) { registry_tail_->registry_next_ = live; } else { registry_head_ = live; }
+        registry_tail_ = live;
+        ++registry_count_;
+        live->registered_.store(true, std::memory_order_relaxed);
     }
 
-    // O(1) swap-remove by the instance's remembered index. Called from ~class_instance.
-    // The caller's own entry expired the moment its last owner let go, BEFORE this lock: while
-    // a region runs, another instance dying under the lock may have swap-removed across it,
-    // moving the expired entry or popping it and letting a fresh registration refill the
-    // index. So the entry is removed only when it is this instance's own (control-block
-    // identity survives expiry), and expired tails come off first; a mismatch means the entry
-    // already went or lingers elsewhere as an expired weak, which every reader skips.
-    // The entry moved into the hole is re-pointed through its pointer, never lock()ed: locking takes
-    // a moment's ownership of another thread's instance (moving its destruction here), and on a
-    // libstdc++ built without atomic-word builtins (WinLibs MinGW) lock()'s CAS races that thread's
-    // mutex-guarded count updates and loses one. A live entry's instance cannot finish dying while
-    // this lock is held (its unregister waits on it); an expired one keeps its stale slot.
-    // Never-registered instances skip.
+    // O(1) unlink, called from ~class_instance (and a re-class). An instance never registered, or parked by a worker, skips
+    // without the lock; a link is only ever changed under the lock while a region runs, so a neighbour cannot move under it.
     void unregister_instance(class_instance* instance) {
-        if (instance->registry_slot_.load(std::memory_order_relaxed) == SIZE_MAX) { return; }   // pending or never registered: nothing to remove, no lock
+        if (!instance->registered_.load(std::memory_order_relaxed)) { return; }
         auto lock = registry_lock();
-        const size_t i = instance->registry_slot_.load(std::memory_order_relaxed);
-        instance->registry_slot_.store(SIZE_MAX, std::memory_order_relaxed);
-        if (i >= instances_.size()) { return; }
-        const std::weak_ptr<class_instance> self = instance->weak_from_this();
-        const auto& entry = instances_[i].weak;
-        if (entry.owner_before(self) || self.owner_before(entry)) { return; }   // not this instance's entry
-        while (instances_.size() - 1 > i && instances_.back().weak.expired()) { instances_.pop_back(); }
-        const size_t last = instances_.size() - 1;
-        if (i != last) {
-            instances_[i] = std::move(instances_[last]);
-            if (!instances_[i].weak.expired()) { instances_[i].instance->registry_slot_.store(i, std::memory_order_relaxed); }
-        }
-        instances_.pop_back();
-    }
-
-    // After a compaction the surviving entries' indexes must be reassigned
-    void reindex_instances() {
-        for (size_t k = 0; k < instances_.size(); ++k) {
-            if (auto live = instances_[k].weak.lock()) { live->registry_slot_.store(k, std::memory_order_relaxed); }
-        }
+        if (!instance->registered_.load(std::memory_order_relaxed)) { return; }
+        if (instance->registry_prev_) { instance->registry_prev_->registry_next_ = instance->registry_next_; } else { registry_head_ = instance->registry_next_; }
+        if (instance->registry_next_) { instance->registry_next_->registry_prev_ = instance->registry_prev_; } else { registry_tail_ = instance->registry_prev_; }
+        instance->registry_prev_ = instance->registry_next_ = nullptr;
+        --registry_count_;
+        instance->registered_.store(false, std::memory_order_relaxed);
     }
 
 private:
@@ -2513,12 +2490,10 @@ private:
 
     std::unordered_map<uint64_t, method_metadata> method_metadata_;
 
-    // The pointer names the instance without owning it (see unregister_instance)
-    struct registry_entry {
-        std::weak_ptr<class_instance> weak;
-        class_instance* instance = nullptr;
-    };
-    std::vector<registry_entry> instances_;
+    // The live instances, linked through themselves in creation order (an instance unlinks itself as it dies)
+    class_instance* registry_head_ = nullptr;
+    class_instance* registry_tail_ = nullptr;
+    size_t registry_count_ = 0;
 
     std::vector<std::weak_ptr<class_definition>> derived_classes_;
 

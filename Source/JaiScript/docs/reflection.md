@@ -77,7 +77,7 @@ reflect::classes()             // -> array<string>, sorted — everything THIS e
 reflect::functions()           // -> array<string>, sorted, namespace-QUALIFIED ("utils::add")
 reflect::globals()             // -> array<string>, sorted — global variable names
 reflect::bases(x)              // -> array<string>, declaration order; [] at a root
-reflect::instances("Creature") // -> array of live instances of the class (engine-scoped)
+reflect::instances("Creature") // -> array of live instances of the class (engine-scoped), in creation order
 reflect::generation("Creature")// -> int, bumps on hot reload/migration — poll this, re-ask on change
 reflect::methods(x)            // -> signature list; the detailed entry shape is companion §2
 reflect::is_enabled(jai::filesystem) // -> bool: may this engine perform gated filesystem operations?

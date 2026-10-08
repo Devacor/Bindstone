@@ -108,8 +108,8 @@ reflect::reflect::construct_shared("Class", args...) // == new Class(args...) �
 reflect::classes()                   // -> array<string>, sorted (script + host-bound classes)
 reflect::bases(v | "Class")          // -> array<string>, declaration order (MI-aware); [] at a root
 reflect::type_name(v)                // precise type: "Creature", "array<int>", "map<string,int>", "int"
-reflect::instances("Class" | v)      // -> array of live instances (the existing weak instance
-                                     //    registry class_definition::instances_ — purge-expired walk)
+reflect::instances("Class" | v)      // -> array of live instances in creation order (the class's
+                                     //    instance registry, a list through its instances)
 reflect::generation("Class" | v)     // -> int; bumps on redefine_class/migration — the cheap
                                      //    "should I re-ask" poll for tools (live-query model)
 reflect::call("name", args...)       // free-function twin of invoke: resolves the (possibly
@@ -381,9 +381,9 @@ itself (declaration-time error, both backends) and its two contract pins: script
 `math::` WORKS (openness is a contract too), and a script `namespace reflect {}` errors
 identically on both backends.
 
-`reflect::instances` walks the existing weak instance registry
-(`class_definition::instances_` — the hot-reload migration list), purging expired entries;
-engine-scoped by construction. `reflect::generation` is one counter on `class_definition`
+`reflect::instances` walks the class's instance registry (`class_definition::live_instances`, the
+hot-reload migration list: a list linked through the instances in creation order, each unlinking
+itself as it dies); engine-scoped by construction. `reflect::generation` is one counter on `class_definition`
 bumped by `redefine_class`/migration — the cheap "should I re-ask" poll that completes the
 live-query model (front door §C).
 

@@ -411,32 +411,49 @@ struct script_value::reference_holder_pool {
 
     static constexpr size_t max_free_blocks = 256;
     std::vector<block*> free_blocks;
-    std::atomic<size_t> outstanding{0};   // checked-out blocks; atomic: see return_block
-    bool engine_alive = true;
+    // Checked-out blocks are counted in two parts: owned (acquires minus owner-thread returns, touched only by the owner thread
+    // while the engine lives) and foreign (returns on any other thread, or on any thread once the pool is orphaned). The pool is
+    // freed when an orphaned pool's two counts meet; owned is stable once orphaned is published, so other threads read it after it.
+    size_t owned = 0;
+    std::atomic<size_t> foreign{0};
+    std::atomic<bool> orphaned{false};
+    std::atomic<bool> freed{false};
     // Pool structure is owner-thread-only. A pooled holder released on a WORKER thread
     // (future parallel flows; none today mint one) must not touch the free list — it
-    // heap-deletes instead, and the atomic count keeps teardown's orphan logic exact.
+    // heap-deletes instead and counts as a foreign return.
     std::thread::id owner = std::this_thread::get_id();
 
     // Reserve up front: return_block runs inside ~strong_ptr (noexcept), so the
     // free-list push must never allocate
     reference_holder_pool() { free_blocks.reserve(max_free_blocks); }
 
+    // an orphaned pool whose blocks all came back frees itself, once
+    void free_if_drained() {
+        if (owned == foreign.load(std::memory_order_acquire)) {
+            bool expected = false;
+            if (freed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) { delete this; }
+        }
+    }
+
     static void return_block(jai::detail::control_block_base* base) {
         block* b = static_cast<block*>(static_cast<jai::detail::control_block<reference_holder>*>(base));
         reference_holder_pool* pool = b->home;
-        const size_t left = --pool->outstanding;
 #ifndef NDEBUG
         base->magic = jai::detail::cb_magic_dead;   // scrambled parked OR freed (use-after-free canary)
 #endif
-        if (pool->engine_alive && std::this_thread::get_id() == pool->owner &&
-            pool->free_blocks.size() < max_free_blocks) {
-            pool->free_blocks.push_back(b);
-        } else {
-            delete b;
-            if (!pool->engine_alive && left == 0) {
-                delete pool;
+        if (!pool->orphaned.load(std::memory_order_acquire) && std::this_thread::get_id() == pool->owner) {
+            --pool->owned;
+            if (pool->free_blocks.size() < max_free_blocks) {
+                pool->free_blocks.push_back(b);
+            } else {
+                delete b;
             }
+            return;
+        }
+        delete b;
+        pool->foreign.fetch_add(1, std::memory_order_acq_rel);
+        if (pool->orphaned.load(std::memory_order_acquire)) {
+            pool->free_if_drained();
         }
     }
 
@@ -455,7 +472,7 @@ struct script_value::reference_holder_pool {
             b->home = this;
             b->dealloc_fn = &return_block;
         }
-        ++outstanding;
+        ++owned;
         return jai::detail::adopt_pooled(new (b->storage) reference_holder());
     }
 
@@ -465,11 +482,8 @@ struct script_value::reference_holder_pool {
             delete b;
         }
         pool->free_blocks.clear();
-        if (pool->outstanding == 0) {
-            delete pool;
-        } else {
-            pool->engine_alive = false;
-        }
+        pool->orphaned.store(true, std::memory_order_release);
+        pool->free_if_drained();
     }
 };
 

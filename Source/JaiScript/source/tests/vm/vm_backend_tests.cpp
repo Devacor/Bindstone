@@ -4080,6 +4080,50 @@ public:
 			check_eq(i1, v1, "plain frame argument rows parity");
 		});
 
+		test("an_inlined_untyped_result_outlives_the_graft_block", [this]() {
+			// fuzz seeds 1564 and 1848: an inlined call of a function without a declared result keeps its result in a var slot; a
+			// program with a class makes var slots candidates for scope-exit kills, and the graft's block exit killed the result
+			// before the expression read it (the vm raised `Invalid operands for * operator`). Single unit and across a redefinition
+			const char* programs[][2] = {
+				{ "class C0 { var m1 = [0, 4, 5]; }\n1;",
+				  "function fn4(int p5) {\n\treturn 568;\n}\n"
+				  "function zbreload() {\n\tif (\"hello\" < \"a\") { }\n\treturn fn4(7 | -3) * 0.0;\n}\n"
+				  "to_string(zbreload()) + \" \" + to_string(fn4(1)) + \" \" + type_of(fn4(2) + 1);" },
+				{ "class C0 { var m1 = [0, 4, 5]; }\n"
+				  "function fn4(int p5) -> int {\n\tfor (int i6 = 0; i6 < 3; i6++) { }\n\tif ((p5 % (11 + 5)) != ((p5 + p5) <=> 0)) { }\n}\n",
+				  "function fn4(int p5) {\n\treturn 568;\n}\n"
+				  "function zbreload() {\n\tif (\"hello\" < \"a\") { }\n\treturn fn4(7 | -3) * 0.0;\n}\n"
+				  "to_string(zbreload()) + \" \" + to_string(fn4(1)) + \" \" + type_of(fn4(2) + 1);" },
+				{ "class D { int id = 0; ~D() { } }\nvar made = [];\n1;",
+				  "function mk(int n) { return D(); }\n"
+				  "function use() { if (made.size() > 5) { } var d = mk(3); return d.id + 1; }\n"
+				  "function pick(int n) { return n > 0 ? \"pos\" : \"neg\"; }\n"
+				  "to_string(use()) + \" \" + pick(2) + pick(-1) + \" 568 int\";" },
+			};
+			const std::string expected[] = { "0.0 568 int", "0.0 568 int", "1 posneg 568 int" };
+			for (size_t pi = 0; pi < 3; ++pi) {
+				for (auto mode : {jai::check_mode::warn, jai::check_mode::off}) {
+					std::string out[2];
+					int idx = 0;
+					for (bool use_vm : {false, true}) {
+						auto e = jai::engine::make();
+						e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+						e->execution_budget(0);
+						e->static_checking(mode);
+						stdlib::register_all(*e);
+						try {
+							e->execute(programs[pi][0]);
+							out[idx] = e->execute(programs[pi][1]).to_string();
+						} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
+						++idx;
+					}
+					const std::string label = "program " + std::to_string(pi) + (mode == jai::check_mode::warn ? " warn" : " off");
+					check_eq(expected[pi], out[0], "interpreter, " + label);
+					check_eq(out[0], out[1], "parity, " + label);
+				}
+			}
+		});
+
 		test("handle_and_field_reference_argument_parity", [this, run_both_backends_stdlib]() {
 			// handles and nulls into var parameters (shared, never copied), var& parameters bound to fields of handles, stores through
 			// them (a declared field converts, a var field takes anything), a captured parameter, a by-value instance still copies

@@ -1398,6 +1398,7 @@ void vm_compiler::note_kill_slot(uint32_t slot) {
 void vm_compiler::note_kill_decl(const statement* decl) {
 	if (!decl || decl->get_type() != node_type::variable_decl) { return; }
 	const auto* v = static_cast<const variable_decl*>(decl);
+	if (!v->name.empty() && v->name[0] == '\x01') { return; }   // a graft's result: read after the graft's block closes, as the call's result is
 	if (v->is_static || v->name_id == UINT64_MAX || !slot_kill_wanted(v->type, v->slot_index, v->name_id)) { return; }
 	note_kill_slot(static_cast<uint32_t>(v->slot_index));
 }

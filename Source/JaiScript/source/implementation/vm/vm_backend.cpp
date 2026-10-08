@@ -178,6 +178,20 @@ namespace {
 		return detail::convert_container_element(eng, element, element_type);
 	}
 
+	// push's element (C++ moves a temporary into push_back): a prvalue instance moves in when its copy's extra death and
+	// its copy are unobservable - no destructor in its value tree, a copyable script class, no C++ object; else the copy
+	checked_result<script_value> vm_convert_pushed_element(engine* eng, script_value& element, type_info_ptr element_type) {
+		if (element.raw_storage_index() == script_value::TYPEID_OBJECT && detail::uniquely_held(element)) {
+			const auto* instance = static_cast<const class_instance*>(element.unchecked_object_handle()->data.get());
+			const class_definition* def = instance->get_class_definition();
+			if (def && def->is_script_class() && !def->nocopy() && !instance->has_cpp_object() && !def->value_tree_runs_destructor()) {
+				if (!element_type || element_type->base_type == script_value_type::jai_any_type) { return std::move(element); }
+				return detail::convert_container_element_taking(eng, element, element_type);
+			}
+		}
+		return detail::convert_container_element(eng, element, element_type);
+	}
+
 	script_value vm_clone_for_capture(const script_value& value, string_symbolizer* symbolizer) {
 		auto type_info = value.get_type_info();
 		if (type_info && type_info->base_type == script_value_type::jai_shared_ptr_type) {
@@ -16104,7 +16118,9 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 			// The unfused pair pinned the node through the receiver's stack copy; a
 			// conversion can run user code, so pin it the same way before converting
 			strong_ptr<script_array> node = const_cast<script_value&>(objd).unchecked_get_array_storage();
-			auto converted_result = vm_convert_array_element(engine_, *val, element_type);
+			script_value* temp = p.value_temp ? frame_slot(f, p.value.slot) : nullptr;
+			auto converted_result = temp && temp == val ? vm_convert_pushed_element(engine_, *temp, element_type)
+			                                            : vm_convert_array_element(engine_, *val, element_type);
 			if (!converted_result) { return raise_from(converted_result); }
 			script_value converted = std::move(converted_result.value());
 			const size_t bytes = sizeof(script_value) +
@@ -16534,7 +16550,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 					const uint64_t push_t1 = __rdtsc(); profile_push_sections_[3] += push_t1 - push_t0;
 #endif
-					auto converted_result = vm_convert_array_element(engine_, stack_[args_base], element_type);
+					auto converted_result = vm_convert_pushed_element(engine_, stack_[args_base], element_type);
 					if (!converted_result) { return raise_from(converted_result); }
 					script_value converted = std::move(converted_result.value());
 #ifdef JAISCRIPT_VM_PROFILE

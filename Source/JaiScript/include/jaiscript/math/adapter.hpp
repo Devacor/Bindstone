@@ -9,9 +9,9 @@
 // adapter names) and never a class instance. The specialization lives beside the host type, in the header that
 // defines it, so every TU that binds the type sees it:
 //
-//     JAI_BIND_VEC3((MV::Point<float>), x, y, z)
-//     JAI_BIND_IVEC3((MV::Point<int>), x, y, z)
-//     JAI_BIND_COLOR((MV::Color), R, G, B, A)
+//     JAI_BIND_VEC3((game::Point<float>), x, y, z)
+//     JAI_BIND_IVEC3((game::Point<int>), x, y, z)
+//     JAI_BIND_COLOR((game::Color), R, G, B, A)
 //
 // The host type is parenthesized so template arguments with commas pass through. A specialization provides the
 // native type, the script kind, and the conversions to and from the native value.

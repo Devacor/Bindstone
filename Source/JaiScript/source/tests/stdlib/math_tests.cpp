@@ -197,7 +197,7 @@ public:
         });
 
         // ============================================================
-        // Mix/Unmix interpolation (Bindstone-style)
+        // Mix/Unmix interpolation
         // ============================================================
 
         test("mix_basic", [this]() {

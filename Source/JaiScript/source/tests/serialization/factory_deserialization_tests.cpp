@@ -11,7 +11,7 @@
 
 namespace jai::foundry::tests {
 
-// Mock context for dependency injection (similar to MV::JaiScriptContext)
+// Mock context for dependency injection (a host's services context)
 struct test_deserialization_context {
     std::string service_name = "TestService";
     int dependency_value = 42;

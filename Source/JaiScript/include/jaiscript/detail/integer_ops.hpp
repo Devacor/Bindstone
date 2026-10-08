@@ -20,7 +20,7 @@
 // whichever build you ship carries no runtime cost for the other policy.
 //
 // This header is deliberately NOT included by the widely-included interpreter.hpp,
-// so its <intrin.h> dependency (MSVC's _mul128) does not inflate Bindstone's
+// so its <intrin.h> dependency (MSVC's _mul128) does not inflate a consumer's
 // translation units — only the few engine .cpp files include it.
 
 #include <jaiscript/core/types.hpp>   // script_int

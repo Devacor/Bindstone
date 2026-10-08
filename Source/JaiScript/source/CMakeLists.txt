@@ -30,8 +30,8 @@ set(JAISCRIPT_SOURCES
     implementation/vm/region_ir.cpp
 )
 
-# MutedVision compiles every implementation/**/*.cpp (MutedVision_Common.vcxitems) and embedders compile
-# jaiscript.cpp; configure fails when either disagrees with this list.
+# A host build may compile every implementation/**/*.cpp or the single jaiscript.cpp; configure fails when
+# either disagrees with this list.
 file(GLOB_RECURSE jaiscript_on_disk RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS implementation/*.cpp)
 set(jaiscript_unity ${CMAKE_CURRENT_SOURCE_DIR}/jaiscript.cpp)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${jaiscript_unity})

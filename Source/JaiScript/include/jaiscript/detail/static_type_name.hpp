@@ -26,7 +26,7 @@ constexpr std::string_view raw_type_signature() {
 
 constexpr std::string_view extract_type_name(std::string_view sig) {
 #if defined(_MSC_VER) && !defined(__clang__)
-	// "... raw_type_signature<class MV::Foo>(void)"
+	// "... raw_type_signature<class game::Foo>(void)"
 	constexpr std::string_view marker = "raw_type_signature<";
 	auto start = sig.find(marker);
 	if (start == std::string_view::npos) { return {}; }
@@ -39,7 +39,7 @@ constexpr std::string_view extract_type_name(std::string_view sig) {
 	else if (name.substr(0, 5) == "enum ") { name.remove_prefix(5); }
 	return name;
 #else
-	// gcc: "... [with T = MV::Foo; std::string_view = ...]"   clang: "... [T = MV::Foo]"
+	// gcc: "... [with T = game::Foo; std::string_view = ...]"   clang: "... [T = game::Foo]"
 	constexpr std::string_view marker = "T = ";
 	auto start = sig.find(marker);
 	if (start == std::string_view::npos) { return {}; }
@@ -50,7 +50,7 @@ constexpr std::string_view extract_type_name(std::string_view sig) {
 #endif
 }
 
-// Fully qualified ("MV::Scene::Node"); empty if the compiler is unsupported.
+// Fully qualified ("game::scene::Node"); empty if the compiler is unsupported.
 // Best-effort spelling for diagnostics — for names that go into saved data, use
 // static_unqualified_type_name, which validates portability.
 template<typename T>
@@ -59,7 +59,7 @@ constexpr std::string_view static_type_name() {
 }
 
 // The implicit registration name: the bare class identifier, all qualification
-// stripped ("MV::Scene::Node" -> "Node"). Anonymous-namespace types fall out as their
+// stripped ("game::scene::Node" -> "Node"). Anonymous-namespace types fall out as their
 // bare name too — the compiler-specific marker (`anonymous namespace', {anonymous}, ...)
 // sits in a discarded middle segment, so taking everything after the last "::" yields a
 // clean identifier without special-casing. Kept bare for consistency with explicit

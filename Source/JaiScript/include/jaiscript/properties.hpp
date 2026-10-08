@@ -9,10 +9,10 @@
 #include <jaiscript/properties/macros.hpp>
 // Include property_serialization.hpp explicitly in .cpp files that serialize properties.
 
-// For custom types (like MV::Point<float>, BoxAABB, etc.), provide
+// For custom types (like game::Point<float>), provide
 // save() and load() free functions in the same namespace as your type (ADL):
 //
-//   namespace MV {
+//   namespace game {
 //     void save(jai::serialization::archive_writer& ar, const Point<float>& p) {
 //       ar.write_float32(p.x);
 //       ar.write_float32(p.y);

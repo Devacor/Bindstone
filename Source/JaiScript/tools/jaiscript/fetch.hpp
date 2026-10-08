@@ -1,8 +1,7 @@
 #pragma once
 // Runner-side fetch primitives: an asynchronous HTTPS download the script polls from its
-// own loop, a SHA-256 digest, and zip extraction with CRC verification. The request and
-// progress shape follows MV::DownloadRequest (Source/MV/Network/download.h); the transport
-// does not - the runner links nothing but the library, so instead of asio+OpenSSL it uses
+// own loop, a SHA-256 digest, and zip extraction with CRC verification. The runner links
+// nothing but the library, so instead of asio+OpenSSL it uses
 // the platform's own HTTPS stack: WinHTTP on Windows (system library, OS certificate
 // store), libcurl on POSIX when the build found it, else the curl executable every Linux and
 // macOS install carries. Registered by register_fetch() next to the console and net bindings.

@@ -49,21 +49,21 @@ taken from <code>source/tests/serialization/polymorphic_serialization_tests.cpp<
 creature does. C++ never names a script class; it hands the creature over and the script extends it:</p>
 <div class="codeblock cb-jai" data-host="Creature registration + self"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern self;                       // the host binds `self` (its callback slots) after load
 
-class Voidling : Creature {        // Creature is the host's bound C++ class
-    int chompCount = 0;
-    double blinkCooldown = 0.0;
-    bool tick(double dt) override { blinkCooldown = blinkCooldown - dt; return false; }
+class Slime : Creature {        // Creature is the host's bound C++ class
+    int bites = 0;
+    double hopCooldown = 0.0;
+    bool tick(double dt) override { hopCooldown = hopCooldown - dt; return false; }
 }
 
 // the three callbacks this host happens to expose (spawn, update, death) - your host will
 // have its own. It passes the C++ creature; the script says what it becomes.
-self.spawn  = [=](var&amp; creature) -&gt; void { extend(creature, Voidling).spawn(); };
+self.spawn  = [=](var&amp; creature) -&gt; void { extend(creature, Slime).spawn(); };
 self.update = [=](var&amp; creature, double dt) -&gt; void { creature.update(dt); };
 self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };</code></pre></div>
 <p>After <code>extend</code>, every road back into script (a bound method returning
 <code>shared_ptr&lt;Creature&gt;</code>, a signal argument, a container element, a serialized
 <code>shared_ptr&lt;Base&gt;</code>, the host's next <code>update</code> call) hands script the
-<em>Voidling</em>, not a sliced view of its base. That is C++'s own rule, "a base pointer to a derived object is
+<em>Slime</em>, not a sliced view of its base. That is C++'s own rule, "a base pointer to a derived object is
 the derived object", carried across the boundary. The object is a <strong>hybrid</strong>: one script instance
 that owns or references the C++ object through a private <code>_cpp_object</code> field and carries the script
 layer (fields, overrides) on top. Overrides dispatch wherever script calls the method; a call C++ makes on the
@@ -76,22 +76,22 @@ place</strong>: the instance the handle already holds is re-classed where it sta
 rebinding and every other handle to the same object follows.</p>
 <div class="codeblock cb-jai" data-host="Creature registration + raw"><span class="cb-label">jaiscript &middot; needs the host&#x27;s classes</span><pre><code class="lang-jai">extern raw;                             // `raw` arrives from the host, so declare it
 
-class Voidkin : Creature {              // Creature is a bound C++ class
-    int chomp = 3;
+class Goblin : Creature {              // Creature is a bound C++ class
+    int bite = 3;
     string speak() override { return "voidkin"; }
 }
-class Voidspawn : Voidkin {
+class GoblinChief : Goblin {
     int fangs = 1;
     string speak() override { return "voidspawn"; }
 }
 
-extend(raw, Voidkin);                    // raw arrived as a plain C++ handle; now it IS a Voidkin
-raw.chomp = 17;
-print(extend(raw, Voidkin).chomp);      // idempotent: the same class returns the live layer
-print(extend(raw, "Voidkin").chomp);    // a string names the class too
+extend(raw, Goblin);                    // raw arrived as a plain C++ handle; now it IS a Goblin
+raw.bite = 17;
+print(extend(raw, Goblin).bite);      // idempotent: the same class returns the live layer
+print(extend(raw, "Goblin").bite);    // a string names the class too
 
-extend(raw, Voidspawn);                  // re-derive in place
-print(raw.chomp, " ", raw.fangs, " ", raw.speak());</code></pre></div>
+extend(raw, GoblinChief);                  // re-derive in place
+print(raw.bite, " ", raw.fangs, " ", raw.speak());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">17
 17
 17 1 voidspawn</code></pre></div>
@@ -101,7 +101,7 @@ print(raw.chomp, " ", raw.fangs, " ", raw.speak());</code></pre></div>
 Anything else is refused, naming both classes.</li>
 <li><strong>Same class: no-op.</strong> The current layer is returned.</li>
 <li><strong>Another class: re-derive.</strong> Every field both classes declare keeps its value
-(<code>chomp</code> above), the new class's own fields take their initializers (<code>fangs</code>), the new
+(<code>bite</code> above), the new class's own fields take their initializers (<code>fangs</code>), the new
 overrides dispatch, and fields only the old class declared stay reachable. No constructor runs. Field
 initializers do, in declaration order, base first, so a class meant for extension needs no constructor.</li>
 <li><strong>Every handle follows.</strong> A handle taken <em>before</em> the extend resolves to the layer on its
@@ -111,7 +111,7 @@ re-classes it in place under the same rule (<code>Pt3</code> must derive <code>p
 <li><strong>Refusals are catchable</strong> in script (<code>try { extend(x, Wrong); } catch (e) { ... }</code>)
 and thrown from the C++ entry point.</li>
 </ul>
-<p>Write it as a statement (<code>extend(kin, Voidling); kin.chompCount = 1;</code>) or chain it (<code>extend(kin, Voidling).spawn();</code>). The object <code>kin</code> holds is the
+<p>Write it as a statement (<code>extend(kin, Slime); kin.bites = 1;</code>) or chain it (<code>extend(kin, Slime).spawn();</code>). The object <code>kin</code> holds is the
 re-classed one afterwards, so keep using <code>kin</code> rather than binding the result to a second name.</p>
 
 <h3 id="try-it-without-a-host">Try it without a host<a class="hlink" href="#try-it-without-a-host" aria-label="link">&#8203;</a></h3>
@@ -155,12 +155,12 @@ Under multiple inheritance the first extensible base's slot is the one used, re-
 <code>jai_script_slot()</code>. The host surface is small:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">auto creature = std::make_shared&lt;Creature&gt;();          // C++ constructs and owns, as always
 
-jai::script_value layer = eng-&gt;extend(creature, "Voidkin");  // the same thing the builtin does
-eng-&gt;add_global_extended("hero", creature, "Voidkin");        // extend-on-bind: handed over already extended
-eng-&gt;execute("hero.chomp = 17;");
+jai::script_value layer = eng-&gt;extend(creature, "Goblin");  // the same thing the builtin does
+eng-&gt;add_global_extended("hero", creature, "Goblin");        // extend-on-bind: handed over already extended
+eng-&gt;execute("hero.bite = 17;");
 
 std::shared_ptr&lt;jai::class_instance&gt; live = eng-&gt;script_layer(*creature);   // the live layer, or null
-std::string state = creature-&gt;script_layer_to_json();   // {"$script":{"chomp":17,...},"$type":"Voidkin"}
+std::string state = creature-&gt;script_layer_to_json();   // {"$script":{"bite":17,...},"$type":"Goblin"}
 creature-&gt;script_layer_from_json(state);                 // hydrate in place (re-derives on another $type)
 
 std::string fields = eng-&gt;script_layer_detach(creature); // the fields as JSON; the object carries no layer now</code></pre></div>
@@ -170,7 +170,7 @@ std::string fields = eng-&gt;script_layer_detach(creature); // the fields as JSO
 <h2 id="ownership">Ownership<a class="hlink" href="#ownership" aria-label="link">&#8203;</a></h2>
 <p>Ownership follows creation, and neither direction cycles:</p>
 <ul>
-<li>A hybrid the <strong>script constructed</strong> (<code>Voidkin()</code>) owns its C++ object; the object's
+<li>A hybrid the <strong>script constructed</strong> (<code>Goblin()</code>) owns its C++ object; the object's
 slot only points back.</li>
 <li>An object that was <strong>extended</strong> owns its layer for its lifetime. The layer references the
 object without owning it (a raw pointer for member access, a weak pointer for <code>shared_ptr</code>
@@ -198,14 +198,14 @@ polymorphism declaration, the security posture) is the <a href="08-serialization
 chapter.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::shared_ptr&lt;Creature&gt; original = eng-&gt;execute("v").as&lt;std::shared_ptr&lt;Creature&gt;&gt;();
 auto loaded = jai::from_binary&lt;std::shared_ptr&lt;Creature&gt;&gt;(*eng, jai::to_binary(*eng, original));   // a fresh object...
-eng-&gt;script_layer(*loaded) != nullptr;                    // ...carrying its Voidkin layer</code></pre></div>
+eng-&gt;script_layer(*loaded) != nullptr;                    // ...carrying its Goblin layer</code></pre></div>
 
 <h2 id="moving-a-layer-between-engines">Moving a layer between engines<a class="hlink" href="#moving-a-layer-between-engines" aria-label="link">&#8203;</a></h2>
 <p>A layer belongs to exactly one engine (its symbols, its class definition). Extending an object in engine
 <code>B</code> while engine <code>A</code> holds its layer <em>moves</em> it: the fields travel by name, the new
 layer is hydrated in <code>B</code>, and <code>A</code>'s layer is retired. For slot-carrying types that is one
-call: <code>b-&gt;extend(obj, "Voidkin")</code>; a type without the slot needs the explicit pair
-<code>b-&gt;extend(obj, "Voidkin", a-&gt;script_layer_detach(obj))</code>, since no engine can see into
+call: <code>b-&gt;extend(obj, "Goblin")</code>; a type without the slot needs the explicit pair
+<code>b-&gt;extend(obj, "Goblin", a-&gt;script_layer_detach(obj))</code>, since no engine can see into
 another's lookup. Layers are movable, never shared between threads: the same rule every script value follows.</p>
 
 <h2 id="errors-and-cost">Errors and cost<a class="hlink" href="#errors-and-cost" aria-label="link">&#8203;</a></h2>

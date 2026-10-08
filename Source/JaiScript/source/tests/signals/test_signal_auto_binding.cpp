@@ -30,7 +30,7 @@ public:
 	void tick(int v) { onTickedSignal(v); }
 };
 
-// The MV Button shape: the signal lives on the BASE (Clickable declares onAccept) and
+// A button shape: the signal lives on the BASE (a clickable base declares onAccept) and
 // script connects through a DERIVED registration (base_class + auto_bind).
 class base_widget : public jai::property_owner<base_widget> {
 public:
@@ -159,10 +159,10 @@ public:
 			check_eq((int64_t)5, eng->execute("txtgot").as_int());
 		});
 
-		// Red-locked from the Workbench File panel: loadButton.onAccept threw "Object has
+		// Red-locked from an editor panel host: loadButton.onAccept threw "Object has
 		// no member 'onAccept'" — onAccept is Clickable's, Button registers with
 		// base_class + auto_bind. Both registration orders (static registrar order is
-		// arbitrary in MV).
+		// arbitrary in a host).
 		test("inherited_signal_property_through_derived_registration", [this]() {
 			auto bindBase = [](engine& a_engine) {
 				dynamic_binder<base_widget>(a_engine, "BaseWidget")

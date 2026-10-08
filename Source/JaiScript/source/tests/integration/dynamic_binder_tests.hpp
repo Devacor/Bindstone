@@ -472,8 +472,8 @@ public:
             check_eq(eng->execute("calc.add(5, 3, 2)").as<int>(), 10);
         });
 
-        // Same NAME, same ARITY, different parameter TYPES must resolve by argument type. Mirrors
-        // MV::Color: set(float...) stores channels raw; set(int...) divides by 255. Before the fix
+        // Same NAME, same ARITY, different parameter TYPES must resolve by argument type. A color type
+        // whose set(float...) stores channels raw and set(int...) divides by 255. Before the fix
         // the two collapsed to the last registration (int), so a float set() truncated to near-black.
         test("same_arity_overload_resolves_by_type", [this]() {
             auto eng = make_engine();
@@ -504,7 +504,7 @@ public:
             check_near(128.0/255.0, eng->execute("d.g").as<double>(), 1e-3);
         });
 
-        // Same-arity CONSTRUCTORS (the other half of the MV::Color clobber: Color(float...) vs
+        // Same-arity CONSTRUCTORS (the other half of the color clobber: Color(float...) vs
         // Color(int...)) must also resolve by argument type. This also guards the registration-path
         // recursion bug: routing the 2nd ctor through the typed entry point used to migrate the
         // dispatcher into the overload set, so a 0-arg call self-recursed into a stack overflow.
@@ -1431,7 +1431,7 @@ public:
         // Bare-identifier call args are escape-marked (their decls CELL-box so script ref
         // params can bind) and var decls flatten value type_info to 'any' (slot dynamism
         // ruling) — C++ boundaries must classify by STORAGE and deref before converting.
-        // Red-locked from the Workbench File panel: p.textField(root, ...) with root = a
+        // Red-locked from an editor panel host: p.textField(root, ...) with root = a
         // plain local threw "Unsupported type for non-const reference extraction"; the
         // free-function shared_ptr shape hard-crashed (Point bytes reinterpreted as a
         // shared_ptr<Point> in function_binder's create_argument).

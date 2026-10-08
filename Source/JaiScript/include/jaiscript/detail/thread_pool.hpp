@@ -3,8 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_THREAD_POOL_HPP__
 #define __JAISCRIPT_DETAIL_THREAD_POOL_HPP__
 
-// Persistent worker pool. Hoisted from MV::ThreadPool per Dev ruling 2026-07-06
-// (parallel_design.md Q5: JaiScript owns the pool; MV may migrate to it later).
+// Persistent worker pool (parallel_design.md Q5: JaiScript owns the pool).
 // Standard C++ only (std::thread/mutex/condition_variable) — no OS APIs.
 //
 // Two submission modes, because the parallel design's pinned worker engines must

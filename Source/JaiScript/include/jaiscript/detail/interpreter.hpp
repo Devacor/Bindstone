@@ -1348,12 +1348,7 @@ namespace jai {
 
         // Check if a conversion is possible from source value to target type
         bool can_convert_to_type(const script_value& source, type_info_ptr target_type) const;
-        
-        
-        // Callback for resolving subscript operators when built-in logic fails
-        using subscript_resolver = std::function<checked_result<script_value>(const std::vector<script_value>&)>;
-        subscript_resolver subscriptResolver_;
-        
+
         // Static method registries for built-in types
         // Built-in method registries (using interned IDs for O(1) lookup)
         std::unordered_map<uint64_t, builtin_method> array_methods_;
@@ -1378,11 +1373,6 @@ namespace jai {
         
     public:
         checked_result<std::string> text_of(const script_value& v) { return value_to_string_with_method(v.deref()); }
-
-        // Set the subscript resolver callback
-        void set_subscript_resolver(subscript_resolver resolver) {
-            subscriptResolver_ = std::move(resolver);
-        }
 
         // Parallel worker setup (parallel_transform v0): pins this instance to a worker
         // context built at the region barrier - root environment (parent = nullptr, the

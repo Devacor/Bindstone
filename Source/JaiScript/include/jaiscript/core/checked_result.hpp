@@ -148,11 +148,6 @@ public:
         return error_;
     }
 
-    // Get static error message
-    [[nodiscard]] std::string_view static_message() const noexcept {
-        return static_msg_;
-    }
-
     // Get symbol ID for additional context (e.g., variable name)
     [[nodiscard]] uint64_t symbol_id() const noexcept {
         return symbol_id_;
@@ -262,11 +257,6 @@ public:
         return error_;
     }
 
-    // Get static error message
-    [[nodiscard]] std::string_view static_message() const noexcept {
-        return static_msg_;
-    }
-
     // Get symbol ID for additional context
     [[nodiscard]] uint64_t symbol_id() const noexcept {
         return symbol_id_;
@@ -337,11 +327,6 @@ public:
     // Get error (cold path - only called when has_error)
     [[nodiscard]] inline std::error_code error() const noexcept {
         return error_;
-    }
-
-    // Get static error message
-    [[nodiscard]] inline std::string_view static_message() const noexcept {
-        return static_msg_;
     }
 
     // Get symbol ID for additional context

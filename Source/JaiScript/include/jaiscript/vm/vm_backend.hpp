@@ -301,8 +301,7 @@ namespace jai::vm {
         checked_result<void> host_slot_store(const host_slot& slot, script_value& value) override;
         bool has_variable(const std::string& name) const override;
 
-        void push_scope() override;
-        void pop_scope() override;
+        void pop_scope();
         void define_variable(const std::string& name, const script_value& value) override;
         void push_instance_scope() override;
         void pop_instance_scope() override;
@@ -311,9 +310,6 @@ namespace jai::vm {
         void set_has_custom_numeric_ops(bool value) override { has_custom_numeric_ops_ = value; }
         void set_has_custom_binary_ops(bool value) override { has_custom_binary_ops_ = value; }
         void set_operator_table(const detail::engine_operator_table* table) override { operator_table_ = table; }
-        void set_subscript_resolver(std::function<checked_result<script_value>(const std::vector<script_value>&)> resolver) override {
-            subscript_resolver_ = std::move(resolver);
-        }
         void set_class_lookup_callback(std::function<std::shared_ptr<class_definition>(const std::string&)> callback) override {
             class_lookup_ = std::move(callback);
         }
@@ -1053,7 +1049,6 @@ namespace jai::vm {
         bool has_custom_numeric_ops_ = false;
         bool has_custom_binary_ops_ = false;
         const detail::engine_operator_table* operator_table_ = nullptr;   // engine-owned flat dispatch
-        std::function<checked_result<script_value>(const std::vector<script_value>&)> subscript_resolver_;
         std::function<std::shared_ptr<class_definition>(const std::string&)> class_lookup_;
 
         std::chrono::nanoseconds execution_budget_{std::chrono::seconds(5)};

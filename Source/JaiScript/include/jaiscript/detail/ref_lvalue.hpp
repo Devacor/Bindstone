@@ -162,6 +162,7 @@ namespace jai::detail {
 		m->ref_field_shape = def->field_shape_epoch();
 		m->ref_field_methods = def->method_epoch();
 		m->ref_field_declared = def->get_field_declared_type(member_id).get();
+		m->ref_field_slot = def->field_slot(member_id);
 	}
 
 	// Mirrors script_value::deref() with checked errors instead of throws (bind-time
@@ -463,9 +464,9 @@ namespace jai::detail {
 				const auto* m = static_cast<const member_expr*>(step);
 				const uint64_t member_id = m->member_id != UINT64_MAX ? m->member_id : symbolizer->intern(m->member);
 				if (class_instance* plain = ref_plain_script_field(cur, m, symbolizer)) {
-					// find_field_value's ladder with the slot kept for the reference's memory
-					const class_definition* plain_class = plain->get_class_definition();
-					const uint32_t slot = plain_class ? plain_class->field_slot(member_id) : class_definition::k_no_field_slot;
+					// the site's slot for this class (ref_plain_script_field proved the class and its epochs), with find_field_value's
+					// ladder kept for a field outside the slots
+					const uint32_t slot = m->ref_field_slot;
 					script_value* field_value = slot != class_definition::k_no_field_slot ? plain->field_slot_value(slot) : plain->find_field_value(member_id);
 					if (!field_value) {
 						return ref_non_lvalue_error();

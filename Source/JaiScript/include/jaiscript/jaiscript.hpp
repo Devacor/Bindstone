@@ -47,7 +47,6 @@
 #include "detail/lexer.hpp"
 #include "detail/parser.hpp"
 #include "detail/interpreter.hpp"
-#include "detail/interpreter_backend.hpp"
 
 #include "serialization/archive_impl.hpp"
 #include "serialization/convenience.hpp"

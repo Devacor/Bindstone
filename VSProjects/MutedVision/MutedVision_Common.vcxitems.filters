@@ -484,9 +484,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\interpreter.hpp">
       <Filter>jaiscript\detail</Filter>
     </ClInclude>
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\interpreter_backend.hpp">
-      <Filter>jaiscript\detail</Filter>
-    </ClInclude>
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\lexer.hpp">
       <Filter>jaiscript\detail</Filter>
     </ClInclude>

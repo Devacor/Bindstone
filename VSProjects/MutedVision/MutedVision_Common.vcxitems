@@ -87,7 +87,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\value_impl.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\ast.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\interpreter.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\interpreter_backend.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\lexer.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\parser.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\detail\string_symbolizer.hpp" />

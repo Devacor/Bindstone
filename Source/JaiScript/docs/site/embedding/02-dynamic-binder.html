@@ -156,11 +156,14 @@ serialization registration exists to forget.</li>
 The type goes in parentheses so templates with commas survive the macro. The member behaves like a
 <code>T</code> in C++ (<code>level += 1</code>, comparisons, streaming all forward), and it self-registers
 into the manager and the type schema.</li>
-<li><code>JAI_SIGNAL_PROPERTY(signature, name)</code> expands to the engine's established pair: a private
+<li><code>JAI_SIGNAL_PROPERTY(signature, name)</code> expands to a pair: a private
 <code>signal_emitter</code> you fire (<code>onWaveSignal(n)</code>) and a public <code>jai::signal</code> view
 scripts and other systems connect to, plus a hidden property that rides save/load. Declaring it is also
 the entire script registration: <code>auto_bind</code> surfaces the signal as a connectable member
-(<a href="#signals-one-view-every-signature">how, below</a>).</li>
+(<a href="#signals-one-view-every-signature">how, below</a>). The emitter is <code>name</code> +
+<code>Signal</code>; <code>JAI_SIGNAL_PROPERTY_AS(signature, name, emitter)</code> names it for a codebase
+with another convention (<code>JAI_SIGNAL_PROPERTY_AS(void(int64_t), on_wave, wave_emitter)</code> fires as
+<code>wave_emitter(n)</code>, connects and serializes as <code>on_wave</code>).</li>
 <li><code>jai::registrar</code> is a self-registering static: any binary that links this file knows how to
 bind <code>Spawner</code> into any engine. The configure lambda only names what the macros can't know:
 the methods. Everything <code>JAI_PROPERTY</code> and <code>JAI_SIGNAL_PROPERTY</code> declared is bound

@@ -15801,6 +15801,7 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
 
     environment_->define(decl->name_id, std::move(enum_map));
     engine_->note_enum_name(decl->name_id);
+    if (environment_->is_program_scope()) { engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), true); }   // vm parity: exec_enum_decl
     return {};
 }
 

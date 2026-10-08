@@ -1484,6 +1484,10 @@ private:
                 is_const = h.field->is_const;
                 if (!h.foreign) { hit.line = h.field->location.line; hit.column = h.field->location.column; }
                 from_type(h.field->type.get());
+            } else if (const enum_decl* en = find_enum(id->name)) {   // an enum's name: a const map<string, int> (docs/const.md 11)
+                is_const = true;
+                known = true; library = true;
+                hit.line = en->location.line; hit.column = en->location.column;
             } else if (auto tc = top_consts_.find(id->name); tc != top_consts_.end() && !id->global_qualified) {
                 is_const = true;
                 hit.line = tc->second->location.line; hit.column = tc->second->location.column;

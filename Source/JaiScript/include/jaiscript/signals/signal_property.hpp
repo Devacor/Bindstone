@@ -43,17 +43,17 @@ namespace jai {
 	};
 }
 
-// Declares a serializable, script-connectable signal as the established private-emitter /
-// public-view pair, plus a hidden property that serializes the emitter under "name":
+// Declares a serializable, script-connectable signal as a private-emitter / public-view pair,
+// plus a hidden property that serializes the emitter under "name":
 //
-//   private: signal_emitter<Sig> nameSignal;   // emit source + serialized state
-//   public:  signal<Sig>         name;         // connect target (scripts / external code)
+//   private: signal_emitter<Sig> emitter;   // emit source + serialized state
+//   public:  signal<Sig>         name;      // connect target (scripts / external code)
 //
-// Emit through the emitter as before: nameSignal(args). Requires the enclosing class to be a
-// property_owner (have a property_mgr). Leaves member access at public:. The schema entry
-// (is_signal) lets dynamic_binder's auto_bind expose the generic Signal view — declaring the
-// signal is the whole registration.
-#define JAI_SIGNAL_PROPERTY(signature, name) \
+// Emit through the emitter: emitter(args). Requires the enclosing class to be a property_owner
+// (have a property_mgr). Leaves member access at public:. The schema entry (is_signal) lets
+// dynamic_binder's auto_bind expose the generic Signal view — declaring the signal is the whole
+// registration. JAI_SIGNAL_PROPERTY(Sig, name) names the emitter nameSignal.
+#define JAI_SIGNAL_PROPERTY_AS(signature, name, emitter) \
 	private: \
 		inline static const int _jai_schema_reg_##name = []{ \
 			using OwnerT = _jai_owner_type; \
@@ -61,9 +61,11 @@ namespace jai {
 				jai::property_meta{ #name, std::type_index(typeid(jai::signal_emitter<signature>)), true, false, true }); \
 			return 0; \
 		}(); \
-		jai::signal_emitter<signature> name##Signal; \
-		jai::signal_property<signature> _jai_signalprop_##name{ property_mgr, #name, name##Signal }; \
+		jai::signal_emitter<signature> emitter; \
+		jai::signal_property<signature> _jai_signalprop_##name{ property_mgr, #name, emitter }; \
 	public: \
-		jai::signal<signature> name{ name##Signal }
+		jai::signal<signature> name{ emitter }
+
+#define JAI_SIGNAL_PROPERTY(signature, name) JAI_SIGNAL_PROPERTY_AS(signature, name, name##Signal)
 
 #endif

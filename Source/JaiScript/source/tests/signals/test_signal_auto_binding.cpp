@@ -8,6 +8,9 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/signals/signal_property.hpp>
 #include <jaiscript/signals/signal_binding.hpp>
+#include <jaiscript/properties/property_serialization.hpp>
+#include <jaiscript/serialization/convenience.hpp>
+#include <jaiscript/serialization/json_archive.hpp>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -41,6 +44,16 @@ public:
 	derived_widget() = default;
 };
 
+// A host whose naming convention is not nameSignal: the emitter is named explicitly.
+class door : public jai::property_owner<door> {
+public:
+	typedef void OpenSignature(int);
+	JAI_SIGNAL_PROPERTY_AS(OpenSignature, on_open, open_emitter);
+	void open(int v) { open_emitter(v); }
+	void add_text_receiver(const std::string& id, const std::string& script) { open_emitter.connect(id, script); }
+	bool has_receiver(const std::string& id) { return open_emitter.connected(id); }
+};
+
 class signal_auto_binding_tests : public suite {
 public:
 	signal_auto_binding_tests() : suite("Signal Auto Binding") {}
@@ -58,6 +71,34 @@ public:
 	}
 
 	void forge_tests() override {
+		test("signal_property_as_names_its_emitter", [this]() {
+			auto eng = jai::foundry::make_engine();
+			dynamic_binder<door>(*eng, "Door")
+				.constructor<>()
+				.method("open", &door::open)
+				.auto_bind()
+				.build();
+			eng->execute("var got = -1; var d = new Door();");
+			eng->execute("d.on_open.connect(\"t\", [](var v) { got = v; });");
+			eng->execute("d.open(12);");
+			check_eq((int64_t)12, eng->execute("got").as_int());
+		});
+
+		test("signal_property_as_serializes_under_its_name", [this]() {
+			auto eng = jai::foundry::make_engine();
+			int64_t fired = 0;
+			eng->add_function("mark", [counter = &fired](int v) { *counter += v; });
+			auto original = std::make_shared<door>();
+			original->add_text_receiver("bump", "mark(arg_0);");
+			std::string json = jai::to_json(*eng, original);
+			check_true(json.find("\"on_open\"") != std::string::npos, "the property key is the signal's name: " + json);
+			auto restored = jai::from_json<std::shared_ptr<door>>(*eng, json);
+			check(restored != nullptr, "loaded not null");
+			check_true(restored->has_receiver("bump"), "text receiver persisted");
+			restored->open(4);
+			check_eq((int64_t)4, fired, "persisted text receiver runs through the named emitter");
+		});
+
 		test("signal_property_connects_via_auto_bind_only", [this]() {
 			auto eng = make_bound_engine();
 			eng->execute("var got = -1; var s = new Scoreboard();");

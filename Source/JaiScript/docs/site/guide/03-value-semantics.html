@@ -105,6 +105,7 @@ print("h.hp = {}", h.hp);</code></pre></div>
 items.size() = 1
 h.hp = 15</code></pre></div>
 <p>Reference parameters survive pass-through chains, block and loop scopes, methods, globals, and recursion. The aliasing follows the value wherever the call takes it.</p>
+<p>A field or element argument binds when the argument is evaluated, as in C++: its receiver and its index are fixed at that point, so a later argument that reassigns them does not change the storage the parameter names (<a href="04-operators.html#evaluation-order-is-a-contract">Evaluation order is a contract</a>).</p>
 <p><strong>A <code>string&amp;</code> parameter takes any string.</strong> A string variable binds its storage, so writes reach the caller. A literal or a computed string binds a temporary for the call, writable, whose writes stay inside the call; its characters are shared until the first write. Lambdas take string temporaries the same way, and a lambda that captures the parameter, or a reference return, keeps the temporary alive:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string upper(string&amp; name) {
     name.to_upper();

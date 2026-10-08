@@ -3,10 +3,10 @@
 #ifndef __JAISCRIPT_DETAIL_ARG_CAPTURE_HPP__
 #define __JAISCRIPT_DETAIL_ARG_CAPTURE_HPP__
 
-// A by-value argument takes its value when it is evaluated. The parse-time stamp
-// (transient_read_marker::stamp_arg_captures) names the arguments a later argument may write; each
-// backend captures such an argument right after evaluating it, by how the resolved callee binds that
-// position. Shared verbatim by both backends.
+// A by-value argument takes its value when it is evaluated, and a reference parameter binds its argument then (Dev ruling
+// 2026-10-08). The parse-time stamp (transient_read_marker::stamp_arg_captures) names the arguments a later argument may write;
+// each backend captures such an argument right after evaluating it, by how the resolved callee binds that position, and mints
+// the reference of a stamped lvalue a reference parameter takes. Shared verbatim by both backends.
 
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/core/execution_backend.hpp>
@@ -158,6 +158,16 @@ namespace jai::detail {
         return holder && holder->argument_source ? holder : nullptr;
     }
 
+    inline bool binds_reference(arg_binding b) {
+        return (static_cast<uint8_t>(b) & static_cast<uint8_t>(arg_binding::reference)) != 0;
+    }
+
+    // the reference the argument's evaluation bound, while no binding has taken it
+    inline const script_value* early_bound_reference(const script_value& v) {
+        const auto* holder = deferred_argument(v);
+        return holder && holder->argument_source->minted ? &holder->argument_source->lvalue : nullptr;
+    }
+
     inline const script_value& argument_for_binding(const script_value& v, arg_binding b) {
         if (const auto* holder = deferred_argument(v)) {
             if (b == arg_binding::copy) return *holder->cell();
@@ -184,6 +194,7 @@ namespace jai::detail {
             return;
         }
         if (deferred_argument(v)) {
+            if (b == arg_binding::reference && early_bound_reference(v)) return;   // the binding takes the minted reference
             script_value selected = argument_for_binding(v, b);
             v = std::move(selected);
         }
@@ -202,6 +213,24 @@ namespace jai::detail {
         try { v = v.clone(); } catch (const std::exception&) {}   // a value that refuses the copy (nocopy) raises at the binding, as it always has
     }
 
+    // the argument's evaluation bound its reference: carried beside the value overload selection, a copy and a handle parameter take
+    inline void hold_minted_reference(script_value& v, arg_binding b, script_value&& minted) {
+        if (auto* holder = deferred_argument(v)) {
+            holder->argument_source->lvalue = std::move(minted);
+            holder->argument_source->minted = true;
+            return;
+        }
+        script_value shared = v.deref();
+        script_value snapshot = v;
+        const bool needs_copy = (static_cast<uint8_t>(b) & static_cast<uint8_t>(arg_binding::copy)) != 0;
+        capture_argument(snapshot, transient_read_marker::arg_capture_full, needs_copy ? arg_binding::copy : arg_binding::share);
+        const auto type = snapshot.get_type_info();
+        script_value held = script_value::make_cell_reference(std::move(snapshot), v.get_engine());
+        held.set_type_info(type);
+        held.get_reference_holder()->argument_source = std::make_unique<argument_capture_storage>(argument_capture_storage{std::move(minted), std::move(shared), true});
+        v = std::move(held);
+    }
+
     inline bool capture_candidate(const script_value& v, uint8_t kind) {
         const size_t ri = v.raw_storage_index();
         if (ri == script_value::TYPEID_REFERENCE) return true;
@@ -212,15 +241,41 @@ namespace jai::detail {
     // argument i of a stamped list, just evaluated: classified (binding() resolves the callee) only when its value may still share storage
     template<typename Binding>
     inline void capture_call_argument(const std::vector<uint8_t>& captures, size_t i, script_value& v, Binding&& binding) {
-        if (i >= captures.size() || captures[i] == 0 || !capture_candidate(v, captures[i])) return;
-        capture_argument(v, captures[i], binding());
+        if (i >= captures.size() || captures[i] == 0) return;
+        const uint8_t kind = captures[i] & transient_read_marker::arg_capture_kind_mask;
+        if (!capture_candidate(v, kind)) return;
+        capture_argument(v, kind, binding());
+    }
+
+    // the same with the stamp's lvalues: a reference parameter's argument mints its reference now (mint(out) -> checked_result<bool>
+    // resolves the argument's place in the caller; false = no place, the binding decides as for any evaluated argument)
+    template<typename Binding, typename Mint>
+    inline checked_result<void> capture_call_argument(const std::vector<uint8_t>& captures, size_t i, script_value& v, Binding&& binding, Mint&& mint) {
+        if (i >= captures.size() || captures[i] == 0) return {};
+        const uint8_t kind = captures[i] & transient_read_marker::arg_capture_kind_mask;
+        if (!(captures[i] & transient_read_marker::arg_capture_lvalue)) {
+            if (capture_candidate(v, kind)) { capture_argument(v, kind, binding()); }
+            return {};
+        }
+        const arg_binding b = binding();
+        if (binds_reference(b)) {
+            script_value minted(std::monostate{}, v.get_engine());
+            auto placed = mint(minted);
+            if (!placed) { return placed.error_value(); }
+            if (placed.value()) {
+                hold_minted_reference(v, b, std::move(minted));
+                return {};
+            }
+        }
+        if (capture_candidate(v, kind)) { capture_argument(v, kind, b); }
+        return {};
     }
 
     // an initializer list's argument binds only when its constructor's body runs, after the chain's field initializers: when
     // those may run code, every read of storage is taken, else the stamp's
     template<typename Binding>
     inline void capture_initializer_argument(const constructor_initializer& ci, size_t i, bool fields_run_code, script_value& v, Binding&& binding) {
-        const uint8_t kind = fields_run_code ? transient_read_marker::arg_capture_kind(ci.arguments[i].get()) : i < ci.arg_captures.size() ? ci.arg_captures[i] : 0;
+        const uint8_t kind = fields_run_code ? transient_read_marker::arg_capture_kind(ci.arguments[i].get()) : i < ci.arg_captures.size() ? ci.arg_captures[i] & transient_read_marker::arg_capture_kind_mask : 0;
         if (kind == 0 || !capture_candidate(v, kind)) return;
         capture_argument(v, kind, binding());
     }

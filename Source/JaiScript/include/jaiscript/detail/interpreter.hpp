@@ -1394,6 +1394,12 @@ namespace jai {
         checked_result<bool> bind_site_reference(const expression* argExpr, call_frame* caller_locals,
                                                  const std::shared_ptr<environment>& caller_env, script_value& out,
                                                  host_slot* slot_out = nullptr, size_t caller_index = 0);
+        checked_result<bool> mint_argument_place(const expression* argExpr, script_value& out);
+        bool later_place_argument(const script_defined_function& function, const detail::call_site_context* call_ctx, size_t from,
+                                  const std::vector<script_value>& args) const;
+        checked_result<void> bind_later_places(const script_defined_function& function, const detail::call_site_context* call_ctx,
+                                               size_t from, std::vector<script_value>& args, size_t frame_index,
+                                               const std::shared_ptr<environment>& caller_env, unit_stamp caller_unit);
 
         // Type conversion helpers (constructor-based conversions)
         // Attempts to convert a value to a target type using constructor-based conversion.

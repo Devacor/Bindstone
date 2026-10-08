@@ -118,6 +118,18 @@ scores[1] = 20;
 print("by reference: ", add_ref(scores[1], bump()));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">by value:     21
 by reference: 100</code></pre></div>
+<p>A reference parameter binds when its argument is evaluated, as in C++. The object a field argument reads from and the index an element argument names are the ones evaluation saw; a later argument that reassigns the receiver or moves the index changes what the variables hold, never which storage the parameter names:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; }
+var first = new Counter();
+var second = new Counter();
+var c = first;
+var hits = [0, 0];
+var i = 0;
+function inc(int&amp; x, y) { x += 1; return y; }
+inc(c.n, c = second);   // binds first.n, then c changes
+inc(hits[i], i++);      // binds hits[0], then i moves
+print(first.n, " ", second.n, " ", hits[0], " ", hits[1]);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 0 1 0</code></pre></div>
 <p>Assignment runs the other way, again as in C++17: in <code>target = value</code> and <code>target op= value</code> the right side is evaluated first, then the target. For <code>obj.f op= e</code>, <code>this.f op= e</code>, <code>C::s op= e</code> and <code>ns::x op= e</code> that means <code>e</code>, then the receiver, then the member&#x27;s read (a user getter included), the arithmetic and the store; for <code>a[j] = e</code> and <code>a[j] op= e</code>, <code>e</code>, then <code>a</code>, then <code>j</code>, then the element. An error in the right side is the one you see, and the target is never touched:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string log = "";
 class Box { int v = 1; }

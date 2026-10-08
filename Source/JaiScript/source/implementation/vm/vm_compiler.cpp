@@ -6523,11 +6523,14 @@ void vm_compiler::deref_ahead_of(const expression* pushed, const expression* lat
 	emit(opcode::op_deref_top);
 }
 
-// argument k's value is taken now when a later argument may write what it read (the stamp's kernel); a private local proven
-// primitive loads as a plain value and needs nothing
-size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_t k, const expression* arg, uint32_t where, uint32_t form) {
-	if (k >= captures.size() || captures[k] == 0 || primitive_local(arg)) return SIZE_MAX;
-	const size_t ip = emit(opcode::op_capture_arg, where, static_cast<uint32_t>(k), captures[k] | (form << 2));
+// argument k's value is taken now when a later argument may write what it read (the stamp's kernel), and a place the stamp marks
+// carries its node for a reference parameter's binding; a private local proven primitive loads as a plain value and needs nothing
+size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_t k, const expression_ptr& arg, uint32_t where, uint32_t form) {
+	if (k >= captures.size() || captures[k] == 0 || primitive_local(arg.get())) return SIZE_MAX;
+	const bool place = (captures[k] & detail::transient_read_marker::arg_capture_lvalue) && form != capture_form_opaque;
+	const uint32_t node = place ? add_node(arg) + 1 : 0;
+	const size_t ip = emit(opcode::op_capture_arg, where, static_cast<uint32_t>(k),
+		(captures[k] & detail::transient_read_marker::arg_capture_kind_mask) | (form << 2) | (node << capture_place_shift));
 	if (form == capture_form_probe) { capture_sites_[where].push_back(ip); }
 	return ip;
 }
@@ -7333,7 +7336,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
 				for (size_t k = 0; k < expr->arguments.size(); ++k) {
 					compile_expression(expr->arguments[k]);
-					emit_arg_capture(captures, k, expr->arguments[k].get(), 0, capture_form_opaque);
+					emit_arg_capture(captures, k, expr->arguments[k], 0, capture_form_opaque);
 				}
 				emit(opcode::op_math, static_cast<uint32_t>(fn), static_cast<uint32_t>(expr->arguments.size()));
 				return;
@@ -7383,7 +7386,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				const auto& arg = expr->arguments[k];
 				record_argument_source(site, arg, expr->arguments.size());
 				compile_expression(arg);
-				if (const size_t ip = emit_arg_capture(captures, k, arg.get(), 0, capture_form_method); ip != SIZE_MAX) { capture_ips.push_back(ip); }
+				if (const size_t ip = emit_arg_capture(captures, k, arg, 0, capture_form_method); ip != SIZE_MAX) { capture_ips.push_back(ip); }
 			}
 			if (!expr->arguments.empty()) {
 				chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
@@ -7496,7 +7499,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		record_argument_source(site, arg, expr->arguments.size());
 		if (k < staged_args) { emit(opcode::op_take_temp, staged_slots[k]); continue; }
 		compile_expression(arg);
-		emit_arg_capture(captures, k, arg.get(), probe_callee ? static_cast<uint32_t>(probe_ip) : static_cast<uint32_t>(expr->arguments.size()),
+		emit_arg_capture(captures, k, arg, probe_callee ? static_cast<uint32_t>(probe_ip) : static_cast<uint32_t>(expr->arguments.size()),
 			probe_callee ? capture_form_probe : capture_form_stack);
 	}
 	if (!expr->arguments.empty()) {
@@ -7597,7 +7600,7 @@ void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
 	for (size_t k = 0; k < expr->arguments.size(); ++k) {
 		record_argument_source(site, expr->arguments[k], expr->arguments.size());
 		compile_expression(expr->arguments[k]);
-		emit_arg_capture(captures, k, expr->arguments[k].get(), node, capture_form_new);
+		emit_arg_capture(captures, k, expr->arguments[k], node, capture_form_new);
 	}
 	if (expr->type && (base == script_value_type::jai_shared_ptr_type || base == script_value_type::jai_object_type)) {
 		const type_info* cls = base == script_value_type::jai_shared_ptr_type ? expr->type->element_type().get() : expr->type.get();

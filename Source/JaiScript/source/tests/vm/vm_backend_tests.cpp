@@ -4362,6 +4362,74 @@ public:
 			check_eq(std::string("ababc|2|~03|xx|5|9~9|true~5"), i2, "interp: reference alias stores");
 			check_eq(i2, v2, "reference alias store parity");
 		});
+
+		test("reference_argument_binds_at_evaluation_parity", [this, run_both_backends_stdlib]() {
+			// Dev ruling 2026-10-08: a reference argument binds when it is evaluated, left to right, as in C++: a later argument that
+			// reassigns the receiver, moves the index, or replaces a nested receiver leaves the binding where evaluation put it, for
+			// functions, methods, constructors, a mixed-mode overload and a later conversion that runs code
+			auto [i2, v2] = run_both_backends_stdlib(R"(
+				class O { var x = 0; }
+				string log = "";
+				void put(var& r, var unused) { r = 99; }
+				var first = new O(); first.x = 1;
+				var second = new O(); second.x = 2;
+				var o = first;
+				put(o.x, o = second);
+				log = log + to_string(first.x) + "," + to_string(second.x);
+				var a = [10, 20, 30];
+				var i = 0;
+				put(a[i], i++);
+				log = log + "|" + to_string(a[0]) + "," + to_string(a[1]) + "," + to_string(i);
+				var p = new O(); p.x = 5;
+				var q = new O(); q.x = 6;
+				var holder = p;
+				function swap_holder() { holder = q; return 0; }
+				put(holder.x, swap_holder());
+				log = log + "|" + to_string(p.x) + "," + to_string(q.x);
+				class Box { var item = null; }
+				var b = Box(); b.item = new O();
+				var old_item = b.item;
+				function replace_item() { b.item = new O(); return 0; }
+				put(b.item.x, replace_item());
+				log = log + "|" + to_string(old_item.x) + "," + to_string(b.item.x);
+				void local_case() {
+					var f = new O(); var s = new O(); var w = f;
+					put(w.x, w = s);
+					array<int> e = [1, 2, 3]; int k = 0;
+					put(e[k], k = 2);
+					log = log + "|" + to_string(f.x) + "," + to_string(s.x) + "," + to_string(e[0]) + to_string(e[2]);
+				}
+				local_case();
+				class M { void put(var& r, var u) { r = 5; } }
+				var m = M();
+				var m1 = new O(); var m2 = new O(); var mh = m1;
+				m.put(mh.x, mh = m2);
+				log = log + "|" + to_string(m1.x) + "," + to_string(m2.x);
+				class Setter { Setter(var& r, var u) { r = 7; } }
+				var k1 = new O(); var k2 = new O(); var kh = k1;
+				Setter(kh.x, kh = k2);
+				var made = new Setter(kh.x, kh = k1);
+				log = log + "|" + to_string(k1.x) + "," + to_string(k2.x);
+				var c1 = new O(); var c2 = new O(); var ch = c1;
+				class Conv { var n = 0; Conv(int v) { n = v; ch = c2; } }
+				void take(Conv c, var& r) { r = 77; }
+				take(5, ch.x);
+				log = log + "|" + to_string(c1.x) + "," + to_string(c2.x);
+				var x1 = new O(); var x2 = new O(); var xh = x1;
+				function set_xh() { xh = x2; return "s"; }
+				class Mixer { void mix(int& r, string n) { log = log + "A"; r = 33; } void mix(int r, int n) { log = log + "B"; r = 44; } }
+				var mx = Mixer();
+				mx.mix(xh.x, set_xh());
+				log = log + "|" + to_string(x1.x) + "," + to_string(x2.x);
+				var y1 = new O(); var yh = y1;
+				put(yh.x, 3);
+				log = log + "|" + to_string(y1.x);
+				log;
+			)");
+			check_eq(std::string("99,2|99,20,1|99,6|99,0|99,0,993|5,0|7,7|77,0A|33,0|99"), i2, "interp: reference arguments bind at evaluation");
+			check_eq(i2, v2, "reference argument evaluation-order parity");
+		});
+
 		test("host_function_direct_entry_parity", [this]() {
 			// a one-overload by-value host function runs on the arguments where they are: exact kinds, a converted argument, a
 			// throw, a callback into script, a re-registration while it runs, a closed loop calling it

@@ -7994,10 +7994,12 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                             push_value(make_value());
                             return {};
                         }
-                        capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] {
-                            return parallel_pin_decl ? detail::parameters_binding(parallel_pin_decl->parameters, ai)
-                                                     : detail::method_binding(cls_pin.get(), dispatch->name_id, ai, expr->arguments.size());
-                        });
+                        if (auto taken = capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] {
+                                return parallel_pin_decl ? detail::parameters_binding(parallel_pin_decl->parameters, ai)
+                                                         : detail::method_binding(cls_pin.get(), dispatch->name_id, ai, expr->arguments.size());
+                            }, [&](script_value& out) { return mint_argument_place(argExpr.get(), out); }); !taken) {
+                            return taken.error_value();
+                        }
                     } catch (const std::runtime_error& e) {
                         return raise_native_exception(e);
                     }
@@ -8179,7 +8181,10 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 push_value(make_value());
                 return {};
             }
-            capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai, false, expr->arguments.size()); });
+            if (auto taken = capture_call_argument(expr->arg_captures, ai, arguments.back(), [&] { return detail::callee_binding(callee, ai, false, expr->arguments.size()); },
+                                                   [&](script_value& out) { return mint_argument_place(argExpr.get(), out); }); !taken) {
+                return taken.error_value();
+            }
         } catch (const std::runtime_error& e) {
             return raise_native_exception(e);
         }
@@ -9946,10 +9951,12 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
             JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_shared, ai, args);
             args.push_back(std::move(pop_value()));
-            capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
-                auto ctor = environment_->get(innerTypeName);
-                return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
-            });
+            if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
+                    auto ctor = environment_->get(innerTypeName);
+                    return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
+                }, [&](script_value& out) { return mint_argument_place(expr->arguments[ai].get(), out); }); !taken) {
+                return taken.error_value();
+            }
         }
 
         // Look up T's constructor
@@ -9983,10 +9990,12 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
     for (size_t ai = args.size(); ai < expr->arguments.size(); ++ai) {
         JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->arguments[ai].get(), rs, ai), expr, rp_new_class, ai, args);
         args.push_back(std::move(pop_value()));
-        capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
-            auto ctor = environment_->get(className);
-            return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
-        });
+        if (auto taken = capture_call_argument(expr->arg_captures, ai, args.back(), [&] {
+                auto ctor = environment_->get(className);
+                return ctor ? detail::callee_binding(ctor.value(), ai, false, expr->arguments.size()) : detail::arg_binding::opaque;
+            }, [&](script_value& out) { return mint_argument_place(expr->arguments[ai].get(), out); }); !taken) {
+            return taken.error_value();
+        }
     }
 
     // Look for a constructor function registered with this class name
@@ -14568,6 +14577,43 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     );
 }
 
+// A stamped lvalue argument's place, resolved where the argument is evaluated (detail::capture_call_argument)
+checked_result<bool> interpreter::mint_argument_place(const expression* argExpr, script_value& out) {
+    return bind_site_reference(argExpr, call_stack_.empty() ? nullptr : &call_stack_.back(), environment_, out);
+}
+
+// a T& parameter after `from` whose argument names a place evaluation decides, its reference not yet bound
+bool interpreter::later_place_argument(const script_defined_function& function, const detail::call_site_context* call_ctx, size_t from,
+                                       const std::vector<script_value>& args) const {
+    if (!call_ctx || !call_ctx->arg_exprs) { return false; }
+    const auto& params = function.parameters();
+    for (size_t j = from; j < args.size() && j < params.size() && j < call_ctx->arg_exprs->size(); ++j) {
+        if (params[j].is_reference && !detail::early_bound_reference(args[j]) &&
+            detail::transient_read_marker::place_lvalue_argument((*call_ctx->arg_exprs)[j].get())) { return true; }
+    }
+    return false;
+}
+
+// a conversion that may run code binds after the arguments after it were evaluated, and nothing ran between: the T& parameters
+// among them bind their places now, as their evaluation would have
+checked_result<void> interpreter::bind_later_places(const script_defined_function& function, const detail::call_site_context* call_ctx,
+                                                    size_t from, std::vector<script_value>& args, size_t frame_index,
+                                                    const std::shared_ptr<environment>& caller_env, unit_stamp caller_unit) {
+    if (!call_ctx || !call_ctx->arg_exprs) { return {}; }
+    const auto& params = function.parameters();
+    for (size_t j = from; j < args.size() && j < params.size() && j < call_ctx->arg_exprs->size(); ++j) {
+        const expression* e = (*call_ctx->arg_exprs)[j].get();
+        if (!params[j].is_reference || detail::early_bound_reference(args[j]) || !detail::transient_read_marker::place_lvalue_argument(e)) { continue; }
+        unit_sync_scope unitSync{ this };
+        enter_unit(caller_unit);
+        script_value minted(std::monostate{}, engine_);
+        auto placed = bind_site_reference(e, frame_index >= 1 ? &call_stack_[frame_index - 1] : nullptr, caller_env, minted);
+        if (!placed) { return placed.error_value(); }
+        if (placed.value()) { detail::hold_minted_reference(args[j], detail::arg_binding::reference, std::move(minted)); }
+    }
+    return {};
+}
+
 // A host callable's T& argument (execution_backend::host_reference_argument): the argument the call in flight passed, when
 // the callable received it (a callback a builtin makes with its own arguments did not), resolved as a T& parameter binds it
 checked_result<script_value> interpreter::host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
@@ -14582,6 +14628,9 @@ checked_result<script_value> interpreter::host_reference_argument(const std::vec
     const script_value& passed = (*ctx->values)[index];
     if (ctx->values != &args && !detail::same_argument(passed, args[index + offset])) {
         return none;
+    }
+    if (const script_value* early = detail::early_bound_reference(passed)) {
+        return *early;
     }
     const expression* argExpr = (*ctx->arg_exprs)[index].get();
     call_frame* caller_locals = call_stack_.empty() ? nullptr : &call_stack_.back();
@@ -14932,6 +14981,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             }
         }
 
+        if (param.is_reference) {
+            if (const script_value* early = detail::early_bound_reference((*argv)[i])) {
+                call_stack_[frame_index].set_local(param.slot_index, script_value(*early));
+                continue;
+            }
+        }
         const auto& arg = detail::argument_for_binding((*argv)[i], detail::parameter_binding(param));
 
         // Use pre-cached symbol ID (parameter binding optimization)
@@ -15023,10 +15078,15 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                                 ? script_value(arg.deref()) : script_value(arg);
             } else {
                 if (argv == &args && i + 1 < args.size() && detail::binding_may_run_code(arg, param.type.get()) &&
-                    detail::later_capture_candidate(i + 1, args.size(), [&](size_t j) -> const script_value& { return args[j]; })) [[unlikely]] {
+                    (detail::later_capture_candidate(i + 1, args.size(), [&](size_t j) -> const script_value& { return args[j]; }) ||
+                     later_place_argument(function, call_ctx, i + 1, args))) [[unlikely]] {
                     held_args = args;
                     for (size_t j = i + 1; j < held_args.size(); ++j) {
                         detail::capture_argument(held_args[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(function.parameters(), j));
+                    }
+                    if (auto placed = bind_later_places(function, call_ctx, i + 1, held_args, frame_index, previousEnv, caller_unit); !placed) {
+                        cleanup();
+                        return placed.error_value();
                     }
                     argv = &held_args;
                 }

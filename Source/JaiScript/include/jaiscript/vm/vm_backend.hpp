@@ -1315,6 +1315,10 @@ namespace jai::vm {
         op_status reference_to_storage(script_value& storage, script_value& out, bool& bound);
         // `v.x` where a reference binds: a COMPONENT reference (detail/math_component_store.hpp), else a non-reference
         checked_result<script_value> component_reference(frame* caller_frame, const expression* e, const std::shared_ptr<environment>& caller_env);
+        op_status bind_place_reference(const expression* place, frame* caller_frame, const std::shared_ptr<environment>& caller_env,
+                                       script_value& out, bool& bound);
+        op_status bind_later_places(const std::vector<parameter>& parameters, std::vector<script_value>* held, size_t args_base, size_t from, size_t argc, const call_site* site,
+                                    frame* caller_frame, chunk* caller_code, const std::shared_ptr<environment>& caller_env, unit_stamp caller_unit);
         op_status bind_site_reference(size_t i, const call_site& site, frame* caller_frame, chunk* caller_code,
                                       const std::shared_ptr<environment>& caller_env, script_value& out, bool& bound,
                                       host_slot* slot_out = nullptr);
@@ -2360,7 +2364,7 @@ namespace jai::vm {
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
-        void capture_arg(frame& f, const vm_instruction& ins);   // cold: the value may still share storage (op_capture_arg)
+        op_status capture_arg(frame& f, const vm_instruction& ins);   // cold: the value may still share storage, or a place binds (op_capture_arg)
         op_status exec_call_from_scratch(frame& f, const vm_instruction& ins);
         op_status exec_call_from_scratch_general(frame& f, const vm_instruction& ins);
         op_status call_parked_script(frame& f, const vm_instruction& ins, const script_defined_function& fn, strong_ptr<script_function> pin);

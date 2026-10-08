@@ -326,13 +326,16 @@ point the language's order puts the read (the interpreter's identifier compound 
 side; the VM's compound store reads the slot after the right side by construction). Suite `Compound Assignment
 Order` pins it.
 
-## 13. A call argument takes its value when it is evaluated (2026-09-27)
+## 13. A call argument takes its value, or binds its reference, when it is evaluated (2026-09-27, 2026-10-08)
 
 Arguments evaluate left to right after the callee, and a by-value argument's value is fixed at that point: a later
 argument (or a conversion the binding runs) that writes the variable, element or object it read does not change what
-the callee receives; a reference parameter binds the lvalue and sees the write. An evaluated argument can still share
-storage (an element read is a reference, a heavy value is a handle to a shared node, a host global is a cpp-bound
-box), so the value is taken explicitly, and only where a later argument may run user code:
+the callee receives; a reference parameter sees the write. A reference parameter binds its argument at that point too
+(Dev ruling 2026-10-08, C++): in `put(o.x, o = other)` the reference names the `x` of the object `o` held when `o.x`
+was evaluated, `put(a[i], i++)` names `a[0]`, and a later argument that reassigns a receiver or replaces a nested one
+moves nothing. An evaluated argument can still share storage (an element read is a reference, a heavy value is a
+handle to a shared node, a host global is a cpp-bound box), so the value is taken explicitly, and only where a later
+argument may run user code:
 
 - The parse-time stamp `call_expr::arg_captures` / `new_expr::arg_captures` (`transient_read_marker::stamp_arg_captures`,
   recomputed by the VM compiler for cloned nodes) marks every argument ahead of the last one that is not
@@ -341,13 +344,21 @@ box), so the value is taken explicitly, and only where a later argument may run 
 - Right after evaluating a marked argument, each backend captures it through the ONE kernel `detail/arg_capture.hpp`,
   classified by how the callee resolved ahead of the arguments binds that position: a copy parameter dereferences,
   copies a heavy payload and decodes a bound primitive; a `shared_ptr`/`weak_ptr` parameter and an opaque host callable
-  only dereference (a host `T&` or `bound_array<T>&` keeps working on the object); a reference parameter is untouched
-  (Tier 1 re-resolves from the expression, Tier 2 shares the evaluated reference). Interpreter: `capture_call_argument`
-  in every call path (math intrinsic, string builtin, direct method, generic) and both `new` loops; VM: `op_capture_arg`
-  with the callee's form (pending register, stack callee, method receiver, `new` class, builtin).
-- A binding conversion that may run user code (`binding_may_run_code`) captures the later arguments first, in both
-  binders; a coroutine captures its arguments in `coroutine_handle::set_function`, since it binds them at the first
-  resume.
+  only dereference (a host `T&` or `bound_array<T>&` keeps working on the object). A place argument (a member, subscript
+  or component lvalue whose receiver or index evaluation decides; the stamp's `arg_capture_lvalue` bit,
+  `transient_read_marker::place_lvalue_argument`) that a reference parameter takes mints its reference there, through the
+  same site resolution the binding uses (interpreter `bind_site_reference`, VM `bind_place_reference`, the node riding the
+  capture instruction above `capture_place_shift`); the reference rides beside the evaluated value
+  (`hold_minted_reference`, `argument_capture_storage::minted`) and the binding takes it as it is
+  (`early_bound_reference`: the parameter binding in both binders, a host `T&` through `host_reference_argument`). An
+  unstamped argument binds at the call as before, which is the same place: nothing runs between its evaluation and the
+  binding. Interpreter: `capture_call_argument` in every call path (math intrinsic, string builtin, direct method,
+  generic) and both `new` loops; VM: `op_capture_arg` with the callee's form (pending register, stack callee, method
+  receiver, `new` class, builtin).
+- A binding conversion that may run user code (`binding_may_run_code`) captures the later arguments first, and binds
+  the places of the later reference parameters (`bind_later_places`), in both binders; a coroutine captures its
+  arguments in `coroutine_handle::set_function`, since it binds them at the first resume. A graft refuses an element
+  reference argument a later argument may move.
 - A VM graft stages an enclosing call's callee and earlier arguments at their original evaluation points. The ordinary
   capture instruction takes any required value snapshot, and the call retains its original argument-source metadata for
   reference binding. Its captured argument prefix stays in owned compiler slots and moves into the final call on both the graft and guard-fallback paths, so surrounding expression operands cannot interleave with it.

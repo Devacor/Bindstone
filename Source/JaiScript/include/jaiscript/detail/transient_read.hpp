@@ -139,6 +139,20 @@ namespace jai::detail {
         // (a by-value call or operator result is fresh); full: any read of storage.
         static constexpr uint8_t arg_capture_ref = 1;
         static constexpr uint8_t arg_capture_full = 2;
+        static constexpr uint8_t arg_capture_kind_mask = 3;
+        // beside the kind: an lvalue whose place evaluation decides (a receiver, an index), so a reference parameter's binding
+        // mints its reference when the argument is evaluated (Dev ruling 2026-10-08)
+        static constexpr uint8_t arg_capture_lvalue = 4;
+
+        static bool place_lvalue_argument(const expression* e) noexcept {
+            if (!e || e->get_type() == node_type::identifier_expr) return false;
+            if (e->get_type() == node_type::member_expr) {
+                const auto* m = static_cast<const member_expr*>(e);
+                if (m->is_static) return false;
+                if (math::any_component_name(m->member)) return true;
+            }
+            return is_ref_bindable_lvalue(e);
+        }
 
         static uint8_t arg_capture_kind(const expression* e) noexcept {
             switch (e->get_type()) {
@@ -166,7 +180,7 @@ namespace jai::detail {
                 const uint8_t kind = arg_capture_kind(args[i].get());
                 if (kind == 0) { continue; }
                 if (!any) { out.assign(last - 1, 0); any = true; }
-                out[i] = kind;
+                out[i] = kind | (place_lvalue_argument(args[i].get()) ? arg_capture_lvalue : 0);
             }
         }
 

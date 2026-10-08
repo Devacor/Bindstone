@@ -284,7 +284,7 @@ namespace jai::vm {
         op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
         op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
         op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code; a = 1: its copy (a literal's existing object ahead of such a sibling)
-        op_capture_arg,     // a = call site (new: expression node; stack: argument count), b = argument index, c = capture kind | form << 2: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
+        op_capture_arg,     // a = call site (new: expression node; stack: argument count), b = argument index, c = capture kind | form << 2 | place node + 1 << capture_place_shift: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
         op_c_ret,           // a = the value (a cell, or k_typed_const_bit | constant), b = the return pad (an op_return after the copy), c = the general ip of the return's tail: a frame program's return (raw into the caller's cell from a raw-entered frame, else boxed through the pad)
         op_take_temp,       // a = owned compiler argument slot: move it onto the operand stack and clear the slot
         op_c_boundary,      // a = boundary index, b = cell loop index, c = the statement's first general ip: a boundary operation (the block parks, its dirty cells written back, and the general form runs the statement)
@@ -321,6 +321,7 @@ namespace jai::vm {
     inline constexpr uint32_t capture_form_method = 2;   // the receiver below the arguments, the member from the call site
     inline constexpr uint32_t capture_form_new = 3;      // the class's constructor, looked up by name (op_new)
     inline constexpr uint32_t capture_form_opaque = 4;   // a builtin or intrinsic: the value is dereferenced
+    inline constexpr uint32_t capture_place_shift = 5;   // above the form: the argument's chunk node + 1 when it names a place (0 = none)
     inline constexpr uint32_t k_cell_op_shift = 24;
     inline constexpr uint32_t k_cell_index_mask = (1u << k_cell_op_shift) - 1;
     inline constexpr uint32_t k_cell_math_float_arg = 0x80;   // op_c_math's math_fn bit: a stdlib alias, whose int argument converts to float first

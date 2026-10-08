@@ -2760,6 +2760,7 @@ namespace detail { struct argument_capture_storage; }
         struct argument_capture_storage {
             script_value lvalue;       // original evaluated reference/source for T&
             script_value shared;       // evaluated handle identity for shared_ptr<T>, even if the source is rebound
+            bool minted = false;       // lvalue is the reference the argument's evaluation bound (detail::early_bound_reference)
         };
     }
 

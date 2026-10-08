@@ -8623,9 +8623,9 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_back_step(frame& f, size_t& ip, con
 // after a call: each site's container, reached the way the entry reached it (its frame slot, or its environment binding while
 // the environment and epoch hold), still names the node resolved at entry; a site reached any other way (an element of a
 // table, a map entry, a member scope) or any difference asks for the full resolution again
-bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok) {
+bool vm_backend::cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok, const std::vector<uint32_t>& land_sites) {
 	cell_state& cs = *f.cells;
-	for (const uint32_t entry : loop.land_sites) {
+	for (const uint32_t entry : land_sites) {
 		const uint32_t k = entry & ~chunk::cell_loop::k_land_member_site;
 		const uint32_t cip = loop.sites[k];
 		if (entry & chunk::cell_loop::k_land_member_site) {
@@ -9493,9 +9493,9 @@ bool vm_backend::cells_reland(frame& f, const chunk::cell_loop& loop, const chun
 		else if (k == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { cs.payload[a.v] = cell_bits_of_float(s->unchecked_as_float()); }
 		else if (k == static_cast<uint8_t>(script_value::TYPEID_BOOL)) { cs.payload[a.v] = s->unchecked_as_bool() ? 1 : 0; }
 	}
-	return cells_reland_effects(f, loop);
+	return cells_reland_effects(f, loop, args_flushed ? &cc : nullptr);   // the probe's effect point checks everything: the arguments run before the landing
 }
-bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop) {
+bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call* landing) {
 	cell_state& cs = *f.cells;
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
 	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return false;
@@ -9527,14 +9527,15 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop) {
 		cs.payload[k] = reinterpret_cast<int64_t>(s->unchecked_string_handle().get());
 	}
 	}
+	const bool narrowed = landing && landing->narrowed;   // a landing checks what it can reach before the next one
 	{ JAI_CELL_COST(11)
-	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok) && !cells_resolve_sites(f, loop)) return false;
+	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok, narrowed ? landing->land_sites : loop.land_sites) && !cells_resolve_sites(f, loop)) return false;
 	}
 	{ JAI_CELL_COST(12)
 	if (!loop.rebinds.empty() && !cells_rebinds_hold(f, loop)) return false;
 	}
 	{ JAI_CELL_COST(13)
-	if (!loop.inline_sites.empty()) { for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; } }   // a callee rebound the inlined leaf's name
+	for (const uint32_t si : narrowed ? landing->inline_sites : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; }   // a callee rebound the inlined leaf's name
 	}
 	{ JAI_CELL_COST(14)
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) return false; }

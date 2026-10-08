@@ -2152,14 +2152,14 @@ namespace jai::vm {
         void cells_writeback(frame& f, const chunk::cell_loop& loop);   // every dirty cell a statement may read back to its slot or binding; the cells stay valid
         const chunk::cell_loop* cells_unpark(frame& f);   // a block parked for a statement ending at f.ip, resumed (f.ip its resume copy ip); nullptr = the general form continues
         bool cells_resync(frame& f, const chunk::cell_loop& loop);   // after a statement on the general form: the slot cells it changed, then the landing's checks
-        bool cells_reland_effects(frame& f, const chunk::cell_loop& loop);   // cells_reland's checks after user code ran, without an argument's slot
+        bool cells_reland_effects(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call* landing = nullptr);   // cells_reland's checks after user code ran, without an argument's slot
         op_status exec_cells_resume(frame& f, const vm_instruction& ins);
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
         const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site, size_t off = SIZE_MAX);
         class_instance* cells_member_prefix(frame& f, class_instance* inst, const member_expr* expr, size_t off);   // a nested member site's prefix instance (`p.pos` of `p.pos.x`); inst itself for a direct site; nullptr = the general form
         const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe, bool prefixed = false, uint32_t* slot_out = nullptr);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
-        bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok);
+        bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok, const std::vector<uint32_t>& land_sites);
         bool cells_sites_reenter(frame& f, const chunk::cell_loop& loop);   // a re-entry in the same call: every site still names the node its last resolution found
         bool cells_rebinds_hold(frame& f, const chunk::cell_loop& loop);   // after a call: every alias live at the landing names its source table's element again
         bool cells_rebind_apply(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::rebind& rb, script_int index, bool reprobe);   // the alias's sites take the table's element at index, a plain array node, else false

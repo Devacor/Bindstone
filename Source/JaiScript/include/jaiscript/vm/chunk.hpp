@@ -519,6 +519,10 @@ namespace jai::vm {
             struct cell_call {
                 uint32_t probe_ip, call_ip, consumer_ip; uint8_t consumer = 0; uint32_t dst = k_invalid_u32; std::vector<call_arg> args; uint8_t raw = 0;
                 uint8_t raw_proven = 0; uint32_t raw_kinds = 0;
+                // what the landing re-checks (narrowed): the land_sites entries and the inlined leaves the block can reach from it before
+                // another landing, which checks the rest; not narrowed: every one
+                bool narrowed = false;
+                std::vector<uint32_t> land_sites, inline_sites;
             };
             std::vector<cell_call> calls;
             // a frame program: the region covers the whole function body from its first instruction to its final HALT, its returns are ret

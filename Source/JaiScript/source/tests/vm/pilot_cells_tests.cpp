@@ -431,6 +431,33 @@ public:
 			)";
 			both(script, "8004/8004|10,4", "second call, other containers");
 		});
+		test("a_callee_rebinding_a_container_is_seen_by_the_landing_before_its_next_read", [this]() {
+			// two calls per iteration: the container read after the first call is checked at that landing, whichever call rebinds it
+			const char* shape = R"(
+				var A = [1, 2, 3, 4, 5, 6, 7, 8];
+				int calls = 0;
+				function pick(int i) -> int { int r = i; if (r < 0) { r = 0; print("never"); } return r; }
+				function churn(int i) -> int { calls += 1; if (calls == WHEN) { A = [100, 200, 300, 400, 500, 600, 700, 800]; } int r = 0; if (i < 0) { print("never"); } return r; }
+				function run() -> int {
+					int s = 0;
+					for (int i = 0; i < 8; ++i) {
+						FIRST
+						s += A[a];
+						SECOND
+						s += b;
+					}
+					return s;
+				}
+				to_string(run());
+			)";
+			auto make = [&](const char* when, const char* first, const char* second) {
+				std::string src = shape;
+				src.replace(src.find("WHEN"), 4, when); src.replace(src.find("FIRST"), 5, first); src.replace(src.find("SECOND"), 6, second);
+				return src;
+			};
+			both(make("3", "int a = pick(i);", "int b = churn(i);"), "3006", "the second call rebinds, the read follows the first landing");
+			both(make("3", "int a = churn(i) + i;", "int b = pick(i) - i;"), "3303", "the first call rebinds, the read follows its own landing");
+		});
 		test("element_reads_inside_typed_expressions_land_the_same", [this]() {
 			// acc = acc + data[idx]: the read lands in a compiler temp (T_LOAD), the add is typed, the loop closes
 			const std::string script = R"(

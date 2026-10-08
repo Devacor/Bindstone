@@ -2,6 +2,7 @@
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/release_machine.hpp>
+#include <bit>
 #include <charconv>
 #include <jaiscript/vm/vm_backend.hpp>
 #ifdef JAISCRIPT_VM_COARSE_PROFILE
@@ -7822,12 +7823,20 @@ void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
 void vm_backend::cells_writeback(frame& f, const chunk::cell_loop& loop) {
 	cell_state& cs = *f.cells;
 	const size_t at = f.ip - loop.copy_head;
-	const chunk::cell_mask pending = cs.dirty.mask(loop.cells.size()) & (at < loop.live_temps.size() ? (~loop.temp_mask | loop.live_temps[at]) : chunk::cell_mask::all());
-	for (uint32_t k = 0; k < loop.cells.size(); ++k) {
-		if (!pending.test(k) || cs.kind[k] == 0) continue;
-		if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } else { cell_flush_one(f, loop, k); }
+	const uint32_t n = static_cast<uint32_t>(loop.cells.size());
+	const chunk::cell_mask* live = at < loop.live_temps.size() ? &loop.live_temps[at] : nullptr;
+	// the dirty bytes eight at a time (each 0 or 1, so clearing the lowest set bit clears its byte), in cell order
+	for (uint32_t base = 0; base < n; base += 8) {
+		uint64_t word;
+		std::memcpy(&word, cs.dirty.b + base, sizeof word);
+		for (; word; word &= word - 1) {
+			const uint32_t k = base + (static_cast<uint32_t>(std::countr_zero(word)) >> 3);
+			if (k >= n) break;
+			if (cs.kind[k] == 0 || (live && loop.temp_mask.test(k) && !live->test(k))) continue;
+			if (loop.cells[k].env_operand != k_invalid_u32) { env_flush_one(f, loop, k); } else { cell_flush_one(f, loop, k); }
+		}
 	}
-	cs.dirty.reset(loop.cells.size());
+	cs.dirty.reset(n);
 }
 
 // the end of a boundary statement (f.ip): the block parked for it resumes when no entry of another block in this frame came between, the

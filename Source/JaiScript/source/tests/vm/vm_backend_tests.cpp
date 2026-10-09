@@ -4051,6 +4051,29 @@ public:
 			check_eq(run(false, nullptr), run(true, &listing), "parity");
 			check_true(listing.find("CALL_METHOD") == std::string::npos, "no general method call remains: " + listing);
 		});
+		test("a_range_for_alias_builtin_keeps_its_value_when_the_container_changes_or_holds_other_kinds", [this]() {
+			// the receiver proof only picks a lane: a container reassigned in the loop, an array<var> of mixed kinds (no proof, the general
+			// call) and a store of another kind through the alias (the element boundary raises, caught) agree with the interpreter
+			const char* program =
+				"array<string> a = [\"1.5\", \"abc\"]; int n = 0;\n"
+				"for (auto& s : a) { n = n + s.size(); a = [\"xxxxxx\"]; n = n + s.size(); }\n"
+				"array<var> mixed = [\"ab\", [1, 2, 3], 7]; int m = 0;\n"
+				"for (auto& x : mixed) { if (type_of(x) != \"int\") { m = m + x.size(); } }\n"
+				"array<string> b = [\"q\"]; string caught = \"none\";\n"
+				"for (var& s : b) { try { s = [1]; } catch (e) { caught = \"raised\"; } n = n + s.size(); }\n"
+				"to_string(n) + \" \" + to_string(m) + \" \" + caught + \" \" + b[0];";
+			auto run = [&](bool use_vm) -> std::string {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->execution_budget(0);
+				e->static_checking(jai::check_mode::warn);
+				stdlib::register_all(*e);
+				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+			};
+			const std::string iv = run(false);
+			check_true(iv.find("ERROR") == std::string::npos, "the interpreter runs it: " + iv);
+			check_eq(iv, run(true), "parity");
+		});
 		test("handle_and_field_reference_argument_parity", [this, run_both_backends_stdlib]() {
 			// handles and nulls into var parameters (shared, never copied), var& parameters bound to fields of handles, stores through
 			// them (a declared field converts, a var field takes anything), a captured parameter, a by-value instance still copies

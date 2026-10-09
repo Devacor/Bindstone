@@ -441,6 +441,8 @@ hold re-reads the environment cells through their bindings and checks each site'
 same array node behind the slot or binding, a plain-cell reference dereferenced); any difference resolves the sites
 in full again and misses only if that fails.
 
+A landing re-checks only the sites and inlined leaves the block can reach from it before the next landing (each call's lists come from the region's graph at compile time); the probe's effect point checks everything, since the arguments run before the landing. The checks are not skipped by a binding epoch. The one structural choke point for every binding a landing protects (environment cells, frame slots, field cells, hetero elements, map values) is `script_value`'s assignment over a heavy value (an array, map, object, function, reference or handle), and the same assignment overwrites every heavy temporary the VM recycles: counted on Gator Quest, 82-92% of call landings see one, against 1.0-1.6% that see an operation-level binding store (an environment or field store of a heavy value, a non-typed element store, a container builtin). An epoch on the operation-level stores would skip almost every check, but its completeness would be a list of operation sites (host functions, member-cache rows, object-slot buffers, map erasure, re-classing, workers), not a structural guarantee, so the landings keep their checks.
+
 Every typed instruction keeps the instruction it replaced in `chunk::typed_sites` at its
 own ip (two for a move). The fast path lands exactly as the general op lands: a payload
 write into a same-tagged slot, otherwise a fresh value carrying the decl's stamp; a store as

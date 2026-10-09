@@ -564,6 +564,8 @@ public:
 
         test("a_long_chain_at_teardown_releases_without_native_recursion", [this]() {
             for (const char* program : {"shared_ptr<Node> head = build(100000);",
+                                        "class Holder { static shared_ptr<Node> head = null; } Holder::head = build(100000);",
+                                        "class Holder { static var bag = null; } Holder::bag = [build(50000), {\"k\": build(50000)}];",
                                         "class Tail { ~Tail() {} } shared_ptr<Node> head = build(100000); Tail t;"}) {
                 auto eng = make_engine();
                 eng->execution_budget(0);

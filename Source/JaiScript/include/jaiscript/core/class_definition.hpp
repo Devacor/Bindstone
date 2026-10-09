@@ -421,6 +421,9 @@ private:
     }
     // The dying instance's members past the native depth go to the release stack (class_registry.cpp)
     void release_fields() noexcept;
+    // An orphaned instance (its definition detached: engine teardown, a definition that died first) has no release stack;
+    // its members and the orphans they alone hold die on a local work list, no destructor can run for them
+    void release_orphan_fields() noexcept;
 };
 
 class class_definition : public std::enable_shared_from_this<class_definition> {
@@ -4131,6 +4134,8 @@ inline class_instance::~class_instance() {
     if (class_def_) {
         class_def_->unregister_instance(this);
         if (fields_cascade()) { release_fields(); }
+    } else if (!destructor_armed_ && fields_cascade()) {
+        release_orphan_fields();
     }
     while (!flat_fields_.empty()) { flat_fields_.pop_back(); }   // members die in reverse declaration order (C++)
 }

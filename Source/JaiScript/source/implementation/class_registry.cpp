@@ -184,6 +184,37 @@ void class_instance::release_fields() noexcept {
     }
 }
 
+void class_instance::release_orphan_fields() noexcept {
+    std::vector<script_value> work;
+    auto take_cells = [&work](class_instance& from) {
+        for (size_t slot = 0; slot < from.flat_fields_.size(); ++slot) {
+            auto& cell = from.flat_fields_[slot];
+            if (cell && cell->release_cascades()) { work.push_back(std::move(*cell)); }
+        }
+        if (from.overflow_fields_) {
+            for (auto& [id, value] : *from.overflow_fields_) {
+                if (value.release_cascades()) { work.push_back(std::move(value)); }
+            }
+        }
+    };
+    take_cells(*this);
+    while (!work.empty()) {
+        script_value v = std::move(work.back());
+        work.pop_back();
+        if (v.raw_storage_index() == script_value::TYPEID_OBJECT) {
+            const auto& holder = v.unchecked_object_handle();
+            if (holder.unique() && holder->is_class_instance_wrapper && holder->data && holder->data.use_count() == 1) {
+                auto* inner = static_cast<class_instance*>(holder->data.get());
+                if (!inner->class_def_ && !inner->destructor_armed_) { take_cells(*inner); }
+            }
+        } else if (v.release_flattens()) {
+            std::vector<script_value> nested;
+            nested.push_back(std::move(v));
+            detail::release_work(nested);
+        }
+    }
+}
+
 namespace detail {
 
 void instance_deleter::operator()(class_instance* ptr) const noexcept {

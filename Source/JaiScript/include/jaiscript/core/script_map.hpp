@@ -108,6 +108,8 @@ namespace jai {
         uint64_t gen_ = 1;                          // moves on every insert, erase or clear
         mutable std::vector<value_type*> order_;    // the entries by key, valid while order_gen_ == gen_
         mutable uint64_t order_gen_ = 0;
+        struct entry_memo_storage { const script_map* owner = nullptr; uint64_t gen = 0; const void* e = nullptr; };
+        mutable entry_memo_storage lane_memo_;      // the vm's main-thread map lanes' memo (a copy names its source: dead by the owner test)
 
         void changed() noexcept { ++gen_; }
         size_t home(size_t h) const noexcept { return static_cast<size_t>((static_cast<uint64_t>(h) * 0x9E3779B97F4A7C15ull) >> shift_); }
@@ -334,6 +336,33 @@ namespace jai {
         iterator end() noexcept { return iterator(); }
         const_iterator end() const noexcept { return const_iterator(); }
         const_iterator cend() const noexcept { return const_iterator(); }
+
+        // a remembered entry of one map: valid while the map that took it is unchanged (gen_ moves on every insert, erase, clear and
+        // assignment); a holder outside the map pins the map (the owner test is an address)
+        using entry_memo = entry_memo_storage;
+        entry_memo& lane_memo() const noexcept { return lane_memo_; }
+        // key's entry: memo's when memo was taken on this map at this generation and its key equals key under the map's key equality
+        // (the generation is tested before the entry is touched), else the map's lookup, recorded in memo; null when key is absent
+        template <typename K>
+        value_type* recall(entry_memo& memo, const K& key) const {
+            if (memo.owner == this && memo.gen == gen_ && memo.e) {
+                entry* e = static_cast<entry*>(const_cast<void*>(memo.e));
+                if (same_key(e, short_of(key), key)) return &e->kv;
+            }
+            entry* e = find_entry(key);
+            memo = entry_memo{this, gen_, e};
+            return e ? &e->kv : nullptr;
+        }
+        // the same for a store: an absent key is inserted (operator[]'s rule) and its new entry recorded
+        value_type* recall_or_insert(entry_memo& memo, const script_value& key) {
+            if (memo.owner == this && memo.gen == gen_ && memo.e) {
+                entry* e = static_cast<entry*>(const_cast<void*>(memo.e));
+                if (same_key(e, short_of(key), key)) return &e->kv;
+            }
+            entry* e = find_or_insert(key, [](size_t h, const script_value& k) { return new entry(h, k); }).first;
+            memo = entry_memo{this, gen_, e};
+            return &e->kv;
+        }
 
         iterator find(const script_value& k) {
             entry* e = find_entry(k);

@@ -11471,7 +11471,7 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 	}
 	auto& map = const_cast<script_map&>(container.as_map());
 	const size_t prior_map_size = map.size();
-	script_value& value_ref = map[key];
+	script_value& value_ref = parallel_worker_ ? map[key] : map.recall_or_insert(map.lane_memo(), key)->second;   // a worker leaves the shared memo alone
 	if (map.size() != prior_map_size) {
 		limits_->memory_charge_deferred(2 * sizeof(script_value) + (key.is_string() ? key.unchecked_as_string().size() : 0));
 	}
@@ -16614,10 +16614,12 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 			}
 		} else {
 			const script_map& map = recv.unchecked_as_map();
-			auto it = map.find(stack_[base].deref());
-			if (inline_op == 9) { result.emplace(it != map.end(), engine_); }
+			const script_value& key = stack_[base].deref();
+			const script_map::value_type* found = parallel_worker_ ? nullptr : map.recall(map.lane_memo(), key);   // a worker leaves the shared memo alone
+			if (parallel_worker_) { if (auto it = map.find(key); it != map.end()) { found = &*it; } }
+			if (inline_op == 9) { result.emplace(found != nullptr, engine_); }
 			else {
-				const script_value& got = it != map.end() ? it->second : stack_[base + 1].deref();
+				const script_value& got = found ? found->second : stack_[base + 1].deref();
 				const size_t k = got.raw_storage_index();
 				// an object, array or map comes back named (the registry's get): the inline lane takes the scalars
 				if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_ARRAY && k != script_value::TYPEID_MAP) { result.emplace(got); }

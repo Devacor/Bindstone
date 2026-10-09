@@ -713,6 +713,56 @@ out;
             second->~script_map();
         });
 
+        // the vm's map lanes remember their last entry: a get then a store of one key, a key changed in place between them, a copy,
+        // a replaced map, an erase, a clear, a map kept across a re-run of its unit, and a parallel body reading the map (workers
+        // leave the shared memo alone) all read what the interpreter reads
+        test("map_lane_memo_parity", [this, both_mode]() {
+            const char* src = R"JAI(
+map<string, int> m = {};
+array<string> src = ["a", "b", "a", "c", "b", "a"];
+for (auto& s : src) { m[s] = m.get(s, 0) + 1; }
+string s = "a";
+m[s] = m.get(s, 0) + 10;
+s.append("x");
+m[s] = m.get(s, 0) + 100;
+var m2 = m;
+m2["a"] = -1;
+string out = to_string(m["a"]) + " " + to_string(m2["a"]) + " " + to_string(m["ax"]) + " " + to_string(m["b"]);
+m = {"a": 5};
+m["a"] = m.get("a", 0) + 1;
+out += " " + to_string(m["a"]) + " " + to_string(m.size());
+m.erase("a");
+out += " " + to_string(m.get("a", 7));
+m.clear();
+m["z"] = m.get("z", 1) + 1;
+out += " " + to_string(m["z"]);
+map<string, int> table = {"k0": 10, "k1": 20, "k2": 30, "k3": 40};
+array<int> xs = [];
+for (int i = 0; i < 64; ++i) { xs.push(i); }
+table["k1"] = table.get("k1", 0) + 1;
+parallel_for (auto& x : xs) { x = table.get("k" + to_string(x % 4), 0); }
+table["k1"] = table.get("k1", 0) + 1;
+int total = 0;
+for (int x : xs) { total += x; }
+out += " " + to_string(total) + " " + to_string(table["k1"]);
+out;
+)JAI";
+            auto [i_out, v_out] = both_mode(src, check_mode::strict);
+            check_eq(std::string("13 -1 100 2 6 1 7 2 1616 22"), i_out, "interpreter");
+            check_eq(i_out, v_out, "backend parity");
+            for (bool use_vm : {false, true}) {
+                auto e = jai::engine::make();
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                jai::stdlib::register_all(e);
+                const char* unit = "map<string, int> kept;\nint bump(string k) { kept[k] = kept.get(k, 0) + 1; return kept[k]; }\n";
+                e->execute(unit);
+                e->execute("bump(\"a\"); bump(\"a\"); bump(\"b\");");
+                e->execute(unit);
+                const std::string got = e->execute("to_string(bump(\"a\")) + \" \" + to_string(bump(\"b\")) + \" \" + to_string(kept.size());").to_string();
+                check_eq(std::string("3 2 2"), got, use_vm ? "re-run unit (vm)" : "re-run unit (interpreter)");
+            }
+        });
+
         test("map_field_survives_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

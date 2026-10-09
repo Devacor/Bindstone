@@ -703,6 +703,7 @@ void vm_backend::prepare_for_execution() {
 		instance_scope_saved_.clear();
 		pending_instance_env_.reset();
 		retired_callees_.clear();
+		host_site_calls_ = 0;
 	}
 	sync_debug_hook();   // execute-entry debug sync (attach/detach/breakpoint edits)
 	arm_execution_deadline();
@@ -12803,7 +12804,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 			    e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity) {
 				pending_callee& pc = pending_callees_.emplace_back();
 				pc.fn = site.ic_fn;
-				if (!site.ic_fn) { pc.pin = site.ic_pin; }   // a host callee is called through its pin; a script callee borrows the site's
+				if (!site.ic_fn) { if (site.ic_host_target) { pc.host = &site; pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }   // a script callee and a direct host callee borrow the site's
 				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 				return {};
 			}
@@ -12897,7 +12898,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 	    &calleeVal.unchecked_as_function() == site.ic_identity &&
 	    (site.ic_native || argc == site.ic_argc)) {
 		pc.fn = site.ic_fn;
-		if (!site.ic_fn) { pc.pin = site.ic_pin; }
+		if (!site.ic_fn) { if (site.ic_host_target) { pc.host = &site; pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }
 	} else {
 		bool parked_direct = false;
 		if (calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
@@ -12915,6 +12916,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 					site.ic_fn = pc.fn;
 					site.ic_argc = static_cast<uint32_t>(argc);
 					site.ic_native = false;
+					fill_host_site(site, calleeVal);
 				}
 			} else if (!thunk && !calleeVal.unchecked_as_function().target<script_static_method_dispatch>()) {   // a static method enters in-loop (invoke_callee)
 				// a host callable takes the arguments as they are (invoke_callee's opaque path): held by its payload, cached
@@ -12927,6 +12929,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 					site.ic_identity = &calleeVal.unchecked_as_function();
 					site.ic_fn = nullptr;
 					site.ic_native = true;
+					fill_host_site(site, calleeVal);
 				}
 			}
 		}
@@ -12951,7 +12954,7 @@ op_status vm_backend::capture_arg(frame& f, const vm_instruction& ins) {
 			if (!pending_callees_.empty()) {
 				const pending_callee& pc = pending_callees_.back();
 				b = pc.fn ? detail::parameters_binding(pc.fn->parameters(), k)
-				    : pc.native() ? detail::function_binding(*pc.pin, k, false, f.code->call_sites[ins.a].arg_symbols.size())
+				    : pc.native() ? detail::function_binding(pc.native_fn(), k, false, f.code->call_sites[ins.a].arg_symbols.size())
 				    : detail::callee_binding(pc.value, k, false, f.code->call_sites[ins.a].arg_symbols.size());
 			}
 			break;
@@ -13225,6 +13228,14 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
 	pending_callee& top = pending_callees_.back();
+	if (top.host) {
+		const call_site& hs = *top.host;
+		if (hs.ic_pin.get() == top.host_fn) {
+			if (op_status st{}; call_host_site(hs, ins.a, st)) { pending_callees_.pop_back(); return st; }
+			top.pin = hs.ic_pin;   // declined: the general path holds the callee itself
+		}
+		return exec_call_from_scratch_general(f, ins);   // refilled since the probe: the probed callee, retired until the outermost entry returns
+	}
 	if (top.fn) {
 		JAI_COARSE(coarse_push_, coarse_pushes_)
 		const script_defined_function& fn = *top.fn;
@@ -13297,6 +13308,37 @@ JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 }
 
 // A host function's direct entry (engine::overload_dispatch::try_direct) on the arguments where they are on the stack
+// the site's direct host overload on the arguments where they are on the stack: each argument of its parameter's kind (try_direct's test)
+bool vm_backend::call_host_site(const call_site& site, size_t argc, op_status& st) {
+	if (argc != site.ic_host_argc || *site.ic_host_gen != site.ic_host_at) { return false; }
+	const size_t base = stack_.size() - argc;
+	const script_value* args = stack_.data() + base;
+	for (size_t i = 0; i < argc; ++i) { if (args[i].deref().type() != site.ic_host_kinds[i]) { return false; } }
+	struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
+	checked_result<script_value> out = site.ic_host_invoke(site.ic_host_target, args, argc);
+	stack_.truncate(base);
+	if (!out) { st = raise_from(out); return true; }
+	stack_.push_back(std::move(out.value()));
+	return true;
+}
+// the site's host lane from its cached callee: the one direct overload of an overload dispatcher, else none
+void vm_backend::fill_host_site(const call_site& site, const script_value& callee) {
+	site.ic_host_target = nullptr;
+	site.ic_host_invoke = nullptr;
+	site.ic_host_owner = {};
+	if (site.ic_fn || callee.raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
+	const auto* od = callee.unchecked_as_function().target<engine::overload_dispatch>();
+	engine::overload_dispatch::direct_snapshot snap;
+	if (!od || !od->direct_entry(snap)) { return; }
+	site.ic_host_owner = *snap.owner.get_storage().get_if<script_value::TYPEID_FUNCTION>();
+	site.ic_host_argc = static_cast<uint32_t>(snap.argc);
+	std::copy(std::begin(snap.kinds), std::end(snap.kinds), site.ic_host_kinds);
+	site.ic_host_gen = snap.generation;
+	site.ic_host_at = snap.at;
+	site.ic_host_invoke = snap.invoke;
+	site.ic_host_target = snap.target;
+}
+
 JAI_NOINLINE bool vm_backend::call_host_direct(const script_function& callee, size_t argc, op_status& st) {
 	const auto* od = callee.target<engine::overload_dispatch>();
 	if (!od) return false;
@@ -13398,7 +13440,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 	}
 #endif
 	if (pc.native()) {
-		if (op_status st{}; call_host_direct(*pc.pin, argc, st)) { return st; }
+		if (op_status st{}; call_host_direct(pc.native_fn(), argc, st)) { return st; }
 	}
 	auto arguments = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &arguments};
@@ -21391,6 +21433,15 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 // A call that hit a site's cache borrows the site's pin of its script callee (no count per call). A refill would drop that pin while
 // such a call is parked or running: the function then moves to the retired list, which the next outermost entry empties
 JAI_NOINLINE void vm_backend::retire_site_callee(const call_site& site) {
+	if (site.ic_host_target) {
+		bool borrowed = host_site_calls_ != 0;
+		for (size_t i = 0; !borrowed && i < pending_callees_.size(); ++i) { borrowed = pending_callees_[i].host == &site; }
+		if (borrowed) {
+			retired_callees_.push_back(site.ic_pin);
+			retired_callees_.push_back(site.ic_host_owner);
+		}
+		return;
+	}
 	if (!site.ic_pin || !site.ic_fn) { return; }
 	const chunk* body = static_cast<const chunk*>(site.ic_fn->backend_body_cache.get());
 	bool borrowed = false;
@@ -21408,6 +21459,9 @@ void vm_backend::release_site_pins() noexcept {
 			site.ic_pin = {};
 			site.ic_identity = nullptr;
 			site.ic_fn = nullptr;
+			site.ic_host_owner = {};
+			site.ic_host_target = nullptr;
+			site.ic_host_invoke = nullptr;
 			site.ctor_pin = {};
 			site.ctor_identity = nullptr;
 			site.ctor_thunk = nullptr;

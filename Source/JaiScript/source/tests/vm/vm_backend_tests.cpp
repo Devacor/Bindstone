@@ -3973,6 +3973,36 @@ public:
 			}
 		});
 
+		test("a_host_callee_follows_its_registration_through_the_call_sites_lane", [this]() {
+			// a call site keeps its host callee's one direct overload; a registration of the name between the probe and the call (in the
+			// arguments) and a site refilled while outer calls of it are parked (recursion) run what the dispatcher runs on both backends
+			auto run = [](bool use_vm, const char* program) -> std::string {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->execution_budget(0);
+				stdlib::register_all(*e);
+				jai::engine* raw = e.get();
+				e->add_function("hf", [](jai::script_int x) -> jai::script_int { return x + 1; });
+				e->add_function("swap", [raw]() -> jai::script_int {
+					raw->add_function("hf", [](jai::script_int x) -> jai::script_int { return x + 100; });
+					return 0;
+				});
+				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+			};
+			const char* in_arguments =
+				"int total = 0;\n"
+				"for (int i = 0; i < 4; ++i) { total = total * 1000 + hf(i == 2 ? swap() : i); }\n"
+				"for (int i = 0; i < 3; ++i) { total = total + hf(i); }\n"
+				"total;";
+			const char* refilled_while_parked =
+				"int k(int d, bool again) { if (d == 0) { if (again) { swap(); return k(1, false); } return 0; } return hf(k(d - 1, again)); }\n"
+				"int a = k(3, true); int b = 0; for (int i = 0; i < 5; ++i) { b = b + hf(i); }\n"
+				"to_string(a) + \" \" + to_string(b);";
+			check_eq(std::string("1002100406"), run(false, in_arguments), "registration in the arguments (interpreter)");
+			check_eq(run(false, in_arguments), run(true, in_arguments), "registration in the arguments (parity)");
+			check_eq(std::string("400 510"), run(false, refilled_while_parked), "a site refilled while parked (interpreter)");
+			check_eq(run(false, refilled_while_parked), run(true, refilled_while_parked), "a site refilled while parked (parity)");
+		});
 		test("handle_and_field_reference_argument_parity", [this, run_both_backends_stdlib]() {
 			// handles and nulls into var parameters (shared, never copied), var& parameters bound to fields of handles, stores through
 			// them (a declared field converts, a var field takes anything), a captured parameter, a by-value instance still copies

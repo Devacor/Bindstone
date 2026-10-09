@@ -964,8 +964,11 @@ namespace jai::vm {
             strong_ptr<script_function> pin;
             const std::vector<uint32_t>* staged_slots = nullptr;
             const script_method_dispatch* method = nullptr;   // a bare sibling method of this frame's class: value is its dispatcher, the receiver the frame's this
-            // a host callable held by pin alone (no fn): invoked with the arguments as they are
-            bool native() const { return !fn && pin; }
+            const call_site* host = nullptr;                  // a host callable the site's cache held at the probe (no pin of its own): borrowed
+            const script_function* host_fn = nullptr;          // that callable: the site's while it caches it, else on the retired list
+            // a host callable held by pin, or borrowed from its site (no fn): invoked with the arguments as they are
+            bool native() const { return !fn && (pin || host); }
+            const script_function& native_fn() const { return pin ? *pin : *host_fn; }
         };
         std::vector<pending_callee> pending_callees_;
 
@@ -2381,6 +2384,9 @@ namespace jai::vm {
         // frame); truncate_to drops the stack first (SIZE_MAX keeps it)
         op_status call_threw(size_t truncate_to);
         bool call_host_direct(const script_function& callee, size_t argc, op_status& st);
+        bool call_host_site(const call_site& site, size_t argc, op_status& st);
+        void fill_host_site(const call_site& site, const script_value& callee);
+        uint32_t host_site_calls_ = 0;   // host callees running through call_host_site: a refill retires the site's pins while one runs
         bool push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc);
         bool bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc);
         // Callee-first probe for member / computed callees (op_probe_member)

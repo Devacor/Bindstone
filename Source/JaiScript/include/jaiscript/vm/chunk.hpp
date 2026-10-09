@@ -145,6 +145,7 @@ namespace jai::vm {
         mutable strong_ptr<script_function> ic_host_owner;
         mutable const uint64_t* ic_host_gen = nullptr;   // the overload set's mutation count: a registration of the name since the fill declines the lane
         mutable uint64_t ic_host_at = 0;
+        mutable bool ic_host_checked = false;   // the lane was looked for since the last refill (filled on a hit: a binding that holds)
         // Monomorphic method-dispatch cache (flat-classes increment 1): validated on
         // (class identity, method_epoch) per class_definition::bump_method_epoch's
         // contract (derived-propagating; definitions engine-lifetime pinned, no ABA).

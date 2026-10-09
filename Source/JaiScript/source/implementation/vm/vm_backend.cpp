@@ -12804,7 +12804,10 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 			    e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity) {
 				pending_callee& pc = pending_callees_.emplace_back();
 				pc.fn = site.ic_fn;
-				if (!site.ic_fn) { if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }   // a script callee and a direct host callee borrow the site's
+				if (!site.ic_fn) {   // a script callee and a direct host callee borrow the site's
+					if (!site.ic_host_checked) [[unlikely]] { fill_host_site(site, *e.fast_ptr); }
+					if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; }
+				}
 				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 				return {};
 			}
@@ -12898,7 +12901,10 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 	    &calleeVal.unchecked_as_function() == site.ic_identity &&
 	    (site.ic_native || argc == site.ic_argc)) {
 		pc.fn = site.ic_fn;
-		if (!site.ic_fn) { if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }
+		if (!site.ic_fn) {
+			if (!site.ic_host_checked) [[unlikely]] { fill_host_site(site, calleeVal); }
+			if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; }
+		}
 	} else {
 		bool parked_direct = false;
 		if (calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
@@ -12916,7 +12922,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 					site.ic_fn = pc.fn;
 					site.ic_argc = static_cast<uint32_t>(argc);
 					site.ic_native = false;
-					fill_host_site(site, calleeVal);
+					clear_host_site(site);
 				}
 			} else if (!thunk && !calleeVal.unchecked_as_function().target<script_static_method_dispatch>()) {   // a static method enters in-loop (invoke_callee)
 				// a host callable takes the arguments as they are (invoke_callee's opaque path): held by its payload, cached
@@ -12929,7 +12935,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 					site.ic_identity = &calleeVal.unchecked_as_function();
 					site.ic_fn = nullptr;
 					site.ic_native = true;
-					fill_host_site(site, calleeVal);
+					clear_host_site(site);
 				}
 			}
 		}
@@ -13320,11 +13326,10 @@ bool vm_backend::call_host_site(const call_site& site, size_t argc, op_status& s
 	stack_.push_back(std::move(out.value()));
 	return true;
 }
-// the site's host lane from its cached callee: the one direct overload of an overload dispatcher, else none
+// the site's host lane from its cached callee, looked for on the first hit after a refill (a site that misses pays nothing): the one direct overload of an overload dispatcher, else none
 void vm_backend::fill_host_site(const call_site& site, const script_value& callee) {
-	site.ic_host_target = nullptr;
-	site.ic_host_invoke = nullptr;
-	site.ic_host_owner = {};
+	clear_host_site(site);
+	site.ic_host_checked = true;
 	if (site.ic_fn || callee.raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
 	const auto* od = callee.unchecked_as_function().target<engine::overload_dispatch>();
 	engine::overload_dispatch::direct_snapshot snap;

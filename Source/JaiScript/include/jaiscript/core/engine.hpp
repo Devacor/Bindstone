@@ -32,11 +32,6 @@
 
 namespace jai {
 
-    // Class constants namespace (shared with dynamic_binder.hpp)
-    namespace class_constants {
-        inline const std::string CPP_OBJECT_FIELD = "_cpp_object";
-    }
-
     // Forward declarations
     class class_definition;
     class class_instance;
@@ -940,7 +935,7 @@ namespace jai {
         class_registry& get_class_registry();
 
         // Script layers (docs/script_extensible.md). A script class deriving a bound C++ class
-        // owns its object through _cpp_object; the object carries the layer back through its
+        // owns its object as its native object; the object carries the layer back through its
         // script_extensible slot (else this engine's weak map), so every boundary return of a
         // shared_ptr<Base> hands script the layer, and serialization writes the script class.
         //
@@ -971,8 +966,8 @@ namespace jai {
         template<typename T>
         std::shared_ptr<class_instance> script_layer(const T& object) const;
 
-        // Map path for types without the slot, keyed by the pointer stored in _cpp_object.
-        // note_script_layer is called from class_instance::set_field.
+        // Map path for types without the slot, keyed by the native object's pointer.
+        // note_script_layer is called from class_instance::set_native.
         void note_script_layer(const void* cpp_object, const std::weak_ptr<class_instance>& owner);
         std::shared_ptr<class_instance> script_layer_of(const void* cpp_object) const;
         // Archive: $type (script class) + $script (fields as JSON) for a layer this engine owns;

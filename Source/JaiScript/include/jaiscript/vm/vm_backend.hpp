@@ -1095,7 +1095,6 @@ namespace jai::vm {
         uint64_t to_string_id_ = 0;
         uint64_t to_bool_id_ = 0;
         uint64_t eq_method_id_ = 0;
-        uint64_t cpp_object_field_id_ = 0;
         uint64_t same_as_id_ = 0;
         uint64_t builtin_push_id_ = 0;   // "push" (the array-push inline fast path)
         uint64_t builtin_has_id_ = 0;    // "has" (the map-has inline)
@@ -1782,8 +1781,6 @@ namespace jai::vm {
                 site.nat_shape = cd.field_shape_epoch();
                 site.nat_entry = entry;
                 site.nat_field_free = !cd.chain_declares_field(id) && cd.field_slot(id) == class_definition::k_no_field_slot;
-                const uint64_t cpp_id = inst.get_cpp_object_field_id();
-                site.nat_cpp_slot = cpp_id ? cd.field_slot(cpp_id) : class_definition::k_no_field_slot;
             }
             if (!entry || inst.has_field(id)) { return nullptr; }
             self = inst.cpp_object_pointer();

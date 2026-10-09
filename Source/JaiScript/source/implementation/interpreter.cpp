@@ -2975,7 +2975,6 @@ interpreter::interpreter()
         throw std::runtime_error("this_id_ mismatch with symbolizer");
     }
 	getValue_id_ = string_symbolizer_->intern("getValue");
-	cpp_object_field_id_ = string_symbolizer_->intern(class_constants::CPP_OBJECT_FIELD);
 
     // Initialize built-in method registries with interned method names
     init_builtin_methods();
@@ -3048,7 +3047,6 @@ interpreter::interpreter(string_symbolizer* external_symbolizer)
 		throw std::runtime_error("this_id_ mismatch with symbolizer");
 	}
 	getValue_id_ = string_symbolizer_->intern("getValue");
-	cpp_object_field_id_ = string_symbolizer_->intern(class_constants::CPP_OBJECT_FIELD);
 
     // Initialize built-in method registries with interned method names
     init_builtin_methods();
@@ -13924,14 +13922,12 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                     }
                                                     script_value cpp_obj = std::move(cpp_result.value());
 
-                                                    // Copy _cpp_object from C++ instance to our instance
+                                                    // The C++ instance's object becomes ours
                                                     if (cpp_obj.is_object()) {
                                                         auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
                                                         if (cpp_instance) {
-                                                            uint64_t src_id = cpp_instance->get_cpp_object_field_id();
-                                                            uint64_t dst_id = instance->get_cpp_object_field_id();
-                                                            if (cpp_instance->has_field(src_id)) {
-                                                                instance->set_field(dst_id, cpp_instance->get_field(src_id));
+                                                            if (const script_value* native = cpp_instance->native()) {
+                                                                instance->set_native(*native);
                                                             }
                                                         }
                                                     }
@@ -14021,17 +14017,12 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                 }
                                 script_value cpp_obj = std::move(result.value());
 
-                                // Extract the C++ object and store it in _cpp_object field
+                                // The parent's C++ object becomes ours
                                 if (cpp_obj.is_object()) {
                                     auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
                                     if (cpp_instance) {
-                                        // Use each instance's own field ID getter to ensure consistency
-                                        uint64_t src_field_id = cpp_instance->get_cpp_object_field_id();
-                                        uint64_t dst_field_id = instance->get_cpp_object_field_id();
-                                        if (cpp_instance->has_field(src_field_id)) {
-                                            // Copy _cpp_object from parent to derived instance
-                                            auto src_value = cpp_instance->get_field(src_field_id);
-                                            instance->set_field(dst_field_id, src_value);
+                                        if (const script_value* native = cpp_instance->native()) {
+                                            instance->set_native(*native);
                                         }
                                     }
                                 }

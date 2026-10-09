@@ -222,7 +222,7 @@ void add_class_members(program_view& view, item_list& items, std::string_view cl
 		if (!statics_only) {
 			for (const auto& [id, _] : d->get_all_field_defaults()) {
 				std::string name(sym->get_string(id));
-				if (!name.empty() && name != jai::class_constants::CPP_OBJECT_FIELD) { items.add(name, 5, d->get_name() + "." + name, 1); }
+				if (!name.empty()) { items.add(name, 5, d->get_name() + "." + name, 1); }
 			}
 		}
 		for (const auto& parent : d->get_parent_classes()) { if (parent) { chain.push_back(parent.get()); } }

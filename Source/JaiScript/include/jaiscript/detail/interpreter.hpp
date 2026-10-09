@@ -954,7 +954,6 @@ namespace jai {
 		uint64_t this_id_;
 		uint64_t super_id_;
 		uint64_t getValue_id_;
-		uint64_t cpp_object_field_id_;  // "_cpp_object"
 
         // The running assignment's value is consumed (it reads the destination back); false only for the root of an
         // expression statement, whose value is discarded

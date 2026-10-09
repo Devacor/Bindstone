@@ -164,6 +164,7 @@ void class_instance::release_fields() noexcept {
         ++m->depth;
         while (!flat_fields_.empty()) { flat_fields_.pop_back(); }
         overflow_fields_.reset();
+        extras_.reset();
         --m->depth;
         return;
     }
@@ -177,6 +178,9 @@ void class_instance::release_fields() noexcept {
         for (auto& [id, value] : *overflow_fields_) {
             if (value.release_cascades()) { m->stack.push_back({std::move(value), detail::release_machine::k_no_frame}); }
         }
+    }
+    if (const script_value* held = native(); held && held->release_cascades()) {
+        m->stack.push_back({std::move(*extras_->native), detail::release_machine::k_no_frame});
     }
     if (driver) {
         std::reverse(m->stack.begin() + static_cast<ptrdiff_t>(mark), m->stack.end());
@@ -196,6 +200,7 @@ void class_instance::release_orphan_fields() noexcept {
                 if (value.release_cascades()) { work.push_back(std::move(value)); }
             }
         }
+        if (const script_value* held = from.native(); held && held->release_cascades()) { work.push_back(std::move(*from.extras_->native)); }
     };
     take_cells(*this);
     while (!work.empty()) {

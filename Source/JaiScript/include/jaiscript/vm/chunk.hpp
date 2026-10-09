@@ -166,7 +166,6 @@ namespace jai::vm {
         mutable uint64_t nat_stamp = 0;
         mutable uint64_t nat_shape = 0;
         mutable const void* nat_entry = nullptr;
-        mutable uint32_t nat_cpp_slot = UINT32_MAX;
         mutable bool nat_field_free = false;
         std::vector<uint32_t> staged_argument_slots;   // immutable owned temps released if this call is abandoned before invocation
         // op_new: the class name's symbol, interned when the site compiles

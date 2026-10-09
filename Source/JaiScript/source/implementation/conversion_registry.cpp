@@ -50,7 +50,7 @@ checked_result<void*> checked_native_reference(const script_value& value, const 
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch),
 				"Script layer was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
 		}
-		auto* native = instance->find_field_value(instance->get_cpp_object_field_id());
+		auto* native = instance->native();
 		const auto* native_holder = native ? native->peek_object_holder() : nullptr;
 		if (!native_holder || native_holder->is_class_instance_wrapper) {
 			return checked_result<void*>(make_error_code(runtime_error_code::type_mismatch), "Object type mismatch");
@@ -73,7 +73,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
 				"Script layer was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object");
 		}
-		auto* native = instance->find_field_value(instance->get_cpp_object_field_id());
+		auto* native = instance->native();
 		if (!native) {
 			return checked_result<std::shared_ptr<void>>(make_error_code(runtime_error_code::type_mismatch),
 				"Field '_cpp_object' not found and no default value available");

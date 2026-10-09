@@ -44,7 +44,7 @@ carried across the boundary.
   Every path that hands the object to script (`make_object`, boundary returns, archive load)
   yields that layer while it lives. There is no second wrapper, no per-crossing instance.
 - **S2 — Ownership follows creation.** A hybrid the *script constructed* (`Voidkin()`) owns
-  its C++ object (`_cpp_object` is a strong handle; the object's slot points back weakly). An
+  its C++ object (the instance's native object is a strong handle; the object's slot points back weakly). An
   object that was *extended* owns its layer for its lifetime (strong slot; the layer holds the
   object without owning it, weakly for `shared_ptr` extraction). Neither direction cycles.
   When an extended object dies while a script still holds its layer, the layer is retired
@@ -92,7 +92,7 @@ carried across the boundary.
   `extend` takes are all the script class name. Its C++ base is `$val`'s type.
 - **S9 — Backend parity.** Both backends run field initializers for `extend` through the
   same `execution_backend::apply_field_initializers` entry; the hook that records the layer
-  (`class_instance::set_field` on `_cpp_object`) is shared, so binder-ctor `super()`, `extend`,
+  (`class_instance::set_native`) is shared, so binder-ctor `super()`, `extend`,
   and archive load register identically by construction.
 - **S10 — C++ properties are members.** Inside a hybrid's methods (and the lambdas made
   there) a bare `.property()` name resolves on the member rung of the lookup ladder
@@ -113,15 +113,15 @@ carried across the boundary.
 | D1b | `extend` is a script builtin (engine-core, every engine has it) taking the bare class name — its constructor value carries the class definition — or a string. | Script controls extension entirely; C++ never bakes in a class name. |
 | D2 | `property_owner<Derived, Bases...>` derives `script_extensible` unless a base already does; with several extensible bases the first one's slot is re-exported (`jai_script_slot`). | Every reflected type is extensible for free; no ambiguous member under multiple inheritance. |
 | D3 | Types without the mixin still work through the engine-owned weak map keyed by complete-object pointer. | Third-party bases can't derive anything; the map is the universal fallback. |
-| D4 | Slot writes and reads go through per-class hooks registered by `dynamic_binder<T>` when `T` is extensible; the existing `_cpp_object` `set_field` hook is the single choke point. | One place decides slot-vs-map; every adoption path already funnels there. |
+| D4 | Slot writes and reads go through per-class hooks registered by `dynamic_binder<T>` when `T` is extensible; the `set_native` hook is the single choke point. | One place decides slot-vs-map; every adoption path already funnels there. |
 | D5 | `make_object(shared_ptr<T>)`, `write_shared_payload`, and `engine::script_layer` branch statically on `is_base_of_v<script_extensible, T>`: slot deref (no `dynamic_cast`, no hash) else map. | The hot path is a pointer read; the map only pays where it must. |
 | D6 | `extend` requires the class to derive the object's registered C++ class (through any script chain); the object is taken as it crossed the boundary (its dynamic class). | No pointer adjustment, no static-type guessing; a mismatch is a one-line error naming both. |
 | D7 | `extend` on an object layered by *another* engine moves the layer: fields saved by name from the old engine, old layer retired, new layer hydrated. `script_layer_detach` does the first half alone. | S6 as a one-liner for extensible types; explicit two-step (`B.extend(obj, cls, A.script_layer_detach(obj))`) for map-only types, which no engine can see into another's map for. |
 | D8 | A retired layer carries a flag; the C++ extraction funnels and the property-getter paths report on it. A retired *extended* layer references an object it no longer owns (fine: the object outlives it or the flag catches the access); a retired *constructed* layer keeps owning its object. | Stale use must not reach an object another layer speaks for (S7); no holder surgery, one flag. |
-| D8b | An extended object's `_cpp_object` is non-owning: `bound_ptr` for member access (zero cost, guarded by the retired flag), `weak_data` for `shared_ptr` extraction (locks the object's own owner). | The object must be free to die; the layer must still serve `T&` at pointer-read cost and `shared_ptr` with real ownership. |
+| D8b | An extended object's native object is non-owning: `bound_ptr` for member access (zero cost, guarded by the retired flag), `weak_data` for `shared_ptr` extraction (locks the object's own owner). | The object must be free to die; the layer must still serve `T&` at pointer-read cost and `shared_ptr` with real ownership. |
 | D9 | Archive load runs field initializers before `$script` hydration. | Fields untouched during play were never materialized, so they were never saved; without this they load as null. |
 | D10 | Names: `script_extensible` (members `script_layer`, `script_layer_to_json`, `script_layer_from_json`, `attach_script_layer`, `own_script_layer`, `detach_script_layer`, `jai_script_slot`), `engine::extend`, `engine::add_global_extended`, `engine::script_layer_detach`, `engine::script_layer`; engine internals prefixed `script_layer_`; the script builtin `extend`. Nothing generic (`detach`, `attach`) lands on property_owner-derived types — components own those names. The 2026-09-01 `hybrid_*`/`find_hybrid_instance`/`load_hybrid_instance` engine API is replaced, not kept as aliases. | `adopt` already means definition-adoption in the binder; `extend` is the word the vision doc reserved for exactly this. One vocabulary, no pollution of derived classes. |
-| D13 | Engine literals are interned once (`post_load`, `_cpp_object` via the instance's cached id); errors travel as `checked_result` codes with symbol placeholders, thrown only at the host boundary. | House rules: interned lookups, error codes inside, throw at `execute`-level doors. |
+| D13 | Engine literals are interned once (`post_load`); errors travel as `checked_result` codes with symbol placeholders, thrown only at the host boundary. | House rules: interned lookups, error codes inside, throw at `execute`-level doors. |
 | D14 | Re-derive re-classes the instance in place (`class_instance::reclass`) rather than minting a replacement and retiring the old one; a stale wrapper re-points its handle at the layer on first touch (S3c). | Dev, 2026-09-02: "extend in place in all cases". Handles never go stale within an engine; no retired twins to explain. |
 | D11 | Two-level chains (`Voidling : CreatureKind : ServerCreature`) are hybrids: every hybrid-semantic site resolves the C++ base with `class_definition::find_cpp_base_class()` (chain walk), never the direct-base field. | `cpp_base_class_` is only set on the class whose *direct* base is C++; every mid-class design needs the walk. |
 | D12 | No script-visible surface. `extend` is host-only; script derives and constructs as before. | Script cannot wrap an existing object today either (`TYPE_SYSTEM_DESIGN.md`); the host owns object lifetimes. |
@@ -175,12 +175,12 @@ arguments and get the live layer back through the boundary (S1).
 
 ## 5. Mechanism
 
-**The slot and the hook.** `class_instance::set_field(_cpp_object)` calls
+**The slot and the hook.** `class_instance::set_native` calls
 `note_script_layer_owner`. It resolves the C++ base through `find_cpp_base_class()` (D11) and
 asks the base's `class_definition` for slot hooks (D4): present → `attach(void*, weak)` writes
 the object's slot; absent → `engine::note_script_layer(complete_ptr, weak)` into the map. The
 hooks are two function pointers the binder installs at `build()` when
-`std::is_base_of_v<script_extensible, T>`; the `void*` is `_cpp_object`'s pointer, which by
+`std::is_base_of_v<script_extensible, T>`; the `void*` is the native object's pointer, which by
 the holder contract is a `T*` for the holder's type name.
 
 **The three reads (D5).** `engine_impl.hpp make_object(shared_ptr<T>)`: extensible → slot
@@ -199,7 +199,7 @@ layer's `find_cpp_base_class()` (D11); `derives_from(base)` (D6); object pointer
 holder (`data`, else `weak_data.lock()`); current layer via slot hooks or map: same engine +
 same class → return it; same engine + other class → carry its fields, `detach_object`; other
 engine → `script_layer_save` there, `detach_object` there (D7). Then `build_script_layer`:
-`create_instance` → `_cpp_object` = `make_cpp_reference(base, object*, weak)` + `hooks->own`
+`create_instance` → `set_native(make_cpp_reference(base, object*, weak))` + `hooks->own`
 for slot types, `make_cpp_object` (strong) + engine-owned entry otherwise → hook fires →
 `backend->apply_field_initializers` → carried fields → `fields_json` hydration → `post_load`.
 
@@ -211,7 +211,7 @@ recursion. Limitation, stated: a class declared inside a function (whose initial
 that function's locals) sees globals under `extend`; every extension-shaped class is top-level.
 
 **Retired layers (D8).** `detach_object` clears the slot/map entry and marks the old layer
-retired (`class_instance::retire_script_layer`); `_cpp_object` stays as it was, so the
+retired (`class_instance::retire_script_layer`); the native object stays as it was, so the
 object lives as long as any old handle. The two C++ extraction funnels
 (`class_instance::get_cpp_object`, `engine_extract_instance_cpp_object`) throw on a retired
 layer, naming the class and the cause. The property-getter path in both backends wraps the
@@ -220,7 +220,7 @@ getter (script getters and synthesized field accessors are left alone: the layer
 fields stay readable) and rethrows the report through the catch.
 
 **Copy (S4).** `class_instance::deep_copy` registers the copy as the layer of the copied C++
-object explicitly — its `_cpp_object` write happens before the copy has a class definition,
+object explicitly — its native-object write happens before the copy has a class definition,
 so the `set_field` hook alone could not.
 
 **Archive.** Write: unchanged envelope (`$type` script class, `$script`, `$val`). Read:
@@ -235,7 +235,7 @@ returns, a map type's layer owns the object and the returned pointer aliases the
    owning layer. Any code that *relied* on the wrapper being distinct (none known) changes.
 2. **Assignment copies, capture shares (S4).** Already the implemented behavior
    (`deep_copy` copies the C++ object through the registered copy function; `clone_for_capture`
-   shares instances holding `_cpp_object`); this doc pins it and adds tests. Alternative
+   shares instances holding a native object); this doc pins it and adds tests. Alternative
    considered: make hybrid assignment share too (entity semantics). Rejected here: it would
    make `var b = a;` mean two things depending on whether `a`'s class has a C++ base.
 3. **`extend` moves foreign layers and re-derives silently-on-purpose (D7, S3b).**

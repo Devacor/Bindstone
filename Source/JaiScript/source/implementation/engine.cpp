@@ -2139,8 +2139,7 @@ void engine::initialize_engine_reference() {
             auto instance = std::static_pointer_cast<class_instance>(obj);
 
             if (instance->script_layer_retired()) { instance->throw_retired_script_layer(); }
-            // Get the C++ object from the special field
-            script_value cppObjValue = instance->get_field(instance->get_cpp_object_field_id());
+            script_value cppObjValue = instance->native_or_throw();
             if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
                 // Direct access to the object_holder to avoid recursive extraction. An extended
                 // object's holder is non-owning: hand its pointer out as an unowned alias (the
@@ -5480,9 +5479,8 @@ bool engine::script_layer_save(const std::shared_ptr<class_instance>& layer, std
         for (uint64_t id : def.field_order()) { if (!def.has_static_field(id)) { script_fields.insert(id); } }
     };
     collect(*class_def);
-    uint64_t cpp_object_id = layer->get_cpp_object_field_id();
     layer->for_each_field([&](uint64_t id, const script_value& value) {
-        if (id == cpp_object_id || !script_fields.count(id)) { return; }
+        if (!script_fields.count(id)) { return; }
         fieldMap.emplace(script_value(std::string(get_symbolizer()->get_string(id)), this), value);
     });
     serialization::json_archive_writer writer(-1, this);
@@ -5548,21 +5546,19 @@ checked_result<std::shared_ptr<class_instance>> engine::build_script_layer(const
         return result(make_error_code(runtime_error_code::extend_rejected),
             "extend: could not instantiate script class '{0}'", script_def->get_type_id());
     }
-    uint64_t cpp_object_id = instance->get_cpp_object_field_id();
     if (auto hooks = base_def->slot_hooks()) {
         // the object owns its layer: the layer only references the object (weakly for ownership)
-        instance->set_field(cpp_object_id,
-            script_value::make_cpp_reference(base_def->get_name(), base_def->get_type_id(), object.get(), object, this));
+        instance->set_native(script_value::make_cpp_reference(base_def->get_name(), base_def->get_type_id(), object.get(), object, this));
         hooks->own(object.get(), instance);
         base_def->note_extended();
     } else {
-        instance->set_field(cpp_object_id, script_value::make_cpp_object(base_def->get_name(), base_def->get_type_id(), object, this));
+        instance->set_native(script_value::make_cpp_object(base_def->get_name(), base_def->get_type_id(), object, this));
         if (engine_owned) { impl->owned_script_layers_[object.get()] = instance; }
     }
     backend()->apply_field_initializers(instance, script_def);
     if (carry_from) {
         carry_from->for_each_field([&](uint64_t id, const script_value& value) {
-            if (id != cpp_object_id && instance->has_field(id)) { instance->set_field(id, value.clone()); }
+            if (instance->has_field(id)) { instance->set_field(id, value.clone()); }
         });
     }
     if (!fields_json.empty()) {
@@ -5605,11 +5601,9 @@ namespace {
 // new class, seed and initialize every declared field, then put the carried values back
 // where the new class declares them (fields only the old class declared stay in overflow).
 void reclass_in_place(engine& eng, const std::shared_ptr<class_instance>& instance,
-                      const std::shared_ptr<class_definition>& script_def, uint64_t skip_id) {
+                      const std::shared_ptr<class_definition>& script_def) {
     std::vector<std::pair<uint64_t, script_value>> carried;
-    instance->for_each_field([&](uint64_t id, const script_value& value) {
-        if (id != skip_id) { carried.emplace_back(id, value); }
-    });
+    instance->for_each_field([&](uint64_t id, const script_value& value) { carried.emplace_back(id, value); });
     instance->reclass(script_def);
     for (const auto& [id, default_value] : script_def->get_all_field_defaults()) {
         if (!instance->has_field_value(id)) { instance->set_field(id, default_value); }
@@ -5646,7 +5640,7 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
             return result(make_error_code(runtime_error_code::extend_rejected),
                 "extend: '{0}' does not derive '{1}'", class_id, instance_def->get_type_id());
         }
-        reclass_in_place(*this, instance, script_def, 0);
+        reclass_in_place(*this, instance, script_def);
         return as_layer();
     }
 
@@ -5666,8 +5660,7 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
             "Script layer '{0}' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object",
             instance_def->get_type_id());
     }
-    const uint64_t cpp_object_id = instance->get_cpp_object_field_id();
-    script_value cpp_value = instance->get_field(cpp_object_id);
+    script_value cpp_value = instance->native_or_throw();
     auto cpp_holder = cpp_value.get_object_holder();
     std::shared_ptr<void> cpp_object = cpp_holder->data ? cpp_holder->data : cpp_holder->weak_data.lock();
     if (!cpp_object) {
@@ -5695,12 +5688,11 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
     }
     if (instance_def != script_def.get()) {
         const bool was_wrapper = !instance_def->is_script_class();
-        reclass_in_place(*this, instance, script_def, cpp_object_id);
+        reclass_in_place(*this, instance, script_def);
         if (was_wrapper) {
             // the wrapper owned the object outright; as a layer it must not (S2)
             if (auto hooks = base->slot_hooks()) {
-                instance->set_field(cpp_object_id,
-                    script_value::make_cpp_reference(base->get_name(), base->get_type_id(), key, cpp_object, this));
+                instance->set_native(script_value::make_cpp_reference(base->get_name(), base->get_type_id(), key, cpp_object, this));
                 hooks->own(key, instance);
                 base->note_extended();
             } else {
@@ -5735,9 +5727,8 @@ checked_result<script_value> engine::extend_checked(const script_value& object, 
 std::string engine::detach_object(const std::shared_ptr<class_instance>& layer) {
     std::string class_name, fields;
     script_layer_save(layer, class_name, fields);
-    uint64_t field_id = layer->get_cpp_object_field_id();
-    if (field_id == 0 || !layer->has_field_value(field_id)) { return fields; }
-    script_value owning = layer->get_field(field_id);
+    if (!layer->native_lookup_enabled() || !layer->native()) { return fields; }
+    script_value owning = *layer->native();
     auto holder = owning.get_object_holder();
     if (!holder) { return fields; }
     void* object = holder->data ? holder->data.get() : holder->bound_ptr;
@@ -5808,9 +5799,8 @@ bool detail::script_layer_from_json(const std::shared_ptr<class_instance>& layer
 std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data) {
     if (!eng || !instance_data) { return nullptr; }
     auto instance = std::static_pointer_cast<class_instance>(instance_data);
-    uint64_t field_id = instance->get_cpp_object_field_id();
-    if (field_id == 0 || !instance->has_field_value(field_id)) { return nullptr; }
-    const script_value& cppObjValue = instance->get_field(field_id);
+    if (!instance->native_lookup_enabled() || !instance->native()) { return nullptr; }
+    const script_value& cppObjValue = *instance->native();
     if (cppObjValue.is_null() || cppObjValue.type() != script_value_type::jai_object_type) { return nullptr; }
     auto objHolder = cppObjValue.get_object_holder();
     if (!objHolder) { return nullptr; }
@@ -5891,11 +5881,10 @@ std::shared_ptr<void> engine_extract_instance_cpp_object(engine* eng, const std:
     }
     auto instance = std::static_pointer_cast<class_instance>(instance_data);
     if (instance->script_layer_retired()) { instance->throw_retired_script_layer(); }
-    uint64_t field_id = instance->get_cpp_object_field_id();
-    if (field_id == 0 || !instance->has_field_value(field_id)) {
+    if (!instance->native_lookup_enabled() || !instance->native()) {
         return nullptr;
     }
-    const script_value& cppObjValue = instance->get_field(field_id);
+    const script_value& cppObjValue = *instance->native();
     if (!cppObjValue.is_null() && cppObjValue.type() == script_value_type::jai_object_type) {
         auto objHolder = cppObjValue.get_object_holder();
         if (!objHolder) { return nullptr; }

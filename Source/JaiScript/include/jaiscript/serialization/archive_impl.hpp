@@ -163,7 +163,7 @@ protected:
     }
 
     // Every property with a getter, in the class's order: C++ bound properties, script fields through their
-    // synthesized getters, hybrids (inherited C++ properties chain through the C++ base; _cpp_object has no getter).
+    // synthesized getters, hybrids (inherited C++ properties chain through the C++ base).
     // A script-declared accessor's error and a host exception leave the archive; a host property that cannot read
     // stays out. False when a getter threw into the backend: the in-flight exception leaves the archive.
     template <class ClassDef, class Emit>

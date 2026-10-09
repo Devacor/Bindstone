@@ -128,11 +128,18 @@ namespace jai::detail {
         a->for_each_field([&](uint64_t id, const script_value& v) { fa.emplace_back(id, &v); });
         size_t nb = 0;
         b->for_each_field([&](uint64_t, const script_value&) { ++nb; });
-        if (fa.size() != nb) { return checked_result<script_value>(script_value(false, eng)); }
+        if (fa.size() + (a->native() ? 1 : 0) != nb + (b->native() ? 1 : 0)) { return checked_result<script_value>(script_value(false, eng)); }
         for (const auto& [id, va] : fa) {
             const script_value* vb = b->find_field_value(id);
             if (!vb) { return checked_result<script_value>(script_value(false, eng)); }
             auto res = eq(*va, *vb);
+            if (!res) { return res; }
+            if (!res.value().unchecked_as_bool()) { return checked_result<script_value>(script_value(false, eng)); }
+        }
+        if (const script_value* na = a->native()) {
+            const script_value* nb_native = b->native();
+            if (!nb_native) { return checked_result<script_value>(script_value(false, eng)); }
+            auto res = eq(*na, *nb_native);
             if (!res) { return res; }
             if (!res.value().unchecked_as_bool()) { return checked_result<script_value>(script_value(false, eng)); }
         }

@@ -1915,6 +1915,57 @@ public:
             check(held != nullptr && held->health == 61, "the C++ object behind the reloaded instance is the one it had");
         });
 
+        test("the_native_object_is_no_member", [&]() {
+            auto eng = native_engine();
+            eng->execute(R"(
+                function raised(function f) -> string {
+                    try { f(); } catch (e) { return e; }
+                    return "no error";
+                }
+                function probe(var o, string name) -> string {
+                    string r = raised(() => reflect::get(o, name)) + "\n";
+                    r += to_string(reflect::has_field(o, name)) + "\n";
+                    r += to_string(reflect::fields(o).some((f) => f["name"] == name)) + "\n";
+                    return r;
+                }
+            )");
+            for (const char* make : {"HybridCreature()", "Voidkin()"}) {
+                eng->execute(std::string("var probed = ") + make + ";");
+                const std::string absent = eng->execute("probe(probed, \"nothere\")").as<std::string>();
+                check(absent.find("has no member 'nothere'") != std::string::npos, "reflect::get raises its no-member text");
+                std::string expected = absent;
+                for (size_t at = expected.find("nothere"); at != std::string::npos; at = expected.find("nothere", at)) {
+                    expected.replace(at, 7, "_cpp_object");
+                }
+                check_eq(expected, eng->execute("probe(probed, \"_cpp_object\")").as<std::string>(), "reflect sees no _cpp_object");
+                auto member_text = [&](const std::string& name) {
+                    try { eng->execute("var read_" + name + " = probed." + name + ";"); }
+                    catch (const std::exception& e) {
+                        std::string text = e.what();
+                        for (size_t at = text.find(name); at != std::string::npos; at = text.find(name, at + 1)) { text.replace(at, name.size(), "NAME"); }
+                        return text;
+                    }
+                    return std::string("no error");
+                };
+                check_ne(std::string("no error"), member_text("nothere"));
+                check_eq(member_text("nothere"), member_text("_cpp_object"), "a member read of _cpp_object raises the absent-member text");
+            }
+            eng->static_checking(check_mode::strict);
+            // The checker leaves a C++-based chain's members open; a script-only class reports an absent member at load
+            auto checker_text = [&](const std::string& type, const std::string& name) {
+                try { eng->execute("class Plain { int a = 1; }\nfunction typed_read() -> int { " + type + " v = " + type + "(); var x = v." + name + "; return 0; }"); }
+                catch (const std::exception& e) {
+                    std::string text = e.what();
+                    for (size_t at = text.find(name); at != std::string::npos; at = text.find(name, at + 1)) { text.replace(at, name.size(), "NAME"); }
+                    return text;
+                }
+                return std::string("no error");
+            };
+            check_ne(std::string("no error"), checker_text("Plain", "nothere"), "the checker reports an absent member of a script class");
+            check_eq(checker_text("Plain", "nothere"), checker_text("Plain", "_cpp_object"), "the checker reports _cpp_object like any absent member");
+            check_eq(checker_text("Voidkin", "nothere"), checker_text("Voidkin", "_cpp_object"), "and leaves it open on a hybrid like any other name");
+        });
+
         test("archives_written_before_read_after", [&]() {
             auto eng = native_engine();
             eng->execute("var v = Voidkin(); v.health = 42; v.label = \"gnasher\"; v.chomp = 7;");

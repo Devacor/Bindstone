@@ -51,6 +51,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (interp parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (interp parity)
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (interp parity)
+#include <jaiscript/detail/function_overloads.hpp>
 #ifdef JAISCRIPT_VM_PROFILE
 #include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
 // the cell blocks' own costs (inclusive cycles and counts): a block run from the dispatcher, the entry, a flush, a miss, a landing, a raw entry,
@@ -13860,6 +13861,14 @@ op_status vm_backend::guarded_native_call(Call&& call) {
 op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site) {
 	const size_t argc = arguments.size();
 
+	if (const script_callable* held = detail::script_callable_of(callee, engine_);
+	    held && held->kind == script_callable::kind_type::overload_set && held->overloads) {
+		// the member these arguments select (KEEP BYTE-PARALLEL with the interpreter's call)
+		auto picked = detail::select_overload_member(*held->overloads, arguments.data(), argc, engine_);
+		if (!picked) { return raise_from(picked); }
+		script_value member = *picked.value();
+		callee = std::move(member);
+	}
 	const script_function& func = callee.as_function();
 	// Own-trampoline fast path: dispatch straight into the call machinery (Squirrel's
 	// OP_CALL→StartCall shape), skipping std::function + backend lookup + virtual hop
@@ -14055,11 +14064,13 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	payload.kind = script_callable::kind_type::function;
 	proto.fn->unit = current_unit();
 	proto.fn->block_defined = environment_ && environment_->block_scope();
+	proto.fn->declared = true;
 	payload.fn = proto.fn;
 	script_value functionValue = script_value::make_function(
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
 
-	environment_->define(proto.decl->name_id, functionValue);
+	// alone, or in the overload set of its name (KEEP BYTE-PARALLEL with interpreter::visit_function_decl)
+	environment_->define(proto.decl->name_id, detail::declare_function_overload(*environment_, proto.decl->name_id, proto.fn, std::move(functionValue), engine_));
 	engine_->bump_definition_epoch();
 	return {};
 }
@@ -14972,16 +14983,10 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 					return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
 				}
 
-				// Trailing defaults open the window; the candidate using fewest defaults wins
-				std::shared_ptr<function_decl> ns_pick;
-				size_t ns_defaults = SIZE_MAX;
-				for (const auto& fd : overloads) {
-					if (arity_accepts(fd->parameters, args.size()) &&
-					    fd->parameters.size() - args.size() < ns_defaults) {
-						ns_pick = fd;
-						ns_defaults = fd->parameters.size() - args.size();
-					}
-				}
+				// The overload these arguments select through the one scorer (a tie raises), else the sole arity match
+				auto ns_selected = select_declaration(overloads, args, member_id, eng);
+				if (!ns_selected) { return ns_selected.error_value(); }
+				std::shared_ptr<function_decl> ns_pick = std::move(ns_selected.value());
 				{
 					const auto& func_decl = ns_pick;
 					if (func_decl) {
@@ -17982,16 +17987,10 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 
 			func_decl->unit = current_unit();
 			auto& overloads = ns_data->functions[func_decl->name_id];
-			for (auto it = overloads.begin(); it != overloads.end(); ++it) {
-				if ((*it)->parameters.size() == func_decl->parameters.size()) {
-					if (!func_decl->is_override) {
-						return raise_(make_error_code(runtime_error_code::type_mismatch),
-							"Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
-							func_decl->name_id, decl->name_id);
-					}
-					overloads.erase(it);
-					break;
-				}
+			if (!detail::admit_namespace_function(overloads, *func_decl)) {
+				return raise_(make_error_code(runtime_error_code::type_mismatch),
+					"Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
+					func_decl->name_id, decl->name_id);
 			}
 
 			if (!func_decl->is_override) {
@@ -18290,8 +18289,9 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 					if (parent_script_class) {
 						// fewest defaults used wins
 						const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
-						std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the sole arity match
-						if (!parent_ctor) { parent_ctor = sole_arity_candidate(parent_ctor_asts, init_args); }
+						auto parent_ctor_pick = select_declaration(parent_ctor_asts, init_args, parent_script_class->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
+						if (!parent_ctor_pick) { return parent_ctor_pick.error_value(); }
+						std::shared_ptr<function_decl> parent_ctor = std::move(parent_ctor_pick.value());
 						if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
 							parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the interpreter
 						}
@@ -18340,8 +18340,9 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 											if (ancestor_script) {
 												// fewest defaults used wins
 												const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
-												std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the sole arity match
-												if (!ancestor_ctor) { ancestor_ctor = sole_arity_candidate(ancestor_ctors, ancestor_args); }
+												auto ancestor_ctor_pick = select_declaration(ancestor_ctors, ancestor_args, ancestor_script->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
+												if (!ancestor_ctor_pick) { return ancestor_ctor_pick.error_value(); }
+												std::shared_ptr<function_decl> ancestor_ctor = std::move(ancestor_ctor_pick.value());
 												if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
 													ancestor_ctor = ancestor_script->implicit_default_constructor();
 												}
@@ -18491,8 +18492,9 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 			// the delegation target through the one scorer (typed exact > conversion > var), else the sole arity match
 			std::vector<std::shared_ptr<function_decl>> other_ctors;
 			for (const auto& ctor_ast : all_ctor_asts) { if (ctor_ast != matching_ctor) { other_ctors.push_back(ctor_ast); } }
-			std::shared_ptr<function_decl> target_ctor = pick_best_overload(other_ctors, init_args);
-			if (!target_ctor) { target_ctor = sole_arity_candidate(other_ctors, init_args); }
+			auto target_ctor_pick = select_declaration(other_ctors, init_args, class_def->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
+			if (!target_ctor_pick) { return target_ctor_pick.error_value(); }
+			std::shared_ptr<function_decl> target_ctor = std::move(target_ctor_pick.value());
 
 			if (!target_ctor) {
 				return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
@@ -18556,10 +18558,10 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
 	if (ctor_asts.size() == 1) {
 		if (arity_accepts(ctor_asts[0]->parameters, args.size())) { matching_ctor = ctor_asts[0]; }
 	} else {
-		matching_ctor = pick_best_overload(ctor_asts, args);
-		if (!matching_ctor) {   // no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss
-			matching_ctor = sole_arity_candidate(ctor_asts, args);
-		}
+		// no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss; a tie raises
+		auto matching_pick = select_declaration(ctor_asts, args, class_def->get_type_id(), engine_);
+		if (!matching_pick) { return matching_pick.error_value(); }
+		matching_ctor = std::move(matching_pick.value());
 	}
 
 	if (!matching_ctor) {
@@ -21643,6 +21645,15 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 	switch (payload.kind) {
 		case script_callable::kind_type::function:
 			return call_script_function(*payload.fn, args);
+		case script_callable::kind_type::overload_set: {
+			if (!payload.overloads) {
+				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Overload set payload without members");
+			}
+			auto picked = detail::select_overload_member(*payload.overloads, args.data(), args.size(), engine_);
+			if (!picked) { return picked.error_value(); }
+			const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
+			return member && member->fn ? call_script_function(*member->fn, args) : picked.value()->as_function()(args);
+		}
 		case script_callable::kind_type::method: {
 			if (!payload.this_obj) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Method payload without 'this' receiver");
@@ -22201,7 +22212,9 @@ bool vm_backend::enter_static_method(frame& caller, script_value& callee, const 
 	const auto& table = dispatch->cls->script_static_method_overloads();
 	const auto it = table.find(dispatch->name_id);
 	if (it != table.end() && it->second.size() > 1) {
-		if (auto best = pick_best_overload(it->second, arguments)) { ast = std::move(best); }
+		const auto verdict = score_declarations(it->second, arguments.data(), arguments.size());
+		if (verdict.rival) return false;   // the dispatcher raises the tie
+		if (verdict.best) { ast = *verdict.best; }
 	}
 	if (!ast->body || ast->is_coroutine) return false;   // a coroutine mints a handle: the opaque call's execute_method_ast
 	try {

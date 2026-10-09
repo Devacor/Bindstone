@@ -814,9 +814,10 @@ private:
     }
 
     // The general redefinition rule (Dev ruling 2026-10-07, docs/const.md 4.3): two definitions of one signature in the same unit
-    // are an error - program-scope functions by name (they do not overload), methods, constructors and namespace functions by
-    // their parameter types; const is not part of a signature. A definition from another unit is a redefinition, the hot-reload
-    // path: it replaces the earlier one, and the checker warns when it sees the earlier definition.
+    // are an error - program-scope functions, methods, constructors and namespace functions, by their parameter types (T& and T
+    // differ; const is not part of a signature). Declarations of other signatures are overloads (Dev ruling 2026-10-02). A
+    // definition of the same signature from another unit is a redefinition, the hot-reload path: it replaces the earlier one, and
+    // the checker warns when it sees the earlier definition.
     static std::string parameter_signature(const function_decl* fn) {
         std::string out = "(";
         for (size_t i = 0; i < fn->parameters.size(); ++i) {
@@ -828,8 +829,8 @@ private:
         return out + ")";
     }
 
-    // by_name: program-scope functions, which do not overload - a second definition of another signature replaces the first
-    // (a warning), one of the same signature is the redefinition error. An `override` declaration replaces on purpose; a
+    // by_name: program-scope functions - a coroutine does not overload, so a function and a coroutine of one name replace each
+    // other (a warning); one of the same signature is the redefinition error. An `override` declaration replaces on purpose; a
     // static and an instance method live in separate tables.
     void report_redefinitions(const std::vector<const function_decl*>& fns, bool by_name) {
         std::unordered_map<std::string, const function_decl*> first_seen;
@@ -847,10 +848,10 @@ private:
             }
             if (!by_name) { continue; }
             auto [nit, fresh] = first_name.emplace(fn->name, fn);
-            if (!fresh && inserted) {
+            if (!fresh && inserted && (fn->is_coroutine || nit->second->is_coroutine)) {
                 diag(diag_level::warning, fn->location,
                      "duplicate definition of function '" + std::string(fn->name) +
-                     "' replaces the earlier one (top-level functions do not overload)",
+                     "' replaces the earlier one (a coroutine does not overload)",
                      nit->second->location.line, nit->second->location.column);
             }
         }
@@ -885,13 +886,16 @@ private:
         }
         report_redefinitions(fns, /*by_name=*/true);
         if (!program_functions_) { return; }
-        std::unordered_set<std::string_view> warned;
+        std::unordered_set<std::string> warned;
         for (const function_decl* fn : fns) {
-            if (!warned.insert(fn->name).second) { continue; }
+            if (!warned.insert(std::string(fn->name) + parameter_signature(fn)).second) { continue; }
             auto pit = program_functions_->find(std::string(fn->name));
             if (pit == program_functions_->end()) { continue; }
             for (const auto& [unit, decls] : pit->second) {
-                const function_decl* other = decls.empty() ? nullptr : decls.front().get();
+                const function_decl* other = nullptr;   // the other unit's declaration of this signature, which this one replaces
+                for (const auto& d : decls) {
+                    if (d && parameter_signature(d.get()) == parameter_signature(fn)) { other = d.get(); break; }
+                }
                 if (!other || other->location.filename == fn->location.filename) { continue; }
                 diag(diag_level::warning, fn->location, "'" + std::string(fn->name) + "' redefines the function defined in " +
                      other->location.filename + ":" + std::to_string(other->location.line));
@@ -2988,7 +2992,115 @@ private:
         if (viable_count == 1 && !only_viable->is_coroutine) {
             out.result = ctype_from_type_info(only_viable->return_type.get());
         }
+        if (viable_count > 1 && scored) { report_ambiguous_call(fname, overloads, args, loc); }
         return out;
+    }
+
+    // Steps from cls up its single-parent chain to base (0 = itself); SIZE_MAX when base is no ancestor or the chain is not modeled
+    size_t class_distance(std::string_view cls, std::string_view base) {
+        size_t steps = 0;
+        std::string_view at = cls;
+        while (steps <= 32) {
+            if (at == base) { return steps; }
+            const sclass* c = find_sclass(at);
+            if (!c || c->decl->base_classes.size() != 1) { break; }
+            at = c->decl->base_classes[0];
+            ++steps;
+        }
+        auto def = engine_class(at);
+        if (!def) { return SIZE_MAX; }
+        const size_t runtime = detail_base_distance(def.get(), base);
+        return runtime == SIZE_MAX ? SIZE_MAX : steps + runtime;
+    }
+
+    static size_t detail_base_distance(const class_definition* def, std::string_view name) { return base_distance(def, name); }
+
+    // The runtime scorer's keys (core/overload_resolution.hpp score_overloads) over static argument types; nullopt when an argument
+    // or a parameter is outside what the static view ranks exactly (an unknown kind, an object a parameter may convert, a container,
+    // a handle). viable=false: a typed parameter the argument matches neither exactly nor by conversion, with no var slot
+    struct static_rank {
+        bool viable = true;
+        size_t mismatches = 0, var_count = 0, defaults = 0, conversions = 0, distance = 0;
+        int score = 0;
+        auto key() const { return std::tie(mismatches, score, var_count, defaults, conversions, distance); }
+    };
+    std::optional<static_rank> static_overload_rank(const function_decl* fn, const std::vector<ctype>& args, bool in_set) {
+        auto [min_a, max_a] = arity_range(fn);
+        if (args.size() < min_a || args.size() > max_a) { return static_rank{false}; }
+        static_rank r;
+        r.defaults = fn->parameters.size() - args.size();
+        bool all_exact = true, all_convertible = true, has_var = false, loose = false;
+        for (size_t i = 0; i < args.size(); ++i) {
+            const parameter& p = fn->parameters[i];
+            if (!p.type || p.type->type_name.empty() || p.type->type_name == "any" || p.type->base_type == script_value_type::jai_any_type) {
+                has_var = true;
+                ++r.var_count;
+                continue;
+            }
+            const ctype& a = args[i];
+            if (a.is_unknown()) { return std::nullopt; }
+            const ctype pt = ctype_from_type_info(p.type.get());
+            auto cost = [&](size_t c) {
+                all_exact = false;
+                if (c) { r.conversions += c; loose = loose || c >= k_loose_conversion; } else { all_convertible = false; ++r.mismatches; }
+            };
+            const bool primitive_a = a.kind == ctype::int_k || a.kind == ctype::float_k || a.kind == ctype::bool_k || a.kind == ctype::char_k ||
+                                     a.kind == ctype::string_k || a.kind == ctype::utf8_k;
+            if (pt.kind == ctype::object_k) {
+                if (a.kind != ctype::object_k) { return std::nullopt; }   // a converting constructor may take it
+                if (a.cls == pt.cls) { continue; }
+                const size_t d = class_distance(a.cls, pt.cls);
+                if (d == SIZE_MAX) { return std::nullopt; }
+                all_exact = false;
+                ++r.conversions;
+                r.distance += d;
+                continue;
+            }
+            if (!primitive_a) { return std::nullopt; }
+            if (a.kind == pt.kind) { continue; }
+            const bool number_to = pt.kind == ctype::int_k || pt.kind == ctype::float_k;
+            if (number_to && (a.kind == ctype::int_k || a.kind == ctype::float_k)) { cost(1); continue; }
+            if (p.is_reference) { cost(0); continue; }
+            switch (pt.kind) {
+                case ctype::int_k: case ctype::float_k: cost(a.kind == ctype::bool_k ? 1 : 0); break;
+                case ctype::bool_k: cost(in_set && (a.kind == ctype::string_k || a.kind == ctype::utf8_k) ? 0 : 2); break;
+                case ctype::string_k: case ctype::utf8_k: cost(2); break;
+                case ctype::char_k: cost(0); break;
+                default: return std::nullopt;
+            }
+        }
+        if (!all_convertible && !has_var) { r.viable = false; return r; }
+        const bool all_typed = !has_var;
+        if (all_typed && all_exact) { r.score = 0; }
+        else if (loose) { r.score = static_cast<int>(2000 + r.conversions); }
+        else if (all_typed) { r.score = static_cast<int>(1 + r.conversions); }
+        else { r.score = 1000; }
+        return r;
+    }
+
+    // Two overloads the runtime scorer could not tell apart on these argument types: the runtime's ambiguous-call text
+    void report_ambiguous_call(std::string_view fname, const std::vector<const function_decl*>& overloads, const std::vector<ctype>& args,
+                               const source_location& loc) {
+        const bool in_set = arity_rivals(overloads, args.size());
+        const function_decl* best = nullptr;
+        const function_decl* rival = nullptr;
+        std::optional<static_rank> best_rank;
+        for (const auto* fn : overloads) {
+            const auto rank = static_overload_rank(fn, args, in_set);
+            if (!rank) { return; }
+            if (!rank->viable) { continue; }
+            if (!best_rank || rank->key() < best_rank->key()) { best = fn; best_rank = rank; rival = nullptr; }
+            else if (rank->key() == best_rank->key() && !rival) { rival = fn; }
+        }
+        if (!best || !rival) { return; }
+        std::string list = "(";
+        for (size_t i = 0; i < args.size() && i < 6; ++i) { if (i) { list += ", "; } list += ctype_name(args[i]); }
+        if (args.size() > 6) { list += ", ..."; }
+        list += ")";
+        const std::string name(fname);
+        diag(diag_level::error, loc, "ambiguous call to '" + name + "' with " + list + ": '" + name + detail::parameter_signature(best->parameters) +
+             "' and '" + name + detail::parameter_signature(rival->parameters) + "' match equally",
+             best->location.line, best->location.column);
     }
 
     // A T& parameter's argument: a primitive of exactly that kind, a class T or a subclass; unknown and var& / auto& pass
@@ -3254,9 +3366,12 @@ private:
             }
             return;
         }
+        size_t viable = 0;
         for (const auto* ctor : c.ctors) {
-            if (script_fn_viable(ctor, args, arity_rivals(c.ctors, args.size()))) { return; }
+            if (script_fn_viable(ctor, args, arity_rivals(c.ctors, args.size()))) { ++viable; }
         }
+        if (viable > 1) { report_ambiguous_call(cls_name, c.ctors, args, loc); }
+        if (viable) { return; }
         report_no_overload(cls_name, c.ctors, args, loc, c.foreign);
     }
 
@@ -3838,7 +3953,7 @@ private:
 				note_global_use(id->name);
 				if (fn_stack_.empty() && !class_ctx_) { report_call_before_declaration(id->name, it->second, c->location); }
 				ov = &it->second;
-				return check_script_overloads(id->name, it->second, args, c->location, false, false).result;
+				return check_script_overloads(id->name, it->second, args, c->location).result;
 			}
 			if (const sclass* sc = find_sclass(id->name)) {
 				check_ctor_call(id->name, *sc, args, c->location);

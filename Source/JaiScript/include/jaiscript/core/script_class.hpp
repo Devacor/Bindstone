@@ -345,7 +345,9 @@ inline checked_result<script_value> script_static_method_dispatch::operator()(co
     const auto& table = cls->script_static_method_overloads();
     const auto it = table.find(name_id);
     if (it != table.end() && it->second.size() > 1) {
-        if (auto best = pick_best_overload(it->second, args)) { payload.ast = best; }
+        const auto verdict = score_declarations(it->second, args.data(), args.size());
+        if (verdict.rival) [[unlikely]] { return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args.data(), args.size(), eng); }
+        if (verdict.best) { payload.ast = *verdict.best; }
     }
     if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_callable(payload, args); }
     struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, args};

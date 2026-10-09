@@ -73,6 +73,15 @@ namespace jai::detail {
                 case script_callable::kind_type::static_method: return p.ast ? parameters_binding(p.ast->parameters, i) : arg_binding::opaque;
                 case script_callable::kind_type::constructor: return constructor_binding(p.cls.get(), i, argc);
                 case script_callable::kind_type::bound_method: return p.bound_dispatch && !through_bound ? callee_binding(*p.bound_dispatch, i, true, argc) : arg_binding::opaque;
+                case script_callable::kind_type::overload_set: {
+                    uint8_t modes = 0;
+                    if (p.overloads) {
+                        for (const auto& m : p.overloads->members) {
+                            if (argc == SIZE_MAX || arity_accepts(m->parameters(), argc)) { modes |= static_cast<uint8_t>(parameters_binding(m->parameters(), i)); }
+                        }
+                    }
+                    return modes ? static_cast<arg_binding>(modes) : arg_binding::opaque;
+                }
             }
         }
         if (const auto* d = fn.target<script_static_method_dispatch>()) {

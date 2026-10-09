@@ -188,8 +188,9 @@ overload viability or scoring (`core/overload_resolution.hpp` is unchanged), and
 - Two definitions of one signature in the same unit are a load error: two methods (or two static methods, or two
   constructors) of one class, two namespace functions, or two program-scope functions with the same parameter types:
   `'m' is already defined with parameters (int&) at 4:5` (`'f' is already defined at 4:5` for a program-scope
-  function). A declaration marked `override` replaces on purpose. Program-scope functions do not overload, so two of one
-  name and different parameters keep the existing warning: the later replaces the earlier.
+  function). A declaration marked `override` replaces on purpose. Declarations of one name and different parameters are
+  overloads (Dev ruling 2026-10-02); a coroutine does not overload, so a function and a coroutine of one name warn and the
+  later replaces the earlier.
 - A definition from another unit (another module, another execute block) is a redefinition, the hot-reload path: it
   replaces the earlier one, and the checker warns when it sees the earlier definition
   (`'f' redefines the function defined in <file>:4`). A same-unit re-run replaces its own definitions and warns about
@@ -508,8 +509,8 @@ JaiScript's (Dev ruling 2026-10-07):
    general load in place. Hot reload never requires a restart (standing rule).
 5. Declarations that differ only by `const` follow the general redefinition rule: two definitions of one signature in
    the same unit are an error, a definition from another unit is a redefinition with a warning, uniformly for methods,
-   constructors and functions. Program-scope functions of one name and different signatures keep the existing
-   replacement warning (they do not overload); an `override` declaration replaces on purpose.
+   constructors and functions. Program-scope functions of one name and different signatures are overloads (Dev ruling
+   2026-10-02); an `override` declaration replaces on purpose.
 6. `const Foo f;` default-constructs a class; every other type needs an initializer.
 7. Captures follow C++ exactly: a copy of a const is const, a reference to a const is a const reference, an
    init-capture deduces by `auto`. JaiScript lambdas behave as C++ `mutable` lambdas (an existing difference, kept).

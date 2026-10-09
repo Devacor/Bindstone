@@ -374,17 +374,19 @@ print("ops map: {}", ops["square"](7));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">18
 1 2 3
 ops map: 49</code></pre></div>
-<h2 id="redefinition-and-the-duplicate-warning">Redefinition and the duplicate warning<a class="hlink" href="#redefinition-and-the-duplicate-warning" aria-label="link">&#8203;</a></h2>
-<p>Top-level functions do <em>not</em> overload: a same-name definition replaces the earlier one (last wins). The checker reports a duplicate definition <em>inside one file</em> as a warning whenever it runs (strict or warn), and warnings never gate, so under the default strict mode the file simply loads and prints <code>5</code>. Run it with <code>--check=warn</code> and the runner prints what it collected on the way:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function damage(a) { return a; }
-function damage(a, b) { return a + b; }
-print(damage(2, 3));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output &middot; --check=warn</span><pre><code class="lang-output">jaiscript: static check (warn mode, running anyway):
-dup.jai:2:10: warning: duplicate definition of function &#x27;damage&#x27; replaces the earlier one (top-level functions do not overload) (declared at 1:10)
-    function damage(a, b) { return a + b; }
-             ^
-5</code></pre></div>
-<p>Composition through <code>include</code>/<code>import</code> stays <strong>silent</strong>: included files parse and check as their own units, so a library included from several places never triggers the warning. Only a literal duplicate in one file does. Redefinition across separate <code>execute()</code> calls (the hot-reload shape) is silent too. Function overloading by arity <em>is</em> available inside namespaces (<code>utils::add(a,b)</code> vs <code>utils::add(a,b,c)</code>, see <a href="../guide/11-kitchen-sink.html#namespaces">Namespaces</a>; same name + same arity there requires <code>override</code> after the parameter list) and for class constructors/methods (see <a href="../guide/07-classes.html#constructor-overloading-and-this-delegation">Classes</a>).</p>
+<h2 id="redefinition-and-the-duplicate-warning">Overloads and redefinition<a class="hlink" href="#redefinition-and-the-duplicate-warning" aria-label="link">&#8203;</a></h2>
+<div class="callout cpp"><p>C++'s rule: functions of one name with different signatures coexist, a call takes the best match, and a tie is an ambiguous call.</p></div>
+<p>Functions of one name with different parameter lists are overloads, at program scope as in namespaces, methods and constructors. A signature is the parameter count, each parameter's declared type (an untyped one is <code>var</code>) and whether it is a reference: <code>f(int&amp; x)</code> and <code>f(int x)</code> are two overloads, and default values are not part of it. A call takes the best match: every argument exact, then fewer and cheaper conversions, then fewer <code>var</code> parameters, then fewer defaults filled in, then the nearest base class:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int damage(int a) { return a; }
+int damage(int a, int b) { return a + b; }
+string damage(string who) { return who + " is hit"; }
+class Pawn { } class Gator : Pawn { } class BigGator : Gator { }
+string kind(Pawn p) { return "pawn"; }
+string kind(Gator g) { return "gator"; }
+print(damage(2), " ", damage(2, 3), " ", damage("gator"), " ", kind(BigGator()));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 5 gator is hit gator</code></pre></div>
+<p>Two overloads that match a call equally well are an ambiguous call, an error that names both: <code>Ambiguous call to 'hit' with (int, int): 'hit(int, float)' and 'hit(float, int)' match equally</code>. The checker reports it at load when it knows the argument types, and the call raises it otherwise, for free functions, namespace functions, methods and constructors alike.</p>
+<p>A second definition of the same signature in one file is an error (<code>'damage' is already defined at 1:5</code>). Another unit's definition of the same signature replaces it, which is how hot reload swaps a function, and a unit that runs again replaces or drops only the overloads it declared itself: an overload its new text no longer declares is gone, another unit's stays. A coroutine does not overload; a function and a coroutine of one name in one file replace each other, and the checker notes it as a warning (<code>duplicate definition of function 'f' replaces the earlier one (a coroutine does not overload)</code>).</p>
 <h2 id="recursion">Recursion<a class="hlink" href="#recursion" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int {
     if (n &lt; 2) { return n; }

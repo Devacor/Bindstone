@@ -2072,6 +2072,7 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 		fast_entry = &cache[cache_slot];
 	} else if (parallel_worker_ && worker_root_env_) {
 		fast_entry = worker_env_cache_slot(f.code, cache_slot);
+		if (fast_entry) { f.env_table_code = f.code; f.env_table = fast_entry - cache_slot; }   // the record's rows never move once sized
 		chain_target = worker_root_env_;
 	}
 	// Fast head: same current env + unmoved env serial (per-worker sinks are private,
@@ -6192,6 +6193,15 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 #endif
 			return e.fast_ptr;
 		}
+	} else if (f.env_table_code == f.code && cache_slot < f.code->code.size() * 3 && (!f.locals || f.top_level || (f.locals->scope_state != 0 && !frame_scope_active(f)))) {
+		// a worker's own row for this chunk, by the same rule
+		const env_lookup_cache_entry& e = f.env_table[cache_slot];
+		if (e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) {
+#ifdef JAISCRIPT_VM_PROFILE
+			++profile_env_resolve_[6];
+#endif
+			return e.fast_ptr;
+		}
 	}
 	return fused_cmp_operand_env(f, operand, cache_slot);
 }
@@ -8309,13 +8319,12 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 	if (cs.site_value.size() < loop.sites.size()) { cs.site_value.resize(loop.sites.size(), nullptr); }
 	// the binding an environment lookup answered from its cache, valid while the environment and its epoch hold (the cache's own rule)
 	auto env_binding = [&](const script_value* v, size_t cache_slot) -> const script_value* {
-		if (!v || cache_slot >= f.code->env_lookup_cache.size()) return nullptr;
-		const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
-		return e.fast_ptr == v && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() ? v : nullptr;
+		const env_lookup_cache_entry* e = v ? armed_env_entry(f, cache_slot) : nullptr;
+		return e && e->fast_ptr == v && e->fast_env == environment_.get() && e->fast_serial == env_symbolizer_->env_epoch() ? v : nullptr;
 	};
 	// an environment container answered by its armed lookup-cache entry while nothing ahead of the environment (a member scope) can take the name:
 	// fused_cmp_operand's own answer, read once
-	bool env_head = cached_global_env_ != nullptr;
+	bool env_head = cached_global_env_ != nullptr || f.env_table_code == f.code;
 	if (env_head && f.locals && !f.top_level) { ensure_frame_member_scope(f, environment_.get()); env_head = !frame_scope_active(f); }
 	const environment* env_now = environment_.get();
 	const uint64_t epoch_now = env_symbolizer_->env_epoch();
@@ -8325,8 +8334,8 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		const script_array* node = nullptr;
 		cs.site_slot[k] = k_invalid_u32; cs.site_env[k] = nullptr; cs.site_value[k] = nullptr;
 		if (ip - loop.copy_head < cs.site_prefix.size()) { cs.site_prefix[ip - loop.copy_head].cd = nullptr; }
-		if (env_head && loop.site_env_cache[k] < f.code->env_lookup_cache.size()) {
-			const env_lookup_cache_entry& e = f.code->env_lookup_cache[loop.site_env_cache[k]];
+		if (const env_lookup_cache_entry* ep = env_head ? armed_env_entry(f, loop.site_env_cache[k]) : nullptr) {
+			const env_lookup_cache_entry& e = *ep;
 			if (e.fast_ptr && e.fast_env == env_now && e.fast_serial == epoch_now && e.fast_ptr->raw_storage_index() == script_value::TYPEID_ARRAY) {
 				cs.site_env[k] = e.fast_ptr; cs.site_value[k] = e.fast_ptr;
 				cs.site_node[ip - loop.copy_head] = e.fast_ptr->unchecked_array_node();
@@ -8372,10 +8381,10 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 			}
 			const size_t read_ip = site.orig_ip != k_invalid_u32 ? site.orig_ip : ci.c;   // the general read's own cache slots (an argument's miss ip is the first argument's)
 			const size_t cache_slot = site.fold_count ? read_ip * 3 + 2 : read_ip * 3;
-			if (site.cont_slot == k_invalid_u32 && cache_slot < f.code->env_lookup_cache.size()) {
+			if (const env_lookup_cache_entry* ep = site.cont_slot == k_invalid_u32 ? armed_env_entry(f, cache_slot) : nullptr) {
 				// an environment binding that is a reference to a property or an element is not a plain node: its getter or its error
 				// belongs to every read, so the loop stays on the general form (the cache holds the binding the general form resolved)
-				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
+				const env_lookup_cache_entry& e = *ep;
 				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return refuse_site(ip, "an environment binding that is a property or element reference");
 			}
 			const fused_operand& lc = f.code->fused_index_protos[site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a].container;
@@ -8429,8 +8438,8 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		} else if (ci.op == opcode::op_c_index_store) {
 			const fused_index_proto& p = f.code->fused_index_protos[ci.a];
 			const size_t cache_slot = p.index_binary != k_invalid_u32 ? ci.c * 3 + 2 : ci.c * 3;
-			if (!(p.container.const_index == k_invalid_u32 && p.container.direct) && cache_slot < f.code->env_lookup_cache.size()) {
-				const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];   // a store through a property or element reference stays general (as the loads above)
+			if (const env_lookup_cache_entry* ep = !(p.container.const_index == k_invalid_u32 && p.container.direct) ? armed_env_entry(f, cache_slot) : nullptr) {
+				const env_lookup_cache_entry& e = *ep;   // a store through a property or element reference stays general (as the loads above)
 				if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return refuse_site(ip, "an environment binding that is a property or element reference");
 			}
 			const bool member_site = p.container.member_node != k_invalid_u32;
@@ -8773,7 +8782,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop) {
 			}
 			// an environment scalar: resolved through the nullable fast head, an int or the block is refused
 			const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
-			const env_lookup_cache_entry* ce = er.cache_slot < f.code->env_lookup_cache.size() ? &f.code->env_lookup_cache[er.cache_slot] : nullptr;
+			const env_lookup_cache_entry* ce = armed_env_entry(f, er.cache_slot);
 			// the binding the general form resolved: a reference to a property or an element is never a cell (its getter or its error belongs to every read), read here without dereferencing it
 			if (ce && ce->fast_ptr && ce->fast_env == environment_.get() && ce->fast_serial == env_symbolizer_->env_epoch() && ce->fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*ce->fast_ptr)) { JAI_CELLS_COUNT(1); return false; }
 			const script_value* v = env_operand_value(f, er);
@@ -9524,8 +9533,8 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop, co
 	for (const uint32_t k : loop.env_cells) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
-		if (!(env_ok && cs.env_ptr[k]) && er.cache_slot < f.code->env_lookup_cache.size()) {
-			const env_lookup_cache_entry& e = f.code->env_lookup_cache[er.cache_slot];   // redeclared by the callee as a reference to a property or an element: the general form's business
+		if (const env_lookup_cache_entry* ep = !(env_ok && cs.env_ptr[k]) ? armed_env_entry(f, er.cache_slot) : nullptr) {
+			const env_lookup_cache_entry& e = *ep;   // redeclared by the callee as a reference to a property or an element: the general form's business
 			if (e.fast_ptr && e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch() && e.fast_ptr->raw_storage_index() == script_value::TYPEID_REFERENCE && !ref_plain_cell(*e.fast_ptr)) return false;
 		}
 		const script_value* v = env_ok && cs.env_ptr[k] ? cs.env_ptr[k] : env_operand_value(f, er);

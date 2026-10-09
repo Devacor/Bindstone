@@ -513,6 +513,10 @@ namespace jai::vm {
             uint32_t debug_prev_ip = 0;
             uint32_t debug_epoch = 0;
             struct cell_state* cells = nullptr;        // the record's raw area (null: a frame that never runs cells)
+            // a worker's private lookup rows for the chunk env_table_code names (worker_env_cache_slot's), found once by the frame's first
+            // lookup; any other chunk (a reused record, a frame that never looked one up) reads through worker_env_cache_slot
+            const chunk* env_table_code = nullptr;
+            env_lookup_cache_entry* env_table = nullptr;
         };
         // a byte per cell: a cell store marks its cell with one byte write, so consecutive stores carry no read-modify-write chain
         struct cell_dirty {
@@ -1466,6 +1470,12 @@ namespace jai::vm {
         // Worker-private cache row for this chunk+slot (nullptr = chunk never pinned
         // here - caller falls through to the full walk). MRU compare first.
         env_lookup_cache_entry* worker_env_cache_slot(const chunk* code, size_t cache_slot);
+        // the lookup-cache entry the general resolution of cache_slot arms for this frame: the chunk's on the main vm, the worker's own row in a
+        // worker whose frame found its table (null: none to read)
+        const env_lookup_cache_entry* armed_env_entry(const frame& f, size_t cache_slot) const noexcept {
+            if (cached_global_env_) return cache_slot < f.code->env_lookup_cache.size() ? &f.code->env_lookup_cache[cache_slot] : nullptr;
+            return f.env_table_code == f.code && cache_slot < f.code->code.size() * 3 ? &f.env_table[cache_slot] : nullptr;
+        }
         // find-or-create the worker cache record for a chunk (called where the owning
         // shared_ptr is in hand; the pin makes the raw-pointer key sound forever)
         void worker_pin_env_cache(const std::shared_ptr<void>& pin, const chunk* code);

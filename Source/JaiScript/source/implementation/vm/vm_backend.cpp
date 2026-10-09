@@ -12728,8 +12728,12 @@ bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (!v) return false;
 	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) { if (!ref_plain_cell(*v)) return false; v = &v->deref(); }
 	if (v->raw_storage_index() != script_value::TYPEID_FUNCTION) return false;
-	const auto* thunk = v->unchecked_as_function().target<script_callable_thunk>();
-	return thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
+	const script_function& fn = v->unchecked_as_function();
+	if (!parallel_worker_ && site.holds_fn.get() == &fn) return true;   // every condition below is fixed for one function object
+	const auto* thunk = fn.target<script_callable_thunk>();
+	const bool holds = thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
+	if (holds && !parallel_worker_) { site.holds_fn = *v->get_storage().get_if<script_value::TYPEID_FUNCTION>(); }
+	return holds;
 }
 // a method graft's guard: the receiver slot holds an instance whose class the guard validated at its current method epoch, and the
 // instance carries no field of the method's name; the validation is the call's own resolution (one public overload with the graft's
@@ -21414,6 +21418,7 @@ void vm_backend::release_site_pins() noexcept {
 			site.mic_dispatch = nullptr;
 			site.mic_cd = nullptr;
 		}
+		for (auto& site : code->inline_sites) { site.holds_fn = {}; }
 	};
 	for (auto& [key, entry] : chunk_cache_) { release(entry.compiled); }
 	for (auto& [key, entry] : expr_chunk_cache_) { release(entry.compiled); }

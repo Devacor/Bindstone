@@ -4135,6 +4135,30 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(iv, vv, "the reload takes the fallback on the vm");
 			check_eq(std::string("30|51"), vv, "the values before and after the reload");
 		});
+		test("an_inlined_callee_redefined_away_and_back_holds_each_time", [this]() {
+			// the guard remembers the function object it validated: a redefinition fails it, and the first definition run again
+			// holds again; every step agrees with the interpreter
+			const std::string first = "int f(int a) { return a * 2; }\n";
+			const std::string prelude = first + "var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(i); } return s; };\n";
+			auto sequence = [&](bool vm) -> std::string {
+				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				try {
+					std::string out;
+					e->execute(prelude);
+					for (int round = 0; round < 3; ++round) {
+						out += e->execute("run(6);").to_string() + ",";
+						e->execute("int f(int a) { return a * 3 + 1; }");
+						out += e->execute("run(6);").to_string() + ",";
+						e->execute(first);
+						out += e->execute("run(6);").to_string() + ";";
+					}
+					return out;
+				} catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+			};
+			const std::string iv = sequence(false), vv = sequence(true);
+			check_eq(iv, vv, "both backends across the redefinitions");
+			check_eq(std::string("30,51,30;30,51,30;30,51,30;"), vv, "each definition's values");
+		});
 		test("a_dropped_jaibite_leaves_its_stamps_resolvable_or_expired", [this]() {
 			// the checker's callee stamps outlive the program they name: a host that executes a jaibite and drops it (the demoreel)
 			// keeps the leaf graftable while its function lives, and a leaf whose declaration died keeps the call (a stamp read

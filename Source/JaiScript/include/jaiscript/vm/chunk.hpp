@@ -619,6 +619,7 @@ namespace jai::vm {
             bool plain_numeric = false;            // a renamed reference parameter's stores were proven by the kinds of plain arithmetic: the guard holds only while no numeric operator is registered
             mutable const class_definition* holds_cd = nullptr;   // the last class the guard validated, at its method epoch
             mutable uint64_t holds_epoch = 0;
+            mutable strong_ptr<script_function> holds_fn;   // the free function the guard last validated: the same object holds again
             // the program-scope names the call's argument proofs read (call_expr::proof_globals: symbol id, kind): the guard holds only
             // while each still holds its kind, re-checked when a run moved engine::definition_epoch past globals_epoch
             std::vector<proof_global> proof_globals;

@@ -266,10 +266,12 @@ inline checked_result<script_value> script_method_dispatch::operator()(const std
     if (args.empty()) {
         return checked_result<script_value>(make_error_code(runtime_error_code::this_outside_method), "Method called without 'this' object");
     }
+    return invoke(args[0], args, 1);
+}
 
-    std::vector<script_value> method_args(args.begin() + 1, args.end());
-
-    auto resolved = cls->resolve_method_overload(name_id, method_args);
+inline checked_result<script_value> script_method_dispatch::invoke(const script_value& this_obj, const std::vector<script_value>& args,
+                                                                   size_t first) const {
+    auto resolved = cls->resolve_method_overload(name_id, args.data() + first, args.size() - first);
     if (!resolved) {
         return resolved.error_value();
     }
@@ -284,12 +286,12 @@ inline checked_result<script_value> script_method_dispatch::operator()(const std
     payload.ast = std::move(resolved.value());
     payload.cls = cls;
     payload.definition_env = definition_env;
-    payload.this_obj = args[0];
-    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_callable(payload, method_args); }
-    struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, method_args};
+    payload.this_obj = this_obj;
+    if (backend->is_executing() || backend->is_unwinding()) { return backend->execute_callable_from(payload, args, first); }
+    struct call { const script_callable& payload; const std::vector<script_value>& args; size_t first; } c{payload, args, first};
     return eng->checked_host_entry([](execution_backend& be, void* ctx) {
         auto* cc = static_cast<call*>(ctx);
-        return be.execute_callable(cc->payload, cc->args);
+        return be.execute_callable_from(cc->payload, cc->args, cc->first);
     }, &c);
 }
 

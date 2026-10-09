@@ -76,6 +76,8 @@ struct script_method_dispatch {
     // is per-method like body_cache. The interpreter ignores it.
     mutable std::shared_ptr<environment> backend_scope_env;
     checked_result<script_value> operator()(const std::vector<script_value>& args) const;
+    // The method on this_obj with the arguments args[first..]
+    checked_result<script_value> invoke(const script_value& this_obj, const std::vector<script_value>& args, size_t first) const;
 };
 
 // Script static overloads retain their identity through aliases, so argument capture can distinguish them from host calls.
@@ -174,6 +176,12 @@ public:
     // Execute a script-defined callable (see script_callable). For kind::method the
     // receiver rides in payload.this_obj and args exclude it.
     virtual checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) = 0;
+    // execute_callable over args[first..]: the arguments after a receiver the caller's list carries ahead of them
+    virtual checked_result<script_value> execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) {
+        if (first == 0) { return execute_callable(payload, args); }
+        const std::vector<script_value> rest(args.begin() + static_cast<std::ptrdiff_t>(first), args.end());
+        return execute_callable(payload, rest);
+    }
 
     // Field initializers for an instance created OUTSIDE construction (engine::extend,
     // archive load): the declared initializers run chain-root first in declaration order

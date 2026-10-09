@@ -288,7 +288,10 @@ namespace jai::vm {
         script_value execute(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;
         script_value execute_textual(const std::vector<declaration_ptr>& declarations, std::shared_ptr<void>& compiled_slot) override;
         void prepare_for_execution() override;
-        checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override;
+        checked_result<script_value> execute_callable(const script_callable& payload, const std::vector<script_value>& args) override {
+            return execute_callable_from(payload, args, 0);
+        }
+        checked_result<script_value> execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) override;
         prepared_callback* prepare_callback(const script_value& callable) override;
         void release_callback(prepared_callback* prepared) override;
 
@@ -1278,7 +1281,8 @@ namespace jai::vm {
                                                           const call_site* site = nullptr,
                                                           frame* caller_frame = nullptr,
                                                           chunk* caller_code = nullptr,
-                                                          const method_entry* method = nullptr);
+                                                          const method_entry* method = nullptr,
+                                                          size_t first = 0);   // the arguments are args[first..]
         // Shared between call_script_function and the in-loop call path (single source of truth)
         void setup_callee_env(const script_defined_function& function, call_frame& locals,
                               const std::shared_ptr<environment>& prev_env, const method_entry* method = nullptr);

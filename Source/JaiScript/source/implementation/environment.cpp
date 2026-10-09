@@ -1099,15 +1099,15 @@ script_value* environment::get_env_var_ptr(uint64_t id) {
 }
 
 checked_result<script_value> bound_method_fn::operator()(const std::vector<script_value>& args) const {
-    // Create a new argument list with 'this' as the first argument
-    std::vector<script_value> method_args;
-    method_args.reserve(args.size() + 1);
-    method_args.push_back(this_obj);
-    method_args.insert(method_args.end(), args.begin(), args.end());
-
-    // Call the method with 'this' included
     const auto& method_func = method.as_function();
-    auto result = method_func(method_args);
+    const auto* dispatch = method_func.target<script_method_dispatch>();
+    auto result = dispatch ? dispatch->invoke(this_obj, args, 0) : [&]() {
+        std::vector<script_value> method_args;
+        method_args.reserve(args.size() + 1);
+        method_args.push_back(this_obj);
+        method_args.insert(method_args.end(), args.begin(), args.end());
+        return method_func(method_args);
+    }();
 
     // If the method returned a NON-OWNING reference into its receiver (the
     // classic chaining idiom `Counter& increment() { ...; return *this; }`

@@ -1569,6 +1569,7 @@ struct engine::implementation {
     // literal by its content, numbered at first execution; 0 is the host
     std::unordered_map<std::string, uint32_t> unit_index_;
     uint32_t unit_count_ = 0;
+    std::unordered_map<uint32_t, unsigned> unit_first_run_;   // each unit's first execution (engine::unit_rerun)
     uint32_t unit_for(const std::string& key) {
         auto it = unit_index_.find(key);
         if (it != unit_index_.end()) { return it->second; }
@@ -2532,7 +2533,11 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
     ++impl->definition_epoch_;   // a run may (re)define anything a cached cross-function proof relied on
     // after a nested run the ambient re-aligns with the frame that resumes (the run may have made the first shadow under it)
     struct unit_scope { string_symbolizer& s; unit_stamp prev; execution_backend* be; ~unit_scope() { s.set_current_unit(prev); if (be) { be->sync_unit(); } } } unitScope{ impl->string_symbolizer_, impl->string_symbolizer_.current_unit(), backend() };
-    if (!textual) { impl->string_symbolizer_.set_current_unit(unit_stamp{ unit, impl->string_symbolizer_.next_execution() }); }   // an include runs under the including unit
+    if (!textual) {   // an include runs under the including unit
+        const unit_stamp stamp{ unit, impl->string_symbolizer_.next_execution() };
+        impl->unit_first_run_.emplace(stamp.id, stamp.seq);
+        impl->string_symbolizer_.set_current_unit(stamp);
+    }
     try {
         execution_backend* be = backend();
         if (!be->is_executing()) { note_host_entry(); }
@@ -4534,6 +4539,13 @@ double engine::execute_elapsed() {
         impl->stamped_generation = impl->entry_generation;
     }
     return std::chrono::duration<double>(now - impl->entry_start).count();
+}
+
+uint64_t engine::host_entry_generation() const noexcept { return impl->entry_generation; }
+
+bool engine::unit_rerun(unit_stamp unit) const {
+    auto it = impl->unit_first_run_.find(unit.id);
+    return it != impl->unit_first_run_.end() && it->second != unit.seq;
 }
 
 void engine::note_host_entry() {

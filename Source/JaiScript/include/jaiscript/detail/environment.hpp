@@ -640,6 +640,7 @@ struct call_frame {
         bool block_defined = false;   // declared inside a block scope (an include in a { }): a call keeps the caller's chain
         bool declared = false;   // a function declaration's (never a lambda's): another signature of its name joins it in an overload set
         size_t line = 0;   // the declaration's line (an overload's diagnostics name it)
+        uint64_t context = 0;   // the host entry that declared it (engine::host_entry_generation)
         std::shared_ptr<const function_decl> decl;   // the vm's mint pins its declaration, so the inliner's stamps on it resolve while the function lives (the interpreter's decl already owns its mint)
 
         const std::vector<parameter>& parameters() const noexcept { return *shared_parameters; }

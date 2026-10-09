@@ -975,6 +975,7 @@ namespace jai {
         // The unit whose code ran this declaration (methods, constructors, coroutines and namespace
         // functions run under it: docs/global_shadowing.md)
         mutable unit_stamp unit{};
+        mutable uint64_t context = 0;   // a namespace function's declaring host entry (engine::host_entry_generation)
         // Return-epilogue classification memo (vm method frames; classify_return_conv
         // derives it from return_type alone, engine-independent). 0 = uncomputed. Same
         // benign-idempotent write pattern as script_defined_function::backend_return_conv.

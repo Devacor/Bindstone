@@ -1456,10 +1456,49 @@ public:
                 const std::string ns_err = run("namespace n { void f(var& x) { } void f(var x) { } } 1;");
                 check_true(ns_err.find("'f(var x)' differs from 'f(var& x)' (line 1)" + tail) != std::string::npos, label + "namespace: " + ns_err);
             }
+            namespace fs = std::filesystem;
+            const auto dir = jai::foundry::test_temp_directory() / "jai_refonly_context";
+            fs::create_directories(dir);
+            { std::ofstream out(dir / "refonly_a.jai", std::ios::trunc); out << "void f(var& x) { }\n"; }
+            { std::ofstream out(dir / "refonly_b.jai", std::ios::trunc); out << "void f(var x) { }\n"; }
             auto engine = make_engine();
-            engine->execute("void f(var& x) { }");
-            const std::string units_err = error_of([&] { engine->execute("void f(var x) { }"); });
-            check_true(units_err.find("'f(var x)' differs from 'f(var& x)' (line 1)" + tail) != std::string::npos, "two units: " + units_err);
+            const std::string a_path = (dir / "refonly_a.jai").generic_string(), b_path = (dir / "refonly_b.jai").generic_string();
+            const std::string files_err = error_of([&] { engine->execute("import \"" + a_path + "\"; import \"" + b_path + "\";"); });
+            check_true(files_err.find("'f(var x)' differs from 'f(var& x)' (line 1)" + tail) != std::string::npos, "two files in one execute: " + files_err);
+            fs::remove_all(dir);
+        });
+
+        test("a_reference_only_overload_in_another_execute_context_redefines", [this, error_of]() {
+            // Dev ruling 2026-10-09: a separate host execute, or a module's re-run, redefines instead of conflicting
+            namespace fs = std::filesystem;
+            auto strings = make_engine();
+            strings->execute("int f(var& x) { return 1; }");
+            check_eq(std::string(), error_of([&] { strings->execute("int f(var x) { return 2; }"); }), "a second execute of a string");
+            check_eq(int64_t(2), strings->execute("var v = 0; f(v);").as_int(), "the later string's definition runs");
+            strings->execute("namespace n { int g(int& a) { return 1; } }");
+            check_eq(int64_t(2), strings->execute("namespace n { int g(int a) { return 2; } } int k = 0; n::g(k);").as_int(), "a namespace reopened by another execute");
+
+            const auto dir = jai::foundry::test_temp_directory() / "jai_refonly_redefine";
+            fs::create_directories(dir);
+            const auto a = dir / "redef_a.jai", b = dir / "redef_b.jai", m = dir / "redef_m.jai";
+            { std::ofstream out(a, std::ios::trunc); out << "int f(var& x) { return 1; }\n"; }
+            { std::ofstream out(b, std::ios::trunc); out << "int f(var x) { return 2; }\n"; }
+            auto files = make_engine();
+            files->execute_file(a.generic_string());
+            check_eq(std::string(), error_of([&] { files->execute_file(b.generic_string()); }), "a second execute_file");
+            check_eq(int64_t(2), files->execute("var v = 0; f(v);").as_int(), "the later file's definition runs");
+
+            { std::ofstream out(m, std::ios::trunc); out << "int other() { return 0; }\n"; }
+            auto reloads = make_engine();
+            const std::string m_path = m.generic_string();
+            reloads->add_function("rewrite_module", [m]() -> jai::script_int {
+                { std::ofstream out(m, std::ios::trunc); out << "int g(var& x) { return 2; }\n"; }
+                fs::last_write_time(m, fs::last_write_time(m) + std::chrono::seconds(4));
+                return 0;
+            });
+            check_eq(int64_t(2), reloads->execute("int g(var x) { return 1; } import \"" + m_path + "\"; rewrite_module(); import \"" + m_path +
+                                                   "\"; var v = 0; g(v);").as_int(), "a module's re-run in the same execute redefines");
+            fs::remove_all(dir);
         });
 
         test("overloads_that_differ_in_a_type_too_coexist_and_a_reload_is_no_second_definition", [this, error_of]() {

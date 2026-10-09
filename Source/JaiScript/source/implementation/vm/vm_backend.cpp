@@ -14066,6 +14066,7 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	proto.fn->block_defined = environment_ && environment_->block_scope();
 	proto.fn->declared = true;
 	proto.fn->line = proto.decl->location.line;
+	proto.fn->context = engine_->host_entry_generation();
 	payload.fn = proto.fn;
 	script_value functionValue = script_value::make_function(
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
@@ -17989,9 +17990,10 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 			}
 
 			func_decl->unit = current_unit();
+			func_decl->context = engine_->host_entry_generation();
 			auto& overloads = ns_data->functions[func_decl->name_id];
 			std::string admission_error;
-			const auto admission = detail::admit_namespace_function(overloads, *func_decl, admission_error);
+			const auto admission = detail::admit_namespace_function(overloads, *func_decl, engine_->unit_rerun(func_decl->unit), admission_error);
 			if (admission == detail::namespace_admission::collision) {
 				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",

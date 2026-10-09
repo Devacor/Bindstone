@@ -905,12 +905,7 @@ private:
             for (const auto& [unit, decls] : pit->second) {
                 const function_decl* other = nullptr;   // the other unit's declaration of this signature, which this one replaces
                 for (const auto& d : decls) {
-                    if (!d || d->location.filename == fn->location.filename) { continue; }
-                    if (detail::differs_only_by_reference(fn->parameters, d->parameters)) {
-                        diag(diag_level::error, fn->location, detail::reference_only_overload_text(fn->name, fn->parameters, d->parameters, d->location.line));
-                        break;
-                    }
-                    if (parameter_signature(d.get()) == parameter_signature(fn)) { other = d.get(); break; }
+                    if (d && parameter_signature(d.get()) == parameter_signature(fn)) { other = d.get(); break; }
                 }
                 if (!other || other->location.filename == fn->location.filename) { continue; }
                 diag(diag_level::warning, fn->location, "'" + std::string(fn->name) + "' redefines the function defined in " +

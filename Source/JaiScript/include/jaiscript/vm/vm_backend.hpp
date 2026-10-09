@@ -2385,6 +2385,12 @@ namespace jai::vm {
         bool call_host_direct(const script_function& callee, size_t argc, op_status& st);
         bool call_host_site(const call_site& site, size_t argc, op_status& st);
         void fill_host_site(const call_site& site, const script_value& callee);
+        static void clear_host_site(const call_site& site) noexcept {
+            site.ic_host_target = nullptr;
+            site.ic_host_invoke = nullptr;
+            site.ic_host_checked = false;
+            if (site.ic_host_owner) { site.ic_host_owner = {}; }
+        }
         uint32_t host_site_calls_ = 0;   // host callees running through call_host_site: a refill retires the site's pins while one runs
         bool push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function>& pin, size_t args_base, size_t argc);
         bool bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc);

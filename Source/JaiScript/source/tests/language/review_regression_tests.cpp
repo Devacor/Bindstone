@@ -11,6 +11,7 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <optional>
+#include <thread>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -3761,6 +3762,30 @@ public:
                 check(escaped->is_function());
             }
             escaped.reset();   // release after the engine is gone
+            check_true(true);
+        });
+
+        // Object holders come from the same kind of pool: churn reuses blocks, a holder released on another thread
+        // is a foreign return, and holders still out when the engine dies free the orphaned pool on their last release
+        test("pool_object_holders_churn_foreign_and_orphan", [this]() {
+            std::vector<script_value> kept;
+            std::optional<script_value> late;
+            {
+                auto e = make_engine();
+                auto r = e->execute(R"(
+                    class P { int v = 0; P(int n) { v = n; } }
+                    int total = 0;
+                    for (int i = 0; i < 3000; ++i) { P p = P(i); shared_ptr<P> q = new P(i + 1); total = total + p.v + q.v; }
+                    total;
+                )");
+                check_eq((int64_t)9000000, r.as_int());
+                e->execute("array<P> held = [P(1), P(2), P(3), P(4)]; shared_ptr<P> one = new P(5);");
+                for (int i = 0; i < 4; ++i) { kept.push_back(e->execute("held[" + std::to_string(i) + "];")); }
+                late.emplace(e->get_variable("one"));
+                std::thread([&kept]() { kept.clear(); }).join();
+                check_eq((int64_t)15, e->execute("int s = 0; for (auto& p : held) { s = s + p.v; } s + one.v;").as_int());
+            }
+            late.reset();
             check_true(true);
         });
     }

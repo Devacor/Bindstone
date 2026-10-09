@@ -1097,9 +1097,11 @@ namespace jai {
         // pool into the slot and registers the teardown; the engine dtor invokes it.
         void*& reference_holder_pool_slot();
         void set_reference_holder_pool_teardown(void (*teardown)(void*));
-        // The same for the math vector node pool
+        // The same for the math vector node pool and the object_holder pool
         void*& vec_node_pool_slot();
         void set_vec_node_pool_teardown(void (*teardown)(void*));
+        void*& object_holder_pool_slot();
+        void set_object_holder_pool_teardown(void (*teardown)(void*));
         // The weak list of cells an escaped closure kept past a frame-exit cycle check (script_value::release_cell_cycles)
         void*& cell_cycle_registry_slot();
         void set_cell_cycle_registry_teardown(void (*teardown)(void*));

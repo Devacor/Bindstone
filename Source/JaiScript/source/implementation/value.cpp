@@ -391,43 +391,33 @@ script_value* script_value::reference_holder::field_cell() const {
     return found;
 }
 
-// Per-engine free-list of reference_holder control blocks: a mint is a pop +
-// placement-new instead of a heap allocation (the hot element/field/cell paths).
-// Blocks self-describe their release through dealloc_fn, so plain make_strong
-// holders and pooled holders coexist - which is what keeps this single-threaded:
-// parallel workers DO mint cell references inside their bodies, so acquire falls
-// back to plain make_strong while a region is active (main thread parked). Releases
-// inherit the value system's existing thread contract (non-atomic strong_ptr counts:
-// a value tree sharing storage with the engine's world must not be released off the
-// engine's thread - true before the pool existed). If the engine dies while
-// user-held references are still out, the pool is orphaned and the last returning
-// block frees it.
-struct script_value::reference_holder_pool {
-    struct block : jai::detail::control_block<reference_holder> {
-        reference_holder_pool* home = nullptr;
+namespace detail {
+
+// An engine's free list of control blocks for one holder type: a mint is a pop + placement new instead of a heap
+// allocation. Blocks self-describe their release through dealloc_fn, so plain make_strong blocks and pooled ones
+// coexist. The free list is owner-thread only: a parallel region's workers mint plain blocks, and a block released off
+// the owner thread is deleted and counted as a foreign return. Checked-out blocks are counted in two parts, owned
+// (acquires minus owner-thread returns, touched only by the owner thread while the engine lives) and foreign; the
+// engine's teardown orphans the pool, and an orphaned pool frees itself when the two counts meet (owned is stable once
+// orphaned is published, so other threads read it after it).
+template<typename T, size_t MaxFree>
+struct holder_block_pool {
+    struct block : control_block<T> {
+        holder_block_pool* home = nullptr;
     };
-    static_assert(offsetof(block, storage) == jai::detail::cb_storage_offset<reference_holder>,
+    static_assert(offsetof(block, storage) == cb_storage_offset<T>,
                   "pooled blocks must keep storage at control_block<T>'s head offset (cb_from_object)");
 
-    static constexpr size_t max_free_blocks = 256;
     std::vector<block*> free_blocks;
-    // Checked-out blocks are counted in two parts: owned (acquires minus owner-thread returns, touched only by the owner thread
-    // while the engine lives) and foreign (returns on any other thread, or on any thread once the pool is orphaned). The pool is
-    // freed when an orphaned pool's two counts meet; owned is stable once orphaned is published, so other threads read it after it.
     size_t owned = 0;
     std::atomic<size_t> foreign{0};
     std::atomic<bool> orphaned{false};
     std::atomic<bool> freed{false};
-    // Pool structure is owner-thread-only. A pooled holder released on a WORKER thread
-    // (future parallel flows; none today mint one) must not touch the free list — it
-    // heap-deletes instead and counts as a foreign return.
     std::thread::id owner = std::this_thread::get_id();
 
-    // Reserve up front: return_block runs inside ~strong_ptr (noexcept), so the
-    // free-list push must never allocate
-    reference_holder_pool() { free_blocks.reserve(max_free_blocks); }
+    // return_block runs inside ~strong_ptr (noexcept): the free-list push must never allocate
+    holder_block_pool() { free_blocks.reserve(MaxFree); }
 
-    // an orphaned pool whose blocks all came back frees itself, once
     void free_if_drained() {
         if (owned == foreign.load(std::memory_order_acquire)) {
             bool expected = false;
@@ -435,15 +425,15 @@ struct script_value::reference_holder_pool {
         }
     }
 
-    static void return_block(jai::detail::control_block_base* base) {
-        block* b = static_cast<block*>(static_cast<jai::detail::control_block<reference_holder>*>(base));
-        reference_holder_pool* pool = b->home;
+    static void return_block(control_block_base* base) {
+        block* b = static_cast<block*>(static_cast<control_block<T>*>(base));
+        holder_block_pool* pool = b->home;
 #ifndef NDEBUG
-        base->magic = jai::detail::cb_magic_dead;   // scrambled parked OR freed (use-after-free canary)
+        base->magic = cb_magic_dead;   // scrambled parked OR freed (use-after-free canary)
 #endif
         if (!pool->orphaned.load(std::memory_order_acquire) && std::this_thread::get_id() == pool->owner) {
             --pool->owned;
-            if (pool->free_blocks.size() < max_free_blocks) {
+            if (pool->free_blocks.size() < MaxFree) {
                 pool->free_blocks.push_back(b);
             } else {
                 delete b;
@@ -457,27 +447,31 @@ struct script_value::reference_holder_pool {
         }
     }
 
-    strong_ptr<reference_holder> acquire() {
-        block* b;
-        if (!free_blocks.empty()) {
-            b = free_blocks.back();
-            free_blocks.pop_back();
-            b->strong_count = 1;
-            b->weak_count = 1;
+    strong_ptr<T> acquire() {
+        if (free_blocks.empty()) [[unlikely]] { return acquire_fresh(); }
+        block* b = free_blocks.back();
+        free_blocks.pop_back();
+        b->strong_count = 1;
+        b->weak_count = 1;
 #ifndef NDEBUG
-            b->magic = jai::detail::cb_magic_live;
+        b->magic = cb_magic_live;
 #endif
-        } else {
-            b = new block();
-            b->home = this;
-            b->dealloc_fn = &return_block;
-        }
         ++owned;
-        return jai::detail::adopt_pooled(new (b->storage) reference_holder());
+        return adopt_pooled(new (b->storage) T());
     }
 
+    JAI_NOINLINE strong_ptr<T> acquire_fresh() {
+        block* b = new block();
+        b->home = this;
+        b->dealloc_fn = &return_block;
+        ++owned;
+        return adopt_pooled(new (b->storage) T());
+    }
+
+    JAI_NOINLINE static strong_ptr<T> acquire_plain() { return make_strong<T>(); }
+
     static void teardown(void* p) {
-        auto* pool = static_cast<reference_holder_pool*>(p);
+        auto* pool = static_cast<holder_block_pool*>(p);
         for (block* b : pool->free_blocks) {
             delete b;
         }
@@ -485,104 +479,42 @@ struct script_value::reference_holder_pool {
         pool->orphaned.store(true, std::memory_order_release);
         pool->free_if_drained();
     }
+
+    JAI_NOINLINE static void install(engine* eng, void*& slot, void (engine::*set_teardown)(void (*)(void*))) {
+        slot = new holder_block_pool();
+        (eng->*set_teardown)(&teardown);
+    }
+
+    static strong_ptr<T> acquire_from(engine* eng, void*& slot, void (engine::*set_teardown)(void (*)(void*))) {
+        if (!slot) [[unlikely]] { install(eng, slot, set_teardown); }
+        return static_cast<holder_block_pool*>(slot)->acquire();
+    }
 };
 
-strong_ptr<script_value::reference_holder> script_value::acquire_reference_holder(engine* eng) {
-    // Worker-side mint (cell refs inside parallel bodies): the pool is single-threaded
-    // (main thread is parked while workers run), so take a plain self-deleting block
-    if (eng->parallel_region_active()) [[unlikely]] {
-        return make_strong<reference_holder>();
-    }
-    void*& slot = eng->reference_holder_pool_slot();
-    if (!slot) [[unlikely]] {
-        slot = new reference_holder_pool();
-        eng->set_reference_holder_pool_teardown(&reference_holder_pool::teardown);
-    }
-    return static_cast<reference_holder_pool*>(slot)->acquire();
 }
 
-namespace {
-    // The math vector node pool, with the reference_holder pool's discipline: the free list is owner-thread
-    // only, a parallel region's workers take plain self-deleting blocks, a block released off the owner thread is
-    // deleted, and the engine's teardown orphans the pool until its last outstanding block returns
-    struct vec_node_pool {
-        struct block : jai::detail::control_block<script_vec_node> {
-            vec_node_pool* home = nullptr;
-        };
-        static_assert(offsetof(block, storage) == jai::detail::cb_storage_offset<script_vec_node>,
-                      "pooled blocks must keep storage at control_block<T>'s head offset (cb_from_object)");
+strong_ptr<script_value::reference_holder> script_value::acquire_reference_holder(engine* eng) {
+    if (eng->parallel_region_active()) [[unlikely]] {
+        return jai::detail::holder_block_pool<reference_holder, 256>::acquire_plain();
+    }
+    return jai::detail::holder_block_pool<reference_holder, 256>::acquire_from(eng, eng->reference_holder_pool_slot(),
+        &engine::set_reference_holder_pool_teardown);
+}
 
-        static constexpr size_t max_free_blocks = 1024;
-        std::vector<block*> free_blocks;
-        std::atomic<size_t> outstanding{0};
-        bool engine_alive = true;
-        std::thread::id owner = std::this_thread::get_id();
-
-        vec_node_pool() { free_blocks.reserve(max_free_blocks); }
-
-        static void return_block(jai::detail::control_block_base* base) {
-            block* b = static_cast<block*>(static_cast<jai::detail::control_block<script_vec_node>*>(base));
-            vec_node_pool* pool = b->home;
-            const size_t left = --pool->outstanding;
-#ifndef NDEBUG
-            base->magic = jai::detail::cb_magic_dead;
-#endif
-            if (pool->engine_alive && std::this_thread::get_id() == pool->owner &&
-                pool->free_blocks.size() < max_free_blocks) {
-                pool->free_blocks.push_back(b);
-            } else {
-                delete b;
-                if (!pool->engine_alive && left == 0) {
-                    delete pool;
-                }
-            }
-        }
-
-        strong_ptr<script_vec_node> acquire() {
-            block* b;
-            if (!free_blocks.empty()) {
-                b = free_blocks.back();
-                free_blocks.pop_back();
-                b->strong_count = 1;
-                b->weak_count = 1;
-#ifndef NDEBUG
-                b->magic = jai::detail::cb_magic_live;
-#endif
-            } else {
-                b = new block();
-                b->home = this;
-                b->dealloc_fn = &return_block;
-            }
-            ++outstanding;
-            return jai::detail::adopt_pooled(new (b->storage) script_vec_node());
-        }
-
-        static void teardown(void* p) {
-            auto* pool = static_cast<vec_node_pool*>(p);
-            for (block* b : pool->free_blocks) {
-                delete b;
-            }
-            pool->free_blocks.clear();
-            if (pool->outstanding == 0) {
-                delete pool;
-            } else {
-                pool->engine_alive = false;
-            }
-        }
-    };
-
+strong_ptr<script_value::object_holder> script_value::acquire_object_holder(engine* eng) {
+    if (!eng || eng->parallel_region_active()) [[unlikely]] {
+        return jai::detail::holder_block_pool<object_holder, 1024>::acquire_plain();
+    }
+    return jai::detail::holder_block_pool<object_holder, 1024>::acquire_from(eng, eng->object_holder_pool_slot(),
+        &engine::set_object_holder_pool_teardown);
 }
 
 strong_ptr<script_vec_node> script_value::acquire_vec_node(engine* eng) {
     if (!eng || eng->parallel_region_active()) [[unlikely]] {
-        return make_strong<script_vec_node>();
+        return jai::detail::holder_block_pool<script_vec_node, 1024>::acquire_plain();
     }
-    void*& slot = eng->vec_node_pool_slot();
-    if (!slot) [[unlikely]] {
-        slot = new vec_node_pool();
-        eng->set_vec_node_pool_teardown(&vec_node_pool::teardown);
-    }
-    return static_cast<vec_node_pool*>(slot)->acquire();
+    return jai::detail::holder_block_pool<script_vec_node, 1024>::acquire_from(eng, eng->vec_node_pool_slot(),
+        &engine::set_vec_node_pool_teardown);
 }
 
 void script_value::unshare_vec_node() {
@@ -955,7 +887,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     script_value v(std::monostate{}, eng);
     v.type_info_ = class_def->get_type_info();
 
-    auto obj = make_strong<object_holder>();
+    auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Set the cached type_id for fast comparison
     obj->data = data;
@@ -967,7 +899,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
 script_value script_value::make_class_object(const class_definition& cd, std::shared_ptr<void> data, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.type_info_ = cd.get_type_info();
-    auto obj = make_strong<object_holder>();
+    auto obj = acquire_object_holder(eng);
     obj->type_name = cd.interned_name();
     obj->type_id = cd.get_type_id();
     obj->data = std::move(data);
@@ -978,7 +910,7 @@ script_value script_value::make_class_object(const class_definition& cd, std::sh
 
 script_value script_value::make_coroutine_handle(uint64_t type_id, std::shared_ptr<void> handle, engine* eng) {
     script_value v(std::monostate{}, eng);
-    auto obj = make_strong<object_holder>();
+    auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, "coroutine_handle", type_id);
     obj->type_id = type_id;
     obj->data = std::move(handle);
@@ -1004,7 +936,7 @@ script_value script_value::make_cpp_object(std::string_view type_name, uint64_t 
     script_value v(std::monostate{}, eng);
     v.type_info_ = class_def->get_type_info();
 
-    auto obj = make_strong<object_holder>();
+    auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;  // Use the provided type_id directly (no re-interning)
     obj->data = data;
@@ -1024,7 +956,7 @@ script_value script_value::make_cpp_reference(std::string_view type_name, uint64
     }
     script_value v(std::monostate{}, eng);
     v.type_info_ = class_def->get_type_info();
-    auto obj = make_strong<object_holder>();
+    auto obj = acquire_object_holder(eng);
     obj->type_name = interned_type_text(eng, type_name, type_id);
     obj->type_id = type_id;
     obj->bound_ptr = object;
@@ -1423,7 +1355,7 @@ script_value script_value::clone() const {
             auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
             auto new_instance = instance->deep_copy();
 
-            auto new_holder = make_strong<object_holder>();
+            auto new_holder = acquire_object_holder(engine_);
             new_holder->type_name = obj_holder->type_name;
             new_holder->type_id = obj_holder->type_id;
             new_holder->data = new_instance;
@@ -1439,7 +1371,7 @@ script_value script_value::clone() const {
         if (class_def && class_def->has_copy_function()) {
             auto new_cpp_obj = class_def->copy_object(obj_holder->data.get());
             if (new_cpp_obj) {
-                auto new_holder = make_strong<object_holder>();
+                auto new_holder = acquire_object_holder(engine_);
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;
                 new_holder->data = new_cpp_obj;
@@ -1527,7 +1459,7 @@ script_value script_value::clone() const {
                 auto instance = std::static_pointer_cast<class_instance>(obj_holder->data);
                 auto new_instance = instance->deep_copy();
 
-                auto new_holder = make_strong<object_holder>();
+                auto new_holder = acquire_object_holder(engine_);
                 new_holder->type_name = obj_holder->type_name;
                 new_holder->type_id = obj_holder->type_id;  // Preserve the cached type_id
                 new_holder->data = new_instance;
@@ -1544,7 +1476,7 @@ script_value script_value::clone() const {
                         const void* copy_src = obj_holder->data ? obj_holder->data.get() : obj_holder->bound_ptr;
                         auto new_cpp_obj = copy_src ? class_def->copy_object(copy_src) : nullptr;
                         if (new_cpp_obj) {
-                            auto new_holder = make_strong<object_holder>();
+                            auto new_holder = acquire_object_holder(engine_);
                             new_holder->type_name = obj_holder->type_name;
                             new_holder->type_id = obj_holder->type_id;
                             new_holder->data = new_cpp_obj;

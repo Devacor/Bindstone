@@ -2089,13 +2089,11 @@ namespace detail { struct argument_capture_storage; }
             script_value* resolve_target();
         };
 
-        // Per-engine block pool for reference_holder mints (defined in value.cpp; state
-        // lives behind engine::reference_holder_pool_slot). Elides the make_strong heap
-        // allocation on the element/field/map-entry/cell mint paths. Single-threaded:
-        // while a parallel region's workers run (they mint cell refs in their bodies),
-        // acquire falls back to plain make_strong blocks that never touch the pool.
-        struct reference_holder_pool;
+        // Per-engine block pools for reference_holder and object_holder mints (value.cpp, state behind the engine's
+        // pool slots): a mint is a pop + placement new instead of a heap allocation. While a parallel region's workers
+        // run, acquire takes plain make_strong blocks that never touch the pool.
         static strong_ptr<reference_holder> acquire_reference_holder(engine* eng);
+        static strong_ptr<object_holder> acquire_object_holder(engine* eng);
         struct cell_cycle_registry;
         
         

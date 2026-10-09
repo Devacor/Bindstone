@@ -43,7 +43,7 @@ namespace jai {
             } else if constexpr (std::is_class_v<T>) {
                 if (std::shared_ptr<detail::first_type_t<class_definition, T>> bound_def = eng->get_class_definition_by_type(std::type_index(typeid(T)))) {
                     // This enables non-owning reference semantics for T& returns
-                    auto holder = make_strong<object_holder>();
+                    auto holder = acquire_object_holder(eng);
                     holder->type_name = bound_def->interned_name();   // interned once per class
                     holder->type_id = bound_def->interned_name_id();
                     holder->data = nullptr;  // Non-owning! bound_ptr holds the pointer

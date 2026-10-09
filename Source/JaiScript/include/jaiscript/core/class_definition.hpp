@@ -402,16 +402,14 @@ private:
     bool construction_pending_ = false;
     bool destructor_armed_ = false;
     bool late_destructor_ = false;   // armed by a re-class, not by the allocation: ~class_instance runs the chain
+    std::atomic<bool> registered_{false};   // in the class's registry list (read unlocked by its own dying owner)
     uint32_t live_field_refs_ = 0;
     std::unique_ptr<std::vector<std::pair<uint64_t, field_cell>>> retired_cells_;
     // The class's registry is a list through its instances in creation order (class_definition::register_instance): linking
-    // and unlinking touch the instance and its two neighbours, under the region lock while a region runs. registered_ is read
-    // unlocked by its own dying owner, hence atomic.
+    // and unlinking touch the instance and its two neighbours, under the region lock while a region runs
     class_instance* registry_prev_ = nullptr;
     class_instance* registry_next_ = nullptr;
-    std::atomic<bool> registered_{false};
     friend class class_definition;
-    mutable uint64_t cpp_object_field_id_ = 0;
     mutable script_value invalid_value_;
 
     static std::shared_ptr<void> extract_cpp_object_impl(const script_value& val);
@@ -3936,8 +3934,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
 }
 
 inline uint64_t class_instance::get_cpp_object_field_id() const {
-    if (cpp_object_field_id_ == 0 && class_def_) { cpp_object_field_id_ = class_def_->get_cpp_object_field_id(); }
-    return cpp_object_field_id_;
+    return class_def_ ? class_def_->get_cpp_object_field_id() : 0;
 }
 
 inline std::shared_ptr<class_instance> class_instance::deep_copy() const {

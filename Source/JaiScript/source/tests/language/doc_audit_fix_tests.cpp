@@ -197,9 +197,9 @@ public:
                               "no overload of 'm' matches this call", "methods at load");
             expect_load_error("class V { int a; V(int x) { a = x; } V(bool b) { a = 1; } } V v = V(\"s\");",
                               "error: no", "constructors at load");
-            // a program's free functions of one name are redefinitions (the last takes every call), never an overload set
-            expect("[[warn_mode]] int f(int a) { return 1; } int f(bool b) { return 2; } f(\"s\");", "2",
-                   "a redefined free function's bool slot takes truthiness");
+            // a program's free functions of one name are an overload set too (Dev ruling 2026-10-02)
+            expect("int f(int a) { return 1; } int f(bool b) { return 2; } var out = \"\"; try { f(\"s\"); } catch (e) { out += e; } out;",
+                   "No overload of 'f' takes (string)", "free functions at run time", check_mode::off);
             expect("void h(bool b) { } bool k = \"s\"; h(\"s\"); k;", "true", "a lone bool slot takes a string's truthiness", check_mode::strict);
             expect("class M { int m(int a) { return 1; } int m(bool b) { return 2; } } to_string(M().m(true)) + to_string(M().m(3));", "21",
                    "exact overloads still pick", check_mode::strict);

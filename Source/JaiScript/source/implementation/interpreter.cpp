@@ -28,6 +28,7 @@
 #include <jaiscript/detail/transient_read.hpp>   // callout_free (subscript-compound fast path)
 #include <jaiscript/detail/binary_handlers.hpp>
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (vm parity)
+#include <jaiscript/detail/function_overloads.hpp>
 #include <jaiscript/detail/char_promotion.hpp>   // char operands promote to int64 0..255
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/utf8_text.hpp>
@@ -8199,8 +8200,17 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     // the engine-backend hop, and keeps parallel-worker interpreters on their own
     // instance (the thunk's operator() routes to the ENGINE's backend, which is the
     // wrong one inside a provisioned worker).
-    const script_function& func = callee.as_function();
-    const auto* callee_thunk = func.target<script_callable_thunk>();
+    const script_function* callee_func = &callee.as_function();
+    const auto* callee_thunk = callee_func->target<script_callable_thunk>();
+    if (callee_thunk && callee_thunk->eng == engine_ && callee_thunk->payload.kind == script_callable::kind_type::overload_set &&
+        callee_thunk->payload.overloads) {
+        // the member these arguments select (KEEP BYTE-PARALLEL with vm_backend::invoke_callee)
+        auto picked = detail::select_overload_member(*callee_thunk->payload.overloads, arguments.data(), arguments.size(), engine_);
+        if (!picked) { return picked.error_value(); }
+        callee_func = &picked.value()->as_function();
+        callee_thunk = callee_func->target<script_callable_thunk>();
+    }
+    const script_function& func = *callee_func;
     const bool direct_script_call = callee_thunk && callee_thunk->eng == engine_ &&
         callee_thunk->payload.kind == script_callable::kind_type::function && callee_thunk->payload.fn;
     detail::call_site_context ctx{&expr->arguments, expr, &arguments};
@@ -8363,17 +8373,10 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
                         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
                     }
 
-                    // Find matching overload by arity in namespace (trailing defaults
-                    // open the window; the candidate using fewest defaults wins)
-                    std::shared_ptr<function_decl> ns_pick;
-                    size_t ns_defaults = SIZE_MAX;
-                    for (const auto& fd : overloads) {
-                        if (arity_accepts(fd->parameters, args.size()) &&
-                            fd->parameters.size() - args.size() < ns_defaults) {
-                            ns_pick = fd;
-                            ns_defaults = fd->parameters.size() - args.size();
-                        }
-                    }
+                    // The overload these arguments select through the one scorer (a tie raises), else the sole arity match
+                    auto ns_selected = select_declaration(overloads, args, member_id, eng);
+                    if (!ns_selected) { return ns_selected.error_value(); }
+                    std::shared_ptr<function_decl> ns_pick = std::move(ns_selected.value());
                     {
                         const auto& func_decl = ns_pick;
                         if (func_decl) {
@@ -12485,6 +12488,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     }
     scriptFunc->unit = decl_unit;
     scriptFunc->block_defined = environment_->block_scope();
+    scriptFunc->declared = true;
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
@@ -12496,8 +12500,9 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
         script_function(script_callable_thunk{engine_, std::move(payload)}), engine_);
     engine_->bump_definition_epoch();
 
-    // Define the function in current environment
-    environment_->define(decl->name_id, functionValue);
+    // Define the function in current environment: alone, or in the overload set of its name (KEEP BYTE-PARALLEL with
+    // vm_backend::exec_func_decl)
+    environment_->define(decl->name_id, detail::declare_function_overload(*environment_, decl->name_id, scriptFunc, std::move(functionValue), engine_));
     return {};
 }
 
@@ -13239,22 +13244,13 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 func_decl->name_id = string_symbolizer_->intern(func_decl->name);
             }
 
-            // Check for collisions: same name AND same arity in this namespace
+            // Overloads of the name coexist; one of the same signature collides unless it overrides (KEEP BYTE-PARALLEL with the vm)
             func_decl->unit = current_unit();
             auto& overloads = ns_data->functions[func_decl->name_id];
-            for (auto it = overloads.begin(); it != overloads.end(); ++it) {
-                if ((*it)->parameters.size() == func_decl->parameters.size()) {
-                    // Collision detected!
-                    if (!func_decl->is_override) {
-                        // func_decl->name_id already interned at line 8216
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
-                            func_decl->name_id, decl->name_id);
-                    }
-                    // Override is specified - remove old definition
-                    overloads.erase(it);
-                    break;
-                }
+            if (!detail::admit_namespace_function(overloads, *func_decl)) {
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
+                    "Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
+                    func_decl->name_id, decl->name_id);
             }
 
             // Check if this namespace name matches a class name
@@ -13688,6 +13684,15 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
     switch (payload.kind) {
         case script_callable::kind_type::function:
             return call_function(*payload.fn, args);
+        case script_callable::kind_type::overload_set: {
+            if (!payload.overloads) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Overload set payload without members");
+            }
+            auto picked = detail::select_overload_member(*payload.overloads, args.data(), args.size(), engine_);
+            if (!picked) { return picked.error_value(); }
+            const script_callable* member = detail::script_callable_of(*picked.value(), engine_);
+            return member && member->fn ? call_function(*member->fn, args) : picked.value()->as_function()(args);
+        }
         case script_callable::kind_type::method: {
             auto method_env = get_pooled_method_environment(payload.definition_env, *payload.this_obj, payload.cls.get());
             method_env->define("this", *payload.this_obj);
@@ -13808,8 +13813,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                     if (parent_script_class) {
                         // Find matching parent constructor (fewest defaults used wins)
                         const auto& parent_ctor_asts = parent_script_class->get_constructor_asts();
-                        std::shared_ptr<function_decl> parent_ctor = pick_best_overload(parent_ctor_asts, init_args);   // typed exact > conversion > var, else the sole arity match
-                        if (!parent_ctor) { parent_ctor = sole_arity_candidate(parent_ctor_asts, init_args); }
+                        auto parent_ctor_pick = select_declaration(parent_ctor_asts, init_args, parent_script_class->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
+                        if (!parent_ctor_pick) { return parent_ctor_pick.error_value(); }
+                        std::shared_ptr<function_decl> parent_ctor = std::move(parent_ctor_pick.value());
                         if (!parent_ctor && parent_ctor_asts.empty() && init_args.empty() && parent_script_class->base_needs_construction()) {
                             parent_ctor = parent_script_class->implicit_default_constructor();   // KEEP BYTE-PARALLEL with the vm
                         }
@@ -13877,8 +13883,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
                                                 // Ancestor is a script class - find matching constructor and add to chain
                                                 // (fewest defaults used wins)
                                                 const auto& ancestor_ctors = ancestor_script->get_constructor_asts();
-                                                std::shared_ptr<function_decl> ancestor_ctor = pick_best_overload(ancestor_ctors, ancestor_args);   // typed exact > conversion > var, else the sole arity match
-                                                if (!ancestor_ctor) { ancestor_ctor = sole_arity_candidate(ancestor_ctors, ancestor_args); }
+                                                auto ancestor_ctor_pick = select_declaration(ancestor_ctors, ancestor_args, ancestor_script->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
+                                                if (!ancestor_ctor_pick) { return ancestor_ctor_pick.error_value(); }
+                                                std::shared_ptr<function_decl> ancestor_ctor = std::move(ancestor_ctor_pick.value());
                                                 if (!ancestor_ctor && ancestor_ctors.empty() && ancestor_args.empty() && ancestor_script->base_needs_construction()) {
                                                     ancestor_ctor = ancestor_script->implicit_default_constructor();
                                                 }
@@ -14063,8 +14070,9 @@ checked_result<script_value> interpreter::initialize_members(const std::shared_p
             // the delegation target through the one scorer (typed exact > conversion > var), else the sole arity match
             std::vector<std::shared_ptr<function_decl>> other_ctors;
             for (const auto& ctor_ast : ctor_asts) { if (ctor_ast != matching_ctor) { other_ctors.push_back(ctor_ast); } }
-            std::shared_ptr<function_decl> target_ctor = pick_best_overload(other_ctors, init_args);
-            if (!target_ctor) { target_ctor = sole_arity_candidate(other_ctors, init_args); }
+            auto target_ctor_pick = select_declaration(other_ctors, init_args, class_def->get_type_id(), engine_);   // typed exact > conversion > var, a tie raises, else the sole arity match
+            if (!target_ctor_pick) { return target_ctor_pick.error_value(); }
+            std::shared_ptr<function_decl> target_ctor = std::move(target_ctor_pick.value());
             
             if (!target_ctor) {
                 return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
@@ -14135,10 +14143,10 @@ checked_result<script_value> interpreter::construct_instance(std::shared_ptr<scr
 
     // The class's constructor overloads through the one script-overload scorer (calls, methods and constructors rank alike:
     // typed exact > conversion > var; KEEP BYTE-PARALLEL with vm_backend's constructor selection)
-    std::shared_ptr<function_decl> matching_ctor = pick_best_overload(ctor_asts, args);
-    if (!matching_ctor) {   // no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss
-        matching_ctor = sole_arity_candidate(ctor_asts, args);
-    }
+    // no viable overload: the sole arity match binds (its parameter raises its own text), else the overload miss; a tie raises
+    auto matching_pick = select_declaration(ctor_asts, args, class_def->get_type_id(), engine_);
+    if (!matching_pick) { return matching_pick.error_value(); }
+    std::shared_ptr<function_decl> matching_ctor = std::move(matching_pick.value());
 
     if (!matching_ctor) {
         return detail::overload_miss(make_error_code(runtime_error_code::no_constructor_found),
@@ -15830,7 +15838,9 @@ bool interpreter::call_static_method(const script_function& callee, const std::v
     const auto& table = dispatch->cls->script_static_method_overloads();
     const auto it = table.find(dispatch->name_id);
     if (it != table.end() && it->second.size() > 1) {
-        if (auto best = pick_best_overload(it->second, arguments)) { ast = std::move(best); }
+        const auto verdict = score_declarations(it->second, arguments.data(), arguments.size());
+        if (verdict.rival) return false;   // the dispatcher raises the tie
+        if (verdict.best) { ast = *verdict.best; }
     }
     if (!ast->body || ast->is_coroutine) return false;   // a coroutine mints a handle: the dispatcher's execute_callable
     // the dispatcher's env exactly (its own, never pooled: what the body leaves in it dies with the call)

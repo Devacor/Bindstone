@@ -153,31 +153,49 @@ inline size_t table_conversion_cost(const script_value& arg, const parameter& pa
     }
 }
 
-// Shared script-overload scorer used by method, static-method and constructor dispatch.
+// Steps from a class up its chain to the base named `name` (0 = the class itself); SIZE_MAX when it is no base
+inline size_t base_distance(const class_definition* def, std::string_view name) {
+    size_t steps = 0;
+    for (const class_definition* c = def; c; c = c->get_parent().get(), ++steps) {
+        if (c->get_name() == name) { return steps; }
+    }
+    return SIZE_MAX;
+}
+
+// The scorer's verdict over a set of candidates: the best one, and a rival that ties it on every key (an ambiguous call)
+template <typename Candidate>
+struct overload_verdict {
+    const Candidate* best = nullptr;
+    const Candidate* rival = nullptr;
+};
+
+// Shared script-overload scorer used by free-function, namespace, method, static-method and constructor dispatch.
 // Priority: 1) all typed + exact match, 2) all typed + conversions (fewest first)
 //           3) var/any parameters (fallback; a typed parameter the argument does not
 //           match ranks the candidate below every one it matches, then fewer var
 //           parameters win: typed exact > conversion > var)
 // Same-score tie: the candidate using FEWER defaults wins (an exact-arity overload
-// beats one that must fill trailing defaults), then fewest conversions.
-// Returns nullptr when no overload is viable for these arguments.
-// Span core (call-arg windows: the vm resolves against the caller's stack slice
-// without collecting a vector); the vector overload below forwards.
-inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
-    const std::vector<std::shared_ptr<function_decl>>& overloads,
-    const script_value* args, size_t argc) {
-    const std::shared_ptr<function_decl>* best_ast = nullptr;
+// beats one that must fill trailing defaults), then fewest conversions, then the nearest base a class argument converts to
+// (Dev ruling 2026-10-02). Candidates equal on every key are an ambiguous call: the verdict names the rival.
+// Returns a null best when no overload is viable for these arguments.
+// Span core (call-arg windows: the vm resolves against the caller's stack slice without collecting a vector).
+template <typename Range, typename Params>
+inline auto score_overloads(const Range& overloads, Params&& params_of, const script_value* args, size_t argc) {
+    using candidate = std::remove_cv_t<std::remove_reference_t<decltype(*std::begin(overloads))>>;
+    overload_verdict<candidate> verdict;
     int best_score = INT_MAX;  // Lower is better: 0=exact, 1-N=conversions, 1000=has_var
     size_t best_mismatches = SIZE_MAX;
     size_t best_var_count = SIZE_MAX;
     size_t best_defaults_used = SIZE_MAX;
     size_t best_conversion_count = SIZE_MAX;
+    size_t best_distance = SIZE_MAX;
 
-    for (const auto& overload_ast : overloads) {
-        if (!arity_accepts(overload_ast->parameters, argc)) {
+    for (const auto& overload : overloads) {
+        const std::vector<parameter>& parameters = params_of(overload);
+        if (!arity_accepts(parameters, argc)) {
             continue;
         }
-        const size_t defaults_used = overload_ast->parameters.size() - argc;
+        const size_t defaults_used = parameters.size() - argc;
 
         bool all_typed = true;       // All parameters have explicit types
         bool all_exact = true;       // All typed parameters match exactly
@@ -186,10 +204,11 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
         bool has_var = false;        // Has any var/any parameters
         size_t var_count = 0;        // var/any parameters
         size_t mismatches = 0;       // typed parameters the argument matches neither exactly nor by conversion
+        size_t distance = 0;         // steps from the class arguments up to the bases their parameters name
         bool loose = false;          // a conversion that ranks after a var parameter
 
         for (size_t i = 0; i < argc; ++i) {
-            const auto& param = overload_ast->parameters[i];
+            const auto& param = parameters[i];
             // Lvalue call args (arr[i], obj.field) arrive as references: match their targets
             const script_value& arg = args[i].deref();
             // var keyword creates type_info with type_name="any" and base_type=jai_any_type
@@ -224,10 +243,11 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
                                     all_exact = false;
                                     conversion_count++;
                                 }
-                            } else if (arg_class_def->is_subtype_of(param.type->type_name)) {
-                                // Derived type - allow but rank as an implicit conversion
+                            } else if (const size_t steps = base_distance(arg_class_def, param.type->type_name); steps != SIZE_MAX) {
+                                // Derived type - allow but rank as an implicit conversion, nearer bases first
                                 all_exact = false;
                                 conversion_count++;
+                                distance += steps;
                             } else {
                                 convert_or_mismatch();
                             }
@@ -266,29 +286,50 @@ inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
             continue;
         }
 
-        bool better;
+        int order;   // < 0: better than the best so far, 0: tied on every key, > 0: worse
         if (mismatches != best_mismatches) {
-            better = mismatches < best_mismatches;
+            order = mismatches < best_mismatches ? -1 : 1;
         } else if (score != best_score) {
-            better = score < best_score;
+            order = score < best_score ? -1 : 1;
         } else if (var_count != best_var_count) {
-            better = var_count < best_var_count;
+            order = var_count < best_var_count ? -1 : 1;
         } else if (defaults_used != best_defaults_used) {
-            better = defaults_used < best_defaults_used;
+            order = defaults_used < best_defaults_used ? -1 : 1;
+        } else if (conversion_count != best_conversion_count) {
+            order = conversion_count < best_conversion_count ? -1 : 1;
+        } else if (distance != best_distance) {
+            order = distance < best_distance ? -1 : 1;
         } else {
-            better = conversion_count < best_conversion_count;
+            order = 0;
         }
-        if (better) {
-            best_ast = &overload_ast;
+        if (order < 0) {
+            verdict.best = &overload;
+            verdict.rival = nullptr;
             best_score = score;
             best_mismatches = mismatches;
             best_var_count = var_count;
             best_defaults_used = defaults_used;
             best_conversion_count = conversion_count;
+            best_distance = distance;
+        } else if (order == 0 && !verdict.rival) {
+            verdict.rival = &overload;
         }
     }
 
-    return best_ast;
+    return verdict;
+}
+
+inline const std::vector<parameter>& overload_parameters(const std::shared_ptr<function_decl>& fn) { return fn->parameters; }
+
+inline overload_verdict<std::shared_ptr<function_decl>> score_declarations(
+    const std::vector<std::shared_ptr<function_decl>>& overloads, const script_value* args, size_t argc) {
+    return score_overloads(overloads, [](const std::shared_ptr<function_decl>& fn) -> const std::vector<parameter>& { return fn->parameters; }, args, argc);
+}
+
+inline const std::shared_ptr<function_decl>* pick_best_overload_ref(
+    const std::vector<std::shared_ptr<function_decl>>& overloads,
+    const script_value* args, size_t argc) {
+    return score_declarations(overloads, args, argc).best;
 }
 
 inline std::shared_ptr<function_decl> pick_best_overload(
@@ -303,6 +344,41 @@ inline std::shared_ptr<function_decl> pick_best_overload(
     const std::vector<script_value>& args) {
     return pick_best_overload(overloads, args.data(), args.size());
 }
+
+namespace detail {
+    // a parameter list as a signature spells it: the declared types, `var` for an untyped slot, & for a reference
+    inline std::string parameter_signature(const std::vector<parameter>& params) {
+        std::string out = "(";
+        for (size_t i = 0; i < params.size(); ++i) {
+            if (i) { out += ", "; }
+            const parameter& p = params[i];
+            const bool untyped = !p.type || p.type->base_type == script_value_type::jai_any_type;
+            out += untyped ? std::string("var") : p.type->canonical_name();
+            if (p.is_reference && (untyped || p.type->base_type != script_value_type::jai_reference_type)) { out += "&"; }
+        }
+        return out + ")";
+    }
+
+    // two overloads tie on these arguments (Dev ruling 2026-10-02): {0} = the callee, {1} = the arguments and the two signatures,
+    // composed only while the symbolizer is unfrozen (a parallel worker gets the list-free shape)
+    JAI_NOINLINE inline error_propagator ambiguous_call(uint64_t name_id, const std::vector<parameter>& best, const std::vector<parameter>& rival,
+                                                       const script_value* args, size_t argc, engine* eng) {
+        const std::error_code ec = make_error_code(runtime_error_code::ambiguous_call);
+        string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+        if (symbols && !symbols->frozen()) {
+            const std::string spelled(symbols->get_string(name_id));
+            return {ec, "Ambiguous call to '{0}' with {1}", name_id,
+                    symbols->intern(argument_type_list(args, argc, eng) + ": '" + spelled + parameter_signature(best) + "' and '" + spelled +
+                                    parameter_signature(rival) + "' match equally")};
+        }
+        return {ec, "Ambiguous call to '{0}'", name_id, 0};
+    }
+}
+
+// The declaration a call binds: the scorer's best, else the one the arity admits (it converts or raises its own text); null
+// when none does (the caller raises its miss); a tie is the ambiguous-call error
+inline checked_result<std::shared_ptr<function_decl>> select_declaration(const std::vector<std::shared_ptr<function_decl>>& overloads,
+                                                                       const script_value* args, size_t argc, uint64_t name_id, engine* eng);
 
 // Constructor and method selection when the scorer finds no viable overload: the one overload the arity admits binds (its parameter
 // converts the argument its slot's way or raises its own text); with several, none does and the caller raises the overload miss
@@ -321,6 +397,22 @@ inline std::shared_ptr<function_decl> sole_arity_candidate(const std::vector<std
                                                            const std::vector<script_value>& args) {
     const auto* sole = sole_arity_candidate(overloads, args.data(), args.size());
     return sole ? *sole : nullptr;
+}
+
+inline checked_result<std::shared_ptr<function_decl>> select_declaration(const std::vector<std::shared_ptr<function_decl>>& overloads,
+                                                                       const script_value* args, size_t argc, uint64_t name_id, engine* eng) {
+    const auto verdict = score_declarations(overloads, args, argc);
+    if (verdict.rival) [[unlikely]] {
+        return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args, argc, eng);
+    }
+    if (verdict.best) { return *verdict.best; }
+    const auto* sole = sole_arity_candidate(overloads, args, argc);
+    return sole ? *sole : std::shared_ptr<function_decl>();
+}
+
+inline checked_result<std::shared_ptr<function_decl>> select_declaration(const std::vector<std::shared_ptr<function_decl>>& overloads,
+                                                                       const std::vector<script_value>& args, uint64_t name_id, engine* eng) {
+    return select_declaration(overloads, args.data(), args.size(), name_id, eng);
 }
 
 // Cache-aware instance-method overload resolution over method_overloads_.
@@ -353,7 +445,12 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
         }
     }
 
-    const auto* best_ast = pick_best_overload_ref(overloads, args, argc);
+    const auto verdict = score_declarations(overloads, args, argc);
+    if (verdict.rival) [[unlikely]] {
+        ec = make_error_code(runtime_error_code::ambiguous_call);
+        return nullptr;
+    }
+    const auto* best_ast = verdict.best;
     if (!best_ast) { best_ast = sole_arity_candidate(overloads, args, argc); }
     if (!best_ast) {
         ec = make_error_code(runtime_error_code::argument_count_mismatch);
@@ -391,6 +488,10 @@ inline checked_result<const std::shared_ptr<function_decl>*> class_definition::r
 
 inline error_propagator class_definition::method_overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc) const {
     auto it = method_overloads_.find(name_id);
+    if (ec == make_error_code(runtime_error_code::ambiguous_call) && it != method_overloads_.end()) {
+        const auto verdict = score_declarations(it->second, args, argc);
+        if (verdict.rival) { return detail::ambiguous_call(name_id, (*verdict.best)->parameters, (*verdict.rival)->parameters, args, argc, get_engine()); }
+    }
     if (it != method_overloads_.end() && it->second.size() == 1 && !arity_accepts(it->second.front()->parameters, argc)) {
         return detail::method_arity_miss(name_id, it->second.front()->parameters.size(), argc, get_engine());
     }

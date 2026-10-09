@@ -138,21 +138,20 @@ switch (1) {
 }
 print(hits);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1101</code></pre></div>
-<h3 id="free-functions-do-not-overload">Free functions do not overload<a class="hlink" href="#free-functions-do-not-overload" aria-label="link">&#8203;</a></h3>
-<p>Inside a namespace or a class, overloads by parameter count (and, for methods, by type) work as in C++:</p>
+<h3 id="free-functions-do-not-overload">Overloads work as in C++<a class="hlink" href="#free-functions-do-not-overload" aria-label="link">&#8203;</a></h3>
+<p>Functions of one name with different signatures coexist at program scope, in a namespace and in a class, and a call takes the best match; a tie raises <code>Ambiguous call to ...</code>, as C++ rejects an ambiguous call:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace geo {
     int area(int side) { return side * side; }
     int area(int w, int h) { return w * h; }
 }
 print(geo::area(4), " ", geo::area(2, 3));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">16 6</code></pre></div>
-<p>At program scope a second definition of a name replaces the first, which is what hot reload needs. The checker notes the duplicate as a warning (<code>jaiscript --check=warn</code> prints it), and the old arity is gone:</p>
+<p>At program scope the same holds, and a definition of the same signature from another unit replaces the earlier one, which is what hot reload needs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int area(int side) { return side * side; }
-int area(int w, int h) { return w * h; }     // replaces the one above
-print(area(2, 3));
-print(area(4));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6
-== error: 'area' expects 2 arguments, got 1</code></pre></div>
+int area(int w, int h) { return w * h; }
+float area(float r) { return 3.0 * r * r; }
+print(area(2, 3), " ", area(4), " ", area(1.5));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6 16 6.75</code></pre></div>
 <h3 id="no-slicing">A base-typed variable keeps the whole object<a class="hlink" href="#no-slicing" aria-label="link">&#8203;</a></h3>
 <div class="callout cpp"><p>This is where JaiScript departs from C++: a <code>Base</code> slot holding a <code>Derived</code> keeps the whole object and its overrides, where C++ would slice it.</p></div>
 <p>Copying a derived value into a base-typed variable, parameter or element keeps all of it: no slicing. Assigning one into a base-typed slot that already holds an object keeps that object and turns it into the derived class in place. The variable's type decides what the checker lets you name, and <code>cast&lt;T&amp;&gt;</code> reaches the rest:</p>

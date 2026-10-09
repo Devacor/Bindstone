@@ -960,8 +960,8 @@ public:
 			check_true(r.as<std::string>().find("call target 'h' is not statically resolvable") != std::string::npos);
 
 			auto r2 = e->execute(R"(
-				int f(int& x) { return x; }
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
+				int g(int& x) { return x; }
+				try { parallel_transform([1, 2, 3], g); } catch (e) { return e; }
 				return "no-error";
 			)");
 			check_true(r2.as<std::string>().find("may not take its element by reference") != std::string::npos);
@@ -1079,10 +1079,10 @@ public:
 				class Node2 { int id = 0; Leaf2 leaf = Leaf2(0); array<int> xs = []; Node2() {} Node2(int n) { id = n; leaf = Leaf2(n * 2); xs = [n, n + 1]; } }
 				var nodes = [];
 				for (int i = 0; i < 40; i++) { nodes.push(Node2(i)); }
-				int f(var n) { return n.id + n.leaf.v + n.xs[1] + n.leaf.tag.size(); }
-				var pout = parallel_transform(nodes, f);
+				int g(var n) { return n.id + n.leaf.v + n.xs[1] + n.leaf.tag.size(); }
+				var pout = parallel_transform(nodes, g);
 				var sout = [];
-				for (auto x : nodes) { sout.push(f(x)); }
+				for (auto x : nodes) { sout.push(g(x)); }
 				return [pout, sout];
 			)";
 			check_matches_serial_at(e, hetero, {1, 2, 8});
@@ -1595,13 +1595,13 @@ public:
 				const std::string src =
 					"var a = [];"
 					"for (var i = 0; i < 48; i++) { a.push(\"w\" + to_string(i * " + std::to_string(k) + ") + \"_tail\"); }"
-					"string f(string s) {"
+					"string g(string s) {"
 					"  var t = s + \"|\" + to_string(s.size() % " + std::to_string(k) + ");"
 					"  return t.substr(0, t.size() % 9 + 3);"
 					"}"
-					"var pout = parallel_transform(a, f);"
+					"var pout = parallel_transform(a, g);"
 					"var sout = [];"
-					"for (auto x : a) { sout.push(f(x)); }"
+					"for (auto x : a) { sout.push(g(x)); }"
 					"return [pout, sout];";
 				e->parallel_thread_count(1);
 				auto r1 = e->execute(src);

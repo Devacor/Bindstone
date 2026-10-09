@@ -3303,7 +3303,7 @@ public:
                              "string f(string s) { return s + \"!\"; } to_string(use(\"2\"))",
                              "to_string(use(\"3\"))"}, "3!", "later execute redefines the callee with another signature");
             check_proof_run({"int f(int v) { return v + 1; } var use() { return f(2); } to_string(use())",
-                             "string f(string s) { return s + \"!\"; } to_string(use())"}, "2!", "a stamped int argument meets a string parameter after the redefinition: the guard falls to the string conversion");
+                             "string f(string s) { return s + \"!\"; } to_string(use())"}, "3", "a later execute adds an overload of another signature: the stamped int argument keeps the int overload");
             check_proof_run({"class O { int m(int v) { return v; } int m(int a, int b) { return a + b; } int m(string s) { return 100; } }\n"
                              "O o = O(); to_string(o.m(1)) + \":\" + to_string(o.m(1, 2)) + \":\" + to_string(o.m(\"s\"))"}, "1:3:100", "overloaded methods");
             check_proof_run({"int d(int a, int b = 5) { return a + b; } to_string(d(1)) + \":\" + to_string(d(1, 2))"}, "6:3", "defaults");

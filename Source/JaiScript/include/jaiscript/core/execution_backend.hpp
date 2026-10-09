@@ -22,6 +22,16 @@ class coroutine_handle;
 namespace debug { class controller; }
 namespace detail { class engine_operator_table; }
 
+struct script_callable;
+
+// The declarations of one function name with distinct signatures (detail/function_overloads.hpp): each member's own function
+// value beside it, so a call that selects a member runs exactly what a lone declaration of it would
+struct function_overload_set {
+    uint64_t name_id = 0;
+    std::vector<std::shared_ptr<script_defined_function>> members;
+    std::vector<script_value> values;
+};
+
 // Backend-neutral payload describing a script-defined callable. Stored thunks capture
 // (engine*, payload) and resolve the live backend at call time via
 // engine::get_execution_backend()->execute_callable(), so no callable ever holds a
@@ -32,7 +42,8 @@ struct script_callable {
     // value, which carries the sticky-env/body-cache state and pins the class). The
     // thunk's operator() replicates make_bound_method's exact behavior; the vm's call
     // path recovers the payload and enters the method in-loop instead.
-    enum class kind_type : uint8_t { function, method, static_method, constructor, bound_method };
+    // overload_set: the program's or a namespace scope's declarations of one name; a call selects one member
+    enum class kind_type : uint8_t { function, method, static_method, constructor, bound_method, overload_set };
     kind_type kind = kind_type::function;
 
     std::shared_ptr<script_defined_function> fn;   // function (free functions, lambdas)
@@ -41,6 +52,7 @@ struct script_callable {
     std::shared_ptr<environment> definition_env;   // method / static_method / constructor
     std::optional<script_value> this_obj;          // method / bound_method ('this'; args exclude it)
     std::optional<script_value> bound_dispatch;    // bound_method: the method value to invoke
+    std::shared_ptr<const function_overload_set> overloads;   // overload_set
 };
 
 // Named trampoline for script-defined callables. Backends mint function values through

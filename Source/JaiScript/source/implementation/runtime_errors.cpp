@@ -70,6 +70,8 @@ std::string runtime_error_category_impl::message(int ev) const {
         // Function/Method errors
         case runtime_error_code::argument_count_mismatch:
             return "Function argument count mismatch";
+        case runtime_error_code::ambiguous_call:
+            return "Ambiguous call";
         case runtime_error_code::no_constructor_found:
             return "No constructor found";
         case runtime_error_code::invalid_super_call:

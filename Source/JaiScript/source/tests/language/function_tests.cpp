@@ -1113,8 +1113,8 @@ public:
                 "class A { int v = 0; A(int x) { v = x; } } class B : A { B() : super(9) {} } B().v;").as_int());
         });
 
-        // ---- duplicate top-level definitions warn; include composition is silent
-        // (Dev ruling 2026-07: warn severity always, scoped to one textual parse unit) ----
+        // ---- top-level functions of other signatures overload (Dev ruling 2026-10-02); a coroutine does not, and a function and
+        // a coroutine of one name warn; include composition is silent (warn severity, scoped to one textual parse unit) ----
 
         auto duplicate_warnings = [](jai::engine& eng) {
             size_t n = 0;
@@ -1125,12 +1125,12 @@ public:
             return n;
         };
 
-        test("duplicate_top_level_definition_warns", [&, this]() {
+        test("top_level_overloads_do_not_warn", [&, this]() {
             auto engine = make_engine();
             engine->static_checking(jai::check_mode::warn);
-            check_eq(int64_t(2), engine->execute(
-                "function f(a) { return 1; } function f(a, b) { return 2; } f(0, 0);").as_int());
-            check_eq(size_t(1), duplicate_warnings(*engine));
+            check_eq(int64_t(21), engine->execute(
+                "function f(a) { return 1; } function f(a, b) { return 2; } f(0, 0) * 10 + f(0);").as_int());
+            check_eq(size_t(0), duplicate_warnings(*engine));
         });
 
         test("duplicate_warning_spans_definition_forms", [&, this]() {
@@ -1179,8 +1179,8 @@ public:
         test("duplicate_warning_never_blocks_strict_mode", [&, this]() {
             auto engine = make_engine();
             engine->static_checking(jai::check_mode::strict);
-            check_eq(int64_t(2), engine->execute(
-                "function f(a) { return 1; } function f(a, b) { return 2; } f(0, 0);").as_int());
+            check_eq(int64_t(1), engine->execute(
+                "coroutine function f() { yield 1; } function f(a) { return 1; } f(0);").as_int());
             check_eq(size_t(1), duplicate_warnings(*engine));
         });
 
@@ -1339,6 +1339,110 @@ public:
                 }
                 run();
             )").to_string());
+        });
+
+        // ---- free-function overloads (Dev ruling 2026-10-02): overloads coexist as in C++, only the same signature replaces, a
+        // reloaded unit replaces or drops only its own declarations; a tie raises, the nearest base breaks a class tie ----
+
+        auto error_of = [](auto&& run) -> std::string {
+            try { run(); } catch (const std::exception& ex) { return ex.what(); }
+            return "";
+        };
+
+        test("free_function_overloads_coexist", [this]() {
+            auto engine = make_engine();
+            check_eq(std::string("AB33|1,2,3,4"), engine->execute(R"(
+                class O { var x = 0; }
+                string log = "";
+                void mix(var& r, string n) { log = log + "A"; r = 33; }
+                void mix(var r, int n) { log = log + "B"; r = 44; }
+                var o = new O();
+                mix(o.x, "s");
+                mix(o.x, 5);
+                int f(int a) { return 1; }
+                int f(string a) { return 2; }
+                int f(int a, int b) { return 3; }
+                int f(float a) { return 4; }
+                log + o.x + "|" + f(7) + "," + f("x") + "," + f(1, 2) + "," + f(2.5);
+            )").to_string());
+        });
+
+        test("free_function_overloads_coexist_across_units", [this]() {
+            auto engine = make_engine();
+            engine->execute("int f(int a) { return 1; }");
+            engine->execute("int f(string a) { return 2; }");
+            check_eq(int64_t(12), engine->execute("f(5) * 10 + f(\"x\");").as_int(), "both units' overloads");
+            engine->execute("int f(string a) { return 3; }");   // the same signature replaces, in any unit
+            check_eq(int64_t(13), engine->execute("f(5) * 10 + f(\"x\");").as_int(), "the same signature replaces");
+        });
+
+        test("free_function_overload_reload_drops_only_its_own", [this, error_of]() {
+            namespace fs = std::filesystem;
+            const auto dir = jai::foundry::test_temp_directory() / "jai_overload_reload";
+            fs::create_directories(dir);
+            const auto mod = dir / "ov_mod.jai";
+            auto write = [&](const char* text) { std::ofstream out(mod, std::ios::trunc); out << text; };
+            write("int f(int a) { return 1; }\nint f(string a) { return 2; }\n");
+            auto engine = make_engine();
+            const std::string path = mod.generic_string();
+            engine->execute("int f(float a) { return 4; }");
+            engine->execute("import \"" + path + "\";");
+            check_eq(int64_t(124), engine->execute("f(5) * 100 + f(\"x\") * 10 + f(2.5);").as_int(), "three overloads from two units");
+            fs::last_write_time(mod, fs::last_write_time(mod) + std::chrono::seconds(2));
+            write("int f(int a) { return 5; }\n");
+            fs::last_write_time(mod, fs::last_write_time(mod) + std::chrono::seconds(4));
+            engine->execute("import \"" + path + "\";");
+            check_eq(int64_t(54), engine->execute("f(5) * 10 + f(2.5);").as_int(), "the reload replaced its own and kept the other unit's");
+            check_true(!error_of([&] { engine->execute("f(\"x\");"); }).empty(), "the reload dropped its string overload");
+            fs::remove_all(dir);
+        });
+
+        test("namespace_function_overloads_by_signature", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(123), engine->execute(R"(
+                namespace n {
+                    int f(int a) { return 1; }
+                    int f(string a) { return 2; }
+                    int f(float a) { return 3; }
+                }
+                n::f(1) * 100 + n::f("x") * 10 + n::f(2.5);
+            )").as_int());
+        });
+
+        test("an_ambiguous_overload_call_raises", [this, error_of]() {
+            auto engine = make_engine();
+            engine->static_checking(jai::check_mode::off);   // the run-time verdict
+            engine->execute("void g(int a, float b) { } void g(float a, int b) { }");
+            const std::string free_err = error_of([&] { engine->execute("g(1, 1);"); });
+            check_true(free_err.find("mbiguous") != std::string::npos, "free: " + free_err);
+            engine->execute("namespace n { void g(int a, float b) { } void g(float a, int b) { } }");
+            const std::string ns_err = error_of([&] { engine->execute("n::g(1, 1);"); });
+            check_true(ns_err.find("mbiguous") != std::string::npos, "namespace: " + ns_err);
+            engine->execute("class K { K() { } K(int a, float b) { } K(float a, int b) { } void g(int a, float b) { } void g(float a, int b) { } }");
+            const std::string method_err = error_of([&] { engine->execute("K().g(1, 1);"); });
+            check_true(method_err.find("mbiguous") != std::string::npos, "method: " + method_err);
+            const std::string ctor_err = error_of([&] { engine->execute("K(1, 1);"); });
+            check_true(ctor_err.find("mbiguous") != std::string::npos, "constructor: " + ctor_err);
+            check_eq(int64_t(1), engine->execute("int h(int a, float b) { return 1; } int h(float a, int b) { return 2; } h(1, 2.5);").as_int(), "a better match is no tie");
+        });
+
+        test("an_ambiguous_overload_call_is_a_load_error_under_strict", [this, error_of]() {
+            auto engine = make_engine();
+            engine->static_checking(jai::check_mode::strict);
+            const std::string err = error_of([&] { engine->execute("int ran = 0; void g(int a, float b) { } void g(float a, int b) { } ran = 1; g(1, 1);"); });
+            check_true(err.find("mbiguous") != std::string::npos, err);
+            check_true(!engine->get_global_environment()->get_value_ptr(engine->get_symbolizer()->intern("ran")), "nothing ran");
+        });
+
+        test("the_nearest_base_breaks_a_class_tie", [this]() {
+            auto engine = make_engine();
+            check_eq(int64_t(23), engine->execute(R"(
+                class A { } class B : A { } class C : B { }
+                int h(A a) { return 1; }
+                int h(B b) { return 2; }
+                class M { int h(A a) { return 1; } int h(B b) { return 3; } }
+                h(C()) * 10 + M().h(C());
+            )").as_int());
         });
     }
 };

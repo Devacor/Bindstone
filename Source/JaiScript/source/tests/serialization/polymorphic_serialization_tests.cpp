@@ -7,6 +7,7 @@
 #include <jaiscript/core/registrar.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/properties.hpp>
+#include <jaiscript/signals/signal_property.hpp>
 #include <jaiscript/detail/static_type_name.hpp>
 #include "serialization_roundtrip.hpp"
 
@@ -1714,8 +1715,290 @@ public:
     }
 };
 
+// ============================================================================
+// Native object access: everything a host object registers reaches script through every spelling, on both
+// backends, and equality, copies and archives keep their results (golden output of the pre-change runtime)
+// ============================================================================
+
+struct NativeGadget : jai::property_owner<NativeGadget> {
+    JAI_PROPERTY((int), charge, 5);
+    JAI_SIGNAL_PROPERTY(void(int), on_spark);
+    void spark(int amount) { charge = charge.get() + amount; on_sparkSignal(amount); }
+    void note(const std::string& id, const std::string& script) { on_sparkSignal.connect(id, script); }
+};
+
+class native_object_access_tests : public suite {
+public:
+    native_object_access_tests() : suite("Native Object Access") {}
+
+    static std::string hex(const std::vector<uint8_t>& bytes) {
+        constexpr const char digits[] = "0123456789abcdef";
+        std::string out;
+        for (uint8_t b : bytes) { out += digits[b >> 4]; out += digits[b & 15]; }
+        return out;
+    }
+    static std::vector<uint8_t> unhex(const std::string& text) {
+        std::vector<uint8_t> out;
+        auto nibble = [](char c) { return static_cast<uint8_t>(c <= '9' ? c - '0' : c - 'a' + 10); };
+        for (size_t i = 0; i + 1 < text.size(); i += 2) { out.push_back(static_cast<uint8_t>((nibble(text[i]) << 4) | nibble(text[i + 1]))); }
+        return out;
+    }
+
+    std::shared_ptr<engine> native_engine() {
+        auto eng = make_engine();
+        stdlib::register_all(*eng);
+        dynamic_binder<HybridCreature>(*eng, "HybridCreature")
+            .constructor<>()
+            .property("health", &HybridCreature::health)
+            .property("label", &HybridCreature::label)
+            .method("speak", &HybridCreature::speak)
+            .build();
+        dynamic_binder<NativeGadget>(*eng, "NativeGadget")
+            .constructor<>()
+            .method("spark", &NativeGadget::spark)
+            .auto_bind()
+            .build();
+        eng->execute(R"(
+            class Voidkin : HybridCreature {
+                int chomp = 3;
+                Voidkin() : super() {}
+                string speak() override { return "voidkin"; }
+            }
+        )");
+        return eng;
+    }
+
+    // Each spelling's result as text, one line per spelling
+    static constexpr const char* k_report = R"(
+        var sparks = 0;
+        function report() -> string {
+            string r = "";
+            var h = HybridCreature();
+            h.health = 7;
+            r += "h.health " + to_string(h.health) + "\n";
+            r += "get " + to_string(reflect::get(h, "health")) + "\n";
+            reflect::set(h, "label", "set");
+            r += "set " + h.label + "\n";
+            h.label += "!";
+            r += "compound " + h.label + "\n";
+            r += "has_field " + to_string(reflect::has_field(h, "health")) + " " + to_string(reflect::has_field(h, "label")) + "\n";
+            r += "fields " + to_json(reflect::fields(h)) + "\n";
+            r += "methods " + to_json(reflect::methods(h)) + "\n";
+            r += "speak " + h.speak() + "\n";
+            auto bound = reflect::bind(h, "speak");
+            r += "bind " + bound() + "\n";
+            r += "invoke " + to_string(reflect::invoke(h, "speak")) + "\n";
+            r += "type " + reflect::type_name(h) + " " + to_string(reflect::is_cpp_bound(h)) + "\n";
+            var h2 = HybridCreature();
+            r += "eq " + to_string(h == h) + " " + to_string(h == h2) + "\n";
+            var hc = h;
+            r += "copy " + to_string(hc == h) + " " + to_string(same_object(hc, h)) + " " + to_string(hc.health) + " " + hc.label + "\n";
+            hc.health = 1;
+            r += "copy independent " + to_string(h.health) + "\n";
+            r += "json " + to_json(h) + "\n";
+            var hj = from_json(to_json(h));
+            r += "from_json " + to_string(hj.health) + " " + hj.label + "\n";
+            var hb = from_binary(to_binary(h));
+            r += "from_binary " + to_string(hb.health) + " " + hb.label + "\n";
+
+            var v = Voidkin();
+            v.health = 42;
+            v.chomp = 8;
+            r += "v.health " + to_string(v.health) + " " + to_string(v.chomp) + " " + v.speak() + "\n";
+            r += "v.get " + to_string(reflect::get(v, "health")) + " " + to_string(reflect::get(v, "chomp")) + "\n";
+            reflect::set(v, "health", 43);
+            r += "v.set " + to_string(v.health) + "\n";
+            r += "v.fields " + to_json(reflect::fields(v)) + "\n";
+            r += "v.methods " + to_json(reflect::methods(v)) + "\n";
+            auto vb = reflect::bind(v, "speak");
+            r += "v.bind " + vb() + " " + to_string(reflect::invoke(v, "speak")) + "\n";
+            r += "v.type " + reflect::type_name(v) + " " + to_string(reflect::is_cpp_bound(v)) + "\n";
+            var v2 = Voidkin();
+            r += "v.eq " + to_string(v == v) + " " + to_string(v == v2) + "\n";
+            var vc = v;
+            r += "v.copy " + to_string(vc == v) + " " + to_string(same_object(vc, v)) + " " + to_string(vc.health) + " " + to_string(vc.chomp) + "\n";
+            r += "v.json " + to_json(v) + "\n";
+            var vj = from_json(to_json(v));
+            r += "v.from_json " + to_string(vj.health) + " " + to_string(vj.chomp) + " " + vj.speak() + "\n";
+            var vbin = from_binary(to_binary(v));
+            r += "v.from_binary " + to_string(vbin.health) + " " + to_string(vbin.chomp) + " " + vbin.speak() + "\n";
+
+            var x = HybridCreature();
+            x.health = 9;
+            extend(x, Voidkin);
+            r += "extend " + to_string(x.health) + " " + to_string(x.chomp) + " " + x.speak() + " " + reflect::type_name(x) + "\n";
+            r += "extend.get " + to_string(reflect::get(x, "health")) + "\n";
+            r += "extend.json " + to_json(x) + "\n";
+
+            var g = NativeGadget();
+            r += "g.charge " + to_string(g.charge) + "\n";
+            g.charge = 9;
+            r += "g.set " + to_string(g.charge) + " " + to_string(reflect::get(g, "charge")) + "\n";
+            reflect::set(g, "charge", 11);
+            g.on_spark.connect("count", [](int n) -> void { sparks = sparks + n; });
+            g.spark(3);
+            r += "g.spark " + to_string(g.charge) + " " + to_string(sparks) + "\n";
+            r += "g.fields " + to_json(reflect::fields(g)) + "\n";
+            r += "g.methods " + to_json(reflect::methods(g)) + "\n";
+            r += "g.json " + to_json(g) + "\n";
+            var g2 = NativeGadget();
+            r += "g.eq " + to_string(g == g) + " " + to_string(g == g2) + "\n";
+            return r;
+        }
+    )";
+
+    // A hot reload of the script subclass keeps each live hybrid's C++ object; identity, copies and equality after it
+    static constexpr const char* k_reload_before = R"(
+        var r1 = Voidkin();
+        r1.health = 61;
+        r1.chomp = 4;
+        var keep = r1;
+        var& alias = r1;
+        auto same_before = same_object(keep, r1);
+        auto alias_before = same_object(alias, r1);
+    )";
+    static constexpr const char* k_reload_class = R"(
+        class Voidkin : HybridCreature {
+            int chomp = 3;
+            int fangs = 2;
+            Voidkin() : super() {}
+            string speak() override { return "reloaded"; }
+        }
+    )";
+    static constexpr const char* k_reload_after = R"(
+        function after_reload() -> string {
+            string r = "";
+            r += "fields " + to_string(r1.health) + " " + to_string(r1.chomp) + " " + to_string(r1.fangs) + " " + r1.speak() + "\n";
+            r += "same " + to_string(same_before) + " " + to_string(same_object(keep, r1)) + "\n";
+            r += "alias " + to_string(alias_before) + " " + to_string(same_object(alias, r1)) + " " + to_string(alias.health) + " " + alias.speak() + "\n";
+            var c = r1;
+            c.health = 5;
+            r += "copy " + to_string(same_object(c, r1)) + " " + to_string(c == r1) + " " + to_string(r1.health) + " " + to_string(c.health) + " " + c.speak() + "\n";
+            r += "eq " + to_string(r1 == r1) + " " + to_string(r1 == keep) + "\n";
+            var fresh = Voidkin();
+            r += "fresh " + to_string(fresh.health) + " " + to_string(fresh.fangs) + " " + to_string(fresh == r1) + "\n";
+            r += "json " + to_json(r1) + "\n";
+            var back = from_binary(to_binary(r1));
+            r += "binary " + to_string(back.health) + " " + to_string(back.chomp) + " " + to_string(back.fangs) + " " + back.speak() + "\n";
+            return r;
+        }
+    )";
+
+    static constexpr const char* k_reload_golden = "fields 61 4 2 reloaded\nsame false false\nalias true true 61 reloaded\ncopy false false 61 5 reloaded\neq true false\nfresh 100 2 false\njson {\"_type_\":\"Voidkin\",\"health\":61,\"label\":\"creature\",\"chomp\":4,\"fangs\":2}\nbinary 61 4 2 reloaded\n";
+    static constexpr const char* k_report_golden = "h.health 7\nget 7\nset set\ncompound set!\nhas_field true true\nfields []\nmethods [{\"access\":\"public\",\"arity\":0,\"from\":\"HybridCreature\",\"name\":\"speak\",\"params\":[],\"static\":false}]\nspeak grr\nbind grr\ninvoke grr\ntype HybridCreature true\neq true false\ncopy false false 7 set!\ncopy independent 7\njson {\"_type_\":\"HybridCreature\",\"health\":7,\"label\":\"set!\"}\nfrom_json 7 set!\nfrom_binary 7 set!\nv.health 42 8 voidkin\nv.get 42 8\nv.set 43\nv.fields [{\"access\":\"public\",\"from\":\"Voidkin\",\"kind\":\"field\",\"name\":\"chomp\",\"static\":false,\"type\":\"int\"}]\nv.methods [{\"access\":\"public\",\"arity\":0,\"from\":\"Voidkin\",\"name\":\"speak\",\"params\":[],\"static\":false}]\nv.bind voidkin voidkin\nv.type Voidkin false\nv.eq true false\nv.copy false false 43 8\nv.json {\"_type_\":\"Voidkin\",\"health\":43,\"label\":\"creature\",\"chomp\":8}\nv.from_json 43 8 voidkin\nv.from_binary 43 8 voidkin\nextend 9 3 voidkin Voidkin\nextend.get 9\nextend.json {\"_type_\":\"Voidkin\",\"health\":9,\"label\":\"creature\",\"chomp\":3}\ng.charge 5\ng.set 9 9\ng.spark 14 3\ng.fields [{\"access\":\"public\",\"from\":\"NativeGadget\",\"kind\":\"field\",\"name\":\"charge\",\"static\":false,\"type\":\"int\"},{\"access\":\"public\",\"from\":\"NativeGadget\",\"kind\":\"signal\",\"name\":\"on_spark\",\"static\":false,\"type\":\"var\"}]\ng.methods [{\"access\":\"public\",\"arity\":1,\"from\":\"NativeGadget\",\"name\":\"spark\",\"params\":[{\"default\":false,\"name\":\"arg0\",\"type\":\"int\"}],\"static\":false}]\ng.json {\"_type_\":\"NativeGadget\",\"on_spark\":{\"_type_\":\"Signal\"},\"charge\":14}\ng.eq true false\n";
+    // hybrid JSON, hybrid binary (hex), host JSON, host binary (hex), gadget JSON: one line each
+    static constexpr const char* k_archives_golden = "{\"$id\": 1,\"$type\": \"Voidkin\",\"$script\": \"{\\\"chomp\\\":7}\",\"$val\": {\"health\": 42,\"label\": \"gnasher\"}}\n01000000000000000004000000030000002469640500000024747970650700000024736372697074040000002476616c040000000b0000000f000000380000000100000007000000566f69646b696e0b0000007b2263686f6d70223a377d01000000000000000002000000060000006865616c7468050000006c6162656c040000000b0000002a00000007000000676e61736865720202\n{\"$id\": 1,\"$val\": {\"health\": 13,\"label\": \"plain\"}}\n0100000000000000000200000003000000246964040000002476616c04000000360000000100000001000000000000000002000000060000006865616c7468050000006c6162656c04000000090000000d00000005000000706c61696e0202\n{\"$id\": 1,\"$val\": {\"charge\": 21,\"on_spark\": {\"parameter_names\": [],\"observers\": [],\"owned_observers\": {\"note\": {\"parameter_names\": [],\"script\": \"mark(arg_0);\"}}}}}";
+    static std::vector<std::string> golden_lines() {
+        std::vector<std::string> out;
+        std::string text = k_archives_golden;
+        size_t start = 0;
+        for (size_t nl = text.find('\n'); nl != std::string::npos; nl = text.find('\n', start)) { out.push_back(text.substr(start, nl - start)); start = nl + 1; }
+        out.push_back(text.substr(start));
+        out.resize(5);
+        return out;
+    }
+
+    void forge_tests() override {
+        test("every_spelling_reaches_the_native_object", [&]() {
+            auto eng = native_engine();
+            eng->execute(k_report);
+            check_eq(std::string(k_report_golden), eng->execute("report()").as<std::string>());
+        });
+
+        test("a_hot_reload_keeps_the_native_object", [&]() {
+            auto eng = native_engine();
+            eng->execute(k_reload_before);
+            eng->execute(k_reload_class);
+            eng->execute(k_reload_after);
+            check_eq(std::string(k_reload_golden), eng->execute("after_reload()").as<std::string>());
+            auto held = eng->execute("r1").as<std::shared_ptr<HybridCreature>>();
+            check(held != nullptr && held->health == 61, "the C++ object behind the reloaded instance is the one it had");
+        });
+
+        test("archives_written_before_read_after", [&]() {
+            auto eng = native_engine();
+            eng->execute("var v = Voidkin(); v.health = 42; v.label = \"gnasher\"; v.chomp = 7;");
+            auto hybrid = eng->execute("v").as<std::shared_ptr<HybridCreature>>();
+            auto host = std::make_shared<HybridCreature>();
+            host->health = 13;
+            host->label = "plain";
+            auto gadget = std::make_shared<NativeGadget>();
+            gadget->charge = 21;
+            gadget->note("note", "mark(arg_0);");
+
+            std::string written;
+            {
+                jai::serialization::json_archive_writer w(0, eng.get());
+                w(hybrid);
+                written += w.str() + "\n";
+            }
+            {
+                jai::serialization::binary_archive_writer w(eng.get());
+                w(hybrid);
+                written += hex(w.data()) + "\n";
+            }
+            {
+                jai::serialization::json_archive_writer w(0, eng.get());
+                w(host);
+                written += w.str() + "\n";
+            }
+            {
+                jai::serialization::binary_archive_writer w(eng.get());
+                w(host);
+                written += hex(w.data()) + "\n";
+            }
+            {
+                jai::serialization::json_archive_writer w(0, eng.get());
+                w(gadget);
+                written += w.str();
+            }
+            check_eq(std::string(k_archives_golden), written, "the writers emit what the pre-change runtime wrote");
+            const auto golden = golden_lines();
+
+            auto read_json = [&](const std::string& text) {
+                jai::serialization::json_archive_reader r(text, eng.get());
+                std::shared_ptr<HybridCreature> out;
+                r(out);
+                return out;
+            };
+            auto read_binary = [&](const std::string& text) {
+                auto bytes = unhex(text);
+                jai::serialization::binary_archive_reader r(bytes.data(), bytes.size(), eng.get());
+                std::shared_ptr<HybridCreature> out;
+                r(out);
+                return out;
+            };
+            for (auto loaded : {read_json(golden[0]), read_binary(golden[1])}) {
+                check(loaded != nullptr, "the golden hybrid loads");
+                check_eq(42, loaded->health);
+                check_eq(std::string("gnasher"), loaded->label);
+                eng->add_global("loadedGolden", eng->make_object(loaded));
+                check_eq((script_int)7, eng->execute("loadedGolden.chomp").as_int(), "its script field");
+                check_eq(std::string("voidkin"), eng->execute("loadedGolden.speak()").as<std::string>(), "its override");
+                check_eq((script_int)42, eng->execute("loadedGolden.health").as_int(), "its C++ property");
+            }
+            for (auto loaded : {read_json(golden[2]), read_binary(golden[3])}) {
+                check(loaded != nullptr, "the golden host object loads");
+                check_eq(13, loaded->health);
+                check_eq(std::string("plain"), loaded->label);
+                check(eng->script_layer(*loaded) == nullptr, "a plain host object loads without a layer");
+            }
+            int64_t fired = 0;
+            eng->add_function("mark", [counter = &fired](int v) { *counter += v; });
+            jai::serialization::json_archive_reader r(golden[4], eng.get());
+            std::shared_ptr<NativeGadget> loaded;
+            r(loaded);
+            check(loaded != nullptr, "the golden gadget loads");
+            check_eq(21, loaded->charge.get());
+            loaded->spark(4);
+            check_eq((int64_t)4, fired, "its persisted text receiver fires");
+        });
+    }
+};
+
 } // namespace jai::foundry::tests
 
+FOUNDRY_REGISTER(jai::foundry::tests::native_object_access_tests)
 FOUNDRY_REGISTER(jai::foundry::tests::polymorphic_serialization_tests)
 FOUNDRY_REGISTER(jai::foundry::tests::implicit_registration_tests)
 FOUNDRY_REGISTER(jai::foundry::tests::hybrid_serialization_tests)

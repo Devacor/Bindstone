@@ -437,6 +437,7 @@ private:
         bool is_handle = false;           // declared shared_ptr<T> / shared_ptr<auto>
         bool map_pair = false;            // range-for variable over a map: .first is the read-only key
         ctype alias;                      // a reference alias of a declared typed container: the type its element reads may prove
+        ctype::kind_t builtin_alias = ctype::unknown;   // a range-for reference over a typed array's elements: the element kind, for builtin receivers only
         const type_info* declared = nullptr;   // for message text; null for auto-inferred
         std::string display;              // declared-type text for messages
         size_t line = 0, column = 0;
@@ -4073,6 +4074,11 @@ private:
 			if (!recv.tentative || recv.element_proof) {
 				proven = recv.kind == ctype::string_k ? 1 : recv.kind == ctype::array_k ? 2 : recv.kind == ctype::map_k ? 3 : 0;
 			}
+			if (proven == 0 && recv.is_unknown() && m->object->get_type() == node_type::identifier_expr) {
+				if (const var_entry* v = find_local(static_cast<const identifier_expr*>(m->object.get())->name)) {
+					proven = v->builtin_alias == ctype::string_k ? 1 : v->builtin_alias == ctype::array_k ? 2 : v->builtin_alias == ctype::map_k ? 3 : 0;
+				}
+			}
 			if (!recv.tentative && !m->is_static) {
 				check_builtin_member(recv, m);
 				checkBuiltinArity(recv, m, c);
@@ -4484,6 +4490,14 @@ private:
                                 f->is_reference;
                 entry.is_reference = f->is_reference;
                 entry.map_pair = container.kind == ctype::map_k;
+                if (f->is_reference && container.kind != ctype::map_k) {
+                    // an alias of a typed buffer's element holds the element's kind (the buffer converts every store): the builtin receiver
+                    // proof reads it (the call checks the receiver's kind at run time)
+                    const ctype held = container.is_unknown() ? declared_container_receiver(f->container.get(), container) : container;
+                    if (held.kind == ctype::array_k && (!held.tentative || held.alias_proof) && held.ti && held.ti->element_type()) {
+                        entry.builtin_alias = ctype_from_type_info(held.ti->element_type().get()).kind;
+                    }
+                }
                 entry.is_handle = f->element_type && f->element_type->base_type == script_value_type::jai_shared_ptr_type;
                 entry.declared = f->element_type.get();
                 entry.display = f->element_type ? f->element_type->canonical_name() : "auto";

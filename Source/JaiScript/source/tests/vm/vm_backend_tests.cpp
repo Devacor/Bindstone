@@ -4030,6 +4030,27 @@ public:
 			check_eq(std::string("1.5 5 1.5XY"), run(false, aliases), "aliases (interpreter)");
 			check_eq(run(false, aliases), run(true, aliases), "aliases (parity)");
 		});
+		test("a_range_for_alias_of_a_typed_array_takes_the_builtin_lanes", [this]() {
+			// the checker proves a builtin receiver that is a range-for reference over a typed array's elements (a by-reference
+			// parameter's too): the call takes the builtin lanes, which check the receiver at run time
+			const char* program =
+				"float sum(array<string>& nums) { float t = 0.0; for (auto& s : nums) { t = t + s.to_float() + s.size(); } return t; }\n"
+				"array<string> a = [\"1.5\", \"2.25\"];\n"
+				"float u = 0.0; for (auto& s : a) { u = u + s.to_float(); }\n"
+				"to_string(sum(a)) + \" \" + to_string(u);";
+			auto run = [&](bool use_vm, std::string* listing) -> std::string {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->execution_budget(0);
+				stdlib::register_all(*e);
+				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
+				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+			};
+			std::string listing;
+			check_eq(std::string("10.75 3.75"), run(false, nullptr), "values (interpreter)");
+			check_eq(run(false, nullptr), run(true, &listing), "parity");
+			check_true(listing.find("CALL_METHOD") == std::string::npos, "no general method call remains: " + listing);
+		});
 		test("handle_and_field_reference_argument_parity", [this, run_both_backends_stdlib]() {
 			// handles and nulls into var parameters (shared, never copied), var& parameters bound to fields of handles, stores through
 			// them (a declared field converts, a var field takes anything), a captured parameter, a by-value instance still copies

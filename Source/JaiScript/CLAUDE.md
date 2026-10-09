@@ -18,8 +18,7 @@ CMake + Ninja, opened as a folder in Visual Studio (VS 18). Build dirs live unde
 
 Debug has no LTCG, so it **links in ~5s incremental** (Release links in ~165s due to `/GL`+`/LTCG` — measured on the MSI; the link grows with the test exe), and MSVC's
 `0xDDDDDDDD` freed-memory fill surfaces dangling-reference / use-after-free bugs that Release
-can mask. (`JAISCRIPT_DEBUG_ENVIRONMENT_CYCLES` is an inert CMake option: nothing in the runtime
-is guarded by it any more.) **Iterate in Debug; do a final Release pass for the shipped config.**
+can mask. **Iterate in Debug; do a final Release pass for the shipped config.**
 
 Build the test target (`--target jaiscript_tests`). (The redundant standalone test exes —
 `test_runner`, `test_simple_static`, `test_string_ctor` — were removed from the CMake build.)
@@ -99,8 +98,8 @@ with `engine->set_backend(backend_type::interpreter)` BEFORE the first execute (
 (interpreter by default, `jaiscript_tests.exe --backend=vm` for the VM); a test that needs one
 backend sets it itself. Script callables execute through
 `execution_backend::execute_callable` (thunks capture engine* + `script_callable` payload — never
-a backend pointer). `interpreter.cpp` is ~11k lines; arithmetic & comparison are inlined in
-`visit_binary` fast paths AND in `interpreter_dispatch.cpp` handlers; the vm's `op_binary` shape
+a backend pointer). `interpreter.cpp` is ~16k lines; arithmetic & comparison are inlined in
+`visit_binary` fast paths AND in the binary handlers (`handle_add` ..., table in `interpreter_dispatch.cpp`); the vm's `op_binary` shape
 operands mirror the same semantics (all three must stay in sync — see integer overflow below).
 Builtin container/string methods live in ONE registry both backends share
 (`detail/builtin_methods.hpp`, `init_builtin_method_registries`).
@@ -832,7 +831,7 @@ int64 `==` precision, cpp-bound float/int reads, float→int UB, integer-overflo
 JSON float precision + recursion depth, and a dangling-temporary in C++ method chaining.
 Regression tests live in `source/tests/language/review_regression_tests.cpp`.
 
-**Current status:** both backends at full parity — 1443 tests Debug / 1474 Release
+**Current status:** both backends at full parity — ~4050 tests Debug / ~4170 Release
 BENCHMARKS, green on interpreter AND vm. VM-perf branch highlights: in-loop VM call frames
 (script calls no longer recurse natively), lvalue reference arguments (`f(obj.field)`,
 `f(arr[i])`) via the shared kernel `detail/ref_lvalue.hpp` (verbatim in both backends), and
@@ -846,5 +845,5 @@ and the fuzz differential gate pin it).
 pass. Reproduce a bug as a foundry test first, confirm it's red, then fix to green.
 
 - **Public builtin ordering** (2026-10-02, `detail/structural_ordering.hpp`): bool false before true; arrays lexicographic; maps lexicographic over ordered key/value entries (keys use private map-key semantics); vectors/colors lexicographic by component; functions, coroutine handles and shared/weak handles by identity. Records require `<` or `<=>`. Raw typed arrays compare without boxing; callbacks use shallow snapshots and pinned nodes, never deep-copy read-only inputs.
-- **Standard namespaces** (2026-10-02): all math operations/constants are engine-core `math::`; `register_math()` remains an idempotent host entry point. No global math/append/concatenate aliases. `string::whitespace` is the shared trim default; byte string `at/front/back` return char as `[]` does, while UTF methods return character text. `map.get(key[, fallback=null])` does not insert. `get` and an array's `front/back/first/last` return a stored object, array or map as a reference (C++'s reference return, Dev ruling 2026-10-03): `var x = m.get(k)` copies, `var& x` and a member call reach the element; `reduce`'s accumulator starts as a copy. Coroutine `resume/done` accept no arguments.
+- **Standard namespaces** (2026-10-02): all math operations/constants are engine-core `math::` (every engine has them; there is no host registration step). No global math/append/concatenate aliases. `string::whitespace` is the shared trim default; byte string `at/front/back` return char as `[]` does, while UTF methods return character text. `map.get(key[, fallback=null])` does not insert. `get` and an array's `front/back/first/last` return a stored object, array or map as a reference (C++'s reference return, Dev ruling 2026-10-03): `var x = m.get(k)` copies, `var& x` and a member call reach the element; `reduce`'s accumulator starts as a copy. Coroutine `resume/done` accept no arguments.
 - **Dynamic container slots**: var/auto tags retain a typed array's T or map's K,V through a dynamic-slot twin; reassignment of the variable remains dynamic, while stores into the current container enforce its constraints. `drop_var_slot` restores the ordinary container tag at typed boundaries.

@@ -11774,10 +11774,11 @@ op_status vm_backend::exec_index_store_fused(frame& f, const vm_instruction& ins
 	}
 	if (container.raw_storage_index() == script_value::TYPEID_MAP && (value_operand || !stack_.empty())) {
 		const script_value& value_peek = value_operand ? *value_ptr : stack_.back();   // raw: a reference operand declines the lane
-		const script_value key = have_raw_index ? script_value(raw_index, engine_)
-		                       : computed_index ? *computed_index
-		                       : p.index.const_index != k_invalid_u32 ? materialize_constant(*f.code, p.index.const_index)   // a chunk constant is a template: the map keeps its own copy
-		                       : *index_ptr;
+		std::optional<script_value> made_key;
+		const script_value& key = have_raw_index ? made_key.emplace(raw_index, engine_)
+		                        : computed_index ? *computed_index
+		                        : p.index.const_index != k_invalid_u32 ? made_key.emplace(materialize_constant(*f.code, p.index.const_index))   // a chunk constant is a template: the map keeps its own copy
+		                        : *index_ptr;   // borrowed: the map copies a key only into an entry it makes
 		bool handled = false;
 		script_value* stored = nullptr;
 		VM_TRY(map_scalar_store(container, key, value_peek, handled, stored));
@@ -16648,7 +16649,7 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 		arguments.push_back(std::move(stack_[base + i]));
 	}
 	stack_.truncate(base);
-	script_value self = stack_.back().deref();
+	script_value self = stack_.back().raw_storage_index() == script_value::TYPEID_REFERENCE ? stack_.back().deref() : std::move(stack_.back());   // the slot is popped next
 	stack_.pop_back();
 	detail::deref_builtin_args_in_place(arguments);
 	pending_call_site saved_pending = pending_site_ctx_;
@@ -16895,7 +16896,12 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 		if (!result) {
 			return raise_from(result);
 		}
-		if (auto* scratch_ref = string_recv->scratch_ref_holder()) [[unlikely]] { scratch_ref->commit_scratch(); }
+		if (auto* scratch_ref = string_recv->scratch_ref_holder()) [[unlikely]] {
+			// a typed element's scratch holds what the buffer holds unless the method is one of the registry's mutators
+			const bool mutator = !string_recv_utf8 && f.code->builtin_indexed ? builtins_.string_mutates_by_index[site.bi_string] != 0
+			                                                                  : builtins_.string_mutator_ids.count(member->member_id) != 0;
+			if (mutator || !scratch_ref->typed_element()) { scratch_ref->commit_scratch(); }
+		}
 		stack_.push_back(std::move(result.value()));
 		return {};
 	}

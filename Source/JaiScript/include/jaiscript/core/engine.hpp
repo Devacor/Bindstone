@@ -565,6 +565,11 @@ namespace jai {
         double engine_elapsed();
         double execute_elapsed();
         void note_host_entry();
+        // The host entry running now (an execute, execute_file or host call into script, with everything it runs): one execute
+        // context. A definition in another context, or in a re-run of its unit, redefines instead of conflicting (Dev ruling
+        // 2026-10-09)
+        uint64_t host_entry_generation() const noexcept;
+        bool unit_rerun(unit_stamp unit) const;
         void note_execute_elapsed_use();
 
         // Object creation through registered class system

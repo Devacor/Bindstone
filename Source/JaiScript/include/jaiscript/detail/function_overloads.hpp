@@ -41,13 +41,20 @@ namespace jai::detail {
         } else if (held->kind == script_callable::kind_type::overload_set && held->overloads) {
             for (size_t i = 0; i < held->overloads->members.size(); ++i) { keep(held->overloads->members[i], held->overloads->values[i]); }
         }
-        if (set->members.empty()) { return value; }
-        for (const auto& member : set->members) {
-            if (differs_only_by_reference(fn->parameters(), member->parameters())) [[unlikely]] {
+        // one that differs only by reference: within one execute context the second definition's error, else a redefinition that
+        // replaces it (another host entry, or a re-run of the declaring unit; Dev ruling 2026-10-09)
+        const bool redefines = eng->unit_rerun(fn->unit);
+        for (size_t i = 0; i < set->members.size();) {
+            const auto& member = set->members[i];
+            if (!differs_only_by_reference(fn->parameters(), member->parameters())) { ++i; continue; }
+            if (member->context == fn->context && !redefines) [[unlikely]] {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "{0}",
                     eng->symbolize(reference_only_overload_text(fn->name, fn->parameters(), member->parameters(), member->line)));
             }
+            set->members.erase(set->members.begin() + static_cast<std::ptrdiff_t>(i));
+            set->values.erase(set->values.begin() + static_cast<std::ptrdiff_t>(i));
         }
+        if (set->members.empty()) { return value; }
         set->members.push_back(fn);
         set->values.push_back(std::move(value));
         script_callable payload;
@@ -94,7 +101,8 @@ namespace jai::detail {
     // declared; a declaration of the same signature that stays collides (the caller raises unless `override`, which erases it), one
     // that differs only by reference is the second definition's error (its text in `error`)
     enum class namespace_admission : uint8_t { admitted, collision, reference_only };
-    inline namespace_admission admit_namespace_function(std::vector<std::shared_ptr<function_decl>>& overloads, const function_decl& fn, std::string& error) {
+    inline namespace_admission admit_namespace_function(std::vector<std::shared_ptr<function_decl>>& overloads, const function_decl& fn, bool redefines,
+                                                        std::string& error) {
         std::erase_if(overloads, [&](const std::shared_ptr<function_decl>& o) { return earlier_run(o->unit, fn.unit); });
         for (auto it = overloads.begin(); it != overloads.end(); ++it) {
             if (!same_signature((*it)->parameters, fn.parameters)) { continue; }
@@ -102,11 +110,13 @@ namespace jai::detail {
             overloads.erase(it);
             break;
         }
-        for (const auto& o : overloads) {
-            if (differs_only_by_reference(fn.parameters, o->parameters)) [[unlikely]] {
-                error = reference_only_overload_text(fn.name, fn.parameters, o->parameters, o->location.line);
+        for (auto it = overloads.begin(); it != overloads.end();) {
+            if (!differs_only_by_reference(fn.parameters, (*it)->parameters)) { ++it; continue; }
+            if ((*it)->context == fn.context && !redefines) [[unlikely]] {
+                error = reference_only_overload_text(fn.name, fn.parameters, (*it)->parameters, (*it)->location.line);
                 return namespace_admission::reference_only;
             }
+            it = overloads.erase(it);   // another execute context or the unit's re-run: a redefinition
         }
         return namespace_admission::admitted;
     }

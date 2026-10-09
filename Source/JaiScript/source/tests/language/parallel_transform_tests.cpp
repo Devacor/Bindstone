@@ -70,6 +70,52 @@ public:
 	}
 
 	void forge_tests() override {
+		test("worker_global_reads_through_blocks_see_a_redefinition_between_regions", [this]() {
+			// a worker's frames find their chunk's lookup rows once: globals read through cell blocks (entry cells, container sites)
+			// and typed operands must see a captured global the caller rebinds between two regions
+			auto e = make_engine();
+			const std::string src = R"(
+				array<float> G = [1.0, 2.0, 3.0, 4.0];
+				float K = 2.0;
+				int N = 4;
+				function row(int y) -> float {
+					float s = 0.0;
+					for (int i = 0; i < N; ++i) { s += G[i] * K + y; }
+					return s;
+				}
+				array<int> ys = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+				var pa = parallel_transform(ys, row);
+				var sa = []; for (auto y : ys) { sa.push(row(y)); }
+				K = 3.0;
+				G = [10.0, 20.0, 30.0, 40.0];
+				var pb = parallel_transform(ys, row);
+				var sb = []; for (auto y : ys) { sb.push(row(y)); }
+				[[pa, pb], [sa, sb]];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 4});
+			e->parallel_thread_count(2);
+			check_true(e->execute(src + "pb[11] == 344.0;").as_bool(), "the second region reads the rebound globals");
+		});
+		test("worker_body_alternating_two_chunks_matches_serial", [this]() {
+			// each call pushes a frame of the other chunk: its first lookup has no rows yet, a reused record carries another chunk's
+			auto e = make_engine();
+			const std::string src = R"(
+				array<float> G = [0.5, 1.5, 2.5];
+				int N = 3;
+				function fa(float x) -> float { float s = 0.0; for (int i = 0; i < N; ++i) { s += G[i] * x; } return s; }
+				function fb(float x) -> float { float s = 1.0; for (int i = 0; i < N; ++i) { s += G[i] - x; } return s; }
+				function row(int y) -> float {
+					float t = 0.0;
+					for (int k = 0; k < 6; ++k) { if (k % 2 == 0) { t += fa(t * 0.25 + y); } else { t += fb(t * 0.5 - y); } }
+					return t;
+				}
+				array<int> ys = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+				var p = parallel_transform(ys, row);
+				var s = []; for (auto y : ys) { s.push(row(y)); }
+				[p, s];
+			)";
+			check_matches_serial_at(e, src, {1, 2, 4});
+		});
 		test("int_transform_matches_serial_1_2_8", [this]() {
 			auto e = make_engine();
 			const std::string src = R"(

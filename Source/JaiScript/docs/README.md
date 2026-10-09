@@ -61,7 +61,7 @@ it.
 ## History
 
 A few files here are planning documents from before the feature they describe shipped —
-[MIGRATION_PLAN.md](MIGRATION_PLAN.md), [REFERENCE_SEMANTICS_PLAN.md](REFERENCE_SEMANTICS_PLAN.md),
+[REFERENCE_SEMANTICS_PLAN.md](REFERENCE_SEMANTICS_PLAN.md),
 [PERSISTENT_INTERPRETER_DESIGN.md](PERSISTENT_INTERPRETER_DESIGN.md),
 [JaiScript_FutureDesign.md](JaiScript_FutureDesign.md), [ROADMAP.md](ROADMAP.md) and their
 neighbours. They record how a decision was reached, not what the language does today; when one

@@ -598,7 +598,6 @@ The implementation in `property_serialization.hpp` now matches the documented pr
 ## Related Documentation
 
 - [JaiScript_BinarySerialization.md](JaiScript_BinarySerialization.md) - Detailed binary format specification
-- [MIGRATION_PLAN.md](MIGRATION_PLAN.md) - Migrating from Cereal to JaiScript serialization
 
 ## Sources
 

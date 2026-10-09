@@ -21,7 +21,7 @@ namespace jai::detail {
         bool out_of_range = false;
     };
 
-    inline float_text_result parse_float_text(const char* text) noexcept {
+    inline float_text_result parse_float_text_strtod(const char* text) noexcept {
         const int saved = errno;
         errno = 0;
         char* end = nullptr;
@@ -31,9 +31,14 @@ namespace jai::detail {
         return { value, end, out_of_range };
     }
 
+    // the same result for text[0..length) (NUL-terminated at length): a decimal spelling std::from_chars reads in range is
+    // its value and end (both round correctly), everything else is strtod's (value.cpp)
+    float_text_result parse_float_text(const char* text, size_t length) noexcept;
+    inline float_text_result parse_float_text(const char* text) noexcept { return parse_float_text(text, std::char_traits<char>::length(text)); }
+
     // the whole text a float (trailing whitespace allowed; isspace takes an unsigned char), nullopt otherwise
     inline std::optional<double> parse_complete_float_text(const std::string& text) noexcept {
-        const auto result = parse_float_text(text.c_str());
+        const auto result = parse_float_text(text.c_str(), text.size());
         if (result.end == text.c_str() || result.out_of_range) return std::nullopt;
         size_t pos = static_cast<size_t>(result.end - text.c_str());
         while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;

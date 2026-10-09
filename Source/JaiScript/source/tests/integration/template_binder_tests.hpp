@@ -186,6 +186,41 @@ JAI_BIND_TEMPLATE_NAMED(TplBinderVec2, jai::foundry::tests::TplBinderVec2, doubl
 JAI_BIND_TEMPLATE_2_NAMED(TplBinderKVPair, jai::foundry::tests::TplBinderKVPair, int, std::string);
 JAI_BIND_TEMPLATE_2_NAMED(TplBinderKVPair, jai::foundry::tests::TplBinderKVPair, std::string, double);
 
+// The unnamed forms and the variant lists: a host template at global scope
+template<typename T>
+struct TplRange { T lo{}; T hi{}; };
+template<typename A, typename B>
+struct TplTagged { A tag{}; B value{}; };
+struct TplCell { int64_t col = 0; int64_t row = 0; };
+namespace jai::foundry::tests {
+template<typename T>
+struct TplSpan { T first{}; T count{}; T stride{}; };
+}
+
+JAI_TEMPLATE_BINDER(TplRange, "TplRange",
+    .property("lo", &TplRange<T>::lo)
+    .property("hi", &TplRange<T>::hi)
+);
+JAI_BIND_TEMPLATE_VARIANTS_2(TplRange, int64_t, double);
+
+JAI_TEMPLATE_BINDER_2(TplTagged, "TplTagged",
+    .property("tag", &TplTagged<T1, T2>::tag)
+    .property("value", &TplTagged<T1, T2>::value)
+);
+JAI_BIND_TEMPLATE_2(TplTagged, std::string, int64_t);
+
+JAI_TEMPLATE_BINDER_NAMED(TplSpan, jai::foundry::tests::TplSpan, "TplSpan",
+    .property("first", &jai::foundry::tests::TplSpan<T>::first)
+    .property("count", &jai::foundry::tests::TplSpan<T>::count)
+    .property("stride", &jai::foundry::tests::TplSpan<T>::stride)
+);
+JAI_BIND_TEMPLATE_VARIANTS_NAMED_3(TplSpan, jai::foundry::tests::TplSpan, int64_t, int, double);
+
+JAI_STATIC_BINDER_AUTO(TplCell,
+    .property("col", &TplCell::col)
+    .property("row", &TplCell::row)
+);
+
 namespace jai::foundry::tests {
 
 class template_binder_tests : public suite {
@@ -366,6 +401,23 @@ public:
             check_eq(int_name, std::string("TplBinderVec2<int32>"), "int32 variant name");
             check_eq(float_name, std::string("TplBinderVec2<float32>"), "float variant name");
             check_eq(double_name, std::string("TplBinderVec2<float>"), "double variant name");
+        });
+
+        test("unnamed_forms_and_variant_lists_register_every_instantiation", [this]() {
+            check(jai_static_type<::TplRange<int64_t>>::registered, "TplRange<int64_t> registered");
+            check(jai_static_type<::TplRange<double>>::registered, "TplRange<double> registered");
+            check_eq(jai_static_type<::TplRange<int64_t>>::name, std::string("TplRange<int>"), "int64_t spells int");
+            check_eq(jai_static_type<::TplRange<double>>::name, std::string("TplRange<float>"), "double spells float");
+            check_eq(jai_static_type<::TplRange<double>>::binder.property_count(), size_t(2), "lo, hi");
+            check_eq(jai_static_type<::TplTagged<std::string, int64_t>>::name, std::string("TplTagged<string, int>"), "two parameters");
+            check_eq(jai_static_type<::TplTagged<std::string, int64_t>>::binder.property_count(), size_t(2), "tag, value");
+            check_eq(jai_static_type<TplSpan<int64_t>>::name, std::string("TplSpan<int>"), "named variant 1");
+            check_eq(jai_static_type<TplSpan<int>>::name, std::string("TplSpan<int32>"), "named variant 2");
+            check_eq(jai_static_type<TplSpan<double>>::name, std::string("TplSpan<float>"), "named variant 3");
+            check_eq(jai_static_type<TplSpan<int>>::binder.property_count(), size_t(3), "first, count, stride");
+            check(!jai_static_type<TplSpan<float>>::registered, "an instantiation the list does not name stays unregistered");
+            check_eq(std::string(jai_static_type<::TplCell>::name), std::string("TplCell"), "JAI_STATIC_BINDER_AUTO spells the C++ name");
+            check_eq(jai_static_type<::TplCell>::binder.property_count(), size_t(2), "col, row");
         });
 
         test("template_binder_2_type_names", [this]() {

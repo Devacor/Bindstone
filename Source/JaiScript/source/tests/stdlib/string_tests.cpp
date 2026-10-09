@@ -2,6 +2,11 @@
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/detail/float_text.hpp>
+#include <charconv>
+#include <cstdio>
+#include <cstring>
+#include <random>
 #include <filesystem>
 #include <fstream>
 
@@ -14,6 +19,47 @@ public:
     string_stdlib_tests() : suite("String Stdlib Tests") {}
 
     void forge_tests() override {
+        test("float_text_parses_as_strtod_parses", [this]() {
+            // the from_chars lane against strtod over a corpus: shortest, round-trip and fixed spellings of random doubles,
+            // subnormals, overflow and underflow, hex, inf and nan, signs, leading whitespace and partial spellings; the same
+            // bits, the same end and the same range verdict every time
+            size_t mismatches = 0, checked = 0;
+            std::string first_bad;
+            auto compare = [&](const std::string& text) {
+                const auto fast = jai::detail::parse_float_text(text.c_str(), text.size());
+                const auto slow = jai::detail::parse_float_text_strtod(text.c_str());
+                const bool same_value = (std::isnan(fast.value) && std::isnan(slow.value)) || std::memcmp(&fast.value, &slow.value, sizeof(double)) == 0;
+                ++checked;
+                if (!same_value || fast.end != slow.end || fast.out_of_range != slow.out_of_range) {
+                    if (mismatches++ == 0) { first_bad = text; }
+                }
+            };
+            std::mt19937_64 rng(20261009);
+            char buf[64];
+            for (int i = 0; i < 200000; ++i) {
+                uint64_t bits = rng();
+                double v;
+                std::memcpy(&v, &bits, sizeof v);
+                if (!std::isfinite(v)) { continue; }
+                auto r = std::to_chars(buf, buf + sizeof buf, v);
+                compare(std::string(buf, r.ptr));
+                std::snprintf(buf, sizeof buf, "%.17g", v); compare(buf);
+                std::snprintf(buf, sizeof buf, "%.3e", v); compare(buf);
+                const double small = std::ldexp(static_cast<double>(rng() % 1000000), -static_cast<int>(rng() % 40));
+                std::snprintf(buf, sizeof buf, "%.6f", small); compare(buf);
+                std::snprintf(buf, sizeof buf, "%.9f", -small); compare(buf);
+            }
+            for (const char* t : {"0", "-0", "0.0", "00012.50", "1.", "-.5", ".5", "5.", "1e", "1e+", "1e-", "1e5", "1E5", "1e-5", "-1e-5",
+                                  "4.9e-324", "5e-324", "2.4703282292062327e-324", "2.4703282292062328e-324", "2.2250738585072011e-308",
+                                  "2.2250738585072014e-308", "1.7976931348623157e308", "1.7976931348623159e308", "1e309", "-1e309",
+                                  "1e-400", "-1e-400", "0x1p3", "0X1.8p1", "-0x10", "inf", "-inf", "INF", "infinity", "nan", "NaN",
+                                  "nan(123)", " 1.5", "\t2", "+1.5", "+.5", "", "-", ".", "-.", "e5", "1.5abc", "12,5", "1_000",
+                                  "123456789012345678901234567890", "0.000000000000000000000000000000000001", "9007199254740993",
+                                  "1.0000000000000002", "0.1", "0.2", "0.30000000000000004"}) {
+                compare(t);
+            }
+            check_eq(size_t(0), mismatches, "mismatches over " + std::to_string(checked) + " texts (first: '" + first_bad + "')");
+        });
         // ============================================================
         // Observer methods (non-mutating)
         // ============================================================

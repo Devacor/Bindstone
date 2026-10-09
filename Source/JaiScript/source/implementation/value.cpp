@@ -4,6 +4,7 @@
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/math_values.hpp>
+#include <jaiscript/detail/float_text.hpp>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -2394,3 +2395,21 @@ size_t script_value::map_key_hash() const noexcept {
 }
 
 } // namespace jai
+
+namespace jai::detail {
+
+float_text_result parse_float_text(const char* text, size_t length) noexcept {
+    const char* const last = text + length;
+    const char* p = text + (length != 0 && text[0] == '-');
+    const bool hex = p + 1 < last && p[0] == '0' && (p[1] == 'x' || p[1] == 'X');
+    const bool digit_first = p < last && p[0] >= '0' && p[0] <= '9';
+    const bool point_first = p + 1 < last && p[0] == '.' && p[1] >= '0' && p[1] <= '9';
+    if ((digit_first && !hex) || point_first) {
+        double value = 0.0;
+        const auto [end, ec] = std::from_chars(text, last, value);
+        if (ec == std::errc{}) { return { value, end, false }; }
+    }
+    return parse_float_text_strtod(text);
+}
+
+} // namespace jai::detail

@@ -336,8 +336,6 @@ public:
                             // deterministic, ≈ declaration order)
                             instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
                                 std::string field_name = std::string(eng->get_symbolizer()->get_string(field_id));
-                                if (field_name == class_constants::CPP_OBJECT_FIELD) return;
-
                                 write_value_key(field_name, true);
                                 write_value(field_val);
                             });

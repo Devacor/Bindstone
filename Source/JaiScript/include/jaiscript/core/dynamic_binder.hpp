@@ -118,9 +118,7 @@ namespace dynamic_binder_detail {
         auto instance = class_def->create_instance();
 
         // Store the C++ object in the class_instance
-        uint64_t cpp_object_field_id = eng->symbolize(class_constants::CPP_OBJECT_FIELD);
-        instance->set_field(cpp_object_field_id,
-            script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, eng));
+        instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, eng));
 
         // Return wrapped object
         return script_value::make_object(class_name, instance, eng);
@@ -484,8 +482,8 @@ public:
                     // Create a class_instance to hold it
                     auto instance = class_def->create_instance();
 
-                    // Store the C++ object in the class_instance as a special field
-                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
+                    // Store the C++ object in the class_instance
+                    instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
 
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ptr);
@@ -512,8 +510,8 @@ public:
                     // Create a class_instance to hold it
                     auto instance = class_def->create_instance();
 
-                    // Store the C++ object in the class_instance as a special field
-                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
+                    // Store the C++ object in the class_instance
+                    instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
 
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ptr);
@@ -1576,8 +1574,8 @@ public:
                     // Create a class_instance to hold it
                     auto instance = class_def->create_instance();
 
-                    // Store the C++ object in the class_instance as a special field
-                    instance->set_field(instance->get_cpp_object_field_id(), script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
+                    // Store the C++ object in the class_instance
+                    instance->set_native(script_value::make_cpp_object(class_name, class_def->get_type_id(), cpp_obj, engine_ptr));
 
                     // Return the class_instance wrapped in a value
                     return script_value::make_object(class_name, instance, engine_ptr);
@@ -1624,7 +1622,7 @@ public:
                     
                     // Create a class_instance to wrap the object
                     auto instance = class_def->create_instance();
-                    instance->set_field(instance->get_cpp_object_field_id(),
+                    instance->set_native(
                         script_value::make_cpp_object(class_name, class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_ptr));
                     
                     // Return wrapped in script_value
@@ -1657,7 +1655,7 @@ public:
                         auto cpp_obj = std::make_shared<T>(obj);
 
                         // Store the C++ object in the class_instance
-                        instance->set_field(instance->get_cpp_object_field_id(),
+                        instance->set_native(
                             script_value::make_cpp_object(class_name,
                                 class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
 
@@ -1698,7 +1696,7 @@ public:
                         auto instance = class_def->create_instance();
                         
                         // Store the shared_ptr directly (no copy needed)
-                        instance->set_field(instance->get_cpp_object_field_id(),
+                        instance->set_native(
                             script_value::make_cpp_object(class_name,
                                 class_def->get_type_id(), std::static_pointer_cast<void>(obj), engine_ptr));
                         
@@ -1788,7 +1786,7 @@ private:
                     [class_def = class_def_, class_name = class_name_, engine_ptr = &engine_](const T& obj) -> script_value {
                         auto instance = class_def->create_instance();
                         auto cpp_obj = std::make_shared<T>(obj);
-                        instance->set_field(instance->get_cpp_object_field_id(),
+                        instance->set_native(
                             script_value::make_cpp_object(class_name,
                                 class_def->get_type_id(), std::static_pointer_cast<void>(cpp_obj), engine_ptr));
                         return script_value::make_object(class_name, instance, engine_ptr);

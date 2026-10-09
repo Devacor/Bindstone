@@ -86,9 +86,8 @@ script_value engine::make_object(std::shared_ptr<T> data) {
         if (data && std::type_index(typeid(*data)) != std::type_index(typeid(T))) {
             if (std::shared_ptr<detail::first_type_t<class_definition, T>> dynamic_def = get_class_definition_by_type(std::type_index(typeid(*data)))) {
                 auto instance = dynamic_def->create_instance();
-                uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
                 std::shared_ptr<void> complete_object(data, dynamic_cast<void*>(data.get()));
-                instance->set_field(cpp_object_field_id,
+                instance->set_native(
                     script_value::make_cpp_object(dynamic_def->get_name(), dynamic_def->get_type_id(), complete_object, this));
                 return script_value::make_object(dynamic_def->get_name(), instance, this);
             }
@@ -101,8 +100,7 @@ script_value engine::make_object(std::shared_ptr<T> data) {
             const std::string& type_name = class_def->get_name();
             auto instance = class_def->create_instance();
 
-            uint64_t cpp_object_field_id = symbolize(class_constants::CPP_OBJECT_FIELD);
-            instance->set_field(cpp_object_field_id,
+            instance->set_native(
                 script_value::make_cpp_object(type_name, class_def->get_type_id(), std::static_pointer_cast<void>(data), this));
 
             return script_value::make_object(type_name, instance, this);

@@ -65,8 +65,8 @@ self.death  = [=](var&amp; creature) -&gt; void { creature.death(); };</code></p
 <code>shared_ptr&lt;Base&gt;</code>, the host's next <code>update</code> call) hands script the
 <em>Slime</em>, not a sliced view of its base. That is C++'s own rule, "a base pointer to a derived object is
 the derived object", carried across the boundary. The object is a <strong>hybrid</strong>: one script instance
-that owns or references the C++ object through a private <code>_cpp_object</code> field and carries the script
-layer (fields, overrides) on top. Overrides dispatch wherever script calls the method; a call C++ makes on the
+that owns or references the C++ object (internal storage no script name reaches; the bound properties and methods
+reach it) and carries the script layer (fields, overrides) on top. Overrides dispatch wherever script calls the method; a call C++ makes on the
 object (<code>creature-&gt;tick(dt)</code>, or a bound C++ method that calls a virtual) runs the C++ body.</p>
 
 <h2 id="extend-object-class">extend(object, Class)<a class="hlink" href="#extend-object-class" aria-label="link">&#8203;</a></h2>

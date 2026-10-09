@@ -80,7 +80,7 @@ plus a lifetime guess") true in substance, and its wording changes to "never an 
 **Mechanism.** Field references pin `std::shared_ptr<class_instance>`: atomic counts, two RMWs per reference lifetime, plus
 `note_field_ref_minted`. A script instance is always held through an `object_holder` (`strong_ptr`, non-atomic). Pinning
 the field reference through that holder, with `owner_instance` kept as a raw pointer, replaces the two atomics with two
-plain counts. C++-bound and hybrid owners (`_cpp_object`, binder objects reached through `property.view.instance`) keep
+plain counts. C++-bound and hybrid owners (the native object, binder objects reached through `property.view.instance`) keep
 `std::shared_ptr`, because their lifetime is shared with C++.
 
 **Parallel workers.** `strong_ptr` counts are already non-atomic everywhere (parallel_design.md §0, §4). Soundness rests

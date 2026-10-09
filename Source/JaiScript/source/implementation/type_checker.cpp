@@ -792,10 +792,9 @@ private:
     bool unit_redefines(const class_decl* cd) {
         auto def = eng_.get_class_registry().find_script_class(std::string(cd->name));
         if (!def) { return false; }
-        const uint64_t cpp_object_id = eng_.symbolize(class_constants::CPP_OBJECT_FIELD);
         size_t own_fields = 0;
         for (const auto& [id, _] : def->get_all_field_defaults()) {
-            if (id != cpp_object_id && def->find_field_declaring_class(id) == def.get()) { ++own_fields; }
+            if (def->find_field_declaring_class(id) == def.get()) { ++own_fields; }
         }
         size_t fields = 0, statics = 0;
         for (const auto& m : cd->members) {
@@ -1902,7 +1901,6 @@ private:
     std::optional<field_proof> resolve_field_proof(std::string_view cls, std::string_view member, const member_hit& hit) {
         if (!stamping() || !hit.found || hit.methods) { return std::nullopt; }
         if (hit.field && hit.field->is_static) { return std::nullopt; }                 // statics live in class storage
-        if (member == class_constants::CPP_OBJECT_FIELD) { return std::nullopt; }
         for (auto n : k_no_proof_names) { if (member == n) { return std::nullopt; } }   // builtin-shadow names
         if (global_tier_name(member)) { return std::nullopt; }
         auto def = engine_class(cls);                                                   // null on a same-unit class's FIRST check
@@ -3782,7 +3780,6 @@ private:
 			return {};
 		}
 		if (!hit.certain) { return {}; }
-		if (m->member == class_constants::CPP_OBJECT_FIELD) { return {}; }
 		if (stale_shape_receiver(recv, m->object.get())) { return {}; }
 		if (!want_static) {
 			if (ctype t; handle_builtin_result(m->member, t)) { return {}; }   // builtin as a value: lenient
@@ -4057,7 +4054,7 @@ private:
 					if (ctype t; handle_builtin_result(m->member, t)) { return t; }
 				}
 				if (stale_shape_receiver(recv, m->object.get())) { return {}; }
-				if (hit.certain && m->member != class_constants::CPP_OBJECT_FIELD) {
+				if (hit.certain) {
 					size_t rl = 0, rc = 0;
 					if (auto it = classes_.find(recv.cls); it != classes_.end()) {
 						rl = it->second.decl->location.line;

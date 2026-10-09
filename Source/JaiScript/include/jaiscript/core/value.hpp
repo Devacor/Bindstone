@@ -53,7 +53,7 @@ namespace jai {
     bool engine_holder_matches_type(engine* eng, const std::string& holder_type_name, const std::type_info& requested);
     std::shared_ptr<void> engine_extract_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data);
     // Owning form for shared_ptr extraction: locks an extended object's weakly held owner
-    // (null once the object died); an owning _cpp_object is returned as is.
+    // (null once the object died); an owning native object is returned as is.
     std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const std::shared_ptr<void>& instance_data);
     
 	namespace detail {
@@ -286,7 +286,7 @@ namespace detail { struct argument_capture_storage; }
         // Internal factory method for raw C++ objects - always requires type_id to avoid re-interning
         static script_value make_cpp_object(std::string_view type_name, uint64_t type_id, std::shared_ptr<void> data, engine* eng);
         // Non-owning C++ object holder that still knows its owner weakly (an extended object's
-        // _cpp_object): T& extraction reads the pointer, shared_ptr extraction locks the weak one.
+        // native object): T& extraction reads the pointer, shared_ptr extraction locks the weak one.
         static script_value make_cpp_reference(std::string_view type_name, uint64_t type_id, void* object,
                                                std::weak_ptr<void> owner, engine* eng);
     public:
@@ -1924,7 +1924,7 @@ namespace detail { struct argument_capture_storage; }
 
             // Registered-class T& binding: the live C++ object (data stays null). Non-owning!
             void* bound_ptr = nullptr;
-            // An extended object's _cpp_object (script_extensible.md): non-owning like bound_ptr,
+            // An extended object's native object (script_extensible.md): non-owning like bound_ptr,
             // but the object's shared_ptr is reachable weakly so shared_ptr extraction can
             // still hand out ownership while the object lives.
             std::weak_ptr<void> weak_data;

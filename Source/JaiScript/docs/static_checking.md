@@ -560,7 +560,7 @@ proof-soundness contract.
 **Field proofs** need a class object: the receiver's certain class must be registered with
 the engine, its whole chain script-only (no C++ base, never `extend`ed), all-public, and the
 member a declared instance field with the synthesized accessors (no custom `_get_`/`_set_`,
-no method of the same name, not a static, not `_cpp_object`, not a shared_ptr builtin name,
+no method of the same name, not a static, not a shared_ptr builtin name,
 not a global-tier name). Bare-name field proofs additionally require a method/ctor body or a
 `[this]` lambda (not a static method, not a `: super(...)` argument list, no includes). A unit
 that declares its own classes gets its field proofs on its SECOND check: registration moves
@@ -599,7 +599,7 @@ and keeps the node-borne read/write lanes only.
 **Not proven** — conversions (int→float widening, bool/string coercions, null→object,
 derived→base, ctor conversions), containers and typed maps, compound assignment and the
 `++`/`--` desugars, `store_through` references, static fields, `super.f`, `?.` receivers,
-engine globals, `_cpp_object`, hybrid (C++-base) and `extend`ed classes, transparent
+engine globals, hybrid (C++-base) and `extend`ed classes, transparent
 wrappers, callable locals, engine functions, `new_expr`, coroutine callees, defaulted or
 by-reference parameters, worker (parallel) frames, and `binary_expr::static_operand_class`
 (annotation only). All of these run the existing code with proofs on or off. A return proof

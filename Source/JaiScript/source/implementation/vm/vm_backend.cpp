@@ -228,7 +228,7 @@ namespace {
 					return value;
 				}
 				auto instance = std::static_pointer_cast<class_instance>(holder->data);
-				if (instance && symbolizer && instance->has_field(symbolizer->intern(class_constants::CPP_OBJECT_FIELD))) {
+				if (instance && symbolizer && instance->native()) {
 					return value;
 				}
 			}
@@ -361,7 +361,6 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		to_string_id_ = symbolizer_->intern("to_string");
 		to_bool_id_ = symbolizer_->intern("to_bool");
 		eq_method_id_ = symbolizer_->intern("==");
-		cpp_object_field_id_ = symbolizer_->intern(class_constants::CPP_OBJECT_FIELD);
 		same_as_id_ = symbolizer_->intern("same_as");
 		coroutine_handle_type_id_ = symbolizer_->intern("coroutine_handle");
 		resume_id_ = symbolizer_->intern("resume");
@@ -16728,7 +16727,7 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 						if (site.nat_cd == cd && site.nat_stamp == cd->native_stamp() && site.nat_shape == cd->field_shape_epoch()) {
 							if (site.nat_entry && !native_field_shadowed(site, *inst, member->member_id)) {
 								native = static_cast<const class_definition::native_entry*>(site.nat_entry);
-								self = inst->cpp_object_pointer_at(site.nat_cpp_slot);
+								self = inst->cpp_object_pointer();
 							}
 						} else {
 							native = native_site_miss(site, *cd, *inst, member->member_id, self);
@@ -18463,10 +18462,8 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 													if (cpp_obj.is_object()) {
 														auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
 														if (cpp_instance) {
-															uint64_t src_id = cpp_instance->get_cpp_object_field_id();
-															uint64_t dst_id = instance->get_cpp_object_field_id();
-															if (cpp_instance->has_field(src_id)) {
-																instance->set_field(dst_id, cpp_instance->get_field(src_id));
+															if (const script_value* native = cpp_instance->native()) {
+																instance->set_native(*native);
 															}
 														}
 													}
@@ -18540,11 +18537,8 @@ checked_result<script_value> vm_backend::initialize_members(const std::shared_pt
 								if (cpp_obj.is_object()) {
 									auto cpp_instance = cpp_obj.as<std::shared_ptr<class_instance>>();
 									if (cpp_instance) {
-										uint64_t src_field_id = cpp_instance->get_cpp_object_field_id();
-										uint64_t dst_field_id = instance->get_cpp_object_field_id();
-										if (cpp_instance->has_field(src_field_id)) {
-											auto src_value = cpp_instance->get_field(src_field_id);
-											instance->set_field(dst_field_id, src_value);
+										if (const script_value* native = cpp_instance->native()) {
+											instance->set_native(*native);
 										}
 									}
 								}

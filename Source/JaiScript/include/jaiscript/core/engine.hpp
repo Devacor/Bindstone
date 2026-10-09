@@ -1155,6 +1155,18 @@ namespace jai {
             const void* set = nullptr;   // the engine's overload set of the name: its entry is never erased
             checked_result<script_value> operator()(const std::vector<script_value>& args) const;
             bool try_direct(const script_value* args, size_t argc, std::optional<checked_result<script_value>>& out) const;
+            // the one overload try_direct runs, for a caller that keeps it: its binding and invoker, each parameter's kind, and the
+            // function that owns the binding (held, the binding outlives a re-registration)
+            struct direct_snapshot {
+                const void* target = nullptr;
+                checked_result<script_value> (*invoke)(const void*, const script_value*, size_t) = nullptr;
+                size_t argc = 0;
+                script_value_type kinds[8]{};
+                script_value owner{std::monostate{}, nullptr};
+                const uint64_t* generation = nullptr;   // the set's mutation count, read where it lives: the overload holds while it reads at
+                uint64_t at = 0;
+            };
+            bool direct_entry(direct_snapshot& out) const;
             // how the overloads taking argc arguments bind argument i (detail::arg_binding bits)
             uint8_t argument_binding(size_t i, size_t argc) const;
         };

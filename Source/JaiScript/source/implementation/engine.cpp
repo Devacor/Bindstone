@@ -446,6 +446,7 @@ struct engine::implementation {
         };
         
         std::vector<Overload> overloads;
+        uint64_t generation = 0;   // moves on every change to overloads (a vm call site's direct lane compares it)
 
         // Reference to the conversion registry and class lookups
         std::shared_ptr<const conversions::conversion_registry> conversions;
@@ -476,6 +477,7 @@ struct engine::implementation {
 
         void add_overload_with_types(size_t argCount, const script_value& func, const std::vector<param_type_info>& paramTypes,
                                      engine::host_direct_entry direct = {}) {
+            ++generation;
             resolved_[0] = resolved_[1] = resolved_shape{};
             auto set_direct = [&](Overload& o) {
                 o.direct = direct;
@@ -1921,6 +1923,26 @@ bool engine::overload_dispatch::try_direct(const script_value* args, size_t argc
     }
     const script_value pin = only.function;   // a re-registration during the call cannot free the running binding
     out.emplace(only.direct.invoke(only.direct_target, args, argc));
+    return true;
+}
+
+bool engine::overload_dispatch::direct_entry(direct_snapshot& out) const {
+    const auto* overloads = static_cast<const implementation::OverloadSet*>(set);
+    if (!overloads || overloads->overloads.size() != 1) { return false; }
+    const auto& only = overloads->overloads.front();
+    if (!only.direct_target || only.argCount != only.paramTypes.size() || only.argCount > std::size(out.kinds)) { return false; }
+    for (size_t i = 0; i < only.argCount; ++i) {
+        const script_value_type want = only.paramTypes[i].base_type;
+        if (!(want == script_value_type::jai_int_type || want == script_value_type::jai_float_type || want == script_value_type::jai_bool_type ||
+              want == script_value_type::jai_char_type || want == script_value_type::jai_string_type)) { return false; }
+        out.kinds[i] = want;
+    }
+    out.target = only.direct_target;
+    out.invoke = only.direct.invoke;
+    out.argc = only.argCount;
+    out.owner = only.function;
+    out.generation = &overloads->generation;
+    out.at = overloads->generation;
     return true;
 }
 

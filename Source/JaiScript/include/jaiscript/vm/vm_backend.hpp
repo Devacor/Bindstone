@@ -964,10 +964,9 @@ namespace jai::vm {
             strong_ptr<script_function> pin;
             const std::vector<uint32_t>* staged_slots = nullptr;
             const script_method_dispatch* method = nullptr;   // a bare sibling method of this frame's class: value is its dispatcher, the receiver the frame's this
-            const call_site* host = nullptr;                  // a host callable the site's cache held at the probe (no pin of its own): borrowed
-            const script_function* host_fn = nullptr;          // that callable: the site's while it caches it, else on the retired list
+            const script_function* host_fn = nullptr;   // a host callable the call's site cached at the probe, borrowed: the site's while it caches it, else retired
             // a host callable held by pin, or borrowed from its site (no fn): invoked with the arguments as they are
-            bool native() const { return !fn && (pin || host); }
+            bool native() const { return !fn && (pin || host_fn); }
             const script_function& native_fn() const { return pin ? *pin : *host_fn; }
         };
         std::vector<pending_callee> pending_callees_;

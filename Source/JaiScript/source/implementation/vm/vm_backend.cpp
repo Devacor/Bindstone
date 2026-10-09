@@ -12804,7 +12804,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 			    e.fast_ptr->raw_storage_index() == script_value::TYPEID_FUNCTION && &e.fast_ptr->unchecked_as_function() == site.ic_identity) {
 				pending_callee& pc = pending_callees_.emplace_back();
 				pc.fn = site.ic_fn;
-				if (!site.ic_fn) { if (site.ic_host_target) { pc.host = &site; pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }   // a script callee and a direct host callee borrow the site's
+				if (!site.ic_fn) { if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }   // a script callee and a direct host callee borrow the site's
 				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 				return {};
 			}
@@ -12898,7 +12898,7 @@ op_status vm_backend::park_callee(frame& f, const call_site& site, size_t argc, 
 	    &calleeVal.unchecked_as_function() == site.ic_identity &&
 	    (site.ic_native || argc == site.ic_argc)) {
 		pc.fn = site.ic_fn;
-		if (!site.ic_fn) { if (site.ic_host_target) { pc.host = &site; pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }
+		if (!site.ic_fn) { if (site.ic_host_target) { pc.host_fn = site.ic_pin.get(); } else { pc.pin = site.ic_pin; } }
 	} else {
 		bool parked_direct = false;
 		if (calleeVal.raw_storage_index() == script_value::TYPEID_FUNCTION) {
@@ -13228,20 +13228,19 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
 	pending_callee& top = pending_callees_.back();
-	if (top.host) {
-		const call_site& hs = *top.host;
-		if (hs.ic_pin.get() == top.host_fn) {
-			if (op_status st{}; call_host_site(hs, ins.a, st)) { pending_callees_.pop_back(); return st; }
-			top.pin = hs.ic_pin;   // declined: the general path holds the callee itself
-		}
-		return exec_call_from_scratch_general(f, ins);   // refilled since the probe: the probed callee, retired until the outermost entry returns
-	}
 	if (top.fn) {
 		JAI_COARSE(coarse_push_, coarse_pushes_)
 		const script_defined_function& fn = *top.fn;
 		strong_ptr<script_function> pin = std::move(top.pin);
 		pending_callees_.pop_back();
 		return call_parked_script(f, ins, fn, std::move(pin));
+	}
+	if (top.host_fn && !top.pin) {
+		const call_site& hs = f.code->call_sites[ins.b];
+		if (hs.ic_pin.get() == top.host_fn) {
+			if (op_status st{}; call_host_site(hs, ins.a, st)) { pending_callees_.pop_back(); return st; }
+			top.pin = hs.ic_pin;   // declined: the general path holds the callee itself
+		}   // else refilled since the probe: the probed callee is retired until the outermost entry returns
 	}
 	return exec_call_from_scratch_general(f, ins);
 }
@@ -21435,7 +21434,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 JAI_NOINLINE void vm_backend::retire_site_callee(const call_site& site) {
 	if (site.ic_host_target) {
 		bool borrowed = host_site_calls_ != 0;
-		for (size_t i = 0; !borrowed && i < pending_callees_.size(); ++i) { borrowed = pending_callees_[i].host == &site; }
+		for (size_t i = 0; !borrowed && i < pending_callees_.size(); ++i) { borrowed = pending_callees_[i].host_fn == site.ic_pin.get() && !pending_callees_[i].pin; }
 		if (borrowed) {
 			retired_callees_.push_back(site.ic_pin);
 			retired_callees_.push_back(site.ic_host_owner);

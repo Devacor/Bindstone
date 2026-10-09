@@ -111,6 +111,11 @@ public:
     void add_constructor_from_ast(std::shared_ptr<function_decl> ctor_ast) {
         // Store for later reference
         if (auto eng = get_engine()) { ctor_ast->unit = eng->current_unit(); }
+        for (const auto& earlier : constructor_asts_) {
+            if (detail::differs_only_by_reference(ctor_ast->parameters, earlier->parameters)) [[unlikely]] {
+                throw runtime_error(detail::reference_only_overload_text(get_name(), ctor_ast->parameters, earlier->parameters, earlier->location.line));
+            }
+        }
         constructor_asts_.push_back(ctor_ast);
 
         // The constructor is already added to the environment by visit_class_decl
@@ -310,6 +315,11 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
 
     // Store the AST in method_overloads_ for type-based resolution
     if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
+    for (const auto& earlier : method_overloads_[name_id]) {
+        if (detail::differs_only_by_reference(ast->parameters, earlier->parameters)) [[unlikely]] {
+            throw runtime_error(detail::reference_only_overload_text(name, ast->parameters, earlier->parameters, earlier->location.line));
+        }
+    }
     method_overloads_[name_id].push_back(ast);
 
     // Invalidate overload resolution cache for this method name (new overload may change resolution)
@@ -380,6 +390,11 @@ inline void class_definition::add_static_script_method(std::string_view name, st
         method_name_id = name_id;
     }
     if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
+    for (const auto& earlier : static_method_overloads_[method_name_id]) {
+        if (detail::differs_only_by_reference(ast->parameters, earlier->parameters)) [[unlikely]] {
+            throw runtime_error(detail::reference_only_overload_text(name, ast->parameters, earlier->parameters, earlier->location.line));
+        }
+    }
     static_method_overloads_[method_name_id].push_back(ast);
 
     static_methods_.insert_or_assign(name_id, script_value::make_function(

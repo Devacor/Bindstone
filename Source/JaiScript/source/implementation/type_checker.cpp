@@ -839,6 +839,17 @@ private:
             const std::string sig = parameter_signature(fn);
             const std::string key = std::string(fn->name) + (fn->is_static ? "#static" : "") + sig;
             auto [it, inserted] = first_seen.emplace(key, fn);
+            if (inserted) {   // an earlier overload of the same name and table that differs only by reference (Dev ruling 2026-10-09)
+                for (const function_decl* earlier : fns) {
+                    if (earlier == fn) { break; }
+                    if (earlier->name != fn->name || earlier->is_static != fn->is_static ||
+                        !detail::differs_only_by_reference(fn->parameters, earlier->parameters)) { continue; }
+                    diag(diag_level::error, fn->location,
+                         detail::reference_only_overload_text(fn->name, fn->parameters, earlier->parameters, earlier->location.line),
+                         earlier->location.line, earlier->location.column);
+                    break;
+                }
+            }
             if (!inserted && !fn->is_override) {
                 diag(diag_level::error, fn->location,
                      "'" + std::string(fn->name) + "' is already defined" + (by_name ? std::string() : " with parameters " + sig) + " at " +
@@ -894,7 +905,12 @@ private:
             for (const auto& [unit, decls] : pit->second) {
                 const function_decl* other = nullptr;   // the other unit's declaration of this signature, which this one replaces
                 for (const auto& d : decls) {
-                    if (d && parameter_signature(d.get()) == parameter_signature(fn)) { other = d.get(); break; }
+                    if (!d || d->location.filename == fn->location.filename) { continue; }
+                    if (detail::differs_only_by_reference(fn->parameters, d->parameters)) {
+                        diag(diag_level::error, fn->location, detail::reference_only_overload_text(fn->name, fn->parameters, d->parameters, d->location.line));
+                        break;
+                    }
+                    if (parameter_signature(d.get()) == parameter_signature(fn)) { other = d.get(); break; }
                 }
                 if (!other || other->location.filename == fn->location.filename) { continue; }
                 diag(diag_level::warning, fn->location, "'" + std::string(fn->name) + "' redefines the function defined in " +

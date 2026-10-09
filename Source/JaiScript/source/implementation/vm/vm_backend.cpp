@@ -14065,12 +14065,15 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 	proto.fn->unit = current_unit();
 	proto.fn->block_defined = environment_ && environment_->block_scope();
 	proto.fn->declared = true;
+	proto.fn->line = proto.decl->location.line;
 	payload.fn = proto.fn;
 	script_value functionValue = script_value::make_function(
 		script_function(script_callable_thunk{eng, std::move(payload)}), engine_);
 
 	// alone, or in the overload set of its name (KEEP BYTE-PARALLEL with interpreter::visit_function_decl)
-	environment_->define(proto.decl->name_id, detail::declare_function_overload(*environment_, proto.decl->name_id, proto.fn, std::move(functionValue), engine_));
+	auto declared = detail::declare_function_overload(*environment_, proto.decl->name_id, proto.fn, std::move(functionValue), engine_);
+	if (!declared) { return raise_from(declared); }
+	environment_->define(proto.decl->name_id, std::move(declared.value()));
 	engine_->bump_definition_epoch();
 	return {};
 }
@@ -17987,10 +17990,15 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 
 			func_decl->unit = current_unit();
 			auto& overloads = ns_data->functions[func_decl->name_id];
-			if (!detail::admit_namespace_function(overloads, *func_decl)) {
+			std::string admission_error;
+			const auto admission = detail::admit_namespace_function(overloads, *func_decl, admission_error);
+			if (admission == detail::namespace_admission::collision) {
 				return raise_(make_error_code(runtime_error_code::type_mismatch),
 					"Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
 					func_decl->name_id, decl->name_id);
+			}
+			if (admission == detail::namespace_admission::reference_only) {
+				return raise_(make_error_code(runtime_error_code::type_mismatch), "{0}", symbolizer_->intern(admission_error));
 			}
 
 			if (!func_decl->is_override) {

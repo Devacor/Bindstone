@@ -359,6 +359,57 @@ namespace detail {
         return out + ")";
     }
 
+    inline bool untyped_parameter(const parameter& p) { return !p.type || p.type->base_type == script_value_type::jai_any_type; }
+
+    inline bool same_parameter_type(const parameter& a, const parameter& b) {
+        if (untyped_parameter(a) != untyped_parameter(b)) { return false; }
+        return untyped_parameter(a) || a.type.get() == b.type.get() || a.type->canonical_name() == b.type->canonical_name();
+    }
+
+    // One signature: the same parameter count and, at each position, the same declared type (an untyped slot is var) and the same
+    // reference flag (C++: T& and T are two signatures). Defaults are not part of it.
+    inline bool same_signature(const std::vector<parameter>& a, const std::vector<parameter>& b) {
+        if (a.size() != b.size()) { return false; }
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (a[i].is_reference != b[i].is_reference || !same_parameter_type(a[i], b[i])) { return false; }
+        }
+        return true;
+    }
+
+    // Two parameter lists of the same count and types that differ only in which parameters are references (Dev ruling 2026-10-09:
+    // such overloads are an error at the second definition, a call could only tie)
+    inline bool differs_only_by_reference(const std::vector<parameter>& a, const std::vector<parameter>& b) {
+        if (a.size() != b.size()) { return false; }
+        bool differs = false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (!same_parameter_type(a[i], b[i])) { return false; }
+            differs = differs || a[i].is_reference != b[i].is_reference;
+        }
+        return differs;
+    }
+
+    // a declaration as its source spells it: the name, then each parameter's type (var when untyped), & for a reference, its name
+    inline std::string declaration_spelling(std::string_view name, const std::vector<parameter>& params) {
+        std::string out(name);
+        out += "(";
+        for (size_t i = 0; i < params.size(); ++i) {
+            if (i) { out += ", "; }
+            const parameter& p = params[i];
+            out += untyped_parameter(p) ? std::string("var") : p.type->canonical_name();
+            if (p.is_reference && (untyped_parameter(p) || p.type->base_type != script_value_type::jai_reference_type)) { out += "&"; }
+            out += " ";
+            out += p.name;
+        }
+        return out + ")";
+    }
+
+    // the second of two overloads that differ only by reference (both backends and the checker: one text)
+    inline std::string reference_only_overload_text(std::string_view name, const std::vector<parameter>& second, const std::vector<parameter>& first,
+                                                    size_t first_line) {
+        return "'" + declaration_spelling(name, second) + "' differs from '" + declaration_spelling(name, first) + "' (line " +
+               std::to_string(first_line) + ") only by reference; overloads must differ in parameter types or count";
+    }
+
     // two overloads tie on these arguments (Dev ruling 2026-10-02): {0} = the callee, {1} = the arguments and the two signatures,
     // composed only while the symbolizer is unfrozen (a parallel worker gets the list-free shape)
     JAI_NOINLINE inline error_propagator ambiguous_call(uint64_t name_id, const std::vector<parameter>& best, const std::vector<parameter>& rival,

@@ -12,20 +12,6 @@
 
 namespace jai::detail {
 
-    // One signature: the same parameter count and, at each position, the same declared type (an untyped slot is var) and the same
-    // reference flag (C++: T& and T are two signatures). Defaults are not part of it.
-    inline bool same_signature(const std::vector<parameter>& a, const std::vector<parameter>& b) {
-        if (a.size() != b.size()) { return false; }
-        for (size_t i = 0; i < a.size(); ++i) {
-            if (a[i].is_reference != b[i].is_reference) { return false; }
-            const bool untyped_a = !a[i].type || a[i].type->base_type == script_value_type::jai_any_type;
-            const bool untyped_b = !b[i].type || b[i].type->base_type == script_value_type::jai_any_type;
-            if (untyped_a != untyped_b) { return false; }
-            if (!untyped_a && a[i].type.get() != b[i].type.get() && a[i].type->canonical_name() != b[i].type->canonical_name()) { return false; }
-        }
-        return true;
-    }
-
     // An earlier run of the unit that is declaring now: its declarations the new run does not repeat are dropped
     inline bool earlier_run(unit_stamp declared, unit_stamp now) { return declared.id == now.id && declared.seq != now.seq; }
 
@@ -36,9 +22,10 @@ namespace jai::detail {
     }
 
     // The value a function declaration defines its name to in `env`: the function itself, or the overload set it joins with the
-    // declarations of other signatures `env` already holds under the name (a variable, a lambda or a host callable is replaced)
-    inline script_value declare_function_overload(environment& env, uint64_t name_id, const std::shared_ptr<script_defined_function>& fn,
-                                                  script_value value, engine* eng) {
+    // declarations of other signatures `env` already holds under the name (a variable, a lambda or a host callable is replaced);
+    // a declaration that differs from one of them only by reference is the second definition's error
+    inline checked_result<script_value> declare_function_overload(environment& env, uint64_t name_id, const std::shared_ptr<script_defined_function>& fn,
+                                                                  script_value value, engine* eng) {
         const script_value* existing = env.get_own_value_ptr(name_id);
         const script_callable* held = existing ? script_callable_of(*existing, eng) : nullptr;
         if (!held) { return value; }
@@ -55,6 +42,12 @@ namespace jai::detail {
             for (size_t i = 0; i < held->overloads->members.size(); ++i) { keep(held->overloads->members[i], held->overloads->values[i]); }
         }
         if (set->members.empty()) { return value; }
+        for (const auto& member : set->members) {
+            if (differs_only_by_reference(fn->parameters(), member->parameters())) [[unlikely]] {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "{0}",
+                    eng->symbolize(reference_only_overload_text(fn->name, fn->parameters(), member->parameters(), member->line)));
+            }
+        }
         set->members.push_back(fn);
         set->values.push_back(std::move(value));
         script_callable payload;
@@ -98,17 +91,24 @@ namespace jai::detail {
     }
 
     // A namespace function declaration (both backends' namespace declaration): an earlier run of the declaring unit drops what it
-    // declared; false when a declaration of the same signature stays (the caller raises unless `override`), which is erased first
-    // when the new one overrides
-    inline bool admit_namespace_function(std::vector<std::shared_ptr<function_decl>>& overloads, const function_decl& fn) {
+    // declared; a declaration of the same signature that stays collides (the caller raises unless `override`, which erases it), one
+    // that differs only by reference is the second definition's error (its text in `error`)
+    enum class namespace_admission : uint8_t { admitted, collision, reference_only };
+    inline namespace_admission admit_namespace_function(std::vector<std::shared_ptr<function_decl>>& overloads, const function_decl& fn, std::string& error) {
         std::erase_if(overloads, [&](const std::shared_ptr<function_decl>& o) { return earlier_run(o->unit, fn.unit); });
         for (auto it = overloads.begin(); it != overloads.end(); ++it) {
             if (!same_signature((*it)->parameters, fn.parameters)) { continue; }
-            if (!fn.is_override) { return false; }
+            if (!fn.is_override) { return namespace_admission::collision; }
             overloads.erase(it);
             break;
         }
-        return true;
+        for (const auto& o : overloads) {
+            if (differs_only_by_reference(fn.parameters, o->parameters)) [[unlikely]] {
+                error = reference_only_overload_text(fn.name, fn.parameters, o->parameters, o->location.line);
+                return namespace_admission::reference_only;
+            }
+        }
+        return namespace_admission::admitted;
     }
 
 } // namespace jai::detail

@@ -12489,6 +12489,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
     scriptFunc->unit = decl_unit;
     scriptFunc->block_defined = environment_->block_scope();
     scriptFunc->declared = true;
+    scriptFunc->line = decl->location.line;
 
     // Create wrapper function resolving the live backend at call time. Named thunk so
     // callers can recover the payload via target<script_callable_thunk>() - vm parity.
@@ -12502,7 +12503,9 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
 
     // Define the function in current environment: alone, or in the overload set of its name (KEEP BYTE-PARALLEL with
     // vm_backend::exec_func_decl)
-    environment_->define(decl->name_id, detail::declare_function_overload(*environment_, decl->name_id, scriptFunc, std::move(functionValue), engine_));
+    auto declared = detail::declare_function_overload(*environment_, decl->name_id, scriptFunc, std::move(functionValue), engine_);
+    if (!declared) { return declared.error_value(); }
+    environment_->define(decl->name_id, std::move(declared.value()));
     return {};
 }
 
@@ -13247,10 +13250,15 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // Overloads of the name coexist; one of the same signature collides unless it overrides (KEEP BYTE-PARALLEL with the vm)
             func_decl->unit = current_unit();
             auto& overloads = ns_data->functions[func_decl->name_id];
-            if (!detail::admit_namespace_function(overloads, *func_decl)) {
+            std::string admission_error;
+            const auto admission = detail::admit_namespace_function(overloads, *func_decl, admission_error);
+            if (admission == detail::namespace_admission::collision) {
                 return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
                     "Function '{0}' already exists in namespace '{1}'. Use 'override' keyword to replace it.",
                     func_decl->name_id, decl->name_id);
+            }
+            if (admission == detail::namespace_admission::reference_only) {
+                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", string_symbolizer_->intern(admission_error));
             }
 
             // Check if this namespace name matches a class name

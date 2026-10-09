@@ -1434,6 +1434,79 @@ public:
             check_true(!engine->get_global_environment()->get_value_ptr(engine->get_symbolizer()->intern("ran")), "nothing ran");
         });
 
+        // ---- overloads that differ only by reference (Dev ruling 2026-10-09): the second definition is an error naming both ----
+
+        test("an_overload_differing_only_by_reference_is_an_error", [this, error_of]() {
+            const std::string tail = " only by reference; overloads must differ in parameter types or count";
+            for (auto mode : {jai::check_mode::off, jai::check_mode::strict}) {
+                const std::string label = mode == jai::check_mode::off ? "run time: " : "load: ";
+                auto run = [&](const std::string& src) {
+                    auto engine = make_engine();
+                    engine->static_checking(mode);
+                    return error_of([&] { engine->execute(src); });
+                };
+                const std::string free_err = run("void f(var& x) { } void f(var x) { } 1;");
+                check_true(free_err.find("'f(var x)' differs from 'f(var& x)' (line 1)" + tail) != std::string::npos, label + "free: " + free_err);
+                const std::string method_err = run("class K { void m(int& a, string b) { } void m(int a, string b) { } } 1;");
+                check_true(method_err.find("'m(int a, string b)' differs from 'm(int& a, string b)' (line 1)" + tail) != std::string::npos, label + "method: " + method_err);
+                const std::string static_err = run("class S { static void m(int a) { } static void m(int& a) { } } 1;");
+                check_true(static_err.find("'m(int& a)' differs from 'm(int a)' (line 1)" + tail) != std::string::npos, label + "static: " + static_err);
+                const std::string ctor_err = run("class C { int v = 0; C(int& a) { } C(int a) { } } 1;");
+                check_true(ctor_err.find("'C(int a)' differs from 'C(int& a)' (line 1)" + tail) != std::string::npos, label + "constructor: " + ctor_err);
+                const std::string ns_err = run("namespace n { void f(var& x) { } void f(var x) { } } 1;");
+                check_true(ns_err.find("'f(var x)' differs from 'f(var& x)' (line 1)" + tail) != std::string::npos, label + "namespace: " + ns_err);
+            }
+            auto engine = make_engine();
+            engine->execute("void f(var& x) { }");
+            const std::string units_err = error_of([&] { engine->execute("void f(var x) { }"); });
+            check_true(units_err.find("'f(var x)' differs from 'f(var& x)' (line 1)" + tail) != std::string::npos, "two units: " + units_err);
+        });
+
+        test("overloads_that_differ_in_a_type_too_coexist_and_a_reload_is_no_second_definition", [this, error_of]() {
+            namespace fs = std::filesystem;
+            auto engine = make_engine();
+            check_eq(int64_t(12), engine->execute(R"(
+                class O { var x = 0; }
+                int mix(var& r, string n) { return 1; }
+                int mix(var r, int n) { return 2; }
+                var o = new O();
+                mix(o.x, "s") * 10 + mix(o.x, 5);
+            )").as_int(), "a reference and a type difference coexist");
+            engine->static_checking(jai::check_mode::off);
+            engine->execute("int h(var& a, int b) { return 1; } int h(var a, float b) { return 2; }");
+            const std::string tie = error_of([&] { engine->execute("var v = 1; h(v, true);"); });
+            check_true(tie.find("Ambiguous call to 'h'") != std::string::npos, "a call that ties another way stays ambiguous: " + tie);
+
+            const auto dir = jai::foundry::test_temp_directory() / "jai_refonly_reload";
+            fs::create_directories(dir);
+            const auto mod = dir / "refonly_mod.jai";
+            { std::ofstream out(mod, std::ios::trunc); out << "int g(var& x) { return 1; }\n"; }
+            auto reloading = make_engine();
+            const std::string path = mod.generic_string();
+            reloading->execute("import \"" + path + "\";");
+            fs::last_write_time(mod, fs::last_write_time(mod) + std::chrono::seconds(2));
+            { std::ofstream out(mod, std::ios::trunc); out << "int g(var x) { return 2; }\n"; }
+            fs::last_write_time(mod, fs::last_write_time(mod) + std::chrono::seconds(4));
+            check_eq(std::string(), error_of([&] { reloading->execute("import \"" + path + "\";"); }), "the reload replaces the unit's own definition");
+            check_eq(int64_t(2), reloading->execute("g(5);").as_int(), "the reloaded definition runs");
+            fs::remove_all(dir);
+        });
+
+        test("a_single_declaration_stays_a_plain_function_value", [this]() {
+            // only an overloaded name leaves the call sites' direct path (the VM's inline cache keys on a plain function value)
+            auto engine = make_engine();
+            auto kind_of = [&](const char* name) {
+                const script_value* v = engine->get_global_environment()->get_value_ptr(engine->get_symbolizer()->intern(name));
+                const auto* thunk = v && v->is_function() ? v->as_function().target<script_callable_thunk>() : nullptr;
+                return thunk ? static_cast<int>(thunk->payload.kind) : -1;
+            };
+            engine->execute("int f(int a) { return 1; } int f2(int a) { return f(a) + 1; } f2(1);");
+            check_eq(static_cast<int>(script_callable::kind_type::function), kind_of("f"), "one declaration");
+            engine->execute("int f(string a) { return 2; }");
+            check_eq(static_cast<int>(script_callable::kind_type::overload_set), kind_of("f"), "two signatures");
+            check_eq(static_cast<int>(script_callable::kind_type::function), kind_of("f2"), "the other name");
+        });
+
         test("the_nearest_base_breaks_a_class_tie", [this]() {
             auto engine = make_engine();
             check_eq(int64_t(23), engine->execute(R"(

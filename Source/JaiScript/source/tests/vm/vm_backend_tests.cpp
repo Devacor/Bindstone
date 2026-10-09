@@ -4003,6 +4003,33 @@ public:
 			check_eq(std::string("400 510"), run(false, refilled_while_parked), "a site refilled while parked (interpreter)");
 			check_eq(run(false, refilled_while_parked), run(true, refilled_while_parked), "a site refilled while parked (parity)");
 		});
+		test("map_stores_borrow_their_key_and_element_reads_write_back_only_through_mutators", [this]() {
+			// a map store takes its key where it is (a range-for alias, a value read from the same map), and a string method called
+			// through a typed element alias writes the element back only when the registry lists it as a mutator
+			auto run = [](bool use_vm, const char* program) -> std::string {
+				auto e = jai::engine::make();
+				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->execution_budget(0);
+				stdlib::register_all(*e);
+				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
+			};
+			const char* keys =
+				"map<string, int> m = {};\n"
+				"array<string> src = [\"a\", \"b\", \"a\", \"longer key\", \"a\"];\n"
+				"for (auto& s : src) { m[s] = m.get(s, 0) + 1; }\n"
+				"map<string, string> n = {\"a\": \"b\"};\n"
+				"n[n[\"a\"]] = \"c\";\n"
+				"to_string(m[\"a\"]) + \" \" + to_string(m[\"b\"]) + \" \" + to_string(m[\"longer key\"]) + \" \" + n[\"b\"] + \" \" + to_string(n.size());";
+			const char* aliases =
+				"array<string> a = [\"1.5\", \"xy\"];\n"
+				"float total = 0.0; int sizes = 0;\n"
+				"for (auto& s : a) { if (s.size() > 2) { total = total + s.to_float(); } sizes = sizes + s.size(); s.to_upper(); }\n"
+				"to_string(total) + \" \" + to_string(sizes) + \" \" + a[0] + a[1];";
+			check_eq(std::string("3 1 1 c 2"), run(false, keys), "keys (interpreter)");
+			check_eq(run(false, keys), run(true, keys), "keys (parity)");
+			check_eq(std::string("1.5 5 1.5XY"), run(false, aliases), "aliases (interpreter)");
+			check_eq(run(false, aliases), run(true, aliases), "aliases (parity)");
+		});
 		test("handle_and_field_reference_argument_parity", [this, run_both_backends_stdlib]() {
 			// handles and nulls into var parameters (shared, never copied), var& parameters bound to fields of handles, stores through
 			// them (a declared field converts, a var field takes anything), a captured parameter, a by-value instance still copies

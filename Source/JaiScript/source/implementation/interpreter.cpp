@@ -7792,7 +7792,10 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     if (!result) {
                         return result.error_value();
                     }
-                    if (auto* scratch_ref = recv_cell->scratch_ref_holder()) [[unlikely]] { scratch_ref->commit_scratch(); }
+                    if (auto* scratch_ref = recv_cell->scratch_ref_holder()) [[unlikely]] {
+                        // a typed element's scratch holds what the buffer holds unless the method is one of the registry's mutators
+                        if (string_mutator_ids_.count(member->member_id) || !scratch_ref->typed_element()) { scratch_ref->commit_scratch(); }
+                    }
                     push_value(std::move(result.value()));
                     return {};
                 }

@@ -21602,7 +21602,10 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 	return compiled;
 }
 
-checked_result<script_value> vm_backend::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
+checked_result<script_value> vm_backend::execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) {
+	if (first != 0 && (payload.kind != script_callable::kind_type::method || !payload.this_obj || payload.ast->is_coroutine)) {
+		return execution_backend::execute_callable_from(payload, args, first);
+	}
 	detail::release_sync release_first(engine_);
 	// A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
 	// destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with interpreter::execute_callable)
@@ -21646,7 +21649,7 @@ checked_result<script_value> vm_backend::execute_callable(const script_callable&
 			}
 			if (!payload.ast->is_coroutine) {
 				const method_entry entry{&payload.definition_env, &*payload.this_obj, payload.cls.get()};
-				return call_script_function(method_function_for(payload.ast), args, nullptr, nullptr, nullptr, &entry);
+				return call_script_function(method_function_for(payload.ast), args, nullptr, nullptr, nullptr, &entry, first);
 			}
 			auto method_env = acquire_method_scope_env(payload.definition_env, *payload.this_obj, payload.cls.get());   // a method env answers `this` itself
 			auto result = execute_method_ast(payload.ast, method_env, args);
@@ -23545,10 +23548,11 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 
 checked_result<script_value> vm_backend::call_script_function(const script_defined_function& function, const std::vector<script_value>& args,
                                                               const call_site* site, frame* caller_frame, chunk* caller_code,
-                                                              const method_entry* method) {
+                                                              const method_entry* method, size_t first) {
+	const size_t argc = args.size() - first;
 	// Opaque entry (bound methods, constructors, function values): the arming invoke
 	// left the call-site context pending - consume it exactly once, when this call is the site's
-	if (!site && detail::same_arguments(pending_site_ctx_.arguments, args)) {
+	if (!site && first == 0 && detail::same_arguments(pending_site_ctx_.arguments, args)) {
 		site = pending_site_ctx_.site;
 		caller_frame = pending_site_ctx_.caller_frame;
 		caller_code = pending_site_ctx_.caller_code;
@@ -23570,8 +23574,8 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 
 	detail::call_depth_guard depth_guard(current_call_depth_);
 
-	if (args.size() != function.parameters().size() && !arity_accepts(function.parameters(), args.size())) {
-		return detail::arity_error(function.name, function.parameters().size(), args.size(), arity_count_ids_, *symbolizer_);
+	if (argc != function.parameters().size() && !arity_accepts(function.parameters(), argc)) {
+		return detail::arity_error(function.name, function.parameters().size(), argc, arity_count_ids_, *symbolizer_);
 	}
 
 	auto body_chunk = std::static_pointer_cast<chunk>(function.backend_body_cache);
@@ -23648,9 +23652,9 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	};
 
 	{
-		auto bind_result = bind_parameters(function.parameters(), args, 0, args.size(), f, *body_chunk,
+		auto bind_result = bind_parameters(function.parameters(), args, first, argc, f, *body_chunk,
 	                                   previousEnv, site, caller_frame, caller_code,
-	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), args.size()), &function, caller_unit);
+	                                   site_arg_proofs(site, caller_code, function.body.get(), function.parameters().size(), argc), &function, caller_unit);
 		if (bind_result == op_status::failed) {
 			cleanup();
 			return pending_error_;

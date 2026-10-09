@@ -661,6 +661,58 @@ out;
             check_eq(i_out, v_out, "backend parity");
         });
 
+        // script_map::recall / recall_or_insert against find through every mutator: an entry memo holds only while its map is
+        // unchanged and the remembered key equals the asked key; a copy's memo names its source; a new map at a dead map's address
+        // starts with no memo
+        test("map_entry_memo_through_every_mutator", [this]() {
+            auto e = jai::engine::make();
+            auto key = [&](const std::string& t) { return jai::script_value(t, e.get()); };
+            auto num = [&](int64_t v) { return jai::script_value(static_cast<jai::script_int>(v), e.get()); };
+            jai::script_map m;
+            jai::script_map::entry_memo memo;
+            auto agrees = [&](jai::script_map& map, const std::string& k, const char* step) {
+                const jai::script_map::value_type* r = map.recall(memo, key(k));
+                auto it = map.find(key(k));
+                const jai::script_map::value_type* f = it == map.end() ? nullptr : &*it;
+                check_true(r == f, std::string("recall agrees with find after ") + step + " (" + k + ")");
+            };
+            m[key("a")] = num(1);
+            agrees(m, "a", "an insert");
+            m.recall_or_insert(memo, key("a"))->second = num(2);
+            check_eq(int64_t(2), m.find(key("a"))->second.as_int(), "a store through the memo lands in the entry");
+            m[key("b")] = num(3);                         agrees(m, "a", "another insert");
+            m[key("a")] = num(4);                         agrees(m, "a", "a value store");
+            m.erase(key("a"));                            agrees(m, "a", "an erase of the key");
+            check_true(m.recall(memo, key("a")) == nullptr, "an erased key is absent");
+            m.recall_or_insert(memo, key("a"))->second = num(5);
+            agrees(m, "a", "an insert through the memo");
+            m.erase(key("b"));                            agrees(m, "a", "an erase of another key");
+            for (int i = 0; i < 2000; ++i) { m[key("g" + std::to_string(i))] = num(i); }
+            agrees(m, "a", "growth");
+            agrees(m, "g1999", "growth");
+            m.clear();                                    agrees(m, "a", "clear");
+            m[key("a")] = num(6); agrees(m, "a", "a reinsert");
+            jai::script_map other; other[key("a")] = num(7);
+            m = other;                                    agrees(m, "a", "a copy assignment");
+            check_eq(int64_t(7), m.recall(memo, key("a"))->second.as_int(), "the assigned map's value");
+            jai::script_map moved; moved[key("a")] = num(8);
+            m = std::move(moved);                         agrees(m, "a", "a move assignment");
+            jai::script_map copy(m);
+            m.recall(memo, key("a"));
+            const jai::script_map::value_type* in_copy = copy.recall(memo, key("a"));
+            check_true(in_copy == &*copy.find(key("a")), "a memo taken on the source misses on the copy");
+            alignas(jai::script_map) unsigned char buf[sizeof(jai::script_map)];
+            auto* first = new (buf) jai::script_map();
+            (*first)[key("a")] = num(9);
+            check_true(first->recall(first->lane_memo(), key("a")) != nullptr, "the first map's lane memo holds");
+            first->~script_map();
+            auto* second = new (buf) jai::script_map();
+            (*second)[key("a")] = num(10);
+            const jai::script_map::value_type* r2 = second->recall(second->lane_memo(), key("a"));
+            check_true(r2 == &*second->find(key("a")) && r2->second.as_int() == 10, "a new map at the dead map's address starts without its memo");
+            second->~script_map();
+        });
+
         test("map_field_survives_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

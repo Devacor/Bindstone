@@ -9037,7 +9037,29 @@ next_frame:
 		case opcode::op_c_lnot: { size_t at = ip; st = exec_c_lnot(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_cmpval: { size_t at = ip; st = exec_c_cmpval(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_append: { size_t at = ip; st = exec_c_append(f, at, ci, regs); ip = at; } break;
-		case opcode::op_c_push: f.ip = ip; st = exec_c_push(f, ci, regs); ip = f.ip; break;
+		case opcode::op_c_push: {
+			// the common row here (exec_c_push, out of line, has the rest): a frame-slot array holding the site's node takes an int or float
+			// cell into its own typed buffer under the kernel's charge
+			const push_proto& p = f.code->push_protos[ci.a];
+			script_array* node = const_cast<script_array*>(cs.site_node[ip - loop.copy_head]);
+			if (node && p.receiver.slot != k_invalid_u32 && p.value.const_index == k_invalid_u32 && !p.value_is_subscript && p.value.slot != k_invalid_u32) {
+				const script_value* recv = frame_slot(f, p.receiver.slot);
+				const uint8_t vk = hot.kinds[p.value.slot];
+				const script_array::kind_t nk = node->kind();
+				if (recv && recv->raw_storage_index() == script_value::TYPEID_ARRAY && recv->unchecked_array_node() == node &&
+				    ((vk == static_cast<uint8_t>(script_value::TYPEID_INT) && (nk == script_array::kind_t::i64 || nk == script_array::kind_t::f64)) ||
+				     (vk == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && nk == script_array::kind_t::f64)) &&
+				    limits_->memory_charge(sizeof(script_value))) {
+					JAI_CELLS_COUNT(7);
+					const int64_t bits = hot.payload[p.value.slot];
+					if (nk == script_array::kind_t::i64) { node->ints().push_back(bits); }
+					else { node->floats().push_back(vk == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<script_float>(bits) : cell_float_of_bits(bits)); }
+					++ip;
+					JAI_CELL_NEXT;
+				}
+			}
+			f.ip = ip; st = exec_c_push(f, ci, regs); ip = f.ip;
+		} break;
 		case opcode::op_c_rebind: f.ip = ip; st = exec_c_rebind(f, ci); ip = f.ip; break;   // element aliases and member sites: out of line, dispatched here
 		case opcode::op_c_mload: f.ip = ip; st = exec_c_mload(f, ci); ip = f.ip; break;
 		case opcode::op_c_mstore: f.ip = ip; st = exec_c_mstore(f, ci); ip = f.ip; break;
@@ -10051,7 +10073,7 @@ bool vm_backend::cells_concat(frame& f, const chunk::cell_loop& loop, uint32_t d
 // cell boxed with its landing's stamp, a constant, or an element of the source container read as a handle; the append is
 // typed_push_append's rows with the kernel's charge, and anything the kernel would decline or raise is a miss onto the general
 // push, whose texts stand
-JAI_FORCEINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr) {
+JAI_NOINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	cell_state& cs = *f.cells;
 	const chunk::cell_loop& loop = *cr.loop;

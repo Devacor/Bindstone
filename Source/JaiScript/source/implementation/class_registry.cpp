@@ -418,7 +418,7 @@ bool class_definition::flat_value_semantics_impl(std::vector<const class_definit
     return flat;
 }
 
-// Transitive value-closure (Dev ruling: any type that cannot point at something else
+// Transitive value-closure (any type that cannot point at something else
 // qualifies - primitives, strings, containers OF value-closed types to any depth,
 // nested flat classes). What poisons: shared_ptr/weak_ptr/function/reference (their
 // semantics IS pointing elsewhere) and auto/var (no store-enforced shape).

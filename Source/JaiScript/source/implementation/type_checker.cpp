@@ -813,9 +813,9 @@ private:
         return fields != own_fields || statics != def->get_static_field_names().size();
     }
 
-    // The general redefinition rule (Dev ruling 2026-10-07, docs/const.md 4.3): two definitions of one signature in the same unit
+    // The general redefinition rule (docs/const.md 4.3): two definitions of one signature in the same unit
     // are an error - program-scope functions, methods, constructors and namespace functions, by their parameter types (T& and T
-    // differ; const is not part of a signature). Declarations of other signatures are overloads (Dev ruling 2026-10-02). A
+    // differ; const is not part of a signature). Declarations of other signatures are overloads. A
     // definition of the same signature from another unit is a redefinition, the hot-reload path: it replaces the earlier one, and
     // the checker warns when it sees the earlier definition.
     static std::string parameter_signature(const function_decl* fn) {
@@ -839,7 +839,7 @@ private:
             const std::string sig = parameter_signature(fn);
             const std::string key = std::string(fn->name) + (fn->is_static ? "#static" : "") + sig;
             auto [it, inserted] = first_seen.emplace(key, fn);
-            if (inserted) {   // an earlier overload of the same name and table that differs only by reference (Dev ruling 2026-10-09)
+            if (inserted) {   // an earlier overload of the same name and table that differs only by reference
                 for (const function_decl* earlier : fns) {
                     if (earlier == fn) { break; }
                     if (earlier->name != fn->name || earlier->is_static != fn->is_static ||
@@ -1115,7 +1115,7 @@ private:
         return def && base_def && def->derives_from(base_def.get());
     }
 
-    // Access control as the runtime applies it (detail::enforce_member_access, Dev ruling 2026-09-27): a private
+    // Access control as the runtime applies it (detail::enforce_member_access): a private
     // (or protected, its synonym) member is reachable inside its declaring class and every class derived from it; the
     // same text as the raise
     bool access_denied(const member_hit& hit, std::string_view member, const source_location& loc) {
@@ -2343,7 +2343,7 @@ private:
             return engine_class(target_cls) != nullptr;   // registered: lenient
         }
         for (const auto* ctor : c->ctors) {
-            // Dev ruling (2026-07): a defaulted-param ctor is NOT a converting ctor -
+            // A defaulted-param ctor is NOT a converting ctor -
             // only TRUE one-parameter constructors convert (matches the runtime gate)
             if (ctor->parameters.size() != 1) { continue; }
             const parameter& p = ctor->parameters[0];
@@ -3143,8 +3143,8 @@ private:
         return false;
     }
 
-    // in_set: fn is one of several overloads, where a string's truthiness never makes a bool parameter viable (Dev ruling
-    // 2026-10-02, the runtime scorer's rule); a lone function's bool slot still takes it by assignment
+    // in_set: fn is one of several overloads, where a string's truthiness never makes a bool parameter viable (the
+    // runtime scorer's rule); a lone function's bool slot still takes it by assignment
     bool script_fn_viable(const function_decl* fn, const std::vector<ctype>& args, bool in_set = false) {
         auto [min_a, max_a] = arity_range(fn);
         if (args.size() < min_a || args.size() > max_a) { return false; }
@@ -3641,7 +3641,7 @@ private:
 				if (access_denied(hit, id->name, id->location)) { return {}; }
 				if (bare_field_context()) { fp = resolve_field_proof(class_ctx_name_, id->name, hit); }
 				if (hit.methods) {
-					if (!hit.methods->empty() && !hit.methods->front()->is_static && bare_field_context()) {   // a method is called or bound, never read bare (Dev ruling 2026-09-30)
+					if (!hit.methods->empty() && !hit.methods->front()->is_static && bare_field_context()) {   // a method is called or bound, never read bare
 						diag(diag_level::error, id->location, detail::bare_method_value_text(id->name, class_ctx_name_));
 					}
 					return ctype::make(ctype::function_k);
@@ -3772,7 +3772,7 @@ private:
 				fp = resolve_field_proof(cls, m->member, hit);
 			}
 			if (hit.methods) {
-				if (!writing && !want_static) {   // a method is called or bound, never read bare (Dev ruling 2026-09-30)
+				if (!writing && !want_static) {   // a method is called or bound, never read bare
 					diag(diag_level::error, m->location, detail::method_value_text(m->member, cls, detail::method_value_receiver(m), false));
 				}
 				return ctype::make(ctype::function_k);
@@ -4205,7 +4205,7 @@ private:
 			}
 			ctype recv;
 			const ctype read_type = infer_member(m, /*writing=*/true, &typed_field, &recv, &hit, &fp);
-			// a shared_ptr<T> namespace variable admits a handle by R-q6 (Dev ruling 2026-09-30) at load; other namespace stores
+			// a shared_ptr<T> namespace variable admits a handle by R-q6 at load; other namespace stores
 			// stay run-time checks under strict (spec: a_typed_namespace_store_is_checked_at_run_time_under_strict)
 			std::string qualified;
 			if (!typed_field && m->is_static) {
@@ -4217,8 +4217,8 @@ private:
 					if (!nt.is_unknown()) { return nt; }
 				}
 			}
-			// An assignment expression's value is the destination's stored value (Dev ruling
-			// 2026-09-08): the member's type when the checker knows it; for a member it cannot
+			// An assignment expression's value is the destination's stored value:
+			// the member's type when the checker knows it; for a member it cannot
 			// read (no field, no getter) the runtime hands back the rhs or the compound's result.
 			// Keep assignment results' existing non-key provenance.
 			ctype result_type = !read_type.is_unknown() ? read_type : compound ? binary_result(read_type, base_op, rhs) : rhs;
@@ -4330,9 +4330,9 @@ private:
         return find_sclass(id->name) != nullptr;
     }
 
-    // Dev ruling 2026-07: compound assign on a typed target behaves like C++ —
+    // Compound assign on a typed target behaves like C++ —
     // `x op= rhs` is `x = T(x op rhs)` — so it checks exactly like plain assignment
-    // of the operation's result. var targets keep the old dynamic behavior (unchecked).
+    // of the operation's result. var targets keep the dynamic behavior (unchecked).
 	const char* incdec_op_ = nullptr;   // the ++/-- spelling while checking its += 1 / -= 1 desugar
 	void check_store(const ctype& rhs, bool compound, token_type base_op, const ctype& target,
 					 const std::string& target_display, const std::string& what,
@@ -4450,7 +4450,7 @@ private:
                          ctype_name(container) + "' to [k, v]");
                 }
                 // the elements' static type: an array's element type, a string's char; a var container, an array<var> or anything
-                // else has none (Dev ruling 2026-09-28)
+                // else has none
                 ctype elem{};
                 if (container.kind == ctype::array_k && container.ti && container.ti->element_type() &&
                     container.ti->element_type()->base_type != script_value_type::jai_any_type) {
@@ -4752,7 +4752,7 @@ private:
         }
     }
 
-	// An auto declaration takes its initializer's static type (Dev ruling 2026-09-27): var or unknown makes the slot a
+	// An auto declaration takes its initializer's static type: var or unknown makes the slot a
 	// var; any other type keeps auto, which the runtime locks to the value. Semantic: the unit's first proof pass
 	// decides it in every mode (stamp or clear see the same program), and it never changes under a running unit.
 	void type_auto_slot(variable_decl* decl, const ctype& init) {
@@ -4768,8 +4768,8 @@ private:
 		}
 	}
 
-	// An auto initializer's static type: a ternary whose arms are int and float has C++'s common type, float (Dev ruling
-	// 2026-09-28); every other mixed ternary has none
+	// An auto initializer's static type: a ternary whose arms are int and float has C++'s common type, float;
+	// every other mixed ternary has none
 	ctype numeric_ternary_type(const expression* init_expr, const ctype& init) {
 		if (!init.is_unknown() || last_mixed_ternary_.node != init_expr) { return init; }
 		const auto a = last_mixed_ternary_.then_type.kind, b = last_mixed_ternary_.else_type.kind;
@@ -4777,7 +4777,7 @@ private:
 		return init;
 	}
 
-	// Inline and plain declarations of one program-scope name never mix across units (Dev ruling 2026-09-30): the runtime
+	// Inline and plain declarations of one program-scope name never mix across units: the runtime
 	// refuses whichever runs second, so the closure reports the pair once, at the plain declaration; this unit's own mix
 	// turns the cell in place
 	void check_inline_redefinition(const variable_decl* decl) {
@@ -4822,7 +4822,7 @@ private:
 		}
 		// shared_ptr<auto>: pointee INFERRED from the initializer's class then enforced
 		// like the explicit spelling; null/missing initializer has nothing to infer
-		// (runtime errors identically - Dev ruling 2026-07)
+		// (runtime errors identically)
 		if (decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type &&
 			!decl->type->element_type()) {
 			if (!has_init || init.kind == ctype::null_k) {
@@ -5019,7 +5019,7 @@ private:
 				if (!f->type && !f->function_spelling) { f->auto_spelled = true; }
 				if (f->initializer) {
 					ctype init = infer(f->initializer.get());
-					if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type (Dev ruling 2026-09-28)
+					if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type
 					if ((f->type && !f->auto_spelled) || f->function_spelling) {
 						ctype ft = declared_variable_type(f);
 						if (!ft.is_unknown() && !assignable(init, ft)) {
@@ -5036,7 +5036,7 @@ private:
 											   fn->name, cd->name, fn->location);
 				}
 				// A class method that shadows a builtin shared_ptr handle method WINS over
-				// the builtin (Dev ruling 2026-07) - point at the now-unreachable builtin.
+				// the builtin - point at the now-unreachable builtin.
 				for (std::string_view b : k_shadowable_handle_method_names) {
 					if (fn->name == b) {
 						std::string m2(b);

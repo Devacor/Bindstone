@@ -586,7 +586,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 				const script_value_type want = c.slot_types[t->slot_index]->base_type;
 				const token_type base = a->op.type == token_type::equal ? token_type::plus : jai::detail::compound_base(a->op.type);
 				const script_value_type got = a->op.type == token_type::equal ? value_kind(a->value.get(), c) : arith_kind(base, want, value_kind(a->value.get(), c));
-				// a store through the reference runs the variable's own table (Dev ruling 2026-09-28), so a number into a number slot
+				// a store through the reference runs the variable's own table, so a number into a number slot
 				// converts exactly as the renamed store does
 				const auto numeric = [](script_value_type k) { return k == script_value_type::jai_int_type || k == script_value_type::jai_float_type; };
 				lands = got == want || (numeric(got) && numeric(want));
@@ -981,7 +981,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 				if (identifier->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
 				if (p.type && !any_type(p.type.get()) && p.type->type_name != "auto") {
 					// the alias names the caller's variable in the parameter's place, skipping the bind's admission and the parameter's
-					// declared type at the stores (Dev ruling 2026-09-30): only a variable statically of that type (a local declared it, a
+					// declared type at the stores: only a variable statically of that type (a local declared it, a
 					// `T& alias`) grafts, any other binds through the call
 					const type_info* actual = nullptr;
 					if (frame && identifier->slot_index < frame->size()) { actual = (*frame)[identifier->slot_index]; }

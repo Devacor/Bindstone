@@ -2288,7 +2288,7 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             // true — an irreflexivity violation that is undefined behavior when a
             // float (or NaN) is used as a std::map key. std::strong_order makes
             // all NaNs compare equal to each other and orders them deterministically. 0.0 and -0.0 are one key (they are ==,
-            // and map_key_hash hashes them alike; Dev ruling 2026-09-28)
+            // and map_key_hash hashes them alike)
             return std::strong_order(unchecked_as_float() == 0.0 ? 0.0 : unchecked_as_float(),
                                      other.unchecked_as_float() == 0.0 ? 0.0 : other.unchecked_as_float());
         case script_value_type::jai_string_type:

@@ -33,7 +33,7 @@ namespace {
         enum : uint8_t { cls_unknown = 0, cls_int = 1, cls_float = 2 };
         // cls = the decl's own class; elem_cls = a typed container's ELEMENT class
         // (array<int>/array<float> elements are store-enforced invariants, so a
-        // subscript read of one proves — the static all-primitive ruling's twin)
+        // subscript read of one proves — the static all-primitive rule's twin)
         struct slot_decl_type { uint64_t symbol; uint8_t cls; uint8_t elem_cls; };
         struct scope {
             std::unordered_multimap<uint64_t, variable_decl*> vars;
@@ -99,7 +99,7 @@ namespace {
 
         // Default-[&] lambda bodies: every identifier resolving OUTSIDE the lambda's own
         // scope is captured by reference, so its declaration must cell-box (C++ lambda
-        // semantics are the contract - Dev ruling 2026-07-09). Stack of scope-boundary
+        // semantics are the contract). Stack of scope-boundary
         // indexes: while inside a [&] body, an identifier declared at a scope BELOW the
         // innermost boundary escapes.
         std::vector<size_t> by_ref_capture_boundaries;
@@ -1914,7 +1914,7 @@ checked_result<type_info_ptr> parser::parse_type() {
             report_foreign(detail::foreign_word::pointer_to_const, peek());
             return make_error_code(parse_error_code::unexpected_token);
         }
-        // Dev ruling (2026-07): a dynamic pointee adds nothing over plain var (which
+        // A dynamic pointee adds nothing over plain var (which
         // already holds and rebinds any shared_ptr) - reject with the teaching pair
         if (check(token_type::var_keyword)) {
             report_error("shared_ptr<var> is not supported: use var (holds and rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)", peek());
@@ -3286,7 +3286,7 @@ checked_result<expression_ptr> parser::lambda_expression() {
 }
 
 // Anonymous function expression: `function (params) {...}` closes over its scope as JavaScript does, by reference -
-// a desugar to a [&] lambda (Dev ruling 2026-10-01)
+// a desugar to a [&] lambda
 checked_result<expression_ptr> parser::anonymous_function_expression() {
     auto lambda = std::make_shared<lambda_expr>(previous().location);
     lambda->default_capture = lambda_expr::capture_default::by_reference;
@@ -3585,7 +3585,6 @@ checked_result<statement_ptr> parser::block_statement() {
 }
 
 // A class is a program-scope type: a function or lambda body cannot declare one, written there or pasted in by an include
-// (Dev ruling 2026-10-01)
 void parser::reject_class_in_function_body(const token& at) {
     if (function_scope_stack_.empty()) { return; }
     if (!splice_spelled_.empty()) {
@@ -3703,7 +3702,7 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     }
     token varName = advance();
     // auto& mutates the owned element in place (the loop's output channel);
-    // plain auto gets a worker-local COPY - zero side effects, still legal (Dev ruling)
+    // plain auto gets a worker-local COPY - zero side effects, still legal
     // Zip: `, decl` repeats declare further loop variables over further arrays (same length)
     std::vector<parameter> extra_params;
     while (match(token_type::comma)) {
@@ -4109,7 +4108,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     nesting_guard nesting(nesting_depth_);
 
     while (!check(token_type::right_brace) && !is_at_end()) {
-        if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member (Dev, 2026-09-27)
+        if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member
             report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
             return make_error_code(parse_error_code::unexpected_token);
         }
@@ -4253,7 +4252,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                     // Typed operator methods returning the enclosing class land HERE (the
                     // ctor lookahead saw no '('): consume the operator symbol exactly like
                     // the general typed path so `Money operator+(Money o)` parses inside
-                    // class Money (open question #11, FIXED 2026-07)
+                    // class Money
                     if (method_name == "operator") {
                         auto op_name = parse_operator_method_symbol();
                         if (!op_name) {
@@ -4335,8 +4334,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                         }
 
                         if (check(token_type::colon)) {
-                            // Initializer lists are constructor-only (Dev ruling 2026-07); on methods
-                            // they were silently parsed and ignored - a trap
+                            // Initializer lists are constructor-only; on methods
+                            // silently parsing and ignoring them would be a trap
                             report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
                             synchronize_class_member(class_open_index);
                             continue;
@@ -4604,8 +4603,8 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
 
                     // Parse constructor initialization list if present
                     if (check(token_type::colon)) {
-                        // Initializer lists are constructor-only (Dev ruling 2026-07); on methods
-                        // they were silently parsed and ignored - a trap
+                        // Initializer lists are constructor-only; on methods
+                        // silently parsing and ignoring them would be a trap
                         report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
                         synchronize_class_member(class_open_index);
                         continue;
@@ -4787,7 +4786,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
     // Parse namespace members (functions, classes, variables)
     nesting_guard nesting(nesting_depth_);
     while (!check(token_type::right_brace) && !is_at_end()) {
-        if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member (Dev, 2026-09-27)
+        if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member
             report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
             return make_error_code(parse_error_code::unexpected_token);
         }
@@ -5012,7 +5011,7 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
     if (check(token_type::greater_equal)) { advance(); return std::string(">="); }
     if (check(token_type::equal_equal)) { advance(); return std::string("=="); }
     if (check(token_type::bang_equal)) { advance(); return std::string("!="); }
-    // Dev ruling 2026-09-30: the rest of C++'s overloadable set (&&, ||, the comma, ->, new and delete stay out); unary or
+    // The rest of C++'s overloadable set (&&, ||, the comma, ->, new and delete stay out); unary or
     // binary by the parameter count, like a C++ member operator. ! goes through the one contextual conversion, to_bool()
     if (check(token_type::bang)) {
         report_error("operator! cannot be declared: !v is !to_bool(v); declare bool to_bool()", peek());
@@ -5361,8 +5360,8 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
         } else {
             JAISCRIPT_TRY_ASSIGN(func->return_type, parse_type());
             func->return_type = wrap_reference_return_type(func->return_type);
-            // A leading return type and a contradictory trailing one is an error
-            // (Dev ruling 2026-07); a matching pair is redundant-legal.
+            // A leading return type and a contradictory trailing one is an error;
+            // a matching pair is redundant-legal.
             if (return_type && func->return_type && func->return_type->id != return_type->id) {
                 report_error("Conflicting return types '" + return_type->type_name + "' and '" +
                              func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
@@ -5378,7 +5377,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     // Parse constructor initialization list (: super(args), : this(args))
     if (check(token_type::colon) && !allow_ctor_initializers) {
         // Initializer lists are constructor-only; on free functions, destructors, and
-        // function-keyword methods they were silently ignored — a trap (Dev ruling 2026-07)
+        // function-keyword methods silently ignoring them would be a trap
         report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
         return make_error_code(parse_error_code::unexpected_token);
     }

@@ -126,8 +126,8 @@ is the writability question.
 | host function overloads (`engine.cpp` dispatchers) | `No matching overload found for 'f' with <symbol#2> arguments` (the count was passed as a symbol id) | `No overload of 'f' takes (int, string)` |
 | host `[]` overloads | `No matching overload found for '[]' with <symbol> arguments` | `No overload of '[]' takes (string)` |
 | namespace function overloads | `No matching overload in namespace 'ns' for <symbol> arguments` | `No overload of 'f' takes (int)` |
-| a second overload whose parameters differ from an earlier one's only by reference, both defined in one execute context (one host execute and everything it runs, its includes and the first loads of its imports; free, namespace, method, static method, constructor; Dev ruling 2026-10-09). A definition from another execute, or from a module's re-run, replaces the earlier one instead | (both coexisted, every call tied) | `'f(var x)' differs from 'f(var& x)' (line 3) only by reference; overloads must differ in parameter types or count` (strict reports it at load, same text) |
-| overloads that tie on the arguments (free, namespace, method, constructor; Dev ruling 2026-10-02) | (the first declared ran) | `Ambiguous call to 'hit' with (int, int): 'hit(int, float)' and 'hit(float, int)' match equally` (worker: `Ambiguous call to 'hit'`; strict reports it at load, lowercase) |
+| a second overload whose parameters differ from an earlier one's only by reference, both defined in one execute context (one host execute and everything it runs, its includes and the first loads of its imports; free, namespace, method, static method, constructor). A definition from another execute, or from a module's re-run, replaces the earlier one instead | (both coexisted, every call tied) | `'f(var x)' differs from 'f(var& x)' (line 3) only by reference; overloads must differ in parameter types or count` (strict reports it at load, same text) |
+| overloads that tie on the arguments (free, namespace, method, constructor) | (the first declared ran) | `Ambiguous call to 'hit' with (int, int): 'hit(int, float)' and 'hit(float, int)' match equally` (worker: `Ambiguous call to 'hit'`; strict reports it at load, lowercase) |
 | script constructor overloads | `No constructor found with matching arguments` | `No constructor of 'Vec2' takes (string)`; when no overload is viable and exactly one takes that many arguments, that one binds (its parameter converts the argument or raises family D's parameter text), and with several (`V(int)` and `V(bool)` called `V("s")`) none does: the overload miss. The same rule picks an ancestor initializer's and a delegation's target (`detail::sole_arity_candidate`). Among several method or constructor overloads a string never makes a `bool` parameter viable (the runtime scorer and the strict checker, which reports `no overload of 'm' matches this call` at load); a lone function's `bool` slot still takes a string's truthiness, and a program's free functions of one name are redefinitions (the last takes every call), not an overload set |
 | a class without a constructor called with arguments | `Default constructor takes no arguments` | an aggregate (every class in the chain constructor-less, no private or reference instance field) takes one initializer per field: `Too many initializers for 'Bare': it has 1 field, got 2`; any other class: `No constructor of 'Bare' takes (int, int)` (the strict checker reports the same texts at load with a lowercase first letter, `too many initializers for 'Bare': ...`, `no constructor of 'Bare' takes (int, int)`, when it knows the arguments) |
 | `: Base(...)` / ancestor initializer | `No matching constructor for ancestor class` | `No constructor of 'Base' takes (string)` |
@@ -161,7 +161,7 @@ One conversion table (`detail/typed_slot.hpp`), one text kernel
 | coroutine yield (a yield takes the declared type like a return; a bare `yield;` hands out nothing) | (yielded as is) | `Cannot yield string from 'g' (declared -> int)` | `Cannot yield string from a coroutine declared -> int` |
 | `=` / compound | `Type mismatch in assignment` | `Cannot assign string to 'x' (declared int)`; a store through a reference variable names it: `int& ry = y; ry = s` reads `Cannot assign string to 'ry' (declared int&)` | `Cannot assign string to a variable declared int` |
 | declaration | `Type mismatch in assignment` | `Cannot initialize 'x' (declared int) with string` | `Cannot initialize a variable declared int with string` |
-| reference declaration over storage of another type (`float& r = v` with `v` a var holding an int; Dev ruling 2026-09-30: a reference must reference) | (bound, stored the var's way) | `Cannot initialize 'r' (declared float&) with int`; a class reference takes T or a subclass (`Cannot initialize 'e' (declared Enemy&) with int`); strict reports a statically known one at load (`cannot initialize 'r' declared 'float&' with 'int'`) | `Cannot initialize a variable declared float& with int` |
+| reference declaration over storage of another type (`float& r = v` with `v` a var holding an int: a reference must reference) | (bound, stored the var's way) | `Cannot initialize 'r' (declared float&) with int`; a class reference takes T or a subclass (`Cannot initialize 'e' (declared Enemy&) with int`); strict reports a statically known one at load (`cannot initialize 'r' declared 'float&' with 'int'`) | `Cannot initialize a variable declared float& with int` |
 | instance field store (script, `set_field` host store) | `Type mismatch in assignment` | `Cannot assign string to field 's' of Vec2 (declared int)` | `Cannot assign string to a field declared int` |
 | static field store | `Type mismatch in assignment` | `Cannot assign string to static 's' of C (declared int)` | `Cannot assign string to a static declared int` |
 | class into class at `=` / field | `Incompatible class types` | the named shape (`Cannot assign B to 'x' (declared A)`) | as above |
@@ -261,7 +261,7 @@ constructed value.
 
 ## Order of errors in an assignment
 
-C++17 [expr.ass] (Dev ruling 2026-09-27): in `E1 = E2` and `E1 op= E2` every value computation and
+C++17 [expr.ass]: in `E1 = E2` and `E1 op= E2` every value computation and
 side effect of `E2` comes before `E1`. For a member target (`obj.f`, `this.f`, `C::s`, `ns::x`) the
 right side runs first, then the receiver, the member's read (a user getter included), the
 arithmetic and the store. For a subscript target (`a[j] = e`, `a[j] op= e`) the value runs
@@ -425,7 +425,7 @@ Each is recognized only in that position, so a script using one of these words a
 | `function* g()`, `function*()` | declaration or expression | `JaiScript has no 'function*': a generator is a coroutine, coroutine name(...) { yield v; }` |
 | `[...a, 3]`, `f(...args)` | an expression | `JaiScript has no spread '...': join arrays with array::concat(a, b) (a.concat(b) appends in place), and pass arguments one by one` |
 
-`let` is not on the list: it is a synonym of `var` (Dev ruling 2026-10-01).
+`let` is not on the list: it is a synonym of `var`.
 
 ## Const (family B, `type_mismatch`; kernel `detail/const_rules.hpp`, docs/const.md)
 
@@ -470,25 +470,25 @@ unit already defined as the warning `'f' redefines the function defined in <file
 ## Host call failures
 
 A `checked_result` host call (`fn.as_function()(args)`, a method or static method value, `coroutine_handle::resume`) carries
-every failure in its result (Dev ruling 2026-10-01): a run-time error keeps its own code and text; an uncaught script throw, a
+every failure in its result: a run-time error keeps its own code and text; an uncaught script throw, a
 missing module or a failed reload comes back as `evaluation_failed` with the text `execute()` would throw (the thrown text,
 `Failed to open import file: <path>`, the check listing). `convert_script_function` refuses a value that is neither a function
 nor null: `Cannot convert a value that is not a function to a std::function callback`.
 
 ## Classes and includes inside a function body
 
-A class is a program-scope type (Dev ruling 2026-10-01): one declared in a function, method or lambda body is a parse error,
+A class is a program-scope type: one declared in a function, method or lambda body is a parse error,
 `a class cannot be declared inside a function body (a class is a program-scope type); declare it at program scope or import
 its file`, located at the `class` (or `nocopy`) keyword.
 
-A literal include inside a function body is the function's own text (Dev ruling 2026-10-01): a class the included file
+A literal include inside a function body is the function's own text: a class the included file
 declares there is a parse error, `an include inside a function body cannot declare class 'K' (a class is a program-scope
 type and the included text is the function's own); import 'k.jai' instead` (the include's path as written, located at the
 class in the included file); a function it declares is a nested function, and when the program scope names it too the strict
 checker warns at warning severity, at the enclosing body: `inc.jai:1:10: function 'helper' from the include in function 'reload' is local to it and hides the
 program-scope 'helper' there without replacing it; import the file to replace program-scope functions` (`in a lambda`).
 
-A named function declared inside a function body captures nothing (Dev ruling 2026-10-02): a read or store of an enclosing
+A named function declared inside a function body captures nothing: a read or store of an enclosing
 frame local inside it is the parse error `Nested function 'helper' cannot use enclosing local 'y': a named function captures
 nothing; use a lambda with a capture ([&], [=] or [y]) or function(...) / =>` on both backends (the parser's capture walk,
 `parser::resolve_outer_use`); globals stay visible, `function(...)` / `=>` keep their `[&]` lambda semantics, and a nested named coroutine follows the
@@ -517,7 +517,7 @@ line `... N more frames` (`stack_frame::elided`, `cap_stack_trace` in `core/type
 | captures | `Cannot capture undefined variable 'x'`, `Cannot capture variable 'x' by reference` | keep |
 | enum values (parse) | `Enum values take no initializer: 'a' is 0, its position in the enum` (an `= value` after an enum value; values are their positions, 0 first) | keep |
 | using declarations (parse) | `'a' names g::a by a using declaration; a variable cannot be declared with that name` (the qualified name in full, `g::h::b` for a nested one; `class`, `enum`, `function`, `member` for the other declarations), `'a' is already named by a using declaration`, `'g::a' is a qualified name; a variable cannot be declared with it` | keep |
-| exceptions | `Bare throw with no active exception thrown.` (`invalid_operation`: a bare `throw;` outside every handler, a fresh coroutine's included; catchable where it stands, like any runtime error) | keep (Dev's wording, byte-exact) |
+| exceptions | `Bare throw with no active exception thrown.` (`invalid_operation`: a bare `throw;` outside every handler, a fresh coroutine's included; catchable where it stands, like any runtime error) | keep (byte-exact) |
 | limits | `Maximum recursion depth exceeded - possible infinite recursion`, `Script execution budget exceeded - raise engine::execution_budget or break up the work`, memory cap | keep; recursion is catchable (see above), execution budget exhaustion is terminal |
 | parallel walls | `method 'm' was not admitted in this parallel body (...)`, `only direct field stores on class instances are allowed in a parallel body (...)`, `custom operator dispatch on class instances is not admitted in a parallel body (...)`, `an assignment that changes an object's class is not admitted in a parallel body` | keep (they carry the remedy) |
 | script layers | `Script layer 'C' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object`, `Cannot copy an instance of nocopy class 'C'`, `No copy constructor available for class C` | keep |

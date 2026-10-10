@@ -1,6 +1,6 @@
 # Script-extensible C++ objects: `script_extensible` + `engine::extend`
 
-**Status: IMPLEMENTED 2026-09-02 — the front door.** Pinned by `Hybrid Serialization Tests`
+**Status: IMPLEMENTED — the front door.** Pinned by `Hybrid Serialization Tests`
 (every assertion on a slot-carrying base and a map-only base, both backends). The mechanism
 (slot hooks, the archive envelope, the initializer hook, migration internals) is §5;
 serialization shape and archive contracts stay where they are (`SERIALIZATION.md`). This doc
@@ -60,7 +60,7 @@ carried across the boundary.
   classes declare keeps its value, `C`'s own fields take their initializers, and ids only the
   old class declared stay reachable in overflow. So every handle already pointing at the
   object follows — `extend(kin, Voidling); kin.chompCount = 1;` is the idiom, no rebinding.
-  The result names the argument (C++'s `T& extend(T&, Class)`, Dev ruling 2026-10-03): a chained call reaches the
+  The result names the argument (C++'s `T& extend(T&, Class)`): a chained call reaches the
   object, `var& w = extend(v, C)` aliases it and `var w = extend(v, C)` copies it, the call-result rule of every function.
   `x` a C++ wrapper or a layer: `C` must derive `x`'s C++ base; the current layer's class is
   a no-op. `x` a pure script instance: `C` must derive `x`'s class. Only a layer owned by
@@ -120,9 +120,9 @@ carried across the boundary.
 | D8 | A retired layer carries a flag; the C++ extraction funnels and the property-getter paths report on it. A retired *extended* layer references an object it no longer owns (fine: the object outlives it or the flag catches the access); a retired *constructed* layer keeps owning its object. | Stale use must not reach an object another layer speaks for (S7); no holder surgery, one flag. |
 | D8b | An extended object's native object is non-owning: `bound_ptr` for member access (zero cost, guarded by the retired flag), `weak_data` for `shared_ptr` extraction (locks the object's own owner). | The object must be free to die; the layer must still serve `T&` at pointer-read cost and `shared_ptr` with real ownership. |
 | D9 | Archive load runs field initializers before `$script` hydration. | Fields untouched during play were never materialized, so they were never saved; without this they load as null. |
-| D10 | Names: `script_extensible` (members `script_layer`, `script_layer_to_json`, `script_layer_from_json`, `attach_script_layer`, `own_script_layer`, `detach_script_layer`, `jai_script_slot`), `engine::extend`, `engine::add_global_extended`, `engine::script_layer_detach`, `engine::script_layer`; engine internals prefixed `script_layer_`; the script builtin `extend`. Nothing generic (`detach`, `attach`) lands on property_owner-derived types — components own those names. The 2026-09-01 `hybrid_*`/`find_hybrid_instance`/`load_hybrid_instance` engine API is replaced, not kept as aliases. | `adopt` already means definition-adoption in the binder; `extend` is the word the vision doc reserved for exactly this. One vocabulary, no pollution of derived classes. |
+| D10 | Names: `script_extensible` (members `script_layer`, `script_layer_to_json`, `script_layer_from_json`, `attach_script_layer`, `own_script_layer`, `detach_script_layer`, `jai_script_slot`), `engine::extend`, `engine::add_global_extended`, `engine::script_layer_detach`, `engine::script_layer`; engine internals prefixed `script_layer_`; the script builtin `extend`. Nothing generic (`detach`, `attach`) lands on property_owner-derived types — components own those names. | `adopt` already means definition-adoption in the binder; `extend` is the word the vision doc reserved for exactly this. One vocabulary, no pollution of derived classes. |
 | D13 | Engine literals are interned once (`post_load`); errors travel as `checked_result` codes with symbol placeholders, thrown only at the host boundary. | House rules: interned lookups, error codes inside, throw at `execute`-level doors. |
-| D14 | Re-derive re-classes the instance in place (`class_instance::reclass`) rather than minting a replacement and retiring the old one; a stale wrapper re-points its handle at the layer on first touch (S3c). | Dev, 2026-09-02: "extend in place in all cases". Handles never go stale within an engine; no retired twins to explain. |
+| D14 | Re-derive re-classes the instance in place (`class_instance::reclass`) rather than minting a replacement and retiring the old one; a stale wrapper re-points its handle at the layer on first touch (S3c). | "Extend in place in all cases". Handles never go stale within an engine; no retired twins to explain. |
 | D11 | Two-level chains (`Voidling : CreatureKind : ServerCreature`) are hybrids: every hybrid-semantic site resolves the C++ base with `class_definition::find_cpp_base_class()` (chain walk), never the direct-base field. | `cpp_base_class_` is only set on the class whose *direct* base is C++; every mid-class design needs the walk. |
 | D12 | No script-visible surface. `extend` is host-only; script derives and constructs as before. | Script cannot wrap an existing object either; the host owns object lifetimes. |
 
@@ -228,7 +228,7 @@ so the `set_field` hook alone could not.
 path above with hydration; a slot type's object owns the layer and the plain pointer
 returns, a map type's layer owns the object and the returned pointer aliases the layer.
 
-## 6. Behavior deltas — NEEDS DEV RULING
+## 6. Behavior deltas
 
 1. **Boundary identity (S1) is new behavior for every existing hybrid.** Before: a bound method
    returning `shared_ptr<Base>` gave a fresh wrapper each call (no script fields). After: the
@@ -239,12 +239,12 @@ returns, a map type's layer owns the object and the returned pointer aliases the
    considered: make hybrid assignment share too (entity semantics). Rejected here: it would
    make `var b = a;` mean two things depending on whether `a`'s class has a C++ base.
 3. **`extend` moves foreign layers and re-derives silently-on-purpose (D7, S3b).**
-   Alternative: throw and require `script_layer_detach`. Chosen (Dev, 2026-09-02): the object
+   Alternative: throw and require `script_layer_detach`. Chosen: the object
    can only have one layer, so "extend here as C" has exactly one coherent meaning; the old
    layer's handles report on use (D8).
 4. **32 bytes per `property_owner` object (D1/D2).** Every scene node/component grows by a
    `shared_ptr` + `weak_ptr`.
-5. **By-value returns copy at the return site (landed 2026-09-04; C++ [stmt.return]).** A
+5. **By-value returns copy at the return site (C++ [stmt.return]).** A
    by-value `return e;` yields a value that aliases nothing the callee could name: a temporary
    (`return [1,2];`, `return make();`, `return a + b;`, `return T();`, `return this;`) is moved
    out; an lvalue read of a global, an outer-scope/captured variable, a field (`return items;`,
@@ -283,7 +283,7 @@ returns, a map type's layer owns the object and the returned pointer aliases the
   `class_instance` and includes only `<memory>`.
 - **Hot-path cost**: slot path is a `weak_ptr::lock` (one atomic increment — `std::weak_ptr`,
   not `strong_ptr`) per boundary crossing, replacing the old `create_instance` allocation.
-  Measured 2026-09-02 on the Bindstone arena pilots (150 s, budget 8, seeds 1/2/3): the
+  Measured on the Bindstone arena simulation (150 s, budget 8, seeds 1/2/3): the
   class-based creature scripts on this engine run 7.5 / 8.9 / 16.8 s against 8.2 / 9.5 / 17.5 s
   for the getVar/setVar scripts on the same exe (−8.5% / −6% / −4%) and 9.7 / 10.1 / 19.6 s at
   `9058fb88` (−23% / −12% / −14%); every outcome byte-identical.

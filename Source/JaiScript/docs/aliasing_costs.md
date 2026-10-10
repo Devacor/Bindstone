@@ -82,7 +82,7 @@ Readings:
 Rule of thumb: **values by default; `&` when a call needs the real thing;
 `new`/`shared_ptr` when the alias needs to live somewhere.**
 
-## Surprise check (Dev protocol: structural vs improvable — verdict first)
+## Surprise check (structural vs improvable — verdict first)
 
 **No major surprise.** The plausible suspects (per-access deref through the
 holder, refcount bumps on call paths, upcast checks making shared_ptr method
@@ -95,7 +95,7 @@ stable deltas are both **structural and already documented**: by-value's deep
 copy (that *is* value semantics — the escape hatches exist for exactly this) and
 the BST handle-shape delta (algorithm shape, not holder overhead).
 
-## Suite retune (2026-07, this study)
+## Suite retune (this study)
 
 - `chaiscript_comparison.cpp`: `binarySearch` / `bubbleSort` retuned to
   `array<int>&` params — the old `auto arr` spelling deep-cloned the array per

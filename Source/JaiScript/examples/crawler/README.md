@@ -29,7 +29,7 @@ Grublin sneaking up your flank shows up in 3D before it shows up in the log.
 `util.jai`, `state.jai` were **snapshots of the roguelike's committed versions** —
 the game rules are deliberately identical (one key = one turn; the AI plays the
 same grid and does not care where the camera points). The roguelike is retired
-(2026-07) and these copies are now the canonical versions, along with its
+and these copies are now the canonical versions, along with its
 smoke-seed determinism-instrument role. Three small deltas from the originals,
 each marked with a `CRAWLER DELTA` comment at the site:
 
@@ -283,7 +283,7 @@ boxes stay live (with the forward view alone at 64x20 it fills the view exactly)
 `--smoke` runs the same headless autopilot idea as the roguelike, translated into
 a body that must turn before it can walk: BFS to the goal, rotate until the nose
 lines up, step, bump-attack what blocks, skill down corridors, sip when scared.
-(The pilot never opens the map, so map-mode absolute movement (2026-07) is not on
+(The pilot never opens the map, so map-mode absolute movement is not on
 this path — all hashes below are unchanged from before that control change.)
 The FNV-fold `STATE_HASH` (now also folding the facing) must match across
 backends for a given seed:
@@ -349,7 +349,7 @@ and coroutine methods landed (3766da09). Both got used naturally:
   resolves through the new lvalue-reference argument path and mutates the real
   monster. The roguelike's free-function + global-chain version is strictly
   clumsier.
-- **FIXED (2026-07): the handle-in-a-field gripe.** This README used to say
+- **FIXED: the handle-in-a-field gripe.** This README used to say
   "handles still refuse to live in fields/containers, so `BOSS_CO` keeps its
   named global slot". Handles are reference-semantic on copy now — copies share
   the one live coroutine — so the boss handle moved into a `Game` field where it

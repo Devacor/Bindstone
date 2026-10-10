@@ -403,8 +403,7 @@ FINALE afterglow (`shot 16 at 12` — the fire has died, the word stays white-ho
 
 ## Language feedback (dogfooding notes — recorded honestly)
 
-Everything below was hit while writing this demo on the VM-perf branch
-(2026-07-05 tree, with another agent's uncommitted engine changes linked in).
+Everything below was hit while writing this demo.
 Minimal repros were extracted for each; the workarounds ship in the scene
 comments. The single biggest lesson first:
 
@@ -420,14 +419,14 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 
 **Bugs worked around (each with a small repro):**
 
-> **Triage update (2026-07-05, VM-perf `b5c118de..`):** every finding below was
+> **Triage update:** every finding below was
 > reproduced (or bisected) at HEAD and resolved; pinning regression tests live in
 > `source/tests/language/demoreel_regression_tests.cpp`. The reel of that day
 > exercised the fixed paths: the graveyard was gone (scenes are destroyed at
 > every transition), `render_rows` declared `prev` in the loop body again, and
 > plasma passed raw `c[0], c[1], c[2]` element args into typed params.
 
-1. **FIXED** (`53526626`: frame exit clears only the frame's OWN method env).
+1. **FIXED** (frame exit clears only the frame's OWN method env).
    ~~Free-function / lambda calls inside class methods poison implicit-self~~
    (both backends). After `g = mk();` where `mk` is a free script function,
    every later field read/write in that method throws `Undefined variable`, and
@@ -440,7 +439,7 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    Workaround: shared helpers live on a `Gfx` class (global instance `gfx`);
    scene factories are an if-chain method instead of an array of lambdas.
 
-2. **FIXED** (`b5c118de`: method frames reserved 0 slots, so a mid-loop DECL_VAR
+2. **FIXED** (method frames reserved 0 slots, so a mid-loop DECL_VAR
    reallocated the locals vector and dangled the counted-for cached pointers).
    ~~VM: loop-body locals assigned from a nested scope corrupt the enclosing
    loop~~ (method context only). An inner `for` assigning an outer-loop body
@@ -463,18 +462,18 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    local name in sibling if/else branches also aliased slots (nondeterministic
    across process runs) — hoisted too.
 
-3. **FIXED** (was already fixed at HEAD by `b80f12fd`: interp ++/-- resolves
+3. **FIXED** (interp ++/-- resolves
    slot-based locals). ~~Interpreter: `++x` on an enclosing-scope local inside a
    for body throws `Undefined variable 'x'`~~ (VM fine; `x = x + 1` fine on both).
 
-4. **FIXED for locals** (`9e5fea2f`: typed declarations and slot stores convert
+4. **FIXED for locals** (typed declarations and slot stores convert
    like assignment — `int d = 4.7` truncates to 4). Typed *fields* remain dynamic
-   (declared field types are discarded at runtime; both backends agree) — pending
-   a Dev ruling, pinned by `typed_field_assignment_stays_dynamic_parity`. The
+   (declared field types are discarded at runtime; both backends agree) — pinned
+   by `typed_field_assignment_stays_dynamic_parity`. The
    host still exposes `itrunc()`/`ifloor()`; script has no explicit float→int
    cast expression.
 
-5. **FIXED** (`5ef9c0be`: overload matching derefs lvalue reference arguments).
+5. **FIXED** (overload matching derefs lvalue reference arguments).
    ~~Raw element / nested-field arguments misresolve against typed parameters~~ —
    `p.add_bg(c[0], c[1], c[2])` resolves and converts; host candidates too.
 
@@ -491,7 +490,7 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    segfaults the interpreter~~ — the graveyard is gone; scenes are destroyed at
    every transition now.
 
-8. **BELIEVED FIXED by `b5c118de`** (same root as finding 2: method frames
+8. **BELIEVED FIXED** (same root as finding 2: method frames
    reserved 0 slots, so many-block-scope methods reallocated their locals vector
    mid-frame — any held pointer/reference into it dangled with exactly this
    delayed-detonation signature). ~~Progressive corruption with delayed
@@ -499,13 +498,13 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
    shapes no longer exist to retest byte-for-byte); the split methods stay.
 
 9. **Host-callable poisoning NO LONGER REPRODUCES at HEAD** (fixed by
-   `74b438d8`: reentrant execute isolation — saved call/value stacks, no mid-run
+   reentrant execute isolation — saved call/value stacks, no mid-run
    pool reset); pinned by `coroutine_in_host_callable_no_state_leak`. Coroutine
    *methods* remain a parse error — that is a missing feature (the class-member
-   parser never accepts `coroutine`), not a bug; needs a Dev decision to build.
+   parser never accepts `coroutine`), not a bug.
    The finale still drives its sequence off scene time (works fine).
 
-10. **NEW (2026-07-06, post-rulings HEAD; interpreter only).** Plain
+10. **NEW (interpreter only).** Plain
     *assignment* of a bare array-element read into an int-typed local throws
     `Cannot assign ... to 'x' (declared int)`; the *declaration* shape is fine, and the VM
     accepts both. Hit in KINSTEIN's DDA loop; likely the new element-ref
@@ -518,7 +517,7 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
     ```
     Workaround (ships in kinstein.jai): read into a declared local, then assign.
 
-11. **FIXED** (`2f92ca83`: a bail inside a statement flushes the values the statement
+11. **FIXED** (a bail inside a statement flushes the values the statement
     defined before it; an inlined call's fallback keeps the caller's statement).
     ~~Found while rewriting DONUT (its splat
     version): inside a large render method of an IMPORTED unit (the shim's
@@ -536,7 +535,7 @@ blanks. Parity testing cannot catch "consistently wrong"; capture your frames.
 script context; `override` is required to redefine a base method (good check,
 surprising the first time); no script-side float→int cast.
 
-**Perf lesson (2026-07-06, PIPEDREAM):** a script *method call* costs on the
+**Perf lesson (PIPEDREAM):** a script *method call* costs on the
 order of tens of microseconds — an empty-bodied helper invoked ~1,500x per frame
 cost ~60 ms before its body ran a single op (measured by gutting the method).
 Fine-grained helpers in per-cell loops are a trap; either inline the work or
@@ -546,7 +545,7 @@ splats only the ~dozen voxels grown per frame into a kept buffer instead of
 re-projecting the whole volume (160+ ms -> fire-scene cost). KINSTEIN keeps its
 per-blob helper but does one sqrt per sprite ROW instead of float math per cell.
 
-**Perf lessons (2026-07-06, the technical climax block — all A/B-measured with
+**Perf lessons (the technical climax block — all A/B-measured with
 throwaway micro-scenes in a scratch copy of the reel):**
 
 - **Array assignment deep-copies — `var&` reference declarations are the hot-loop

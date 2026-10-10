@@ -6,14 +6,14 @@
 SAME semantics. Attacks GLOOM's INDEX family (~16k ops/tick × ~450 cy), memory bandwidth
 (13.6k-element grids: 435 KB → 109 KB), value-semantics clone cost (typed clone = memcpy),
 and makes parallel all-primitive proofs true by construction. Part of the 4-point
-structural plan (2026-07-10); read with `invariants.md` (§1 layout, §3 reference cells,
+structural plan; read with `invariants.md` (§1 layout, §3 reference cells,
 §6 parity) and `reference_model.md`.
 
 ## Decision: one TYPEID, a tagged node class
 
 `TYPEID_ARRAY` stays 6. The pointee of variant alt 6 changes from
 `std::vector<script_value>` to a new `class script_array` (kind ∈ {hetero, i64, f64};
-hetero wraps the old vector, typed kinds hold raw buffers). Rationale (scouted 2026-07-10):
+hetero wraps the old vector, typed kinds hold raw buffers). Rationale:
 
 - ALL raw variant access to alt 6 is confined to value.hpp/value.cpp (~11 sites); every
   other consumer (224 sites / 34 files) goes through five accessors
@@ -56,7 +56,7 @@ The store-enforced element type is what makes raw buffers sound. Scouted facts i
    :4997-5011, vm_backend.cpp:3007-3013) operates on a UNIQUE node (fresh clone or moved
    temporary). Shallow-sharing views (`var&` refs, subscript-read copies, pushed-element
    reads) all PRESERVE the tag.
-3. **A `var` keeps a typed array typed** (Dev ruling 2026-09-28): a var slot stamps a typed
+3. **A `var` keeps a typed array typed**: a var slot stamps a typed
    array with the `dynamic_slot` twin of its own tag (`engine::get_type_info_array_dynamic`,
    `detail::var_stamp`): same name, id and element type, so every element boundary still
    reads `array<T>` (`var v = ints; v.push("s")` raises like `ints.push("s")`), while every
@@ -66,11 +66,11 @@ The store-enforced element type is what makes raw buffers sound. Scouted facts i
    ONLY through views whose tag names its element type — write paths on typed nodes never need
    promotion machinery; incompatible writes are exactly today's `array_element_type_mismatch`.
 
-**Lane rule (as built, 2026-09-02, fuzz seed 129):** a fast lane that touches a buffer raw tests the
+**Lane rule (as built, fuzz seed 129):** a fast lane that touches a buffer raw tests the
 *kind* it was written for (`kind() == i64 || kind() == f64`), never `is_typed()`. `is_typed()` only says
 "no script_value elements exist"; the byte and string kinds are typed too and must take the enforcing
 `get`/`set` path. The vm's unfused element-store and compound-store lanes broke this once and stored an
-int into a string buffer unchecked (the interpreter raised); the pins live in the Strong Types battery,
+int into a string buffer unchecked (the interpreter raised); the pins live in the Strong Types suite,
 and the fuzz generator now draws typed declarations so the shape stays covered.
 
 ### Stage-0 prerequisite: the tag is NOT airtight today (two real holes)
@@ -88,7 +88,7 @@ and the fuzz generator now draws typed declarations so the shape stays covered.
   their initializer exactly like assignment does") and push semantics. Same fix covers it.
 
 Both are red-first behavior FIXES (error where silence was; conversion where passthrough
-was) aligned with the language's documented contract. Flagged to Dev in the session report.
+was) aligned with the language's documented contract.
 
 Stage-0 fallout finding: retagging typed array FIELDS surfaced a latent element-predicate
 blind spot — `is_element_type_compatible` never accepted shared_ptr-tagged instances into
@@ -99,7 +99,7 @@ class-name match); pushing a handle into a LOCAL typed array now also works (it 
 before — widening consistent with `var p = new P()` ≡ `shared_ptr<P>`).
 
 Non-goals v1: `slice`/`filter`/builtins still return untyped (hetero) results (element-type
-retention is a separate ruling); `array<bool>`/`array<char>`/typed maps deferred; `array<T>`
+retention is a separate decision); `array<bool>`/`array<char>`/typed maps deferred; `array<T>`
 where T is non-primitive stays hetero with today's one-level enforcement.
 
 ## Element lvalues (the hard part)
@@ -165,7 +165,7 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   range-for auto&/auto, f(arr[i]) by-ref, ++ through refs, OOB, shrink-under-ref, COW
   uniqueness, hot reload with typed fields, coroutines holding element refs.
 
-  **As-built (2a, 2026-07-10):** typed kinds live behind `engine::typed_array_storage()`
+  **As-built (2a):** typed kinds live behind `engine::typed_array_storage()`
   (scaffold flag, default OFF — DELETE when the default flips after stage 3 bake).
   Deviations from the plan above, each deliberate:
   - The **boundary kernel is the one typed-node producer** (not make_array alone):
@@ -188,10 +188,10 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
     demotion with raw typed worker access.
   - `unchecked_as_array`/`as_array`/`checked_as_array` **Debug-assert hetero** — any
     unconverted path trips loudly under tests/fuzz instead of reading empty.
-  - Tests pin a 4-way battery: every snippet runs interp/vm × flag off/on and all four
+  - Tests pin a 4-way matrix: every snippet runs interp/vm × flag off/on and all four
     outputs must be byte-identical ("typed storage is observationally invisible"),
     plus C++-level checks that buffers actually engage and laundering actually demotes.
-  **As-built (2026-09-02, Dev ruling: the representation follows the declared type).**
+  **As-built (the representation follows the declared type).**
   The scaffold flag is DELETED: `array<int>`/`array<float>` are raw buffers always,
   `array<var>` (and `array<auto>` without a uniform inferred type) is the only
   `script_value`-vector form, and moving between them is an explicit language step
@@ -219,7 +219,7 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   - parallel_transform no longer demotes a typed input at the barrier: it reads a boxed
     snapshot (stage 3's raw typed worker reads replace the snapshot).
   Pinned: `Script Container Tests` (typed_buffer_bound_array_mutates_in_place,
-  script_value_vector_view_is_array_var_only, ...), the strong-types battery (now both
+  script_value_vector_view_is_array_var_only, ...), the strong-types suite (both
   backends on the one representation), the DOOM tape (5.96 -> 5.70 ms/tic).
 
 - **Stage 3 — parallel + GLOOM payoff.** Typed borrows/raw_input; kind-checked static
@@ -230,14 +230,14 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
   buffers; C++ interop bulk paths (`vector<T>` ⇄ typed array near-memcpy,
   conversion_registry_impl.hpp:15-45, engine_impl.hpp:166-195). Measure.
 
-- **Stage 5 — every element type (Dev direction 2026-09-02).** As-built the same night:
+- **Stage 5 — every element type.** As-built:
   `b8`/`c8` (bool/char, one shared byte buffer) and `str` (string handles, 8 bytes,
   sharing exactly the object a boxed element shares) joined `i64`/`f64`; `auto`/`array<auto>`
   uniform primitive literals infer the element type and take the buffer. Byte and string
   kinds box through `get`/`set` in the INDEX family (raw lanes stay int/float — a
   `raw_bool` decl sink is the cheap next lane). The parallel all-primitive check excludes
   `str` (handles never borrow raw; `statically_all_primitive` already excluded strings).
-  - **byte kinds — BUILT (`kind_t::u8` / `kind_t::i8`, Dev ruling 2026-09-28).** `array<uint8>` / `array<int8>`
+  - **byte kinds — BUILT (`kind_t::u8` / `kind_t::i8`).** `array<uint8>` / `array<int8>`
     share the `b8`/`c8` byte buffer, the kind carrying the sign (1 byte per element against 8 for `i64`). The element
     type is an int type_info named `uint8`/`int8` (`native_size` 1, `is_byte_element()`, interned apart from `int`);
     `get` widens to int, `set`/`push` take a pre-converted in-range int, and the range kernel
@@ -250,7 +250,7 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
     `dims * 4`. `get` boxes a vector, and `set`/`push` take a value already converted to the kind. The general raw lanes
     decline these kinds; the VM has its own element-component lanes (`op_velem_load` / `op_velem_store`). A parallel body
     borrows them raw like the scalar kinds.
-  - **object kind — BUILT (`kind_t::obj`, 2026-09-02).** `array<UserType>` (script or
+  - **object kind — BUILT (`kind_t::obj`).** `array<UserType>` (script or
     bound C++ class) is a buffer of `obj_slot{strong_ptr<object_holder> handle, type_info_ptr tag}`
     (16 bytes vs 32 boxed). The per-slot tag reproduces the boxed value exactly on `get`
     (a `shared_ptr<K>`-tagged element stays shared, a plain one stays a value), so every
@@ -267,19 +267,19 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
     workers exclude the kind (handles never borrow raw); `bound_array<Class>` binds it
     (every access boxes through get/set). 37 behaviour probes captured on the pre-change
     build are byte-identical on both backends after the change and live in the Strong
-    Types battery. **Ruling needed from Dev:** Dev's target shape `array<CreatureBase>
+    Types suite. The target shape `array<CreatureBase>
     {VoidElemental, LifeElemental}` needs subclass admission, which today's exact-class
     rule forbids (C++ `vector<Base>` slices; `vector<shared_ptr<Base>>` does not). The
     slot already carries a per-element tag, so admitting subclasses is a kernel-rule
     change, not a layout change. Until then the C++ boundary payoff is exact-class:
     `std::vector<std::shared_ptr<K>>` / `std::vector<K>` extraction can prove the class
     once per array (next step).
-    **RULED 2026-09-02 (Dev): subclasses are admitted.** Every element gate accepts the class
+    **Subclasses are admitted.** Every element gate accepts the class
     or a subclass (exact id first, then `class_derives_from`'s parent walk); the per-slot tag
     is what makes a Derived element keep its own fields inside `array<Base>`; whole-array
     conversions prove the source class once; the boundary fast path accepts a derived tag.
-    **`parallel_for` over an object-kind source keeps the node typed (Dev ruling 2026-09-04:
-    the declared type is a proven fact about every element).** The barrier scans the slot
+    **`parallel_for` over an object-kind source keeps the node typed (the
+    declared type is a proven fact about every element).** The barrier scans the slot
     tags (16 B each, no instance read) and takes the declared-type proof
     (`declared_class_exclusive`): every present class and every class a reached nested
     field can hold - registered subclasses included - is value-closed and no field the body
@@ -299,9 +299,9 @@ hashes 1503537018@600t + frame parity, Release A/B same-session; one-line commit
     region; an object-kind input already lends its slots, `typed_input`, and its elements
     pass the same declared-type proof as `parallel_for`'s).
 
-## Stage 6 — typed maps (designed 2026-09-02, not built)
+## Stage 6 — typed maps (designed, not built)
 
-Dev's rule: "maps follow similar rules" — `map<K,V>` with spelled key and value types is a
+The rule: "maps follow similar rules" — `map<K,V>` with spelled key and value types is a
 typed node, `map<var,var>` (and untyped literals) the only dynamic form, conversion an
 explicit assignment, no silent demote, no Debug/Release difference. The ordering contract
 (`script_map` is ORDERED by `script_value <=>`: type rank, then content) is kept.
@@ -309,7 +309,7 @@ explicit assignment, no silent demote, no Debug/Release difference. The ordering
 **Size of the job.** `script_map` is a bare `std::map<script_value, script_value>` alias
 touched directly at 99 sites (value.hpp 21, conversion_registry.cpp 13, bound_map 11,
 value.cpp 10, function_binder 9, reflection/json/archives/backends the rest). Stage 0 is
-therefore the array campaign's stage 0 again: a node class (`script_map_node`) with a
+therefore the array design's stage 0 again: a node class (`script_map_node`) with a
 `kind` and funnels (`find`/`get`/`set`/`erase`/`size`/`for_each_entry`/`materialize`/
 `demote_to_hetero`), every direct user moved onto the funnels while the only kind is
 `hetero` (byte-identical behaviour, gated by suites + hashes), THEN typed kinds.
@@ -338,11 +338,11 @@ otherwise; rebuild copies entries as-is). Literals with spelled types produce ty
 (added with this design; first reading 272 µs interp / 126 µs vm at `c5a47278`) and the existing
 `Map copy by value: 100 string keys (x20)` (219 µs). Dynamic string keys build a script
 string per read today; a str-keyed typed map compares bytes without one. Measure before
-building stage 1: if the dynamic-key row does not move ≥2× in a prototype, the campaign's
+building stage 1: if the dynamic-key row does not move ≥2× in a prototype, the typed map's
 value is footprint only.
 
 **Order.** Stage 0 (node + funnels, hetero-only) is the one to ship first and alone; it is
-the same shape as `d320732c`'s array stage 0 and the same gates apply.
+the same shape as the array stage 0 and the same gates apply.
 
 ## Risk register
 
@@ -350,7 +350,7 @@ the same shape as `d320732c`'s array stage 0 and the same gates apply.
    caller audit + Debug assert + ref-mutation suites (++ through ref, compound through ref).
 2. **Stamp site missed** (an any-tagged view over a live typed node, or a var slot read as
    locked) — caught by: enumerating `set_type_info` call sites on array values, the var
-   battery (`var a = typed; a.push("s")` raises, `a = "s"` rebinds), fuzz.
+   tests (`var a = typed; a.push("s")` raises, `a = "s"` rebinds), fuzz.
 3. **Node identity drift** (borrow tags / `<=>` / parallel node-alias keys) — the node
    pointer must never change meaning; demote mutates IN PLACE (same allocation). Caught
    by: parallel suite + borrow identity tests.

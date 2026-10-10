@@ -206,7 +206,7 @@ It builds Debug and Release with three compilers — MSVC on Windows, GCC 14 and
 Ubuntu 24.04 — and each of the six builds runs:
 
 - `jaiscript_tests` and `jaiscript_tests --backend=vm`
-- a 300-program differential-fuzz campaign (`jaiscript_fuzz --isolate`)
+- a 300-program differential-fuzz run (`jaiscript_fuzz --isolate`)
 - the example hash gates: GLOOM and GRUBWELL (and, in Release, demoreel and Gator Quest) must
   reproduce their reference hashes on both backends
 - the language server's protocol tests (`tools/lsp/tests/lsp_test.py`: golden fixtures and the

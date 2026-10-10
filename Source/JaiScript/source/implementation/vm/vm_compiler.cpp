@@ -725,7 +725,7 @@ bool vm_compiler::call_args_need_probe(const call_expr& call) const {
 
 // A subscript chain fusable as a binary operand: `base[i][j]...[k]` where base is an
 // identifier, every index is an identifier or int literal, and the classifier marked
-// every level transient (the element-elision ruling applies; the runtime replays the
+// every level transient (the element-elision rule applies; the runtime replays the
 // full op_index semantics per level for any non-array shape). Truly N-level - the
 // depth cap is a sanity bound, not a semantic limit.
 // C::s / ns::x as an argument: a reference parameter binds its storage (bind_parameters)
@@ -2102,7 +2102,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 			    !ident->global_qualified && assign->value->get_type() != node_type::member_expr &&
 			    assign->static_operand_class >= operand_class_int_int && assign->static_operand_class <= operand_class_float_int && value_temp_operand(assign->value.get())) {
 				// `x op= a[i];` (or a unary or math operand) inside a loop: the operand lands in a temp and the compound reads it, as
-				// row 167's binary operand does, so the typed rows and the cell translation take the statement
+				// a binary operand does, so the typed rows and the cell translation take the statement
 				const uint32_t dst = identifier_slot_operand(ident);
 				const size_t temp_mark = temp_next_;
 				fused_operand src;
@@ -3522,7 +3522,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// have no copy; a miss inside the loop pushes the general form's counted state first (cells_miss over inner_counted)
 		uint32_t inner_skip_until = 0, inner_cmp_at = k_invalid_u32, inner_cmp_proto = k_invalid_u32;
 		std::vector<uint32_t> inner_counted;
-		// a bail (row 139): a statement the translation does not take (a translation-class refusal), standing inside a conditional span of
+		// a bail: a statement the translation does not take (a translation-class refusal), standing inside a conditional span of
 		// the body (reached only through a forward branch before it whose target lies after it), is a planned miss at its first instruction
 		// instead of a refusal of the loop: the general form runs the statement whole from there with the stack it expects, so the
 		// translation state is snapshotted at every statement start and restored, and the copy resumes at the end of the innermost arm
@@ -3929,7 +3929,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				++ip;
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_call_temp
 			           && code[ip + 1].a >= static_cast<uint32_t>(c.first_temp_slot) && code[ip + 1].a < k_typed_slot_mask) {
-				// `a[i].m`: the element into an alias temp (row 173) is an element alias's rebind, the member temp over the temp its dependent
+				// `a[i].m`: the element into an alias temp is an element alias's rebind, the member temp over the temp its dependent
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				if (fp.index_chain_ext.size() > 2 || !array_target(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint32_t aslot = code[ip + 1].a;
@@ -5188,7 +5188,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			const size_t m = copy_at[bip - head] - loop.copy_head;
 			if (m < loop.live_temps.size()) { for (const uint32_t k : held) { loop.live_temps[m].set(k); } }
 		}
-		// fused pairs (row 150): the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the
+		// fused pairs: the block loop runs an adjacent pair of plain instructions as one dispatch; the first instruction takes the
 		// pair's opcode and keeps its word, the second keeps both (a jump into it dispatches it alone); greedy left to right, a pair's second
 		// instruction starts no pair; the sites, the origins, the site rows and the liveness are per instruction and stand as they are
 		if (ir_passes_) {
@@ -5250,7 +5250,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 			}
 		}
-		for (uint32_t k = 0; k < loop.cells.size(); ++k) {   // the landing's lists (row 156.2): the environment cells, and the slot cells a string may sit in
+		for (uint32_t k = 0; k < loop.cells.size(); ++k) {   // the landing's lists: the environment cells, and the slot cells a string may sit in
 			const chunk::cell_loop::cell& cl = loop.cells[k];
 			if (cl.env_operand != k_invalid_u32 || cl.iter_index || !(cl.temp || cl.first_decl)) { loop.entry_cells.push_back(k); }
 			if (cl.env_operand != k_invalid_u32) { loop.env_cells.push_back(k); continue; }
@@ -6666,7 +6666,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		return;
 	}
 
-	// Register-file lift (wave W1+W2): pure fusible sub-binaries on EITHER side compute
+	// Register-file lift: pure fusible sub-binaries on EITHER side compute
 	// into compiler temps (frame slots above local_count) and the outer binary rides
 	// the fused kernel with temps as ordinary slot operands — no pushes, no unfused
 	// op_binary. Sub-lifts emit left-then-right (subtree evaluation order preserved);
@@ -7062,7 +7062,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				emit(opcode::op_index_store, shape, 0, string_site);
 			}
 		} else {
-			// C++17: the value first, then the container and the index (Dev ruling 2026-09-27); an inert value keeps the
+			// C++17: the value first, then the container and the index; an inert value keeps the
 			// target-first shape, which observes the same
 			const bool value_first = !compound_rhs_inert(expr->value.get());
 			if (value_first) { compile_expression(expr->value); }
@@ -7098,7 +7098,7 @@ void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& exp
 				}
 			}
 		} else {
-			// C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27); a literal right side
+			// C++17: the right-hand side is sequenced before the target; a literal right side
 			// keeps the target-first shape, which observes the same
 			const bool value_first = !compound_rhs_inert(expr->value.get());
 			if (value_first) { compile_expression(expr->value); deref_ahead_of(expr->value.get(), member.get()); }
@@ -7456,7 +7456,7 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 		temp_next_ = mark;
 		return;
 	}
-	// Callee-first probe (Dev ruling 2026-07-08): identifier callees resolve via
+	// Callee-first probe: identifier callees resolve via
 	// op_probe_callee at the pre-args observation point into the pending register -
 	// no value-stack materialization, byte-identical semantics. Other callee shapes
 	// keep the verbatim load+op_call pair.

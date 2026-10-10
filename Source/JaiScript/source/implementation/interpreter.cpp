@@ -227,7 +227,7 @@ namespace {
     }
 
     // Decl-ref (auto&/T& x = y) aliasing of a value that is already a reference: SHARE
-    // the holder, constraint included. RULED (2026-07-06): element/field/map-entry refs
+    // the holder, constraint included. Element/field/map-entry refs
     // keep their bind-time type constraint through a ref decl — auto& over an
     // array<int> element enforces int on store exactly like direct element assignment
     // (reverses the e43f8a6f constraint-dropping pin). Sharing also keeps container
@@ -2242,14 +2242,14 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         return self; // Return the reset shared_ptr
     }},
 
-        // RULED (2026-07, open question #9, option C): use_count() reports the OUTER
+        // use_count() reports the OUTER
         // strong_ptr<object_holder> count — the layer script alias copies bump and the
         // layer script weak_ptr expiry follows — so `shared_ptr<T> a = T()` reports 1
         // and `var b = a;` makes it 2. The builtin's own call path holds transient
         // receiver copies (bound-method capture + this local), so the raw count is
         // aliases + K with K constant per backend (interp binds one fewer stack copy
         // than the vm); the offset below is pinned by the alias-ladder parity tests.
-        // Today's inner std::shared_ptr count (C++-side shares) moved to cpp_ref_count().
+        // The inner std::shared_ptr count (C++-side shares) is cpp_ref_count().
         {symbolizer->intern("use_count"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "use_count() takes no arguments");
@@ -2270,7 +2270,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         return ctx.make_value(static_cast<script_int>(0));
     }},
 
-        // Preserves the pre-ruling use_count() number: how many C++-side owners share
+        // The inner std::shared_ptr count: how many C++-side owners share
         // the object (as<std::shared_ptr<T>>() / get_class_instance() extractions)
         {symbolizer->intern("cpp_ref_count"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
         if (!args.empty()) {
@@ -2704,7 +2704,7 @@ std::optional<checked_result<bool>> interpreter::object_equality_via_method(cons
     return std::nullopt;
 }
 
-// A declared operator!= wins over !(a == b) (C++20, Dev ruling 2026-10-01), asked where operator== would be: a class
+// A declared operator!= wins over !(a == b) (C++20), asked where operator== would be: a class
 // instance against a non-null value of its kind, or any value one of its != overloads takes when the chain declares <=>.
 // KEEP BYTE-PARALLEL with vm_backend::object_inequality_via_method
 std::optional<checked_result<bool>> interpreter::object_inequality_via_method(const script_value& left, const script_value& right) {
@@ -2725,7 +2725,7 @@ std::optional<checked_result<bool>> interpreter::object_inequality_via_method(co
     return std::nullopt;
 }
 
-// The right operand's <=> where the left operand has no operator (Dev ruling 2026-10-01): 5 < v is (v <=> 5) > 0, a
+// The right operand's <=> where the left operand has no operator: 5 < v is (v <=> 5) > 0, a
 // candidate only when its parameter takes the left operand. KEEP BYTE-PARALLEL with the vm twins below
 std::optional<checked_result<bool>> interpreter::object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
     if (parallel_worker_) [[unlikely]] { return std::nullopt; }
@@ -2759,7 +2759,7 @@ std::optional<checked_result<script_value>> interpreter::object_spaceship_revers
     return std::nullopt;
 }
 
-// <=> drives == (Dev ruling 2026-10-01): an operand whose chain declares <=> answers a == b, the left operand first, then the
+// <=> drives ==: an operand whose chain declares <=> answers a == b, the left operand first, then the
 // right one: its operator== when an overload takes the other operand, else its <=> as (a <=> b) == 0 when one does; any other
 // operand, a class without <=> included, keeps its own == (memberwise between values of one class, false otherwise)
 std::optional<checked_result<bool>> interpreter::object_spaceship_equality_via_method(const script_value& left, const script_value& right) {
@@ -2881,7 +2881,7 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
     return std::nullopt;
 }
 
-// A class's unary operator (Dev ruling 2026-09-30): the chain's overload taking no argument, called on the operand; nullopt
+// A class's unary operator: the chain's overload taking no argument, called on the operand; nullopt
 // when the class declares none (the builtin meaning and text follow). KEEP BYTE-PARALLEL with vm_backend::object_unary_via_method
 std::optional<checked_result<script_value>> interpreter::object_unary_via_method(const script_value& operand, token_type op) {
     if (parallel_worker_) [[unlikely]] { return std::nullopt; }
@@ -2899,7 +2899,7 @@ std::optional<checked_result<script_value>> interpreter::object_unary_via_method
     return checked_result<script_value>(std::move(result.value()));
 }
 
-// A callable object (Dev ruling 2026-09-30): only a call that would raise not callable asks for it, so ordinary calls never
+// A callable object: only a call that would raise not callable asks for it, so ordinary calls never
 // pay for it. KEEP BYTE-PARALLEL with vm_backend::call_operator_of
 script_value interpreter::call_operator_of(const script_value& callee) {
     const script_value& v = callee.deref();
@@ -3307,7 +3307,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
                 saved_member_scope = self->member_scope_;
                 if (!textual) { self->member_scope_ = {}; }
             }
-            // Counted, not a flag (Dev ruling): a nested execute's exit decrements
+            // Counted, not a flag: a nested execute's exit decrements
             // symmetrically and can never clear the outer run's in-flight state
             self->pending_instance_env_.reset();
             ++self->execute_depth_;
@@ -4015,7 +4015,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     if (!key.has_valid_engine()) {
                         key.set_engine(left.has_valid_engine() ? left.get_engine() : engine_);
                     }
-                    // Declared key type: keys never coerce (Dev ruling 2026-09-02), so the
+                    // Declared key type: keys never coerce, so the
                     // check runs BEFORE the auto-insert (KEEP BYTE-PARALLEL with the vm)
                     if (auto map_tag = left.get_type_info()) {
                         if (type_info_ptr key_type = map_tag->key_type();
@@ -4277,8 +4277,8 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
     };
 
     // `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
-    // full, and decoding an OPAQUE bound to null would lie about its truthiness (§13,
-    // 2026-07). Identical result for bound primitives. Byte-parallel with exec_unary.
+    // full, and decoding an OPAQUE bound to null would lie about its truthiness
+    // (§13). Identical result for bound primitives. Byte-parallel with exec_unary.
     if (expr->op.type == token_type::bang) {
         push_value(make_value(!is_truthy(operand)));
         return {};
@@ -5317,7 +5317,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 }
 
                 // Store the enforced (declared-type converted) value; a consumed expression's
-                // value is the stored one (Dev ruling 2026-09-08), read back through a property getter
+                // value is the stored one, read back through a property getter
                 if (prop_setter) {
                     JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
                     if (expression_result_needed_) {
@@ -5353,7 +5353,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 return std::move(stored.value());
             };
             // Handle compound assignment to member expression (e.g., obj.value += 10)
-            // C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27), then the
+            // C++17: the right-hand side is sequenced before the target, then the
             // receiver is evaluated ONCE and held raw (a reference receiver re-resolves by mode at the store)
             // across the read and the store-back; a :: target has no receiver (replay: rhs 0, receiver 1,
             // partial {rhs}). KEEP BYTE-PARALLEL with the vm's value-first member compound.
@@ -5676,7 +5676,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             // General compound assignment for any expression
             // This handles subscripts, function calls that return references, etc.
 
-            // C++17: the right-hand side is sequenced before the target (Dev ruling 2026-09-27): the value first, then the
+            // C++17: the right-hand side is sequenced before the target: the value first, then the
             // subscript's container and index and the element's read (replay: rhs 0, target 1, partial {rhs}). KEEP
             // BYTE-PARALLEL with the vm's value-first index compound.
             script_value rightValue;
@@ -6076,7 +6076,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     auto expected_type = ptr_type_info->element_type();
                     std::string expected_type_name = expected_type ? expected_type->type_name : "";
 
-                    // Monotonic-ladder rule (Dev ruling 2026-07, refines c81c9812): a
+                    // Monotonic-ladder rule: a
                     // var-held (dynamic_pointee) holder behaves IDENTICALLY to a typed
                     // holder wherever typed is legal - a VALUE rhs of a COMPATIBLE class
                     // (same class or subclass of the held pointee) assigns INTO the shared
@@ -6109,7 +6109,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         auto value_element = value_type_info->element_type();
                         if (ptr_type_info->dynamic_pointee) {
                             // var-declared holder: '=' with a handle rhs REBINDS unchecked
-                            // (Dev ruling 2026-07; enforcement guards copy-assign-to-
+                            // (enforcement guards copy-assign-to-
                             // underlying, not re-pointing) - carry the rebindable marker
                             if (engine_ && value_element && !value_type_info->dynamic_pointee) {
                                 value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value_element.get()));
@@ -6133,7 +6133,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         // var-held handle receiving an INCOMPATIBLE value or a primitive:
                         // REBIND (var's dynamic power where typed would error). A COMPATIBLE
                         // value falls through to the auto-unwrap path below, IDENTICAL to a
-                        // typed holder (Dev ruling 2026-07, refines c81c9812). Replace the
+                        // typed holder. Replace the
                         // stored handle with a value-copy of the rhs and keep the 'any'
                         // marker so the variable stays dynamic for the next '='.
                         script_value rebound = clone_for_assignment(value);
@@ -6234,7 +6234,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         // The value keeps its own type_info
                     }
                     // For any_type (var), keep the any_type on the variable. Exception
-                    // (mirrors the decl path, Dev ruling 2026-07): a shared_ptr-tagged
+                    // (mirrors the decl path): a shared_ptr-tagged
                     // rhs keeps its marker - flattening to 'any' would silently detach
                     // the handle at the copy below
                     else if (detail::var_slot(target_type.get()) &&
@@ -6245,7 +6245,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     else if (detail::var_slot(target_type.get()) &&
                              engine_ && value.get_type_info()->element_type() &&
                              !value.get_type_info()->dynamic_pointee) {
-                        // var target adopting a handle: mark it rebindable (Dev ruling 2026-07)
+                        // var target adopting a handle: mark it rebindable
                         value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
                             value.get_type_info()->element_type().get()));
                     }
@@ -6328,7 +6328,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                 // Not a C++ property or no setter - use regular field assignment
                                 // (typed fields enforce like locals)
                                 if (!assigned_to_member) {
-                                    // All-detach ruling (2026-07, #12): the implicit-this
+                                    // All-detach rule: the implicit-this
                                     // MOVE path stores a detached snapshot like the
                                     // explicit o.f = spelling (was the one live-member hole)
                                     if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
@@ -6509,7 +6509,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         incoming = std::move(enforced.value());
                     }
                     if (expression_result_needed_) {
-                        script_value stored = clone_for_assignment(incoming);   // the expression's value is a copy of the stored one (Dev ruling 2026-09-08)
+                        script_value stored = clone_for_assignment(incoming);   // the expression's value is a copy of the stored one
                         inst->field_slot_write(memberExpr->proven_slot, std::move(incoming));
                         push_value(std::move(stored));
                     } else {
@@ -6598,7 +6598,7 @@ checked_result<void> interpreter::store_through_subscript_reference(script_value
 
     // Validate element type if this is a container subscript reference
     type_info_ptr element_type = refHolder->container_element_type;
-    // a class element keeps its object: the copy assignment (Dev ruling 2026-10-03; KEEP BYTE-PARALLEL with vm_backend::exec_index_assign)
+    // a class element keeps its object: the copy assignment (KEEP BYTE-PARALLEL with vm_backend::exec_index_assign)
     const auto in_place = detail::element_copy_assign(*target_ptr, value, element_type, engine_);
     if (in_place && !*in_place) { return *in_place; }
     if (in_place) {
@@ -6911,8 +6911,8 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
     } else if (is_shared_ptr) {
         // shared_ptr<T> variable - handle initialization.
         // shared_ptr<auto> (element_type null) INFERS the pointee from the initializer's
-        // exact class, then enforces it exactly like the explicit spelling (Dev ruling
-        // 2026-07); a null/missing initializer has nothing to infer.
+        // exact class, then enforces it exactly like the explicit spelling;
+        // a null/missing initializer has nothing to infer.
         const bool infer_pointee = decl->type && !decl->type->element_type();
         if (!decl->initializer) {
             if (infer_pointee) {
@@ -7001,7 +7001,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // Get the target variable's address
             uint64_t targetSymbolId = string_symbolizer_->intern(identExpr->name);
 
-            // SLOT-aware resolution (Dev ruling 2026-07-09): plain function locals live
+            // SLOT-aware resolution: plain function locals live
             // in frame slots, not the environment - the escape marker cell-boxes the
             // SLOT, so the binder must look there first or `auto& r = x` errors
             // "undefined variable" for every slot-resident local. Env storage is
@@ -7068,7 +7068,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 // Member-final initializer (auto& p = G.player): field reads evaluate to
                 // COPIES, so the evaluated result can't alias - resolve the chain through
                 // the shared kernel into an owner-pinned FIELD reference instead (route-
-                // independence with ref params/returns; Dev ruling 2026-07-12). Access/
+                // independence with ref params/returns). Access/
                 // removed-field errors surface as-is; the kernel's generic non-lvalue
                 // verdict (computed script property, non-object receiver) keeps the
                 // decl's own error text below.
@@ -7253,19 +7253,19 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             }
             // Set declared type - this locks the variable's type. Exception: a 'var' decl
             // keeps a shared_ptr-tagged initializer's marker — `var p = new P()` IS
-            // `shared_ptr<P> p = P()` (Dev ruling 2026-07), so the reference-semantics
+            // `shared_ptr<P> p = P()`, so the reference-semantics
             // tag must survive the decl instead of flattening to 'any'
             if (effective_decl_type->base_type == script_value_type::jai_any_type &&
                 (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-                detail::var_stamp(value, effective_decl_type, engine_);   // a typed array keeps its element type (Dev ruling 2026-09-28)
+                detail::var_stamp(value, effective_decl_type, engine_);   // a typed array keeps its element type
             } else if (effective_decl_type->base_type != script_value_type::jai_any_type ||
                 !value.get_type_info() ||
                 value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
                 value.set_type_info(effective_decl_type);
             } else if (engine_ && value.get_type_info()->element_type() &&
                        !value.get_type_info()->dynamic_pointee) {
-                // var-held handle: '=' with a handle rhs REBINDS unchecked (Dev ruling
-                // 2026-07; enforcement guards copy-assign-to-underlying, not re-pointing)
+                // var-held handle: '=' with a handle rhs REBINDS unchecked
+                // (enforcement guards copy-assign-to-underlying, not re-pointing)
                 value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
                     value.get_type_info()->element_type().get()));
             }
@@ -7846,7 +7846,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         cls_raw = inst_raw->get_class_definition();
                     }
                     // Worker method wall → admission verdict (parallel-method-admission
-                    // ruling): barrier-admitted methods dispatch through pinned
+                    // rule): barrier-admitted methods dispatch through pinned
                     // worker-private state (fresh dispatcher value, pre-resolved overload —
                     // no shared count, cache, or IC is ever touched); anything unpinned
                     // keeps the wall error. KEEP the verdict text BYTE-PARALLEL with vm
@@ -7884,7 +7884,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         ic_route = true;
                     } else {
                         // Full gate (fills the IC on success). A user class method WINS
-                        // over a same-named builtin handle method (Dev ruling 2026-07): the
+                        // over a same-named builtin handle method: the
                         // sp-builtin only applies when the class does NOT define the method.
                         const bool sp_builtin = objectValue.get_type_info() &&
                             objectValue.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
@@ -8572,7 +8572,7 @@ std::optional<checked_result<void>> interpreter::bare_method_reference_error(con
     return std::nullopt;
 }
 
-// A bare method name read without a call inside a method (Dev ruling 2026-09-30); KEEP BYTE-PARALLEL with
+// A bare method name read without a call inside a method; KEEP BYTE-PARALLEL with
 // vm_backend::raise_bare_method_value
 checked_result<void> interpreter::bare_method_value_error(const identifier_expr* expr, const script_value& self) {
     if (parallel_worker_) [[unlikely]] {
@@ -8585,7 +8585,7 @@ checked_result<void> interpreter::bare_method_value_error(const identifier_expr*
         string_symbolizer_->intern(detail::bare_method_value_text(expr->name, owner)));
 }
 
-// obj.method without a call (Dev ruling 2026-09-30): a method is called or bound, never read bare. KEEP BYTE-PARALLEL with
+// obj.method without a call: a method is called or bound, never read bare. KEEP BYTE-PARALLEL with
 // vm_backend::raise_method_value
 JAI_NOINLINE void interpreter::raise_script_text(const std::string& text, const source_location& location) {
     active_exception_value_ = make_value(text);
@@ -8921,8 +8921,8 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         // This is an explicitly marked shared_ptr<T> object
         auto methodIt = shared_ptr_methods_.find(expr->member_id);
         if (methodIt != shared_ptr_methods_.end()) {
-            // A user class method WINS over a same-named builtin handle method (Dev ruling
-            // 2026-07): only mint the builtin when the underlying class does NOT define it.
+            // A user class method WINS over a same-named builtin handle method:
+            // only mint the builtin when the underlying class does NOT define it.
             bool user_shadows = false;
             if (auto ci = objectValue.get_class_instance()) {
                 if (auto* cd = ci->get_class_definition()) {
@@ -10071,8 +10071,8 @@ checked_result<void> interpreter::visit_array_literal_expr_t(array_literal_expr*
     // Reserve capacity to avoid reallocations (optimization)
     array.reserve(expr->elements.size());
 
-    // Evaluate each element and add to array. All-detach ruling (2026-07, open
-    // question #12): literal construction is a store boundary - bound primitives
+    // Evaluate each element and add to array. All-detach rule:
+    // literal construction is a store boundary - bound primitives
     // snapshot like every assignment-shaped store, and element/subscript reads that
     // arrive as reference wrappers normalize to VALUES exactly like assignment
     // (a literal must never hold a live reference into its source; to_json emitted
@@ -10138,7 +10138,7 @@ checked_result<void> interpreter::visit_map_literal_expr_t(map_literal_expr* exp
         const bool copy_key = key.is_reference() || is_lvalue_shaped_expr(entry.first.get());   // existing objects: the literal holds its own copies
         const bool copy_value = value.is_reference() || is_lvalue_shaped_expr(entry.second.get());
 
-        // All-detach ruling (2026-07, #12): literal construction is a store boundary -
+        // All-detach rule: literal construction is a store boundary -
         // bound primitives snapshot, and reference-wrapper reads normalize to VALUES
         // like assignment (see the array-literal twin for the argument; KEEP
         // BYTE-PARALLEL with vm_backend::exec_map)
@@ -11419,7 +11419,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                     // Reallocation-safe reference (container+index, not a raw element
                     // pointer): a push in the loop body can reallocate the vector, and a
                     // raw pointer would dangle -> heap corruption on write-through (#41).
-                    // RULED (2026-07-06): the ref carries the container's declared element
+                    // The ref carries the container's declared element
                     // type — for (auto& x : intArr) x = "s" errors like intArr[i] = "s";
                     // var (any-tagged) containers stay unconstrained.
                     type_info_ptr element_constraint = nullptr;
@@ -13056,7 +13056,7 @@ checked_result<void> interpreter::visit_class_decl(class_decl* decl) {
         
         
         // Declared types install first so redefine_class flags a retype as fields_changed
-        // and migrate_fields converts against the NEW types (retype ruling)
+        // and migrate_fields converts against the NEW types (retype rule)
         class_def->replace_field_declared_types(std::move(new_field_types), true);
         class_def->replace_static_declared_types(std::move(new_static_types));
 
@@ -14560,7 +14560,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         return {};
     }
 
-    // Tier 2 (general lvalues; Dev ruling 2026-07-12): the argument already evaluated
+    // Tier 2 (general lvalues): the argument already evaluated
     // in normal left-to-right order, and subscript/map reads over lvalue bases mint
     // owner-pinned references with full index generality - computed indices
     // (grid[y+1][x]), member-expr indices (arr[o.idx]), map keys (m["k"]). A reference
@@ -15758,7 +15758,7 @@ std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr
 }
 
 // Release an environment back to the pool.
-// Lifetime ruling (2026-07, flat-stack stage 1): a freed pool slot holds NOTHING — a dead
+// Lifetime rule: a freed pool slot holds NOTHING — a dead
 // frame's env must not keep its values or parent chain (a lambda's capture env!) alive
 // until slot reuse; weak_ptr expiry is script-observable. The epilogue flattens/derefs
 // return values BEFORE release, and references are owner-pinned (cells), so resetting
@@ -15785,7 +15785,7 @@ void interpreter::release_environment(const std::shared_ptr<environment>& env, b
     if (environment_pool_index_ > 0 && environment_pool_[environment_pool_index_ - 1] == env) {
         if (env.use_count() <= 2) {
             if (!clear_now) {
-                // Lifetime ruling (2026-07): a freed pool slot must not pin a PARENT
+                // Lifetime rule: a freed pool slot must not pin a PARENT
                 // CHAIN until slot reuse — that retention was exactly the dead-lambda
                 // capture leak (the freed frame env's parent was the capture env).
                 // ONLY the parent link (+ its stale pointer cache) drops here: the

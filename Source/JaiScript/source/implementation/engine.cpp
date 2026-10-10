@@ -2042,8 +2042,8 @@ engine::~engine() {
             impl->debug_transport_->stop();
             impl->debug_transport_.reset();
         }
-        // Program-scope variables die in reverse construction order while the engine still runs their destructors (Dev
-        // ruling 2026-10-03); a destructor's error is reported through the script error handler, never propagated
+        // Program-scope variables die in reverse construction order while the engine still runs their destructors;
+        // a destructor's error is reported through the script error handler, never propagated
         if (impl->backend && impl->destructors_armed_ && impl->global_environment_) {
             try { impl->global_environment_->release_values_in_reverse(); } catch (...) {}
         }
@@ -2399,7 +2399,7 @@ void engine::initialize_engine_reference() {
         auto extended = engine_weak->extend_checked(args[0], args[1], std::string());
         if (!extended) { return extended; }
         // A pure script value is C++'s T& extend(T& object, Class): the result names the argument, so `var w = extend(v, B)`
-        // copies and `var& w = extend(v, B)` aliases v (Dev ruling 2026-10-03, the call-result rule)
+        // copies and `var& w = extend(v, B)` aliases v (the call-result rule)
         const script_value& object = args[0].deref();
         auto holder = object.raw_storage_index() == script_value::TYPEID_OBJECT && !object.is_shared_ptr_type() ? object.get_object_holder() : nullptr;
         if (!holder || !holder->is_class_instance_wrapper || !holder->data ||
@@ -2947,9 +2947,9 @@ uint64_t engine::registration_fingerprint() const {
         hash ^= 0xFFu; hash *= 1099511628211ull;  // name separator
     }
     // Plain-global function registrations (zero-arg add_function, add_variadic_function,
-    // single untyped bindings) never enter overloadedFunctions, so they were invisible
-    // here — a .jaibite saved against them loaded with registration_mismatch()==false and
-    // died at execute (open question #10, FIXED by inclusion 2026-07). Folded in AFTER
+    // single untyped bindings) never enter overloadedFunctions, so they are included
+    // here — otherwise a .jaibite saved against them loads with registration_mismatch()==false and
+    // dies at execute. Folded in AFTER
     // the sorted overload surface with an arity-class marker, so engines registering
     // none of these hash exactly as before; engines that do get a CHANGED fingerprint
     // (old .jaibites then report the advisory mismatch — correct, loads never hard-fail).
@@ -3700,7 +3700,7 @@ type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {
 type_info* engine::get_type_info_shared_ptr_dynamic(type_info* pointee_type) {
     // var-held-handle twin (param2=1 keys it apart from the plain spelling): same
     // name/id/element so every existing read behaves identically; dynamic_pointee
-    // lets the assignment route rebind unchecked (Dev ruling 2026-07)
+    // lets the assignment route rebind unchecked
     implementation::type_key key{script_value_type::jai_shared_ptr_type, pointee_type ? pointee_type->id : 0, 1};
 
     auto it = impl->type_infos_.find(key);
@@ -3852,7 +3852,7 @@ type_info* engine::get_type_info(const type_info& temp) {
         case script_value_type::jai_reference_type:
         // shared_ptr MUST key on its pointee: it fell into the parameterless default
         // before, so every parsed shared_ptr<T> collapsed onto the first-interned T
-        // engine-wide - new Bar() silently constructed Foo (GLOOM bug, 2026-07)
+        // engine-wide - new Bar() silently constructed Foo
         case script_value_type::jai_shared_ptr_type:
             // Single type parameter
             param1_id = temp.type_params.empty() ? 0 : (temp.type_params[0] ? temp.type_params[0]->id : 0);
@@ -4327,7 +4327,7 @@ size_t engine::parallel_thread_count() const {
     // Auto is CAPPED, not hardware_concurrency: region entry pays a serial per-worker
     // provisioning cost, and on high-core hybrid CPUs raw hw (24 on a 285HX) was
     // measurably WORSE than serial (GLOOM 11.7 ms/tick at 24 vs 9.4 serial vs 7.0 at
-    // the sweep sweet spot). Dev: min(hardware_concurrency - 1, 6) - a consistent set of
+    // the sweep sweet spot). Auto = min(hardware_concurrency - 1, 6) - a consistent set of
     // pre-allocated pool threads, built once per engine and reused by every region; the
     // region's cost-adaptive rule wakes fewer for light bodies. Callers that know their
     // workload set an explicit count.
@@ -5817,7 +5817,7 @@ type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp
     return def ? def->get_type_info() : nullptr;
 }
 
-// Subclass admission (Dev ruling 2026-09-02): does class `derived_id` equal or derive from
+// Subclass admission: does class `derived_id` equal or derive from
 // `base_id`? Exact ids answer without a lookup; otherwise one registry lookup and a
 // depth-capped walk over the parent chain (script parents and bound C++ bases alike).
 namespace detail {

@@ -1,5 +1,5 @@
 // parallel_transform v0 (docs/parallel_design.md; docs/parallel_prove_or_serial.md §5,
-// RULED contract A). One builtin, three phases, all charged to the call itself:
+// contract A). One builtin, three phases, all charged to the call itself:
 //
 //   ADMISSION (amortized per body): a fail-closed static walk over fn's AST — every node
 //   kind is whitelisted or the call errors ("parallel_transform: <reason> at line:col").
@@ -95,7 +95,7 @@ namespace jai::detail {
 		std::vector<std::weak_ptr<class_instance>> pending_instances;
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
-		// Live input vector (Dev ruling 2026-07-09 "safe AND free"): workers read the
+		// Live input vector ("safe AND free"): workers read the
 		// caller's vector directly - all-primitive elements (typed proof or one dynamic
 		// scan) mint worker-local copies with zero refcount traffic, and elements the
 		// fork's element proof made exclusive lend a handle only their chunk's worker
@@ -144,7 +144,7 @@ namespace jai::detail {
 		std::vector<snapshot_capture_cache_entry> snapshot_cache;
 
 		// Barrier-admitted class methods for THIS call: worker-private minted dispatcher
-		// values + pre-resolved overloads (parallel-method-admission ruling). Rebuilt per
+		// values + pre-resolved overloads (parallel-method-admission rule). Rebuilt per
 		// call (element classes are a runtime fact); cleared at the join.
 		detail::parallel_method_pin_table method_pins;
 
@@ -1236,7 +1236,7 @@ namespace {
 
 		// Root-parameter contract for the region's entry body: transform requires a
 		// by-value unary param; parallel_for takes either (auto& mutates in place,
-		// plain auto is a side-effect-free worker copy - Dev ruling)
+		// plain auto is a side-effect-free worker copy)
 		enum class root_param { none, unary_value, unary };
 
 		bool admit_function(const std::shared_ptr<script_defined_function>& fn, uint64_t global_name_id,
@@ -1300,7 +1300,7 @@ namespace {
 			return ok;
 		}
 
-		// ===== Barrier-time class-method admission (parallel-method-admission ruling) =====
+		// ===== Barrier-time class-method admission (parallel-method-admission rule) =====
 		// A method on the chunk-exclusive element is exactly as safe as the same accesses
 		// spelled inline in the loop body — the walk proves it: self fields read/write OK,
 		// captured global reads collect as ordinary captures, everything shared-mutating
@@ -2755,7 +2755,7 @@ namespace {
 		}
 	}
 
-	// STATIC all-primitive proof (Dev ruling 2026-07-09 "safety AND free"): a TYPED
+	// STATIC all-primitive proof ("safety AND free"): a TYPED
 	// container's element types are store-enforced invariants, so array<int> etc. is
 	// all-primitive by construction - no O(n) content scan needed, ever. Untyped
 	// containers fall back to the dynamic scan below.
@@ -2822,7 +2822,7 @@ namespace {
 	                             std::vector<script_value>& elements, const reach_filter& reach,
 	                             const char* prefix, std::vector<type_info*>* types = nullptr);
 
-	// In-place element PROOF + NORMALIZATION (parallel_for; Dev rulings 2026-07-09):
+	// In-place element PROOF + NORMALIZATION (parallel_for):
 	// after this pass returns true, mutating the element under chunk exclusivity can
 	// never touch a refcount another thread can see. Value semantics carry most of the
 	// argument (script stores deep-copy, so elements cannot share structure); the one
@@ -2876,7 +2876,7 @@ namespace {
 		return false;
 	}
 
-	// Declared-type exclusivity (Dev ruling: a typed array's element type is a proven fact
+	// Declared-type exclusivity (a typed array's element type is a proven fact
 	// about every element): true when every instance a slot of class `cd` can hold - `cd`
 	// and, when asked, its registered subclasses - is value-closed and no field the body
 	// reaches can touch a shared string; a reached object field asks its own class the same
@@ -3124,7 +3124,7 @@ namespace {
 	// another thread can see - parallel_for mutates it in place through a reference, the
 	// transform's by-value binding clones it (so the transform reaches every element WHOLE
 	// and passes an open reach). An object-kind source takes the declared-type verdict first
-	// (one scan of the 16-byte slot tags, no instance read; Dev ruling: the declared type is
+	// (one scan of the 16-byte slot tags, no instance read; the declared type is
 	// a proven fact about every element) and walks per element only when it fails; every
 	// other source that is not statically all-primitive walks (normalize_element_inplace).
 	// engine::allow_unsafe_parallel keeps the classes and the detach and drops the verdict.
@@ -3614,7 +3614,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// one the body only reads (the transform's input) is boxed ONCE into a private node the
 	// cursor can address instead. An OBJECT-kind range keeps its slots: element references
 	// materialize the slot's handle per touch and the declared class carries the exclusivity
-	// proof (Dev ruling: the declared type of a typed array is a proven fact about every element).
+	// proof (the declared type of a typed array is a proven fact about every element).
 	const bool typed_obj = source_node->is_typed() && source_node->kind() == script_array::kind_t::obj;
 	script_value boxed_range(std::monostate{}, &eng);
 	state.faults.checkpoint("region.input_storage");
@@ -4232,7 +4232,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	out.unchecked_get_array_storage()->values().assign(n, script_value(std::monostate{}, &eng));
 
 	// Optional weight hint: evaluated per element at the barrier, single-threaded, on the
-	// engine's own backend (ruled section 11 Q1). Chunk boundaries equalize cumulative weight.
+	// engine's own backend (section 11 Q1). Chunk boundaries equalize cumulative weight.
 	region_plan plan;
 	if (weight_payload && n >= k_parallel_small_n) {
 		size_t worker_count = eng.parallel_thread_count();

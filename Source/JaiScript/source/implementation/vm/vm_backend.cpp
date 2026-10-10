@@ -16661,6 +16661,13 @@ op_status vm_backend::exec_call_builtin(frame& f, const vm_instruction& ins) {
 	return guarded_native_call([&] { return (*fn)(builtin_ctx(), self, arguments); });
 }
 
+// a string method's scratch through a typed element holds what the buffer holds unless the method is one of the registry's mutators
+// (by compile-time index when the site has one, else by name); out of line, off the method call's frame
+JAI_NOINLINE void vm_backend::commit_string_scratch(script_value& recv, uint16_t bi_string, uint64_t member_id) {
+	auto* scratch_ref = recv.scratch_ref_holder();
+	const bool mutator = bi_string != 0xFFFF ? builtins_.string_mutates_by_index[bi_string] != 0 : builtins_.string_mutator_ids.count(member_id) != 0;
+	if (mutator || !scratch_ref->typed_element()) { scratch_ref->commit_scratch(); }
+}
 op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 	JAI_COARSE(coarse_method_, coarse_methods_)
 #ifdef JAISCRIPT_VM_PROFILE
@@ -16896,11 +16903,8 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 		if (!result) {
 			return raise_from(result);
 		}
-		if (auto* scratch_ref = string_recv->scratch_ref_holder()) [[unlikely]] {
-			// a typed element's scratch holds what the buffer holds unless the method is one of the registry's mutators
-			const bool mutator = !string_recv_utf8 && f.code->builtin_indexed ? builtins_.string_mutates_by_index[site.bi_string] != 0
-			                                                                  : builtins_.string_mutator_ids.count(member->member_id) != 0;
-			if (mutator || !scratch_ref->typed_element()) { scratch_ref->commit_scratch(); }
+		if (string_recv->scratch_ref_holder()) [[unlikely]] {
+			commit_string_scratch(*string_recv, !string_recv_utf8 && f.code->builtin_indexed ? site.bi_string : uint16_t(0xFFFF), member->member_id);
 		}
 		stack_.push_back(std::move(result.value()));
 		return {};

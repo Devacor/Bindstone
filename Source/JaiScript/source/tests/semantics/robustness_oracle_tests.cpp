@@ -1,6 +1,6 @@
 // Spec oracles for the robustness pass: every expected value comes from the specification (CLAUDE.md, docs/, C++ where
 // the docs name it), never from a backend. Every row runs on the interpreter and the VM, proofs on and off, VM passes off,
-// the copy elisions off, and with injected cell misses when the build carries the lever.
+// the copy elisions off, and with injected cell misses when the build defines JAISCRIPT_MISS_INJECTION.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -109,7 +109,7 @@ private:
 
 	// CLAUDE.md "One conversion table for every typed slot": a by-value parameter runs the assignment table; a lone method
 	// converts like a lone free function, among overloads the scorer takes the table's rows and a string never makes a bool
-	// parameter viable (Dev ruling 2026-10-02); the strict checker agrees at load
+	// parameter viable; the strict checker agrees at load
 	void method_conversions() {
 		test("a_lone_method_converts_its_arguments_like_a_free_function", [this]() {
 			expect("lone method", R"(
@@ -292,7 +292,7 @@ private:
 		});
 	}
 
-	// Dev ruling 2026-10-03: map.filter(pred) keeps the accepted entries in the receiver and returns it, map::filter(m, pred)
+	// map.filter(pred) keeps the accepted entries in the receiver and returns it, map::filter(m, pred)
 	// returns them as a new map and leaves m alone (the array dot / namespace pairs)
 	void map_transforms() {
 		test("map_dot_filter_mutates_and_map_namespace_filter_copies", [this]() {
@@ -325,10 +325,10 @@ private:
 		});
 	}
 
-	// Second docs audit (2026-10-03): extend identity, thrown objects' text, parse texts that name the fix, top-level call
+	// Extend identity, thrown objects' text, parse texts that name the fix, top-level call
 	// order under strict, host overload misses
 	void second_audit() {
-		// extend re-classes in place and its result names the argument (C++'s T& extend(T&, Class), Dev ruling 2026-10-03):
+		// extend re-classes in place and its result names the argument (C++'s T& extend(T&, Class)):
 		// `var w = extend(v, B)` copies, `var& w = extend(v, B)` aliases, a chained call reaches v, a handle's copy shares
 		test("extend_reclasses_in_place_and_its_result_follows_the_call_result_rule", [this]() {
 			expect("extend result binding", R"(
@@ -565,7 +565,7 @@ private:
 		});
 	}
 
-	// The call-result rule for builtins that hand back a stored element (Dev ruling 2026-10-03, C++'s reference returns):
+	// The call-result rule for builtins that hand back a stored element (C++'s reference returns):
 	// binding the result to var/auto/T copies, var&/T& and a member call reach the element; reduce's accumulator is a copy
 	void stored_element_results() {
 		test("stored_element_results_copy_by_value_and_alias_by_reference", [this]() {
@@ -603,7 +603,7 @@ private:
 	// An engine frees what it made: the conversion registry's standard converters reached it through a captured shared_ptr
 	// (every engine's registry and the host classes its converters name lived forever), and a script class's methods and a
 	// closure held the program environment that held them
-	// Dev ruling 2026-10-03: a frame that shared local cells with [&] lambdas checks those cells at its exit; a cycle of
+	// A frame that shared local cells with [&] lambdas checks those cells at its exit; a cycle of
 	// cells and the closures they hold that nothing else reaches is cleared (its destructors run at the frame exit), an
 	// escaped closure keeps everything alive and working, and nothing still reachable is destroyed
 	void cell_cycles() {

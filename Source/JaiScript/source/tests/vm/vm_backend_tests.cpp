@@ -284,7 +284,7 @@ public:
 			}, "runaway recursion raises max_recursion_depth");
 		});
 
-		// === Real TCO (Dev ruling: no artificial vm depth limit) ===
+		// === Real TCO (no artificial vm depth limit) ===
 		// A tail-flagged bare self-call splices the live record + window in place; the
 		// interpreter keeps its recursion limit (accepted divergence, KD-ENV-RECURSION-LIMIT
 		// charter). Every decline gate below is pinned by a shape that must still limit.
@@ -346,7 +346,7 @@ public:
 			}, "infinite tail recursion raises the execution budget error");
 		});
 
-		// Fixed 2026-07 (demoreel finding 1): a plain-function call inside a method must
+		// Regression: a plain-function call inside a method must
 		// NOT clear the caller method scope's this-binding — field reads and this.x keep
 		// working after the call, on both backends.
 		test("plain_callee_keeps_caller_this", [this]() {
@@ -372,7 +372,7 @@ public:
 			}
 		});
 
-		// Stage 2 (compile-time lazy envs): plain in-loop callees whose bodies provably never
+		// Compile-time lazy envs: plain in-loop callees whose bodies provably never
 		// touch the per-call scope environment skip creating it. These pin the parity contract
 		// on both backends and the compiler's fail-closed trigger table.
 		test("lazy_env_callee_keeps_caller_this_from_method_top_scope", [this]() {
@@ -714,7 +714,7 @@ public:
 			}
 		});
 
-		// Stage 3 (method flattening): method self-recursion no longer stacks native
+		// Method flattening: method self-recursion does not stack native
 		// frames, but the depth-10000 error must still be raised and stay catchable
 		// through the flattened path on both backends.
 		test("ctor_self_recursion_raises_catchable_error", [this]() {
@@ -754,7 +754,7 @@ public:
 			}
 		});
 
-		// Stage 4 (metadata skip): ref-free direct callees skip the per-call arg-metadata
+		// Metadata skip: ref-free direct callees skip the per-call arg-metadata
 		// build, so current_arg_metadata_ holds a stale outer snapshot while they run.
 		// Ref-param binding around and after such calls must be unaffected.
 		test("ref_param_call_surrounds_ref_free_call", [this]() {
@@ -980,7 +980,7 @@ public:
 			}
 		});
 
-		// Stage 1 (shared-holder pass-through): passing a bound reference onward shares the
+		// Shared-holder pass-through: passing a bound reference onward shares the
 		// original holder instead of minting a new one per hop, so element refs keep their
 		// container re-resolution and env-anchored refs keep the origin anchor.
 		test("ref_param_pass_through_chain_depth3", [this]() {
@@ -1245,8 +1245,7 @@ public:
 		});
 
 		test("ref_decl_element_constraint_enforced", [this]() {
-			// RULED (2026-07-06): reverses the e43f8a6f D4v constraint-dropping pin —
-			// element refs from typed containers CARRY the container's element type, so
+			// Element refs from typed containers CARRY the container's element type, so
 			// the retyping write through an auto& decl errors with the same text as
 			// direct element assignment, and the element keeps its value.
 			const char* src = R"(
@@ -1588,7 +1587,7 @@ public:
 			}
 		});
 
-		// Stage 2 (Tier 1): field/subscript/chain lvalue arguments bind to reference
+		// Tier 1: field/subscript/chain lvalue arguments bind to reference
 		// parameters through the shared resolver (detail/ref_lvalue.hpp). Field refs pin
 		// the instance, element refs pin the vector; typed fields/elements enforce their
 		// bind-time tag on assign-through.
@@ -1757,7 +1756,7 @@ public:
 
 		test("tier1_typed_field_numeric_conversion_and_null", [this]() {
 			// float converts into an int field and null stores a typed null in a class field, as the direct field
-			// store does (the `TreeNode left = null` idiom; the field's own table, Dev ruling 2026-09-30)
+			// store does (the `TreeNode left = null` idiom; the field's own table)
 			const char* src = R"(
 				class Node { int num = 1; Node next = null; }
 				function put(var& x, var val) { x = val; }
@@ -1779,7 +1778,7 @@ public:
 		});
 
 		test("tier1_field_constraint_is_declared_type", [this]() {
-			// RULED (2026-07): the DECLARED field type is the ref constraint. A 'var' field
+			// The DECLARED field type is the ref constraint. A 'var' field
 			// is dynamic — its ref binds unconstrained regardless of the stored value's tag —
 			// while a declared 'int' field constrains the ref exactly like the in-method
 			// identifier-assign path does.
@@ -1887,7 +1886,7 @@ public:
 				var msg = "";
 			)";
 			// f(m["k"]) moved OUT of this matrix: map-key ref args bind via tier 2
-			// (Dev ruling 2026-07-12; see tier2_general_lvalue_ref_args)
+			// (see tier2_general_lvalue_ref_args)
 			const char* cases[] = {
 				"try { f(b.v + 1); } catch (e) { msg = e; } msg;",
 				"try { f(arr.size()); } catch (e) { msg = e; } msg;",
@@ -1903,7 +1902,7 @@ public:
 					check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
 						std::string("non-lvalue arg keeps the exact error: ") + c + " got: " + msg);
 				}
-				{   // a method passed as a value is the method-value error (Dev ruling 2026-09-30), ahead of the reference binding
+				{   // a method passed as a value is the method-value error, ahead of the reference binding
 					auto e = jai::engine::make();
 					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					e->static_checking(jai::check_mode::warn);
@@ -1943,7 +1942,7 @@ public:
 		});
 
 		test("tier2_general_lvalue_ref_args", [this]() {
-			// Dev ruling 2026-07-12: a reference VALUE is an lvalue - ref params bind
+			// A reference VALUE is an lvalue - ref params bind
 			// the evaluated argument's owner-pinned reference when the structural kernel
 			// can't classify the shape (map keys, computed indices, member-expr indices,
 			// typed-array elements). Index side effects run exactly once, in arg order.
@@ -2011,7 +2010,7 @@ public:
 		});
 
 		test("ref_decl_member_final", [this]() {
-			// Dev ruling 2026-07-12 route-independence: var&/auto& declarations bind
+			// Route independence: var&/auto& declarations bind
 			// member-final chains through the same kernel ref params use (the
 			// gloom_idiomatic `auto& p = G.player` encounter). Computed properties keep
 			// the decl's non-lvalue error.
@@ -2660,7 +2659,7 @@ public:
 				std::ofstream f(file_path);
 				f << "auto vm_included_flag = 77;";
 			}
-			// row 123.3: an include is textual, so an include inside a function body scopes with the function: the included
+			// An include is textual, so an include inside a function body scopes with the function: the included
 			// global is visible inside loader() and gone after it, identically on both backends
 			const char* script = R"(
 				function loader() { include "vm_include_in_fn.jai"; return vm_included_flag; }
@@ -3018,8 +3017,8 @@ public:
 				same_object(kept, h.pet) ? h.pet.id * 10 + h.pet.extra : -1;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("41"), i_out, "interp: Dog takes the Animal-constrained field in place through a field ref (Dev ruling 2026-10-04)");
-			check_eq(std::string("41"), v_out, "vm: Dog takes the Animal-constrained field in place through a field ref (Dev ruling 2026-10-04)");
+			check_eq(std::string("41"), i_out, "interp: Dog takes the Animal-constrained field in place through a field ref");
+			check_eq(std::string("41"), v_out, "vm: Dog takes the Animal-constrained field in place through a field ref");
 		});
 
 		// A var local's tag is 'any'; the constraint check resolves the actual instance
@@ -3102,9 +3101,9 @@ public:
 		test("tier1_map_pair_accessor_ref_args", [this]() {
 			// Range-for map pairs expose .second through a C++ property whose value is a
 			// live map-entry reference: the PROPERTY-mode ref (reference_model.md) writes
-			// through the pair's setter into the real entry (Dev ruling 2026-07-12 kept
-			// the write landing in the map). kv.first is the pair's own COPY of the key:
-			// binding it writes that copy (the by-reference-binds-properties ruling), so
+			// through the pair's setter into the real entry (the write
+			// lands in the map). kv.first is the pair's own COPY of the key:
+			// binding it writes that copy (by-reference binds properties), so
 			// the map key - and the ordering invariant - stay untouched.
 			const char* src = R"(
 				var m = {"a": 1, "b": 2};
@@ -3153,7 +3152,7 @@ public:
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
 			check_true(i_out.find("AB|") == 0, std::string("interp: raw same-class and subtype accepted, got: ") + i_out);
-			// the ref runs the field's table (Dev ruling 2026-09-30): the DECLARED type ('S p') names the slot
+			// the ref runs the field's table: the DECLARED type ('S p') names the slot
 			check_true(i_out.find("Cannot assign int to field 'p' of H (declared S)") != std::string::npos,
 				std::string("interp: rejection names the declared constraint, got: ") + i_out);
 			check_eq(i_out, v_out, "shared_ptr field constraint parity");
@@ -3215,7 +3214,7 @@ public:
 			};
 			auto parts = split(i_out);
 			check_eq((size_t)6, parts.size(), "six error captures");
-			// Dev ruling 2026-09-02: a subclass is admitted into a class-typed element (no error)
+			// A subclass is admitted into a class-typed element (no error)
 			check_true(parts[0].empty(), std::string("direct gate admits a subtype, got: ") + parts[0]);
 			check_eq(parts[0], parts[1], "subtype: ref matches direct");
 			check_true(parts[2].empty(), std::string("direct gate admits a var-held instance of the class, got: ") + parts[2]);
@@ -3283,11 +3282,10 @@ public:
 
 		// Tier 3(b): the exact-class-match conversion skip must keep value semantics -
 		// exact match still deep-clones; subclass args keep the full path.
-		// RULED (2026-07, `new` sugar): a 'var' decl keeps a shared_ptr-tagged
+		// `new` sugar: a 'var' decl keeps a shared_ptr-tagged
 		// initializer's marker (var sp = shared_ptr<P>() ≡ shared_ptr<P> sp = P()), so
 		// sp's arg tag forces sharing through the exact-class param (14,14) — matching
-		// what the decl-typed spelling always did. Was 14,4 when the var decl flattened
-		// the tag to 'any'.
+		// what the decl-typed spelling does.
 		test("tier3_exact_class_param_still_clones", [this, run_both_backends]() {
 			const char* src = R"(
 				class P { int v = 1; }
@@ -3586,11 +3584,9 @@ public:
 		});
 
 		test("stage1_closure_callee_capture_dies_with_scope", [this, run_both_backends]() {
-			// RULED (2026-07, flat-stack stage 1): a DEAD lambda's captures keep
-			// nothing. The interpreter used to read false here — a freed pool slot
-			// retained its parent chain (the capture env) until slot reuse
-			// (release_environment kept parent+values); the vm's pool always dropped
-			// them at release. Both backends now report expiry, and the vm's callee
+			// A DEAD lambda's captures keep
+			// nothing: a freed pool slot drops its parent chain (the capture env)
+			// at release on both backends, so both report expiry, and the vm's callee
 			// cache must never re-add a pin (closures are excluded from it; the
 			// capture-env leak class is also guarded by C++ alive counts in
 			// Comprehensive Scope Tests::mixed_scopes_comprehensive).
@@ -3613,7 +3609,7 @@ public:
 		});
 
 		test("stage1_live_lambda_capture_keeps_object_alive", [this, run_both_backends]() {
-			// RULED positive twin: a LIVE lambda's by-value shared_ptr capture keeps
+			// Positive twin: a LIVE lambda's by-value shared_ptr capture keeps
 			// the object alive after every other alias dies; dropping the lambda
 			// releases it.
 			auto [i1, v1] = run_both_backends(R"(
@@ -4313,7 +4309,7 @@ public:
 		});
 
 		test("reference_argument_binds_at_evaluation_parity", [this, run_both_backends_stdlib]() {
-			// Dev ruling 2026-10-08: a reference argument binds when it is evaluated, left to right, as in C++: a later argument that
+			// A reference argument binds when it is evaluated, left to right, as in C++: a later argument that
 			// reassigns the receiver, moves the index, or replaces a nested receiver leaves the binding where evaluation put it, for
 			// functions, methods, constructors, a mixed-mode overload and a later conversion that runs code
 			auto [i2, v2] = run_both_backends_stdlib(R"(
@@ -4455,7 +4451,7 @@ public:
 			check_true(i5.find("Cannot take reference of undefined variable") != std::string::npos, "ref-return ::missing raises (got: " + i5 + ")");
 		});
 
-		// === Callee-first semantics guards (Dev ruling 2026-07-08: callee-before-args
+		// === Callee-first semantics guards (callee-before-args
 		// IS the language, matching C++17; the vm's probe pair keeps the observation
 		// point without materializing the callee on the value stack) ===
 
@@ -4553,7 +4549,7 @@ public:
 			check_eq(std::string("1:5:15:true"), v1, "vm: yield-in-args pending isolation");
 		});
 
-		// INDEX operand fusion phase 2: member-base containers (`base.field[i]` resolves
+		// INDEX operand fusion: member-base containers (`base.field[i]` resolves
 		// the member inside the op through its own member_ic row) and computed flat-binary
 		// indexes (`a[i + 1]` runs the index through binary_fused_compute in-op). Every
 		// test below runs both backends; the exotic shapes exercise the verbatim replays.
@@ -4928,7 +4924,7 @@ public:
 			// an auto& local): every deref runs the getter, which the host can count. A lane
 			// that reads it and then misses (out of range, a mismatched kind) would run it
 			// again on the general path; the lanes step aside for such references, so the
-			// count is the interpreter's: one per read (Astra's getter-boundary probe)
+			// count is the interpreter's: one per read (a getter-boundary probe)
 			struct probe_box { script_int reads = 0; std::vector<script_int> values{10, 20}; };
 			for (bool proofs : {true, false}) {
 				for (int backend = 0; backend < 2; ++backend) {
@@ -5074,7 +5070,7 @@ public:
 			}
 			// the override can arrive between execute calls (typed ops read the flag per
 			// execution) or from a native callback while the function runs; every timing agrees
-			// with the interpreter (Astra's operator-transition matrix)
+			// with the interpreter (an operator-transition matrix)
 			for (bool proofs : {true, false}) {
 				const char* define = "int calc(int a, int b) { int c = a + b; int d = (a + b) * 10; return c * 1000 + d; } function later() { install(); return calc(1, 1); }";
 				auto make = [&](bool interp) {
@@ -5097,7 +5093,7 @@ public:
 				check_eq(run(interp, "calc(1, 1);"), run(vmx, "calc(1, 1);"), "after the install, a later execute");
 				check_true(run(vmx, "calc(1, 1);") != "2020", "the typed slots see the installed operator: " + run(vmx, "calc(1, 1);"));
 			}
-			// op_t_load: the decl read battery's shapes again through the flattened site, and the
+			// op_t_load: the decl read tests' shapes again through the flattened site, and the
 			// lowering probe (a closure body with a proven element read lists T_LOAD)
 			{
 				auto vm = vm_engine();

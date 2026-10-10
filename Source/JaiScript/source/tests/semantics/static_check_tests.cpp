@@ -257,7 +257,7 @@ public:
         });
 
         test("compound_assign_follows_cpp_rules", [this]() {
-            // Dev ruling: `x op= rhs` on a typed target is `x = T(x op rhs)` — numeric
+            // `x op= rhs` on a typed target is `x = T(x op rhs)` — numeric
             // conversions are fine, a string result into an int target is not.
             auto e = make_engine();
             check_eq((size_t)0, error_count(e->check("int x = 1; x += 2.5;")));
@@ -511,7 +511,7 @@ public:
             check_eq((size_t)0, error_count(e->check(std::string(cls) + "c.lives = 5; c.meow(); c.fed(2);")));
             check_eq((size_t)1, error_count(e->check(std::string(cls) + "c.zzz_nope();")));
             check_eq((size_t)1, error_count(e->check(std::string(cls) + "c.zzz_nope = 1;")));
-            // typed fields enforce like locals (Dev ruling: declared field types are real)
+            // typed fields enforce like locals (declared field types are real)
             check_eq((size_t)1, error_count(e->check(std::string(cls) + "c.lives = \"s\";")));
             check_eq((size_t)1, error_count(e->check(std::string(cls) + "c.fed(\"s\");")));
             check_eq((size_t)1, error_count(e->check(std::string(cls) + "c.meow(1);")));
@@ -802,8 +802,8 @@ public:
             check_eq((size_t)0, error_count(e->check("string s = 1 + \"b\";")));
         });
 
-        // A mixed-branch ternary has no single static type, so 'auto x = c ? 0 : 1.5' is a var
-        // (Dev ruling 2026-09-27); the warning says so, since the spelling reads like a typed
+        // A mixed-branch ternary has no single static type, so 'auto x = c ? 0 : 1.5' is a var;
+        // the warning says so, since the spelling reads like a typed
         // slot. Typed decls absorb the join and var stays dynamic.
         test("warn_auto_from_mixed_branch_ternary", [this]() {
             auto e = make_engine();
@@ -1004,7 +1004,7 @@ public:
         });
 
         test("shared_ptr_decl_pointee_checking", [this]() {
-            // Runtime enforces typed shared_ptr decl pointees (Dev ruling 2026-07);
+            // Runtime enforces typed shared_ptr decl pointees;
             // the checker models the same rule through its object-assignability
             // lattice: wrong class errors, derived->base stays clean.
             auto e = make_engine();
@@ -1017,7 +1017,7 @@ public:
         });
 
         test("shared_ptr_auto_decl_infer_then_enforce", [this]() {
-            // shared_ptr<auto> models runtime's infer-then-enforce (Dev ruling 2026-07):
+            // shared_ptr<auto> models runtime's infer-then-enforce:
             // the pointee comes from the initializer's class and behaves like the
             // explicit spelling thereafter. Nothing to infer (missing/null/non-class
             // initializer) errors, matching runtime.
@@ -1314,7 +1314,7 @@ public:
         });
 
         test("proof_consumers_retype_on_reload_assigns_never_errors", [this]() {
-            // Ruling (2): field proofs armed before a reload that retypes the fields miss on
+            // Field proofs armed before a reload that retypes the fields miss on
             // the shape epoch, and the ladder converts/rejects exactly as the unproven twin.
             auto on = make_engine();
             auto off = make_engine();
@@ -2332,7 +2332,7 @@ public:
         });
 
         test("extern_without_a_definition_raises_at_its_first_use", [this]() {
-            // Dev (2026-09-30): an extern declares nothing; a use while nothing defines the name raises, and `inline` creates it
+            // An extern declares nothing; a use while nothing defines the name raises, and `inline` creates it
             auto e = make_engine();
             e->execute("extern ghost;\nfunction touch() -> int { return ghost; }");
             std::string read = outcome(*e, "touch()");

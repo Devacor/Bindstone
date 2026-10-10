@@ -2,7 +2,7 @@
 // typed rows; docs/invariants.md): an event the fast path assumes away happens inside it, and the result must be the
 // one the specification gives for the plain program. Expected values come from the spec, never from a backend. Every
 // row runs on the interpreter and the VM, proofs on and off, passes off, and with injected cell misses when the build
-// carries the lever.
+// defines JAISCRIPT_MISS_INJECTION.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>

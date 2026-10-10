@@ -1,4 +1,4 @@
-// Fixes found by the 2026-10-01 documentation audit: backend parity of serialized field order, the interpreter's
+// Fixes found by a documentation audit: backend parity of serialized field order, the interpreter's
 // call-depth contract on a small native stack, and the texts of several runtime and checker diagnostics.
 
 #include <jaiscript/testing/foundry.hpp>
@@ -197,7 +197,7 @@ public:
                               "no overload of 'm' matches this call", "methods at load");
             expect_load_error("class V { int a; V(int x) { a = x; } V(bool b) { a = 1; } } V v = V(\"s\");",
                               "error: no", "constructors at load");
-            // a program's free functions of one name are an overload set too (Dev ruling 2026-10-02)
+            // a program's free functions of one name are an overload set too
             expect("int f(int a) { return 1; } int f(bool b) { return 2; } var out = \"\"; try { f(\"s\"); } catch (e) { out += e; } out;",
                    "No overload of 'f' takes (string)", "free functions at run time", check_mode::off);
             expect("void h(bool b) { } bool k = \"s\"; h(\"s\"); k;", "true", "a lone bool slot takes a string's truthiness", check_mode::strict);

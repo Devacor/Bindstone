@@ -97,9 +97,9 @@ public:
     }
     
     void forge_tests() override {
-        // RULED (2026-07, open question #9, option C): use_count() reports the OUTER
+        // use_count() reports the OUTER
         // holder count — the layer script alias copies bump and script weak_ptr expiry
-        // follows. cpp_ref_count() preserves the old inner number (C++-side shares).
+        // follows. cpp_ref_count() reports the inner number (C++-side shares).
         // The alias-ladder must be byte-identical on BOTH backends (the builtin
         // subtracts a per-backend transient offset — these pins hold it stable).
         test("use_count_reports_script_alias_ladder", [this]() {
@@ -147,17 +147,17 @@ public:
             }
         });
 
-        // RULED (2026-07, flat-stack stage 1): transient_k is CALIBRATION, not
+        // transient_k is CALIBRATION, not
         // semantics — but every change to the transient-copy structure must be
-        // REPORTED with direction + cause, never silently retuned (Dev: "a regression
-        // isn't silent"). This audit pins the exact script-visible count for a
+        // REPORTED with direction + cause, never silently retuned (a regression
+        // isn't silent). This audit pins the exact script-visible count for a
         // canonical call shape PER BACKEND, so any change to per-call copies fails
         // here and forces the report:
         //   DOWNWARD (fewer copies, e.g. stage-2 in-place binding eliding the arg
         //   slice) = a win — update the pin WITH a proof of safety in the commit
         //   (which copy was elided, why no observable aliasing change).
         //   UPWARD (more copies) = a copy regression — justify or treat as a defect.
-        // Ledger at this pin (transient_k: interp 2 / vm 3, use_count builtin):
+        // Counts at this pin (transient_k: interp 2 / vm 3, use_count builtin):
         //   top-level a.use_count(): 1 alias + builtin transients - k = 1 (both).
         //   inside probe(a): interp = outer(1) + args-vector copy(1) + param slot(1)
         //   + builtin transients(2) - k(2) = 3; vm = outer(1) + param slot(1)
@@ -186,7 +186,7 @@ public:
         });
 
         test("cpp_ref_count_sees_cpp_extraction", [this]() {
-            // cpp_ref_count() preserves the pre-ruling number: script aliases leave it
+            // cpp_ref_count() reports the inner number: script aliases leave it
             // at 1; a C++-side share (holder->data copy) bumps it
             for (bool use_vm : {false, true}) {
                 auto e = engine::make();

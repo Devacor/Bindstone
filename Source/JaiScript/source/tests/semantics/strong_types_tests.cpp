@@ -39,8 +39,8 @@ public:
             // var is the runtime hatch: the element boundary (a declaration literal, push, a
             // subscript store, a map value store, the reference route) admits a var-held instance
             // of the element class or a subclass, a new element carries its class, a store over an
-            // existing element assigns into it, the element keeping its object and taking the source's class (Dev rulings
-            // 2026-10-03 and 2026-10-04), and a rejection names the payload's type, never the var tag; byte-identical on
+            // existing element assigns into it, the element keeping its object and taking the source's class, and a rejection names
+            // the payload's type, never the var tag; byte-identical on
             // both backends
             const char* src = R"(
                 class Animal { int id = 1; }
@@ -93,7 +93,7 @@ public:
         });
 
         test("handle_typed_elements_take_null_and_live_instances", [this]() {
-			// Dev rulings 2026-09-08: array<shared_ptr<T>> / array<weak_ptr<T>> elements and
+			// array<shared_ptr<T>> / array<weak_ptr<T>> elements and
 			// map<K, shared_ptr<T>> values take null at every site (a declaration literal, push,
 			// a subscript store, a map store, the reference route, a var-held null); a shared_ptr<T>
 			// element takes a live instance of T or a subclass the way a shared_ptr<T> variable does
@@ -166,7 +166,7 @@ public:
 		});
 
         test("assignment_expressions_yield_the_stored_value", [this]() {
-            // Dev ruling 2026-09-08: the value of an assignment expression is the destination's
+            // The value of an assignment expression is the destination's
             // stored value on every spelling (`auto r = (c.n = 3.9)` is int 3): typed local, bare and
             // explicit field, static, accessor (read back through _get_), array element, map value,
             // nested element, compound forms; postfix keeps the old stored value; a var element keeps
@@ -244,7 +244,7 @@ public:
 
         test("bool_and_int_elements_convert", [this]() {
 			// Invalid conversion statements use warn_mode so their runtime texts are still exercised.
-			// Dev ruling 2026-09-09: bool and int convert both ways at the element boundary (a
+			// bool and int convert both ways at the element boundary (a
 			// declaration literal, push, a subscript store, a map value, a whole typed array), like
 			// the scalar slots; int -> string stays explicit (to_string / cast<string>), float and
 			// string rows keep their texts, map keys stay strict; both backends agree
@@ -346,7 +346,7 @@ public:
 
         test("extern_raises_until_defined_and_inline_creates_on_both_backends", [this]() {
             auto eng = make_engine();
-            // externs declare nothing (Dev, 2026-09-30): a use before the host's add_global or a declaration raises
+            // externs declare nothing: a use before the host's add_global or a declaration raises
             auto r = eng->execute(R"(
                 extern int hp;
                 extern loose;
@@ -1403,7 +1403,7 @@ public:
             check_eq(result.as<int>(), 50);
         });
 
-        // ===== COMPOUND ASSIGNMENT: C++ RULES ON TYPED TARGETS (ruling 2026-07) =====
+        // ===== COMPOUND ASSIGNMENT: C++ RULES ON TYPED TARGETS =====
         // x op= rhs ≡ x = T(x op rhs): compute in the promoted type, convert the result
         // back to the declared type exactly like plain '=' (int truncates toward zero).
         // var (any-typed) targets keep the old dynamic behavior (int += 2.5 -> float 3.5).
@@ -1500,7 +1500,7 @@ public:
 
         test("compound_typed_element_and_ref_targets", [this, check_both]() {
             // Constrained element: the store converts (12.5 -> 12) and a consumed expression's
-            // value is the stored element (Dev ruling 2026-09-08)
+            // value is the stored element
             check_both("array<int> a = [10]; a[0] += 2.5; type_of(a[0]) + \":\" + to_string(a[0])", "int:12", "typed element converts");
             check_both("array<int> a = [10]; var r = (a[0] += 2.5); to_string(r)", "12", "element result is the stored element");
             check_both("array<int> a = [10]; a[0] %= 4.5; to_string(a[0])", "1", "typed element %=");
@@ -1534,7 +1534,7 @@ public:
             }
         });
 
-        // ===== TYPED CLASS FIELDS ENFORCE LIKE LOCALS (ruling 2026-07) =====
+        // ===== TYPED CLASS FIELDS ENFORCE LIKE LOCALS =====
         // Declared field types are stored on the class definition and every write path
         // converts through the field kernel (same table '=' uses on locals): direct member
         // assign, implicit-this assign, compound, ctor field-init, set_field C++ API,
@@ -1706,7 +1706,7 @@ public:
             // wrappers (JaiScript objects travel as object OR shared_ptr over one holder).
             // A subtype member is reached through cast<T&> or a var receiver: the field's
             // static class is S, and S has no 't' (exactly like C++). A field holding an S keeps
-            // its object and takes the subtype's class (Dev ruling 2026-10-04: no slicing).
+            // its object and takes the subtype's class (no slicing).
             check_both(R"(
                 class S { int x = 1; }
                 class T : S { int t = 2; }
@@ -2055,7 +2055,7 @@ public:
         });
 
         test("a_reference_stores_by_its_declared_type", [this, check_both]() {
-            // Dev ruling 2026-09-30: the reference's declared type governs the store (cast<int&>(v), int& r = v); var& and auto&
+            // The reference's declared type governs the store (cast<int&>(v), int& r = v); var& and auto&
             // keep the referent's own rule
             check_both("var v = 1; cast<int&>(v) = 2.5; type_of(v) + \":\" + to_string(v)", "int:2", "cast<int&> over a var");
             check_both("var v = 1; int& r = v; r = 2.5; type_of(v) + \":\" + to_string(v)", "int:2", "int& over a var");
@@ -2103,7 +2103,7 @@ public:
         });
 
         test("a_reference_binding_must_reference", [this, check_both, both]() {
-            // Dev ruling 2026-09-30: a T& binds a var only while it holds T's kind (a class: T or a subclass); otherwise the binding
+            // A T& binds a var only while it holds T's kind (a class: T or a subclass); otherwise the binding
             // raises, in every binding form, naming the value's type and T&
             check_both("var v = 1; var c = \"\"; try { float& r = v; c = \"bound\"; } catch (e) { c = e; } c", "Cannot initialize 'r' (declared float&) with int", "float& over a var holding an int");
             check_both("var v = 2.5; var c = \"\"; try { int& r = v; c = \"bound\"; } catch (e) { c = e; } c", "Cannot initialize 'r' (declared int&) with float", "int& over a var holding a float");
@@ -2121,7 +2121,7 @@ public:
         });
 
         test("a_reference_parameter_stores_by_its_declared_type", [this, check_both]() {
-            // Dev ruling 2026-09-30: `void f(int& p)` over a var stores ints, decided at the stores from the parameter's declared type
+            // `void f(int& p)` over a var stores ints, decided at the stores from the parameter's declared type
             check_both("function f(int& p) { p = 2.5; } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:2", "a converting store");
             check_both("function f(int& p) { p += 0.5; p++; } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:2", "compound and ++");
             check_both("function f(int& p) { p = p + 1; p += 2; p++; } var v = 1; f(v); type_of(v) + \":\" + to_string(v)", "int:5", "matching kinds");
@@ -2268,7 +2268,7 @@ public:
 
         // ===== TYPED FLAT ARRAY STORAGE (typed_array_design.md) =====
         // array<int>/array<float> hold raw primitive buffers by their declared type (the
-        // representation, not a mode - Dev ruling 2026-09-02). The contract: typed
+        // representation, not a mode). The contract: typed
         // storage is observationally invisible - every snippet runs on both backends and
         // the outputs pin the plain-semantics answer.
 
@@ -2332,7 +2332,7 @@ public:
             check_quad_error(q("array<K> ks = [K()]; ks.push(5)").c_str(), "an int does not push");
             check_quad_error(q("class J { int b = 0; } array<K> x = [J()]").c_str(), "another class does not declare");
             check_quad_error(q("class J { int b = 0; } array<K> ks = [K()]; ks[0] = J()").c_str(), "another class does not store");
-            check_quad(q("class D : K { } array<D> ds = [D()]; array<K> ks = ds; to_string(ks.size()) + \",\" + to_string(ks[0].a)").c_str(), "1,1", "array<Derived> converts to array<Base> (Dev ruling 2026-09-02: subclasses admitted)");
+            check_quad(q("class D : K { } array<D> ds = [D()]; array<K> ks = ds; to_string(ks.size()) + \",\" + to_string(ks[0].a)").c_str(), "1,1", "array<Derived> converts to array<Base> (subclasses admitted)");
         });
 
         test("type_of_names_the_held_class_through_casts", [check_quad]() {
@@ -2345,9 +2345,9 @@ public:
         });
 
         test("map_behaviour_battery", [check_quad, check_quad_error]() {
-            // Every row is the pre-change output of BOTH backends (scratchpad mapprobes_before.txt,
-            // 2026-09-02): the typed-map campaign (typed_array_design.md stage 6) must keep them
-            // byte-identical, and the two EDGE rows are rulings for Dev, not behaviour to copy
+            // Every row is the pre-change output of BOTH backends: typed map storage
+            // (typed_array_design.md stage 6) must keep them
+            // byte-identical, and the two EDGE rows are undecided, not behaviour to copy
             check_quad("var m = {\"a\": 1, \"b\": 2}; to_string(m[\"a\"] + m[\"b\"]) + \",\" + to_string(m.size())", "3,2", "literal read + size");
             check_quad("map<string,int> m = {\"a\": 1, \"b\": 2}; to_string(m[\"b\"]) + \"|\" + type_of(m)", "2|map", "typed declaration");
             check_quad("map<int,string> m = {3: \"c\", 1: \"a\", 2: \"b\"}; string s = \"\"; for (auto kv : m) { s += kv.second; } s", "abc", "int keys iterate in key order");
@@ -2378,10 +2378,10 @@ public:
             check_quad("map<string,int> m = {\"a\": 1}; m.clear(); m[\"b\"] = 2; to_string(m.size()) + \",\" + to_string(m.contains(\"a\"))", "1,false", "clear then store");
             check_quad("map<string,array<int>> m = {\"a\": [1, 2]}; m[\"a\"].push(3); to_string(m[\"a\"].size()) + \",\" + to_string(m[\"a\"][2])", "3,3", "array value mutates through the entry");
             check_quad("coroutine int walk(map<string,int> mm) { for (auto kv : mm) { yield kv.second; } return 0; } map<string,int> m = {\"a\": 5, \"b\": 6}; auto h = walk(m); to_string(h.resume()) + \",\" + to_string(h.resume())", "5,6", "coroutine over a map");
-            check_quad_error("map<string,int> m = {}; m[5] = 1", "key type enforced on a direct store (Dev ruling 2026-09-02)");
+            check_quad_error("map<string,int> m = {}; m[5] = 1", "key type enforced on a direct store");
             check_quad_error("map<string,int> m = {}; m[\"k\"] = \"str\"", "value type enforced on store");
             check_quad_error("map<string,int> m = {\"a\": \"s\"}", "value type enforced on declaration");
-            check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "increment of a map entry (Dev ruling 2026-09-02: works like += 1)");
+            check_quad("map<string,int> m = {\"n\": 1}; m[\"n\"]++; to_string(m[\"n\"])", "2", "increment of a map entry (works like += 1)");
         });
 
         test("instance_plan_battery", [check_quad, check_quad_error]() {
@@ -2674,7 +2674,7 @@ public:
         });
 
         test("increment_targets_battery", [check_quad, check_quad_error]() {
-            // Dev ruling 2026-09-02: ++/-- work on every lvalue, not only identifiers. Non-
+            // ++/-- work on every lvalue, not only identifiers. Non-
             // identifier targets desugar at parse time to `+= 1` / `-= 1` (the compound
             // machinery both backends share); postfix yields the exact old value
             check_quad("array<int> a = [1, 2]; a[0]++; to_string(a[0])", "2", "postfix ++ on a typed element");
@@ -2703,7 +2703,7 @@ public:
         });
 
         test("map_key_types_battery", [check_quad, check_quad_error]() {
-            // Dev ruling 2026-09-02: the declared key type is enforced on direct stores; map<var,V>
+            // The declared key type is enforced on direct stores; map<var,V>
             // takes any key; an `auto` key or value slot infers from a uniform literal (mixed = error)
             // and stays dynamic for an empty literal - the array rule applied to maps
             check_quad("map<var,int> m = {}; m[5] = 1; m[\"x\"] = 2; to_string(m.size())", "2", "map<var,V> takes any key");
@@ -2722,12 +2722,12 @@ public:
 
         test("subclass_admission_battery", [check_quad, check_quad_error]() {
 			// Runtime subclass tags and value-dependent downcasts are tested explicitly in warn mode.
-			// Dev ruling 2026-09-02: class-typed arrays admit the class and its subclasses (exact
+			// Class-typed arrays admit the class and its subclasses (exact
 			// ids compare first; the parent-chain walk runs only on a name mismatch); each
 			// slot keeps its own class tag; whole-array conversions prove the source class once
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B(), D()]; to_string(arr.size()) + \",\" + to_string(arr[1].b)", "2,2", "a subclass element keeps its own class (per-slot tag): its fields stay reachable");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; arr.push(D()); to_string(arr.size()) + \",\" + to_string(arr[1].a)", "2,1", "push of a subclass into array<Base>");
-			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; D d = D(); d.a = 5; arr[0] = d; to_string(arr[0].a) + type_of(arr[0]) + to_string(arr[0].b)", "5D2", "store of a subclass over an element takes the subclass in place (Dev ruling 2026-10-04: no slicing)");
+			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> arr = [B()]; D d = D(); d.a = 5; arr[0] = d; to_string(arr[0].a) + type_of(arr[0]) + to_string(arr[0].b)", "5D2", "store of a subclass over an element takes the subclass in place (no slicing)");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } class E : D { int c = 3; } array<B> deep = [E()]; to_string(deep[0].c)", "3", "two inheritance levels");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<D> ds = [D()]; array<B> bs = ds; bs[0].a = 9; to_string(ds[0].a) + \",\" + to_string(bs[0].a)", "1,9", "array<Derived> into array<Base> is a copy (value semantics)");
 			check_quad("[[warn_mode]] class B { int a = 1; } class D : B { int b = 2; } array<B> bs = [D(), D()]; array<D> back = bs; to_string(back.size()) + \",\" + to_string(back[1].b)", "2,2", "array<Base> whose elements are all Derived converts to array<Derived>");
@@ -2740,7 +2740,7 @@ public:
 		});
 
         test("typed_decl_initializer_exception_wins", [check_quad_error]() {
-            // fuzz seed 22684 (2026-09-02): the interpreter's typed declaration enforced the
+            // fuzz seed 22684: the interpreter's typed declaration enforced the
             // declared type on the null a raising member read leaves behind, reporting
             // 'Type mismatch in assignment' where the vm reports the member exception
             check_quad_error("class K { int a = 1; } auto k = K(); int y = k.missing", "int decl from a missing member raises the member text");
@@ -2764,9 +2764,9 @@ public:
             check_quad("array<char> c = ['a', 'b']; array<char> d = c; d[0] = 'x'; to_string(c[0]) + to_string(d[0])", "ax", "char buffer copy is a copy");
             check_quad("array<bool> f = [true, false]; to_json(f)", "[true,false]", "bool buffer serializes");
             check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + ch; } s", "hi", "char buffer range-for");
-            check_quad("array<bool> f = [true]; f.push(1); f.push(0); to_json(f)", "[true,true,false]", "bool buffer converts an int (Dev ruling 2026-09-09)");
+            check_quad("array<bool> f = [true]; f.push(1); f.push(0); to_json(f)", "[true,true,false]", "bool buffer converts an int");
             check_quad_error("array<char> c = ['a']; c[0] = \"s\"", "char buffer rejects string");
-            // fuzz seed 201467 (element band, 2026-09-29): an int written into a bool element through a reference reached the
+            // fuzz seed 201467 (element band): an int written into a bool element through a reference reached the
             // buffer unconverted and crashed both backends; a reference store takes the direct store's rows
             check_quad("array<bool> f = [false, true]; for (auto& x : f) { x = 5; } to_json(f)", "[true,true]", "bool buffer store through a range-for reference converts an int");
             check_quad("function z(bool& p) { p = 0; } array<bool> f = [true]; z(f[0]); to_json(f)", "[false]", "an int stored through a bool& parameter into a bool buffer converts");
@@ -2780,14 +2780,14 @@ public:
             check_quad("array<string> s = [\"hi\"]; to_json(s)", "[\"hi\"]", "string buffer serializes");
             check_quad("array<string> s = [\"a\", \"b\"]; s.reverse(); s[0]", "b", "string buffer reverse");
             check_quad_error("array<string> s = [\"a\"]; s.push(1)", "string buffer rejects int");
-            // fuzz seed 129 (2026-09-02): the vm's unfused element-store lane took ANY typed
+            // fuzz seed 129: the vm's unfused element-store lane took ANY typed
             // node with a numeric rhs - an int landed unchecked in a string buffer
             check_quad_error("array<string> s = [\"a\"]; int g = 5; s[0] = g", "string buffer element store rejects int");
             check_quad("array<string> s = [\"a\"]; s[0] += \"1\"; s[0]", "a1", "string buffer compound store concatenates through the enforcing path");
-            check_quad("array<bool> f = [true, true]; f[0] = 0; f[1] = 7; to_json(f)", "[false,true]", "bool buffer element store converts an int (Dev ruling 2026-09-09)");
+            check_quad("array<bool> f = [true, true]; f[0] = 0; f[1] = 7; to_json(f)", "[false,true]", "bool buffer element store converts an int");
             check_quad_error("array<char> c = ['a']; c[0] += 1", "char buffer compound store rejects int");
             check_quad("array<string> s = [\"a\"]; string t = \"b\"; s[0] = t; s[0]", "b", "string buffer element store of a string");
-            // fuzz seed 6977 (2026-09-02): the vm's inline push named an ELEMENT-REFERENCE
+            // fuzz seed 6977: the vm's inline push named an ELEMENT-REFERENCE
             // argument 'reference' in the mismatch text where the interpreter names the
             // referent (pre-existing for dynamic tables too; ref locals and fields were fine)
             check_quad_error("array<string> t = [\"a\"]; array<int> v = [1]; v.push(t[0])", "push of a string-buffer element into array<int> names the referent");
@@ -2943,7 +2943,7 @@ public:
         test("typed_storage_value_semantics_and_laundering", [check_quad]() {
             // decl copy is a deep copy (kind-preserving buffer copy)
             check_quad("array<int> a = [1,2]; array<int> b = a; b[0] = 9; to_string(a[0]) + to_string(b[0])", "19", "typed->typed copy");
-            // a var copy keeps the typed array (Dev ruling 2026-09-28): the element type holds, the variable stays a var
+            // a var copy keeps the typed array: the element type holds, the variable stays a var
             check_quad("array<int> a = [1,2]; var v = a; string r = \"\"; try { v.push(\"s\"); } catch (e) { r = \"raised\"; } v.push(3); r + to_string(v.size()) + to_string(a.size())", "raised32", "a var copy keeps array<int>");
             // var& preserves the tag: still enforced
             check_quad("array<int> a = [1]; var& r = a; r.push(2); to_string(a.size())", "2", "var& push int");

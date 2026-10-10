@@ -32,7 +32,7 @@ public:
 			check_throws([&]() { e->execute("for (int i = 0; i < 2; i += 0) { }"); });
 		});
 
-		// fuzz seed 33294 (2026-09-02): the fast counting loop's fall-through continuation
+		// fuzz seed 33294: the fast counting loop's fall-through continuation
 		// (taken when the counter's storage kind changes mid-loop - here a one-time
 		// reference binding boxes it) had no back-edge limit check, so the loop ran
 		// unbudgeted forever on the interpreter (the vm checks every back-edge)
@@ -88,9 +88,9 @@ public:
 			check_eq((int64_t)200000, r.as_int());
 		});
 
-		// Dev ruling 2026-07: budget/timeout errors are TERMINAL - no script catch may
-		// swallow them (the old catchable semantics enabled the FZ-BUDGET-LIVELOCK
-		// denial-of-service: catch-and-retry loops kept execute() from ever returning).
+		// Budget/timeout errors are TERMINAL - no script catch may
+		// swallow them (catchable semantics would enable the FZ-BUDGET-LIVELOCK
+		// denial-of-service: catch-and-retry loops keep execute() from ever returning).
 		test("budget_error_is_terminal_not_catchable", [this]() {
 			auto e = make_engine();
 			e->execution_budget(0.05);
@@ -246,7 +246,7 @@ public:
 				r.as<std::string>());
 		});
 
-		// Dev ruling: ONE script catch per execute; the SECOND raise in the same
+		// ONE script catch per execute; the SECOND raise in the same
 		// execute is TERMINAL (Part-1 machinery - every catch skipped, execute fails).
 		test("memory_cap_second_raise_is_terminal", [this]() {
 			auto e = make_engine();
@@ -289,7 +289,7 @@ public:
 		});
 
 		// Environment storage growth (defines of new names in fresh scopes) counts
-		// toward the allowance too (Dev explicitly wants env size counted).
+		// toward the allowance too (env size is counted deliberately).
 		test("memory_cap_env_growth_bomb_trips", [this]() {
 			auto e = make_engine();
 			e->execution_budget(5.0);

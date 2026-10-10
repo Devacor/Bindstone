@@ -347,8 +347,8 @@ public:
 					ok;
 				)");
 				check_true(r.as<bool>(), backend_tag(use_vm) + "char-char ordering comparisons");
-				// Char ruling 2026-07-12 (comparison inting) REVERSED the earlier pin:
-				// mixed char/int ordering now promotes to int64 0..255 like arithmetic.
+				// Comparison inting: mixed char/int ordering promotes to int64 0..255
+				// like arithmetic.
 				auto e2 = gloom_engine(use_vm);
 				check_true(!e2->execute("var x = 'a' < 1; x").as<bool>(), backend_tag(use_vm) + "char/int ordering promotes (97 < 1 is false)");
 				check_true(e2->execute("var y = 'a' < 98; y").as<bool>(), backend_tag(use_vm) + "char/int ordering promotes (97 < 98 is true)");
@@ -404,7 +404,7 @@ public:
 				std::string caught = "<no throw>";
 				try {
 					auto r = boom.as_function()(std::vector<jai::script_value>{});
-					if (!r.has_value()) { caught = std::string("<checked error> ") + e->format_error(r); }   // the checked flavor carries it (Dev ruling 2026-10-01)
+					if (!r.has_value()) { caught = std::string("<checked error> ") + e->format_error(r); }   // the checked flavor carries it
 				} catch (const jai::script_exception& ex) {
 					caught = std::string("<threw> ") + ex.what();
 				}
@@ -451,7 +451,7 @@ public:
 		});
 
 		test("host_callable_after_nested_execute_stays_mid_script", [this]() {
-			// Dev ruling: the executing state is a COUNTER (semaphore), not a bool.
+			// The executing state is a COUNTER (semaphore), not a bool.
 			// A host callback that runs a NESTED execute() and then invokes a
 			// throwing stored callable is still MID-SCRIPT after the nested execute
 			// returns - the boundary conversion must not fire, and the outer

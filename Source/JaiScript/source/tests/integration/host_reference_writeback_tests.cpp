@@ -14,7 +14,7 @@ using namespace jai;
 using namespace jai::foundry;
 
 // A non-const T& host parameter writes the callee's final value back into the script lvalue its argument names
-// (Dev ruling 2026-09-30), every value kind and every lvalue kind, on both backends
+// in every value kind and every lvalue kind, on both backends
 namespace writeback_hosts {
     struct flat2 { float x = 0, y = 0; };
     enum class mode : int { off = 0, on = 1, dim = 2 };

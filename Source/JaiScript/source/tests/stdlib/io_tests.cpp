@@ -82,7 +82,7 @@ public:
             check(output.find("Value: 42") != std::string::npos);
         });
 
-        // RULED (2026-07): single-arg print is VERBATIM passthrough — {{ }} escape
+        // Single-arg print is VERBATIM passthrough — {{ }} escape
         // processing only runs when format substitution runs (format path with args).
         // print is one shared registry entry, so both backends share this behavior.
         test("print_single_arg_verbatim_braces", [this]() {

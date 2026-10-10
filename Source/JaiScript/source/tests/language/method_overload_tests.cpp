@@ -59,7 +59,7 @@ public:
         });
 
         // ------------------------------------------------------- parameter defaults
-        // Dev ruling (2026-07): a callable with N params of which K have trailing
+        // A callable with N params of which K have trailing
         // defaults is callable with N-K..N args UNIFORMLY - instance methods, ctors
         // (incl. this()/super() delegation), static methods, namespace functions -
         // matching what free functions always did. Resolution gates share ONE kernel

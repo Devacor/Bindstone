@@ -187,7 +187,7 @@ public:
 			check(listing.find("throw:") == std::string::npos, "guarded loop executes successfully");
 		});
 		test("manifest_is_the_same_across_engines_and_names_no_runtime_state", [this]() {
-			// row 125: two engines intern different ids for the same names; the manifest names symbols by spelling
+			// two engines intern different ids for the same names; the manifest names symbols by spelling
 			const std::string src = "float f = 1.0000001; function run() { int s = 0; int i = 0; while (i < 10) { s = s + i * 2; i = i + 1; } return s; } print(to_string(run()) + to_string(f));";
 			auto a = compile_snippet(src); auto b = compile_snippet(src);
 			check_true(a.program && b.program && a.function && b.function, "compiled");
@@ -197,7 +197,7 @@ public:
 			check_true(ma.find("cell_loops 1") != std::string::npos, "the function's loop closed");
 		});
 		test("manifest_changes_with_a_constants_low_bit", [this]() {
-			// Astra (2026-09-12 19:54): 1.0000001 and 1.0000002 list the same; the manifest carries the constant's 64 bits
+			// 1.0000001 and 1.0000002 never list the same; the manifest carries the constant's 64 bits
 			auto a = compile_snippet("float f = 1.0000001; print(to_string(f));");
 			check_true(static_cast<bool>(a.program), "compiled");
 			const std::string before = jai::vm::chunk_manifest(*a.program, a.eng->get_symbolizer());
@@ -332,7 +332,7 @@ public:
 			both(script, "", "float payloads");
 		});
 		test("chained_index_store_folds_every_step", [this]() {
-			// Astra's control (b-review/chained-store.jai): pix[gi + 1 + offset] carries a chain step past the
+			// Control: pix[gi + 1 + offset] carries a chain step past the
 			// store's first binary; the cell store folds every step exactly as the general lane does
 			const std::string script = R"(
 				array<int> pixels = [0, 0, 0, 0, 0, 0, 0, 0];
@@ -348,7 +348,7 @@ public:
 			both(script, "124", "chained index store");
 		});
 		test("late_chain_overflow_keeps_prior_stores_and_the_text", [this]() {
-			// Astra's control (b-review/late-chain-overflow.jai, verified on stock: "Integer overflow in '+'" and 49):
+			// Control (the plain program gives "Integer overflow in '+'" and 49):
 			// the first chained index lands in bounds through the final %8, the second iteration's addition
 			// overflows in checked mode; the text and the prior store match the interpreter
 			const std::string script = R"(
@@ -1061,7 +1061,7 @@ public:
 			check_true(vm.rfind("108,48,", 0) == 0, "the plain aliases land: " + vm);
 		});
 		test("a_closed_loop_may_branch_inside_itself", [this]() {
-			// Astra's diamond fixtures in while form, the texture loop's guarded arm, a continue, a break (an exit of the
+			// Diamond fixtures in while form, the texture loop's guarded arm, a continue, a break (an exit of the
 			// block) and an overflow inside the taken arm: the same on both backends, proofs on and off
 			const std::string script = R"(
 				function diamond(int n) -> int { int total = 0; int i = 0; while (i < n) { if ((i % 2) == 0) { total += i; } else { total -= i; } i = i + 1; } return total; }
@@ -1193,7 +1193,7 @@ public:
 			check_true(listing.find("CELLS_BACK") != std::string::npos && listing.find("C_ARITH_ANY") != std::string::npos && listing.find("C_MATH") != std::string::npos && listing.find("C_MOV") != std::string::npos, "the flat column loop closes: " + listing);
 		});
 		test("two_pinned_tables_sharing_a_guard_slot_keep_their_own_snapshots", [this]() {
-			// Astra's review probes (guard_slot_reuse, guard_slot_reuse_kind): two guarded element-reference reads in
+			// Probes (guard_slot_reuse, guard_slot_reuse_kind): two guarded element-reference reads in
 			// different statements share one guard-temp slot; a bounds miss and a kind miss at the first read must resume
 			// the general form on the first table's handle, not the second's
 			const char* body = R"(
@@ -1334,8 +1334,8 @@ public:
 			check_eq(size_t(5), closed, "every spelling closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
-			// the translation's refusals are recorded per loop: a call is an effect (a break was one until row 119f, a string append
-			// a representation until row 122: both close now), a member read of a frame-slot instance is a load site (row 147a; a temp the block did not take between rows 142 and 146), a tree deeper than
+			// the translation's refusals are recorded per loop: a call is an effect (a break and a string append are not: both close),
+			// a member read of a frame-slot instance is a load site, a tree deeper than
 			// the lift's node cap (21 binary nodes: the lifted part pushes a fused binary and the general BINARY consumes it) is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
@@ -1347,9 +1347,9 @@ public:
 				" var f6 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + to_string(i).size(); i = i + 1; } return acc; };");
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
 			check_true(listing.find(": effect at") != std::string::npos, "the method call on a call's result is an effect, its loop too thin for a boundary: " + listing);
-			check_true(listing.find("CALL_TEMP") != std::string::npos && listing.find("C_PROBE") != std::string::npos, "the call the sum consumes lands in a temp and its loop closes through the door (row 146a): " + listing);
+			check_true(listing.find("CALL_TEMP") != std::string::npos && listing.find("C_PROBE") != std::string::npos, "the call the sum consumes lands in a temp and its loop closes through the door: " + listing);
 			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes; as a boundary it would be most of the body): " + listing);
-			check_true(listing.find("C_MLOAD") != std::string::npos && listing.find("(MEMBER_TEMP)") == std::string::npos, "the member read of a frame-slot instance is a load site and its loop closes (row 147a): " + listing);
+			check_true(listing.find("C_MLOAD") != std::string::npos && listing.find("(MEMBER_TEMP)") == std::string::npos, "the member read of a frame-slot instance is a load site and its loop closes: " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {
 			// a while whose condition computes before its compare (a temp, an env value, an element read), the float family of
@@ -1396,7 +1396,7 @@ public:
 			const std::string listing = listing_of(defs);
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			// v5's widening store from a local (`acc = t`) and v6's assignment from an element read (`last = h[i]`) are move
-			// rows since row 118b (a LOAD and STORE pair, a pushing read and STORE before it), so all six close
+			// rows (a LOAD and STORE pair, a pushing read and STORE before it), so all six close
 			check_eq(size_t(6), closed, "the six value-model loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 600) + ")");
 		});
 		test("temps_are_values_per_definition", [this]() {
@@ -1444,7 +1444,7 @@ public:
 			check_eq(size_t(5), closed, "every move loop closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 400) + ")");
 		});
 		test("a_removed_map_entry_refuses_the_block", [this]() {
-			// Astra's finding (2026-09-11): the entry dereferenced a guarded map-entry reference before the loop's own code ran,
+			// Regression: the entry dereferenced a guarded map-entry reference before the loop's own code ran,
 			// so a key erased since the reference was taken raised the removed-entry text at admission on a path the general
 			// form never takes; admission is non-observing, the stale entry refuses the block, and the text appears only where
 			// the loop itself reads the entry (the taken companion), on both backends, proofs on and off
@@ -2115,7 +2115,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 			}
 		});
 		test("a_redeclared_global_after_a_call_lands_by_its_new_type", [this]() {
-			// Astra's fourth finding: a native callee redeclares the global the loop holds as an environment cell (`var G` becomes
+			// Regression: a native callee redeclares the global the loop holds as an environment cell (`var G` becomes
 			// `int G = 5`, the raw kind unchanged); the next iteration's float store must take the int boundary (the general form's
 			// conversion), so the landing misses on the stamp change and both backends land the same
 			const char* defs = R"JAI(
@@ -2152,7 +2152,7 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			check(run_with(true, std::string(defs) + " probe(4, 2);", true, false).rfind("2.5", 0) == 0, "another unit's redeclaration shadows and the loop keeps its own cell: " + run_with(true, std::string(defs) + " probe(4, 2);", true, false));
 		});
 		test("call_arguments_and_the_callee_keep_their_source_order_across_a_getter", [this]() {
-			// Astra's third finding and its callee-getter follow-up: `take(V, G + 1)` where V is a global reference to a native
+			// Regression, with a callee-getter variant: `take(V, G + 1)` where V is a global reference to a native
 			// property whose getter steps G, the same through a local reference slot, and `F(G + 1)` where F is a reference to a
 			// property whose getter returns the callee and steps G. Argument order is the source order on both backends: a computed
 			// argument after a verbatim load keeps the loop general (an effect refusal); the callee's resolution runs first, at its
@@ -2222,7 +2222,7 @@ var via_callee = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n
 			check(listing.find(":probe") != std::string::npos, "the probe is an operation of the region: " + listing);
 		});
 		test("a_read_that_may_run_user_code_never_runs_ahead_of_an_earlier_operand", [this]() {
-			// Astra's second finding and its follow-ups: the outer container of a nested read, or the left operand of a fused
+			// Regression and its variants: the outer container of a nested read, or the left operand of a fused
 			// binary, is read before the inner read in the language's order; when that read may run user code (an operator[] on a
 			// var container, a getter-backed reference as the index or as the receiver, a class operator or a custom numeric
 			// operator inside the index) and the operand is a binding user code could rebind (a global, a local captured by
@@ -2298,7 +2298,7 @@ var private_stays = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; 
 			check(snap.find("-- cell loop") != std::string::npos, "a guarded container ahead of an index that may run user code still closes as a block: " + snap);
 		});
 		test("a_global_redeclared_as_a_property_reference_after_compilation_reads_first", [this]() {
-			// Astra's reload case: a function compiled while P and X2 were values of this unit; the host then redeclares them as
+			// Reload case: a function compiled while P and X2 were values of this unit; the host then redeclares them as
 			// references to properties (var& P = box.grid; var& X2 = box.number); the compiled reads must still read P (its getter,
 			// or its error) before the inner read that raises, and a getter-backed binding inside a loop runs its getter on every
 			// read (the block admits neither the site nor the cell). The fixture is a C++ box bound as a global by reference with
@@ -2356,7 +2356,7 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 			check(listing.find("-- cell loop") != std::string::npos && listing.find("OPERAND_TEMP") != std::string::npos && guards == 2, "an environment container ahead of a quiet inner read keeps its value snapshot at its own point in the block too (its guard and the counted loop's placeholder): " + listing);
 		});
 		test("a_guard_temp_is_a_value_at_its_own_point", [this]() {
-			// Astra's two reproductions against 118d.2: a getter's captured null is a value, never a sign that no snapshot was taken (the
+			// Two regressions: a getter's captured null is a value, never a sign that no snapshot was taken (the
 			// getter runs once whether it returns null or a table), and a guard temp's slot belongs to later definitions once the guard's
 			// read is past (a live multiply operand of the next statement is never erased: the overflow text and the checked float-to-int
 			// conversion both need it on the general form after a miss)
@@ -2465,7 +2465,7 @@ var MIXED = [3, 1, 4, 1, 5, "s", 2, 6];
 			check(listing.find(":append") != std::string::npos, "the IR names the append: " + listing);
 		});
 		test("a_string_environment_cell_is_re_borrowed_after_every_effect_point", [this]() {
-			// Astra's rebase requirement for row 122 on the stable chain: the string cells' nodes are re-read in cells_reland, so a callee
+			// The string cells' nodes are re-read in cells_reland, so a callee
 			// that rebinds the environment string (flip(i): TEXT = "b" at i == 2, a call taking only an int, so the loop stays admitted)
 			// and a getter observed by the callee probe that rebinds it (var& F = box.callable, armed from i == 2) both show in the
 			// next append; the fixture is a C++ box bound as a global by reference with a free arm()
@@ -2596,7 +2596,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("a_computed_index_on_a_member_container_fuses_and_the_dda_loop_closes", [this]() {
 			// gloom_ray_chunk_step's DDA while (GLOOM pure.jai 46): `t.pack[cell / 15]` reads a member container at a computed
-			// index; fused, the loop closes over the member container (row 129) with its float compounds (row 130)
+			// index; fused, the loop closes over the member container with its float compounds
 			const char* fn = "class Ws { int mw = 8; array<int> pack = []; }"
 			                 " var f = function(var& t, float posx, float posy, float rdx, float rdy) -> float {"
 			                 " int mw = t.mw; int mx = posx; int my = posy;"
@@ -2849,7 +2849,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("CELLS_BACK") != std::string::npos && l.find("-- open loop") == std::string::npos, "the narrowing loop closes: " + l);
 		});
 		test("a_push_of_a_getter_backed_element_misses_before_the_getter_runs", [this]() {
-			// Astra's host (2026-09-14): a property reference stored in an array<var> element through the native array view; its
+			// A host fixture: a property reference stored in an array<var> element through the native array view; its
 			// getter adds 10 to a global (or rewrites the element); the block's push must not observe it ahead of the general
 			// form, so the sums and the rewrite agree with the interpreter, proofs on and off (a getter that throws is a separate,
 			// older boundary gap on both backends: the native exception is not the script's to catch through an element read)
@@ -2956,7 +2956,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(m.find("-- open loop") == std::string::npos && m.find("C_BOUNDARY") != std::string::npos && m.find("C_BAIL") == std::string::npos, "a translation gap on the main path is a boundary: " + m);
 			// lights_tic's shape (JaiDOOM spec.jai): a declaration the translation does not take inside an arm, read by the arm's later
 			// statements, under a continue-guarded body; a bail stands for the rest of its arm, so the arm's local leaves no cell to guard
-			// at entry (the census at the first row 139 tip: lights_tic slot 5 want=1 have=0, refused at every entry)
+			// at entry (otherwise lights_tic slot 5 is want=1 have=0, refused at every entry)
 			const std::string lights = R"(
 				var LT_MAX = [200, 180, 160, 140]; var LT_MIN = [100, 90, 80, 70]; var SE_LIGHT = [0, 0, 0, 0]; var LT_CNT = [1, 2, 1, 3]; var LT_SEC = [0, 1, 2, 3]; var LT_KIND = [0, 1, 2, 0];
 				function jitter(int k) -> int { return k % 3 + 1; }
@@ -2986,7 +2986,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string k = listing_of(lights);
 			size_t bails = 0, last_bail = std::string::npos;
 			for (size_t at = k.find("C_BOUNDARY"); at != std::string::npos; at = k.find("C_BOUNDARY", at + 1)) { ++bails; last_bail = at; }
-			// row 153: the two element stores of jitter's result graft (their arguments are locals), while `int l2 = LT_MAX[i] - wobble(i) * 16`
+			// the two element stores of jitter's result graft (their arguments are locals), while `int l2 = LT_MAX[i] - wobble(i) * 16`
 			// keeps its call (wobble returns inside a loop) and runs as a boundary standing for the declaration and the statements after it in
 			// its arm (the skips after it in the region's listing)
 			(void)last_bail;
@@ -3127,7 +3127,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("MEMBER_TEMP") != std::string::npos && (l.find("SET_MEMBER_FUSED") != std::string::npos || l.find("SET_MEMBER_VALUE") != std::string::npos) && l.find("T_DECL_MOV") != std::string::npos && l.find("GET_MEMBER") == std::string::npos && l.find("SET_MEMBER ") == std::string::npos, "member reads are temps (the declaration a move row) and the store reads its base from the slot: " + l);
 		});
 		test("an_alias_lives_to_the_end_of_the_body_and_an_inner_counted_step_polls_the_budget", [this]() {
-			// Astra's reproductions on the landed 016175eb (2026-09-16): a return inside the body reading the alias after its last read
+			// Regressions: a return inside the body reading the alias after its last read
 			// inside the block (the flush left the first iteration's reference), and an inner counted loop whose step never polled the budget
 			// (a zero step, a huge bound); and the coverage limit beside them: a while holding a counted for was skipped as the counted
 			// loop's own generic duplicate. Both backends, proofs on and off
@@ -3162,7 +3162,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("C_JUMP") != std::string::npos, "the inner step is preceded by the budget poll: " + l);
 		});
 		test("a_typed_push_moves_the_payload_without_an_intermediate_value", [this]() {
-			// row 143 (Astra's first value-level experiment): a cell or a typed element pushed into a typed buffer moves its payload; a hetero
+			// a cell or a typed element pushed into a typed buffer moves its payload; a hetero
 			// destination still takes a value with the cell's declared stamp; the conversion subset, the memory charge, self pushes and the
 			// fallbacks are the general push's. Both backends, proofs on and off
 			const std::string script = R"(
@@ -3207,7 +3207,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(listing.find("C_LOAD") != std::string::npos && listing.find("C_INDEX_STORE") != std::string::npos, "the cell copy is present: " + listing);
 		});
 		test("an_injected_miss_at_every_plain_position_keeps_the_interpreter_s_answer", [this]() {
-			// the miss injection lever (row 143.1; a build with JAISCRIPT_MISS_INJECTION defined, else the shapes run as plain parity):
+			// miss injection (a build with JAISCRIPT_MISS_INJECTION defined, else the shapes run as plain parity):
 			// every nth plain cell instruction misses before it runs, so the flush, the alias and temp liveness, the inner counted
 			// loop's state, the call door's landing and the range head's index sync continue on the general form from every position
 			const char* body = R"(
@@ -3249,7 +3249,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		test("a_var_local_fixed_to_int_by_a_typed_use_keeps_its_float", [this]() {
-			// row 143.2: a var local declared in the body from a float constant, incremented by the speculative typed row: the cell's
+			// Regression: a var local declared in the body from a float constant, incremented by the speculative typed row: the cell's
 			// kind was fixed to int by the increment and the landing took that for the declaration's kind (a span truncated the
 			// constant, a loop's pinned arithmetic read the float's bits). The declaration's own kind judges the first write, the
 			// cell's contract refuses any other kind at the landing, and a constant seeds the cell's kind at admission
@@ -3266,7 +3266,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "an int var under the typed rows still closes: " + l);
 		});
 		test("two_environment_arguments_of_one_call_push_their_own_values", [this]() {
-			// row 143.3: a call with two global arguments inside a block ran both general loads at the copy's ip, so they shared one
+			// Regression: a call with two global arguments inside a block ran both general loads at the copy's ip, so they shared one
 			// lookup cache slot and the second argument received the first's value (JaiDOOM's draw_weapon once its body was a span);
 			// the loop shape and the span shape, both backends, and the values through a third callee that writes the globals first
 			const char* script =
@@ -3282,7 +3282,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 		});
 		test("a_call_the_expression_consumes_lands_in_a_temp_and_the_loop_closes", [this]() {
-			// row 146a: `if (side(x, y, n) == 0)`, `acc + twice(i) * 2`, `while (dec(k) > 0)`: the call's result lands in a compiler temp
+			// `if (side(x, y, n) == 0)`, `acc + twice(i) * 2`, `while (dec(k) > 0)`: the call's result lands in a compiler temp
 			// (op_call_temp) when its partner is a literal or a private local, the consumer reads a slot, the door lands it in a temp
 			// cell; an environment partner keeps the stack form (the general read must follow the call); a string result and a
 			// reference result land on the general form; an error inside the callee keeps its text
@@ -3308,7 +3308,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
 			const std::string l = listing_of(prelude);
 			auto count = [&](const char* needle) { size_t n = 0; for (size_t at = l.find(needle); at != std::string::npos; at = l.find(needle, at + 1)) { ++n; } return n; };
-			// row 153: side, twice and dec are leaves and graft; a call the graft does not take lands in a temp as before
+			// side, twice and dec are leaves and graft; a call the graft does not take lands in a temp
 			check_true(count("CALL_TEMP") + count("-- inlined ") >= 4, "the calls the expressions consume land in temps or graft: " + std::to_string(count("CALL_TEMP")) + " + " + std::to_string(count("-- inlined ")) + "\n" + l);
 			check_true(count("C_PROBE") + count("-- inlined ") >= 3, "the loops around them close with the door or the graft: " + std::to_string(count("C_PROBE")) + "\n" + l);
 			const std::string envl = listing_of("int G = 5; int twice(int v) { return v * 2; } var envpartner = function(int k) { int s = 0; for (int i = 0; i < k; i++) { s = s + (G + twice(i)); } return s; };");
@@ -3385,7 +3385,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		test("a_member_read_of_a_frame_slot_instance_is_a_block_site", [this]() {
-			// row 147a: `p.x` inside a loop and inside a span is a load site: the field resolved once at entry, C_MLOAD lands its kind; a
+			// `p.x` inside a loop and inside a span is a load site: the field resolved once at entry, C_MLOAD lands its kind; a
 			// string field, a user accessor and a null base keep the general form (the entry refuses); a callee that rewrites the field
 			// between reads is seen (the hold check after the call re-resolves); both backends, proofs on and off
 			const std::string prelude =
@@ -3417,7 +3417,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member read sites under an injected miss at every " + std::to_string(every)); }
 		});
 		test("a_member_read_through_an_element_alias_is_resolved_per_rebind", [this]() {
-			// row 148: `for (auto& p : pool) { p.x }` over a hetero list of instances and over a class-typed buffer, `var& e = list[i]; e.x`,
+			// `for (auto& p : pool) { p.x }` over a hetero list of instances and over a class-typed buffer, `var& e = list[i]; e.x`,
 			// a subclass element with the same field (the per-site cache re-probes on a class change), a callee that replaces the element
 			// between reads (the hold check re-applies the rebind), a string field (the general form); both backends, proofs on and off
 			const std::string prelude =
@@ -3451,7 +3451,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias member sites under an injected miss at every " + std::to_string(every)); }
 		});
 		test("a_member_store_in_statement_position_is_one_op_and_a_block_site", [this]() {
-			// row 147b: `p.x = v;` takes its value as an operand (SET_MEMBER_VALUE, no push, no POP) and a block writes the field in place
+			// `p.x = v;` takes its value as an operand (SET_MEMBER_VALUE, no push, no POP) and a block writes the field in place
 			// (C_MSTORE) when the value's kind is the field's kind; an int into a float field, a float into a var field holding an int, a
 			// string field and a user setter run the general store (its conversions and texts); the value read back after the loop, both
 			// backends, proofs on and off, and under an injected miss
@@ -3484,7 +3484,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member stores under an injected miss at every " + std::to_string(every)); }
 		});
 		test("an_element_alias_passed_to_a_callee_passes_its_reference_and_the_loop_stays_closed", [this]() {
-			// row 148.1: `for (auto& p : pool) { step(p); }` with `step(var& p)` writing the element's fields: the alias is a call argument, the door
+			// `for (auto& p : pool) { step(p); }` with `step(var& p)` writing the element's fields: the alias is a call argument, the door
 			// pushes the element reference the general LOAD pushes, the callee's writes land in the element, the loop closes and runs without a
 			// miss (the injected-miss controls cover the door); a by-value callee copies as on the general form; a body-declared alias too
 			const std::string prelude =
@@ -3512,7 +3512,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias arguments under an injected miss at every " + std::to_string(every)); }
 		});
 		test("adjacent_plain_cell_pairs_run_as_one_dispatch", [this]() {
-			// row 150: arithmetic chains, compare chains and element load pairs in a block are fused pairs in the listing; the values match the
+			// arithmetic chains, compare chains and element load pairs in a block are fused pairs in the listing; the values match the
 			// interpreter with the middle end's switch on and off, under the injected miss at every plain position (both halves count), with
 			// an overflow inside a pair's second half (the general text), and with a jump landing on a pair's second instruction
 			const std::string prelude =
@@ -3891,7 +3891,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		test("inlined_leaves_run_inside_blocks", [this]() {
-			// row 152: small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
+			// small free leaves called from a loop block (light_band's early returns, dist2's plain body, lerp's floats, a var
 			// parameter, a void leaf through an element alias) compile at their call sites; the values hold on both backends, with proofs
 			// off, with the middle end's switch off (no graft) and under the injected miss; the listing names the grafts and the loop closes
 			const std::string prelude =
@@ -3924,7 +3924,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "inlined leaves under an injected miss at every " + std::to_string(every)); }
 		});
 		test("methods_graft_at_their_call_sites", [this]() {
-			// row 171: recv.m(args) on a slot receiver compiles as the method's body (this and the bare fields read through the receiver);
+			// recv.m(args) on a slot receiver compiles as the method's body (this and the bare fields read through the receiver);
 			// a subclass instance behind a base reference takes the fallback (its own override), a field owned by a user accessor keeps the
 			// call (the bare name is the backing field), a void method storing fields, a method with a loop; the values hold on both
 			// backends, with proofs off, with the middle end off and under the injected miss; the listing names the graft and the loop closes
@@ -3958,7 +3958,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, injected(every), "method grafts under an injected miss at every " + std::to_string(every)); }
 		});
 		test("a_method_graft_follows_reloads", [this]() {
-			// row 171: the guard validates the receiver's class at its method epoch; a reload of the class (a new body)
+			// the guard validates the receiver's class at its method epoch; a reload of the class (a new body)
 			// takes the fallback, so the caller sees the new method without recompiling
 			const std::string prelude =
 				"class Q { int v = 2; function get() -> int { return v * 10; } }\n"
@@ -3980,7 +3980,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(std::string("80|804"), vv, "the values before and after the reload");
 		});
 		test("member_reads_of_elements_close_loops", [this]() {
-			// row 173: a[i].m inside a loop over an array of instances lands the element in an alias temp and the member in a member temp;
+			// a[i].m inside a loop over an array of instances lands the element in an alias temp and the member in a member temp;
 			// the loop closes, and the kernel facts hold: a subclass element, a user accessor read per element, a store through a call between
 			// reads, an out-of-range index's text; both backends, proofs off, the middle end off and the injected miss agree
 			const std::string prelude =
@@ -4017,7 +4017,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(interp, injected(every), "element member reads under an injected miss at every " + std::to_string(every)); }
 		});
 		test("constructor_field_stores_convert_and_run_accessors_elsewhere", [this]() {
-			// row 172: bare field stores in constructor bodies keep their this-field entry across constructions: the declared type converts
+			// bare field stores in constructor bodies keep their this-field entry across constructions: the declared type converts
 			// (int from float, float from int), a subclass constructor's stores, a user setter on another field untouched by the bare store
 			const std::string script = R"(
 				class C { int n = 0; float f = 0.0; float g = 0.0; int sets = 0; function _set_g(float v) -> void { sets += 1; g = v * 2.0; } C(float a, int b) { n = a; f = b; g = a; } }
@@ -4029,7 +4029,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "", "constructor field stores, proofs off", false);
 		});
 		test("lambda_locals_graft_at_their_calls", [this]() {
-			// row 175: a local declared with a lambda literal grafts at its calls; a local rebound to another lambda, a capturing lambda
+			// a local declared with a lambda literal grafts at its calls; a local rebound to another lambda, a capturing lambda
 			// and an untyped result keep the call; the values hold on both backends, proofs off and the middle end off
 			const std::string script = R"(
 				int K = 3;
@@ -4063,7 +4063,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined <lambda>") != std::string::npos, "the lambda calls are inlined: " + l);
 		});
 		test("constructor_bodies_run_as_method_frames", [this]() {
-			// row 176: constructor bodies through the method door: falling off the end yields the instance, private members (the eager
+			// constructor bodies through the method door: falling off the end yields the instance, private members (the eager
 			// environment), defaults, super chains, a raise inside the body, methods and lambdas that see `this`; both backends agree
 			const std::string script = R"(
 				class A { int x = 0; A(int v) { if (v > 0) { x = v; } else { x = -1; } } }
@@ -4088,7 +4088,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(interp.find("5,-1,12,7,3,41,42,1225|") == 0, interp.c_str());
 		});
 		test("untyped_lambdas_graft_with_their_proven_return_kind", [this]() {
-			// row 180: an untyped lambda whose returns all yield one certain scalar kind grafts with that result type; a lambda with mixed
+			// an untyped lambda whose returns all yield one certain scalar kind grafts with that result type; a lambda with mixed
 			// returns, an uncertain return and a void body keep the call; values agree on both backends, proofs off and the middle end off
 			const std::string script = R"(
 				function run() -> string {
@@ -4115,7 +4115,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined <lambda>") != std::string::npos, "the untyped lambdas are inlined: " + l);
 		});
 		test("an_inlined_callee_redefined_takes_the_fallback", [this]() {
-			// row 152: the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
+			// the guard compares the name's binding with the function the graft was made from; a reload of the callee (the same
 			// unit executed again with another body) fails it, and the fallback runs the real call, so the caller sees the new body without
 			// recompiling; both backends agree across the reload
 			const std::string prelude =
@@ -4184,7 +4184,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(gone_listing.find("-- call kept leaf line 2: a callee whose declaration is gone") != std::string::npos, "the dead declaration keeps the call: " + gone_listing);
 		});
 		test("a_raise_inside_an_inlined_body_names_the_callee", [this]() {
-			// row 152: an inlined body that raises keeps the text and the trace's first frame is the callee, as the interpreter's is
+			// an inlined body that raises keeps the text and the trace's first frame is the callee, as the interpreter's is
 			const std::string prelude =
 				"int f(int a) { return 100 / a; }\n"
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(3 - i); } return s; };\n";
@@ -4197,8 +4197,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(!trace.empty() && trace.front().function == "f", "the trace names the callee first: " + (trace.empty() ? std::string("<empty>") : trace.front().function));
 		});
 		test("a_global_read_before_a_writing_callee_is_not_hoisted", [this]() {
-			// row 152: `s + G + bump()` reads G before the call on both backends (the operand spills into a temp ahead of the graft); a bare
-			// global before the call of a body that writes one is taken into a temp ahead of the graft (row 203), so the order holds
+			// `s + G + bump()` reads G before the call on both backends (the operand spills into a temp ahead of the graft); a bare
+			// global before the call of a body that writes one is taken into a temp ahead of the graft, so the order holds
 			const std::string prelude =
 				"int G = 1;\n"
 				"int bump() { G = G + 1; return G; }\n"
@@ -4211,7 +4211,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined pure") != std::string::npos, "pure is inlined after a global read: " + l);
 		});
 		test("string_and_var_parameters_at_the_grafts_edge", [this]() {
-			// row 152: a var parameter taking a scalar local with a proven int return is a graft, and so is a var result the site's kinds make
+			// a var parameter taking a scalar local with a proven int return is a graft, and so is a var result the site's kinds make
 			// one scalar kind (it holds what the return yields); a string parameter or a string result keeps the call (their declarations
 			// would open the enclosing block); the values hold either way
 			const std::string prelude =
@@ -4225,7 +4225,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined tag") == std::string::npos, "tag (a string) keeps its call: " + l);
 		});
 		test("a_call_under_a_conditional_operand_keeps_its_call", [this]() {
-			// row 152: a leaf in a ternary's arm or on the right side of && / || runs on the paths that choose it; a graft would run its body
+			// a leaf in a ternary's arm or on the right side of && / || runs on the paths that choose it; a graft would run its body
 			// on every path, so the statement keeps the call (N counts bump's runs); a leaf in a plain operand of the same loop grafts
 			const std::string prelude =
 				"int N = 0;\n"
@@ -4238,7 +4238,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined pure") != std::string::npos, "pure in a plain operand is inlined: " + l);
 		});
 		test("a_body_writing_through_a_reference_parameter_grafts_only_at_the_statements_front", [this]() {
-			// row 153: `s + i + inc(i)` reads i before inc writes it through its var& parameter (a store, or tick's ++ of the parameter's
+			// `s + i + inc(i)` reads i before inc writes it through its var& parameter (a store, or tick's ++ of the parameter's
 			// name); the exact hoist spills `s + i` into a typed temp ahead of the body, so all three graft and the values hold
 			const std::string prelude =
 				"int inc(var& p) { p = p + 1; int r = p; return r; }\n"
@@ -4251,7 +4251,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes around the three grafts: " + l);
 		});
 		test("an_increment_of_a_global_in_the_body_is_a_write", [this]() {
-			// row 152: `G++` in the body writes G (an identifier's own increment, not a compound store); a statement that reads G before
+			// `G++` in the body writes G (an identifier's own increment, not a compound store); a statement that reads G before
 			// the call keeps it
 			const std::string prelude =
 				"int G = 0;\n"
@@ -4262,7 +4262,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined nextg") == std::string::npos, "nextg after a read of G keeps its call: " + l);
 		});
 		test("a_store_the_statement_completes_before_the_call_keeps_it", [this]() {
-			// row 152: `(i = i + 1) + twice(i)` stores i before the call reads it, `(G = G + 1) + readg()` stores G before the body reads it;
+			// `(i = i + 1) + twice(i)` stores i before the call reads it, `(G = G + 1) + readg()` stores G before the body reads it;
 			// a graft would run the arguments and the body first, so both statements keep their calls; the declaration after them grafts
 			const std::string prelude =
 				"int G = 0;\n"
@@ -4276,7 +4276,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined twice ") == std::string::npos && l.find("-- inlined readg") == std::string::npos, "twice and readg behind a store keep their calls: " + l);
 		});
 		test("a_static_member_read_before_a_body_writing_it_keeps_the_call", [this]() {
-			// row 152: `s + Counter::n + bumpc()` reads the static before bumpc writes it; a static member read is a member read to the scan
+			// `s + Counter::n + bumpc()` reads the static before bumpc writes it; a static member read is a member read to the scan
 			const std::string prelude =
 				"class Counter { static int n = 0; }\n"
 				"int bumpc() { Counter::n = Counter::n + 1; int r = Counter::n; return r; }\n"
@@ -4286,7 +4286,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined bumpc") == std::string::npos, "bumpc after a read of the static keeps its call: " + l);
 		});
 		test("every_position_takes_the_same_graft", [this]() {
-			// row 153: the call becomes a temp, so an operand, a declaration, an assignment, an if condition, a while condition, a for condition
+			// the call becomes a temp, so an operand, a declaration, an assignment, an if condition, a while condition, a for condition
 			// and update, an argument of another leaf and an argument of a host function are one position; the values on both backends
 			const std::string prelude =
 				"int add1(int a) { return a + 1; }\n"
@@ -4304,7 +4304,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined twice") != std::string::npos, "twice over the hoisted add1 is inlined: " + l);
 		});
 		test("a_spilled_operand_raises_before_the_body", [this]() {
-			// row 153: `A[i] + div(1, i - 9)` reads the element before the call; the graft spills the read into a typed temp ahead of the body, so
+			// `A[i] + div(1, i - 9)` reads the element before the call; the graft spills the read into a typed temp ahead of the body, so
 			// with i out of range the element's raise comes first, as the interpreter's does, never the body's division
 			const std::string prelude =
 				"array<int> A = [1, 2, 3];\n"
@@ -4318,7 +4318,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined div") != std::string::npos, "div behind a spilled read is inlined: " + l);
 		});
 		test("returns_in_many_arms_jump_to_one_join", [this]() {
-			// row 153: a body with returns in six arms and one inside a nested block grafts (each return declares the result and jumps to the join;
+			// a body with returns in six arms and one inside a nested block grafts (each return declares the result and jumps to the join;
 			// the rests are never cloned), on both backends, proofs on and off
 			const std::string prelude =
 				"int tone(int kind, int tx) {\n"
@@ -4336,7 +4336,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined tone") != std::string::npos, "tone is inlined through the join: " + l);
 		});
 		test("an_unproven_return_converts_with_the_returns_text", [this]() {
-			// row 153: `return cells[i]` from a var container has no proof; the graft declares the result with the return site, so a string
+			// `return cells[i]` from a var container has no proof; the graft declares the result with the return site, so a string
 			// element raises the callee's own text on both backends, and an int element is the value
 			const std::string prelude =
 				"var cells = [1, 2, \"x\"];\n"
@@ -4350,7 +4350,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined cell_at") != std::string::npos, "cell_at is inlined with the return site: " + l);
 		});
 		test("a_hoisted_condition_takes_the_fallback_after_a_reload", [this]() {
-			// row 153: a leaf in an if condition grafts ahead of the condition's jumps; a reload of the callee fails the guard and the fallback
+			// a leaf in an if condition grafts ahead of the condition's jumps; a reload of the callee fails the guard and the fallback
 			// declares the real call's result into the same temp, so the condition reads the new body's value
 			const std::string prelude =
 				"int lim(int a) { return a + 10; }\n"
@@ -4372,7 +4372,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined lim") != std::string::npos, "lim in the condition is inlined: " + l);
 		});
 		test("a_call_behind_an_effect_stays_a_call", [this]() {
-			// row 153: the first call a statement runs is the one hoisted; a method call or a host call first keeps every later leaf a call
+			// the first call a statement runs is the one hoisted; a method call or a host call first keeps every later leaf a call
 			// (it would run behind an effect), while a leaf first grafts and the effect follows
 			const std::string prelude =
 				"int add1(int a) { return a + 1; }\n"
@@ -4384,7 +4384,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined add2") != std::string::npos, "add2 ahead of the method call is inlined: " + l);
 		});
 		test("a_leaf_another_unit_declares_grafts", [this]() {
-			// row 153.1: tile_at lives in maps.jai and spot_free in sim.jai; a leaf a unit imports resolves through the program's function table
+			// tile_at lives in maps.jai and spot_free in sim.jai; a leaf a unit imports resolves through the program's function table
 			// (the closure's cached unit, the one the import executes), so it grafts in the importer's loop and the guard reads the live binding
 			namespace fs = std::filesystem;
 			fs::path dir = fs::temp_directory_path() / "jai_row1531";
@@ -4408,7 +4408,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined cell_at") != std::string::npos, "cell_at from the imported unit is inlined in a condition (its return converts at the result): " + l);
 		});
 		test("a_global_another_unit_declares_types_the_proofs", [this]() {
-			// row 154.1: ND_X in JaiDOOM's map.jai and G in GLOOM's game.jai; a top-level global one unit declares with a spelled type is typed
+			// ND_X in JaiDOOM's map.jai and G in GLOOM's game.jai; a top-level global one unit declares with a spelled type is typed
 			// by that declaration in every other unit's proof pass (never for its diagnostics), a class-typed one once its class is defined
 			// (the importer's proofs re-stamp after the import; its callers are named functions, compiled at their first call after it), so `at`
 			// and `span` graft inside their loops on both accounts
@@ -4990,7 +4990,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- call kept after_of") != std::string::npos, "after_of stays a call inside the closed loop: " + l);
 		});
 		test("a_particle_step_through_an_alias_grafts_with_its_ternary", [this]() {
-			// row 153.2: gloom_particle_step's shape, a var& parameter bound to a range-for alias, member reads and stores through it and the
+			// gloom_particle_step's shape, a var& parameter bound to a range-for alias, member reads and stores through it and the
 			// ternary store `life = life < 4 ? life : 4`, which lands as the condition's jumps and one store per arm; the leaf grafts inside the
 			// range-for and the values hold on both backends, proofs on and off
 			const std::string prelude =
@@ -5006,7 +5006,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined step") != std::string::npos, "step grafts inside the range-for with its ternary store: " + l);
 		});
 		test("the_listing_names_each_kept_call_with_its_rule", [this]() {
-			// row 154.0: a call the inliner keeps is named in the listing with the rule that kept it: a var local into an int parameter (an
+			// a call the inliner keeps is named in the listing with the rule that kept it: a var local into an int parameter (an
 			// unproven argument), a leaf as a method call's argument, and a leaf returning a var element inside a loop (a return the block cannot
 			// land: the element's kind is unknown until run time)
 			const std::string l = listing_run(
@@ -5020,7 +5020,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- call kept at line 4: a return the block cannot land") != std::string::npos, "a return the block cannot land keeps the call: " + l);
 		});
 		test("a_graft_after_a_continue_closes_the_loop_without_a_bail", [this]() {
-			// row 152: draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the
+			// draw_seg's shape, `if (done[x] != 0) { continue; }` then a leaf call, then a statement whose float temp takes a slot the
 			// graft declared as an int; the graft declares no default for its result (a bare DECL_VAR is no block instruction, and inside the
 			// conditional span after the continue it made the graft a planned bail) and its declarations are compiler values to the walk (a
 			// later temp may take their slots with another kind), so the loop's copy holds the graft and runs it as a block
@@ -5035,7 +5035,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("bail->") == std::string::npos && l.find("C_BAIL") == std::string::npos, "no bail inside the loop: " + l);
 		});
 		test("a_callee_with_a_loop_grafts_into_a_column_loop", [this]() {
-			// row 159: draw_seg's column shape, a callee whose body is a loop with a continue and a break, taking its texture and the frame
+			// draw_seg's column shape, a callee whose body is a loop with a continue and a break, taking its texture and the frame
 			// buffer as typed references bound to the caller's aliases: both calls graft, the grafted loops and the column loop close
 			const std::string prelude =
 				"array<int> PIX = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];\n"
@@ -5068,7 +5068,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(size_t(4), loops, "the grafted loops, the column loop and the fold loop close: " + l);
 		});
 		test("a_return_inside_a_callee_loop_keeps_the_call", [this]() {
-			// row 159: a return from inside the callee's own loop would leave the loop's state behind the graft's join, so the call stays
+			// a return from inside the callee's own loop would leave the loop's state behind the graft's join, so the call stays
 			const std::string prelude =
 				"int find(array<int>& a, int v) { for (int i = 0; i < 4; ++i) { if (a[i] == v) { return i; } } return -1; }\n"
 				"int run() { array<int> a = [4, 5, 6, 7]; int s = 0; for (int k = 0; k < 8; ++k) { s = s + find(a, k); } return s; }\n";
@@ -5077,7 +5077,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- call kept find line 2: a return inside a loop") != std::string::npos, "the call stays with its rule: " + l);
 		});
 		test("a_typed_reference_parameter_grafts_as_the_callers_variable", [this]() {
-			// row 159: an int& parameter bound to an int local is that local (Dev ruling 2026-09-28: an int& binds only an int): 3.7
+			// an int& parameter bound to an int local is that local (an int& binds only an int): 3.7
 			// stores as the local's int, grafted or not
 			const std::string prelude =
 				"void set37(int& a) { a = 3.7; }\n"
@@ -5087,7 +5087,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined set37") != std::string::npos, "the typed reference parameter grafts: " + l);
 		});
 		test("a_reference_argument_that_is_not_a_local_keeps_the_call", [this]() {
-			// row 159: a var& or typed reference parameter bound to a field or a method name binds through the caller's member rules;
+			// a var& or typed reference parameter bound to a field or a method name binds through the caller's member rules;
 			// the call stays, so a method name raises the binder's text on both backends
 			const std::string prelude =
 				"void by_ref(var& p) { p = 1; }\n"
@@ -5104,7 +5104,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- call kept by_ref line 3: a reference argument that is not a local") != std::string::npos, "the call stays with its rule: " + l);
 		});
 		test("a_loop_of_more_than_128_cells_closes", [this]() {
-			// row 159: the cell mask holds 256 cells; a loop over 140 locals runs as one block
+			// the cell mask holds 256 cells; a loop over 140 locals runs as one block
 			std::string src = "int run() { ";
 			for (int i = 0; i < 140; ++i) { src += "int v" + std::to_string(i) + " = " + std::to_string(i) + "; "; }
 			src += "\n\tfor (int k = 0; k < 3; ++k) { ";
@@ -5172,7 +5172,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- inlined itr") != std::string::npos && l.find("bail->") != std::string::npos, "the graft and the bail are in the loop: " + l.substr(0, 400));
 		});
 
-		// row 187: a bare call to a stdlib math builtin lowers to the math temp while the name binds the registered function
+		// a bare call to a stdlib math builtin lowers to the math temp while the name binds the registered function
 		test("stdlib_math_calls_lower_to_math_temps", [this]() {
 			const std::string src = "function f(float x, float y) -> float { float a = host_sqrt(x * x + y * y); float b = host_sin(x) + host_cos(y); return a + b + host_floor(y * 0.5) + host_ceil(x) + host_tan(0.25) + host_degrees(host_radians(x)); }\n"
 				"to_string(f(3.0, 4.0)) + \",\" + to_string(f(1, 2));";
@@ -5254,7 +5254,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(interp, vm, "a host that registers host_sqrt again");
 			check_eq(std::string("4.0 4.0,4.0 4.0 3.0"), vm, "the overload set answers");
 		});
-		// row 188: a loop whose body evaluates a stdlib alias closes; the name holds at the entry and after each call's landing
+		// a loop whose body evaluates a stdlib alias closes; the name holds at the entry and after each call's landing
 		test("host_math_alias_loops_close_as_cell_blocks", [this]() {
 			const std::string src = "array<float> XS = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5];\n"
 				"function run(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { float x = XS[i & 7]; float d = host_sqrt(x * x + 1.0) - 0.5; s += d + host_sin(x) + host_floor(x); } return s; }\n"
@@ -5286,7 +5286,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "", "a rebinding call inside the loop");
 			both(src, "", "a rebinding call inside the loop, proofs off", false);
 		});
-		// row 189: a typed global in arithmetic or a declaration is a typed row's environment operand
+		// a typed global in arithmetic or a declaration is a typed row's environment operand
 		test("typed_globals_are_typed_row_operands", [this]() {
 			const std::string src = "float G = 1.5; float H = 2.0; int N = 7;\n"
 				"function f(float x, int k) -> float { float a = x - G; float b = a * H + G; float s = G; int m = k * N + N; return b + s + m; }\n"
@@ -5323,7 +5323,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "4.0,31.5,4.0", "a graft in a method");
 			both(src, "4.0,31.5,4.0", "a graft in a method, proofs off", false);
 		});
-		// row 190: a callee whose only calls are stdlib aliases or math:: intrinsics grafts; the alias keeps its guard inside the graft
+		// a callee whose only calls are stdlib aliases or math:: intrinsics grafts; the alias keeps its guard inside the graft
 		test("host_math_alias_callees_graft", [this]() {
 			const std::string src = "float K = 2.0;\n"
 				"function len3(float x, float y, float z) -> float { float d = host_sqrt(x * x + y * y + z * z); return d; }\n"
@@ -5356,7 +5356,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "", "alias grafts under rebinding, proofs off", false);
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
 		});
-		// row 191: the entry reads an environment container through its armed lookup; a field of the name, a rebound or replaced global,
+		// the entry reads an environment container through its armed lookup; a field of the name, a rebound or replaced global,
 		// and a reference binding keep the full resolution
 		test("block_entry_environment_containers", [this]() {
 			const std::string src = "[[warn_mode]]\narray<float> A = [1.0, 2.0, 3.0, 4.0];\narray<float> B = [0.5, 0.5, 0.5, 0.5];\n"
@@ -5375,7 +5375,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// row 193: a value read into a temp ahead of an environment name on its right (a math call, an element, a member): the name resolves
+		// a value read into a temp ahead of an environment name on its right (a math call, an element, a member): the name resolves
 		// after it, the source order, so the binary keeps its fused form and the loop around it closes
 		test("temp_reads_ahead_of_an_environment_partner", [this]() {
 			const std::string src = "[[warn_mode]]\nfloat G = 0.25; array<float> A = [1.0, 4.0, 9.0, 16.0];\n"
@@ -5391,7 +5391,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
 			check_true(fl.find("open loop") == std::string::npos && fl.find("-- cell loop") != std::string::npos, "the loop closes: " + fl);
 		});
-		// row 192: a call's int or float result lands in the declaration or temp its consumer fills; any other result takes the consumer
+		// a call's int or float result lands in the declaration or temp its consumer fills; any other result takes the consumer
 		test("typed_call_results_land_in_their_consumer", [this]() {
 			const std::string src = "[[warn_mode]]\n"
 				"function fi(int a, int b) -> int { return a * b + 1; }\n"
@@ -5413,7 +5413,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string l = listing_run(src);
 			check_true(l.find("CALL_TYPED") != std::string::npos, "the calls land typed: " + l.substr(0, 2000));
 		});
-		// row 198: a graft's parameter, local or result is a compiler value under its declared type: a block lands it by the declaration's
+		// a graft's parameter, local or result is a compiler value under its declared type: a block lands it by the declaration's
 		// conversion (an int into a float local widens), never the source's raw kind under the cell's float contract
 		test("graft_locals_convert_by_their_declared_type_in_a_block", [this]() {
 			const std::string src = "[[warn_mode]]\n"
@@ -5444,7 +5444,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// row 198: a ternary operand lands in a compiler temp ahead of the operation (each arm by one move), so the binary around it keeps a
+		// a ternary operand lands in a compiler temp ahead of the operation (each arm by one move), so the binary around it keeps a
 		// direct operand and a block takes it: an absolute value, a clamp, int and float arms, nested ternaries, environment partners
 		test("ternary_operands_lift_into_temps", [this]() {
 			const std::string src = "[[warn_mode]]\nfloat G = 0.25; int GI = 3;\n"
@@ -5477,7 +5477,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// row 199: an environment name ahead of a hoisted read (`q + A * host_sin(q * 1.3)`) reads into a temp first and the loop closes; a leaf whose
+		// an environment name ahead of a hoisted read (`q + A * host_sin(q * 1.3)`) reads into a temp first and the loop closes; a leaf whose
 		// return the checker cannot prove (`return host_sqrt(x) + 1.0`) grafts into a loop when its declared result is a scalar, the block landing it
 		// by that type
 		test("environment_partners_and_unproven_scalar_returns", [this]() {
@@ -5539,7 +5539,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// row 198: a leaf whose body calls another leaf grafts, the inner leaf grafted inside it (one level), each behind its own guard
+		// a leaf whose body calls another leaf grafts, the inner leaf grafted inside it (one level), each behind its own guard
 		test("nested_leaves_graft", [this]() {
 			const std::string src = "[[warn_mode]]\nfloat S = 0.5;\n"
 				"function field(float x, float y) -> float { float s = host_sin(x * S); float c = host_cos(y); float r = s * c + x * y; return r; }\n"
@@ -5575,7 +5575,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const size_t c = vm.find(',');
 			check_true(c != std::string::npos && vm.substr(0, vm.find('=')) == vm.substr(vm.find('=') + 1, c - vm.find('=') - 1), "serial and parallel agree: " + vm);
 		});
-		// row 197: a straight-line span of typed statements outside every closed loop runs as a region: entered at its first instruction,
+		// a straight-line span of typed statements outside every closed loop runs as a region: entered at its first instruction,
 		// left at its end; a refusal or a miss at the first instruction runs the trampoline's copy of it
 		test("straight_line_regions", [this]() {
 			const std::string src = "[[warn_mode]]\n"
@@ -5785,9 +5785,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// row 203: a graft is an observing point for the names read to its left, as the real call is: a name a write anywhere may reach (a
+		// a graft is an observing point for the names read to its left, as the real call is: a name a write anywhere may reach (a
 		// local a closure captures by reference, a reference declaration) keeps the call when the body writes a global, a field or an element
-		// row 203: an element read that a later operand's user code may write is read before that operand runs (a binary's left operand,
+		// an element read that a later operand's user code may write is read before that operand runs (a binary's left operand,
 		// an earlier element or entry of a container literal), as the interpreter reads it; a call argument binds late on both backends
 		test("an_element_read_ahead_of_a_writing_call_reads_first", [this]() {
 			const std::string src = "array<int> GA = [1, 2, 3];\n"
@@ -6039,7 +6039,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		// a call's reference result is an operand the language reads where it stands: ahead of a later operand that may run user code (a
-		// binary's right side, a later container literal element) it is dereferenced first, as an element read is (row 203)
+		// binary's right side, a later container literal element) it is dereferenced first, as an element read is
 		test("a_reference_result_is_read_ahead_of_a_writing_sibling", [this]() {
 			const std::string src = "int G = 1;\n"
 				"array<int> A = [1, 2];\n"
@@ -7068,7 +7068,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function run6(int n) -> string { float t = 0.0; for (int i = 0; i < n; ++i) { bumpf(t, i * 0.5); incf(t); } return to_string(t) + \":\" + type_of(t); }\n"
 				"function run7() -> string { float q = 3.0; bumpf(q, 0.25); return to_string(q) + \":\" + type_of(q); }\n"
 				"run1() + \" \" + run2() + \" \" + run3() + \" \" + run4() + \" \" + run5() + \" \" + run6(10) + \" \" + run7();";
-			// a store through a reference runs the variable's own table and a T& binds only a T (Dev rulings 2026-09-28)
+			// a store through a reference runs the variable's own table and a T& binds only a T
 			const std::string expected = "2:int 7.0:float 2:int 1:int 2.5:float 32.5:float 3.25:float";
 			both(src, expected, "name references");
 			both(src, expected, "name references, proofs off", false);
@@ -7206,7 +7206,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"string out = run(6) + \" | \" + flip(5) + \" | \" + big(3) + \" | \" + zero(3);\n"
 				"A = function(var i, var j) { return 7; };\n"
 				"out + \" | \" + run(2);";
-			// flip's setf(k) stores 2.5 into the int k through the reference: k's own table keeps it an int (Dev ruling 2026-09-28)
+			// flip's setf(k) stores 2.5 into the int k through the reference: k's own table keeps it an int
 			const std::string want = "7.5400642840316 91 12.0 10.5 156 | 30.54493464052287:int | E:Integer overflow in '*' | E:Division by zero | 42.0 5 3.0 1.5 28";
 			both(src, want, "untyped leaves");
 			both(src, want, "untyped leaves, proofs off", false);

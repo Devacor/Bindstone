@@ -1019,8 +1019,8 @@ public:
         });
 
         // ---------------------------------------------- converting-ctor ruling pins
-        // Dev ruling (2026-07): a defaulted-parameter constructor is NOT a converting
-        // constructor - deliberate C++ divergence ("this gives us more control").
+        // A defaulted-parameter constructor is NOT a converting
+        // constructor - a deliberate C++ divergence for more control.
         // The idiom pair replaces C++'s explicit keyword: conversion is opted INTO
         // with a true one-parameter (delegating) overload, and opted OUT OF with a
         // defaulted sentinel parameter.
@@ -1064,7 +1064,7 @@ public:
 
         test("defaulted_sentinel_param_opts_out_of_conversion", [&]() {
             // The opt-OUT direction: an explicitly-1-arg-callable ctor that must NOT
-            // convert gains a dummy defaulted param (Dev's example) - callable as
+            // convert gains a dummy defaulted param - callable as
             // Money(3.5) via the defaults machinery, invisible to conversion.
             auto eng = make_engine();
             eng->execute(R"(

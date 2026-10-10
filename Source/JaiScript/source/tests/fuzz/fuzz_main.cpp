@@ -9,7 +9,7 @@
 //   jaiscript_fuzz                          run seeds 0..999 (default --iterations 1000)
 //   jaiscript_fuzz --iterations 10000       run seeds 0..9999
 //   jaiscript_fuzz --seed 1234              run exactly one seed (verbose)
-//   jaiscript_fuzz --seed-start 5000        first seed of the campaign range
+//   jaiscript_fuzz --seed-start 5000        first seed of the run's range
 //   jaiscript_fuzz --minimize               auto-minimize each divergence
 //   jaiscript_fuzz --corpus DIR             write failing programs + minimized forms + repro skeletons
 //   jaiscript_fuzz --timeout-ms 250         per-execute engine budget (default 250)
@@ -18,7 +18,7 @@
 //   jaiscript_fuzz --child --seed N         one seed, machine-readable verdict via exit code
 //                                           (0 agree, 20 diverge, 21 budget-skip)
 //   jaiscript_fuzz --isolate                spawn a --child process per seed (crash isolation:
-//                                           a VM crash doesn't kill the campaign)
+//                                           a VM crash doesn't kill the run)
 //   jaiscript_fuzz --no-suppressions        report known (suppressed) divergences too
 //   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
 //   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false) and engine::local_alias(false)
@@ -255,7 +255,7 @@ namespace {
 		program minimized = p;
 		bool have_min = false;
 		// Only minimize UNRECOGNIZED divergences: suppressed ones are already
-		// triaged, and minimization is the expensive step of the campaign.
+		// triaged, and minimization is the expensive step of the run.
 		if (opt.minimize_flag && supp.empty()) {
 			minimize_stats stats;
 			auto still = [&](const program& cand) {
@@ -540,7 +540,7 @@ int main(int argc, char** argv) {
 
 	if (opt.child) {
 		// Wall-clock watchdog: a program that never reaches a budget check (or a hang
-		// in native code) must not stall the campaign - the child exits with the HANG
+		// in native code) must not stall the run - the child exits with the HANG
 		// code and the parent reports the seed.
 		const double hang_ms = std::max(10000.0, opt.timeout_ms * 40.0);
 		std::thread([hang_ms]() {
@@ -645,7 +645,7 @@ int main(int argc, char** argv) {
 					break;
 			}
 		} else {
-			// In-process: a crash kills the campaign; the marker line below makes the
+			// In-process: a crash kills the run; the marker line below makes the
 			// dying seed attributable so a driver can resume at seed+1.
 			std::cout << "[running seed " << seed << "]\r";
 			std::cout.flush();

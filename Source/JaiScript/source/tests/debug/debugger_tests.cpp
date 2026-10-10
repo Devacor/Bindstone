@@ -286,7 +286,7 @@ public:
         check_eq(static_cast<int64_t>(42), eng->get_variable("r").as_int());
     }
 
-    // Dev ruling: parallel regions are ATOMIC to the debugger. A breakpoint inside the
+    // Parallel regions are ATOMIC to the debugger. A breakpoint inside the
     // body never fires while the body runs as part of a region — including chunk 0 on
     // the calling thread (structural: every region context is a fresh slot backend the
     // controller was never wired to) — but the SAME body called serially hits normally.

@@ -1121,7 +1121,7 @@ namespace jai::fuzz {
 
 			// Operator methods (throwing variants exercise the operator-throw surface;
 			// the named-class-return spelling covers the typed-operator parse path that
-			// only `auto operator+` / `bool operator<` shapes left blind — open question #11)
+			// only `auto operator+` / `bool operator<` shapes left blind)
 			if (rng_.chance(35)) {
 				ci.has_op_plus = true;
 				if (rng_.chance(20))
@@ -1540,7 +1540,7 @@ namespace jai::fuzz {
 					break;
 				case 5:
 					if (rng_.chance(50)) {
-						// Typed buffer declarations (the representation rule, 2026-09-02): every
+						// Typed buffer declarations (the representation rule): every
 						// primitive element kind, uniform literals; later pushes/stores of other
 						// types are error-parity draws, not noise
 						lines_.push_back(typed_array_decl(name));

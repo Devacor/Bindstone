@@ -1,4 +1,4 @@
-// Regression tests for bugs found during the 2026-05 deep review.
+// Regression tests for bugs found during a deep review.
 // Each test documents the finding number from that review and reproduces the
 // edge case that previously failed. Pure-script reproducers live here; the
 // C++-bound numeric reproducers (cpp_bound float/int reads) live in
@@ -75,11 +75,11 @@ public:
 
     void forge_tests() override {
         test("a_compound_target_reference_is_read_after_the_right_hand_side", [this]() {
-            // Astra's backlog-drain finding (2026-09-11 18:00): `value += restore(data)` where `value` is an untyped element
+            // Regression: `value += restore(data)` where `value` is an untyped element
             // or map-entry reference whose element was removed and whose right side restores it. The interpreter
             // dereferenced the target before the right side ran (to probe its fast paths) and raised the removed-element
             // error with calls = 0; the VM, whose right value is already on the stack, ran restore() first and stored 22.
-            // The language's order is the right side first; both backends now agree, and a right side that raises
+            // The language's order is the right side first; both backends agree, and a right side that raises
             // surfaces its own error before any target error
             for (bool vm : {false, true}) {
                 auto e = engine::make();
@@ -108,10 +108,10 @@ public:
             }
         });
         test("a_program_scope_compound_on_a_removed_element_is_catchable_on_both_backends", [this]() {
-            // Astra's compound_program_scope probe: `value += 2` on a reference to a removed element at program scope. Both
+            // compound_program_scope probe: `value += 2` on a reference to a removed element at program scope. Both
             // backends dereferenced the target raw and the host exception escaped the script's catch at program scope
-            // (inside a function the call boundary converted it); 118.1b made the interpreter's read checked, this row the
-            // VM's, so the catch sees the language's error at every scope on both backends
+            // (inside a function the call boundary converted it); the interpreter's read and the VM's are checked, so
+            // the catch sees the language's error at every scope on both backends
             for (bool vm : {false, true}) {
                 auto e = engine::make();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
@@ -133,11 +133,11 @@ public:
             }
         });
         test("a_raising_left_operand_stops_the_expression_on_both_backends", [this]() {
-            // Astra's fuzz seed 1449: a missing instance field on the LEFT raises through the
+            // Fuzz seed 1449: a missing instance field on the LEFT raises through the
             // interpreter's unwinding flag with a placeholder value, and the interpreter went on to
             // evaluate the RIGHT operand, so its side effect ran and a checked error from it (a
             // missing static member) replaced the first; the vm stops at the left. Both backends
-            // now report the left's error and run the right operand zero times, for arithmetic,
+            // report the left's error and run the right operand zero times, for arithmetic,
             // comparison and the logical operators
             for (bool vm : {false, true}) {
                 auto e = engine::make();
@@ -200,7 +200,7 @@ public:
             std::string src(400, '!');  // > MAX_PARSE_DEPTH
             src += "true";
             // The depth guard makes the parser fail gracefully (no stack overflow):
-            // since the 2026-06 review fixes, guard failures surface as a thrown
+            // guard failures surface as a thrown
             // parse_error with a diagnostic instead of a silent null. Engine stays usable.
             check_throws([&]() { e->execute(src); });
             check_eq((int64_t)3, e->execute("1 + 2").as_int());
@@ -243,7 +243,7 @@ public:
             check_eq((int64_t)12, r.as_int());
         });
 
-        // ---- #8 set_local gap after a skipped block (agent-applied; lock it in) ----
+        // ---- #8 set_local gap after a skipped block ----
         test("local_after_untaken_block", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(
@@ -763,7 +763,7 @@ public:
             check_eq((int64_t)8, r.as_int());
         });
         test("closure_capture_local_snapshot", [this]() {
-            // A captured local is a snapshot; a top-level (global) x is read when the lambda runs (Dev ruling 2026-09-27)
+            // A captured local is a snapshot; a top-level (global) x is read when the lambda runs
             auto e = make_engine();
             auto r = e->execute(R"(
                 function run() -> auto {
@@ -977,7 +977,7 @@ public:
             check_eq(std::string("-0.0"), e->execute("to_string(0.0 * -1.0)").as_string());
         });
         test("fuzz_neg_zero_map_key_ordering", [this]() {
-            // Dev ruling 2026-09-28: -0.0 and +0.0 are one map key (they are ==) on both backends
+            // -0.0 and +0.0 are one map key (they are ==) on both backends
             auto e = make_engine();
             check_eq((int64_t)1, e->execute(R"(
                 double z = 0.0;
@@ -1406,7 +1406,7 @@ public:
             check_eq((int64_t)999, r.as_int());  // recomputed element address, not a dangling ptr
         });
 
-        // ---- 2026-07: builtin methods through references (docs-agent finding) ----
+        // ---- builtin methods through references ----
         // String builtins invoked through a ref DECL segfaulted on both backends: the
         // identifier-receiver fast path passed the RAW stored value (a reference wrapper)
         // as `self`, and string builtins read self's storage unchecked. Array/map
@@ -2066,7 +2066,7 @@ public:
                 string caught = "";
                 try { pk().v += boom(); } catch (e) { caught = e; }
                 log + "|" + caught + ":" + ("" + shared.v);
-            )").c_str(), "R|boom:10", "C++17 (Dev ruling 2026-09-27): the rhs before the receiver; an rhs raise evaluates no target", check_mode::strict);
+            )").c_str(), "R|boom:10", "C++17: the rhs before the receiver; an rhs raise evaluates no target", check_mode::strict);
             expect_order((std::string(recv_prelude) + R"(
                 var n = null;
                 var& gn() { log += "N"; return n; }
@@ -2122,7 +2122,7 @@ public:
                 "a string subscript compound runs the index once", check_mode::strict);
         });
         test("map_compound_missing_key_starts_from_the_default", [this, expect_order]() {
-            // Dev ruling 2026-09-28: a typed-value map's missing key takes the value type's default before the compound (C++
+            // A typed-value map's missing key takes the value type's default before the compound (C++
             // operator[]); a var-valued map has none and raises; the key expression runs once either way
             expect_order(R"(
                 var log = "";
@@ -2347,7 +2347,7 @@ public:
             check_eq(this_msg[0], this_msg[1], "this-store error text is byte-identical across backends");
             check_eq(undef_msg[0], undef_msg[1], "undefined-name text is byte-identical across backends");
         });
-        // ---- by-reference binding of C++ properties (Dev ruling: bind the MEMBER ITSELF;
+        // ---- by-reference binding of C++ properties (bind the MEMBER ITSELF;
         // docs/reference_model.md CPP-MEMBER / PROPERTY). Every row runs both backends. ----
         auto propref_engine = [](bool use_vm) {
             auto e = jai::engine::make();
@@ -2517,7 +2517,7 @@ public:
             }
         });
         test("read_only_property_store_raises_every_spelling", [this, propref_engine]() {
-            // Dev ruling (row 30 follow-up): assigning to a getter-only property is an error on
+            // Assigning to a getter-only property is an error on
             // every spelling, produced once by the binder's read-only setter - C++ semantics.
             const std::string ro_text = "Cannot assign to 'ro': it is read-only";
             std::vector<std::string> texts[2];
@@ -2750,7 +2750,7 @@ public:
             check_eq(direct_text, ref_msg[0], "the reference raises the direct store's own conversion text");
             // Narrow widths: the CPP-MEMBER box stores like an add_global_ref int32 (a
             // silent truncation) where the direct setter range-checks ("Integer value out
-            // of range for int") - pinned as observed; flagged for a Dev ruling.
+            // of range for int") - pinned as observed; an open question.
             check_eq(narrow_ref[0], narrow_ref[1], "narrow-int text is byte-identical across backends");
             check_eq(narrow_direct[0], narrow_direct[1]);
             check_true(narrow_ref[0].empty(), "reference store into int32 truncates (bound-variable rule)");
@@ -2820,7 +2820,7 @@ public:
             }
         });
         test("script_accessor_override_binds_through_accessors", [this, propref_engine]() {
-            // A script _set_/_get_ override in the chain wins (row 29): the reference routes
+            // A script _set_/_get_ override in the chain wins: the reference routes
             // through it instead of aiming at the member
             for (bool use_vm : {false, true}) {
                 auto e = propref_engine(use_vm);
@@ -3141,8 +3141,8 @@ public:
                 h()
             )", "aqb/3", "local receiver with a calling argument");
         });
-        // ---- the catch variable is an ordinary block-scoped local of the catch body (Dev
-        // contract, C++ catch (e) semantics): a frame slot in functions, a scope env at top
+        // ---- the catch variable is an ordinary block-scoped local of the catch body
+        // (C++ catch (e) semantics): a frame slot in functions, a scope env at top
         // level; locals -> members -> globals like any local, shadows for the block only,
         // invisible to callees and to code after the block, captured like any local.
         // Both backends used to resolve it dynamically through a backend-global intercept
@@ -3313,8 +3313,8 @@ public:
     }
 };
 
-// Reference-capture semantics (Dev ruling 2026-07-09: C++ lambda semantics ARE the
-// contract - "[&] needs to work or all ref captures fail"). These were silently broken
+// Reference-capture semantics (C++ lambda semantics ARE the contract: [&] works or
+// no ref capture does). Regression: these were silently broken
 // for SLOT-resident function locals (pre-cells "capture by value, by-ref is UAF"
 // compromises that the cell model obsoleted): [&]/[&x] captured copies, and
 // `auto& r = <local>` errored "undefined variable" (escape marker boxes the SLOT, the
@@ -4212,7 +4212,7 @@ public:
             e->execute("class P { int helper(int v) { return v * 2; } }");
             check_true(flat_of(e, "P"));
         });
-        // Strings ARE value-closed (Dev ruling: a member string is an engine value
+        // Strings ARE value-closed (a member string is an engine value
         // type, per-instance; the barrier normalization detaches rare shared nodes)
         test("string_field_flat", [this]() {
             auto e = make_engine();
@@ -4234,7 +4234,7 @@ public:
             e->execute("class P { var xs = []; }");
             check_false(flat_of(e, "P"));
         });
-        // Transitive value-closure (Dev ruling): containers of containers, containers
+        // Transitive value-closure: containers of containers, containers
         // of flat classes - anything that cannot point at something else
         test("nested_container_field_flat", [this]() {
             auto e = make_engine();
@@ -4313,7 +4313,7 @@ public:
     }
 };
 
-// Char integral promotion (Dev ruling 2026-07-12, the DOOM WAD-parser feedback):
+// Char integral promotion (from the DOOM WAD-parser feedback):
 // a char operand enters ARITHMETIC and BITWISE binary operators as int64 in 0..255
 // (unsigned by spec). Strictly additive: char+string concat, native char comparisons,
 // and object custom operators keep their pre-promotion meaning. One shared kernel,
@@ -4383,7 +4383,7 @@ public:
             check_eq(std::string("int"), e->execute("type_of('a' + 1)").as_string());
             check_eq(std::string("char"), e->execute("type_of('a')").as_string());
         });
-        // Comparison inting (second ruling, same day): comparisons promote exactly like
+        // Comparison inting: comparisons promote exactly like
         // arithmetic, so the char domain has ONE rule instead of two.
         test("char_equals_int", [this]() {
             auto e = make_engine();
@@ -4391,7 +4391,7 @@ public:
             check(e->execute("97 == 'a'").as_bool());
             check(e->execute("'a' != 98").as_bool());
             check_false(e->execute("'a' == 98").as_bool());
-            // The pre-ruling silent-false binary idiom, now truthful:
+            // The binary idiom that is silently false without promotion, truthful:
             check(e->execute("var s = \"\\x1A\"; s[0] == 0x1A").as_bool());
         });
         test("char_equals_string_stays_false", [this]() {
@@ -4463,7 +4463,7 @@ public:
             const char* prelude = "var log = \"\"; class T { string n; T(string s) { n = s; } ~T() { log += n + \";\"; } } ";
             const std::pair<const char*, const char*> rows[] = {
                 {"function f() { T a = T(\"a\"); T b = a; b.n = \"b\"; } f();", "a;b;"},
-                {"function f() { T a = T(\"a\"); T b = T(\"x\"); b = a; b.n = \"b\"; } f();", "a;b;"},   // b = a copy-assigns: b keeps its object (Dev ruling 2026-10-03)
+                {"function f() { T a = T(\"a\"); T b = T(\"x\"); b = a; b.n = \"b\"; } f();", "a;b;"},   // b = a copy-assigns: b keeps its object
                 {"function h(T p) { p.n = \"p\"; } function f() { T a = T(\"a\"); h(a); } f();", "p;a;"},
                 {"function r() -> T { T a = T(\"r\"); return a; } function f() { T x = r(); x.n = \"x\"; } f();", "x;"},
                 {"function f() { T a = T(\"a\"); array<T> arr = [a]; arr[0].n = \"e\"; } f();", "a;e;"},
@@ -4515,7 +4515,7 @@ public:
             check_eq((int64_t)5, e->execute("class A { int x = 1; A() { x = 5; } } auto a = A(); a.x").as_int());
         });
         test("ctor_valued_return_is_a_parse_error", [this]() {
-            // Dev ruling 2026-09-26: a constructor cannot return a value; a lambda or nested function inside it can
+            // A constructor cannot return a value; a lambda or nested function inside it can
             auto e = make_engine();
             jai::stdlib::register_all(e);
             std::string err;
@@ -4525,7 +4525,7 @@ public:
                 "class C { int x = 0; C() { var f = [](int a) { return a * 2; }; function g(int b) -> int { return b + 1; } x = f(5) + g(1); } } C().x").as_int());
         });
         test("ctor_bare_return_yields_the_instance", [this]() {
-            // Dev ruling 2026-09-26: a bare `return;` ends the constructor body early; the call yields the instance
+            // A bare `return;` ends the constructor body early; the call yields the instance
             auto e = make_engine();
             jai::stdlib::register_all(e);
             check_eq(std::string("A"), e->execute(
@@ -4535,7 +4535,7 @@ public:
             check_eq((int64_t)9, e->execute("G(0).x").as_int());
         });
         test("typed_declarations_default_initialize", [this]() {
-            // Dev ruling 2026-09-26: a typed declaration without an initializer takes its type's default - a class default-constructs,
+            // A typed declaration without an initializer takes its type's default - a class default-constructs,
             // int 0, float 0.0, bool false, string "", containers empty; var stays null; locals, fields, statics and globals alike
             auto e = make_engine();
             jai::stdlib::register_all(e);
@@ -4553,7 +4553,7 @@ public:
             )").as_string());
         });
         test("paren_and_brace_declarations_construct", [this]() {
-            // Dev ruling 2026-09-26: T x(args) direct-initializes, T x() default-constructs, and a primitive takes one value or its zero
+            // T x(args) direct-initializes, T x() default-constructs, and a primitive takes one value or its zero
             auto e = make_engine();
             jai::stdlib::register_all(e);
             check_eq(std::string("3.0,4.0|1.5|5|0|7.0|2.5"), e->execute(R"(
@@ -4566,7 +4566,7 @@ public:
             )").as_string());
         });
         test("a_class_holding_itself_by_value_is_an_error", [this]() {
-            // Dev ruling 2026-09-26: `Node next;` would build a Node inside every Node; `Node next = null;` is a link
+            // `Node next;` would build a Node inside every Node; `Node next = null;` is a link
             auto e = make_engine();
             jai::stdlib::register_all(e);
             std::string err;
@@ -4575,7 +4575,7 @@ public:
             check_eq((int64_t)2, e->execute("class Link { int v = 0; Link next = null; Link(int x) { v = x; } } Link a = Link(1); a.next = Link(2); a.next.v").as_int());
         });
         test("ctor_throw_leaks_no_instance", [this]() {
-            // Dev ruling 2026-09-26: a throw propagates, the target keeps its value, and the half-built instance runs no destructor
+            // A throw propagates, the target keeps its value, and the half-built instance runs no destructor
             auto e = make_engine();
             jai::stdlib::register_all(e);
             check_eq(std::string("3|null|bad|bad|[]"), e->execute(R"(

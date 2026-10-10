@@ -663,7 +663,7 @@ public:
             check_eq(result.as<std::string>(), "hello`world");
         });
 
-        // Splice depth is tracked on LEXED brace tokens (2026-07): whitespace before a
+        // Splice depth is tracked on LEXED brace tokens: whitespace before a
         // brace used to skip the depth bookkeeping - `${ x }` was a parse error and a
         // space-prefixed '{' swallowed the splice terminator (runaway template scan).
         test("template_string_splice_whitespace", [this]() {

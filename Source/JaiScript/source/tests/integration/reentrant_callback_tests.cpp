@@ -205,7 +205,7 @@ public:
 		});
 
 		test("nested_execute_failure_in_converted_callback_propagates_to_the_script", [this]() {
-			// Dev ruling 2026-09-28: a script callback behind a host std::function throws its error through to the host, which
+			// A script callback behind a host std::function throws its error through to the host, which
 			// hands it back to the calling script as the host call's error
 			auto eng = make_engine();
 			engine* raw = eng.get();
@@ -481,7 +481,7 @@ public:
 			// a property reference stored in an array<var> element through the native array view; its getter throws on its
 			// third (or first) call: dst.push(SRC[0]) is a call whose argument the fused push reads itself, so the exception
 			// converts in the calling frame and the function's own try catches it, on both backends, proofs on and off
-			// (Astra's acceptance case, 2026-09-14; the unfused call's argument zone already did this)
+			// (an acceptance case; the unfused call's argument zone does the same)
 			struct source_t { engine* eng = nullptr; int throw_at = 3; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int throw_at) -> std::string {
 				auto e = engine::make();

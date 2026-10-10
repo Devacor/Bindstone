@@ -1,5 +1,5 @@
-// Regression tests for bugs found during the 2026-06 release review.
-// Each test names the review finding it pins. Phase 1 batch: typed-null values,
+// Regression tests for bugs found during a release review.
+// Each test names the review finding it pins: typed-null values,
 // environment-pool corruption, closure slot collisions, throw fallthrough,
 // switch scope leaks, and compound-assignment overflow.
 

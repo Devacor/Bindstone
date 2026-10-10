@@ -789,8 +789,8 @@ public:
             check(exception_thrown);  // Verify diamond inheritance was rejected
         });
 
-        // `new T(args)` is pure sugar for shared_ptr<T>(args) construction (Dev ruling
-        // 2026-07): same new_expr, same tagging, reference semantics opt-in. A 'var'
+        // `new T(args)` is pure sugar for shared_ptr<T>(args) construction:
+        // same new_expr, same tagging, reference semantics opt-in. A 'var'
         // decl keeps the shared_ptr marker (var p = new P() IS shared_ptr<P> p = P()).
         test("new_keyword_shared_ptr_sugar_basics", [this]() {
             const char* src = R"(
@@ -904,7 +904,7 @@ public:
         });
 
         // === Member access enforcement (private:/protected:/public: labels) ===
-        // RULED (2026-09-27, two levels): private = the declaring class and every class derived
+        // Two levels: private = the declaring class and every class derived
         // from it; protected is its synonym; lambdas defined in a method inherit its class's
         // access; free functions/top level are public-only. Host C++ APIs stay unrestricted.
         test("member_access_enforcement_matrix", [this]() {
@@ -959,7 +959,7 @@ public:
 
         test("member_access_private_reaches_derived_classes", [this]() {
             // Derived methods reach Base-private and Base-protected alike, bare, through this.
-            // and through super:: (two levels, Dev ruling 2026-09-27)
+            // and through super:: (two levels)
             const char* src = R"(
                 class Base {
                 private:
@@ -1025,7 +1025,7 @@ public:
         });
 
         // ------------------------------------------------- bare-name resolution order
-        // 2026-07 audit pins (docs/site/guide/07-classes.html "Name resolution in
+        // Audit pins (docs/site/guide/07-classes.html "Name resolution in
         // methods"): catch var > locals/params > enclosing scopes > GLOBALS > fields >
         // methods > statics, identical on both backends for reads AND writes. The
         // surprising row - globals shadow fields - is DELIBERATELY pinned; this.name
@@ -1080,7 +1080,7 @@ public:
         });
 
         // ------------------------------------- shared_ptr<T> type-intern identity
-        // GLOOM bug (2026-07): engine::get_type_info's composite key had no case for
+        // GLOOM bug: engine::get_type_info's composite key had no case for
         // jai_shared_ptr_type, so every parsed shared_ptr<T> collapsed onto the FIRST
         // interned T engine-wide - `new Bar()` after `new Foo()` SILENTLY CONSTRUCTED
         // a Foo (both backends; new desugars to the same shared_ptr<T>(args) node).
@@ -1145,7 +1145,7 @@ public:
                 )");
                 check_eq((int64_t)1, e->execute("a.x").as_int());
                 check_eq((int64_t)2, e->execute("b.y").as_int());
-                // Dev ruling (2026-07): typed shared_ptr decls ENFORCE the pointee
+                // Typed shared_ptr decls ENFORCE the pointee
                 // class - wrong-class value init and wrong-class sp-aliasing both
                 // error; upcasts (script chains) stay legal; null stays assignable.
                 check_throws([&]() { e->execute("shared_ptr<Bar> wrong = Foo();"); });
@@ -1165,7 +1165,7 @@ public:
         });
 
         test("shared_ptr_auto_decl_infers_then_enforces", [this]() {
-            // shared_ptr<auto> (Dev ruling 2026-07): the pointee is INFERRED from the
+            // shared_ptr<auto>: the pointee is INFERRED from the
             // initializer's exact class, then enforced exactly like the explicit
             // spelling - construct-and-share, handle sharing, upcast-on-reassign,
             // wrong-class errors, and null-after-establishment all mirror shared_ptr<T>.
@@ -1227,7 +1227,7 @@ public:
         });
 
         test("shared_ptr_var_is_a_parse_error", [this]() {
-            // Dev ruling (2026-07, option 2): shared_ptr<var> is REJECTED at parse -
+            // shared_ptr<var> is REJECTED at parse -
             // plain var already holds and rebinds any shared_ptr across unrelated
             // classes, so a constrained-but-dynamic pointee has no use case, and var
             // meaning something different inside angle brackets would muddy the ladder.
@@ -1273,7 +1273,7 @@ public:
         });
 
         test("var_held_handles_rebind_unchecked", [this]() {
-            // Dev ruling (2026-07, refines c81c9812): a var-DECLARED holder behaves
+            // A var-DECLARED holder behaves
             // IDENTICALLY to a typed handle holder wherever typed is legal (the monotonic
             // ladder). A handle rhs REBINDS; a COMPATIBLE value rhs assigns INTO the
             // pointee (just like shared_ptr<T>/auto); var's ONLY extra power is REBINDING
@@ -1304,7 +1304,7 @@ public:
                 e->execute("var wsrc = new Foo(); weak_ptr<Foo> w = wsrc;");
                 check_eq(false, e->execute("w.expired()").as<bool>());
                 check_throws([&]() { e->execute("weak_ptr<Bar> wbad = wsrc;"); });
-                // MONOTONIC LADDER (Dev ruling 2026-07, refines c81c9812): a var-held
+                // MONOTONIC LADDER: a var-held
                 // handle behaves IDENTICALLY to a typed holder wherever typed is legal.
                 // A COMPATIBLE value rhs (same class or subclass of the held pointee)
                 // assigns INTO the shared pointee, so aliases SEE the change - exactly
@@ -1342,11 +1342,10 @@ public:
         });
 
         test("user_method_wins_over_builtin_handle_method", [this]() {
-            // Dev ruling (2026-07): a user class method takes PRIORITY over a same-named
-            // builtin shared_ptr handle method (reset/use_count/unique/cpp_ref_count).
-            // Previously the builtin shadowed the class method (gloom's fx.reset() silently
-            // no-op'd the builtin reset()); now the class method wins on shared_ptr<T>
-            // instances, the builtin stays reachable where NO class method shadows it, and
+            // A user class method takes PRIORITY over a same-named
+            // builtin shared_ptr handle method (reset/use_count/unique/cpp_ref_count)
+            // (otherwise gloom's fx.reset() would silently no-op the builtin reset()): the
+            // class method wins on shared_ptr<T> instances, the builtin stays reachable where NO class method shadows it, and
             // a shadow emits ONE warning per colliding method per class definition.
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();

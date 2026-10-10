@@ -250,7 +250,7 @@ public:
             )", "|r|a|");
         });
 
-        // Assignment into a slot holding a class instance by value is C++'s copy assignment (Dev ruling 2026-10-03): the
+        // Assignment into a slot holding a class instance by value is C++'s copy assignment: the
         // slot keeps its object, the declared class's members take the source's, then a temporary source dies
         test("assignment_copy_assigns_and_the_temporary_dies", [this]() {
             expect_log(R"(
@@ -278,7 +278,7 @@ public:
             )", "r:r|r");
         });
 
-        // No slicing (Dev ruling 2026-10-04): a source of another class the slot admits re-classes the slot's object in place:
+        // No slicing: a source of another class the slot admits re-classes the slot's object in place:
         // the levels it loses die (destructor body, then their members), it takes the source's class, every member assigns
         // from the source; references, handles and same_object keep seeing the one object
         test("assignment_from_a_subclass_source_reclasses_the_object", [this]() {

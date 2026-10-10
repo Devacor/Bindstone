@@ -119,7 +119,7 @@ public:
             expect(raised("var v = math::vec2(); v.z = 1;"), "math::vec2 has no member 'z'", "a store to a missing component");
         });
 
-        // Dev ruling 2026-09-30: a component is an lvalue wherever a reference binds, as in C++
+        // A component is an lvalue wherever a reference binds, as in C++
         test("components_are_lvalues", [expect, raised]() {
             const std::string fns = "void f(float& a) { a = a * 10; } void g(var& a) { a = 2.7; } ";
             expect(fns + "math::vec3 v = math::vec3(1, 2, 3); f(v.y); to_string(v)", "(1.0, 20.0, 3.0)", "a reference parameter");

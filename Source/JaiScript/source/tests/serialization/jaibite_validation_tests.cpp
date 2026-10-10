@@ -274,7 +274,7 @@ public:
         });
 
         test("valid_constructor_initializer_preserves_bytes", [this]() {
-            // a class is a program-scope type (Dev ruling 2026-10-01): its delegating initializer reads a program-scope name
+            // a class is a program-scope type: its delegating initializer reads a program-scope name
             auto eng = make_engine();
             auto bite = eng->jaibite(R"(
                 int seed = 3;

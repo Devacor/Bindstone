@@ -14,7 +14,7 @@ public:
     function_tests() : suite("Function Tests") {}
     
     void forge_tests() override {
-        // A named function declared in a function body captures nothing (Dev ruling 2026-10-02): an enclosing frame local is
+        // A named function declared in a function body captures nothing: an enclosing frame local is
         // a parse error on both backends; globals stay visible, and function(...) / => keep their [&] lambda semantics
         test("nested_named_function_captures_nothing", [this]() {
             for (const char* source : {
@@ -1069,7 +1069,7 @@ public:
             check_eq(int64_t(42), engine->execute("function g(x) { return x * 2; } g(21);").as_int());
         });
 
-        // ---- return-type conflicts (Dev ruling 2026-07: contradictory leading +
+        // ---- return-type conflicts (contradictory leading +
         // trailing types = parse error; a matching pair is redundant-legal) ----
 
         test("return_type_conflict_is_parse_error", [this]() {
@@ -1094,7 +1094,7 @@ public:
             check_throws([&]() { engine->execute("int g() -> { return \"x\"; } g();"); });
         });
 
-        // ---- initializer lists are constructor-only (Dev ruling 2026-07) ----
+        // ---- initializer lists are constructor-only ----
 
         test("initializer_list_only_on_constructors", [this]() {
             auto engine = make_engine();
@@ -1113,7 +1113,7 @@ public:
                 "class A { int v = 0; A(int x) { v = x; } } class B : A { B() : super(9) {} } B().v;").as_int());
         });
 
-        // ---- top-level functions of other signatures overload (Dev ruling 2026-10-02); a coroutine does not, and a function and
+        // ---- top-level functions of other signatures overload; a coroutine does not, and a function and
         // a coroutine of one name warn; include composition is silent (warn severity, scoped to one textual parse unit) ----
 
         auto duplicate_warnings = [](jai::engine& eng) {
@@ -1185,7 +1185,7 @@ public:
         });
 
         test("same_signature_twice_in_one_unit_is_an_error", [&, this]() {
-            // the general redefinition rule (Dev ruling 2026-10-07, docs/const.md 4.3)
+            // the general redefinition rule (docs/const.md 4.3)
             auto engine = make_engine();
             std::string err;
             try { engine->execute("function f(a) { return 1; } function f(a) { return 2; } f(0);"); } catch (const std::exception& ex) { err = ex.what(); }
@@ -1341,7 +1341,7 @@ public:
             )").to_string());
         });
 
-        // ---- free-function overloads (Dev ruling 2026-10-02): overloads coexist as in C++, only the same signature replaces, a
+        // ---- free-function overloads: overloads coexist as in C++, only the same signature replaces, a
         // reloaded unit replaces or drops only its own declarations; a tie raises, the nearest base breaks a class tie ----
 
         auto error_of = [](auto&& run) -> std::string {
@@ -1434,7 +1434,7 @@ public:
             check_true(!engine->get_global_environment()->get_value_ptr(engine->get_symbolizer()->intern("ran")), "nothing ran");
         });
 
-        // ---- overloads that differ only by reference (Dev ruling 2026-10-09): the second definition is an error naming both ----
+        // ---- overloads that differ only by reference: the second definition is an error naming both ----
 
         test("an_overload_differing_only_by_reference_is_an_error", [this, error_of]() {
             const std::string tail = " only by reference; overloads must differ in parameter types or count";
@@ -1469,7 +1469,7 @@ public:
         });
 
         test("a_reference_only_overload_in_another_execute_context_redefines", [this, error_of]() {
-            // Dev ruling 2026-10-09: a separate host execute, or a module's re-run, redefines instead of conflicting
+            // A separate host execute, or a module's re-run, redefines instead of conflicting
             namespace fs = std::filesystem;
             auto strings = make_engine();
             strings->execute("int f(var& x) { return 1; }");

@@ -1,6 +1,6 @@
 #pragma once
 
-// Loader-only byte mutation campaign. Mutated trees are deliberately NOT executed:
+// Loader-only byte mutation fuzzing. Mutated trees are deliberately NOT executed:
 // execution fuzzing and its result/print oracle remain in fuzz_harness.hpp.
 #include "fuzz_generator.hpp"
 

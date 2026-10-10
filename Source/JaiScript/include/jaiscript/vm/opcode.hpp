@@ -111,8 +111,8 @@ namespace jai::vm {
 
         op_inline_guard,    // a = inline site, b = the fallback ip: the site's name binds the site's function, or the fallback runs the original statement (docs/typed_regions_design.md, Inlined leaves)
         op_probe_callee,    // a=site index, b=argc: resolve the identifier callee at the
-                            // callee-first observation point (Dev ruling 2026-07-08:
-                            // callee-before-args IS the language, matching C++17) into the
+                            // callee-first observation point (callee-before-args IS the
+                            // language, matching C++17) into the
                             // pending-callee register stack - no value-stack materialization
         op_call_from_scratch, // a=argc, b=site index: call the pending callee (args at stack top)
         op_probe_member,    // a=site index, b=0 member lookup / 1 callable check: raise the
@@ -236,7 +236,7 @@ namespace jai::vm {
         op_c_mstore,        // a = value (a cell, or k_typed_const_bit | constant), b = member_expr node, c = the base slot: a member store site,
                             // the field's payload written in place when the kinds agree, the general store otherwise
         op_set_member_value,   // a = member_store_protos index: `base.member = operand;` in statement position, the value an operand (no push, no result)
-        // fused cell pairs (row 150): the opcode of the first instruction of an adjacent pair, its own word; the second instruction keeps its own
+        // fused cell pairs: the opcode of the first instruction of an adjacent pair, its own word; the second instruction keeps its own
         // word and opcode and runs from the fused executor when the first fell through to it (a jump into it dispatches it alone)
         op_c_arith2,        // C_ARITH_P then C_ARITH_P
         op_c_jcmp2,         // C_JCMP_P then C_JCMP_P (the second when the first falls through)

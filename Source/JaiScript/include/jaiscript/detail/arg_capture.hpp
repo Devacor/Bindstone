@@ -3,8 +3,8 @@
 #ifndef __JAISCRIPT_DETAIL_ARG_CAPTURE_HPP__
 #define __JAISCRIPT_DETAIL_ARG_CAPTURE_HPP__
 
-// A by-value argument takes its value when it is evaluated, and a reference parameter binds its argument then (Dev ruling
-// 2026-10-08). The parse-time stamp (transient_read_marker::stamp_arg_captures) names the arguments a later argument may write;
+// A by-value argument takes its value when it is evaluated, and a reference parameter binds its argument then.
+// The parse-time stamp (transient_read_marker::stamp_arg_captures) names the arguments a later argument may write;
 // each backend captures such an argument right after evaluating it, by how the resolved callee binds that position, and mints
 // the reference of a stamped lvalue a reference parameter takes. Shared verbatim by both backends.
 

@@ -18,7 +18,7 @@ namespace jai {
     class class_definition;
 
     // shared_ptr HANDLE builtin method names that a user class method now SHADOWS and
-    // WINS over (Dev ruling 2026-07). same_as is deliberately EXCLUDED: it is a UNIVERSAL
+    // WINS over. same_as is deliberately EXCLUDED: it is a UNIVERSAL
     // identity primitive available on every value (and excluded from the fast method-call
     // gate), not a per-class-overridable handle method. weak_ptr's lock/expired never
     // collide here - they dispatch on weak_ptr VALUES, which are not user class instances.

@@ -281,7 +281,7 @@ namespace stdlib {
             const std::function<script_value(const script_value&)>& transform) {
         if (!eng->get_class_definition(type_name)) return script_value(std::monostate{}, eng);
 
-        // the class's constructor, called as Name() would call it; its error (or throw) is the load's (Dev ruling 2026-09-28)
+        // the class's constructor, called as Name() would call it; its error (or throw) is the load's
         script_value ctor = eng->get_variable(type_name);
         if (!ctor.is_function()) return script_value(std::monostate{}, eng);
         auto constructed = ctor.as_function()({});

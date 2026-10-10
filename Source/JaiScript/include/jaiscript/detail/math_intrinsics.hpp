@@ -17,14 +17,14 @@
 
 namespace jai::detail {
 
-    // ---- math:: language intrinsics (Dev commission 2026-07-09) ---------------------------
+    // ---- math:: language intrinsics ---------------------------
     // `math::` is a RESERVED namespace owned by the language: both backends recognize
     // `math::<fn>(args)` call shapes and execute through eval_math_intrinsic below -
     // no registration, no environment lookup, no native-boundary crossing. Pure-numeric
-    // by ruling: nobody overrides int+int-class operations, and math:: is ours; user
+    // by design: nobody overrides int+int-class operations, and math:: is ours; user
     // operator overloads (vec + vec, ...) are untouched - their internals decompose to
     // these numerics. ONE enum + ONE name map + ONE kernel = the single source of truth
-    // (parity by construction; the lookup ladder ruling: switch/array, no strings past
+    // (parity by construction; the lookup ladder: switch/array, no strings past
     // the first resolution, which callers cache on the AST node).
     enum class math_fn : uint8_t {
         floor_, ceil_, itrunc, ifloor,
@@ -200,7 +200,7 @@ namespace jai::detail {
 
         uint64_t next() { return generator(); }
         void seed(uint64_t s) { generator.seed(s); }
-        // Uniform [0.0, 1.0] INCLUSIVE of both ends (Dev spec: ranges are inclusive)
+        // Uniform [0.0, 1.0] INCLUSIVE of both ends (ranges are inclusive)
         double next_unit_inclusive() {
             return static_cast<double>(next() >> 11) * (1.0 / 9007199254740991.0);   // / (2^53 - 1)
         }
@@ -393,7 +393,7 @@ namespace jai::detail {
         }
     }
 
-    // ---- color blending (Dev ruling 2026-09-29) --------------------------------------------------------------------------
+    // ---- color blending --------------------------------------------------------------------------
     // Everything in binary64, landing binary32. OKLab is Bjorn Ottosson's published transform: gamma-encoded sRGB to linear
     // sRGB to LMS (cube root) to Lab and back; the result clamps to the sRGB gamut per channel. Alpha is straight.
     namespace color_math {
@@ -1108,8 +1108,8 @@ namespace jai::detail {
     }
 
     // The ONE evaluation kernel, used verbatim by both backends. Args arrive as an
-    // array of DEREF'D pointers (zero-copy from the caller's stack). Type discipline
-    // per ruling: ONE variant read per arg, switch on it; cpp_bound decodes through
+    // array of DEREF'D pointers (zero-copy from the caller's stack). Type discipline:
+    // ONE variant read per arg, switch on it; cpp_bound decodes through
     // the S8 prologue shape. Every case arity-checks BEFORE touching args.
     inline checked_result<script_value> eval_math_intrinsic(math_fn fn, const script_value* const* args, size_t argc,
                                                             engine* eng, math_rng_state& rng) {

@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_FUNCTION_OVERLOADS_HPP__
 #define __JAISCRIPT_DETAIL_FUNCTION_OVERLOADS_HPP__
 
-// Program-scope and namespace function overloads (Dev ruling 2026-10-02): declarations of one name coexist as in C++, a
+// Program-scope and namespace function overloads: declarations of one name coexist as in C++, a
 // declaration of the same signature replaces, and a unit run again replaces or drops only what its earlier run declared. A call
 // takes the one scorer's best (core/overload_resolution.hpp); a tie on every key raises. Shared verbatim by both backends.
 
@@ -42,7 +42,7 @@ namespace jai::detail {
             for (size_t i = 0; i < held->overloads->members.size(); ++i) { keep(held->overloads->members[i], held->overloads->values[i]); }
         }
         // one that differs only by reference: within one execute context the second definition's error, else a redefinition that
-        // replaces it (another host entry, or a re-run of the declaring unit; Dev ruling 2026-10-09)
+        // replaces it (another host entry, or a re-run of the declaring unit)
         const bool redefines = eng->unit_rerun(fn->unit);
         for (size_t i = 0; i < set->members.size();) {
             const auto& member = set->members[i];

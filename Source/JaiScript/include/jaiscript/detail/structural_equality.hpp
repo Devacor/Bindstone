@@ -1,5 +1,5 @@
 #pragma once
-// Script `==` on heavy operands is memberwise, like C++ containers (Dev ruling 2026-09-05):
+// Script `==` on heavy operands is memberwise, like C++ containers:
 // arrays elementwise, maps entrywise in key order, class instances fieldwise in slot order,
 // each with an early out on a size or class mismatch and on the first unequal member. The
 // recursion runs through the backend's full `==` (the `eq` callback), so a nested user

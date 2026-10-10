@@ -561,8 +561,7 @@ namespace jai {
         double execute_elapsed();
         void note_host_entry();
         // The host entry running now (an execute, execute_file or host call into script, with everything it runs): one execute
-        // context. A definition in another context, or in a re-run of its unit, redefines instead of conflicting (Dev ruling
-        // 2026-10-09)
+        // context. A definition in another context, or in a re-run of its unit, redefines instead of conflicting
         uint64_t host_entry_generation() const noexcept;
         bool unit_rerun(unit_stamp unit) const;
         void note_execute_elapsed_use();
@@ -1056,9 +1055,9 @@ namespace jai {
         type_info* get_type_info_weak_ptr(type_info* pointee_type);
         type_info* get_type_info_shared_ptr(type_info* pointee_type);
         // var-held-handle twin of get_type_info_shared_ptr: identical shape/name/id but
-        // dynamic_pointee=true, so '=' with a handle rhs rebinds unchecked (Dev ruling 2026-07)
+        // dynamic_pointee=true, so '=' with a handle rhs rebinds unchecked
         type_info* get_type_info_shared_ptr_dynamic(type_info* pointee_type);
-        // A var slot's twin of a typed array's tag: dynamic_slot=true (Dev ruling 2026-09-28)
+        // A var slot's twin of a typed array's tag: dynamic_slot=true
         type_info* get_type_info_array_dynamic(type_info* array_type);
 		type_info* get_type_info_map_dynamic(type_info* a_mapType);
         type_info* get_type_info_reference(type_info* referenced_type);
@@ -1125,7 +1124,7 @@ namespace jai {
         void report_script_error(const std::string& a_message, std::error_code a_code = {});
 
         // Advisory diagnostics that are NOT errors (e.g. a class method shadowing a builtin
-        // handle method - Dev ruling 2026-07). Always-on, independent of static_checking().
+        // handle method). Always-on, independent of static_checking().
         // Default sink is std::cerr ("[jaiscript] warning: ..."); the host app / tests
         // install their own handler to capture. Execution always proceeds.
         void set_script_warning_handler(std::function<void(const std::string&)> a_handler);
@@ -1136,7 +1135,7 @@ namespace jai {
         void push_external_call_scope();
         void pop_external_call_scope();
 
-        // The checked_result flavor's host entry (Dev ruling 2026-10-01): `run` executes on the backend, and a call made while no
+        // The checked_result flavor's host entry: `run` executes on the backend, and a call made while no
         // script runs reports every failure in its result (a run-time error, an uncaught throw, a failed import or reload), the
         // engine left ready for the next call; a call from inside running script passes straight through
         using host_entry_body = checked_result<script_value> (*)(execution_backend&, void*);

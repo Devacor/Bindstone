@@ -157,7 +157,7 @@ public:
     // A retired layer (engine::script_layer_detach, or a move to another engine) keeps
     // owning its object so old handles never dangle, but every C++ extraction through it
     // throws instead of reaching an object another layer now speaks for.
-    // Set while a script constructor has not completed: the half-built instance runs no destructor (Dev ruling 2026-09-26)
+    // Set while a script constructor has not completed: the half-built instance runs no destructor
     void construction_pending(bool pending) { construction_pending_ = pending; }
     bool construction_pending() const { return construction_pending_; }
 
@@ -809,12 +809,12 @@ public:
         bump_method_epoch();
     }
 
-    // Declared field types (ruling 2026-07: typed fields enforce like locals). 'auto'
+    // Declared field types (typed fields enforce like locals). 'auto'
     // fields store no entry (they infer from the initialized value); 'var' stores the
     // any tag explicitly (dynamic stays dynamic). Replaced wholesale on definition and
     // on hot reload; a semantic change on a REDEFINITION (mark_changes) flags the next
     // redefine_class as fields_changed so instances re-migrate (converting per the
-    // retype ruling). The initial definition must NOT flag: a spurious first-reload
+    // hot-reload retype rule). The initial definition must NOT flag: a spurious first-reload
     // migration would rebuild fields_ and dangle field pointers cached by suspended
     // coroutines' env chains.
     void replace_field_declared_types(std::unordered_map<uint64_t, type_info_ptr> new_types, bool mark_changes) {
@@ -839,10 +839,10 @@ public:
         }
     }
 
-    // TRUE when instances are value-closed (parallel_for v1, Dev rulings 2026-07-09):
+    // TRUE when instances are value-closed (parallel_for v1):
     // a script class whose every instance field is store-enforced to a value-semantic
     // shape — primitive (int/float/bool/char), STRING (engine value type, per-instance
-    // by ruling; the rare shared string node is detached by the region barrier's
+    // by design; the rare shared string node is detached by the region barrier's
     // normalization pass, not banned here), typed primitive/string container, or a
     // nested script class that is itself flat — with a flat parent chain and no C++
     // base/data. Because those stores all deep-clone, two live instances can never
@@ -1088,7 +1088,7 @@ public:
 
     // Chain-aware (this class + script parents + cpp base): does ANY resolvable user
     // method with this name exist? Used to let a user class method WIN over a same-named
-    // builtin handle method (Dev ruling 2026-07). Cheap: no symbolizer / no throw.
+    // builtin handle method. Cheap: no symbolizer / no throw.
     bool defines_method(uint64_t id) const {
         if (methods_.find(id) != methods_.end()) { return true; }
         for (const auto& parent : parent_classes_) {
@@ -1258,7 +1258,7 @@ public:
     std::shared_ptr<class_instance> allocate_instance() {
         std::shared_ptr<class_instance> instance;
         // Destructor probe memo: "~"+name_ alloc + symbolizer intern + has_method are
-        // class-static facts, recomputed per MINT before this (measured 2026-07-12 in
+        // class-static facts, recomputed per MINT before this (measured in
         // the construct_instance section profile). method_epoch_ already cascades to
         // derived classes on every method-set mutation, so it is the exact validity key.
         if (dtor_memo_epoch_ != method_epoch_) {
@@ -2983,7 +2983,7 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type: {
             // the same kind; the other precision of the same dimensions converts (int32 to binary32 in one rounding, binary32
-            // to int32 through the checked kernel; Dev decision 5); anything else rejects with the site's text
+            // to int32 through the checked kernel); anything else rejects with the site's text
             const script_value_type have = detail::math::kind_of(v);
             if (have == target) return slot_conversion::of(verdict::identity);
             if (!detail::math::converts(have, target)) return slot_conversion::of(verdict::reject);
@@ -3002,7 +3002,7 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
 // lives in typed_slot.hpp (defined out of line in environment.cpp).
 checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value, const type_info_ptr& target_type, engine* eng);
 
-// The pointee class a shared_ptr<T> slot judges a source by (R-q6, Dev ruling 2026-09-30): a typed handle's static pointee (a
+// The pointee class a shared_ptr<T> slot judges a source by: a typed handle's static pointee (a
 // C++ shared_ptr<U> converts to shared_ptr<T> only upward; a downcast needs cast<shared_ptr<T>>), else - a var-held handle, a plain
 // object - the class the object really has. Null when neither is known (opaque host flows stay lenient).
 inline const std::string* shared_handle_judged_class_name(const script_value& v, engine* eng) {
@@ -3332,7 +3332,7 @@ inline bool var_slot(const type_info* t) noexcept {
 	return t && (t->base_type == script_value_type::jai_any_type || t->dynamic_slot);
 }
 
-// The tag a value takes in a var slot (Dev ruling 2026-09-28): a typed container keeps its constraints through the dynamic
+// The tag a value takes in a var slot: a typed container keeps its constraints through the dynamic
 // twin, anything else takes `any_tag` (the slot's own any)
 inline void var_stamp(script_value& value, const type_info_ptr& any_tag, engine* eng) {
 	const type_info_ptr& tag = value.get_type_info();
@@ -3432,7 +3432,7 @@ inline std::optional<script_value> field_store_convert_no_script(const script_va
 // Script-surface member access enforcement kernel — the ONE check both backends call
 // verbatim at every member get/set/compound/call site (parity by construction).
 // ctx = the class whose method body is currently executing (nullptr at top level /
-// free functions). Two levels (Dev ruling 2026-09-27): public = everyone; private = the
+// free functions). Two levels: public = everyone; private = the
 // declaring class and every class derived from it, through any receiver of the family;
 // protected is a synonym of private. Host C++ APIs (get_field/set_field/get_fields,
 // serialization) never call this — the host side stays unrestricted by design.
@@ -3447,8 +3447,8 @@ inline checked_result<void> enforce_member_access(const class_definition* cls, u
         "Cannot access private member '{0}' of class '{1}'", member_id, declarer->get_type_id());
 }
 
-// operator= on a plain store (docs/static_checking.md rule table; C++ assignment, Dev ruling 2026-10-03; no slicing, Dev ruling
-// 2026-10-04). A destination slot holding a class instance by value keeps its object: a source of the held instance's class
+// operator= on a plain store (docs/static_checking.md rule table; C++ assignment; no slicing).
+// A destination slot holding a class instance by value keeps its object: a source of the held instance's class
 // assigns every member into it (the implicit copy assignment: a by-value class member assigns in turn, any other member
 // takes the member-copy rule, clone_element); a source of another class the slot's declared class admits (that class or a
 // subclass) first destroys the levels the object loses, re-classes it in place to the source's class, then assigns every
@@ -3828,7 +3828,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
         type_info_ptr declared = class_def_ ? class_def_->get_field_declared_type(id) : nullptr;
         if (existing && !existing->is_reference() && !existing->is_null() &&
             declared && declared->base_type != script_value_type::jai_any_type) {
-            // Hot-reload retype ruling (2026-07): a declared-type change CONVERTS the live
+            // Hot-reload retype rule: a declared-type change CONVERTS the live
             // value wherever the assignment table allows (float->int truncates, int->string
             // via to_string, subtype objects stay); a value with NO conversion (object into
             // int, string into int) or one that converts only through script (a converting

@@ -3,7 +3,7 @@
 #ifndef __JAISCRIPT_DETAIL_METHOD_VALUE_HPP__
 #define __JAISCRIPT_DETAIL_METHOD_VALUE_HPP__
 
-// A method is called or bound, never read bare (Dev ruling 2026-09-30): obj.method without a call raises this text on both
+// A method is called or bound, never read bare: obj.method without a call raises this text on both
 // backends and in the strict checker. A class instance, handle or host object binds with reflect::bind; a value type's
 // (string, array, map, coroutine) methods run on the value, so a lambda wraps the call.
 

@@ -426,7 +426,7 @@ inline bool class_definition::has_static_method_with_arity(uint64_t name_id, siz
     return false;
 }
 
-// Dev ruling (2026-07): a defaulted-parameter constructor is NOT a converting
+// A defaulted-parameter constructor is NOT a converting
 // constructor (deliberate C++ divergence) - implicit conversion requires a TRUE
 // one-parameter constructor; opt in with a delegating overload
 // (Money(int a) : this(a, 0) {}). Explicit construction keeps the arity window.

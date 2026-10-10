@@ -8,7 +8,7 @@
 
 namespace jai::detail {
 
-// A plain declaration of a name an inline declaration created (Dev ruling 2026-09-30) is refused; the text names the
+// A plain declaration of a name an inline declaration created is refused; the text names the
 // declaration it should be, its type as written (var: none; a destructuring name: auto)
 inline std::string inline_spelling(const variable_decl* decl, std::string_view name) {
 	std::string type;

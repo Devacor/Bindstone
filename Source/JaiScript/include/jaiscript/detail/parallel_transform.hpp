@@ -6,10 +6,10 @@
 // parallel_transform v0 (docs/parallel_design.md, docs/parallel_prove_or_serial.md §5).
 // Contract A: a body either satisfies the parallel contract or ERRORS — never silent-serial.
 // Everything here constructs lazily inside the first parallel_transform call; worker
-// contexts persist in an engine-owned slot pool and are RESET per call (Dev-greenlit
-// reuse — rebuild only on a provisioning-fingerprint change). Outside an active region
+// contexts persist in an engine-owned slot pool and are RESET per call (reuse
+// — rebuild only on a provisioning-fingerprint change). Outside an active region
 // the engine carries exactly one extra null-pointer test on the (cold, allocation-path)
-// engine::execution_limits() accessor — the ruled zero-concurrency-cost-outside-parallel
+// engine::execution_limits() accessor — the zero-concurrency-cost-outside-parallel
 // invariant; sequential paths never touch any of this.
 
 #include <jaiscript/core/checked_result.hpp>
@@ -141,7 +141,7 @@ namespace jai::detail {
         // replacement, a container/string mutator on an element-rooted chain, an alias of it).
         // A by-value element parameter whose body neither writes through it nor uses it whole
         // (element_reach_all) binds the element IN PLACE on the worker: every remaining use is
-        // a member read, so the copy is unobservable (Dev: a copy we can prove away goes).
+        // a member read, so the copy is unobservable (a copy we can prove away goes).
         bool element_mutated = false;
         bool transform_cursor = false;   // the transform delivers elements through a chunk cursor (set once its chunk loop lands)
     };
@@ -207,7 +207,7 @@ namespace jai::detail {
         // INTERNED symbol ids, never std::string (no per-region allocation).
         std::vector<std::pair<uint64_t, parallel_capture_kind>> last_captures;
 
-        // Worker-context reuse (Dev-greenlit): slots built inside a region persist and
+        // Worker-context reuse: slots built inside a region persist and
         // are RESET per call (limits re-slice, budget re-arm, residual-state clear,
         // host-copy refresh) instead of rebuilt; a slot rebuilds only when its
         // provisioning fingerprint (backend type + admission-graph bodies) changes.

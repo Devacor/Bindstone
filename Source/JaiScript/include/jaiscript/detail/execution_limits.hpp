@@ -123,7 +123,7 @@ namespace jai::detail {
 	// The single raise point for memory-cap errors (identical text/semantics on both
 	// backends and in the shared builtin methods). Re-arms the counter so a catching
 	// script gets a fresh allowance to clean up; the second raise per top-level execute
-	// latches terminal (Dev ruling: ONE script catch per execute, then terminal).
+	// latches terminal (ONE script catch per execute, then terminal).
 	inline error_propagator raise_memory_cap(execution_limits& limits) noexcept {
 		limits.memory_used = 0;
 		if (++limits.memory_raises >= 2) { limits.terminal_error = true; }

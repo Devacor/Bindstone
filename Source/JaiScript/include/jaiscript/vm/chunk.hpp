@@ -44,7 +44,7 @@ namespace jai::vm {
         uint32_t ident_node = k_invalid_u32;
 
         // Subscript-read operand `base[i][j]...[k]` (every level transient-marked, so the
-        // elision ruling applies): slot/symbol above name the BASE container; the chain
+        // elision rule applies): slot/symbol above name the BASE container; the chain
         // holds one entry per level, OUTERMOST-application order (base[chain[0]][chain[1]]...).
         // Truly N-level: array levels resolve in place, any other level (map key, borrow,
         // OOB) replays that one level through the real op_index and the walk continues.
@@ -137,7 +137,7 @@ namespace jai::vm {
         mutable uint32_t ic_argc = 0;
         mutable bool ic_native = false;   // the cached callee is a host callable (ic_fn null): the call invokes it with the arguments as they are
         mutable bool ic_host_checked = false;   // the lane was looked for since the last refill (filled on a hit: a binding that holds)
-        // Monomorphic method-dispatch cache (flat-classes increment 1): validated on
+        // Monomorphic method-dispatch cache: validated on
         // (class identity, method_epoch) per class_definition::bump_method_epoch's
         // contract (derived-propagating; definitions engine-lifetime pinned, no ABA).
         // Caches the resolve ladder's outcome for one receiver class: the pre-minted
@@ -494,7 +494,7 @@ namespace jai::vm {
             uint32_t iter_proto = k_invalid_u32, iter_index_cell = k_invalid_u32, iter_site = k_invalid_u32;
             std::vector<uint32_t> inner_counted;   // the counted_for_protos indices of the inner counted loops the block took, outermost first: a miss inside one pushes the general form's state (cells_miss)
             std::vector<cell> cells;
-            std::vector<uint32_t> env_cells;           // the cells with an environment operand: a landing after a call re-reads them (row 156.2)
+            std::vector<uint32_t> env_cells;           // the cells with an environment operand: a landing after a call re-reads them
             std::vector<uint32_t> entry_cells;         // the cells the entry reads (environment values, the range index, live slots); temps and body declarations enter empty
             std::vector<uint32_t> site_env_cache;      // per site: the lookup-cache slot of a load whose container is a plain environment name (k_invalid_u32: any other site)
             std::vector<uint32_t> string_candidates;   // the slot cells whose kind may be a string at run time: a landing re-borrows them

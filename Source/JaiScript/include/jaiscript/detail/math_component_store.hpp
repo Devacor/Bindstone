@@ -132,7 +132,7 @@ namespace jai::detail::math {
 		return stored;
 	}
 
-	// `v.x` where a reference binds (Dev ruling 2026-09-30: a component is an lvalue, as in C++): a COMPONENT reference over
+	// `v.x` where a reference binds (a component is an lvalue, as in C++): a COMPONENT reference over
 	// the storage the vector lives in. The base binds as a reference base does - a bare identifier's variable (share turns
 	// its storage into a reference: the backend's cell), a static's cell, the pure lvalue path (a field, an element, a C++
 	// property). A non-reference when the expression is no component of a math value.

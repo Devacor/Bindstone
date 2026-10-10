@@ -66,7 +66,7 @@ namespace jai::detail::math {
 	}
 	inline bool integral(vk k) noexcept { return k == vk::jai_ivec2_type || k == vk::jai_ivec3_type; }
 	inline bool is_color(vk k) noexcept { return k == vk::jai_color_type; }
-	// The typed-slot row between two kinds (Dev decision 5): the same kind, or the other precision of the same dimensions; a
+	// The typed-slot row between two kinds: the same kind, or the other precision of the same dimensions; a
 	// color and a vector never convert into each other
 	inline bool converts(vk from, vk to) noexcept {
 		return from == to || (is_vec_type(from) && is_vec_type(to) && dims(from) == dims(to) && is_color(from) == is_color(to));
@@ -148,12 +148,12 @@ namespace jai::detail::math {
 
 	// ---- scalar narrowing (one kernel for every landing) -------------------------------------------------------------
 	// A script float rounds to nearest binary32; a finite value beyond binary32's range becomes +-infinity (the IEEE
-	// conversion, Dev decision 1); an int converts in one rounding
+	// conversion); an int converts in one rounding
 	inline float to_f32(script_float d) noexcept { return static_cast<float>(d); }
 	inline float to_f32(script_int i) noexcept { return static_cast<float>(i); }
 
 	inline constexpr std::string_view int32_overflow_text = "Integer overflow: the value does not fit an int32 component";
-	// An int64 into an int32 component: in range stores, out of range follows the build's integer policy (Dev decision 2)
+	// An int64 into an int32 component: in range stores, out of range follows the build's integer policy
 	inline checked_result<int32_t> to_i32(script_int v) noexcept {
 		if (v >= std::numeric_limits<int32_t>::min() && v <= std::numeric_limits<int32_t>::max()) {
 			return static_cast<int32_t>(v);
@@ -197,7 +197,7 @@ namespace jai::detail::math {
 		return script_value::make_vec(k, words, eng);
 	}
 
-	// A vec converted to another kind of the same dimensions (the typed-slot row, Dev decision 5): int32 to binary32 in
+	// A vec converted to another kind of the same dimensions (the typed-slot row): int32 to binary32 in
 	// one rounding, binary32 to int32 through the checked float-to-integer kernel; the same kind passes
 	JAI_MATH_COLD inline checked_result<script_value> convert(const script_value& v, vk target, engine* eng) {
 		const vk k = kind_of(v);
@@ -219,7 +219,7 @@ namespace jai::detail::math {
 		return make(target, f, i, eng);
 	}
 
-	// The constructor math::K(args): () zero; scalars for the first components (the rest default to 0, Dev decision 4);
+	// The constructor math::K(args): () zero; scalars for the first components (the rest default to 0);
 	// (v, scalars...) a narrower vector of the same family followed by scalars that complete the count exactly
 	// (vec3(v2, z), vec4(v3, w), vec4(v2, z, w)); (v) a vector of the same dimensions (converted)
 	inline const char* ctor_arity_text(vk k) noexcept {

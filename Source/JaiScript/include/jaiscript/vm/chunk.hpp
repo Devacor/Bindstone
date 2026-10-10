@@ -136,15 +136,6 @@ namespace jai::vm {
         mutable strong_ptr<script_function> ic_pin;
         mutable uint32_t ic_argc = 0;
         mutable bool ic_native = false;   // the cached callee is a host callable (ic_fn null): the call invokes it with the arguments as they are
-        // the cached host callable's one direct overload (engine::overload_dispatch::direct_entry): a call whose arguments are of its
-        // parameters' kinds runs the binding through the invoker, the callee borrowed from the site
-        mutable const void* ic_host_target = nullptr;
-        mutable checked_result<script_value> (*ic_host_invoke)(const void*, const script_value*, size_t) = nullptr;
-        mutable uint32_t ic_host_argc = 0;
-        mutable script_value_type ic_host_kinds[8]{};
-        mutable strong_ptr<script_function> ic_host_owner;
-        mutable const uint64_t* ic_host_gen = nullptr;   // the overload set's mutation count: a registration of the name since the fill declines the lane
-        mutable uint64_t ic_host_at = 0;
         mutable bool ic_host_checked = false;   // the lane was looked for since the last refill (filled on a hit: a binding that holds)
         // Monomorphic method-dispatch cache (flat-classes increment 1): validated on
         // (class identity, method_epoch) per class_definition::bump_method_epoch's
@@ -188,6 +179,15 @@ namespace jai::vm {
         mutable const void* ctor_thunk = nullptr;
         mutable const class_definition* ctor_cls_key = nullptr;
         mutable std::shared_ptr<script_class_definition> ctor_cls;
+        // the cached host callable's one direct overload (engine::overload_dispatch::direct_entry): a call whose arguments are of its
+        // parameters' kinds runs the binding through the invoker, the callee borrowed from the site; kept off the lines every call reads
+        mutable const void* ic_host_target = nullptr;
+        mutable checked_result<script_value> (*ic_host_invoke)(const void*, const script_value*, size_t) = nullptr;
+        mutable uint32_t ic_host_argc = 0;
+        mutable script_value_type ic_host_kinds[8]{};
+        mutable strong_ptr<script_function> ic_host_owner;
+        mutable const uint64_t* ic_host_gen = nullptr;   // the overload set's mutation count: a registration of the name since the fill declines the lane
+        mutable uint64_t ic_host_at = 0;
     };
 
     struct function_proto {

@@ -595,6 +595,8 @@ A landing after a call re-reads the environment cells and re-borrows the string 
 `string_candidates`, recorded when the block is built) instead of scanning every cell twice; a block of a hundred cells landing
 once per column paid the scan on every column.
 
+The block switch is one large function, and what stays inline in it is measured, not assumed: each executor kept inline grows the switch, and past a point the compiler stops inlining the small helpers (buffer sizes, the dirty mask) into the hot cases. The executors run inline or out of line by how often whole programs reach them. Moving the move executor (`C_MOV`) out of line costs OSSUARY 13.8% (a worker runs 1.4M moves a run) and the head compare (`C_CMP_P`) costs JaiDOOM 2%, so both stay inline. The push executor runs out of line (Gator Quest 5-6% and OSSUARY 2.9% faster) with its common row, an int or float cell into a frame-slot array's own typed buffer, kept in the switch, since GLOOM pushes 2.5M times a run and loses 1.3% when every push pays the call. A dispatch tail replicated into every case (each case jumping to its successor through its own small switch) makes the switch slower on every measured program, 1 to 12%.
+
 ### Fused cell pairs
 
 The block loop runs an adjacent pair of plain cell instructions as one dispatch when the pair is one of the hot shapes

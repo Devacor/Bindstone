@@ -81,13 +81,13 @@ namespace jai::detail {
 		}
 	}
 
-	// <=> with a NaN operand (IEEE: unordered, Dev ruling 2026-09-30)
+	// <=> with a NaN operand (IEEE: unordered)
 	template <class Result>
 	Result nan_order_error() {
 		return Result(make_error_code(runtime_error_code::invalid_numeric_operand), "Cannot order NaN with <=>");
 	}
 
-	// The error a binary operator's fault raises (one text per operator family, Dev ruling 2026-09-28)
+	// The error a binary operator's fault raises (one text per operator family)
 	template <class Result>
 	Result scalar_fault_error(token_type op, scalar_fault fault) {
 		switch (fault) {

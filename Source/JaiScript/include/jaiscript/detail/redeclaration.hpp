@@ -9,7 +9,7 @@
 namespace jai::detail {
 
 // The same unit running a program-scope declaration again (a module an import re-runs after a touch, the host's execute_file of
-// the same file, a re-run string, a top-level include run again) - Dev ruling 2026-09-27: a declaration written without an
+// the same file, a re-run string, a top-level include run again): a declaration written without an
 // initializer keeps the value its variable holds (only a declaration that assigns resets it), unless its declared type changed,
 // which resets it to the new type's default, as a class field whose declared type changes on hot reload does. Both backends ask
 // here, before the declaration's default is evaluated.

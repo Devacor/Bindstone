@@ -24,7 +24,7 @@ namespace detail {
 			return [fn = std::move(fn)](Args... args) -> R {
 				engine* eng = fn.get_engine();
 				engine::external_call_guard scope(eng);
-				// Every failure throws to the host (the throwing flavor, Dev ruling 2026-10-01); a host function called from script
+				// Every failure throws to the host (the throwing flavor); a host function called from script
 				// hands it back to the script as that call's runtime error, text included
 				std::vector<script_value> values;
 				values.reserve(sizeof...(Args));

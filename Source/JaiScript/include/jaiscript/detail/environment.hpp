@@ -97,7 +97,7 @@ namespace jai {
         // The program-scope cell the running unit already declared for `id` (a re-run of the same unit), else null; the
         // unit's own inline cell turns plain (a declaration switched from inline)
         script_value* same_unit_cell(uint64_t id);
-        // Inline and plain declarations of one name never mix across units (Dev ruling 2026-09-30). An inline declaration
+        // Inline and plain declarations of one name never mix across units. An inline declaration
         // in this program or namespace scope: create (nothing there), adopt (an inline cell, a host global, the running
         // unit's own plain cell - which turns inline), or conflict (a plain declaration of `owner` defined it)
         enum class inline_verdict : uint8_t { create, adopt, conflict };

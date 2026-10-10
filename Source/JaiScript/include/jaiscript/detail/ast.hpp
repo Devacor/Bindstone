@@ -192,8 +192,8 @@ namespace jai {
         // local, a parameter, a program-level declaration of this unit); false for reference declarations and
         // for names the unit does not declare. A reference bound to such a name dereferences a cell, never a getter.
         bool names_known_value = false;
-        // Parser resolution: the name is a slot-resident `T& name = e;` declaration or `T& p` parameter with a concrete T (Dev
-        // ruling 2026-09-30: the declared type governs a store through it): the storage index a value of T's kind has, 0xFF when
+        // Parser resolution: the name is a slot-resident `T& name = e;` declaration or `T& p` parameter with a concrete T (the
+        // declared type governs a store through it): the storage index a value of T's kind has, 0xFF when
         // every store runs T's table (detail::declared_ref_kind), and T in declared_ref
         uint8_t declared_ref_kind = 0;
         // Field proof (bare this-field read/write inside a method): the receiver's certain class
@@ -666,7 +666,7 @@ namespace jai {
         // through a cell so the variable can be bound by reference
         bool var_ref_escaping = false;
         // Declared auto: the checker's first proof pass makes the variable a var when the container's elements have no static
-        // type (Dev ruling 2026-09-28); the spelling stays auto for re-checks and .jaibite
+        // type; the spelling stays auto for re-checks and .jaibite
         bool auto_spelled = false;
         bool auto_typed = false;
         // The checker saw the container's elements already hold the declared type: the binding converts nothing (a cell head
@@ -837,7 +837,7 @@ namespace jai {
         // `const T x = e;` (docs/const.md): set once by its initializer, then only read; in a class body a class-level constant
         bool is_const = false;
         mutable const_site const_check;   // T& / var& / shared_ptr<T> bound to a const
-        // Declared `auto` (Dev ruling 2026-09-27): the unit's first proof pass types the slot by its initializer's
+        // Declared `auto`: the unit's first proof pass types the slot by its initializer's
         // STATIC type, once - a known type keeps auto (the runtime locks to the value, which has that type), a var
         // or unknown static type makes `type` the var marker; the spelling stays auto for re-checks and .jaibite
         bool auto_spelled = false;

@@ -29,7 +29,7 @@ inline bool arity_accepts(const std::vector<parameter>& params, size_t argc) {
     return argc >= required_parameter_count(params) && argc <= params.size();
 }
 
-// A unary operator the class chain declares (Dev ruling 2026-09-30): a script overload of the name that takes no argument
+// A unary operator the class chain declares: a script overload of the name that takes no argument
 // (the class or a base), or a host class's method of that name (its binding decides the arity)
 inline bool declares_unary_operator(const class_definition* def, uint64_t name_id) {
     bool script_declared = false;
@@ -73,7 +73,7 @@ inline bool binary_operator_accepts(const class_definition* def, uint64_t name_i
     return def && def->get_method(name_id, false).is_function();
 }
 
-// A reversed comparison (Dev ruling 2026-10-01): a < b answered by b's <=> is (b <=> a) > 0, and so on
+// A reversed comparison: a < b answered by b's <=> is (b <=> a) > 0, and so on
 inline token_type reversed_comparison(token_type op) {
     switch (op) {
         case token_type::less: return token_type::greater;
@@ -92,7 +92,7 @@ inline std::optional<script_int> reversed_spaceship_sign(const script_value& res
     return std::nullopt;
 }
 
-// C++20 comparison rewriting (Dev ruling 2026-10-01): with no operator< in the chain, a < b is (a <=> b) < 0, and so on for
+// C++20 comparison rewriting: with no operator< in the chain, a < b is (a <=> b) < 0, and so on for
 // <= > >=; the left operand's operator<=> result compares with zero (a NaN compares false), anything but a number is no answer
 inline std::optional<bool> spaceship_rewritten(token_type op, const script_value& result) {
     const script_value& r = result.deref();
@@ -125,7 +125,7 @@ inline bool converting_constructor_takes(const script_value& arg, const type_inf
 // The assignment table's rows past the exact type that a by-value parameter takes (docs/static_checking.md), as overload costs:
 // int<->float and bool to a number 1 (a conversion, ahead of a var parameter); a to_int/to_float/to_char method and the string
 // and bool rows 2 and a converting constructor 3 (k_loose_conversion and up: after a var parameter, which takes the value as it
-// is); 0 = not viable. Among several overloads a string never makes a bool parameter viable (Dev ruling 2026-10-02).
+// is); 0 = not viable. Among several overloads a string never makes a bool parameter viable.
 inline constexpr size_t k_loose_conversion = 2;
 inline size_t table_conversion_cost(const script_value& arg, const parameter& param, bool in_set) {
     using t = script_value_type;
@@ -175,8 +175,8 @@ struct overload_verdict {
 //           match ranks the candidate below every one it matches, then fewer var
 //           parameters win: typed exact > conversion > var)
 // Same-score tie: the candidate using FEWER defaults wins (an exact-arity overload
-// beats one that must fill trailing defaults), then fewest conversions, then the nearest base a class argument converts to
-// (Dev ruling 2026-10-02). Candidates equal on every key are an ambiguous call: the verdict names the rival.
+// beats one that must fill trailing defaults), then fewest conversions, then the nearest base a class argument converts to.
+// Candidates equal on every key are an ambiguous call: the verdict names the rival.
 // Returns a null best when no overload is viable for these arguments.
 // Span core (call-arg windows: the vm resolves against the caller's stack slice without collecting a vector).
 template <typename Range, typename Params>
@@ -376,8 +376,8 @@ namespace detail {
         return true;
     }
 
-    // Two parameter lists of the same count and types that differ only in which parameters are references (Dev ruling 2026-10-09:
-    // such overloads are an error at the second definition, a call could only tie)
+    // Two parameter lists of the same count and types that differ only in which parameters are references
+    // (such overloads are an error at the second definition, a call could only tie)
     inline bool differs_only_by_reference(const std::vector<parameter>& a, const std::vector<parameter>& b) {
         if (a.size() != b.size()) { return false; }
         bool differs = false;
@@ -410,7 +410,7 @@ namespace detail {
                std::to_string(first_line) + ") only by reference; overloads must differ in parameter types or count";
     }
 
-    // two overloads tie on these arguments (Dev ruling 2026-10-02): {0} = the callee, {1} = the arguments and the two signatures,
+    // two overloads tie on these arguments: {0} = the callee, {1} = the arguments and the two signatures,
     // composed only while the symbolizer is unfrozen (a parallel worker gets the list-free shape)
     JAI_NOINLINE inline error_propagator ambiguous_call(uint64_t name_id, const std::vector<parameter>& best, const std::vector<parameter>& rival,
                                                        const script_value* args, size_t argc, engine* eng) {

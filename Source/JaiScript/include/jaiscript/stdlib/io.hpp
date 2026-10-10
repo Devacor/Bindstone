@@ -269,7 +269,7 @@ namespace stdlib {
             }
 
             if (effective_args == 1) {
-                // Single-arg print is VERBATIM passthrough by design (Dev ruling 2026-07):
+                // Single-arg print is VERBATIM passthrough by design:
                 // {{ }} escapes only apply when format substitution runs — no reason to
                 // alter the string when there is nothing to substitute
                 out << args[0].to_string();
@@ -370,7 +370,7 @@ namespace stdlib {
             return script_value(std::move(text.value()), eng);
         });
 
-        // §13 (ruled 2026-07): opaque host pointers (make_value(T*) on an UNREGISTERED
+        // Opaque host pointers (make_value(T*) on an UNREGISTERED
         // type) are non-null/truthy to script but the engine cannot name them — this
         // predicate is how scripts tell a registered/script object (true) from an opaque
         // host-only pass-through token (false). All ordinary values answer true.
@@ -383,7 +383,7 @@ namespace stdlib {
             return true;
         });
 
-        // Byte minting (char ruling 2026-07-12): explicit int -> char, range-checked.
+        // Byte minting: explicit int -> char, range-checked.
         // The reverse of promotion; there is deliberately no IMPLICIT int -> char.
         eng_ref.add_function("to_char", [](script_int n) -> script_char {
             if (n < 0 || n > 255) {

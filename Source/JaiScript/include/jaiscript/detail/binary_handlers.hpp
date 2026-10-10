@@ -13,7 +13,7 @@
 //   std::optional<checked_result<bool>> object_comparison(l, r, uint64_t method_id)
 //   std::optional<checked_result<bool>> object_equality(l, r); bool defines_custom_equality(const script_value&)
 //   std::optional<checked_result<bool>> object_inequality(l, r)   // a declared operator!=, ahead of !(l == r)
-//   object_comparison_reversed(l, r, id), object_spaceship_reversed(l, r), object_spaceship_equality(l, r)   // <=> answers (Dev ruling 2026-10-01)
+//   object_comparison_reversed(l, r, id), object_spaceship_reversed(l, r), object_spaceship_equality(l, r)   // <=> answers
 //   bool unwinding(); bool parallel_worker(); size_t& equality_depth()
 //   checked_result<script_value> equal(l, r)   // the backend's == entry, for memberwise element comparison
 
@@ -245,7 +245,7 @@ namespace jai::detail {
 		if (unwrapped_left.is_null() || unwrapped_right.is_null()) { return h.make_bool(unwrapped_left.is_null() && unwrapped_right.is_null()); }
 		if (math::owns_comparison(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] { return h.make_bool(math::equal(left, right)); }
 		if (unwrapped_left.type() != unwrapped_right.type()) {
-			if (unwrapped_left.is_object() || unwrapped_right.is_object()) {   // a class's <=> may take the other kind (Dev ruling 2026-10-01)
+			if (unwrapped_left.is_object() || unwrapped_right.is_object()) {   // a class's <=> may take the other kind
 				if (auto mixed = h.object_spaceship_equality(left, right)) {
 					if (!*mixed) { return mixed->error_value(); }
 					return h.make_bool(mixed->value());

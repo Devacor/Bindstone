@@ -146,7 +146,7 @@ namespace jai::detail {
 
 	// Shared reference admission is in ref_lvalue.hpp; casts, parameters, loops and returns use it.
 
-	// A typed range-for variable's element (Dev ruling 2026-09-28): by value it takes the element as `T x = element;` would, by
+	// A typed range-for variable's element: by value it takes the element as `T x = element;` would, by
 	// reference it binds an element that holds a T (a class: T or a subclass). auto and var bind the element as it is
 	inline bool range_for_declared(const type_info* declared) {
 		return declared && declared->base_type != script_value_type::jai_any_type && declared->base_type != script_value_type::jai_null_type;

@@ -687,7 +687,7 @@ inline void register_reflection_functions(engine& eng_ref) {
         return make_bound_method(target, dispatcher).as_function()(call_args);
     });
 
-    // A method taken as a value is spelled reflect::bind(obj, "name") (Dev ruling 2026-09-30): the callable holds the object
+    // A method taken as a value is spelled reflect::bind(obj, "name"): the callable holds the object
     // and keeps it alive, exactly as a bound method always has; a value type's methods run on the value, so a lambda wraps them
     add("bind", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 2, "bind");

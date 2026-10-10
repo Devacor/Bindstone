@@ -39,7 +39,7 @@ namespace jai {
         const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
         std::vector<token> using_stream_;    // the program's stream after its using declarations rewrote it
         // `using ns::name;` (a comma list) at a statement's start: the rest of THIS token stream reads each name as its qualified
-        // spelling (Dev ruling 2026-09-30: file-local, not transitive, any namespace); false when the stream names no using
+        // spelling (file-local, not transitive, any namespace); false when the stream names no using
         bool apply_using_declarations(const std::vector<token>& in, std::vector<token>& out);
         bool reject_using_name(const token& t, const char* what);
         // hot_reload_migrate at a unit's top level is the unit's reload hook: one, declared void hot_reload_migrate(map<string, var> previous)

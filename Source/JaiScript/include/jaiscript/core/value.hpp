@@ -349,7 +349,7 @@ namespace detail { struct argument_capture_storage; }
         // to the string's storage, `index` a byte of a string or a character of a utf8_string;
         // deref reads that character, stores replace it (detail/string_element.hpp)
         static script_value make_string_element_reference(const script_value& pin, size_t index, engine* eng);
-        // COMPONENT reference (`v.x` of a math value, Dev ruling 2026-09-30): pin is the reference to the vector's storage
+        // COMPONENT reference (`v.x` of a math value): pin is the reference to the vector's storage
         // (a cell, a field, an element, a property), component the component it names
         static script_value make_component_reference(const script_value& pin, size_t component, engine* eng);
         static script_value make_function(const script_function& func, engine* eng);
@@ -467,8 +467,8 @@ namespace detail { struct argument_capture_storage; }
             const script_value& d = deref();
             const size_t idx = d.raw_storage_index();
             // Opaque host pointers (make_value(T*) on an unregistered type) are NON-null
-            // while the pointer is live — they ARE objects to script (open question #13,
-            // ruled 2026-07); a null host pointer still reads as null.
+            // while the pointer is live — they ARE objects to script;
+            // a null host pointer still reads as null.
             return idx == TYPEID_NULL ||
                    (idx == TYPEID_CPP_BOUND && d.bound_semantic_is(TYPEID_NULL) &&
                     d.get_cpp_bound_ptr() == nullptr);
@@ -581,7 +581,7 @@ namespace detail { struct argument_capture_storage; }
             }
         }
 
-        // Store-boundary normalization (§12 all-detach ruling, 2026-07): a bound
+        // Store-boundary normalization (all-detach): a bound
         // PRIMITIVE stored into a container slot or member detaches to a snapshot —
         // write-through belongs to the registered NAME (and refs/captures/by-ref params
         // bound to it), never to stored copies. Opaque host tokens (semantic NULL) keep
@@ -1010,7 +1010,7 @@ namespace detail { struct argument_capture_storage; }
                     } else {
                         // References resolve first (cells reach C++ boundaries raw); the
                         // object gate is the STORAGE, not type_info_ — var-stored objects
-                        // legally carry an 'any' declared tag (decl flattening ruling), so
+                        // legally carry an 'any' declared tag (decl flattening), so
                         // only the holder's registered-type check below guards the cast.
                         if (is_reference()) {
                             return deref().as<T>();
@@ -2203,7 +2203,7 @@ namespace detail { struct argument_capture_storage; }
         // a trivial scalar, so relocation runs no effectful ctor/dtor. RAII on OWNED
         // payloads is exact: handle copies increment, destroys decrement, in the same
         // places the variant did them. get<I>/get_if<I> callers keep the check-then-get
-        // discipline (never bad_variant_access — the D12/S9 ruling stands).
+        // discipline (never bad_variant_access).
         class storage {
         public:
             storage() noexcept : index_(TYPEID_NULL) {}

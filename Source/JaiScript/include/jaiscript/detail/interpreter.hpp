@@ -799,7 +799,7 @@ namespace jai {
         bool hasBreakRequest_ = false;
         bool hasContinueRequest_ = false;
 
-        // Execute-nesting depth (a COUNTER, not a flag - Dev ruling: a nested C++
+        // Execute-nesting depth (a COUNTER, not a flag: a nested C++
         // execute() on the same engine must not clear the outer run's in-flight
         // state on exit). Non-zero while any execute() runs a program - a reentrant
         // execute (host callback mid-script, e.g. hot reload) isolates itself at
@@ -967,7 +967,7 @@ namespace jai {
         // Step-debugger controller (engine-owned). Atomic because the transport thread
         // may attach/detach while this thread is running — but it is NOT read per
         // statement: sync_debug_hook (below) mirrors it into the plain gate at the debug
-        // sync points only (Dev ruling: no atomics on the statement path).
+        // sync points only (no atomics on the statement path).
         std::atomic<debug::controller*> debugger_{nullptr};
 
         // Script-thread cached statement-hook gate: non-null only while a debug session
@@ -1287,7 +1287,7 @@ namespace jai {
                     if (value.is_float()) return value.unchecked_as_float() != 0.0;
                     if (value.is_string()) return !value.unchecked_as_string().empty();
                     if (value.is_char()) return true;
-                    // Opaque bound: truthy while the host pointer is live (§13, 2026-07)
+                    // Opaque bound: truthy while the host pointer is live
                     return value.get_cpp_bound_ptr() != nullptr;
                 case script_value::TYPEID_REFERENCE:
                     // References are transparent to truthiness like every other consumer

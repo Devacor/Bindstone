@@ -82,7 +82,7 @@ namespace jai::vm {
         void profile_reset() override;
         uint64_t profile_cycles_[256] = {};
         uint64_t profile_counts_[256] = {};
-        // Per-script-function accounting (the sampling interface Astra asked for; main
+        // Per-script-function accounting (the sampling interface; main
         // engine only, workers are not attributed). Exclusive = the opcode self time of the
         // function's own instructions (the same rdtsc pairs as the opcode table: callee
         // bodies excluded, the call and return machinery included); inclusive = frame entry
@@ -213,7 +213,7 @@ namespace jai::vm {
         uint64_t profile_typed_decl_read_[2] = {};   // tried, hit
         uint64_t profile_typed_spec_[2] = {};        // speculative T_LOAD sites: hit, miss
         uint64_t profile_typed_store_[2] = {};       // tried, hit
-        // Serial census (2026-09-09), reset with the opcode tables: typed landings by kind x outcome
+        // Serial census, reset with the opcode tables: typed landings by kind x outcome
         // [0]=temp in-place [1]=temp construct [2]=decl stamp-hit [3]=decl construct [4]=store refused
         // [5]=store payload+stamp [6]=store construct [7]=compound in-place [8]=compound refused
         // [9]=typed fallback entries
@@ -330,7 +330,7 @@ namespace jai::vm {
         std::shared_ptr<environment> get_current_environment() const override { return environment_; }
 
         // Named slot locals of the parked frame, reconstructed lazily from the chunk's
-        // decl/load/store operands (no name table baked into release chunks — Q6 ruling).
+        // decl/load/store operands (no name table baked into release chunks).
         std::vector<std::pair<std::string, script_value>> get_current_frame_locals() const override;
 
         bool is_unwinding() const override { return is_unwinding_; }
@@ -622,7 +622,7 @@ namespace jai::vm {
                 (1u << script_value::TYPEID_FLOAT) | (1u << script_value::TYPEID_CHAR) |
                 (1u << script_value::TYPEID_BOOL);
             // a trivial payload destroys nothing whatever its stamp: the type tag is a raw pointer wrapper and the engine a raw
-            // pointer, so a typed local's int, float, bool, char or null pops as free as a tagless temp (row 155.1)
+            // pointer, so a typed local's int, float, bool, char or null pops as free as a tagless temp
             static bool dtor_elidable(const script_value& s) noexcept {
                 return ((trivial_payload_mask >> s.raw_storage_index()) & 1u) != 0;
             }
@@ -866,7 +866,7 @@ namespace jai::vm {
         std::vector<std::shared_ptr<environment>> instance_scope_saved_;
         std::shared_ptr<environment> pending_instance_env_;
         engine* engine_ = nullptr;
-        type_info* ti_int_ = nullptr; type_info* ti_float_ = nullptr; type_info* ti_bool_ = nullptr; type_info* ti_string_ = nullptr;   // the engine's canonical stamps, cached with the engine (row 156.1)
+        type_info* ti_int_ = nullptr; type_info* ti_float_ = nullptr; type_info* ti_bool_ = nullptr; type_info* ti_string_ = nullptr;   // the engine's canonical stamps, cached with the engine
         uint64_t shared_ptr_ctor_symbol_ = 0, weak_ptr_ctor_symbol_ = 0;   // type_ctor_base_symbol's two names, interned with this engine's symbolizer
         uint64_t type_ctor_base_symbol(uint64_t sym);
 #ifdef JAISCRIPT_MISS_INJECTION
@@ -952,7 +952,7 @@ namespace jai::vm {
         frame_stack frames_;
         size_t top_frame_mark_ = SIZE_MAX;   // frames_ index of the innermost top-level frame (a trace counts the frames above it)
 
-        // Pending-callee register stack (callee-first ruling, 2026-07-08): identifier
+        // Pending-callee register stack (callee-first): identifier
         // callees resolve at the pre-args observation point WITHOUT materializing on
         // the value stack. LIFO across nested arg calls; per-FIBER (run_fiber swaps it
         // with the other execution stacks - `f(yield x)` suspends between probe and
@@ -1179,7 +1179,7 @@ namespace jai::vm {
                                                  script_value&& receiver,
                                                  const std::vector<script_value>& arguments,
                                                  const call_site& site);
-        // Call-arg window twins (increment 2): the receiver sits at stack_[args_base-1]
+        // Call-arg window twins: the receiver sits at stack_[args_base-1]
         // and the args at [args_base, args_base+argc) — they bind IN PLACE as frame
         // slots (zero per-arg moves; the receiver slot is the pin, destroyed by pop
         // truncation exactly like the plain path's callee slot). The dispatcher still
@@ -2045,8 +2045,8 @@ namespace jai::vm {
         // The typed ops' fast paths without their fallbacks (guards, arithmetic, landing): the
         // wrappers below add the fallback, the cell block loop returns to the general dispatch
         // at the missing ip instead. cmp_jump: 1 = fell through, 2 = jumped, -1 = miss
-        // force-inlined into their wrappers (and the cell block loop): the split of row 92 left the
-        // wrappers calling out of line, which Astra's same-tree stock measured on JaiDOOM
+        // force-inlined into their wrappers (and the cell block loop): wrappers calling them out of line
+        // cost measurably on JaiDOOM
         JAI_FORCEINLINE bool typed_arith_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE int typed_cmp_jump_fast(frame& f, const vm_instruction& ins);
         JAI_FORCEINLINE bool typed_load_fast(frame& f, const vm_instruction& ins);
@@ -2067,9 +2067,9 @@ namespace jai::vm {
         op_status exec_cells_back(frame& f, const vm_instruction& ins);
         op_status exec_c_mload(frame& f, const vm_instruction& ins);   // a member read site: the field's kind and payload into the cell
         op_status exec_c_mstore(frame& f, const vm_instruction& ins);   // a member store site: the field's payload written in place when the kinds agree
-        // fused cell pairs (row 150): the first instruction's executor on its own word, then the second's on the next word when the block is
-        // still live and the ip fell through; out of line, so the block switch keeps its shape (the row 148.2 rule)
-        struct cell_regs;   // the block loop's registers (row 155.3; defined with cells_run below)
+        // fused cell pairs: the first instruction's executor on its own word, then the second's on the next word when the block is
+        // still live and the ip fell through; out of line, so the block switch keeps its shape
+        struct cell_regs;   // the block loop's registers (defined with cells_run below)
         void cells_miss_ip(frame& f, size_t& ip, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step);
         void cells_flush_ip(frame& f, size_t& ip, const chunk::cell_loop& loop);
         op_status exec_c_arith2(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
@@ -2088,7 +2088,7 @@ namespace jai::vm {
         op_status exec_cells_cfor_back(frame& f, const vm_instruction& ins);   // a counted loop's back edge: the general step and compare, then the block entry
         bool cells_enter(frame& f, const chunk::cell_loop& loop);              // the guards, the container sites and the unboxing; false = the general form runs
         op_status cells_run(frame& f, const chunk::cell_loop& loop);           // the copy as one block until an exit, a miss or a raise
-        // the block loop's registers (row 155.3): the cells' payloads, kinds and dirty bytes, the chunk's constants, the copy's code and
+        // the block loop's registers: the cells' payloads, kinds and dirty bytes, the chunk's constants, the copy's code and
         // the loop, read once per run; every executor on the hot switch reads through them instead of re-deriving frame -> cells -> vectors
         struct cell_regs { int64_t* payload; uint8_t* kinds; cell_dirty* dirty; const script_value* consts; const vm_instruction* code; const chunk::cell_loop* loop; };
 #if defined(_MSC_VER)
@@ -2228,8 +2228,8 @@ namespace jai::vm {
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_push(frame& f, const vm_instruction& ins);
-        // The value of an assignment expression is the destination's stored value (Dev ruling
-        // 2026-09-08: `auto r = (c.n = 3.9)` is int 3). A consumed member store reads the member
+        // The value of an assignment expression is the destination's stored value
+        // (`auto r = (c.n = 3.9)` is int 3). A consumed member store reads the member
         // back (through a user _get_ when one exists); a discarded one lands the rhs, which
         // nothing observes
         op_status land_member_store_result(frame& f, const script_value& object, member_expr* member, script_value&& rhs);
@@ -2402,7 +2402,7 @@ namespace jai::vm {
                                                size_t args_base, size_t argc,
                                                const call_site* site);
         // Real TCO: a tail-flagged bare self-call reuses the live record + window in
-        // place — no record push, no depth tick (Dev ruling: no artificial depth limit)
+        // place — no record push, no depth tick (no artificial depth limit)
         op_status tail_splice_frame(call_record& rec,
                                                const script_defined_function& function,
                                                strong_ptr<script_function> pin,

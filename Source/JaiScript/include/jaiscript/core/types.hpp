@@ -66,7 +66,7 @@ namespace jai {
     // typed nodes through get()/set()/typed buffers (kind-dispatch helpers live in
     // value.hpp where script_value is complete).
     // Object slot of a class-typed buffer: the handle plus the element's own class tag
-    // (exact-class homogeneous today; per-slot so a subclass ruling costs no layout
+    // (per-slot, so a subclass element costs no layout
     // change). Defined in value.hpp where script_value::object_holder is complete.
     struct obj_slot;
 

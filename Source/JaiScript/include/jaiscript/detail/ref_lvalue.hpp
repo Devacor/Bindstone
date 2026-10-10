@@ -43,7 +43,7 @@ namespace jai::detail {
 		return true;
 	}
 
-	// A T& binds an lvalue that holds a T and never converts (Dev ruling 2026-09-28, C++): a primitive or math value its exact
+	// A T& binds an lvalue that holds a T and never converts (C++): a primitive or math value its exact
 	// kind, a class T or a subclass (a typed null of one too), a container or handle exactly its type
 	// when both types are concrete; var& and auto& bind any lvalue, and a container of unknown element type stays lenient
 	inline bool reference_binding_admits(const type_info* declared, const script_value& current_in, engine* eng) {
@@ -84,7 +84,7 @@ namespace jai::detail {
 		}
 	}
 
-	// `T& name = e;` binds e's storage only when it holds a T (Dev ruling 2026-09-30: a var too - a reference must reference):
+	// `T& name = e;` binds e's storage only when it holds a T (a var too - a reference must reference):
 	// the declaration's text names the value's type and T&
 	inline std::optional<error_propagator> reference_decl_rejection(const variable_decl& decl, const script_value& value, engine* eng) {
 		const type_info* t = decl.type.get();
@@ -614,10 +614,10 @@ namespace jai::detail {
 	}
 
 	// ---- Constrained store-through enforcement ----
-	// An element reference runs the direct subscript store's kernel and a field reference the direct field store's table
-	// (Dev ruling 2026-09-30): the same store passes or fails with one text whether spelled directly or through a bound ref.
+	// An element reference runs the direct subscript store's kernel and a field reference the direct field store's table:
+	// the same store passes or fails with one text whether spelled directly or through a bound ref.
 
-	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02; same symbol as container_enforce.hpp)
+	// engine.cpp: subclass admission walk (same symbol as container_enforce.hpp)
 	bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
 
 	inline checked_result<script_value> ref_convert_for_element(engine* eng, const script_value& element, type_info_ptr element_type) {
@@ -717,7 +717,7 @@ namespace jai::detail {
 	}
 
 	// A store into a variable's own storage (a cell's value, a frame slot) obeys the variable's declared type: the assignment
-	// table and its text (Dev ruling 2026-09-28; the slot-less shape unless the caller names the slot, a store through `int& r`)
+	// table and its text (the slot-less shape unless the caller names the slot, a store through `int& r`)
 	template <class SiteFn>
 	inline checked_result<void> variable_store_with(script_value& storage, script_value& value, engine* eng, SiteFn&& site_of) {
 		if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {   // a host-bound variable (add_global_ref): the C++ memory
@@ -851,7 +851,7 @@ namespace jai::detail {
 		return false;
 	}
 
-	// A store through a reference with a declared type T runs T's table first (Dev ruling 2026-09-30: `var v; int& r = v;
+	// A store through a reference with a declared type T runs T's table first (`var v; int& r = v;
 	// r = 2.5` stores int 2), a class T its operator= on the referent; the storage's own rules follow. nullopt when the
 	// operator wrote it.
 	template <class SiteFn>

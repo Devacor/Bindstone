@@ -46,7 +46,7 @@ namespace jai::detail {
     // (copied) at operand-evaluation time - the interpreter's historical order, which the
     // old VM's late deref silently diverged from; (2) use_count observed inside a class
     // operator method may sit one higher than the pre-elision VM - calibration, not
-    // semantics, per the standing transient-copy ruling.
+    // semantics, per the transient-copy rule.
     //
     // Unary value ops are deliberately NOT in the set: -/~ do not deref references today
     // (a subscript operand errors on both backends), and marking would make that shape's
@@ -141,7 +141,7 @@ namespace jai::detail {
         static constexpr uint8_t arg_capture_full = 2;
         static constexpr uint8_t arg_capture_kind_mask = 3;
         // beside the kind: an lvalue whose place evaluation decides (a receiver, an index), so a reference parameter's binding
-        // mints its reference when the argument is evaluated (Dev ruling 2026-10-08)
+        // mints its reference when the argument is evaluated
         static constexpr uint8_t arg_capture_lvalue = 4;
 
         static bool place_lvalue_argument(const expression* e) noexcept {

@@ -92,7 +92,7 @@ namespace jai::detail {
 	// engine.cpp: the class rows of the element boundary judge the instance behind the value's
 	// tag (a var-held Animal, a shared_ptr<Dog> handle) with the scalar table's own admission
 	bool object_element_admits(const script_value& v, const type_info& element_type, engine* eng);
-	// a handle into a shared_ptr<T> element: a variable's rule (R-q6: the static pointee of a typed handle, a var-held one's class)
+	// a handle into a shared_ptr<T> element: a variable's rule (the static pointee of a typed handle, a var-held one's class)
 	bool shared_element_admits(const script_value& v, const type_info_ptr& element_type, engine* eng);
 	// The class a tag names for the subclass walk: a handle tag's pointee, else the tag itself
 	inline uint64_t class_tag_id(const type_info& t) {
@@ -133,7 +133,7 @@ namespace jai::detail {
 		auto elem_type = actual_element.type();
 		auto target_type = element_type->base_type;
 
-		// Dev ruling 2026-09-08: a handle-typed element takes null (C++: a vector of handles
+		// A handle-typed element takes null (C++: a vector of handles
 		// holds empty handles); by-value elements stay non-nullable like std::vector<T>
 		if (actual_element.raw_storage_index() == script_value::TYPEID_NULL) {
 			return target_type == script_value_type::jai_shared_ptr_type || target_type == script_value_type::jai_weak_ptr_type;
@@ -155,7 +155,7 @@ namespace jai::detail {
 			}
 			return true;
 		}
-		// Dev ruling 2026-09-08: a live instance stores into a shared_ptr<T> element the way it
+		// A live instance stores into a shared_ptr<T> element the way it
 		// stores into a shared_ptr<T> variable or field (the slot owns the handle)
 		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
 			return element_type->type_name.empty() || object_element_admits(actual_element, *element_type, eng);
@@ -167,7 +167,7 @@ namespace jai::detail {
 		if (target_type == script_value_type::jai_float_type && elem_type == script_value_type::jai_int_type) {
 			return true;
 		}
-		// Dev ruling 2026-09-09: bool and int convert both ways at the element boundary, like the
+		// Bool and int convert both ways at the element boundary, like the
 		// scalar slots (a string element still takes only a string: to_string / cast<string> spell it)
 		if ((target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_bool_type) ||
 		    (target_type == script_value_type::jai_bool_type && elem_type == script_value_type::jai_int_type)) {
@@ -406,7 +406,7 @@ namespace jai::detail {
 		return convert_container_element(eng, element, element_type);
 	}
 
-	// engine.cpp: subclass admission walk (Dev ruling 2026-09-02)
+	// engine.cpp: subclass admission walk
 	bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id);
 
 	inline bool byte_kind(script_array::kind_t k) noexcept {
@@ -461,7 +461,7 @@ namespace jai::detail {
 		}
 	}
 
-	// Uniform-literal inference (Dev ruling 2026-09-02): `auto a = [1, 2, 3]` and
+	// Uniform-literal inference: `auto a = [1, 2, 3]` and
 	// `array<auto> a = [...]` infer their element type from a homogeneous primitive
 	// literal and take that type's representation (array<int>/array<float> = raw buffer,
 	// array<string>/bool/char = the locked tag). Empty, nested, object, or bound-primitive
@@ -506,7 +506,7 @@ namespace jai::detail {
 		return type_info_ptr{eng->get_type_info_array(element)};
 	}
 
-	// Map twin of the array rule (Dev ruling 2026-09-02): an `auto` key or value slot
+	// Map twin of the array rule: an `auto` key or value slot
 	// (the parser leaves it null: plain `auto m`, `map<auto,V>`, `map<K,auto>`) infers its
 	// type from a uniform primitive literal; an empty literal stays dynamic; mixed kinds
 	// answer null with mixed_part set (1 = keys, 2 = values) so the caller raises. Spelled

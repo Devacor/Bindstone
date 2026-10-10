@@ -88,18 +88,18 @@ namespace jai {
         size_t native_size = 0;     // Size in bytes of the native C++ type
         bool is_signed = true;      // For integral types
 
-        // shared_ptr held by a var-DECLARED variable (Dev ruling 2026-07): '=' with a
+        // shared_ptr held by a var-DECLARED variable: '=' with a
         // handle rhs REBINDS unchecked across classes. Same name/id/element as the
         // plain spelling (every other read behaves identically); interned as a twin
         // via engine::get_type_info_shared_ptr_dynamic. Excluded from equals().
         bool dynamic_pointee = false;
 
-        // A typed container held by a var slot (Dev ruling 2026-09-28): the container keeps its element/key/value types (every element
+        // A typed container held by a var slot: the container keeps its element/key/value types (every element
         // boundary reads it), the slot stays dynamic ('=' takes any value). Same name/id/element as the plain spelling;
         // interned as a twin via engine::get_type_info_array_dynamic/get_type_info_map_dynamic. Excluded from equals().
         bool dynamic_slot = false;
 
-        // A reference whose DECLARED type is T (`int& r = v`, cast<int&>(v); Dev ruling 2026-09-30): the T& twin a store through
+        // A reference whose DECLARED type is T (`int& r = v`, cast<int&>(v)): the T& twin a store through
         // it converts by T's table before the storage's own rules. Same name/id/element as the plain T&; interned via
         // engine::get_type_info_declared_reference. Excluded from equals().
         bool declared_reference = false;

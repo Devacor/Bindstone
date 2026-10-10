@@ -52,7 +52,7 @@ namespace jai {
         constructor_failed = 57,
         evaluation_failed = 58,
         member_access_on_null = 59,
-        ambiguous_call = 60,   // overloads tie on the arguments (Dev ruling 2026-10-02)
+        ambiguous_call = 60,   // overloads tie on the arguments
 
         // Class errors (71-80)
         class_not_found = 71,

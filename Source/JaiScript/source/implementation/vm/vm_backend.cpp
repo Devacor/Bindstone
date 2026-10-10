@@ -13312,9 +13312,8 @@ JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 	}
 }
 
-// A host function's direct entry (engine::overload_dispatch::try_direct) on the arguments where they are on the stack
 // the site's direct host overload on the arguments where they are on the stack: each argument of its parameter's kind (try_direct's test)
-bool vm_backend::call_host_site(const call_site& site, size_t argc, op_status& st) {
+JAI_NOINLINE bool vm_backend::call_host_site(const call_site& site, size_t argc, op_status& st) {
 	if (argc != site.ic_host_argc || *site.ic_host_gen != site.ic_host_at) { return false; }
 	const size_t base = stack_.size() - argc;
 	const script_value* args = stack_.data() + base;
@@ -13327,7 +13326,7 @@ bool vm_backend::call_host_site(const call_site& site, size_t argc, op_status& s
 	return true;
 }
 // the site's host lane from its cached callee, looked for on the first hit after a refill (a site that misses pays nothing): the one direct overload of an overload dispatcher, else none
-void vm_backend::fill_host_site(const call_site& site, const script_value& callee) {
+JAI_NOINLINE void vm_backend::fill_host_site(const call_site& site, const script_value& callee) {
 	clear_host_site(site);
 	site.ic_host_checked = true;
 	if (site.ic_fn || callee.raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
@@ -13343,6 +13342,7 @@ void vm_backend::fill_host_site(const call_site& site, const script_value& calle
 	site.ic_host_target = snap.target;
 }
 
+// A host function's direct entry (engine::overload_dispatch::try_direct) on the arguments where they are on the stack
 JAI_NOINLINE bool vm_backend::call_host_direct(const script_function& callee, size_t argc, op_status& st) {
 	const auto* od = callee.target<engine::overload_dispatch>();
 	if (!od) return false;

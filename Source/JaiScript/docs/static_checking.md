@@ -60,7 +60,7 @@ read around its errors.
 | `s[i]` of a declared `string` / `utf8_string` (store target) | char, string, utf8_string (the text replaces the character) | anything else is `cannot store into 'string': a string character takes a char or a string, got 'int'`; a compound store checks the operator's result on the character (`s[i] += 1` is int, rejected; `s[i] += "x"` is text) |
 | `array<T>` / `map<K,V>` | compatible container elements and keys | known literal elements, nested literals and declared container types are checked; typed subscript reads carry T/V, and typed push arguments and subscript stores are checked; var-sourced values stay lenient |
 | object `C` | null (a typed null); same class; derived→base; a `shared_ptr<C or derived>` handle; ctor conversion `C(src)` through exactly ONE true 1-param ctor whose parameter takes `src` directly (no chaining, no `to_X()` on the way in); on plain assignment, a user `operator=` overload of `C` (or an in-script base) that accepts `src` | unrelated classes with no viable 1-arg ctor or `operator=` = error; array/map/function into object = error; a registered ancestor's `operator=` is lenient |
-| `shared_ptr<T>` | null; an object of `T` or a subclass; a handle whose STATIC pointee is `T` or a subclass (an upcast); `cast<shared_ptr<T>>(h)`; a `var`/unknown source (judged at run time by its object's class) | a handle statically typed `shared_ptr<Base>` (a downcast needs the cast) or an unrelated class = error, at a declaration, `=`, a field, a `shared_ptr<T>` namespace variable, a parameter, a return and a container element (R-q6, Dev ruling 2026-09-30) |
+| `shared_ptr<T>` | null; an object of `T` or a subclass; a handle whose STATIC pointee is `T` or a subclass (an upcast); `cast<shared_ptr<T>>(h)`; a `var`/unknown source (judged at run time by its object's class) | a handle statically typed `shared_ptr<Base>` (a downcast needs the cast) or an unrelated class = error, at a declaration, `=`, a field, a `shared_ptr<T>` namespace variable, a parameter, a return and a container element |
 | `weak_ptr<T>` | null or a compatible shared/weak handle | same pointee or derived-to-base; unknown sources stay lenient |
 | `T&` declaration | T, or a derived class for a base-class reference | conversions do not make a mismatched reference binding valid; unknown sources stay lenient |
 | `function` variable or field | callable or null | calls through callable variables and function-typed parameters remain unchecked |
@@ -99,7 +99,7 @@ returning function is the top frame of the stack trace with the call site below 
 methods and resumed coroutines alike; a coroutine's frame sits above the resumer's) and the
 error surfaces in the caller.
 
-**Compound assign** (Dev ruling 2026-07, settled): typed targets follow C++ rules —
+**Compound assign**: typed targets follow C++ rules —
 `x op= rhs` is `x = T(x op rhs)`, so `int x; x += 2.5` is fine (truncates) and
 `x += "s"` is an error (string result into int). A `string` variable or field appends text
 only, as the runtime does: `s += 'c'` and `s += "t"` append, `s += n` with a known non-text
@@ -110,7 +110,7 @@ element target (`names[i] += 5`) concatenates at run time and stays lenient; a r
 global `+` operator makes the rule lenient. `++`/`--` on a string member (the `+= 1` desugar) is
 `cannot apply '++' to 'string'`. `var` targets keep dynamic behavior, unchecked.
 
-**Typed fields** (Dev ruling 2026-07, settled): declared field types are real and enforce
+**Typed fields**: declared field types are real and enforce
 like locals — field initializers, member stores (`obj.field = v`, bare `field = v` inside
 methods, inherited fields) all check against the declared type.
 
@@ -254,13 +254,13 @@ host's warning channel (`engine::report_script_warning`, stderr unless the host 
 since a run-time include has no load listing to print.
 
 **Functions from an include inside a function body** — a literal include there is spliced into the body, so a
-function the file declares is a nested function (Dev ruling 2026-10-01). When the program scope names it too (the unit's top
+function the file declares is a nested function. When the program scope names it too (the unit's top
 level, another unit of the program, or the engine) the checker warns at the enclosing body, the message led by the
 included declaration's place: `inc.jai:1:10: function 'helper' from the include in function
 'reload' is local to it and hides the program-scope 'helper' there without replacing it; import the file to replace
 program-scope functions` (`in a lambda`). A declaration counts as spliced when its file differs from the enclosing body's.
 
-**Access** — two levels (Dev ruling 2026-09-27): a member after `private:` (or `protected:`,
+**Access** — two levels: a member after `private:` (or `protected:`,
 its synonym) is reachable from the declaring class and every class derived from it, by any
 spelling and through any receiver of that family. An access outside the family whose member
 the checker resolves - a receiver whose static class is certain (`w.secret` with `Wallet w`,
@@ -654,7 +654,7 @@ cache-entry creation). Executes with host instance variables check fresh per cal
 set is per-call; that per-call walk never touches the cached stamps). Walk cost is
 parse-order (same tree, no allocation-heavy state).
 
-## Shadowing warnings (2026-07)
+## Shadowing warnings
 
 Warning severity ALWAYS (never gates strict — shadowing is legal). Shapes:
 

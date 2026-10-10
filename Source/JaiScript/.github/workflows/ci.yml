@@ -17,7 +17,7 @@ permissions:
 jobs:
   # Three compilers x two configurations. Every cell builds the library, the suite, the
   # fuzzer, the runner and the example games, then runs the suite on both backends, a
-  # short differential-fuzz campaign and the games' deterministic hash checks. The gate
+  # short differential-fuzz run and the games' deterministic hash checks. The gate
   # logic lives in tools/ci/gates.sh so any step can be reproduced locally.
   build:
     name: ${{ matrix.name }} ${{ matrix.config }}

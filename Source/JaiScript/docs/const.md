@@ -1,7 +1,7 @@
 # const (design)
 
-Status: **ruled, implemented** (Dev ruling 2026-10-07: a narrow `const`, for parameters, variable declarations and
-expressiveness; Dev's decisions on the open questions are listed in section 14). Section 9.3 lists what is not enforced yet.
+Status: **implemented**: a narrow `const`, for parameters, variable declarations and expressiveness; the decisions on
+the open questions are listed in section 14. Section 9.3 lists what is not enforced yet.
 
 `const` marks a binding that is set once and then only read. The rules are C++'s, cut down to the declaration:
 
@@ -183,13 +183,13 @@ is a later performance change and is not part of these semantics.
 
 `f(const T& x)` and `f(T& x)` have the same signature, as do `f(const T x)` and `f(T x)`. `const` never enters
 overload viability or scoring (`core/overload_resolution.hpp` is unchanged), and declarations that differ only by
-`const` follow the general redefinition rule (Dev ruling 2026-10-07), with nothing special for `const`:
+`const` follow the general redefinition rule, with nothing special for `const`:
 
 - Two definitions of one signature in the same unit are a load error: two methods (or two static methods, or two
   constructors) of one class, two namespace functions, or two program-scope functions with the same parameter types:
   `'m' is already defined with parameters (int&) at 4:5` (`'f' is already defined at 4:5` for a program-scope
   function). A declaration marked `override` replaces on purpose. Declarations of one name and different parameters are
-  overloads (Dev ruling 2026-10-02); a coroutine does not overload, so a function and a coroutine of one name warn and the
+  overloads; a coroutine does not overload, so a function and a coroutine of one name warn and the
   later replaces the earlier.
 - A definition from another unit (another module, another execute block) is a redefinition, the hot-reload path: it
   replaces the earlier one, and the checker warns when it sees the earlier definition
@@ -206,8 +206,8 @@ plain `T&` is accepted exactly when that verdict says the parameter is never wri
 ## 5. Class constants
 
 A `const` declaration in a class body is a class-level constant: `const int MAX_HP = 100;`, `static const int MAX_HP =
-100;` and `const static int MAX_HP = 100;` declare the same thing, one value shared by every instance (Dev ruling
-2026-10-07: const in a class is the simple, static form). There are no per-instance const fields, so no constructor
+100;` and `const static int MAX_HP = 100;` declare the same thing, one value shared by every instance (const
+in a class is the simple, static form). There are no per-instance const fields, so no constructor
 ever sets a const, and a class with constants copies and copy-assigns like any other class.
 
 - It needs an initializer (`const 'MAX_HP' needs an initializer: const int MAX_HP = 0;`, a class type included).
@@ -457,7 +457,7 @@ no scoped const is unchanged.
 ## 11. Enums
 
 An `enum E { a, b }` declaration defines `E` as a `map<string, int>`. C++ enumerators are constants, and so are
-JaiScript's (Dev ruling 2026-10-07):
+JaiScript's:
 
 - The enum's name is a const: `E = 5`, `E["c"] = 2` and `E.erase("a")` are errors (the checker knows the enum by its
   declaration; both backends mark a program-scope enum's cell), and `E.size()`, iteration, `E::v` and `E.v` read.
@@ -499,7 +499,7 @@ JaiScript's (Dev ruling 2026-10-07):
   006d304a70772e5f, crawler 3849293868, Gator Quest 3218840367, JaiDOOM 1746772898), fuzz 3000 with no divergence, and
   `verify_site.py` for the guide. The fuzz generator does not write const declarations yet.
 
-## 14. Decisions (Dev, 2026-10-07)
+## 14. Decisions
 
 1. `const x = e` (and an untyped `const x` parameter) is `const auto`, with C++'s deep meaning.
 2. A `const` in a class body is a class-level constant (`static const`); there are no per-instance const fields and no
@@ -509,8 +509,8 @@ JaiScript's (Dev ruling 2026-10-07):
    general load in place. Hot reload never requires a restart (standing rule).
 5. Declarations that differ only by `const` follow the general redefinition rule: two definitions of one signature in
    the same unit are an error, a definition from another unit is a redefinition with a warning, uniformly for methods,
-   constructors and functions. Program-scope functions of one name and different signatures are overloads (Dev ruling
-   2026-10-02); an `override` declaration replaces on purpose.
+   constructors and functions. Program-scope functions of one name and different signatures are overloads; an
+   `override` declaration replaces on purpose.
 6. `const Foo f;` default-constructs a class; every other type needs an initializer.
 7. Captures follow C++ exactly: a copy of a const is const, a reference to a const is a const reference, an
    init-capture deduces by `auto`. JaiScript lambdas behave as C++ `mutable` lambdas (an existing difference, kept).

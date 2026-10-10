@@ -1,4 +1,4 @@
-# Load-bearing invariants (VM-perf era, 2026-07)
+# Load-bearing invariants
 
 Things that are easy to break silently. Each has a source anchor; if you're about to violate
 one, read the anchor first. Background: `thin_value_spec.md` / `thin_value_rebaseline.md`.
@@ -35,7 +35,7 @@ handle outside make_strong or used it after free.
 
 ## 2b. Frame slot pointers survive stack growth via the ONE chokepoint
 
-Flat-stack era (stage 2): vm frame slots live in value-stack WINDOWS
+Flat stack: vm frame slots live in value-stack WINDOWS
 (`frame::window_base/window_live`, slot k at `stack_[window_base + k]`), and the stack is a
 flat vector that reallocates on growth. The VM caches raw pointers into slots across
 dispatch iterations (`counted_for_state.var/end_ptr/step_ptr`, `exec_cfor_prep` — end/step
@@ -47,7 +47,7 @@ you add it to `rebase_window_pointers` in the same commit; references never qual
 (owner-pinned holders, §3). Windows are created FULL (null placeholders up to `local_count`
 behind `window_live`), so operand temps always start above the whole window. Fiber frames
 (`vm_coroutine_state::locals`) still use `call_frame` vectors and keep the pre-stage-2 rule:
-reserve the full `local_count` up front, never reallocate mid-frame (the 2026-07 demoreel
+reserve the full `local_count` up front, never reallocate mid-frame (the demoreel
 finding-2 failure mode was silent wrong loop counts in Release). The interpreter's
 `call_stack_` frames keep the old rule unchanged.
 
@@ -86,7 +86,7 @@ parks the unwinding flag, exception, value and trace around it). Pinned by Spec 
 `reentrant_destructors_and_operand_order` and Reentrant Callbacks (the ASan build shows the
 heap-use-after-free when broken).
 
-## 3. Reference cells (mode 1 is DELETED, 2026-07 stage C)
+## 3. Reference cells (mode 1 is DELETED)
 
 The old ref-anchor rule is dead machinery: `reference_holder` no longer has a raw
 `target` pointer or a `weak_ptr<environment> sourceEnv` — a reference NEVER holds a
@@ -182,7 +182,7 @@ The Foundry benchmark harness (Release BENCHMARKS config) reports **integer µs/
 and never claim a sub-µs win from it — anything under ~1 µs needs a dedicated ns micro-bench
 (see `execution_mode_metrics.md` for the methodology that resolved the 0.4 µs regime).
 
-## 8. Typed array representation follows the declared type (2026-09-02)
+## 8. Typed array representation follows the declared type
 
 - `array<int>` / `array<float>` / `array<bool>` / `array<char>` / `array<string>` are raw
   buffers by construction (`script_array::kind_t` i64/f64/b8/c8/str) and `array<UserType>`
@@ -220,7 +220,7 @@ and never claim a sub-µs win from it — anything under ~1 µs needs a dedicate
   defeats the reference-free premise. Worker-side instance copies register on the shared
   class definition under `engine::parallel_instance_registry_lock()` (region-time only).
 
-## 9. Inline-cache entries are keyed by site, never by symbol (2026-09-04)
+## 9. Inline-cache entries are keyed by site, never by symbol
 
 `env_lookup_cache` entries (`chunk.hpp`) carry a class pointer, a field slot and a serial but
 NO symbol. The this-field IC (`this_field_ic_probe` / `this_field_ic_arm`, the store twin) is
@@ -236,7 +236,7 @@ receiver gate reads the receiver LOAD's own slot, recorded at compile time as
 `Strong Types :: bare_field_store_then_read_in_loops_battery` (the Foundry field-write shape,
 which the whole suite otherwise missed).
 
-## 10. Lambda capture sources resolve in the runtime's lookup order (2026-09-04)
+## 10. Lambda capture sources resolve in the runtime's lookup order
 
 The SOURCE a captured name binds to is decided by ONE kernel, `detail/capture_ladder.hpp`
 (`resolve_capture_source`), used verbatim by `visit_lambda_expr` and `exec_closure`: the
@@ -256,7 +256,7 @@ capture env parents the GLOBAL env, so "already captured" tests must read its OW
 is silently skipped (the bug class that let `[&]` box a global instead of the local).
 Pinned by `Lambda Captures :: *_over_same_named_global` and the method-shadowing rows.
 
-## 11. The string write gate (2026-09-04)
+## 11. The string write gate
 
 String copies share ONE `strong_ptr<script_string>` node (`clone()` and
 `clone_for_assignment` are shallow for strings by design - O(1) copies), so an in-place
@@ -293,7 +293,7 @@ gate. Rules:
   `kv.first`) must `commit_scratch()` after the mutator, on every path that passes the
   deref'd scratch as self (identifier fast paths included) - the unshare lands in the
   scratch, and only the commit stores the fresh node back.
-- Map keys ride this, never a copy (Dev ruling 2026-09-04): the range-for pair's `first`
+- Map keys ride this, never a copy: the range-for pair's `first`
   stays the key's SHARED handle (`args.push_back(it->first)` / `it->first.clone()` in both
   backends, zero per-iteration work), `keys()` / `to_array()` / predicate arguments hand
   out shared handles too, and the first write through any of them detaches. The static
@@ -307,11 +307,11 @@ gate. Rules:
   string_value_semantics_battery / string_mutator_receiver_lvalue_battery /
   string_mutator_chain_battery`, `review_regression :: string_cow_*`.
 
-## 12. A compound assignment reads its target after its right side (2026-09-11)
+## 12. A compound assignment reads its target after its right side
 
 `x op= e` evaluates `e`, then reads `x`, then stores, on both backends (the right operand before the left, as
 C++17 sequences every assignment operator); `x = x op e` and the plain binary keep their left-to-right reads.
-Every target follows the same order (2026-09-27): `obj.f op= e`, `this.f op= e`, `C::s op= e`, `ns::x op= e`,
+Every target follows the same order: `obj.f op= e`, `this.f op= e`, `C::s op= e`, `ns::x op= e`,
 `a[j] op= e` and `a[j] = e` evaluate `e` first, then the receiver, container and index, then the read (a user
 getter included), the arithmetic and the store, so an error in `e` comes before any error the target raises.
 The VM emits the value first and the executor rotates the operands into its own order
@@ -326,12 +326,12 @@ point the language's order puts the read (the interpreter's identifier compound 
 side; the VM's compound store reads the slot after the right side by construction). Suite `Compound Assignment
 Order` pins it.
 
-## 13. A call argument takes its value, or binds its reference, when it is evaluated (2026-09-27, 2026-10-08)
+## 13. A call argument takes its value, or binds its reference, when it is evaluated
 
 Arguments evaluate left to right after the callee, and a by-value argument's value is fixed at that point: a later
 argument (or a conversion the binding runs) that writes the variable, element or object it read does not change what
 the callee receives; a reference parameter sees the write. A reference parameter binds its argument at that point too
-(Dev ruling 2026-10-08, C++): in `put(o.x, o = other)` the reference names the `x` of the object `o` held when `o.x`
+(C++): in `put(o.x, o = other)` the reference names the `x` of the object `o` held when `o.x`
 was evaluated, `put(a[i], i++)` names `a[0]`, and a later argument that reassigns a receiver or replaces a nested one
 moves nothing. An evaluated argument can still share storage (an element read is a reference, a heavy value is a
 handle to a shared node, a host global is a cpp-bound box), so the value is taken explicitly, and only where a later
@@ -374,7 +374,7 @@ A new call form must stamp its arguments and capture on both backends; an operan
 evaluation must leave the interpreter's value stack (statements clear it at their boundaries). Suite `Call Argument
 Capture` pins it.
 
-## 14. An auto declaration takes its initializer's static type, once (2026-09-27)
+## 14. An auto declaration takes its initializer's static type, once
 
 `auto x = e` is the type the checker gives `e`, never the kind the value holds when the line runs: a `var` or
 unknown static type makes `x` a `var`, any other type keeps `auto` (the runtime locks to the value, which has
@@ -392,7 +392,7 @@ as `auto` and types it again at load). The rules for an implementation:
 
 Suite `Spec Conformance` (`auto_static_type`) pins it, both backends, proofs on and off, every check mode.
 
-## 15. Collection transforms preserve observable copy behavior (2026-10-02)
+## 15. Collection transforms preserve observable copy behavior
 
 Dot array append/concat/filter/map/slice mutate; array:: forms copy. Dot map keeps
 input constraints; namespace map takes declared callback result constraints. Filters

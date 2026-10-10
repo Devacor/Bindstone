@@ -179,7 +179,7 @@ ride inside the elements. One curiosity: `--pix half` emits MORE bytes per
 frame than quad (35.6 KB vs 21.5 KB) because flat quad cells are a 1-byte space
 on background while every half-mode cell is a 3-byte half-block glyph.
 
-### Captured reads dissolve the glyph wall (v0.5, 2026-07-08)
+### Captured reads dissolve the glyph wall (v0.5)
 
 `parallel_transform` captured reads (docs/parallel_design.md §13) let a body
 READ enclosing globals, so the quad glyph-row builder is now a per-row function

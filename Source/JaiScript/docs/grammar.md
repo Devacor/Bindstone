@@ -936,7 +936,7 @@ string healthLevel = health > 75 ? "healthy" :
     constructor delegation (the ONLY initializer-list forms).
 11. **Switch Semantics**: Break-by-default. Use `fallthrough;` for explicit fall-through.
 12. **Visibility**: `public:`/`private:`/`protected:` labels are **enforced at member
-    access** on both backends, in two levels (Dev ruling 2026-09-27): default and
+    access** on both backends, in two levels: default and
     `public:` = everyone; `private:` = the declaring class and every class derived from
     it, by a bare name, `this.x` or any receiver of that family; `protected:` is a synonym
     of `private:`. Lambdas defined inside a method inherit that class's access; free
@@ -984,7 +984,7 @@ string healthLevel = health > 75 ? "healthy" :
     iteration over captured containers. Violations raise
     "parallel_transform: <reason> at line:col" — never silently serial.
     `thread_count()` reports the worker count a region will use.
-16. **Typed shared_ptr declarations enforce their pointee** (Dev ruling 2026-07):
+16. **Typed shared_ptr declarations enforce their pointee**:
     `shared_ptr<Bar> wrong = Foo();` and wrong-class sp-aliasing error ("type must match
     or be a subclass"); derived→base upcasts stay legal, null initialization is fine, and
     null stays assignable after establishment. `shared_ptr<auto>` INFERS the pointee from
@@ -997,8 +997,7 @@ string healthLevel = health > 75 ? "healthy" :
     supported (they error at call time — a plain `auto`/untyped parameter already binds
     anything, or use an explicit `shared_ptr<T>`). The ladder has exactly three handle
     spellings: `shared_ptr<T>` (enforced pointee), `shared_ptr<auto>` (infer then
-    enforce), and plain `var` (the MONOTONIC LADDER — Dev ruling 2026-07, refining the
-    earlier "fully dynamic" wording: a var-held handle behaves IDENTICALLY to a typed
+    enforce), and plain `var` (the MONOTONIC LADDER: a var-held handle behaves IDENTICALLY to a typed
     handle holder wherever the typed spelling is legal; var's ONLY extra power is
     accepting an incompatible type). For a var currently holding a shared_ptr handle, `=`
     resolves by rhs: a HANDLE rhs (`p = new Bar();`, or another handle var) REBINDS; a
@@ -1016,7 +1015,7 @@ string healthLevel = health > 75 ? "healthy" :
     is DELIBERATELY a parse error ("shared_ptr<var> is not supported: use var (holds and
     rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)") —
     the constrained-but-dynamic middle ground has no use case, and `var` meaning
-    something different inside angle brackets would muddy the ladder (Dev ruling 2026-07).
+    something different inside angle brackets would muddy the ladder.
 17. **`cast` is the typed boundary**: `cast<T>(e)` is exactly `T tmp = e;` (a value copy
     for classes, the assignment conversion table for primitives), `cast<T&>(e)` is a
     reference to the same object built with the `auto& r = e` machinery (owner-pinned;

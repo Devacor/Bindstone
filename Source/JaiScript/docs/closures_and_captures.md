@@ -119,8 +119,7 @@ environment/member sources when checking is disabled or an AST is loaded. `this`
 `super` require `[this]` or a default that admits instance capture. An anonymous
 `function(args) { ... }` expression is the JavaScript form: it closes over its scope by
 reference, exactly `[&]` (shared live cells that outlive the scope, `this` included), so
-`function(x) { return function(y) { return x + y; }; }` works and sees later writes to `x`
-(Dev ruling 2026-10-01).
+`function(x) { return function(y) { return x + y; }; }` works and sees later writes to `x`.
 
 Namespaces are program scopes: a lambda made there continues to read their live variables.
 Named captures and init-captures still take the requested creation-time snapshot.

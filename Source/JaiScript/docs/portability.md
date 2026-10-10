@@ -1,4 +1,4 @@
-# Portability status (2026-07 audit)
+# Portability status
 
 Scope: the library proper — `include/jaiscript/` + `source/implementation/`. The `examples/`
 programs are Windows console demos (guarded `#ifdef _WIN32` + `<conio.h>`/`SetConsoleMode`) and
@@ -72,7 +72,7 @@ and recursive assignment and type parsing are not covered by that counter.
   cpp-bound reads decode through `unchecked_as_int()/unchecked_as_float()` over pointers to
   genuinely-typed host variables.
 
-## 3. Second-compiler smoke — clang 18 + libc++ (2026-07)
+## 3. Second-compiler smoke — clang 18 + libc++
 
 No clang-cl ships with this VS 2026 install, and the VS 2026 MSVC STL hard-rejects
 clang < 20 (`yvals_core.h` STL1000), so the clang-cl/MS-STL combination is untestable here.

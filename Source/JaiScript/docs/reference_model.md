@@ -1,6 +1,6 @@
-# The reference model (cells era, 2026-07)
+# The reference model
 
-What a `jaiscript` reference IS, after stage C deleted mode 1. One page; the
+What a `jaiscript` reference IS. One page; the
 load-bearing rules live in `invariants.md` §3, the runtime shapes in
 `source/tests/vm/vm_backend_tests.cpp` (`ref_*` / `escape_*`).
 
@@ -50,11 +50,11 @@ allocates except the first boxing of a variable.
   A host-bound variable (`add_global_ref`) boxes the same way, its cpp_bound box becoming the
   cell's value: every store through the cell (the name, `auto& r = hp`, an `int&` parameter,
   `=`, `op=`, `++`) writes the C++ memory through the box's conversion (`variable_store`,
-  `assign_through`) and never replaces the box, so the name stays bound (Dev ruling 2026-10-01).
+  `assign_through`) and never replaces the box, so the name stays bound.
 - **`arr[i]` / `obj.field` / chains** resolve to ELEMENT/FIELD refs via the shared
   `detail/ref_lvalue.hpp` resolver (ref args, ref returns) or the subscript-lvalue
   paths. **`m[k]`** lvalues mint MAP-ENTRY refs.
-- **Math components** (`v.x`, `pos.y`, `a[i].z`, `obj.pos.x`, `S::v.x`, `col.g`; Dev ruling 2026-09-30) mint a
+- **Math components** (`v.x`, `pos.y`, `a[i].z`, `obj.pos.x`, `S::v.x`, `col.g`) mint a
   COMPONENT ref over the base's own reference (an identifier boxes its variable, the rest resolve as above) wherever
   a reference binds: ref args, `var&`/`T&` declarations, `cast<T&>`, ref returns
   (`detail/math_component_store.hpp` `component_reference`, both backends). A component over a base only evaluation

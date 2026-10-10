@@ -60,5 +60,5 @@ it.
 
 A few files are working notes rather than documentation — [OPEN_NOTES.md](OPEN_NOTES.md),
 [PERF_PASS_2026-09-02.md](PERF_PASS_2026-09-02.md) and
-`arch_audit_2026-07.json`: measurement ledgers and unresolved design tensions kept next to the
+`arch_audit_2026-07.json`: measurement logs and unresolved design tensions kept next to the
 code they discuss. Nothing in them is a contract, and nothing on the site depends on them.

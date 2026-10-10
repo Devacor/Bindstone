@@ -480,7 +480,7 @@ excluded. LOC (script total ~3560 + 530 host):
 
 Rough wall-time per milestone: host + skeleton + data ~2h; all systems first
 pass ~3h; first clean smoke (incl. map fixes via the validator) ~2h; perf
-campaign (measure → chunked rays → strip cache → bg prefill → row fast paths)
+pass (measure → chunked rays → strip cache → bg prefill → row fast paths)
 ~2h; pilot debugging + balance ~1.5h.
 
 **What felt good:**

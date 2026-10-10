@@ -88,10 +88,10 @@ P7 perf + feel ........ GREEN (p7_bench.jai: 9.7 ms/frame @ 120x78 autopilot vs 
 P8 legacy ............. GREEN (p8_doom2.jai: freedoom2 MAP01 + doom2 monsters/music/skies/progression,
                         p8_doom2.bmp; flowtest grew the demo-determinism hash pin + nightmare checks)
 
-## Language showcase pass (2026-07-12)
+## Language showcase pass
 
 Post-P7 sweep making the codebase demonstrate JaiScript's marquee features without moving the
-perf band (measurements in PERF_BASELINE.md's showcase ledger):
+perf band (measurements in PERF_BASELINE.md's showcase-pass table):
 
 - things.jai .... `monster_brain` coroutine per mobj (handles are values, stored in a hetero array)
 - spec.jai ...... `Mover` class + `mover_run` coroutine drive lifts/floors/stairs (cold path)
@@ -104,10 +104,10 @@ perf band (measurements in PERF_BASELINE.md's showcase ledger):
                   map-start warm pass
 - render.jai .... `tex_warm_map` composites every referenced wall texture at map start via
                   `parallel_transform` (~1.7x vs serial; first-sight frame spikes moved into load)
-- Hot paths stay flat typed-array free functions (IDIOMATIC_COST ruling: classes/coroutines are
+- Hot paths stay flat typed-array free functions (per IDIOMATIC_COST: classes/coroutines are
   for cold paths; the mobj pool, PIX, clip arrays keep parallel admission)
 
-## Round 2 (2026-07-12): the full game
+## Round 2: the full game
 
 Tracks 1-3: rocket launcher (weapon 5, MISL projectile + radius damage + rocket-jump shove),
 powerups (berserk/invis/radsuit/allmap/goggles/soul/backpack with palette tints and wear-off

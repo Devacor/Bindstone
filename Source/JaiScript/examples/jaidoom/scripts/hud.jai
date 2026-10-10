@@ -338,7 +338,7 @@ function menu_lump(string label) -> string {
 // full-screen net lobby / address entry (STCFN text — no M_ art exists here).
 // Every row is width-FITTED: the scale shrinks until the line fits the screen
 // (floor 0.45 keeps glyphs legible), so narrow terminals wrap nothing and
-// clip nothing (Dev's field report: hints crammed/cut at his size).
+// clip nothing.
 function fit_scale(string s, float want) -> float {
 	float ms = want;
 	while (ms > 0.45 && text_width(s, ms) > VW - 8) { ms = ms * 0.85; }

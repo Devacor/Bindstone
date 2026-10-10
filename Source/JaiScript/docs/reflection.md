@@ -163,5 +163,5 @@ scope, including skipped disk caches and allowed in-memory programs.
 
 No expression trees, no runtime type emission (hot reload is the better answer), no
 process-global reflection, no monkey-patching. Attributes/editor hints (`@range(0,100)`-style)
-are a separate design shared with the editor campaign — companion §6. Errors are ordinary
+are a separate design shared with the editor — companion §6. Errors are ordinary
 catchable runtime errors with one consistent family text — companion §2.

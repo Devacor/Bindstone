@@ -803,8 +803,7 @@ y = "hello";             // OK: var allows any type
 
 var mixed = [1, "two", 3.14];  // OK: var allows mixed types
 ```
-See `STRONG_TYPES.md` for the full runtime type ladder and `static_checking.md` for
-compile-time enforcement (off/warn/strict).
+See `static_checking.md` for compile-time enforcement (off/warn/strict).
 
 ### Generic Containers
 ```cpp

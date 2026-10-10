@@ -595,10 +595,6 @@ The implementation in `property_serialization.hpp` now matches the documented pr
 | Archive detection | `jai_archive<Archive>` concept | Archive traits |
 | Versioning | In-format + explicit | Explicit only |
 
-## Related Documentation
-
-- [JaiScript_BinarySerialization.md](JaiScript_BinarySerialization.md) - Detailed binary format specification
-
 ## Sources
 
 - [Cereal Serialization Functions](https://uscilab.github.io/cereal/serialization_functions.html)

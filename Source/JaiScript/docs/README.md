@@ -49,25 +49,16 @@ both backends consume, [parallel_design.md](parallel_design.md) and
 [parallel_prove_or_serial.md](parallel_prove_or_serial.md) for `parallel_transform`,
 [thin_value_spec.md](thin_value_spec.md) for the 32-byte value layout,
 [aliasing_costs.md](aliasing_costs.md), [flatstack_design.md](flatstack_design.md),
-[DEBUGGER_DESIGN.md](DEBUGGER_DESIGN.md), [EXCEPTION_DESIGN.md](EXCEPTION_DESIGN.md),
-[TYPE_SYSTEM_DESIGN.md](TYPE_SYSTEM_DESIGN.md), [STRONG_TYPES.md](STRONG_TYPES.md).
+[DEBUGGER_DESIGN.md](DEBUGGER_DESIGN.md), [EXCEPTION_DESIGN.md](EXCEPTION_DESIGN.md).
 
-[JaiScriptTesting.md](JaiScriptTesting.md) and [JaiScriptVMTesting.md](JaiScriptVMTesting.md)
-are the testing notes for the two backends.
+[JaiScriptVMTesting.md](JaiScriptVMTesting.md) holds the testing notes for running the suites on both backends.
 
 These are useful if you are working *on* JaiScript, and unnecessary if you are working *with*
 it.
 
-## History
+## Working notes
 
-A few files here are planning documents from before the feature they describe shipped —
-[REFERENCE_SEMANTICS_PLAN.md](REFERENCE_SEMANTICS_PLAN.md),
-[PERSISTENT_INTERPRETER_DESIGN.md](PERSISTENT_INTERPRETER_DESIGN.md),
-[JaiScript_FutureDesign.md](JaiScript_FutureDesign.md), [ROADMAP.md](ROADMAP.md) and their
-neighbours. They record how a decision was reached, not what the language does today; when one
-of them disagrees with a file in the contract table above, the contract is right.
-
-A few more are working notes rather than documentation — [OPEN_NOTES.md](OPEN_NOTES.md),
-[DRAGON_PERF.md](DRAGON_PERF.md), [PERF_PASS_2026-09-02.md](PERF_PASS_2026-09-02.md) and
+A few files are working notes rather than documentation — [OPEN_NOTES.md](OPEN_NOTES.md),
+[PERF_PASS_2026-09-02.md](PERF_PASS_2026-09-02.md) and
 `arch_audit_2026-07.json`: measurement ledgers and unresolved design tensions kept next to the
 code they discuss. Nothing in them is a contract, and nothing on the site depends on them.

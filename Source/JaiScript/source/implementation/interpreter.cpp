@@ -6072,7 +6072,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                 } else if (currentVal && currentVal->get_type_info() &&
                           currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
                     // Special handling for shared_ptr<T> assignment with auto-unwrap semantics
-                    // See TYPE_SYSTEM_DESIGN.md "Assignment Semantics" section
                     auto ptr_type_info = currentVal->get_type_info();
                     auto expected_type = ptr_type_info->element_type();
                     std::string expected_type_name = expected_type ? expected_type->type_name : "";

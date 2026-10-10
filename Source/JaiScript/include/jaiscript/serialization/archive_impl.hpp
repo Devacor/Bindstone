@@ -83,7 +83,6 @@ namespace adl_detect {
 
 // All serialization functions call I/O methods through self() for static dispatch.
 // Derived classes implement I/O methods as regular (non-virtual) methods.
-// See JAI_ARCHIVE_DEVIRTUALIZATION.md for design rationale.
 
 // Serialization Context - tracks whether we're writing property values or array elements.
 // This enables automatic wrapping decisions:
@@ -754,7 +753,6 @@ public:
 
 // All deserialization functions call I/O methods through self() for static dispatch.
 // Derived classes implement I/O methods as regular (non-virtual) methods.
-// See JAI_ARCHIVE_DEVIRTUALIZATION.md for design rationale.
 
 template<class Derived>
 class archive_reader_impl : public archive_base {

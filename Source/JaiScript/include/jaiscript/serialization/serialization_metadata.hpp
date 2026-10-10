@@ -45,7 +45,6 @@ template<typename Archive> struct reader_archive_id_trait {
 
 // Uses function pointers (manual vtable) for minimal indirection.
 // Only used for dynamic/runtime polymorphism - static code uses CRTP directly.
-// See JAI_ARCHIVE_DEVIRTUALIZATION.md for design rationale.
 class any_archive_writer {
     void* ptr_;
     writer_archive_id id_;

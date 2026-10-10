@@ -246,8 +246,8 @@ Three mechanisms, one per hazard class:
   **exclusive reachable set** ⇒ zero-copy element reads, no atomics — the partitioning
   discipline core/strong_ptr.hpp:115-130 was designed for. Any cross-chunk alias (or alias into
   a capture) deep-clones that element at the barrier; correctness never depends on the fast
-  path. Value semantics makes alias-freedom the common case (docs/JaiScript_DeepCopyDesign.md —
-  assignments and parameter passing deep-copy), so aliases exist only where someone made one on
+  path. Value semantics makes alias-freedom the common case (assignments and by-value
+  parameters copy), so aliases exist only where someone made one on
   purpose (`reference_holder`, value.hpp). References are owner-pinned handles
   (cell/element/field/map-entry, invariants.md §3) whose strong_ptr refcounts are NON-ATOMIC
   and whose pins alias engine-owned state — a ref reachable from an element forces that

@@ -39,8 +39,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p><strong>Script side</strong>: the <code>to_json</code> / <code>from_json</code> builtins turn any script
 value into text and back: one line each way.</p>
 <p><strong>C++ side</strong>: an archive framework that writes JSON or a compact binary through one
-interface (<code>include/jaiscript/serialization/</code>; spec in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/SERIALIZATION.md"><code>docs/SERIALIZATION.md</code></a> and
-<a href="https://github.com/Devacor/JaiScript/blob/master/docs/JaiScript_BinarySerialization.md"><code>docs/JaiScript_BinarySerialization.md</code></a>). It is a drop-in for Cereal-shaped code: the same
+interface (<code>include/jaiscript/serialization/</code>; spec in <a href="https://github.com/Devacor/JaiScript/blob/master/docs/SERIALIZATION.md"><code>docs/SERIALIZATION.md</code></a>). It is a drop-in for Cereal-shaped code: the same
 member/free <code>serialize</code> / <code>save</code> / <code>load</code> dispatch.</p>
 <p>The part worth knowing before you write any of it: <strong>a class you have already bound for
 scripting is most of the way to serializable.</strong> The <a href="02-dynamic-binder.html">dynamic_binder</a>

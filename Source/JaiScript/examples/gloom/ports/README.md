@@ -1,6 +1,6 @@
 # GLOOM and JaiDOOM whole-program gates
 
-Measured snapshot: [2026-09-08 results](RESULTS_2026-09-08_FINAL.md).
+Measured snapshot: [results](RESULTS.md).
 
 The ports execute the shared host's deterministic 100x40, quad-pixel workload.
 Squirrel 3.2 uses the bundled runtime with 64-bit integers and `SQUSEDOUBLE`,

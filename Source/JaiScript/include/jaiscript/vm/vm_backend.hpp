@@ -2312,6 +2312,7 @@ namespace jai::vm {
         op_status map_scalar_store(script_value& container, const script_value& key, const script_value& value, bool& handled, script_value*& stored);
         const script_map::value_type* map_lane_find(const script_map& map, const script_value& key) const;
         script_value& map_lane_slot(script_map& map, const script_value& key) const;
+        void commit_string_scratch(script_value& recv, uint16_t bi_string, uint64_t member_id);
         // The getter-shadow/field-slot probe behind every GET_MEMBER-family site cache
         // fill (slot UINT32_MAX = negative: same_as / nonpublic chain / sp-builtin name /
         // custom-getter shadow / no field slot)

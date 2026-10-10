@@ -1,5 +1,5 @@
-// Element checker/runtime agreement corpus from Fable's 129-program review.
-// Rejecting a program that runs with checking off fails this battery.
+// Element checker/runtime agreement corpus (129 programs).
+// Rejecting a program that runs with checking off fails this suite.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>

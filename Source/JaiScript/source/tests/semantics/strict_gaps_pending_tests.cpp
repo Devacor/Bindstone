@@ -1,5 +1,5 @@
-// Approved strict-rule battery. Register accepted cases individually.
-// Approved rules are active; the two deferred proposals remain unregistered.
+// Strict-rule cases. Register accepted cases individually.
+// Accepted rules are active; the two deferred proposals remain unregistered.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/jaibite.hpp>
@@ -15,7 +15,7 @@ public:
 		rules_456_and_controls();
 		element_rules();
 		element_rule_boundaries();
-		// deferred_proposals();            // not approved
+		// deferred_proposals();            // not registered
 	}
 
 private:
@@ -248,7 +248,7 @@ private:
 			auto eng = make_engine();
 			eng->static_checking(check_mode::off);
 			check_eq(std::string("Cannot initialize 'r' (declared int&) with string"),
-			         eng->execute("string s = \"s\"; var c = \"\"; try { int& r = s; } catch (e) { c = e; } c;").as_string());   // a reference must reference (Dev ruling 2026-09-30): the binding raises
+			         eng->execute("string s = \"s\"; var c = \"\"; try { int& r = s; } catch (e) { c = e; } c;").as_string());   // a reference must reference: the binding raises
 			check_eq(std::string("Cannot initialize 'f' (declared function) with int"),
 			         eng->execute("var c = \"\"; try { function f = 42; } catch (e) { c = e; } c;").as_string());   // a function slot takes a callable or null (std::function's rule)
 			check_eq(script_int{1}, eng->execute(

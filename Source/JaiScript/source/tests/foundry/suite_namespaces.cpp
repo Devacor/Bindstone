@@ -16,8 +16,8 @@ public:
     namespace_tests() : suite("Namespace Tests") {}
 
     void forge_tests() override {
-        // using ns::name; (a comma list): the rest of the unit's text reads the name as its qualified spelling (Dev ruling
-        // 2026-09-30: parse time, file-local, not transitive, any namespace; the name cannot be declared again)
+        // using ns::name; (a comma list): the rest of the unit's text reads the name as its qualified spelling (parse
+        // time, file-local, not transitive, any namespace; the name cannot be declared again)
         test("using_declarations", [&]() {
             const std::string utils = "namespace utils { auto add(a, b) { return a + b; } int LIMIT = 7; }\n";
             for (bool use_vm : {false, true}) {

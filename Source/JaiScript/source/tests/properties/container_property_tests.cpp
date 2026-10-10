@@ -381,7 +381,7 @@ public:
 FOUNDRY_REGISTER(jai::foundry::tests::lambda_capture_probes)
 
 // Edge-sanding pins: move-only properties, name-shadowing dedup, truthful schema flags,
-// registry thread-safety (census-backed fixes, 2026-07-12).
+// registry thread-safety (census-backed fixes).
 class hardened_base : public property_owner<hardened_base> {
 public:
     JAI_PROPERTY((int), shared_name, 1);

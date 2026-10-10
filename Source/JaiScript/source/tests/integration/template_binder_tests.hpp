@@ -67,7 +67,7 @@ struct TplAutoDetectVec {
     T dot() const { return a * b; }
 };
 
-// ---- template-instantiation type-identity audit fixture (2026-07, GLOOM follow-up).
+// ---- template-instantiation type-identity audit fixture (GLOOM follow-up).
 // The shared_ptr intern bug was a type-identity KEYING failure; this pair pins that
 // no other path keys two distinct C++ instantiations alike. Same method names,
 // per-instantiation distinct behavior - any cross-talk shows immediately.
@@ -229,7 +229,7 @@ public:
 
     void forge_tests() override {
 
-        // -------------------- template-instantiation type-identity audit (2026-07)
+        // -------------------- template-instantiation type-identity audit
         // Matrix result at audit time: registration/lookup, construction+dispatch,
         // shared_ptr paths (incl. the fixed composite intern), container elements,
         // conversion_registry, base upcasts, opaque tokens - ALL keyed correctly

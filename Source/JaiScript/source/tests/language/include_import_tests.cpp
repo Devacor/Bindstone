@@ -363,7 +363,7 @@ public:
         });
         
         test("include_is_textual_the_file_runs_at_the_include_site", [=, this]() {
-            // Dev (2026-09-12): includes are the includer's scope. The included declarations belong to the including unit (a
+            // Includes are the includer's scope. The included declarations belong to the including unit (a
             // later `var x` in the includer writes the included x in place, and the included function sees it), and an include
             // inside a block or a function body scopes with it (docs/global_shadowing.md)
             auto eng = make_engine();
@@ -382,7 +382,7 @@ public:
             cleanup_temp_file(blk);
         });
         test("a_literal_include_inside_a_function_is_spliced_into_the_function", [=, this]() {
-            // row 126 (Dev, 2026-09-12: an include inside a function sees its parameters and locals, pay for what you use): a
+            // An include inside a function sees its parameters and locals (pay for what you use): a
             // literal include in a function body is parsed into the body (C++), so the checker and both backends see one
             // function; the included text reads and writes the parameter, declares a local the function then uses, defines a
             // function; a nested literal include splices too
@@ -401,7 +401,7 @@ public:
             cleanup_temp_file(inner);
         });
         test("a_function_body_include_declares_nested_functions_and_no_class", [=, this]() {
-            // Dev ruling 2026-10-01: the spliced text is the function's own, as pasted C++ text is: a function it declares is a
+            // The spliced text is the function's own, as pasted C++ text is: a function it declares is a
             // nested function, local to the body and gone after it, the program-scope function of that name untouched (the
             // strict checker warns that it hides one); a class, always a program-scope type, cannot be declared there
             auto eng = make_engine();
@@ -475,9 +475,9 @@ public:
             cleanup_temp_file(local);
         });
         test("a_changed_spliced_file_reparses_its_includer_on_every_cache_tier", [=, this]() {
-            // Astra's finding of 2026-09-16 on 126.1's cache path: the same engine's execute_file (the file cache's fast path) and a literal
+            // Regression on the spliced-include cache path: the same engine's execute_file (the file cache's fast path) and a literal
             // execute (the literal cache's fast path) kept the old parse when only the spliced file changed (3, 3, 3 for 3, 11, 119); every tier
-            // now revalidates the spliced stamps before a hit runs. Different sizes move the stamp within one clock tick
+            // revalidates the spliced stamps before a hit runs. Different sizes move the stamp within one clock tick
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
             eng->add_include_path(jai::foundry::test_temp_directory().string());
@@ -496,7 +496,7 @@ public:
             cleanup_temp_file(parent);
         });
         test("a_textual_include_shared_by_two_units_resolves_each_units_cells", [=, this]() {
-            // row 123.5 (Astra, 2026-09-12 19:32): an included file's compiled program and the functions it defines belong to
+            // An included file's compiled program and the functions it defines belong to
             // the including unit; two units including the same file each get their own, so the VM's lookup caches never serve
             // another unit's binding (docs/global_shadowing.md)
             auto eng = make_engine();
@@ -567,7 +567,7 @@ public:
             cleanup_temp_file(moduleB);
         });
 
-        // === include in expression position (Dev ruling 2026-07: include returns its value) ===
+        // === include in expression position (include returns its value) ===
         // `var cfg = include "file.jai";` evaluates to the included file's result — exactly
         // what engine::execute returns for that source. Statement-position include is
         // unchanged (value discarded). include always RUNS the file (no cache), so its
@@ -839,7 +839,7 @@ public:
         });
 
         test("jaibite_cache_version_mismatch_reparses_and_rewrites", [=, this]() {
-            // Format-version stamp (Dev ruling 2026-07-11): a sibling from an older
+            // Format-version stamp: a sibling from an older
             // parser/format silently reparses + rewrites — stale parse-time semantics
             // (e.g. slot assignment changes) must never load
             for (bool use_vm : {false, true}) {
@@ -1558,7 +1558,7 @@ public:
         });
 
         test("import_is_a_statement_that_takes_no_scope", [=, this]() {
-            // Dev's ruling (2026-09-27): an import may stand wherever a statement may (a function, a block, a loop, a lambda) and
+            // An import may stand wherever a statement may (a function, a block, a loop, a lambda) and
             // always runs at program scope; directly in a class or a namespace body it is a parse error naming the rule
             auto lib = create_temp_file("lib_anywhere.jai", "int lib_fn() { return 11; }\n");
             const char* nested[] = {
@@ -1908,7 +1908,7 @@ public:
         });
 
         test("a_module_rerun_keeps_a_variable_declared_without_an_initializer", [=, this]() {
-            // Dev's ruling (2026-09-27): a same-unit re-run resets a variable only when its declaration assigns; `T x;` keeps the
+            // A same-unit re-run resets a variable only when its declaration assigns; `T x;` keeps the
             // value (the first run defaults it), unless its declared type changed, which resets it to the new type's default
             const auto dir = jai::foundry::test_temp_directory();
             int tick = 100;

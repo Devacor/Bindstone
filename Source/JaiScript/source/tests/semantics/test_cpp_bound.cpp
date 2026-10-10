@@ -266,13 +266,13 @@ public:
             check_false(eng->execute("sa.same_as(8)").as_bool(), "bound same_as unequal int");
         });
 
-        // Section-12.5 ruling: compound on a bound value stored AS an element/member/field
+        // thin_value spec §12.5: compound on a bound value stored AS an element/member/field
         // decode-reads the LIVE C++ value, then detach-and-replaces the slot (C++ untouched).
-        // ALL-DETACH ruling (2026-07, open question #12, approved verbatim): write-through
+        // All-detach: write-through
         // belongs to the registered NAME (and refs/captures/by-ref params bound to it),
-        // never to stored copies. Literal construction now snapshots like every
+        // never to stored copies. Literal construction snapshots like every
         // assignment-shaped store, so the slots hold 100 (construction-time value), not
-        // a live alias — the two decode-reads-live asserts flipped with this ruling.
+        // a live alias.
         test("pin_element_compound_detach_and_replace", [this]() {
             auto eng = jai::foundry::make_engine();
             int c8 = 100;
@@ -290,7 +290,7 @@ public:
             check_eq((int64_t)102, eng->execute("m8[\"k\"]").as_int(), "map value stays detached");
         });
 
-        // Rows 14/15/11 of the #12 matrix — the previously unpinned cells. Post-ruling:
+        // Ref compounds on stored bound values:
         // stored values are detached snapshots, so ref-mediated compounds through
         // container slots and the implicit-this move path can never reach C++.
         test("pin_ref_compound_on_stored_bound_never_reaches_cpp", [this]() {
@@ -333,7 +333,7 @@ public:
         });
 
         // Assigning a bound value INTO an object member detaches it at store time — and
-        // since the #12 all-detach ruling (2026-07) array/map slots snapshot the same
+        // array/map slots snapshot the same
         // way; the member snapshots at assignment, compound operates on the snapshot.
         test("pin_member_compound_detach_and_replace", [this]() {
             auto eng = jai::foundry::make_engine();
@@ -388,8 +388,8 @@ public:
                 check_eq((int64_t)1, eng->execute("var r3 = 1; if (bfz) { r3 = 2; } r3").as_int(), tag + "0.0 bound float falsy in if");
                 check_true(eng->execute("!bfz").as_bool(), tag + "!zero-bound-float");
                 check_eq((int64_t)2, eng->execute("var r4 = 1; if (bfn) { r4 = 2; } r4").as_int(), tag + "nonzero bound float truthy in if");
-                // RULED (2026-07, §13): opaque bound objects are TRUTHY while the host
-                // pointer is live (they ARE objects to script). Was falsy pre-ruling.
+                // thin_value spec §13: opaque bound objects are TRUTHY while the host
+                // pointer is live (they ARE objects to script).
                 check_eq((int64_t)2, eng->execute("var r5 = 1; if (bop) { r5 = 2; } r5").as_int(), tag + "opaque bound truthy in if");
                 check_false(eng->execute("!bop").as_bool(), tag + "!opaque-bound");
                 check_eq((int64_t)3, eng->execute("var steps = 0; while (bn) { steps = steps + 1; bn = bn - 1; } steps").as_int(), tag + "while on bound int");
@@ -419,7 +419,7 @@ public:
             check_true(eng->execute("function rc12(int& t) { return t >= 100; } rc12(bg)").as_bool(), "comparison through by-ref param");
         });
 
-        // ---- T2 (rung 1, thin_value spec section 13): ruled write-through/live-read
+        // ---- T2 (rung 1, thin_value spec section 13): write-through/live-read
         // ---- semantics for bound values (section 12 deltas), both backends.
 
         test("t2_compound_writethrough_matrix", [this]() {
@@ -556,7 +556,7 @@ public:
                 check_eq((int64_t)106, bg2, tag + "++ through ref decl writes through");
                 eng->execute("var fcap = [&bg2]() { bg2 += 4; }; fcap();");
                 check_eq((int64_t)110, bg2, tag + "compound through by-ref capture writes through");
-                // Plain '=' through a ref stores into the C++ variable and the name stays bound (Dev ruling 2026-10-01)
+                // Plain '=' through a ref stores into the C++ variable and the name stays bound
                 eng->execute("auto& rr3 = bg2; rr3 = rr3 + 4;");
                 check_eq((int64_t)114, bg2, tag + "plain assign through ref writes through");
                 bg2 = 200;
@@ -598,7 +598,7 @@ public:
             check_true(bb1, "as<script_bool&> aliases the live bool");
 
             // Width/sign-mismatched bindings throw a catchable jai::runtime_error - NEVER
-            // std::bad_variant_access (the D12/S9 ruling).
+            // std::bad_variant_access.
             auto v32 = eng->execute("b32");
             bool caught32 = false;
             try { v32.template as<script_int&>(); } catch (const jai::runtime_error&) { caught32 = true; }
@@ -739,9 +739,9 @@ public:
             probe.v = 5;
             auto val = eng->make_value(&probe);
             check_true(val.is_cpp_bound(), "make_value(T*) on unregistered type is bound");
-            // RULED (2026-07, §13): opaque bound objects are NON-null while the pointer
-            // is live (was is_null()==true pre-ruling); a null host pointer stays null.
-            check_false(val.is_null(), "opaque bound is non-null (ruled)");
+            // thin_value spec §13: opaque bound objects are NON-null while the pointer
+            // is live; a null host pointer stays null.
+            check_false(val.is_null(), "opaque bound is non-null");
             auto& extracted = val.template as<t1_opaque_probe&>();
             extracted.v = 42;
             check_eq(42, probe.v, "as<T&> extraction aliases the live object");

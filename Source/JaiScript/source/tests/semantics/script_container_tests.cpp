@@ -367,7 +367,7 @@ public:
             check_eq(sum, (10000 * 9999) / 2);
         });
 
-        // ===== Typed representation at the binding boundary (2026-09-02) =====
+        // ===== Typed representation at the binding boundary =====
         // array<int>/array<float> ARE raw buffers; bound_array<T>& mutates them in place
         // through the node, and the script_value vector view exists only for array<var>.
         test("typed_buffer_bound_array_mutates_in_place", [this]() {
@@ -426,7 +426,7 @@ public:
         });
 
         test("class_typed_array_binds_vector_of_shared_ptr", [this]() {
-            // Dev's binding shape: array<K> of a bound C++ class hands its objects to a
+            // Binding shape: array<K> of a bound C++ class hands its objects to a
             // std::vector<std::shared_ptr<K>> parameter (by value: the binder rejects
             // container references by design). The class is proven once per array (kind
             // obj), each slot's holder gives up its object; identity is shared (C++ writes
@@ -451,7 +451,7 @@ public:
             check_eq((int64_t)2, eng->execute("class Big : Creature { int extra = 1; Big() : super() {} } array<Big> bigs = [Big(), Big()]; count(bigs)").as_int());
             check_eq((int64_t)26, eng->execute("class Big2 : Creature { int extra = 1; Big2() : super() {} } array<Big2> bigs = [Big2(), Big2()]; heal_all(bigs); sum_hp(bigs)").as_int());
             check_eq((int64_t)13, eng->execute("class Big3 : Creature { int extra = 1; Big3() : super() {} } array<Big3> b = [Big3()]; heal_all(b); b[0].hp").as_int());
-            // Dev's shape: a base-typed array holding bound instances AND hybrid subclasses, handed over by the fast path
+            // Shape: a base-typed array holding bound instances AND hybrid subclasses, handed over by the fast path
             check_eq((int64_t)6, eng->execute("class Sub : Creature { int extra = 1; Sub() : super() {} } array<Creature> mixed = [Creature(), Sub()]; sum_hp(mixed)").as_int());
             check_eq((int64_t)26, eng->execute("class Sub2 : Creature { int extra = 1; Sub2() : super() {} } array<Creature> mixed = [Creature(), Sub2()]; heal_all(mixed); sum_hp(mixed)").as_int());
             // a hybrid default-constructs its C++ base when its constructor names no super(...), or when it declares none

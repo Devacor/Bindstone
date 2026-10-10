@@ -66,10 +66,10 @@ public:
     }
 
     void forge_tests() override {
-        // Real-world shaped macro benches (2026-07-11, the GLOOM lessons): entity_tick
+        // Real-world shaped macro benches (the GLOOM lessons): entity_tick
         // = the game-loop shape (class instances, method calls, field read/write ICs);
         // brains = the call-boundary shape (coroutine resumes + bare sibling method
-        // calls — the CALL_FROM_SCRATCH heat, the campaign yardstick).
+        // calls — the CALL_FROM_SCRATCH heat).
         test("bench_entity_tick", [this]() {
             run_macro_bench("entity_tick", R"(
                 class Entity {
@@ -362,7 +362,7 @@ public:
             )");
         });
 
-        // int& over a var: the declared type converts every store (Dev ruling 2026-09-30)
+        // int& over a var: the declared type converts every store
         benchmark("Reference Stores (int& over var, 200 iterations)", [this]() {
             test_engine->execute(R"(
                 var w = 0;
@@ -1011,7 +1011,7 @@ public:
         // === String Performance Benchmarks ===
         // These measure the shared_ptr string optimization effectiveness
 
-        // Container copy by value (2026-09-02 pass): the STORE taxonomy on GLOOM named one
+        // Container copy by value: the STORE taxonomy on GLOOM named one
         // `pix = G.bg` per frame at 527k cycles - an untyped 4000-int array deep-copied
         // element by element. These rows pin that shape: untyped scalar, typed buffer,
         // string elements, and a map.
@@ -1145,7 +1145,7 @@ public:
         }, 300);
 
         benchmark("Push 200 Derived into array<Base> (x20)", [this]() {
-            // the subclass admission: a name mismatch, then the parent-chain walk (Dev ruling 2026-09-02).
+            // the subclass admission: a name mismatch, then the parent-chain walk.
             // Each benchmark runs on a fresh engine (pre_test), so the setup repeats
             if (!bite) {
                 test_engine->execute(R"(
@@ -1178,7 +1178,7 @@ public:
         }, 300);
 
         benchmark("Boundary: array<K> (200) -> std::vector<std::shared_ptr<K>> (x100)", [this]() {
-            // Dev's binding shape: a class-typed script array handed to a C++ parameter of
+            // A binding shape: a class-typed script array handed to a C++ parameter of
             // shared pointers to the bound class
             if (!bite) {
                 dynamic_binder<bench_creature>(*test_engine, "BenchCreature")
@@ -1204,7 +1204,7 @@ public:
         }, 300);
 
         benchmark("Map lookup: map<string,int> 100 keys, 1000 dynamic-key reads", [this]() {
-            // the typed-map campaign's yardstick (typed_array_design.md stage 6): dynamic
+            // the typed-map yardstick (typed_array_design.md stage 6): dynamic
             // string keys build a script string per read today; a typed string-keyed map
             // can compare the bytes without one
             if (!bite) {
@@ -1287,7 +1287,7 @@ public:
 // ============================================================================
 // Element-traffic ns micro-harness (dedicated steady_clock resolution, NOT the
 // integer-uS Foundry benchmark harness). Isolates array element read/store cost
-// per the value-traffic campaign (GLOOM_COMPARISON.md 2.4). Run with:
+// per the value-traffic analysis (GLOOM_COMPARISON.md 2.4). Run with:
 //   jaiscript_tests.exe "Element Traffic NS" --verbose            (interpreter)
 //   jaiscript_tests.exe "Element Traffic NS" --verbose --backend=vm
 // Prints ns/op (body loop minus a same-shape overhead loop, divided by op count).

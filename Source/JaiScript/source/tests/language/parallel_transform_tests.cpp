@@ -1669,7 +1669,7 @@ public:
 	}
 };
 
-// parallel_for v1 (Dev rulings 2026-07-09): the in-place fork-join statement.
+// parallel_for v1: the in-place fork-join statement.
 // auto& mutates the owned element in place (no output array, no merge); plain auto is
 // a side-effect-free worker copy. Elements must be value-closed (primitives, strings,
 // value containers, flat classes); the barrier detaches shared string nodes instead of
@@ -1694,7 +1694,7 @@ public:
 
 	void forge_tests() override {
 		test("inlined_leaf_inside_a_worker_body_matches_serial_1_2_8", [this]() {
-			// row 153.3: a leaf grafted into a parallel_for body runs in the workers too (the worker's copy of the callee closes over the
+			// A leaf grafted into a parallel_for body runs in the workers too (the worker's copy of the callee closes over the
 			// worker's root, which the guard accepts); the values match the serial loop at every worker count
 			auto e = make_engine();
 			const std::string src = R"(
@@ -2029,7 +2029,7 @@ public:
 		});
 
 		test("class_changing_assignment_denied_with_verdict", [this]() {
-			// An assignment of another class into a by-value slot re-classes the slot's object (Dev ruling 2026-10-04: no
+			// An assignment of another class into a by-value slot re-classes the slot's object (no
 			// slicing): its dropped levels' destructors and the class registry are not worker territory
 			auto e = make_engine();
 			e->parallel_thread_count(4);
@@ -2111,7 +2111,7 @@ public:
 		});
 
 		test("captured_names_keep_their_scope_in_method_pins", [this]() {
-			// Astra's binding control (2026-09-09): a global palette read inside Cell.calc() and a
+			// Binding control: a global palette read inside Cell.calc() and a
 			// caller-local palette of the same name read in the parallel body. A pinned method
 			// resolves its captures in the worker's method environment, the body in its own, so
 			// both bindings survive: v gains calc()'s 1 + 1 and the body's 3 per round, 63 -> 75.
@@ -2169,7 +2169,7 @@ public:
 		});
 
 		test("unsafe_mode_keeps_the_runtime_walls", [this]() {
-			// Astra's unsafe matrix (2026-09-09): under allow_unsafe_parallel(true) at 8 workers a
+			// Unsafe matrix: under allow_unsafe_parallel(true) at 8 workers a
 			// sibling call spelled this.inner(), a field's method leaf.read() and an accessor this.x
 			// asserted a getter-id miss on the frozen interner, and a bare sibling call died on a
 			// dead strong_ptr block: unsafe mode had skipped the element-class collection, which
@@ -3303,7 +3303,7 @@ public:
 			check_pending_recovery(true, true, true);
 		});
 		test("registry_recovery_survives_load", [this]() {
-			// The swap-remove race (perf pass row 83) needed contention: an expired weak entry moved
+			// The swap-remove race needed contention: an expired weak entry moved
 			// by a concurrent swap-remove while a fresh registration refilled the index lost one
 			// live instance about once per 150 runs under CPU load. Burner threads supply the
 			// contention here; the three recovery shapes must keep every survivor registered.

@@ -430,23 +430,23 @@ namespace jai::fuzz {
 	};
 
 	inline const std::vector<suppression>& known_suppressions() {
-		// Shapes observed and triaged in real campaigns; see known_divergences.md
-		// for the ledger (repro seeds, wrong-backend judgment, status).
+		// Shapes observed and triaged in real fuzz runs; see known_divergences.md
+		// for the record (repro seeds, wrong-backend judgment, status).
 		static const std::vector<suppression> list = {
 			// throw inside a class ordering operator swallowed by one backend
-			// (fix in flight; not observed since - matcher kept for the campaign).
+			// (fix in flight; not observed since - matcher kept).
 			{"KD-ORDERING-THROW", "throw inside operator< swallowed by one backend",
 				{"operator<"}, {"op-lt-boom"}},
 			// Both backends run under the interpreter's call-depth cap (run_program), so a deep recursion raises at the same
-			// call on both; what remains of this accepted class (Dev rulings 2026-07-09 / 2026-07-14) is the vm's bare self
+			// call on both; what remains of this accepted class is the vm's bare self
 			// tail call, which reuses its frame (guide ch.6, G06-080) and completes where the interpreter raises
 			// (uncaught or caught: the text is the same)
 			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's depth cap raises",
 				{}, {"Maximum recursion depth exceeded"}},
-			// The 2026-07 FZ-* matchers (typed-fn-no-return, undef-var eval order,
+			// The FZ-* matchers (typed-fn-no-return, undef-var eval order,
 			// neg-zero, overflow op names, float divzero text, recursion text,
-			// spaceship overflow swallow) were removed when their fixes landed on
-			// VM-perf; recorded seeds re-verified agreeing with --no-suppressions.
+			// spaceship overflow swallow) were removed with their fixes; recorded
+			// seeds re-verified agreeing with --no-suppressions.
 			// See known_divergences.md "Fixed" for the root causes.
 		};
 		return list;

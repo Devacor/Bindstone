@@ -1,8 +1,8 @@
 // Spec conformance: every expected value below is derived from the specification (Source/JaiScript/CLAUDE.md
 // "Language features", docs/*.md, the guide, and C++ where the docs say C++ semantics), never from running
-// a backend. docs/spec_conformance.md is the ledger: each claim, its source, the tests that pin it.
+// a backend. docs/spec_conformance.md lists each claim, its source and the tests that pin it.
 // Every row runs on the interpreter and the VM, with proofs on and off and the VM's passes off (and, in a
-// build with the miss-injection lever, with injected cell misses), against one expected string.
+// build that defines JAISCRIPT_MISS_INJECTION, with injected cell misses), against one expected string.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -503,7 +503,7 @@ public:
 	}
 
 private:
-	// CLAUDE.md "An assignment expression's value is the destination's stored value" (Dev ruling 2026-09-08)
+	// CLAUDE.md "An assignment expression's value is the destination's stored value"
 	void assignment_expression_values() {
 		test("assignment_value_is_the_stored_value_for_every_destination_kind", [this]() {
 			expect("stored value", R"(
@@ -587,7 +587,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Declarations without an initializer" and "Constructor exits" (Dev rulings 2026-09-26), crossed with
+	// CLAUDE.md "Declarations without an initializer" and "Constructor exits", crossed with
 	// coroutines and delegating constructors
 	void declarations_and_constructors() {
 		test("defaulted_declarations_inside_a_coroutine_re_default_on_every_execution", [this]() {
@@ -720,7 +720,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "== is memberwise on heavy values" (Dev ruling 2026-09-05)
+	// CLAUDE.md "== is memberwise on heavy values"
 	void memberwise_equality() {
 		test("memberwise_equality_with_user_operators_at_every_depth", [this]() {
 			expect("memberwise", R"(
@@ -787,7 +787,7 @@ private:
 		});
 	}
 
-	// CLAUDE.md "Map key types" (Dev ruling 2026-09-02); texts from docs/diagnostics.md "element / key boundary"
+	// CLAUDE.md "Map key types"; texts from docs/diagnostics.md "element / key boundary"
 	void map_keys() {
 		test("map_key_types_are_enforced_and_auto_keys_infer", [this]() {
 			expect("keys", R"(
@@ -1927,7 +1927,7 @@ private:
 			)", "Cannot initialize 'x' (declared int) with null|raised|Array index 5 out of bounds for array of size 1");
 		});
 		test("bitwise_compound_assignments_are_x_op_equals_y_with_x_evaluated_once", [this]() {
-			// Dev ruling 2026-09-28: &= |= ^= <<= >>= on every lvalue (a local, a field, this's field, a static, a namespace
+			// &= |= ^= <<= >>= on every lvalue (a local, a field, this's field, a static, a namespace
 			// variable, an element, a map entry), the stored value as the expression's value, the operand text
 			expect("bitwise compound", R"(
 				class Flags { int f = 1; static int s = 1; void bump() { f |= 8; } }
@@ -2136,7 +2136,7 @@ private:
 		});
 	}
 
-	// Access control (Dev ruling 2026-09-27, two levels as simple as possible): public: = everyone; private: = the declaring
+	// Access control (two levels, as simple as possible): public: = everyone; private: = the declaring
 	// class and every class derived from it, by any spelling and through any receiver of the family; protected: is a synonym
 	// of private: (one message). Outside the family every read, write, call, compound and ++/-- raises
 	// "Cannot access private member 'x' of class 'C'"; the strict checker reports it at load when the receiver class is
@@ -2242,7 +2242,7 @@ private:
 		});
 	}
 
-	// Dev ruling 2026-09-27 (docs/closures_and_captures.md): a program-scope variable is never captured by default - [=],
+	// docs/closures_and_captures.md: a program-scope variable is never captured by default - [=],
 	// [&] and bare [] read it when the lambda runs, [&g] is the same as not listing it, an explicit [g] copies it at creation;
 	// an init-capture [x = e] copies e, evaluated at creation in the enclosing scope, into the lambda's own x. Locals and
 	// parameters keep their contract (bare [] and [=] copy, [&] shares the cell)
@@ -2301,7 +2301,7 @@ private:
 		});
 	}
 
-	// Dev ruling 2026-09-27, C++17 [expr.ass]: in E1 op= E2 every value computation and side effect of E2 is sequenced before
+	// C++17 [expr.ass]: in E1 op= E2 every value computation and side effect of E2 is sequenced before
 	// E1 - the right side runs first, then the target's receiver, its read (a user getter included), the arithmetic and the store
 	void compound_member_order() {
 		test("a_member_compound_evaluates_its_right_side_before_the_target", [this]() {
@@ -2330,7 +2330,7 @@ private:
 		});
 	}
 
-	// Dev ruling 2026-09-27, C++17 [expr.ass]: a[j] op= e evaluates e before a and j (the plain store already did)
+	// C++17 [expr.ass]: a[j] op= e evaluates e before a and j (as the plain store does)
 	void compound_subscript_order() {
 		test("a_subscript_compound_evaluates_its_right_side_before_the_container_and_index", [this]() {
 			expect("subscript order", R"(
@@ -2360,7 +2360,7 @@ private:
 
 	void auto_static_type() {
 		test("an_auto_from_a_var_or_unknown_static_type_is_a_var", [this]() {
-			// Dev ruling 2026-09-27: `auto x = e` takes e's static type; a var element, a var local, a var-returning call and a
+			// `auto x = e` takes e's static type; a var element, a var local, a var-returning call and a
 			// mixed-branch ternary other than int with float have none, so x is a var (a later store of another type lands as is)
 			const char* src = R"(
 				var arr = [1, 2];
@@ -2437,7 +2437,7 @@ private:
 			)", "weak_ptr", check_mode::warn);
 		});
 		test("f3_a_store_takes_its_right_sides_value_before_the_target", [this]() {
-			// Dev ruling 2026-09-27 (C++17): the right operand of every assignment operator, its value included, before the target
+			// C++17: the right operand of every assignment operator, its value included, before the target
 			expect("store value timing", R"(
 				array<int> a = [0, 0];
 				array<int> b = [1, 2];
@@ -2483,7 +2483,7 @@ private:
 	// docs/SIMPLIFICATION_AUDIT.md: the audit's divergences, each pinned here by the change that fixes it
 	void simplification_audit_fixes() {
 		test("f1_a_nested_assignment_yields_the_destinations_stored_value", [this]() {
-			// Dev ruling 2026-09-08: the value of an assignment is the destination's stored value, consumed anywhere
+			// The value of an assignment is the destination's stored value, consumed anywhere
 			expect("nested stored value", R"(
 				class C { int n = 0; static int s = 0; }
 				function id(var v) { return v; }
@@ -2645,7 +2645,7 @@ private:
 		});
 	}
 
-	// R-q6 (Dev ruling 2026-09-30): a typed shared_ptr<U> enters shared_ptr<T> by its STATIC pointee, C++-style - an upcast
+	// A typed shared_ptr<U> enters shared_ptr<T> by its STATIC pointee, C++-style - an upcast
 	// converts, a downcast needs cast<shared_ptr<T>>; a var source by the class its object really has (T or a subclass);
 	// an unrelated class never. One rule at every site, both backends
 	void handle_admission() {
@@ -2798,7 +2798,7 @@ private:
 		known_bugs_simplification_audit();
 	}
 
-	// Dev's rulings of 2026-09-28 (docs/spec_conformance.md section 9)
+	// docs/spec_conformance.md section 9
 	void rulings_2026_09_28() {
 		test("a_bare_throw_with_nothing_active_is_a_catchable_runtime_error", [this]() {
 			expect("bare throw", R"(
@@ -2852,7 +2852,7 @@ private:
 		nan_comparisons();
 	}
 
-	// Dev's rulings of 2026-10-01
+	// Comparison rewriting, <=> everywhere, host call failure routes, host-bound references and class scope
 	void rulings_2026_10_01() {
 		comparison_rewriting();
 		host_call_failure_routes();
@@ -2864,7 +2864,7 @@ private:
 
 	void spaceship_everywhere() {
 		test("a_right_operand_spaceship_answers_reversed_comparisons", [this]() {
-			// Dev ruling 2026-10-01: with no operator for the left operand, a right operand whose chain declares an applicable
+			// With no operator for the left operand, a right operand whose chain declares an applicable
 			// <=> answers: 5 < v is 0 < (v <=> 5), 5 <=> v is 0 <=> (v <=> 5); an overload that cannot take the left operand
 			// is no candidate, so the builtin text stands
 			expect("reversed", R"(
@@ -2880,7 +2880,7 @@ private:
 			)", "true true false true -1 1 0|true 2|012|Invalid operands for < operator|Invalid operands for < operator|Invalid operands for <=> operator", check_mode::warn);
 		});
 		test("equality_comes_from_spaceship_when_no_operator_equal_is_declared", [this]() {
-			// Dev ruling 2026-10-01: == and != come from <=> ((a <=> b) == 0) for a class value whose chain declares <=> and no
+			// == and != come from <=> ((a <=> b) == 0) for a class value whose chain declares <=> and no
 			// operator==, the left operand's first, then the right one's; a declared operator== wins, x == null stays a null
 			// test, a class without <=> compares memberwise, an overload that cannot take the other operand is no candidate
 			expect("== from <=>", R"(
@@ -2905,7 +2905,7 @@ private:
 
 	void spaceship_drives_mixed_operands() {
 		test("spaceship_drives_mixed_operands", [this]() {
-			// Dev ruling 2026-10-01 ("<=> can drive everything if it's implemented"): a <=> overload that takes the other operand
+			// <=> drives everything it can: a <=> overload that takes the other operand
 			// answers == != < <= > >= <=> against any operand, both orders; a declared operator that takes it wins; null tests,
 			// classes without <=>, and overloads that cannot take the operand keep their meaning
 			expect("mixed", R"(
@@ -2936,7 +2936,7 @@ private:
 
 	void classes_in_function_bodies() {
 		test("a_class_declared_in_a_function_body_is_a_parse_error", [this]() {
-			// Dev ruling 2026-10-01: a class is a program-scope type, so a function or lambda body cannot declare one
+			// A class is a program-scope type, so a function or lambda body cannot declare one
 			const std::string text = "a class cannot be declared inside a function body (a class is a program-scope type); declare it at program scope or import its file";
 			for (const char* src : {"function f() -> int { class L { int q = 3; } return 1; }",
 			                        "var g = []() { class L { int q = 3; } return 1; };",
@@ -2956,7 +2956,7 @@ private:
 	}
 
 	void host_call_failure_routes() {
-		// Dev ruling 2026-10-01: a checked_result-returning call reports every failure in its result (a run-time error, an
+		// A checked_result-returning call reports every failure in its result (a run-time error, an
 		// uncaught script throw, a missing module, a failed reload; a function, a bound method, a static method, a coroutine
 		// resume); a throwing call (execute, convert_script_function's std::function) throws for every failure; the engine
 		// stays usable after each
@@ -3034,7 +3034,7 @@ private:
 	struct ref_player { int64_t hp = 0; std::string tag; };
 
 	void host_global_references() {
-		// Dev ruling 2026-10-01: a reference to an add_global_ref variable aliases the C++ storage: a store through it (=, op=,
+		// A reference to an add_global_ref variable aliases the C++ storage: a store through it (=, op=,
 		// ++, a script T& parameter that writes) converts through the bound type and writes C++, and the name stays bound
 		test("a_reference_to_a_host_bound_int_stores_through_to_cpp", [this]() {
 			int64_t hp = 0;
@@ -3139,7 +3139,7 @@ private:
 			)", "true true false true|false true");
 		});
 		test("spaceship_equality_replaces_the_memberwise_default", [this]() {
-			// Dev ruling 2026-10-01 (<=> as much as possible): a class with <=> and no operator== compares by (a <=> b) == 0,
+			// A class with <=> and no operator== compares by (a <=> b) == 0,
 			// never fieldwise
 			expect("== from <=>", R"(
 				class Z { int n = 0; Z(int x) { n = x; } int operator<=>(Z o) { return 0; } }
@@ -3171,7 +3171,7 @@ private:
 
 	void nan_comparisons() {
 		test("nan_relations_are_ieee_and_spaceship_has_a_total_order", [this]() {
-			// Dev ruling 2026-09-30 (R-q8): == != < <= > >= follow IEEE (a NaN operand compares false, and unequal) on every lane
+			// == != < <= > >= follow IEEE (a NaN operand compares false, and unequal) on every lane
 			// (typed, dynamic, mixed int/float, a negated condition, a typed loop head, container equality); <=> with a NaN operand
 			// groups NaNs after numbers; a map keeps its total key order (a NaN key is found again)
 			expect("nan", R"(
@@ -3204,7 +3204,7 @@ private:
 
 	void field_reference_stores() {
 		test("a_store_through_a_field_reference_runs_the_fields_table", [this]() {
-			// Dev ruling 2026-09-30 (R-q7): auto& r = o.f; r = v stores exactly what o.f = v stores, plain and compound, and
+			// auto& r = o.f; r = v stores exactly what o.f = v stores, plain and compound, and
 			// refuses with the direct store's text
 			expect("field reference", R"(
 				class O { int f = 0; float g = 0.0; bool b = false; string s = ""; }
@@ -3227,7 +3227,7 @@ private:
 
 	void reflect_bind() {
 		test("reflect_bind_binds_a_method_to_its_object", [this]() {
-			// Dev ruling 2026-09-30: reflect::bind(obj, "name") is the spelling of a method taken as a value: the callable holds the
+			// reflect::bind(obj, "name") is the spelling of a method taken as a value: the callable holds the
 			// object (a value instance, a handle, a host object) and keeps it alive; a value type's methods run on the value (a
 			// lambda wraps them); the class's access control applies; c2 = C() copy-assigns into the object the callable holds
 			expect("reflect::bind", R"(
@@ -3251,7 +3251,7 @@ private:
 
 	void builtin_methods_as_values() {
 		test("a_bare_method_name_read_without_a_call_is_an_error", [this]() {
-			// Dev ruling 2026-09-30: a bare method name read without a call inside a method is the same violation, the receiver
+			// A bare method name read without a call inside a method is the same violation, the receiver
 			// spelled this; the lookup order stands (locals -> members -> globals): only a resolution that lands on an instance
 			// method errors, so a local or parameter of that name wins and a static method stays a function value
 			expect("bare method values", R"(
@@ -3302,7 +3302,7 @@ private:
 			});
 		});
 		test("a_method_read_without_a_call_is_an_error", [this]() {
-			// Dev ruling 2026-09-30: obj.method without a call reads too easily as a call, so it is an error for user, builtin and
+			// obj.method without a call reads too easily as a call, so it is an error for user, builtin and
 			// host methods: a class instance, handle or host object binds with reflect::bind, a value type's methods take a lambda;
 			// a field holding a callable stays a value
 			expect("method values", R"(
@@ -3347,7 +3347,7 @@ private:
 
 	void script_class_operator_overloads() {
 		test("a_script_class_overloads_every_cpp_overloadable_operator", [this]() {
-			// Dev ruling 2026-09-30: unary - + ~ and binary % & | ^ << >> <=> join the declarable operators (unary vs binary by
+			// Unary - + ~ and binary % & | ^ << >> <=> join the declarable operators (unary vs binary by
 			// the parameter count, like C++ member operators); a compound form is x = x op y through the class's operator; the
 			// class chain resolves them; a builtin operand keeps its builtin meaning
 			const std::string src = R"(
@@ -3393,7 +3393,7 @@ private:
 			)", "Unary minus requires numeric operand|Bitwise NOT requires integer operand|Invalid operands for % operator", check_mode::off);
 		});
 		test("a_class_cannot_declare_operator_bang_and_not_reads_to_bool", [this]() {
-			// Dev ruling 2026-09-30: like C++ with an operator bool, !v and if (v) go through the one contextual conversion:
+			// Like C++ with an operator bool, !v and if (v) go through the one contextual conversion:
 			// !v is !to_bool(v), if (v) is to_bool(v); declaring operator! on a script class is a parse error that says so
 			expect("to_bool contexts", R"(
 				class Z { int n = 0; Z(int x) { n = x; } bool to_bool() { return n != 0; } }
@@ -3421,7 +3421,7 @@ private:
 			});
 		});
 		test("a_class_with_operator_call_is_callable_wherever_a_function_is_called", [this]() {
-			// Dev ruling 2026-09-30: a call whose callee holds a class instance runs its operator() (any arity, the usual
+			// A call whose callee holds a class instance runs its operator() (any arity, the usual
 			// overload scorer, the class chain), through a local, a global, a field, an element, a computed callee and a handle
 			const std::string src = R"(
 				class Adder {
@@ -3479,7 +3479,7 @@ private:
 
 	void compound_operators_have_one_table() {
 		test("a_compound_operator_has_one_table_at_every_destination", [this]() {
-			// the simplification audit's F9-F12 (Dev: one semantics per compound operator, one zero-divisor text per operator family):
+			// the simplification audit's F9-F12 (one semantics per compound operator, one zero-divisor text per operator family):
 			// member '/=' divides like the local's, '+=' appends text only to a text target at every destination (a local, a field,
 			// this's field, an element, a map entry, a reference), '/' and '/=' raise 'Division by zero', '%' and '%=' 'Modulo by zero'
 			expect("one compound table", R"(
@@ -3600,7 +3600,7 @@ private:
 
 	void ruling_auto_fields() {
 		test("an_auto_field_takes_its_initializers_static_type", [this]() {
-			// ruling 4 (auto = static type) for class fields: an int-initialized auto field is an int field, an auto without a static
+			// auto = static type, for class fields: an int-initialized auto field is an int field, an auto without a static
 			// type is a var
 			expect("auto fields", R"(
 				var FLAG = true;
@@ -3902,7 +3902,7 @@ private:
 		});
 	}
 
-	// Dev ruling 2026-09-27: a by-value argument takes its value when it is evaluated, left to right
+	// A by-value argument takes its value when it is evaluated, left to right
 	void call_argument_capture() {
 		test("by_value_arguments_capture_their_values_left_to_right", [this]() {
 			expect("call args", R"(

@@ -398,8 +398,8 @@ public:
             check_eq(int64_t(112), result.as<int64_t>());
         });
 
-        // A named coroutine declared in a function body captures nothing, like a nested named function (Dev ruling
-        // 2026-10-03): an enclosing frame local is a parse error on both backends; a lambda or function(...) / => reads it
+        // A named coroutine declared in a function body captures nothing, like a nested named function: an
+        // enclosing frame local is a parse error on both backends; a lambda or function(...) / => reads it
         test("nested_coroutine_reading_an_enclosing_local_is_a_parse_error", [this]() {
             for (const char* source : {
                 "int f(int base) { coroutine int gen() { yield base; return 0; } auto g = gen(); return g.resume(); } f(4);",
@@ -553,7 +553,7 @@ public:
             check_eq(int64_t(62), result.as<int64_t>());
         });
 
-        // ===== COROUTINE METHODS (ruling 2026-07) =====
+        // ===== COROUTINE METHODS =====
         // `coroutine int steps() { ... }` inside a class: calling it on an instance mints
         // a handle exactly like a free coroutine; 'this' is pinned in the handle (its own
         // method env + receiver) and survives suspension on both backends.
@@ -889,7 +889,7 @@ public:
         // Method coroutines MATCH that precedent: a class hot reload while a method
         // coroutine is suspended leaves the suspended handle on the OLD body, resuming
         // against the SAME (migrated) instance; fresh calls use the NEW body.
-        // HANDLE REFERENCE SEMANTICS (Dev ruling, 2026-07): a handle IS a reference to a
+        // HANDLE REFERENCE SEMANTICS: a handle IS a reference to a
         // running computation, so copies SHARE the live coroutine (clone() shallow-shares
         // the holder - value.cpp jai_object_type case). Field stores, aliases, by-value
         // params, and container elements all see the same resume/done state.
@@ -1352,7 +1352,7 @@ public:
             both_drained("string log = \"\";\nint side() { log += \"S\"; return 1; }\nint f2(int a, int b) { log += \"F\"; return a + b; }\n"
                          "coroutine int gen() { return f2(side(), (yield 1) == null ? 5 : 0); }\n"
                          "auto h = gen(); string s = \"\"; while (!h.done()) { log += \"|\"; var v = h.resume(); if (s != \"\") { s += \"|\"; } s += to_string(v); } log + \"#\" + s",
-                "|S|F#1|6", "the callee-first probe shape (row 29) with a yield in the args");
+                "|S|F#1|6", "the callee-first probe shape with a yield in the args");
             both_drained("int orig(int x) { return 100 + x; }\nint repl(int x) { return 200 + x; }\nvar fp = orig;\n"
                          "coroutine int gen() { return fp((yield 1) == null ? 5 : 0); }\n"
                          "auto h = gen(); var a = h.resume(); fp = repl; var b = h.resume(); to_string(a) + \"|\" + to_string(b)",
@@ -1529,7 +1529,7 @@ public:
             both_drained("class P { int v = 0; }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var arr = [P(), P()]; arr[nz(yield 1)].v += 5; return arr[1].v; }\nauto h = g(); drain(h)",
                 "1|5", "yield inside the index of a member-compound receiver");
             both_drained("class P { int v = 3; }\nint nz(var v) { return v == null ? 1 : 0; }\ncoroutine int g() { var p = P(); ((yield 1) == null ? p : p).v += nz(yield 2) * 4; return p.v; }\nauto h = g(); drain(h)",
-                "2|1|7", "yields in both the receiver and the rhs of a member compound: the rhs first (C++17, Dev ruling 2026-09-27)");
+                "2|1|7", "yields in both the receiver and the rhs of a member compound: the rhs first (C++17)");
         });
 
         test("yield_in_method_field_stores", [this, both_drained]() {
@@ -1595,7 +1595,7 @@ public:
             }
         });
 
-        // ---- catch variable across suspension (Dev contract: the catch variable is an
+        // ---- catch variable across suspension (contract: the catch variable is an
         // ordinary block-scoped local of the catch body - a frame slot - and survives
         // suspension like any local; the exception pair + in-catch marker are parked per
         // coroutine so the resumer's own try/catch between resumes never touches them).

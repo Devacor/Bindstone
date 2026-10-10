@@ -114,7 +114,7 @@ public:
 		test("element_argument_band_seeds_no_new_divergence", [this]() {
 			// every program carries the element-argument band: mixed-kind element reads as several
 			// operands of one call inside loops the vm closes into cell blocks
-			run_seed_range(80, 120, true, fuzz::band_mode::always);   // 89, 97 and 192 caught the argument-zone miss (row 184)
+			run_seed_range(80, 120, true, fuzz::band_mode::always);   // 89, 97 and 192 caught the argument-zone miss
 		});
 		test("math_band_seeds_no_new_divergence", [this]() {
 			// every program carries the math band: math::vec2/vec3/ivec2/ivec3 through every lvalue kind, in and out of functions

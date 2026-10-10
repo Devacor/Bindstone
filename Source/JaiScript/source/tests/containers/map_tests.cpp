@@ -445,7 +445,7 @@ public:
 
         // A map key is read-only (C++ `const Key`, the ordering invariant), by value AND by
         // reference; `auto& kv` aliases the value only. The pair's `first` stays a SHARED
-        // handle of the key (no per-iteration copy - Dev ruling 2026-09-04); the checker
+        // handle of the key (no per-iteration copy); the checker
         // rejects the mutation spellings it can see under strict, and the runtime backstop
         // is the string copy-on-write gate (docs/invariants.md 11): whatever the checker
         // cannot see mutates a copy and the map is never touched. Every row runs on both
@@ -489,7 +489,7 @@ public:
             rejected("map<int,int> m = {1: 1}; for (auto kv : m) { kv.first++; } 0", "postfix ++ (desugars to += 1)");
             rejected("map<int,int> m = {1: 1}; for (auto& kv : m) { --kv.first; } 0", "prefix -- by reference");
             rejected("auto m = {\"a\": 1}; for (auto kv : m) { kv.first.to_upper(); } 0", "auto map literal is statically a map");
-            rejected("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { kv.first += \"hey\"; } 0", "Dev's spelling: kv.first += \"hey\" by reference");
+            rejected("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { kv.first += \"hey\"; } 0", "kv.first += \"hey\" by reference");
             rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var p = kv; p.first.to_upper(); } 0", "a copied pair still holds the key (C++ pair<const K, V>)");
             rejected("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { auto& p = kv; p.first.insert(0, \"x\"); } 0", "an alias of the pair still holds the key");
             rejected("map<string,int> m = {\"a\": 1}; for (auto kv : m) { auto f = [&]() { kv.first.to_upper(); }; f(); } 0", "the pair reached through a [&] lambda");
@@ -503,11 +503,11 @@ public:
                       i_out.find("map keys are read-only (copy it instead: var k = ") != std::string::npos,
                       std::string("alias text: ") + what + " (got: " + i_out + ")");
             };
-            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { var& cheeky = kv.first; } 0", "Dev's spelling: var& cheeky = kv.first");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { var& cheeky = kv.first; } 0", "var& cheeky = kv.first");
             rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { auto& k = kv.first; } 0", "auto& alias of the key");
             rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var& k = kv.first; } 0", "var& alias of the key");
             rejected_alias("function up(string& s) { s.to_upper(); } map<string,int> m = {\"a\": 1}; for (auto kv : m) { up(kv.first); } 0", "passed to a string& parameter");
-            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { shared_ptr<auto> cheeky = kv.first; } 0", "Dev's spelling (shared_ptr<var> is not a spelling; shared_ptr<auto> is): shared_ptr<auto> cheeky = kv.first");
+            rejected_alias("map<string,int> m = {\"a\": 1}; for (auto& kv : m) { shared_ptr<auto> cheeky = kv.first; } 0", "shared_ptr<var> is not a spelling; shared_ptr<auto> is: shared_ptr<auto> cheeky = kv.first");
             rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { shared_ptr<string> c = kv.first; } 0", "shared_ptr<string> from the key");
             rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { shared_ptr<auto> c = kv.first; } 0", "shared_ptr<auto> from the key");
             rejected_alias("map<string,int> m = {\"a\": 1}; shared_ptr<string> h = null; for (auto kv : m) { h = kv.first; } 0", "store into a shared_ptr-declared variable");
@@ -517,7 +517,7 @@ public:
             rejected_alias("map<string,int> m = {\"a\": 1}; function first_key() -> shared_ptr<string> { for (auto kv : m) { return kv.first; } return null; } first_key(); 0", "returned as a shared_ptr");
             rejected_alias("map<string,int> m = {\"a\": 1}; for (auto kv : m) { var p = kv; var& c = p.first; } 0", "alias through a copied pair");
             rejected_alias("map<string,int> m = {\"a\": 1}; string other = \"o\"; bool flag = true; for (auto kv : m) { var& c = flag ? kv.first : other; } 0", "a ternary over the key keeps the marker");
-            accepted("map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto& kv : m) { var okay = kv.first; okay.to_upper(); okay += \"!\"; r += okay; } r + to_json(m)", "A!{\"a\":1}", "Dev's spelling: var okay = kv.first is the copy-on-write path");
+            accepted("map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto& kv : m) { var okay = kv.first; okay.to_upper(); okay += \"!\"; r += okay; } r + to_json(m)", "A!{\"a\":1}", "var okay = kv.first is the copy-on-write path");
             accepted("map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto kv : m) { string s2 = kv.first; s2.to_upper(); string u = cast<string>(kv.first); u += \"?\"; r += s2 + u; } r + to_json(m)", "Aa?{\"a\":1}", "typed copies and a by-value cast");
             accepted("map<string,int> m = {\"a\": 1}; function first_key() -> string { for (auto kv : m) { return kv.first; } return \"\"; } string k = first_key(); k.to_upper(); k + to_json(m)", "A{\"a\":1}", "returned by value: a copy");
             accepted("map<string,int> m = {\"a\": 1}; string r = \"\"; for (auto kv : m) { auto f = [=]() { return kv.first + \"x\"; }; r += f(); } r", "ax", "reading the key inside a lambda");
@@ -574,7 +574,7 @@ public:
                 "{\"k\":\"V\"}v", "a map value copied from a variable detaches on write");
         });
 
-        // The map's contract (Dev's map-order ruling): iteration and serialization see key order, never insertion order; an
+        // The map's contract: iteration and serialization see key order, never insertion order; an
         // iteration continues after its key when the map changes under it (a callee's stores and erases included); a reference
         // to a value survives the table's growth; keys of different kinds stay distinct; == and JSON follow key order
         test("map_contract_battery", [this, both_mode]() {

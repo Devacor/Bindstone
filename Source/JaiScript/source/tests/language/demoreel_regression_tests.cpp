@@ -234,7 +234,7 @@ public:
 			}
 		});
 
-		// RULED (2026-07): typed class fields enforce like locals — the declared type is
+		// Typed class fields enforce like locals — the declared type is
 		// stored on the class definition and every field write converts through the same
 		// table '=' uses (an int field truncates 4.7 to 4); 'var' fields stay dynamic.
 		test("typed_field_assignment_converts_parity", [this]() {

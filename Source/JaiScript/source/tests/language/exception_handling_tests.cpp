@@ -765,7 +765,7 @@ public:
             check_eq(std::string("f:2|<script>:4"), trace_shape(*engine));
         });
 
-        // ---- returncatch (Dev: C++ semantics): the typed-return conversion is part of the
+        // ---- returncatch (C++ semantics): the typed-return conversion is part of the
         // `return` statement, so a try/catch around the failing return INSIDE the callee
         // catches it; uncaught, the attribution and text above are unchanged. ----
         test("return_conversion_error_caught_at_return_site", [this]() {

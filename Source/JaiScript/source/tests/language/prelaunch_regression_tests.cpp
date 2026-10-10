@@ -184,8 +184,7 @@ public:
 		});
 
 		test("aggregate_copies_share_explicit_handles", [this]() {
-			// C++ copy semantics for every aggregate copy (Astra review 2, Dev's standing
-			// ruling): value members deep-copy, shared_ptr<T> members keep sharing their
+			// C++ copy semantics for every aggregate copy: value members deep-copy, shared_ptr<T> members keep sharing their
 			// object, on instances, arrays and maps alike; a direct handle copy shares as before.
 			auto eng = make_engine();
 			eng->execute(R"(
@@ -263,8 +262,8 @@ public:
 		test("script_objects_outliving_their_engine_destroy_safely", [this]() {
 			// A host that keeps a script value past engine teardown (a UI page: a
 			// signal receiver capturing a script object, destroyed after the engine) must be
-			// able to drop it: the instance's destructor used to reach into its destroyed
-			// class definition to unregister itself (Astra's -loginshot 0xC0000005 in
+			// able to drop it. Regression: the instance's destructor reached into its destroyed
+			// class definition to unregister itself (a -loginshot 0xC0000005 in
 			// class_definition::unregister_instance). The definition orphans its live
 			// instances as it dies; dropping them afterwards is a plain destruction.
 			std::optional<script_value> instance, closure, nested;
@@ -278,7 +277,7 @@ public:
 			instance.reset();
 			nested.reset();
 			closure.reset();
-			// Astra's counterexample: an explicit value capture keeps the class definition alive
+			// Counterexample: an explicit value capture keeps the class definition alive
 			// past the engine through the captured environment, so the definition's destructor
 			// never ran; the instance must still destroy without consulting the dead engine
 			std::optional<script_value> callback, method_capture;

@@ -195,7 +195,7 @@ public:
             check_true(has_custom_ops);
         });
 
-        // FIXED (2026-07, open question #11): typed operator methods accept named-class
+        // Typed operator methods accept named-class
         // return types — `Money operator+(Money o)` parses inside class Money (the
         // own-class-name member branch consumes the operator symbol like the general
         // typed path). Parity with the function-keyword spelling.
@@ -251,7 +251,7 @@ public:
             }
         });
 
-        // Memberwise == (Dev ruling 2026-09-05): arrays, maps and class instance values compare
+        // Memberwise ==: arrays, maps and class instance values compare
         // like C++ containers, early out on size/class mismatch and the first unequal member;
         // shared_ptr handles compare by pointer like std::shared_ptr; same_object(x, y) is
         // identity. detail/structural_equality.hpp, one kernel for both backends.

@@ -884,7 +884,7 @@ public:
         });
 
         test("auto_uniform_literal_infers_element_type", [this]() {
-            // Dev ruling 2026-09-02: a uniform primitive literal infers its element type and
+            // A uniform primitive literal infers its element type and
             // takes that representation; auto is infer-then-enforce for arrays too
             auto eng = make_engine();
             check_eq((int64_t)4, eng->execute("auto nums = [1, 2, 3]; nums.push(4.7); nums[3]").as_int(), "auto int literal locks to int (float converts)");

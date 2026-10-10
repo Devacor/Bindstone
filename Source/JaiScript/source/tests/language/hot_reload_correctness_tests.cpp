@@ -64,7 +64,7 @@ public:
             check_eq(eng->execute("d.nb").as<int>(), 7);  // new inherited field added
         });
 
-        // RETYPE MIGRATION RULING (2026-07): changing a field's declared type on reload
+        // RETYPE MIGRATION RULE: changing a field's declared type on reload
         // CONVERTS the live value wherever the assignment conversion table allows
         // (int -> string via to_string, float -> int truncation, int -> float widening);
         // only a value with NO conversion (object into int, non-numeric string into int)

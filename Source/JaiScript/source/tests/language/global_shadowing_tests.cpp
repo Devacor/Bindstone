@@ -113,7 +113,7 @@ public:
 			});
 		});
 		test("an_inline_declaration_shares_the_visible_global_or_creates_it_when_absent", [this]() {
-			// Dev (2026-09-30): an inline variable is one variable every inline declaration shares; the first to run creates it
+			// An inline variable is one variable every inline declaration shares; the first to run creates it
 			// (unit 0) and a later one adopts it, as it adopts a host global
 			every_backend("inline", "5 5|8 8|7 7 7", [](engine& e) {
 				e.execute("inline var G; G = 5; function f() { return G; }");
@@ -146,7 +146,7 @@ public:
 			});
 		});
 		test("inline_and_plain_declarations_of_a_name_never_mix_across_units", [this]() {
-			// Dev (2026-09-30): in either order a mix of inline and plain declarations across units raises; the texts spell the fix
+			// In either order a mix of inline and plain declarations across units raises; the texts spell the fix
 			const std::string expected =
 				"'G' is already defined inline; declare it 'inline G;' to share it|"
 				"'N' is already defined inline; declare it 'inline int N;' to share it|"
@@ -237,7 +237,7 @@ public:
 			}
 		});
 		test("a_reference_argument_resolves_in_the_callers_unit", [this]() {
-			// row 123.6: a by-reference argument is the caller's code, so it binds the caller's unit's cell; the call enters the
+			// A by-reference argument is the caller's code, so it binds the caller's unit's cell; the call enters the
 			// callee's unit ahead of the binding and the binding resolves under the caller's (the sol2 precompiled BST benchmark's
 			// abort: a literal and a jaibite of the same text both declaring ref_root)
 			every_backend("ref args", "2 1 11 1", [](engine& e) {
@@ -266,7 +266,7 @@ public:
 			});
 		});
 		test("the_first_shadow_from_a_host_callback_leaves_the_active_frame_on_its_unit", [this]() {
-			// row 123.7: the ambient stamp is written only once a name has versions; a frame active when the first shadow appears
+			// The ambient stamp is written only once a name has versions; a frame active when the first shadow appears
 			// (a host callback declaring another unit's global) keeps resolving as its own unit's code
 			every_backend("first shadow under a frame", "11 11 22", [](engine& e) {
 				engine* raw = &e;
@@ -299,7 +299,7 @@ public:
 			});
 		});
 		test("a_callable_minted_by_a_shared_include_keeps_its_includers_unit", [this]() {
-			// Astra's saved-function matrix (2026-09-13): one file's declaration node runs under two includers; the callable each
+			// Saved-function matrix: one file's declaration node runs under two includers; the callable each
 			// includer saved is that includer's (a cached mint is reused only under the unit it was minted for), for a named
 			// function, a lambda and a coroutine alike
 			every_backend("shared include", "11 22 11 22|11 22|11 22", [](engine& e) {
@@ -318,7 +318,7 @@ public:
 			});
 		});
 		test("a_block_is_a_scope_inside_a_unit", [this]() {
-			// Dev (2026-09-12): scope is also identified by {}. A block declaration shadows for the block and vanishes after it, at
+			// Scope is also identified by {}. A block declaration shadows for the block and vanishes after it, at
 			// program scope and in a function; a callee still sees the outer binding; a block in another unit shadows only inside
 			// the block and is not that unit's declaration of the name
 			every_backend("blocks", "2 1 2 1 1 5 3 1 20 1", [](engine& e) {

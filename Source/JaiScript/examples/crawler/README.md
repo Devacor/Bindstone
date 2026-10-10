@@ -47,7 +47,7 @@ modals), `game.jai` (facing movement, crawler turn loop, saves, autopilot),
 ## Build
 
 Part of the normal JaiScript CMake build (`JAISCRIPT_BUILD_EXAMPLES=ON` by
-default). `build.bat` builds both configurations and prints both paths:
+default):
 
 ```bash
 # from Source/JaiScript (VsDevCmd + Ninja, same as the test builds)

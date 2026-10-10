@@ -124,7 +124,7 @@ carried across the boundary.
 | D13 | Engine literals are interned once (`post_load`); errors travel as `checked_result` codes with symbol placeholders, thrown only at the host boundary. | House rules: interned lookups, error codes inside, throw at `execute`-level doors. |
 | D14 | Re-derive re-classes the instance in place (`class_instance::reclass`) rather than minting a replacement and retiring the old one; a stale wrapper re-points its handle at the layer on first touch (S3c). | Dev, 2026-09-02: "extend in place in all cases". Handles never go stale within an engine; no retired twins to explain. |
 | D11 | Two-level chains (`Voidling : CreatureKind : ServerCreature`) are hybrids: every hybrid-semantic site resolves the C++ base with `class_definition::find_cpp_base_class()` (chain walk), never the direct-base field. | `cpp_base_class_` is only set on the class whose *direct* base is C++; every mid-class design needs the walk. |
-| D12 | No script-visible surface. `extend` is host-only; script derives and constructs as before. | Script cannot wrap an existing object today either (`TYPE_SYSTEM_DESIGN.md`); the host owns object lifetimes. |
+| D12 | No script-visible surface. `extend` is host-only; script derives and constructs as before. | Script cannot wrap an existing object either; the host owns object lifetimes. |
 
 ## 4. API
 
